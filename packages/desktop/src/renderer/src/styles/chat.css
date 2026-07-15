@@ -1,0 +1,103 @@
+.thread-root,
+.thread-viewport { width: 100%; height: 100%; }
+.thread-viewport { overflow-y: auto; overflow-x: hidden; }
+.thread-column { width: min(100%, 760px); min-height: calc(100% - 164px); margin: 0 auto; padding: 36px 24px 28px; }
+.message { width: 100%; margin-bottom: 24px; font-size: 14px; line-height: 1.68; }
+.message-user { display: flex; justify-content: flex-end; }
+.user-bubble { max-width: min(78%, 620px); padding: 10px 14px; border-radius: 8px; background: hsl(var(--muted)); }
+.user-bubble p { margin: 0; white-space: pre-wrap; }
+.message-assistant { color: hsl(var(--foreground)); }
+.aui-md { font-size: 14px; line-height: 1.68; }
+.aui-md > :first-child { margin-top: 0; }
+.aui-md > :last-child { margin-bottom: 0; }
+.aui-md pre { border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--muted) / 0.5); }
+.reasoning-block { margin: 0 0 12px; color: hsl(var(--muted-foreground)); }
+.reasoning-block summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; list-style: none; }
+.reasoning-block summary svg:last-child { transition: transform 120ms ease; }
+.reasoning-block[open] summary svg:last-child { transform: rotate(180deg); }
+.reasoning-content { margin-top: 8px; padding-left: 20px; border-left: 1px solid hsl(var(--border)); white-space: pre-wrap; font-size: 12px; line-height: 1.6; }
+
+.tool-view { margin: 8px 0; border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; }
+.tool-view summary { display: grid; grid-template-columns: 20px auto minmax(0, 1fr) 18px 14px; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; background: hsl(var(--muted) / 0.45); cursor: pointer; list-style: none; font-size: 12px; }
+.tool-icon { display: grid; place-items: center; color: hsl(var(--muted-foreground)); }
+.tool-name { font-weight: 600; }
+.tool-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--muted-foreground)); font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; }
+.tool-status { display: grid; place-items: center; }
+.tool-status.complete { color: #16833c; }
+.tool-status.error { color: hsl(var(--destructive)); }
+.spinner { width: 12px; height: 12px; border: 2px solid hsl(var(--muted-foreground) / 0.25); border-top-color: hsl(var(--foreground)); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.tool-chevron { transition: transform 120ms ease; }
+.tool-view[open] .tool-chevron { transform: rotate(90deg); }
+.tool-body { display: grid; gap: 1px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--border)); }
+.tool-section { min-width: 0; background: hsl(var(--background)); }
+.tool-section-label { min-height: 24px; padding: 5px 12px 4px; background: hsl(var(--muted) / 0.28); color: hsl(var(--muted-foreground)); font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.tool-body pre { max-height: 260px; margin: 0; padding: 10px 12px; overflow: auto; background: hsl(var(--background)); white-space: pre-wrap; overflow-wrap: anywhere; font-family: "Cascadia Mono", Consolas, monospace; font-size: 11px; line-height: 1.55; }
+.tool-body pre.tool-result { background: hsl(var(--muted) / 0.3); }
+.tool-body pre.tool-result.error { color: hsl(var(--destructive)); }
+.tool-body pre.tool-command { color: hsl(var(--foreground)); white-space: pre; }
+.tool-meta { display: flex; min-height: 30px; flex-wrap: wrap; align-items: center; gap: 5px; padding: 5px 10px; background: hsl(var(--background)); }
+.tool-meta span { max-width: 100%; padding: 2px 6px; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 4px; color: hsl(var(--muted-foreground)); text-overflow: ellipsis; white-space: nowrap; font-family: "Cascadia Mono", Consolas, monospace; font-size: 10px; }
+.tool-edit { min-width: 0; background: hsl(var(--background)); }
+.tool-edit .tool-diff { max-height: 180px; padding-left: 26px; border-left: 3px solid transparent; }
+.tool-edit .tool-diff-remove { border-left-color: hsl(var(--destructive)); background: hsl(var(--destructive) / 0.07); }
+.tool-edit .tool-diff-add { border-left-color: #16833c; background: rgb(22 131 60 / 7%); }
+
+.thread-footer { position: sticky; bottom: 0; width: 100%; padding: 18px 20px 12px; background: hsl(var(--background)); }
+.composer-wrap { width: min(100%, 760px); margin: 0 auto; }
+.session-status { display: grid; width: min(100%, 760px); gap: 4px; margin: 0 auto 6px; }
+.session-status-row { display: flex; min-height: 28px; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--muted) / 0.4); color: hsl(var(--muted-foreground)); font-size: 11px; }
+.session-status-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-status-row.is-error { border-color: hsl(var(--destructive) / 0.3); color: hsl(var(--destructive)); }
+.status-spin { animation: spin 0.9s linear infinite; }
+.composer { position: relative; border: 1px solid hsl(var(--border)); border-radius: 8px; background: hsl(var(--background)); box-shadow: 0 8px 24px hsl(var(--foreground) / 0.08); }
+.composer-suggestions {
+	position: absolute;
+	right: 0;
+	bottom: calc(100% + 6px);
+	left: 0;
+	z-index: 40;
+	max-height: 280px;
+	padding: 5px;
+	overflow: auto;
+	border: 1px solid hsl(var(--border));
+	border-radius: 7px;
+	background: hsl(var(--popover));
+	box-shadow: 0 12px 32px hsl(var(--foreground) / 0.12);
+}
+.composer-suggestions button {
+	display: grid;
+	grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr);
+	align-items: center;
+	gap: 7px;
+	width: 100%;
+	min-height: 32px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	font-size: 12px;
+	text-align: left;
+}
+.composer-suggestions button.is-active { background: hsl(var(--accent)); }
+.composer-suggestions strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.composer-suggestions span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--muted-foreground)); }
+.composer textarea { display: block; width: 100%; min-height: 70px; max-height: 220px; padding: 13px 14px 8px; resize: none; border: 0; outline: 0; background: transparent; color: hsl(var(--foreground)); font-size: 14px; line-height: 1.55; }
+.composer textarea::placeholder { color: hsl(var(--muted-foreground)); }
+.composer-widgets { display: grid; gap: 1px; padding: 7px 10px; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--muted) / 0.25); }
+.composer-toolbar + .composer-widgets { border-top: 1px solid hsl(var(--border)); border-bottom: 0; }
+.composer-widgets pre { max-height: 96px; margin: 0; overflow: auto; white-space: pre-wrap; color: hsl(var(--muted-foreground)); font-family: "Cascadia Mono", Consolas, monospace; font-size: 10px; line-height: 1.5; }
+.composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 42px; padding: 4px 7px; }
+.composer-tools,
+.composer-config { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.config-select { max-width: 110px; height: 28px; padding: 0 22px 0 7px; border: 0; border-radius: 5px; background: transparent; color: hsl(var(--muted-foreground)); font-size: 11px; }
+.model-select { max-width: 160px; }
+.config-select:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+.mode-control { display: flex; padding: 2px; border: 1px solid hsl(var(--border)); border-radius: 6px; }
+.mode-control button { height: 23px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: hsl(var(--muted-foreground)); font-size: 11px; }
+.mode-control button.is-active { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+.attachment-list { display: flex; gap: 8px; padding: 10px 10px 0; }
+.attachment { position: relative; width: 58px; height: 58px; border: 1px solid hsl(var(--border)); border-radius: 6px; overflow: hidden; }
+.attachment img { width: 100%; height: 100%; object-fit: cover; }
+.attachment button { position: absolute; top: 3px; right: 3px; display: grid; width: 18px; height: 18px; padding: 0; place-items: center; border: 0; border-radius: 50%; background: hsl(var(--foreground)); color: hsl(var(--background)); }
+.queue-strip { display: flex; align-items: center; justify-content: space-between; margin: 0 10px 6px; padding: 5px 8px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--muted) / 0.5); font-size: 11px; }
+.composer-error { margin: 5px 8px 0; color: hsl(var(--destructive)); font-size: 11px; }

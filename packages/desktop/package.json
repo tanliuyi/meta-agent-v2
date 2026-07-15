@@ -1,0 +1,43 @@
+{
+	"name": "@meta-agent/desktop",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Meta Agent desktop application",
+	"type": "module",
+	"main": "./out/main/index.js",
+	"scripts": {
+		"dev": "electron-vite dev",
+		"preview": "electron-vite preview",
+		"typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+		"build": "npm run typecheck && electron-vite build"
+	},
+	"dependencies": {
+		"@assistant-ui/react": "0.14.26",
+		"@assistant-ui/react-markdown": "0.14.5",
+		"@earendil-works/pi-coding-agent": "0.80.7",
+		"@xterm/addon-fit": "0.11.0",
+		"@xterm/xterm": "6.0.0",
+		"class-variance-authority": "0.7.1",
+		"clsx": "2.1.1",
+		"lucide-react": "1.24.0",
+		"node-pty": "1.1.0",
+		"radix-ui": "1.6.2",
+		"react": "19.2.7",
+		"react-dom": "19.2.7",
+		"tailwind-merge": "3.6.0"
+	},
+	"devDependencies": {
+		"@types/node": "24.12.4",
+		"@types/react": "19.2.17",
+		"@types/react-dom": "19.2.3",
+		"@vitejs/plugin-react": "5.2.0",
+		"electron": "43.1.1",
+		"electron-vite": "5.0.0",
+		"typescript": "5.9.3",
+		"vite": "7.3.6",
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}
