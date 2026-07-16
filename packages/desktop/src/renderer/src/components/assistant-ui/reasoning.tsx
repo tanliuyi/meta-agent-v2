@@ -6,7 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@renderer/c
 import { cn } from "@renderer/lib/cn";
 import { cva, type VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
-import { createContext, memo, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const ANIMATION_DURATION = 200;
 
@@ -30,6 +30,8 @@ export type ReasoningRootProps = Omit<React.ComponentProps<typeof Collapsible>, 
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
     defaultOpen?: boolean;
+    /** Automatic open state that does not enable the streaming preview. */
+    autoOpen?: boolean;
     /**
      * Whether the reasoning is currently streaming. When provided, it
      * supersedes `defaultOpen`: the disclosure auto-opens while streaming
@@ -45,15 +47,23 @@ function ReasoningRoot({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   defaultOpen = false,
+  autoOpen,
   streaming,
   children,
   ...props
 }: ReasoningRootProps) {
   const initialOpenRef = useRef(defaultOpen);
+  const previousAutoOpenRef = useRef(autoOpen);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
+  useLayoutEffect(() => {
+    const previousAutoOpen = previousAutoOpenRef.current;
+    previousAutoOpenRef.current = autoOpen;
+    if (previousAutoOpen === true && autoOpen === false) setUserOpen(null);
+  }, [autoOpen]);
+
   const isControlled = controlledOpen !== undefined;
-  const isOpen = isControlled ? controlledOpen : (userOpen ?? streaming ?? initialOpenRef.current);
+  const isOpen = isControlled ? controlledOpen : (userOpen ?? autoOpen ?? streaming ?? initialOpenRef.current);
   const isAutoMode = isControlled || userOpen === null;
   const isPreview = streaming === true && isOpen && isAutoMode;
 
@@ -165,11 +175,11 @@ function ReasoningTrigger({
       <ChevronDownIcon
         data-slot="reasoning-trigger-chevron"
         className={cn(
-          "aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0",
-          "transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
-          "-rotate-90",
-          "group-data-open/trigger:rotate-0",
-          "group-data-panel-open/trigger:rotate-0",
+          "aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0 opacity-0",
+          "transition-[transform,opacity] duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+          "-rotate-90 group-hover/trigger:opacity-100",
+          "group-data-open/trigger:rotate-0 group-data-open/trigger:opacity-100",
+          "group-data-panel-open/trigger:rotate-0 group-data-panel-open/trigger:opacity-100",
         )}
       />
     </CollapsibleTrigger>
@@ -231,7 +241,7 @@ function ReasoningText({ className, children, ...props }: React.ComponentProps<"
       ref={scrollRef}
       data-slot="reasoning-text"
       className={cn(
-        "aui-reasoning-text relative z-0 max-h-64 overflow-y-auto ps-6 pt-2 pb-2 leading-relaxed text-pretty",
+        "aui-reasoning-text relative z-0 max-h-64 overflow-y-auto ps-0 pt-2 pb-2 leading-relaxed text-pretty",
         "transform-gpu transition-[transform,opacity] ease-[cubic-bezier(0.32,0.72,0,1)]",
         "motion-reduce:animate-none",
         "group-data-open/collapsible-content:animate-in",
@@ -248,7 +258,7 @@ function ReasoningText({ className, children, ...props }: React.ComponentProps<"
       )}
       {...props}
     >
-      <div ref={contentRef} className="aui-reasoning-text-content space-y-4">
+      <div ref={contentRef} className="aui-reasoning-text-content flex flex-col gap-2 space-y-4">
         {children}
       </div>
     </div>

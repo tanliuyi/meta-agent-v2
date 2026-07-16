@@ -1,11 +1,12 @@
 import { ThreadPrimitive } from "@assistant-ui/react";
-import { MessageSquarePlus } from "lucide-react";
+import { ArrowDown, MessageSquarePlus } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useDesktop } from "../../state/desktop-context.tsx";
-import { sessionKey } from "../../state/desktop-model.ts";
+import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { Composer } from "./composer.tsx";
 import { HostRequests } from "./host-requests.tsx";
-import { VirtualizedThreadSurface } from "./virtualized-thread.tsx";
+import { Messages } from "./messages.tsx";
+import { SessionStatus } from "./session-status.tsx";
 
 /** 中央聊天工作区。 */
 export function ChatThread() {
@@ -14,7 +15,10 @@ export function ChatThread() {
   if (desktop.draft) {
     const draftProject = desktop.projects.find(({ id }) => id === desktop.draft?.projectId) ?? null;
     return (
-      <ThreadPrimitive.Root className="thread-root aui-root flex h-full flex-col bg-background" style={THREAD_STYLE}>
+      <ThreadPrimitive.Root
+        className="thread-root aui-root aui-thread-root @container flex h-full flex-col bg-background"
+        style={THREAD_STYLE}
+      >
         <div className="min-h-0 flex-1" />
         <div className="thread-footer relative shrink-0 bg-background">
           <div className="relative mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-2 px-4 pb-4">
@@ -41,8 +45,35 @@ export function ChatThread() {
   }
   return (
     <>
-      <ThreadPrimitive.Root className="thread-root aui-root flex h-full flex-col bg-background" style={THREAD_STYLE}>
-        <VirtualizedThreadSurface sessionKey={sessionKey(snapshot.projectId, snapshot.threadId)} snapshot={snapshot} />
+      <ThreadPrimitive.Root
+        className="thread-root aui-root aui-thread-root @container flex h-full flex-col bg-background"
+        style={THREAD_STYLE}
+      >
+        <ThreadPrimitive.Viewport
+          turnAnchor="top"
+          data-slot="aui_thread-viewport"
+          className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
+        >
+          <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4">
+            <div data-slot="aui_message-group" className="mb-14 flex flex-col gap-y-6 empty:hidden">
+              <Messages />
+            </div>
+            <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mt-auto flex flex-col gap-2 overflow-visible rounded-t-(--composer-radius) bg-background pb-4">
+              <ThreadPrimitive.ScrollToBottom asChild>
+                <TooltipIconButton
+                  tooltip="滚动到底部"
+                  side="top"
+                  variant="outline"
+                  className="aui-thread-scroll-to-bottom dark:border-border dark:bg-background dark:hover:bg-accent absolute -top-12 z-10 self-center rounded-full p-4 disabled:invisible"
+                >
+                  <ArrowDown />
+                </TooltipIconButton>
+              </ThreadPrimitive.ScrollToBottom>
+              <SessionStatus snapshot={snapshot} />
+              <Composer mode="session" snapshot={snapshot} />
+            </ThreadPrimitive.ViewportFooter>
+          </div>
+        </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
       <HostRequests snapshot={snapshot} />
     </>
@@ -50,9 +81,9 @@ export function ChatThread() {
 }
 
 const THREAD_STYLE = {
-  "--thread-max-width": "760px",
+  "--thread-max-width": "44rem",
   "--composer-bg": "color-mix(in oklab, var(--color-muted) 30%, var(--color-background))",
-  "--composer-radius": "8px",
+  "--composer-radius": "1.5rem",
   "--composer-padding": "8px",
 } as CSSProperties;
 

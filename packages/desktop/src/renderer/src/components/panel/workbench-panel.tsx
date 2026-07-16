@@ -1,9 +1,10 @@
 import { Files, ListTodo, PanelRightClose, Plus, TerminalSquare } from "lucide-react";
+import { Suspense } from "react";
 import { useDesktop } from "../../state/desktop-context.tsx";
 import { Button } from "../ui/button.tsx";
 import { useResize } from "../ui/use-resize.ts";
 import { FilePanel } from "./file-panel.tsx";
-import { TerminalView } from "./terminal-view.tsx";
+import { LazyTerminalView } from "./lazy-terminal-view.tsx";
 
 /** 与当前 session 绑定的可停靠 Workbench Panel。 */
 export function WorkbenchPanel() {
@@ -85,7 +86,9 @@ function TerminalPanel() {
         <TerminalSquare size={14} />
         <span>{project?.cwd}</span>
       </div>
-      <TerminalView terminalId="panel" />
+      <Suspense fallback={<div className="terminal-view" aria-busy="true" />}>
+        <LazyTerminalView terminalId="panel" />
+      </Suspense>
     </div>
   );
 }

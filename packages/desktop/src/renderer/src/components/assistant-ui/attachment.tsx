@@ -205,8 +205,11 @@ export const UserMessageAttachments: FC = () => {
 };
 
 export const ComposerAttachments: FC<{ disabled?: boolean }> = ({ disabled }) => {
+  const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  if (!hasAttachments) return null;
+
   return (
-    <div className="aui-composer-attachments flex w-full flex-row items-center gap-2 overflow-x-auto empty:hidden">
+    <div className="aui-composer-attachments flex w-full flex-row items-center gap-2 overflow-x-auto">
       <ComposerPrimitive.Attachments>{() => <AttachmentUI disabled={disabled} />}</ComposerPrimitive.Attachments>
     </div>
   );

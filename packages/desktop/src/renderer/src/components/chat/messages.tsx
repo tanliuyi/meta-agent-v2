@@ -5,74 +5,31 @@ import {
   ComposerPrimitive,
   ErrorPrimitive,
   MessagePrimitive,
+  ThreadPrimitive,
   useAuiState,
 } from "@assistant-ui/react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, Pencil } from "lucide-react";
-import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn.ts";
 import { UserMessageAttachments } from "../assistant-ui/attachment.tsx";
 import { ReasoningContent, ReasoningRoot, ReasoningText, ReasoningTrigger } from "../assistant-ui/reasoning.tsx";
 import { StreamdownText } from "../assistant-ui/streamdown-text.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { Button } from "../ui/button.tsx";
-import { createProcessGroupBy } from "./message-part-grouping.ts";
+import { createProcessGroupBy, hasFinalResponseText, summarizeChainOfThought } from "./message-part-grouping.ts";
 import { ToolView } from "./tool-view.tsx";
 
-interface MessageEntranceAnimationState {
-  isRunning: boolean;
-  seenMessageIds: Set<string>;
-}
-
-const MessageEntranceAnimationContext = createContext<MessageEntranceAnimationState | null>(null);
-const MessageProcessContext = createContext(false);
 const COLLAPSED_USER_MESSAGE_HEIGHT = 160;
 
-export function MessageEntranceAnimationProvider({
-  children,
-  isRunning,
-  messageIds,
-}: {
-  children: ReactNode;
-  isRunning: boolean;
-  messageIds: readonly string[];
-}) {
-  const [seenMessageIds] = useState(() => new Set(messageIds));
-  useLayoutEffect(() => {
-    if (!isRunning) {
-      for (const messageId of messageIds) seenMessageIds.add(messageId);
-    }
-  }, [isRunning, messageIds, seenMessageIds]);
-  const value = useMemo(() => ({ isRunning, seenMessageIds }), [isRunning, seenMessageIds]);
-  return <MessageEntranceAnimationContext.Provider value={value}>{children}</MessageEntranceAnimationContext.Provider>;
-}
-
-export function MessageProcessGroup({
-  children,
-  durationMs,
-  isRunning,
-}: {
-  children: ReactNode;
-  durationMs?: number;
-  isRunning: boolean;
-}) {
+export function Messages() {
   return (
-    <MessageProcessContext.Provider value>
-      <div data-slot="aui-turn-process">
-        <ReasoningRoot variant="ghost" open={isRunning ? true : undefined} streaming={isRunning}>
-          <ReasoningTrigger label={processLabel(isRunning, durationMs)} active={isRunning} disabled={isRunning} />
-          <ReasoningContent aria-busy={isRunning}>
-            <ReasoningText className="max-h-[none] overflow-visible p-0">{children}</ReasoningText>
-          </ReasoningContent>
-        </ReasoningRoot>
-      </div>
-    </MessageProcessContext.Provider>
+    <ThreadPrimitive.Messages>
+      {({ message }) => (message.role === "user" ? <UserMessage /> : <AssistantMessage />)}
+    </ThreadPrimitive.Messages>
   );
 }
 
-export const THREAD_MESSAGE_COMPONENTS = { UserMessage, AssistantMessage };
-
 function UserMessage() {
-  const animateEntrance = useMessageEntranceAnimation();
   const isEditing = useAuiState((state) => state.message.composer.isEditing);
   if (isEditing) return <EditComposer />;
 
@@ -80,10 +37,7 @@ function UserMessage() {
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
       data-role="user"
-      className={cn(
-        "grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
-        animateEntrance && "fade-in slide-in-from-bottom-1 animate-in duration-150",
-      )}
+      className="fade-in slide-in-from-bottom-1 animate-in grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2"
     >
       <UserMessageAttachments />
 
@@ -120,7 +74,7 @@ function UserMessageContent() {
   if (!hasContent) return null;
 
   return (
-    <div className="aui-user-message-content bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word">
+    <div className="aui-user-message-content bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word text-sm">
       <div ref={contentRef} className={cn(!isExpanded && "max-h-40 overflow-hidden")}>
         <MessagePrimitive.Parts />
       </div>
@@ -213,11 +167,9 @@ function EditComposer() {
 }
 
 function AssistantMessage() {
-  const animateEntrance = useMessageEntranceAnimation();
-  const isInProcessGroup = useContext(MessageProcessContext);
-  const durationMs = useAuiState((state) => state.message.metadata.timing?.totalStreamTime);
   const messageParts = useAuiState((state) => state.message.parts);
   const isMessageRunning = useAuiState((state) => state.message.status?.type === "running");
+  const hasFinalText = useMemo(() => hasFinalResponseText(messageParts), [messageParts]);
   const groupParts = useMemo(
     () => createProcessGroupBy(messageParts, isMessageRunning),
     [isMessageRunning, messageParts],
@@ -226,41 +178,26 @@ function AssistantMessage() {
     <MessagePrimitive.Root
       data-slot="aui-assistant-message-root"
       data-role="assistant"
-      className={cn(
-        "relative",
-        !isInProcessGroup && "-mb-7 pb-7",
-        animateEntrance && "fade-in slide-in-from-bottom-1 animate-in duration-150",
-      )}
+      className="fade-in slide-in-from-bottom-1 animate-in relative -mb-7 pb-7 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
-      <div className="text-sm leading-relaxed text-foreground wrap-break-word">
+      <div className="flex flex-col gap-2 text-sm leading-relaxed text-foreground wrap-break-word">
         <MessagePrimitive.GroupedParts groupBy={groupParts}>
           {({ part, children }) => {
             switch (part.type) {
-              case "group-process": {
-                if (isInProcessGroup) return children;
+              case "group-process":
                 return (
-                  <div data-slot="aui-chain-of-thought">
-                    <ReasoningRoot
-                      variant="ghost"
-                      open={isMessageRunning ? true : undefined}
-                      streaming={isMessageRunning}
-                    >
-                      <ReasoningTrigger
-                        label={processLabel(isMessageRunning, durationMs)}
-                        active={isMessageRunning}
-                        disabled={isMessageRunning}
-                      />
-                      <ReasoningContent aria-busy={isMessageRunning}>
-                        <ReasoningText className="max-h-[none] overflow-visible p-0">{children}</ReasoningText>
-                      </ReasoningContent>
-                    </ReasoningRoot>
-                  </div>
+                  <ProcessGroup indices={part.indices} running={isMessageRunning} hasFinalText={hasFinalText}>
+                    {children}
+                  </ProcessGroup>
+                );
+              case "group-chainOfThought": {
+                const running = part.status.type === "running";
+                return (
+                  <ChainOfThoughtGroup indices={part.indices} running={running}>
+                    {children}
+                  </ChainOfThoughtGroup>
                 );
               }
-              case "group-tool":
-              case "group-reasoning":
-              case "group-intermediate-text":
-                return children;
               case "text":
               case "reasoning":
                 return <StreamdownText />;
@@ -285,50 +222,78 @@ function AssistantMessage() {
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
       </div>
-      {!isInProcessGroup ? (
-        <AuiIf
-          condition={(state) => {
-            const lastPart = state.message.parts.at(-1);
-            return lastPart?.type === "text" && lastPart.text.trim().length > 0;
-          }}
-        >
-          <div className="flex min-h-7 items-center pt-1">
-            <ActionBarPrimitive.Root
-              hideWhenRunning
-              autohide="not-last"
-              className="animate-in fade-in flex gap-1 text-muted-foreground duration-200"
-            >
-              <ActionBarPrimitive.Copy asChild>
-                <TooltipIconButton tooltip="复制消息" side="top">
-                  <AuiIf condition={(state) => state.message.isCopied}>
-                    <Check className="animate-in zoom-in-50 fade-in" />
-                  </AuiIf>
-                  <AuiIf condition={(state) => !state.message.isCopied}>
-                    <Copy className="animate-in zoom-in-75 fade-in" />
-                  </AuiIf>
-                </TooltipIconButton>
-              </ActionBarPrimitive.Copy>
-            </ActionBarPrimitive.Root>
-          </div>
-        </AuiIf>
-      ) : null}
+      <AuiIf
+        condition={(state) => {
+          const lastPart = state.message.parts.at(-1);
+          return lastPart?.type === "text" && lastPart.text.trim().length > 0;
+        }}
+      >
+        <div className="flex min-h-7 items-center pt-1">
+          <ActionBarPrimitive.Root
+            hideWhenRunning
+            autohide="not-last"
+            className="animate-in fade-in flex gap-1 text-muted-foreground duration-200"
+          >
+            <ActionBarPrimitive.Copy asChild>
+              <TooltipIconButton tooltip="复制消息" side="top">
+                <AuiIf condition={(state) => state.message.isCopied}>
+                  <Check className="animate-in zoom-in-50 fade-in" />
+                </AuiIf>
+                <AuiIf condition={(state) => !state.message.isCopied}>
+                  <Copy className="animate-in zoom-in-75 fade-in" />
+                </AuiIf>
+              </TooltipIconButton>
+            </ActionBarPrimitive.Copy>
+          </ActionBarPrimitive.Root>
+        </div>
+      </AuiIf>
     </MessagePrimitive.Root>
   );
 }
 
-function processLabel(isRunning: boolean, durationMs?: number): string {
-  if (isRunning) return "处理中";
-  if (durationMs === undefined) return "已处理";
-  const seconds = Math.max(1, Math.round(durationMs / 1_000));
-  return `已处理 ${seconds}秒`;
+function ChainOfThoughtGroup({
+  indices,
+  running,
+  children,
+}: {
+  indices: readonly number[];
+  running: boolean;
+  children: ReactNode;
+}) {
+  const label = useAuiState((state) => summarizeChainOfThought(state.message.parts, indices));
+  return (
+    <ReasoningRoot variant="ghost">
+      <ReasoningTrigger label={label} active={running} />
+      <ReasoningContent className="text-foreground" aria-busy={running}>
+        <ReasoningText>{children}</ReasoningText>
+      </ReasoningContent>
+    </ReasoningRoot>
+  );
 }
 
-function useMessageEntranceAnimation(): boolean {
-  const messageId = useAuiState((state) => state.message.id);
-  const state = useContext(MessageEntranceAnimationContext);
-  const animate = state?.isRunning === true && !state.seenMessageIds.has(messageId);
-  useLayoutEffect(() => {
-    state?.seenMessageIds.add(messageId);
-  }, [messageId, state]);
-  return animate;
+function ProcessGroup({
+  indices,
+  running,
+  hasFinalText,
+  children,
+}: {
+  indices: readonly number[];
+  running: boolean;
+  hasFinalText: boolean;
+  children: ReactNode;
+}) {
+  const label = useAuiState((state) => summarizeChainOfThought(state.message.parts, indices));
+  return (
+    <ReasoningRoot variant="ghost" autoOpen={running || !hasFinalText} streaming={running}>
+      <ReasoningTrigger
+        label={label}
+        active={running}
+        disabled={running}
+        className="w-full max-w-none border-b border-border/60 pb-2.5"
+      />
+      <ReasoningContent className="text-foreground" aria-busy={running}>
+        <ReasoningText className="mt-3 max-h-[none] overflow-visible p-0 text-foreground">{children}</ReasoningText>
+      </ReasoningContent>
+    </ReasoningRoot>
+  );
 }

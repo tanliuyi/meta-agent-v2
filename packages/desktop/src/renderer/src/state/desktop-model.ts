@@ -22,7 +22,7 @@ export interface DesktopContextValue {
   chooseProject(): Promise<void>;
   loadProjectThreads(projectId: string): Promise<void>;
   removeProject(projectId: string): Promise<void>;
-  beginDraft(): Promise<void>;
+  beginDraft(projectId?: string): Promise<void>;
   selectDraftProject(projectId: string): Promise<void>;
   selectDraftModel(provider: string, modelId: string): void;
   selectDraftThinking(level: SessionControlState["thinkingLevel"]): void;
@@ -49,7 +49,7 @@ export interface DesktopState {
   draft: DraftSessionState | null;
   threadCatalogs: Record<string, Thread[]>;
   activeThreadIds: Record<string, string | undefined>;
-  bootstraps: Record<string, SessionBootstrap>;
+  bootstrap: SessionBootstrap | null;
   controls: Record<string, SessionControlState>;
   workbenches: Record<string, WorkbenchState>;
   loading: boolean;
@@ -62,7 +62,7 @@ export const INITIAL_STATE: DesktopState = {
   draft: null,
   threadCatalogs: {},
   activeThreadIds: {},
-  bootstraps: {},
+  bootstrap: null,
   controls: {},
   workbenches: {},
   loading: true,
@@ -126,6 +126,7 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
     return {
       ...state,
       project: action.project,
+      bootstrap: null,
       threadCatalogs: {
         ...state.threadCatalogs,
         [action.project.id]: reuseThreadCatalog(state.threadCatalogs[action.project.id], action.threads),
@@ -153,11 +154,13 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       draft,
       threadCatalogs,
       activeThreadIds,
+      bootstrap: current ? null : state.bootstrap,
     };
   }
   if (action.type === "draft-started") {
     return {
       ...state,
+      bootstrap: null,
       draft: { projectId: action.projectId, config: null, configLoading: true, phase: "editing" },
     };
   }
@@ -231,7 +234,7 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
         ...state.activeThreadIds,
         [action.bootstrap.projectId]: action.bootstrap.threadId,
       },
-      bootstraps: { ...state.bootstraps, [key]: action.bootstrap },
+      bootstrap: action.bootstrap,
       controls: { ...state.controls, [key]: action.bootstrap.control },
       workbenches: { ...state.workbenches, [key]: action.workbench },
     };
@@ -264,6 +267,7 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
     return {
       ...state,
       activeThreadIds: { ...state.activeThreadIds, [action.projectId]: undefined },
+      bootstrap: state.bootstrap?.projectId === action.projectId ? null : state.bootstrap,
     };
   if (action.type === "control") return applyControl(state, action.control);
   if (action.type === "workbench") {
@@ -277,14 +281,32 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
 function applyControl(state: DesktopState, control: SessionControlState): DesktopState {
   const key = sessionKey(control.projectId, control.threadId);
   const previous = state.controls[key];
-  if (!state.bootstraps[key] || (previous && previous.revision >= control.revision)) return state;
+  if (
+    state.bootstrap?.projectId !== control.projectId ||
+    state.bootstrap.threadId !== control.threadId ||
+    (previous && previous.revision >= control.revision)
+  )
+    return state;
+  const threadCatalogs = updateThreadSummary(state.threadCatalogs, control);
   return {
     ...state,
     controls: { ...state.controls, [key]: control },
-    threadCatalogs: updateProjectThreads(state.threadCatalogs, control.projectId, (thread) =>
-      thread.id === control.threadId ? { ...thread, title: control.title, running: control.running } : thread,
-    ),
+    threadCatalogs,
   };
+}
+
+function updateThreadSummary(
+  catalogs: Record<string, Thread[]>,
+  control: SessionControlState,
+): Record<string, Thread[]> {
+  const threads = catalogs[control.projectId];
+  if (!threads) return catalogs;
+  const index = threads.findIndex(({ id }) => id === control.threadId);
+  const thread = threads[index];
+  if (!thread || (thread.title === control.title && thread.running === control.running)) return catalogs;
+  const next = [...threads];
+  next[index] = { ...thread, title: control.title, running: control.running };
+  return { ...catalogs, [control.projectId]: next };
 }
 
 export function sessionKey(projectId: string, threadId: string): string {

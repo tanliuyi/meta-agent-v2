@@ -7,7 +7,7 @@ import {
 import { Archive, ArchiveRestore, MoreHorizontal, Trash2 } from "lucide-react";
 import { type KeyboardEvent, useRef, useState } from "react";
 import type { Project, Thread } from "../../../../shared/contracts.ts";
-import { useDesktop } from "../../state/desktop-context.tsx";
+import { useDesktopNavigation } from "../../state/desktop-context.tsx";
 import {
   isDesktopThreadItemForProject,
   normalizeThreadTitle,
@@ -33,7 +33,7 @@ interface RenameState {
 
 /** 使用 assistant-ui primitives 渲染当前 Project 的 session 列表。 */
 export function DesktopThreadList({ id, project }: DesktopThreadListProps) {
-  const desktop = useDesktop();
+  const desktop = useDesktopNavigation();
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
@@ -163,7 +163,7 @@ function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   return (
     <ThreadListItemPrimitive.Root
       data-slot="aui_thread-list-item"
-      className="thread-row group hover:bg-muted focus-visible:bg-muted data-active:bg-muted has-focus-visible:bg-muted has-data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors focus-visible:outline-none"
+      className="thread-row group hover:bg-muted focus-visible:bg-muted data-active:bg-foreground/10 data-active:hover:bg-foreground/10 has-focus-visible:bg-muted has-data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors focus-visible:outline-none"
       data-thread-id={thread.id}
       data-pending={isPending || undefined}
     >
@@ -180,7 +180,7 @@ function DesktopThreadListItem(props: DesktopThreadListItemProps) {
       ) : (
         <ThreadListItemPrimitive.Trigger
           data-slot="aui_thread-list-item-trigger"
-          className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none group-hover:pe-9 group-has-focus-visible:pe-9 group-has-data-[state=open]:pe-9 group-data-active:pe-9 focus-visible:ring-[3px]"
+          className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-8 text-start text-sm outline-none group-hover:pe-9 group-has-focus-visible:pe-9 group-has-data-[state=open]:pe-9 group-data-active:pe-9 focus-visible:ring-[3px]"
           disabled={isSwitching}
           onClickCapture={preventPrimitiveThreadAction}
           onClick={(event) =>

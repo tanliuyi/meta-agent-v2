@@ -165,22 +165,27 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
     [report, threadActions],
   );
 
-  const beginDraft = useCallback(async () => {
-    if (draft.current || pendingDraftSubmission.current) return;
-    try {
-      const selected =
-        (state.project?.available ? state.project : undefined) ?? state.projects.find(({ available }) => available);
-      if (!selected) throw new Error("新建会话前必须先添加可用的 Project");
-      const actions = threadActions.current;
-      if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
-      await actions.enterDraft();
-      const generation = ++draftProjectGeneration.current;
-      dispatch({ type: "draft-started", projectId: selected.id });
-      await loadDraftConfiguration(selected.id, generation);
-    } catch (value) {
-      report(value);
-    }
-  }, [loadDraftConfiguration, report, state.project, state.projects, threadActions]);
+  const beginDraft = useCallback(
+    async (projectId?: string) => {
+      if (draft.current || pendingDraftSubmission.current) return;
+      try {
+        const selected = projectId
+          ? state.projects.find((project) => project.id === projectId && project.available)
+          : ((state.project?.available ? state.project : undefined) ??
+            state.projects.find(({ available }) => available));
+        if (!selected) throw new Error("新建会话前必须先添加可用的 Project");
+        const actions = threadActions.current;
+        if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
+        await actions.enterDraft();
+        const generation = ++draftProjectGeneration.current;
+        dispatch({ type: "draft-started", projectId: selected.id });
+        await loadDraftConfiguration(selected.id, generation);
+      } catch (value) {
+        report(value);
+      }
+    },
+    [loadDraftConfiguration, report, state.project, state.projects, threadActions],
+  );
 
   const selectDraftProject = useCallback(
     async (projectId: string) => {
@@ -363,6 +368,8 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
   );
 
   const key = state.project && activeThreadId ? sessionKey(state.project.id, activeThreadId) : "";
+  const bootstrap =
+    state.bootstrap && sessionKey(state.bootstrap.projectId, state.bootstrap.threadId) === key ? state.bootstrap : null;
   return useMemo(
     () => ({
       projects: state.projects,
@@ -371,8 +378,8 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
       threads,
       threadCatalogs: state.threadCatalogs,
       threadId: activeThreadId,
-      bootstrap: state.bootstraps[key] ?? null,
-      snapshot: state.controls[key] ?? state.bootstraps[key]?.control ?? null,
+      bootstrap,
+      snapshot: state.controls[key] ?? bootstrap?.control ?? null,
       workbench: state.workbenches[key] ?? null,
       loading: state.loading,
       error: state.error,
@@ -395,6 +402,7 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
     [
       state,
       key,
+      bootstrap,
       threads,
       activeThreadId,
       chooseProject,

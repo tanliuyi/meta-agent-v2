@@ -8,8 +8,11 @@
 [data-slot="aui-turn"] > [data-role="assistant"] + [data-role="assistant"] {
   margin-top: 8px;
 }
+.aui-md {
+  margin-bottom: 0;
+}
 .tool-view {
-  margin: 8px 0;
+  margin: 0 0 8px;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   overflow: hidden;
@@ -17,17 +20,20 @@
 [data-slot="tool-group-content"] .tool-view {
   margin: 0;
 }
-.tool-view summary {
+.tool-trigger {
   display: grid;
   grid-template-columns: 20px auto minmax(0, 1fr) 18px 14px;
   align-items: center;
   gap: 6px;
+  width: 100%;
   min-height: 36px;
   padding: 0 10px;
+  border: 0;
   background: hsl(var(--muted) / 0.45);
+  color: inherit;
   cursor: pointer;
-  list-style: none;
   font-size: 12px;
+  text-align: start;
 }
 .tool-icon {
   display: grid;
@@ -67,7 +73,7 @@
 .tool-chevron {
   transition: transform 120ms ease;
 }
-.tool-view[open] .tool-chevron {
+.tool-view[data-state="open"] .tool-chevron {
   transform: rotate(90deg);
 }
 .tool-body {

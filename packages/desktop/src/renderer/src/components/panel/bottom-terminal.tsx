@@ -1,9 +1,10 @@
 import { RotateCcw, TerminalSquare, X } from "lucide-react";
-import { useRef } from "react";
+import { Suspense, useRef } from "react";
 import { useDesktop } from "../../state/desktop-context.tsx";
 import { Button } from "../ui/button.tsx";
 import { useResize } from "../ui/use-resize.ts";
-import { TerminalView, type TerminalViewHandle } from "./terminal-view.tsx";
+import { LazyTerminalView } from "./lazy-terminal-view.tsx";
+import type { TerminalViewHandle } from "./terminal-view.tsx";
 
 /** 当前 session 独立的底部终端停靠区。 */
 export function BottomTerminal() {
@@ -67,7 +68,9 @@ function OpenBottomTerminal({
           <X size={14} />
         </Button>
       </header>
-      <TerminalView ref={terminal} terminalId="bottom" />
+      <Suspense fallback={<div className="terminal-view" aria-busy="true" />}>
+        <LazyTerminalView ref={terminal} terminalId="bottom" />
+      </Suspense>
     </section>
   );
 }

@@ -25,7 +25,7 @@ Sidebar
 
 - [Desktop AG-UI 集成规范](./ag-ui-integration-spec.md)负责 Pi -> AG-UI 映射、控制面和 session catalog；
 - [Desktop assistant-ui Thread Adapter 与原子 Attach 规范](./assistant-ui-thread-attach-spec.md)负责 thread 切换、消息 hydrate、active run join 和 attachment 原子性；
-- [Desktop assistant-ui Thread 虚拟化规范](./assistant-ui-thread-virtualization-spec.md)负责单个会话内的消息时间线虚拟化，与 session 列表无关。
+- 单个会话的消息时间线由 assistant-ui `ThreadPrimitive.Viewport` 原生滚动负责，与 session 列表无关。
 - [Desktop 新会话草稿规范](./new-session-draft-spec.md)替代本规范中“点击 New 立即创建 session”的流程。
 
 ## 2. 调研结论

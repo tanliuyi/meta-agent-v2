@@ -55,7 +55,16 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   runtime: AgUiAssistantRuntime;
   actions: DesktopThreadActions;
 } {
-  const agent = useMemo(() => new ElectronPiAgent(), []);
+  const runtimeRef = useRef<AgUiAssistantRuntime | null>(null);
+  const agent = useMemo(
+    () =>
+      new ElectronPiAgent((messages) => {
+        const activeRuntime = runtimeRef.current;
+        if (!activeRuntime) return;
+        activeRuntime.thread.import(messageRepository(convertAgUiMessages(messages)));
+      }),
+    [],
+  );
   const projectRef = useRef(options.project);
   const targetProjectRef = useRef<Project | null>(null);
   const targetCreateInputRef = useRef<SessionCreateInput | null>(null);
@@ -158,6 +167,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
     onCancel: cancel,
     isSendDisabled: options.isSendDisabled,
   });
+  runtimeRef.current = runtime;
 
   useEffect(
     () =>

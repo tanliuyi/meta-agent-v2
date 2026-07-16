@@ -1,33 +1,31 @@
 import { ThreadListPrimitive } from "@assistant-ui/react";
 import { CircleHelp, FolderPlus, Plus, Search, Settings } from "lucide-react";
-import { useRef, useState } from "react";
-import { useDesktop } from "../../state/desktop-context.tsx";
+import { memo, useRef, useState } from "react";
+import { useDesktopNavigation } from "../../state/desktop-context.tsx";
 import {
   preventPrimitiveThreadAction,
   runControlledThreadAction,
   runPendingThreadAction,
 } from "../../state/thread-list-commands.ts";
 import { Button } from "../ui/button.tsx";
-import { ConfirmDialog } from "../ui/confirm-dialog.tsx";
 import { ScrollArea } from "../ui/scroll-area.tsx";
 import { ProjectList } from "./project-list.tsx";
 
-type PendingDelete = { id: string; title: string } | null;
-
 /** Codex Desktop 风格的 Project 与 session 主导航。 */
-export function Sidebar() {
-  const desktop = useDesktop();
+export const Sidebar = memo(function Sidebar() {
+  const desktop = useDesktopNavigation();
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
-  const draftPending = desktop.draft?.phase === "materializing" || pendingKeys.has("draft");
+  const draftPending = desktop.draft !== null || pendingKeys.has("draft");
   const canStartDraft = desktop.projects.some(({ available }) => available);
 
-  const confirmDelete = () => {
-    if (!pendingDelete) return;
-    const projectId = pendingDelete.id;
-    setPendingDelete(null);
-    void desktop.removeProject(projectId);
+  const startDraft = (projectId?: string) => {
+    void runPendingThreadAction(pendingActions.current, "draft", setPendingKeys, async () => {
+      await desktop.beginDraft(projectId);
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLTextAreaElement>("[data-draft-composer] textarea")?.focus(),
+      );
+    });
   };
 
   return (
@@ -49,12 +47,7 @@ export function Sidebar() {
               onClickCapture={preventPrimitiveThreadAction}
               onClick={(event) =>
                 runControlledThreadAction(event, () => {
-                  void runPendingThreadAction(pendingActions.current, "draft", setPendingKeys, async () => {
-                    await desktop.beginDraft();
-                    requestAnimationFrame(() =>
-                      document.querySelector<HTMLTextAreaElement>("[data-draft-composer] textarea")?.focus(),
-                    );
-                  });
+                  startDraft();
                 })
               }
             >
@@ -67,15 +60,16 @@ export function Sidebar() {
         <div className="sidebar-section-heading">
           <span>项目</span>
           <Button variant="ghost" size="icon" aria-label="添加项目" onClick={() => void desktop.chooseProject()}>
-            <FolderPlus size={15} />
+            <FolderPlus size={12} />
           </Button>
         </div>
         <ScrollArea className="sidebar-projects">
           <ProjectList
             projects={desktop.projects}
             projectId={desktop.project?.id}
+            newTaskDisabled={draftPending}
             onProjectExpand={(id) => void desktop.loadProjectThreads(id)}
-            onProjectDelete={(project) => setPendingDelete({ id: project.id, title: project.name })}
+            onNewTask={startDraft}
           />
         </ScrollArea>
         <div className="sidebar-footer">
@@ -87,17 +81,7 @@ export function Sidebar() {
             <CircleHelp size={15} />
           </Button>
         </div>
-        <ConfirmDialog
-          open={pendingDelete !== null}
-          title="移除项目"
-          description={`仅从 Meta Agent 移除“${pendingDelete?.title ?? ""}”，不会删除工作区文件。`}
-          confirmLabel="移除"
-          onOpenChange={(open) => {
-            if (!open) setPendingDelete(null);
-          }}
-          onConfirm={confirmDelete}
-        />
       </aside>
     </ThreadListPrimitive.Root>
   );
-}
+});

@@ -44,7 +44,7 @@ describe("desktop reducer", () => {
     state = desktopReducer(state, { type: "control", control: createControl(2, "过期版本") });
 
     expect(state.controls["project:thread"]?.title).toBe("第三版");
-    expect(state.bootstraps["project:thread"]?.messages).toEqual([]);
+    expect(state.bootstrap?.messages).toEqual([]);
     expect(state.threadCatalogs[project.id]?.[0]?.title).toBe("第三版");
   });
 
@@ -181,8 +181,61 @@ describe("desktop reducer", () => {
     expect(state.draft).toBeNull();
     expect(state.threadCatalogs[project.id]).toEqual([thread]);
     expect(state.activeThreadIds[project.id]).toBe(thread.id);
-    expect(state.bootstraps["project:thread"]).toBe(bootstrap);
+    expect(state.bootstrap).toBe(bootstrap);
     expect(selectActiveThreadId(state)).toBe(thread.id);
+  });
+
+  it("session 来回切换时只保留 active bootstrap", () => {
+    const otherThread = { ...thread, id: "other-thread" };
+    const firstBootstrap = createBootstrap(1, "第一个会话");
+    const secondBootstrap = createBootstrap(1, "第二个会话", 0, otherThread.id);
+    const returnedBootstrap = createBootstrap(2, "返回第一个会话");
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-loaded",
+      project,
+      threads: [thread, otherThread],
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: firstBootstrap,
+      workbench: createWorkbench(),
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: secondBootstrap,
+      workbench: { ...createWorkbench(), threadId: otherThread.id },
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: returnedBootstrap,
+      workbench: createWorkbench(),
+    });
+
+    expect(state.bootstrap).toBe(returnedBootstrap);
+    expect(state.bootstrap).not.toBe(firstBootstrap);
+    expect(state.bootstrap).not.toBe(secondBootstrap);
+    expect(selectActiveThreadId(state)).toBe(thread.id);
+  });
+
+  it("control 未改变 thread 摘要时复用 catalog 引用", () => {
+    let state = desktopReducer(INITIAL_STATE, { type: "project-loaded", project, threads: [thread] });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: createBootstrap(1, thread.title),
+      workbench: createWorkbench(),
+    });
+    const catalogs = state.threadCatalogs;
+    const projectThreads = state.threadCatalogs[project.id];
+
+    state = desktopReducer(state, { type: "control", control: createControl(2, thread.title) });
+
+    expect(state.threadCatalogs).toBe(catalogs);
+    expect(state.threadCatalogs[project.id]).toBe(projectThreads);
+    expect(state.controls["project:thread"]?.revision).toBe(2);
   });
 
   it("删除 draft Project 时保留草稿状态并清空目标", () => {
@@ -253,13 +306,13 @@ function createWorkbench(): WorkbenchState {
   };
 }
 
-function createBootstrap(revision: number, title: string, cursor = 0): SessionBootstrap {
+function createBootstrap(revision: number, title: string, cursor = 0, threadId = thread.id): SessionBootstrap {
   return {
     protocolVersion: PROTOCOL_VERSION,
     projectId: project.id,
-    threadId: thread.id,
+    threadId,
     cursor,
-    control: createControl(revision, title),
+    control: { ...createControl(revision, title), threadId },
     messages: [],
     state: {},
   };

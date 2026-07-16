@@ -186,7 +186,6 @@ function Select({ options, placeholder, className, ...props }: SelectProps) {
         )}
       >
         <span>{selectedOption?.label ?? placeholder}</span>
-        <ChevronDownIcon className="size-3.5 opacity-50" />
       </SelectPrimitive.Trigger>
 
       <SelectContent>

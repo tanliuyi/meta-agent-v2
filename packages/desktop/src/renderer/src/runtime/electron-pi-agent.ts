@@ -3,6 +3,8 @@ import {
   type BaseEvent,
   BaseEventSchema,
   EventType,
+  type Message,
+  MessagesSnapshotEventSchema,
   type RunAgentInput,
   type RunAgentParameters,
 } from "@ag-ui/client";
@@ -12,13 +14,15 @@ import { sessionEventBus } from "./session-event-bus.ts";
 
 /** 使用 Electron IPC 作为 AG-UI transport 的本地 agent。 */
 export class ElectronPiAgent extends AbstractAgent {
+  private readonly onSnapshot?: (messages: Message[]) => void;
   private projectId?: string;
   private activeRun?: SessionBootstrap["activeRun"];
   private lastSequence = 0;
   private current?: Subscriber<BaseEvent>;
   private paused = false;
+  private pendingSnapshot?: Message[];
 
-  constructor() {
+  constructor(onSnapshot?: (messages: Message[]) => void) {
     super({
       agentId: "pi-desktop",
       description: "Pi coding agent over Electron IPC",
@@ -26,6 +30,7 @@ export class ElectronPiAgent extends AbstractAgent {
       initialMessages: [],
       initialState: {},
     });
+    this.onSnapshot = onSnapshot;
   }
 
   get attachedSession(): { projectId: string; threadId: string } | undefined {
@@ -41,6 +46,7 @@ export class ElectronPiAgent extends AbstractAgent {
     this.activeRun = bootstrap.activeRun;
     this.lastSequence = bootstrap.cursor;
     this.paused = false;
+    this.pendingSnapshot = undefined;
   }
 
   async detach(): Promise<void> {
@@ -48,6 +54,7 @@ export class ElectronPiAgent extends AbstractAgent {
     this.projectId = undefined;
     this.activeRun = undefined;
     this.paused = false;
+    this.pendingSnapshot = undefined;
   }
 
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -59,6 +66,7 @@ export class ElectronPiAgent extends AbstractAgent {
       }
       this.current = subscriber;
       this.paused = false;
+      this.pendingSnapshot = undefined;
       const replay = this.activeRun;
       const runId = replay?.runId ?? input.runId;
       this.activeRun = undefined;
@@ -120,16 +128,35 @@ export class ElectronPiAgent extends AbstractAgent {
         this.requestResync(subscriber, release);
         return;
       }
+      if (envelope.event.type === EventType.MESSAGES_SNAPSHOT) {
+        const snapshot = MessagesSnapshotEventSchema.safeParse(envelope.event);
+        if (!snapshot.success) {
+          this.requestResync(subscriber, release);
+          return;
+        }
+        this.pendingSnapshot = snapshot.data.messages;
+        continue;
+      }
       if (envelope.event.type === EventType.RUN_ERROR) {
         subscriber.error(new Error("message" in envelope.event ? String(envelope.event.message) : "Pi run failed"));
+        this.applyPendingSnapshot();
         return;
       }
       subscriber.next(envelope.event);
       if (envelope.event.type === EventType.RUN_FINISHED) {
         subscriber.complete();
+        this.applyPendingSnapshot();
         return;
       }
     }
+  }
+
+  private applyPendingSnapshot(): void {
+    const snapshot = this.pendingSnapshot;
+    this.pendingSnapshot = undefined;
+    if (!snapshot) return;
+    this.messages = snapshot;
+    this.onSnapshot?.(snapshot);
   }
 
   private requestResync(subscriber: Subscriber<BaseEvent>, release: () => void): void {

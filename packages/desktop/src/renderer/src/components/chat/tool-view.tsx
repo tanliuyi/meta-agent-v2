@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useToolUpdate } from "../../runtime/tool-status-store.ts";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.tsx";
 import { ToolContent } from "./tools/tool-content.tsx";
 
 /** 按 Pi 原生工具类型渲染紧凑工具状态。 */
@@ -23,8 +24,8 @@ export function ToolView({ toolCallId, toolName, args, result, status }: ToolCal
   const displayedResult = update?.result ?? result;
 
   return (
-    <details className="tool-view">
-      <summary>
+    <Collapsible className="tool-view">
+      <CollapsibleTrigger className="tool-trigger focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px] focus-visible:ring-inset">
         <span className="tool-icon">{view.icon}</span>
         <span className="tool-name">{view.label}</span>
         <span className="tool-target">{toolTarget(args)}</span>
@@ -32,11 +33,13 @@ export function ToolView({ toolCallId, toolName, args, result, status }: ToolCal
           {running ? <span className="spinner" /> : error ? <X size={13} /> : <Check size={13} />}
         </span>
         <ChevronRight size={13} className="tool-chevron" />
-      </summary>
-      <div className="tool-body">
-        <ToolContent name={toolName} args={args} result={displayedResult} error={error} />
-      </div>
-    </details>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="data-closed:animate-collapsible-up data-open:animate-collapsible-down overflow-hidden data-closed:pointer-events-none data-closed:fill-mode-forwards motion-reduce:animate-none">
+        <div className="tool-body">
+          <ToolContent name={toolName} args={args} result={displayedResult} error={error} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

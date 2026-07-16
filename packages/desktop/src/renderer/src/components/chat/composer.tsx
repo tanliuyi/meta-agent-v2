@@ -1,5 +1,5 @@
 import { ComposerPrimitive, useAssistantRuntime, useAuiState } from "@assistant-ui/react";
-import { ArrowUp, RotateCcw } from "lucide-react";
+import { ArrowUp, RotateCcw, Square } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import type {
   DraftSessionConfig,
@@ -8,7 +8,7 @@ import type {
   SessionControlState,
   SlashCommand,
 } from "../../../../shared/contracts.ts";
-import { toPiImageInputs } from "../../runtime/image-attachments.ts";
+import { submitRunningMessage } from "../../runtime/running-session.ts";
 import type { DraftSessionState } from "../../state/desktop-model.ts";
 import { ComposerAddAttachment, ComposerAttachments } from "../assistant-ui/attachment.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
@@ -88,14 +88,15 @@ export function Composer(props: ComposerProps) {
     try {
       const composer = runtime.thread.composer;
       const state = composer.getState();
-      await window.desktop.sessions.enqueue({
-        projectId: snapshot.projectId,
-        threadId: snapshot.threadId,
-        text: state.text.trim(),
-        images: await toPiImageInputs(state.attachments),
-        mode,
-      });
-      await composer.reset();
+      await submitRunningMessage(
+        state,
+        { projectId: snapshot.projectId, threadId: snapshot.threadId, mode },
+        (input) => window.desktop.sessions.enqueue(input),
+        {
+          append: (message) => runtime.thread.append(message),
+          resetComposer: () => composer.reset(),
+        },
+      );
     } catch (value) {
       setError(errorMessage(value));
     } finally {
@@ -144,7 +145,15 @@ export function Composer(props: ComposerProps) {
       event.preventDefault();
       if (event.key !== "Escape" || !snapshot?.running) return;
     }
-    if (event.key !== "Escape" || !snapshot?.running || event.nativeEvent.isComposing) return;
+    if (!snapshot?.running || event.nativeEvent.isComposing) return;
+
+    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      if (!event.repeat) void submitRunning();
+      return;
+    }
+
+    if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
     if (event.repeat) return;
@@ -196,9 +205,7 @@ export function Composer(props: ComposerProps) {
               <ComposerSuggestions ref={suggestions} projectId={suggestionProjectId} commands={commands} />
             ) : null}
             <ComposerWidgets widgets={aboveWidgets} />
-            <div className="empty:hidden">
-              <ComposerAttachments disabled={disabled} />
-            </div>
+            <ComposerAttachments disabled={disabled} />
             <ComposerPrimitive.Input
               className="caret-primary placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-sm leading-relaxed outline-none"
               onKeyDown={handleInputKeyDown}
@@ -352,16 +359,30 @@ function ComposerSubmitControl({
     );
   }
   if (props.snapshot.running) {
+    if (isEmpty) {
+      return (
+        <ComposerPrimitive.Cancel asChild>
+          <TooltipIconButton
+            tooltip={escapeCancelArmed ? "再次按 Esc 停止运行" : "停止运行"}
+            side="top"
+            variant="default"
+            className="size-7 rounded-full"
+          >
+            <Square className="size-3.5 fill-current" />
+          </TooltipIconButton>
+        </ComposerPrimitive.Cancel>
+      );
+    }
     return (
       <TooltipIconButton
-        type={escapeCancelArmed ? "button" : "submit"}
-        tooltip={escapeCancelArmed ? "再次按 Esc 停止运行" : "发送后续消息"}
+        type="submit"
+        tooltip="发送后续消息"
         side="top"
         variant="default"
         className="size-7 rounded-full"
-        disabled={!escapeCancelArmed && (sending || isEmpty || props.snapshot.readiness.state !== "ready")}
+        disabled={sending || props.snapshot.readiness.state !== "ready"}
       >
-        {escapeCancelArmed ? <span className="text-[9px] font-semibold">Esc</span> : <ArrowUp className="size-4" />}
+        <ArrowUp className="size-4" />
       </TooltipIconButton>
     );
   }

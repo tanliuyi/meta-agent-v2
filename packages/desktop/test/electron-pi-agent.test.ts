@@ -90,6 +90,53 @@ describe("ElectronPiAgent", () => {
     await expect(error).resolves.toMatchObject({ name: "AbortError" });
     expect(attach).toHaveBeenCalledTimes(2);
   });
+
+  it("终态 snapshot 不进入 AG-UI 聚合器并在 run 完成后交给 canonical importer", async () => {
+    let push: ((update: SessionPushPayload) => void) | undefined;
+    installWindow({
+      run: vi.fn(async () => {}),
+      attach: async (_projectId, _threadId, listener) => {
+        push = listener;
+        return bootstrap(0);
+      },
+    });
+    const attached = await sessionEventBus.attach("project", "thread");
+    const onSnapshot = vi.fn();
+    const agent = new ElectronPiAgent(onSnapshot);
+    await agent.attach(attached);
+    const received: BaseEvent[] = [];
+    const completed = new Promise<void>((resolve) =>
+      agent.run(runInput()).subscribe({ next: (event) => received.push(event), complete: resolve }),
+    );
+    push?.(terminalPush());
+    await completed;
+
+    expect(received.map(({ type }) => type)).toEqual([EventType.RUN_FINISHED]);
+    expect(onSnapshot).toHaveBeenCalledWith([{ id: "user", role: "user", content: "question" }]);
+    expect(agent.messages).toEqual([{ id: "user", role: "user", content: "question" }]);
+  });
+
+  it("畸形终态 snapshot 触发 resync 而不是进入 canonical importer", async () => {
+    let push: ((update: SessionPushPayload) => void) | undefined;
+    const attach = vi
+      .fn<Window["desktop"]["sessions"]["attach"]>()
+      .mockImplementationOnce(async (_projectId, _threadId, listener) => {
+        push = listener;
+        return bootstrap(0);
+      })
+      .mockImplementationOnce(async () => bootstrap(1));
+    installWindow({ run: vi.fn(async () => {}), attach });
+    const attached = await sessionEventBus.attach("project", "thread");
+    const onSnapshot = vi.fn();
+    const agent = new ElectronPiAgent(onSnapshot);
+    await agent.attach(attached);
+    const error = new Promise<unknown>((resolve) => agent.run(runInput()).subscribe({ error: resolve }));
+    push?.(invalidSnapshotPush());
+
+    await expect(error).resolves.toMatchObject({ name: "AbortError" });
+    expect(onSnapshot).not.toHaveBeenCalled();
+    expect(attach).toHaveBeenCalledTimes(2);
+  });
 });
 
 interface WindowOverrides {
@@ -181,6 +228,67 @@ function eventPush(cursor: number, delta: string): Extract<SessionPushPayload, {
           runId: "canonical-run",
           sequence: cursor,
           event: { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "assistant", delta },
+        },
+      ],
+    },
+  };
+}
+
+function terminalPush(): Extract<SessionPushPayload, { type: "events" }> {
+  return {
+    type: "events",
+    projectId: "project",
+    threadId: "thread",
+    batch: {
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: "project",
+      threadId: "thread",
+      fromSequence: 1,
+      toSequence: 2,
+      events: [
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          projectId: "project",
+          threadId: "thread",
+          runId: "generated-run",
+          sequence: 1,
+          event: {
+            type: EventType.MESSAGES_SNAPSHOT,
+            messages: [{ id: "user", role: "user", content: "question" }],
+          },
+        },
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          projectId: "project",
+          threadId: "thread",
+          runId: "generated-run",
+          sequence: 2,
+          event: { type: EventType.RUN_FINISHED, threadId: "thread", runId: "generated-run" },
+        },
+      ],
+    },
+  };
+}
+
+function invalidSnapshotPush(): Extract<SessionPushPayload, { type: "events" }> {
+  return {
+    type: "events",
+    projectId: "project",
+    threadId: "thread",
+    batch: {
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: "project",
+      threadId: "thread",
+      fromSequence: 1,
+      toSequence: 1,
+      events: [
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          projectId: "project",
+          threadId: "thread",
+          runId: "generated-run",
+          sequence: 1,
+          event: { type: EventType.MESSAGES_SNAPSHOT, messages: [{}] },
         },
       ],
     },

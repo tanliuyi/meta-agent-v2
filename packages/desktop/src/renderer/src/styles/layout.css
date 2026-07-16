@@ -82,11 +82,6 @@
 .project-group {
   margin-bottom: 6px;
 }
-.project-main {
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
 .project-warning {
   margin-left: auto;
   color: hsl(var(--destructive));

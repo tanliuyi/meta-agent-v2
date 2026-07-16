@@ -1,6 +1,6 @@
 import { useAui } from "@assistant-ui/react";
 import { cva, type VariantProps } from "class-variance-authority";
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 import {
   type ComponentPropsWithoutRef,
@@ -164,7 +164,16 @@ function ModelSelectorRoot({
   const efforts = getModelEfforts(selectedModel);
   const activeEffort = resolveEffort(efforts, effort);
   const contextValue = useMemo(
-    () => ({ models, value, setValue, selectedModel, efforts, effort: activeEffort, setEffort, setOpen }),
+    () => ({
+      models,
+      value,
+      setValue,
+      selectedModel,
+      efforts,
+      effort: activeEffort,
+      setEffort,
+      setOpen,
+    }),
     [models, value, setValue, selectedModel, efforts, activeEffort, setEffort, setOpen],
   );
 
@@ -188,7 +197,7 @@ export const modelSelectorTriggerVariants = cva(
       },
       size: {
         default: "h-8 px-2.5 py-1.5",
-        sm: "h-7 px-2 py-1 text-[11px]",
+        sm: "h-7 px-2 py-1 text-xs",
         lg: "h-9 px-3 py-2",
       },
     },
@@ -220,7 +229,6 @@ function ModelSelectorTrigger({ className, variant, size, children, onKeyDown, .
       {...props}
     >
       {children ?? <ModelSelectorValue />}
-      <ChevronDown className="size-4 opacity-50" aria-hidden="true" />
     </PopoverTrigger>
   );
 }
@@ -401,7 +409,9 @@ function ModelSelectorItem({ model, className, children, onSelect, ...props }: M
   );
 }
 
-export type ModelSelectorEffortProps = ComponentPropsWithoutRef<"div"> & { label?: ReactNode };
+export type ModelSelectorEffortProps = ComponentPropsWithoutRef<"div"> & {
+  label?: ReactNode;
+};
 
 function ModelSelectorEffort({ label = "Thinking", className, onKeyDown, ...props }: ModelSelectorEffortProps) {
   const { efforts, effort, setEffort } = useModelSelectorEfforts();
