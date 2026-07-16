@@ -1,3 +1,4 @@
+import { useAui, useAuiState } from "@assistant-ui/react";
 import { File, Folder, TerminalSquare } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import type { FileNode, SlashCommand } from "../../../../shared/contracts.ts";
@@ -9,8 +10,6 @@ export interface ComposerSuggestionsHandle {
 interface ComposerSuggestionsProps {
   projectId: string;
   commands: readonly SlashCommand[];
-  text: string;
-  onChange(text: string): void;
 }
 
 interface Suggestion {
@@ -23,27 +22,32 @@ interface Suggestion {
 
 /** 提供 Pi slash command 与 Project 文件的键盘补全。 */
 export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, ComposerSuggestionsProps>(
-  function ComposerSuggestions({ projectId, commands, text, onChange }, ref) {
+  function ComposerSuggestions({ projectId, commands }, ref) {
+    const aui = useAui();
+    const text = useAuiState((state) => state.composer.text);
     const context = completionContext(text);
     const [files, setFiles] = useState<FileNode[]>([]);
     const [selected, setSelected] = useState(0);
 
     useEffect(() => {
       if (context?.type !== "file") {
-        setFiles([]);
+        setFiles((current) => (current.length === 0 ? current : []));
         return;
       }
       let active = true;
-      void window.desktop.files
-        .list(projectId, "", context.query)
-        .then((items) => {
-          if (active) setFiles(items.slice(0, 10));
-        })
-        .catch(() => {
-          if (active) setFiles([]);
-        });
+      const timeout = window.setTimeout(() => {
+        void window.desktop.files
+          .list(projectId, "", context.query)
+          .then((items) => {
+            if (active) setFiles(items.slice(0, 10));
+          })
+          .catch(() => {
+            if (active) setFiles((current) => (current.length === 0 ? current : []));
+          });
+      }, 200);
       return () => {
         active = false;
+        window.clearTimeout(timeout);
       };
     }, [context?.query, context?.type, projectId]);
 
@@ -75,7 +79,7 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
     const accept = (index: number) => {
       const item = items[index];
       if (!item || !context) return false;
-      onChange(`${text.slice(0, context.start)}${item.text}`);
+      aui.composer().setText(`${text.slice(0, context.start)}${item.text}`);
       return true;
     };
 

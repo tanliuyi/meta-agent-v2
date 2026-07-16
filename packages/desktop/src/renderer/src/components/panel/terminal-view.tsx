@@ -64,6 +64,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     terminal.loadAddon(fit);
     terminal.open(container.current);
     terminalRef.current = terminal;
+    let resizeFrame: number | undefined;
+    let lastGrid: TerminalGrid | undefined;
 
     const matches = (event: TerminalEvent) =>
       event.projectId === projectId && event.threadId === threadId && event.terminalId === terminalId;
@@ -86,15 +88,23 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
         .write(projectId, threadId, terminalId, data)
         .catch((value: unknown) => setStatus(errorMessage(value)));
     });
-    const resize = new ResizeObserver(() => {
-      fit.fit();
-      if (!opened) return;
-      void window.desktop.terminals
-        .resize(projectId, threadId, terminalId, terminal.cols, terminal.rows)
-        .catch((value: unknown) => setStatus(errorMessage(value)));
-    });
+    const syncSize = () => {
+      if (resizeFrame !== undefined) return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = undefined;
+        fit.fit();
+        const grid = { columns: terminal.cols, rows: terminal.rows };
+        if (!opened || isSameTerminalGrid(lastGrid, grid)) return;
+        lastGrid = grid;
+        void window.desktop.terminals
+          .resize(projectId, threadId, terminalId, grid.columns, grid.rows)
+          .catch((value: unknown) => setStatus(errorMessage(value)));
+      });
+    };
+    const resize = new ResizeObserver(syncSize);
     resize.observe(container.current);
     fit.fit();
+    lastGrid = { columns: terminal.cols, rows: terminal.rows };
 
     void window.desktop.terminals
       .open(projectId, threadId, terminalId, terminal.cols, terminal.rows)
@@ -103,6 +113,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
         terminal.write(initial.output);
         revision.current = initial.revision;
         opened = true;
+        syncSize();
         for (const event of pending) apply(event);
         setStatus(initial.running ? null : "终端进程已退出");
       })
@@ -114,6 +125,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
       active = false;
       terminalRef.current = null;
       resize.disconnect();
+      if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
       input.dispose();
       unsubscribe();
       fit.dispose();
@@ -128,6 +140,15 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     </div>
   );
 });
+
+export interface TerminalGrid {
+  columns: number;
+  rows: number;
+}
+
+export function isSameTerminalGrid(previous: TerminalGrid | undefined, current: TerminalGrid): boolean {
+  return previous?.columns === current.columns && previous.rows === current.rows;
+}
 
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);

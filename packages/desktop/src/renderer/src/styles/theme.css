@@ -51,10 +51,6 @@ select {
   letter-spacing: 0;
 }
 
-button {
-  color: inherit;
-}
-
 ::selection {
   background: hsl(var(--primary) / 0.14);
 }

@@ -5,7 +5,7 @@ import { StreamdownText } from "@renderer/components/assistant-ui/streamdown-tex
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@renderer/components/ui/collapsible";
 import { cn } from "@renderer/lib/cn";
 import { cva, type VariantProps } from "class-variance-authority";
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 const ANIMATION_DURATION = 200;
@@ -127,36 +127,38 @@ function ReasoningFade({
 function ReasoningTrigger({
   active,
   duration,
+  label = "Reasoning",
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
   active?: boolean;
   duration?: number;
+  label?: string;
 }) {
   const durationText = duration ? ` (${duration}s)` : "";
+  const labelText = `${label}${durationText}`;
 
   return (
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
       className={cn(
-        "aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]",
+        "aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98] disabled:cursor-default disabled:hover:text-muted-foreground disabled:active:scale-100",
         className,
       )}
       {...props}
     >
-      <BrainIcon data-slot="reasoning-trigger-icon" className="aui-reasoning-trigger-icon size-4 shrink-0" />
       <span
         data-slot="reasoning-trigger-label"
         className="aui-reasoning-trigger-label-wrapper relative inline-block leading-none tabular-nums"
       >
-        <span>Reasoning{durationText}</span>
+        <span>{labelText}</span>
         {active ? (
           <span
             aria-hidden
             data-slot="reasoning-trigger-shimmer"
             className="aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
           >
-            Reasoning{durationText}
+            {labelText}
           </span>
         ) : null}
       </span>
@@ -175,8 +177,6 @@ function ReasoningTrigger({
 }
 
 function ReasoningContent({ className, children, ...props }: React.ComponentProps<typeof CollapsibleContent>) {
-  const isPreview = useContext(ReasoningPreviewContext);
-
   return (
     <CollapsibleContent
       data-slot="reasoning-content"
@@ -193,9 +193,7 @@ function ReasoningContent({ className, children, ...props }: React.ComponentProp
       )}
       {...props}
     >
-      <ReasoningFade side="top" />
       {children}
-      {isPreview ? <ReasoningFade /> : null}
     </CollapsibleContent>
   );
 }
@@ -210,13 +208,22 @@ function ReasoningText({ className, children, ...props }: React.ComponentProps<"
     const scrollEl = scrollRef.current;
     const contentEl = contentRef.current;
     if (!scrollEl || !contentEl) return;
+    let frame: number | undefined;
     const pin = () => {
-      scrollEl.scrollTop = scrollEl.scrollHeight;
+      if (frame !== undefined) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        if (scrollEl.scrollHeight <= scrollEl.clientHeight) return;
+        scrollEl.scrollTop = scrollEl.scrollHeight;
+      });
     };
     pin();
     const observer = new ResizeObserver(pin);
     observer.observe(contentEl);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
   }, [isPreview]);
 
   return (

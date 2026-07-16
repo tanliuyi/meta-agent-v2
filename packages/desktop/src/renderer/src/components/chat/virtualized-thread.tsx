@@ -5,12 +5,13 @@ import { type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { SessionControlState } from "../../../../shared/contracts.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { Composer } from "./composer.tsx";
-import { MessageEntranceAnimationProvider, THREAD_MESSAGE_COMPONENTS } from "./messages.tsx";
+import { MessageEntranceAnimationProvider, MessageProcessGroup, THREAD_MESSAGE_COMPONENTS } from "./messages.tsx";
 import { SessionStatus } from "./session-status.tsx";
 import {
   buildThreadTurns,
   didUserScrollUp,
   isScrollerAtBottom,
+  partitionThreadTurn,
   projectThreadMessageRows,
   resolveThreadScrollState,
   type ScrollerMetrics,
@@ -68,12 +69,29 @@ function VirtualizedThreadScroller({
 }) {
   const rows = useThreadMessageRows();
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const runStartedAtRef = useRef<number | null>(isRunning ? Date.now() : null);
+  const [lastRunDurationMs, setLastRunDurationMs] = useState<number>();
   const turns = useThreadTurns(rows);
   const messageIds = useMemo(() => rows.map(({ id }) => id), [rows]);
+  const roleByMessageId = useMemo(() => new Map(rows.map(({ id, role }) => [id, role])), [rows]);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickyRef = useRef(true);
   const programmaticScrollRef = useRef(false);
   const atBottomRef = useRef(true);
+
+  useEffect(() => {
+    if (isRunning) {
+      if (runStartedAtRef.current === null) {
+        runStartedAtRef.current = Date.now();
+        setLastRunDurationMs(undefined);
+      }
+      return;
+    }
+    if (runStartedAtRef.current !== null) {
+      setLastRunDurationMs(Date.now() - runStartedAtRef.current);
+      runStartedAtRef.current = null;
+    }
+  }, [isRunning]);
 
   const updateAtBottom = useCallback(
     (value: boolean) => {
@@ -175,6 +193,8 @@ function VirtualizedThreadScroller({
           <div data-slot="aui-message-group" className="empty:hidden" style={{ paddingTop, paddingBottom }}>
             {items.map((item) => {
               const turn = turns[item.index]!;
+              const sections = partitionThreadTurn(turn, roleByMessageId);
+              const isLatestTurn = item.index === turns.length - 1;
               return (
                 <div
                   key={item.key}
@@ -183,7 +203,28 @@ function VirtualizedThreadScroller({
                   data-slot="aui-turn"
                   className="flex flex-col py-3"
                 >
-                  {turn.messageIds.map((messageId) => (
+                  {sections.leadingMessageIds.map((messageId) => (
+                    <VirtualizedMessageById
+                      key={messageId}
+                      messageId={messageId}
+                      components={THREAD_MESSAGE_COMPONENTS}
+                    />
+                  ))}
+                  {sections.processMessageIds.length > 0 ? (
+                    <MessageProcessGroup
+                      durationMs={isLatestTurn ? lastRunDurationMs : undefined}
+                      isRunning={isRunning && isLatestTurn}
+                    >
+                      {sections.processMessageIds.map((messageId) => (
+                        <VirtualizedMessageById
+                          key={messageId}
+                          messageId={messageId}
+                          components={THREAD_MESSAGE_COMPONENTS}
+                        />
+                      ))}
+                    </MessageProcessGroup>
+                  ) : null}
+                  {sections.answerMessageIds.map((messageId) => (
                     <VirtualizedMessageById
                       key={messageId}
                       messageId={messageId}
@@ -236,10 +277,16 @@ function ThreadScrollToBottom({ visible, onClick }: { visible: boolean; onClick(
 }
 
 function useThreadMessageRows(): readonly ThreadMessageRow[] {
-  const previousRowsRef = useRef<readonly ThreadMessageRow[]>([]);
+  const cacheRef = useRef<{
+    messages: readonly ThreadMessageRow[] | undefined;
+    rows: readonly ThreadMessageRow[];
+  }>({ messages: undefined, rows: [] });
   return useAuiState((state) => {
-    const rows = projectThreadMessageRows(previousRowsRef.current, state.thread.messages);
-    previousRowsRef.current = rows;
+    const messages = state.thread.messages;
+    const cached = cacheRef.current;
+    if (cached.messages === messages) return cached.rows;
+    const rows = projectThreadMessageRows(cached.rows, messages);
+    cacheRef.current = { messages, rows };
     return rows;
   });
 }

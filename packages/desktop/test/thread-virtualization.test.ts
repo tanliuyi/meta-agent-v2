@@ -3,6 +3,7 @@ import {
   buildThreadTurns,
   didUserScrollUp,
   isScrollerAtBottom,
+  partitionThreadTurn,
   projectThreadMessageRows,
   resolveThreadScrollState,
   stabilizeThreadTurnIds,
@@ -56,6 +57,40 @@ describe("thread virtualization", () => {
 
     expect(initial.map(({ id }) => id)).toEqual(["user-1", "user-2"]);
     expect(appended.map(({ id }) => id)).toEqual(["user-1", "user-2"]);
+  });
+
+  it("将最终回答前的 assistant 消息统一归入过程区域", () => {
+    const turn = {
+      id: "user",
+      messageIds: ["user", "reasoning-1", "tool-1", "reasoning-2", "answer"],
+    };
+    const roles = new Map<string, ThreadMessageRow["role"]>([
+      ["user", "user"],
+      ["reasoning-1", "assistant"],
+      ["tool-1", "assistant"],
+      ["reasoning-2", "assistant"],
+      ["answer", "assistant"],
+    ]);
+
+    expect(partitionThreadTurn(turn, roles)).toEqual({
+      leadingMessageIds: ["user"],
+      processMessageIds: ["reasoning-1", "tool-1", "reasoning-2"],
+      answerMessageIds: ["answer"],
+    });
+  });
+
+  it("实时单 assistant 消息不创建额外 turn 级过程区域", () => {
+    const turn = { id: "user", messageIds: ["user", "assistant"] };
+    const roles = new Map<string, ThreadMessageRow["role"]>([
+      ["user", "user"],
+      ["assistant", "assistant"],
+    ]);
+
+    expect(partitionThreadTurn(turn, roles)).toEqual({
+      leadingMessageIds: ["user"],
+      processMessageIds: [],
+      answerMessageIds: ["assistant"],
+    });
   });
 
   it("run finish 替换 user message ID 时复用原 turn ID", () => {

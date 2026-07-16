@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isSameTerminalGrid } from "../src/renderer/src/components/panel/terminal-view.tsx";
 import { limitSize } from "../src/renderer/src/components/ui/use-resize.ts";
 
 describe("limitSize", () => {
@@ -10,5 +11,14 @@ describe("limitSize", () => {
 
   it("视口过小时仍保留可用的最小值", () => {
     expect(limitSize(200, 360, 240)).toBe(360);
+  });
+});
+
+describe("isSameTerminalGrid", () => {
+  it("仅在终端网格行列变化时要求同步", () => {
+    expect(isSameTerminalGrid(undefined, { columns: 80, rows: 24 })).toBe(false);
+    expect(isSameTerminalGrid({ columns: 80, rows: 24 }, { columns: 80, rows: 24 })).toBe(true);
+    expect(isSameTerminalGrid({ columns: 80, rows: 24 }, { columns: 81, rows: 24 })).toBe(false);
+    expect(isSameTerminalGrid({ columns: 80, rows: 24 }, { columns: 80, rows: 25 })).toBe(false);
   });
 });

@@ -8,6 +8,12 @@ export interface ThreadTurn {
   messageIds: readonly string[];
 }
 
+export interface ThreadTurnSections {
+  leadingMessageIds: readonly string[];
+  processMessageIds: readonly string[];
+  answerMessageIds: readonly string[];
+}
+
 export interface ScrollerMetrics {
   scrollTop: number;
   scrollHeight: number;
@@ -45,6 +51,25 @@ export function buildThreadTurns(rows: readonly ThreadMessageRow[]): readonly Th
     }
   }
   return turns;
+}
+
+/** 将同一 turn 中最终 assistant 消息之前的输出归入统一过程区域。 */
+export function partitionThreadTurn(
+  turn: ThreadTurn,
+  roleByMessageId: ReadonlyMap<string, ThreadMessageRow["role"]>,
+): ThreadTurnSections {
+  const firstAssistantIndex = turn.messageIds.findIndex((messageId) => roleByMessageId.get(messageId) === "assistant");
+  if (firstAssistantIndex < 0) {
+    return { leadingMessageIds: turn.messageIds, processMessageIds: [], answerMessageIds: [] };
+  }
+  const lastAssistantIndex = turn.messageIds.findLastIndex(
+    (messageId) => roleByMessageId.get(messageId) === "assistant",
+  );
+  return {
+    leadingMessageIds: turn.messageIds.slice(0, firstAssistantIndex),
+    processMessageIds: turn.messageIds.slice(firstAssistantIndex, lastAssistantIndex),
+    answerMessageIds: turn.messageIds.slice(lastAssistantIndex),
+  };
 }
 
 /** snapshot 替换部分 message ID 时，通过仍稳定的成员复用既有 turn ID。 */

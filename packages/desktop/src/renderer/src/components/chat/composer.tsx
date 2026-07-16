@@ -1,6 +1,6 @@
 import { ComposerPrimitive, useAssistantRuntime, useAuiState } from "@assistant-ui/react";
-import { ArrowUp, RotateCcw, Square } from "lucide-react";
-import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ArrowUp, RotateCcw } from "lucide-react";
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import type {
   DraftSessionConfig,
   Project,
@@ -17,6 +17,7 @@ import { ModelSelect, ProjectSelect, ThinkingSelect } from "./composer-controls.
 import { ComposerSuggestions, type ComposerSuggestionsHandle } from "./composer-suggestions.tsx";
 
 const NO_COMMANDS: readonly SlashCommand[] = [];
+const ESCAPE_CANCEL_WINDOW_MS = 1_000;
 
 type ComposerProps =
   | {
@@ -36,15 +37,29 @@ type ComposerProps =
 /** assistant-ui Composer 与 Desktop draft/session 控制面的组合入口。 */
 export function Composer(props: ComposerProps) {
   const runtime = useAssistantRuntime();
-  const text = useAuiState((state) => state.composer.text);
-  const isEmpty = useAuiState((state) => state.composer.isEmpty);
   const [mode, setMode] = useState<SendMode>("followUp");
   const [sending, setSending] = useState(false);
   const [selectingProject, setSelectingProject] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [escapeCancelArmed, setEscapeCancelArmed] = useState(false);
+  const escapeCancelTimer = useRef<number | undefined>(undefined);
   const suggestions = useRef<ComposerSuggestionsHandle>(null);
   const snapshot = props.mode === "session" ? props.snapshot : null;
   const materializing = props.mode === "draft" && props.phase === "materializing";
+
+  const clearEscapeCancelTimer = useCallback(() => {
+    if (escapeCancelTimer.current === undefined) return;
+    window.clearTimeout(escapeCancelTimer.current);
+    escapeCancelTimer.current = undefined;
+  }, []);
+
+  useEffect(() => {
+    if (!snapshot?.running) {
+      clearEscapeCancelTimer();
+      setEscapeCancelArmed(false);
+    }
+    return clearEscapeCancelTimer;
+  }, [clearEscapeCancelTimer, snapshot?.running]);
 
   useEffect(() => {
     const editorText = snapshot?.extensionUi.editorText;
@@ -67,7 +82,7 @@ export function Composer(props: ComposerProps) {
   const commands = props.mode === "draft" ? NO_COMMANDS : props.snapshot.commands;
 
   const submitRunning = async () => {
-    if (!snapshot || isEmpty || sending) return;
+    if (!snapshot || runtime.thread.composer.getState().isEmpty || sending) return;
     setSending(true);
     setError(null);
     try {
@@ -94,7 +109,7 @@ export function Composer(props: ComposerProps) {
       !props.project?.available ||
       !props.config?.model ||
       props.config.readiness.state !== "ready" ||
-      isEmpty ||
+      runtime.thread.composer.getState().isEmpty ||
       sending ||
       selectingProject ||
       materializing
@@ -124,8 +139,28 @@ export function Composer(props: ComposerProps) {
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!suggestions.current?.handleKey(event.key)) return;
+    const suggestionHandled = suggestions.current?.handleKey(event.key) === true;
+    if (suggestionHandled) {
+      event.preventDefault();
+      if (event.key !== "Escape" || !snapshot?.running) return;
+    }
+    if (event.key !== "Escape" || !snapshot?.running || event.nativeEvent.isComposing) return;
     event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+
+    if (escapeCancelTimer.current !== undefined) {
+      clearEscapeCancelTimer();
+      setEscapeCancelArmed(false);
+      runtime.thread.composer.cancel();
+      return;
+    }
+
+    setEscapeCancelArmed(true);
+    escapeCancelTimer.current = window.setTimeout(() => {
+      escapeCancelTimer.current = undefined;
+      setEscapeCancelArmed(false);
+    }, ESCAPE_CANCEL_WINDOW_MS);
   };
 
   const clearQueue = async () => {
@@ -158,13 +193,7 @@ export function Composer(props: ComposerProps) {
         <ComposerPrimitive.AttachmentDropzone asChild disabled={disabled}>
           <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-[color-mix(in_oklab,var(--color-muted)_30%,var(--color-background))] p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
             {suggestionProjectId && !materializing ? (
-              <ComposerSuggestions
-                ref={suggestions}
-                projectId={suggestionProjectId}
-                commands={commands}
-                text={text}
-                onChange={(value) => runtime.thread.composer.setText(value)}
-              />
+              <ComposerSuggestions ref={suggestions} projectId={suggestionProjectId} commands={commands} />
             ) : null}
             <ComposerWidgets widgets={aboveWidgets} />
             <div className="empty:hidden">
@@ -269,49 +298,13 @@ export function Composer(props: ComposerProps) {
                     />
                   </>
                 )}
-                {snapshot?.running ? (
-                  <ComposerPrimitive.Cancel asChild>
-                    <TooltipIconButton tooltip="停止运行" side="top" variant="outline" className="size-7 rounded-full">
-                      <Square className="size-3 fill-current" />
-                    </TooltipIconButton>
-                  </ComposerPrimitive.Cancel>
-                ) : null}
-                {props.mode === "draft" ? (
-                  <TooltipIconButton
-                    type="submit"
-                    tooltip="发送消息"
-                    side="top"
-                    variant="default"
-                    className="size-7 rounded-full"
-                    disabled={
-                      disabled ||
-                      configLoading ||
-                      isEmpty ||
-                      !props.project?.available ||
-                      !props.config?.model ||
-                      props.config.readiness.state !== "ready"
-                    }
-                  >
-                    <ArrowUp className="size-4" />
-                  </TooltipIconButton>
-                ) : props.snapshot.running ? (
-                  <TooltipIconButton
-                    type="submit"
-                    tooltip="发送后续消息"
-                    side="top"
-                    variant="default"
-                    className="size-7 rounded-full"
-                    disabled={sending || isEmpty || props.snapshot.readiness.state !== "ready"}
-                  >
-                    <ArrowUp className="size-4" />
-                  </TooltipIconButton>
-                ) : (
-                  <ComposerPrimitive.Send asChild>
-                    <TooltipIconButton tooltip="发送消息" side="top" variant="default" className="size-7 rounded-full">
-                      <ArrowUp className="size-4" />
-                    </TooltipIconButton>
-                  </ComposerPrimitive.Send>
-                )}
+                <ComposerSubmitControl
+                  props={props}
+                  disabled={disabled}
+                  configLoading={configLoading}
+                  sending={sending}
+                  escapeCancelArmed={escapeCancelArmed}
+                />
               </div>
             </div>
             <ComposerWidgets widgets={belowWidgets} />
@@ -320,6 +313,64 @@ export function Composer(props: ComposerProps) {
       </ComposerPrimitive.Root>
       {error || readinessError ? <p className="composer-error">{error ?? readinessError}</p> : null}
     </div>
+  );
+}
+
+function ComposerSubmitControl({
+  props,
+  disabled,
+  configLoading,
+  sending,
+  escapeCancelArmed,
+}: {
+  props: ComposerProps;
+  disabled: boolean;
+  configLoading: boolean;
+  sending: boolean;
+  escapeCancelArmed: boolean;
+}) {
+  const isEmpty = useAuiState((state) => state.composer.isEmpty);
+  if (props.mode === "draft") {
+    return (
+      <TooltipIconButton
+        type="submit"
+        tooltip="发送消息"
+        side="top"
+        variant="default"
+        className="size-7 rounded-full"
+        disabled={
+          disabled ||
+          configLoading ||
+          isEmpty ||
+          !props.project?.available ||
+          !props.config?.model ||
+          props.config.readiness.state !== "ready"
+        }
+      >
+        <ArrowUp className="size-4" />
+      </TooltipIconButton>
+    );
+  }
+  if (props.snapshot.running) {
+    return (
+      <TooltipIconButton
+        type={escapeCancelArmed ? "button" : "submit"}
+        tooltip={escapeCancelArmed ? "再次按 Esc 停止运行" : "发送后续消息"}
+        side="top"
+        variant="default"
+        className="size-7 rounded-full"
+        disabled={!escapeCancelArmed && (sending || isEmpty || props.snapshot.readiness.state !== "ready")}
+      >
+        {escapeCancelArmed ? <span className="text-[9px] font-semibold">Esc</span> : <ArrowUp className="size-4" />}
+      </TooltipIconButton>
+    );
+  }
+  return (
+    <ComposerPrimitive.Send asChild>
+      <TooltipIconButton tooltip="发送消息" side="top" variant="default" className="size-7 rounded-full">
+        <ArrowUp className="size-4" />
+      </TooltipIconButton>
+    </ComposerPrimitive.Send>
   );
 }
 
