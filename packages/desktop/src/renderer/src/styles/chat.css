@@ -8,9 +8,6 @@
 [data-slot="aui-turn"] > [data-role="assistant"] + [data-role="assistant"] {
   margin-top: 8px;
 }
-.aui-md {
-  margin-bottom: 0;
-}
 .tool-view {
   margin: 0 0 8px;
   border: 1px solid hsl(var(--border));

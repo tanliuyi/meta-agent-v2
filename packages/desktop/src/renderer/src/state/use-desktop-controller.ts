@@ -8,6 +8,8 @@ import {
   desktopReducer,
   INITIAL_STATE,
   selectActiveThreadId,
+  selectNavigationProjectId,
+  selectNavigationThreadId,
   sessionKey,
   threadFromBootstrap,
 } from "./desktop-model.ts";
@@ -18,6 +20,8 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
   const [state, dispatch] = useReducer(desktopReducer, INITIAL_STATE);
   const threads = state.project ? (state.threadCatalogs[state.project.id] ?? []) : [];
   const activeThreadId = selectActiveThreadId(state);
+  const navigationProjectId = selectNavigationProjectId(state);
+  const navigationThreadId = selectNavigationThreadId(state);
   const activeThreadIds = useRef(state.activeThreadIds);
   activeThreadIds.current = state.activeThreadIds;
   const draft = useRef(state.draft);
@@ -56,13 +60,15 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
   }, []);
 
   const loadThread = useCallback(
-    async (project: Project, threadId: string) => {
+    async (project: Project, threadId: string, optimistic = true) => {
+      if (optimistic) dispatch({ type: "thread-load-started", project, threadId });
       try {
         const actions = threadActions.current;
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
         const prepared = await actions.open(project, threadId);
         dispatch({ type: "thread-loaded", project, bootstrap: prepared.bootstrap, workbench: prepared.workbench });
       } catch (value) {
+        dispatch({ type: "thread-load-failed", projectId: project.id, threadId });
         if (value instanceof DOMException && value.name === "AbortError") return;
         report(value);
       }
@@ -275,6 +281,9 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
   const openThread = useCallback(
     async (projectId: string, threadId: string) => {
       if (draft.current?.phase === "materializing") return;
+      const targetProject = state.projects.find(({ id }) => id === projectId);
+      if (!targetProject) return;
+      dispatch({ type: "thread-load-started", project: targetProject, threadId });
       try {
         const leavingDraft = draft.current !== null;
         draftProjectGeneration.current += 1;
@@ -282,12 +291,13 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
           !leavingDraft && state.project?.id === projectId
             ? state.project
             : await window.desktop.projects.open(projectId);
-        await loadThread(project, threadId);
+        await loadThread(project, threadId, false);
       } catch (value) {
+        dispatch({ type: "thread-load-failed", projectId, threadId });
         report(value);
       }
     },
-    [loadThread, report, state.project],
+    [loadThread, report, state.project, state.projects],
   );
 
   const renameThread = useCallback(
@@ -378,6 +388,8 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
       threads,
       threadCatalogs: state.threadCatalogs,
       threadId: activeThreadId,
+      navigationProjectId,
+      navigationThreadId,
       bootstrap,
       snapshot: state.controls[key] ?? bootstrap?.control ?? null,
       workbench: state.workbenches[key] ?? null,
@@ -405,6 +417,8 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
       bootstrap,
       threads,
       activeThreadId,
+      navigationProjectId,
+      navigationThreadId,
       chooseProject,
       loadProjectThreads,
       removeProject,

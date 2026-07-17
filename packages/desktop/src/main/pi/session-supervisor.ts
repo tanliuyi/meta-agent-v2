@@ -307,9 +307,9 @@ export class SessionSupervisor {
 
   private publish(update: SessionPushPayload): void {
     for (const subscription of this.subscriptions.values()) {
-      if (subscription.projectId === update.projectId && subscription.threadId === update.threadId) {
-        subscription.send({ ...update, attachmentId: subscription.attachmentId });
-      }
+      const isActiveSession = subscription.projectId === update.projectId && subscription.threadId === update.threadId;
+      if (update.type !== "control" && !isActiveSession) continue;
+      subscription.send({ ...update, attachmentId: subscription.attachmentId });
     }
   }
 

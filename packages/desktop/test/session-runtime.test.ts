@@ -13,7 +13,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 }));
 
 vi.mock("../src/main/pi/session-configuration.ts", () => ({
-  createSessionConfigurationServices: () => ({ auth: {}, models: {}, settings: {} }),
+  createSessionConfigurationServices: () => ({
+    auth: {},
+    models: { getAvailable: () => [], getAll: () => [] },
+    settings: {},
+  }),
   resolveSessionCreateSelection: mocks.resolveSelection,
   sessionReadiness: () => ({ state: "ready" }),
 }));
@@ -68,13 +72,14 @@ describe("SessionRuntime summary", () => {
     expect(mocks.createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ model, thinkingLevel: "high" }));
   });
 
-  it("首条用户消息替换新会话占位标题", async () => {
+  it("首条用户消息替换新会话占位标题并立即推送 control", async () => {
     const session = createSession();
+    const push = vi.fn();
     mocks.createAgentSession.mockResolvedValue({ session });
     const runtime = await SessionRuntime.create({
       projectId: "project",
       cwd: "/workspace",
-      push: () => {},
+      push,
       onSummaryChanged: () => {},
     });
     const message: AgentSession["messages"][number] = {
@@ -87,6 +92,9 @@ describe("SessionRuntime summary", () => {
     mocks.listener?.({ type: "message_end", message });
 
     expect(runtime.threadSummary(false).title).toBe("第一条问题");
+    expect(push).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "control", control: expect.objectContaining({ title: "第一条问题" }) }),
+    );
     await runtime.dispose();
   });
 });
@@ -99,6 +107,14 @@ function createSession(): AgentSession {
     messages: [],
     state: { pendingToolCalls: new Map(), errorMessage: undefined },
     isStreaming: false,
+    thinkingLevel: "off",
+    extensionRunner: { getRegisteredCommands: () => [] },
+    promptTemplates: [],
+    resourceLoader: { getSkills: () => ({ skills: [] }) },
+    getContextUsage: () => undefined,
+    getSteeringMessages: () => [],
+    getFollowUpMessages: () => [],
+    getAvailableThinkingLevels: () => ["off"],
     async bindExtensions() {},
     subscribe(listener: (event: AgentSessionEvent) => void) {
       mocks.listener = listener;

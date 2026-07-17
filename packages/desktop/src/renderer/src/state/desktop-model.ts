@@ -14,6 +14,8 @@ export interface DesktopContextValue {
   threads: Thread[];
   threadCatalogs: Readonly<Record<string, Thread[]>>;
   threadId: string | null;
+  navigationProjectId: string | null;
+  navigationThreadId: string | null;
   bootstrap: SessionBootstrap | null;
   snapshot: SessionControlState | null;
   workbench: WorkbenchState | null;
@@ -43,12 +45,18 @@ export interface DraftSessionState {
   phase: "editing" | "materializing";
 }
 
+interface PendingThreadLoad {
+  projectId: string;
+  threadId: string;
+}
+
 export interface DesktopState {
   projects: Project[];
   project: Project | null;
   draft: DraftSessionState | null;
   threadCatalogs: Record<string, Thread[]>;
   activeThreadIds: Record<string, string | undefined>;
+  pendingThreadLoad: PendingThreadLoad | null;
   bootstrap: SessionBootstrap | null;
   controls: Record<string, SessionControlState>;
   workbenches: Record<string, WorkbenchState>;
@@ -62,6 +70,7 @@ export const INITIAL_STATE: DesktopState = {
   draft: null,
   threadCatalogs: {},
   activeThreadIds: {},
+  pendingThreadLoad: null,
   bootstrap: null,
   controls: {},
   workbenches: {},
@@ -91,6 +100,8 @@ export type DesktopAction =
       workbench: WorkbenchState;
     }
   | { type: "draft-discarded" }
+  | { type: "thread-load-started"; project: Project; threadId: string }
+  | { type: "thread-load-failed"; projectId: string; threadId: string }
   | { type: "thread-loaded"; project: Project; bootstrap: SessionBootstrap; workbench: WorkbenchState }
   | { type: "thread-created"; thread: Thread; bootstrap: SessionBootstrap; workbench: WorkbenchState }
   | { type: "thread-renamed"; projectId: string; threadId: string; title: string }
@@ -104,12 +115,13 @@ export type DesktopAction =
 
 /** 对 Desktop renderer 的低频控制状态执行无副作用更新。 */
 export function desktopReducer(state: DesktopState, action: DesktopAction): DesktopState {
-  if (action.type === "projects-loaded") return { ...state, projects: sortProjects(action.projects) };
+  if (action.type === "projects-loaded") return { ...state, projects: action.projects.toReversed() };
   if (action.type === "project-upserted") {
-    return {
-      ...state,
-      projects: sortProjects([...state.projects.filter(({ id }) => id !== action.project.id), action.project]),
-    };
+    const index = state.projects.findIndex(({ id }) => id === action.project.id);
+    if (index === -1) return { ...state, projects: [action.project, ...state.projects] };
+    const projects = [...state.projects];
+    projects[index] = action.project;
+    return { ...state, projects };
   }
   if (action.type === "project-threads-loaded") {
     return {
@@ -162,6 +174,8 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       ...state,
       bootstrap: null,
       draft: { projectId: action.projectId, config: null, configLoading: true, phase: "editing" },
+      pendingThreadLoad: null,
+      loading: false,
     };
   }
   if (action.type === "draft-project-selected") {
@@ -211,32 +225,43 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
     return { ...state, draft: { ...state.draft, phase: "editing" } };
   }
   if (action.type === "draft-discarded") return state.draft ? { ...state, draft: null } : state;
+  if (action.type === "thread-load-started") {
+    return {
+      ...state,
+      pendingThreadLoad: { projectId: action.project.id, threadId: action.threadId },
+      loading: true,
+    };
+  }
+  if (action.type === "thread-load-failed") {
+    const pending = state.pendingThreadLoad;
+    if (!pending || pending.projectId !== action.projectId || pending.threadId !== action.threadId) return state;
+    return { ...state, pendingThreadLoad: null, loading: false };
+  }
   if (action.type === "thread-loaded" || action.type === "thread-created" || action.type === "draft-committed") {
     const key = sessionKey(action.bootstrap.projectId, action.bootstrap.threadId);
     const projectThreads = state.threadCatalogs[action.bootstrap.projectId] ?? [];
     const created = action.type === "thread-created" || action.type === "draft-committed";
+    const control = newerControl(state.controls[key], action.bootstrap.control);
+    const catalogs = created
+      ? {
+          ...state.threadCatalogs,
+          [action.bootstrap.projectId]: [action.thread, ...projectThreads.filter(({ id }) => id !== action.thread.id)],
+        }
+      : state.threadCatalogs;
     return {
       ...state,
       draft: null,
       ...(action.type === "thread-loaded" || action.type === "draft-committed" ? { project: action.project } : {}),
-      ...(created
-        ? {
-            threadCatalogs: {
-              ...state.threadCatalogs,
-              [action.bootstrap.projectId]: [
-                action.thread,
-                ...projectThreads.filter(({ id }) => id !== action.thread.id),
-              ],
-            },
-          }
-        : {}),
+      threadCatalogs: control === action.bootstrap.control ? catalogs : updateThreadSummary(catalogs, control),
       activeThreadIds: {
         ...state.activeThreadIds,
         [action.bootstrap.projectId]: action.bootstrap.threadId,
       },
+      pendingThreadLoad: null,
       bootstrap: action.bootstrap,
-      controls: { ...state.controls, [key]: action.bootstrap.control },
+      controls: { ...state.controls, [key]: control },
       workbenches: { ...state.workbenches, [key]: action.workbench },
+      loading: false,
     };
   }
   if (action.type === "thread-renamed") {
@@ -267,32 +292,33 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
     return {
       ...state,
       activeThreadIds: { ...state.activeThreadIds, [action.projectId]: undefined },
+      pendingThreadLoad: null,
       bootstrap: state.bootstrap?.projectId === action.projectId ? null : state.bootstrap,
+      loading: false,
     };
   if (action.type === "control") return applyControl(state, action.control);
   if (action.type === "workbench") {
     const key = sessionKey(action.workbench.projectId, action.workbench.threadId);
     return { ...state, workbenches: { ...state.workbenches, [key]: action.workbench } };
   }
-  if (action.type === "loading") return { ...state, loading: action.loading };
+  if (action.type === "loading") return { ...state, loading: action.loading || state.pendingThreadLoad !== null };
   return { ...state, error: action.error };
 }
 
 function applyControl(state: DesktopState, control: SessionControlState): DesktopState {
   const key = sessionKey(control.projectId, control.threadId);
   const previous = state.controls[key];
-  if (
-    state.bootstrap?.projectId !== control.projectId ||
-    state.bootstrap.threadId !== control.threadId ||
-    (previous && previous.revision >= control.revision)
-  )
-    return state;
+  if (previous && previous.revision >= control.revision) return state;
   const threadCatalogs = updateThreadSummary(state.threadCatalogs, control);
   return {
     ...state,
     controls: { ...state.controls, [key]: control },
     threadCatalogs,
   };
+}
+
+function newerControl(previous: SessionControlState | undefined, bootstrap: SessionControlState): SessionControlState {
+  return previous && previous.revision > bootstrap.revision ? previous : bootstrap;
 }
 
 function updateThreadSummary(
@@ -318,6 +344,15 @@ export function selectActiveThreadId(state: DesktopState): string | null {
   return state.activeThreadIds[state.project.id] ?? null;
 }
 
+export function selectNavigationProjectId(state: DesktopState): string | null {
+  return state.pendingThreadLoad?.projectId ?? state.project?.id ?? null;
+}
+
+export function selectNavigationThreadId(state: DesktopState): string | null {
+  if (state.pendingThreadLoad) return state.pendingThreadLoad.threadId;
+  return selectActiveThreadId(state);
+}
+
 export function threadFromBootstrap(bootstrap: SessionBootstrap): Thread {
   return {
     id: bootstrap.threadId,
@@ -331,10 +366,6 @@ export function threadFromBootstrap(bootstrap: SessionBootstrap): Thread {
     archived: false,
     running: bootstrap.control.running,
   };
-}
-
-function sortProjects(projects: Project[]): Project[] {
-  return projects.toSorted((left, right) => right.lastOpenedAt - left.lastOpenedAt);
 }
 
 function updateProjectThreads(

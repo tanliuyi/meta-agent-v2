@@ -58,11 +58,27 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   const runtimeRef = useRef<AgUiAssistantRuntime | null>(null);
   const agent = useMemo(
     () =>
-      new ElectronPiAgent((messages) => {
-        const activeRuntime = runtimeRef.current;
-        if (!activeRuntime) return;
-        activeRuntime.thread.import(messageRepository(convertAgUiMessages(messages)));
-      }),
+      new ElectronPiAgent(
+        (messages) => {
+          const activeRuntime = runtimeRef.current;
+          if (!activeRuntime) return;
+          activeRuntime.thread.import(messageRepository(convertAgUiMessages(messages)));
+        },
+        (message) => {
+          const activeRuntime = runtimeRef.current;
+          if (!activeRuntime) return;
+          const converted = convertAgUiMessages([message])[0];
+          if (converted?.role !== "user") return;
+          activeRuntime.thread.append({
+            role: "user",
+            content: converted.content,
+            attachments: converted.attachments,
+            metadata: converted.metadata,
+            createdAt: converted.createdAt,
+            startRun: false,
+          });
+        },
+      ),
     [],
   );
   const projectRef = useRef(options.project);

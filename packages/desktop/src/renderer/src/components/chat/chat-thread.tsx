@@ -1,17 +1,27 @@
 import { ThreadPrimitive } from "@assistant-ui/react";
 import { ArrowDown, MessageSquarePlus } from "lucide-react";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useLayoutEffect, useRef } from "react";
 import { useDesktop } from "../../state/desktop-context.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { Composer } from "./composer.tsx";
 import { HostRequests } from "./host-requests.tsx";
 import { Messages } from "./messages.tsx";
 import { SessionStatus } from "./session-status.tsx";
+import { followThreadSwitchToBottom } from "./thread-switch-bottom-follow.ts";
 
 /** 中央聊天工作区。 */
 export function ChatThread() {
   const desktop = useDesktop();
   const { project, bootstrap, snapshot } = desktop;
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const threadId = bootstrap?.threadId ?? null;
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!threadId || !viewport || !content) return;
+    return followThreadSwitchToBottom(viewport, content);
+  }, [threadId]);
   if (desktop.draft) {
     const draftProject = desktop.projects.find(({ id }) => id === desktop.draft?.projectId) ?? null;
     return (
@@ -50,11 +60,13 @@ export function ChatThread() {
         style={THREAD_STYLE}
       >
         <ThreadPrimitive.Viewport
+          ref={viewportRef}
           turnAnchor="top"
+          scrollToBottomOnThreadSwitch={false}
           data-slot="aui_thread-viewport"
           className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
         >
-          <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4">
+          <div ref={contentRef} className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4">
             <div data-slot="aui_message-group" className="mb-14 flex flex-col gap-y-6 empty:hidden">
               <Messages />
             </div>

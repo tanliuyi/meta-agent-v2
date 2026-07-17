@@ -13,7 +13,8 @@ type DesktopNavigationValue = Pick<
   | "project"
   | "draft"
   | "threadCatalogs"
-  | "threadId"
+  | "navigationProjectId"
+  | "navigationThreadId"
   | "chooseProject"
   | "loadProjectThreads"
   | "removeProject"
@@ -45,7 +46,8 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
       project: desktop.project,
       draft: desktop.draft,
       threadCatalogs: desktop.threadCatalogs,
-      threadId: desktop.threadId,
+      navigationProjectId: desktop.navigationProjectId,
+      navigationThreadId: desktop.navigationThreadId,
       chooseProject: desktop.chooseProject,
       loadProjectThreads: desktop.loadProjectThreads,
       removeProject: desktop.removeProject,
@@ -60,7 +62,8 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
       desktop.project,
       desktop.draft,
       desktop.threadCatalogs,
-      desktop.threadId,
+      desktop.navigationProjectId,
+      desktop.navigationThreadId,
       desktop.chooseProject,
       desktop.loadProjectThreads,
       desktop.removeProject,

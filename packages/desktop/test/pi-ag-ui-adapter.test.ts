@@ -3,7 +3,11 @@ import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-
 import { describe, expect, it, vi } from "vitest";
 import { piMessageId } from "../src/main/pi/message-projector.ts";
 import { PiAgUiAdapter } from "../src/main/pi/pi-ag-ui-adapter.ts";
-import type { SessionEventBatch, SessionToolUpdate } from "../src/shared/contracts.ts";
+import {
+  CONSUMED_USER_MESSAGE_EVENT,
+  type SessionEventBatch,
+  type SessionToolUpdate,
+} from "../src/shared/contracts.ts";
 
 describe("PiAgUiAdapter", () => {
   it("按标准顺序映射 text、reasoning、tool 和最终快照", () => {
@@ -62,6 +66,37 @@ describe("PiAgUiAdapter", () => {
     expect(tools.at(-1)).toEqual({ toolCallId: "tool-1", status: "error", result: "ok" });
     expect(events.at(-2)?.type).toBe(EventType.MESSAGES_SNAPSHOT);
     vi.useRealTimers();
+  });
+
+  it("pi 消费尚未写入 history 的排队 user message 时发送插入事件", () => {
+    const session = createSession();
+    const batches: SessionEventBatch[] = [];
+    const adapter = new PiAgUiAdapter({
+      projectId: "project",
+      session,
+      onEvents: (batch) => batches.push(batch),
+      onTool: () => {},
+    });
+    adapter.start(runInput());
+    adapter.handle({ type: "message_start", message: session.messages[0]! });
+    adapter.handle({ type: "queue_update", steering: ["排队消息"], followUp: [] });
+    adapter.handle({ type: "queue_update", steering: [], followUp: [] });
+
+    const queued: Extract<AgentSession["messages"][number], { role: "user" }> = {
+      role: "user",
+      content: "排队消息",
+      timestamp: 2,
+    };
+    adapter.handle({ type: "message_start", message: queued });
+
+    const events = batches.flatMap((batch) => batch.events.map(({ event }) => event));
+    expect(events.filter(({ type }) => type === EventType.CUSTOM)).toEqual([
+      {
+        type: EventType.CUSTOM,
+        name: CONSUMED_USER_MESSAGE_EVENT,
+        value: { id: "thread:2:1", role: "user", content: "排队消息" },
+      },
+    ]);
   });
 
   it("agent_end 在 retry 边界不会提前结束 run", () => {

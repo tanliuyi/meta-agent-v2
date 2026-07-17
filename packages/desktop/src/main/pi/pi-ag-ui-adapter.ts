@@ -1,12 +1,13 @@
 import { type BaseEvent, compactEvents, EventType, type Message, type RunAgentInput } from "@ag-ui/client";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import {
+  CONSUMED_USER_MESSAGE_EVENT,
   PROTOCOL_VERSION,
   type SessionEventBatch,
   type SessionEventEnvelope,
   type SessionToolUpdate,
 } from "../../shared/contracts.ts";
-import { piMessageId, projectMessages, resultText } from "./message-projector.ts";
+import { piMessageId, projectMessages, projectUserMessage, resultText } from "./message-projector.ts";
 
 interface AdapterOptions {
   projectId: string;
@@ -36,6 +37,8 @@ export class PiAgUiAdapter {
   private assistantMessageId?: string;
   private terminalError?: string;
   private turn = 0;
+  private queuedUserMessages: string[] = [];
+  private consumedUserMessages: string[] = [];
 
   constructor(options: AdapterOptions) {
     this.projectId = options.projectId;
@@ -62,10 +65,17 @@ export class PiAgUiAdapter {
     this.activeRun = { runId: input.runId, baseline: [...input.messages], events: [] };
     this.terminalError = undefined;
     this.turn = 0;
+    this.queuedUserMessages = [];
+    this.consumedUserMessages = [];
     this.emit({ type: EventType.RUN_STARTED, threadId: this.session.sessionId, runId: input.runId });
   }
 
   handle(event: AgentSessionEvent): void {
+    if (event.type === "queue_update") {
+      this.consumedUserMessages = removedMessages(this.queuedUserMessages, [...event.steering, ...event.followUp]);
+      this.queuedUserMessages = [...event.steering, ...event.followUp];
+      return;
+    }
     if (event.type === "turn_start") {
       this.turn += 1;
       this.emit({ type: EventType.STEP_STARTED, stepName: `turn-${this.turn}` });
@@ -73,6 +83,21 @@ export class PiAgUiAdapter {
     }
     if (event.type === "turn_end") {
       this.emit({ type: EventType.STEP_FINISHED, stepName: `turn-${this.turn}` });
+      return;
+    }
+    if (event.type === "message_start" && event.message.role === "user") {
+      const text = userMessageText(event.message);
+      const consumedIndex = this.consumedUserMessages.indexOf(text);
+      if (consumedIndex === -1) return;
+      this.consumedUserMessages.splice(consumedIndex, 1);
+      this.emit(
+        {
+          type: EventType.CUSTOM,
+          name: CONSUMED_USER_MESSAGE_EVENT,
+          value: projectUserMessage(this.session, event.message),
+        },
+        true,
+      );
       return;
     }
     if (event.type === "message_start" && event.message.role === "assistant") {
@@ -274,4 +299,19 @@ export class PiAgUiAdapter {
     this.pendingTools.clear();
     for (const update of updates) this.onTool(update);
   }
+}
+
+function removedMessages(previous: readonly string[], current: readonly string[]): string[] {
+  const remaining = [...current];
+  return previous.filter((message) => {
+    const index = remaining.indexOf(message);
+    if (index === -1) return true;
+    remaining.splice(index, 1);
+    return false;
+  });
+}
+
+function userMessageText(message: Extract<AgentSession["messages"][number], { role: "user" }>): string {
+  if (typeof message.content === "string") return message.content;
+  return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 }

@@ -119,9 +119,9 @@
   cursor: wait;
 }
 .running-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
   border: 2px solid hsl(var(--muted-foreground) / 0.35);
   border-top-color: hsl(var(--foreground));
   border-radius: 50%;

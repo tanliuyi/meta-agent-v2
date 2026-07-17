@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { desktopReducer, INITIAL_STATE, selectActiveThreadId } from "../src/renderer/src/state/desktop-model.ts";
+import {
+  desktopReducer,
+  INITIAL_STATE,
+  selectActiveThreadId,
+  selectNavigationProjectId,
+  selectNavigationThreadId,
+} from "../src/renderer/src/state/desktop-model.ts";
 import type {
   DraftSessionConfig,
   Project,
@@ -31,6 +37,25 @@ const thread: Thread = {
 };
 
 describe("desktop reducer", () => {
+  it("Project 按添加顺序倒序展示，并在新增时置顶", () => {
+    const older = { ...project, id: "older", name: "older" };
+    const newer = { ...project, id: "newer", name: "newer" };
+    let state = desktopReducer(INITIAL_STATE, { type: "projects-loaded", projects: [older, newer] });
+
+    expect(state.projects.map(({ id }) => id)).toEqual(["newer", "older"]);
+
+    const newest = { ...project, id: "newest", name: "newest" };
+    state = desktopReducer(state, { type: "project-upserted", project: newest });
+    expect(state.projects.map(({ id }) => id)).toEqual(["newest", "newer", "older"]);
+
+    state = desktopReducer(state, {
+      type: "project-upserted",
+      project: { ...older, name: "older updated", lastOpenedAt: 99 },
+    });
+    expect(state.projects.map(({ id }) => id)).toEqual(["newest", "newer", "older"]);
+    expect(state.projects[2]?.name).toBe("older updated");
+  });
+
   it("只接受 revision 更新的 control state，不复制消息历史", () => {
     const workbench = createWorkbench();
     let state = desktopReducer(INITIAL_STATE, { type: "project-loaded", project, threads: [thread] });
@@ -46,6 +71,160 @@ describe("desktop reducer", () => {
     expect(state.controls["project:thread"]?.title).toBe("第三版");
     expect(state.bootstrap?.messages).toEqual([]);
     expect(state.threadCatalogs[project.id]?.[0]?.title).toBe("第三版");
+  });
+
+  it("thread 加载开始时乐观切换 navigation，并在失败后恢复原选择", () => {
+    const targetThread = { ...thread, id: "target-thread" };
+    const currentBootstrap = createBootstrap(1, "当前会话");
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-loaded",
+      project,
+      threads: [thread, targetThread],
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: currentBootstrap,
+      workbench: createWorkbench(),
+    });
+
+    state = desktopReducer(state, { type: "thread-load-started", project, threadId: targetThread.id });
+
+    expect(selectActiveThreadId(state)).toBe(thread.id);
+    expect(selectNavigationThreadId(state)).toBe(targetThread.id);
+    expect(state.loading).toBe(true);
+    expect(state.bootstrap).toBe(currentBootstrap);
+
+    state = desktopReducer(state, {
+      type: "thread-load-failed",
+      projectId: project.id,
+      threadId: targetThread.id,
+    });
+
+    expect(selectActiveThreadId(state)).toBe(thread.id);
+    expect(selectNavigationThreadId(state)).toBe(thread.id);
+    expect(state.loading).toBe(false);
+    expect(state.bootstrap).toBe(currentBootstrap);
+  });
+
+  it("跨 Project 切换时不提前改变 runtime 使用的 committed project/thread", () => {
+    const otherProject = { ...project, id: "other-project", cwd: "C:/other" };
+    const otherThread = { ...thread, id: "other-thread", projectId: otherProject.id };
+    let state = desktopReducer(INITIAL_STATE, { type: "project-loaded", project, threads: [thread] });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: createBootstrap(1, "当前会话"),
+      workbench: createWorkbench(),
+    });
+    state = desktopReducer(state, {
+      type: "project-threads-loaded",
+      projectId: otherProject.id,
+      threads: [otherThread],
+    });
+
+    state = desktopReducer(state, {
+      type: "thread-load-started",
+      project: otherProject,
+      threadId: otherThread.id,
+    });
+
+    expect(selectNavigationProjectId(state)).toBe(otherProject.id);
+    expect(selectNavigationThreadId(state)).toBe(otherThread.id);
+    expect(state.project).toBe(project);
+    expect(selectActiveThreadId(state)).toBe(thread.id);
+  });
+
+  it("快速连续切换只允许最新请求回滚，并恢复切换前的 committed thread", () => {
+    const firstTarget = { ...thread, id: "first-target" };
+    const secondTarget = { ...thread, id: "second-target" };
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-loaded",
+      project,
+      threads: [thread, firstTarget, secondTarget],
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: createBootstrap(1, "当前会话"),
+      workbench: createWorkbench(),
+    });
+
+    state = desktopReducer(state, { type: "thread-load-started", project, threadId: firstTarget.id });
+    state = desktopReducer(state, { type: "thread-load-started", project, threadId: secondTarget.id });
+    state = desktopReducer(state, {
+      type: "thread-load-failed",
+      projectId: project.id,
+      threadId: firstTarget.id,
+    });
+
+    expect(selectActiveThreadId(state)).toBe(thread.id);
+    expect(selectNavigationThreadId(state)).toBe(secondTarget.id);
+    expect(state.loading).toBe(true);
+
+    state = desktopReducer(state, {
+      type: "thread-load-failed",
+      projectId: project.id,
+      threadId: secondTarget.id,
+    });
+
+    expect(selectActiveThreadId(state)).toBe(thread.id);
+    expect(selectNavigationThreadId(state)).toBe(thread.id);
+    expect(state.loading).toBe(false);
+  });
+
+  it("切换期间先到达的 run_end control 不会被旧 bootstrap 丢弃", () => {
+    const targetThread = { ...thread, id: "target-thread", running: true };
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-loaded",
+      project,
+      threads: [thread, targetThread],
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: createBootstrap(1, "当前会话"),
+      workbench: createWorkbench(),
+    });
+    state = desktopReducer(state, {
+      type: "control",
+      control: { ...createControl(2, "目标会话"), threadId: targetThread.id, running: false },
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: {
+        ...createBootstrap(1, "目标会话", 0, targetThread.id),
+        control: { ...createControl(1, "目标会话"), threadId: targetThread.id, running: true },
+      },
+      workbench: { ...createWorkbench(), threadId: targetThread.id },
+    });
+
+    expect(state.controls["project:target-thread"]?.revision).toBe(2);
+    expect(state.threadCatalogs[project.id]?.find(({ id }) => id === targetThread.id)?.running).toBe(false);
+  });
+
+  it("draft commit 保留 materialize 期间先到达的 run_end control", () => {
+    let state = desktopReducer(INITIAL_STATE, { type: "draft-started", projectId: project.id });
+    state = desktopReducer(state, {
+      type: "control",
+      control: { ...createControl(2, "首条消息"), running: false },
+    });
+    const bootstrap = {
+      ...createBootstrap(1, "首条消息"),
+      control: { ...createControl(1, "首条消息"), running: true },
+    };
+
+    state = desktopReducer(state, {
+      type: "draft-committed",
+      project,
+      thread: { ...thread, running: true },
+      bootstrap,
+      workbench: createWorkbench(),
+    });
+
+    expect(state.controls["project:thread"]?.revision).toBe(2);
+    expect(state.threadCatalogs[project.id]?.[0]?.running).toBe(false);
   });
 
   it("归档状态与当前 session 选择相互独立", () => {

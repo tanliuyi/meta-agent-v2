@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ElectronPiAgent } from "../src/renderer/src/runtime/electron-pi-agent.ts";
 import { sessionEventBus } from "../src/renderer/src/runtime/session-event-bus.ts";
 import type { SessionBootstrap, SessionPushPayload } from "../src/shared/contracts.ts";
-import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
+import { CONSUMED_USER_MESSAGE_EVENT, PROTOCOL_VERSION } from "../src/shared/contracts.ts";
 
 const originalWindow = globalThis.window;
 
@@ -30,6 +30,44 @@ describe("ElectronPiAgent", () => {
     expect(agent.messages).toEqual(bootstrap(3).messages);
     expect(received).toEqual(replay);
     expect(run).not.toHaveBeenCalled();
+    agent.cancelActive();
+  });
+
+  it("active run replay 到消费事件时才通知 renderer 插入 user message", async () => {
+    installWindow({ run: vi.fn(async () => {}) });
+    const consumed = { id: "queued", role: "user" as const, content: "排队消息" };
+    const replay: BaseEvent[] = [
+      { type: EventType.RUN_STARTED, threadId: "thread", runId: "canonical-run" },
+      { type: EventType.CUSTOM, name: CONSUMED_USER_MESSAGE_EVENT, value: consumed },
+    ];
+    const onConsumed = vi.fn();
+    const agent = new ElectronPiAgent(undefined, onConsumed);
+    await agent.attach({ ...bootstrap(2), activeRun: { runId: "canonical-run", events: replay } });
+    agent.run(runInput()).subscribe({ error: () => {} });
+
+    expect(onConsumed).toHaveBeenCalledWith(consumed);
+    agent.cancelActive();
+  });
+
+  it("live 消费事件立即通知 renderer 插入 user message", async () => {
+    let push: ((update: SessionPushPayload) => void) | undefined;
+    installWindow({
+      run: vi.fn(async () => {}),
+      attach: async (_projectId, _threadId, listener) => {
+        push = listener;
+        return bootstrap(0);
+      },
+    });
+    const attached = await sessionEventBus.attach("project", "thread");
+    const onConsumed = vi.fn();
+    const agent = new ElectronPiAgent(undefined, onConsumed);
+    await agent.attach(attached);
+    agent.run(runInput()).subscribe({ error: () => {} });
+    const consumed = { id: "queued", role: "user" as const, content: "引导消息" };
+
+    push?.(consumedUserPush(1, consumed));
+
+    expect(onConsumed).toHaveBeenCalledWith(consumed);
     agent.cancelActive();
   });
 
@@ -228,6 +266,34 @@ function eventPush(cursor: number, delta: string): Extract<SessionPushPayload, {
           runId: "canonical-run",
           sequence: cursor,
           event: { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "assistant", delta },
+        },
+      ],
+    },
+  };
+}
+
+function consumedUserPush(
+  cursor: number,
+  message: { id: string; role: "user"; content: string },
+): Extract<SessionPushPayload, { type: "events" }> {
+  return {
+    type: "events",
+    projectId: "project",
+    threadId: "thread",
+    batch: {
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: "project",
+      threadId: "thread",
+      fromSequence: cursor,
+      toSequence: cursor,
+      events: [
+        {
+          protocolVersion: PROTOCOL_VERSION,
+          projectId: "project",
+          threadId: "thread",
+          runId: "generated-run",
+          sequence: cursor,
+          event: { type: EventType.CUSTOM, name: CONSUMED_USER_MESSAGE_EVENT, value: message },
         },
       ],
     },

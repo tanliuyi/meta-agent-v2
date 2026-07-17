@@ -8,11 +8,7 @@ export function projectMessages(session: AgentSession): Message[] {
   const projected: Message[] = [];
   for (const [index, message] of session.messages.entries()) {
     if (message.role === "user") {
-      projected.push({
-        id: messageId(session.sessionId, message.timestamp, index),
-        role: "user",
-        content: projectUserContent(message.content),
-      });
+      projected.push(projectUserMessage(session, message, index));
       continue;
     }
     if (message.role === "assistant") {
@@ -81,6 +77,20 @@ export function resultText(value: unknown): string {
   return JSON.stringify(toJson(value), null, 2);
 }
 
+/** 投影已持久化或刚开始消费、尚未写入 session history 的 user message。 */
+export function projectUserMessage(
+  session: AgentSession,
+  message: Extract<AgentSession["messages"][number], { role: "user" }>,
+  knownIndex?: number,
+): Extract<Message, { role: "user" }> {
+  const index = knownIndex ?? messageIndex(session, message);
+  return {
+    id: messageId(session.sessionId, message.timestamp, index),
+    role: "user",
+    content: projectUserContent(message.content),
+  };
+}
+
 function projectUserContent(
   content: Extract<AgentSession["messages"][number], { role: "user" }>["content"],
 ): Extract<Message, { role: "user" }>["content"] {
@@ -119,11 +129,15 @@ function messageId(sessionId: string, timestamp: number, index: number): string 
 
 /** live 与历史投影共用的稳定 Pi 消息 ID。 */
 export function piMessageId(session: AgentSession, message: AgentSession["messages"][number]): string {
+  const index = messageIndex(session, message);
+  return messageId(session.sessionId, message.timestamp, index);
+}
+
+function messageIndex(session: AgentSession, message: AgentSession["messages"][number]): number {
   const directIndex = session.messages.indexOf(message);
-  if (directIndex >= 0) return messageId(session.sessionId, message.timestamp, directIndex);
+  if (directIndex >= 0) return directIndex;
   const matchingIndex = session.messages.findLastIndex(
     (item) => item.timestamp === message.timestamp && item.role === message.role,
   );
-  if (matchingIndex >= 0) return messageId(session.sessionId, message.timestamp, matchingIndex);
-  return `${session.sessionId}:${message.timestamp}:${message.role}`;
+  return matchingIndex >= 0 ? matchingIndex : session.messages.length;
 }

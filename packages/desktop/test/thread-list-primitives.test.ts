@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  COLLAPSED_THREAD_COUNT,
   isDesktopThreadItemForProject,
   nextRegularThreadId,
+  nextThreadVisibleLimit,
   normalizeThreadTitle,
   preventPrimitiveThreadAction,
   resolveDesktopAdapterThread,
@@ -10,6 +12,7 @@ import {
   runPendingThreadAction,
   shouldOpenThread,
   type ThreadListItemIdentity,
+  visibleRegularThreadIds,
 } from "../src/renderer/src/state/thread-list-commands.ts";
 import type { Project, Thread } from "../src/shared/contracts.ts";
 
@@ -134,5 +137,31 @@ describe("thread-list primitives command bridge", () => {
     expect(shouldOpenThread("regular", "regular")).toBe(false);
     expect(shouldOpenThread("other", "regular")).toBe(true);
     expect(shouldOpenThread(null, "regular")).toBe(true);
+  });
+
+  it("默认显示 5 条，并且每次展开 10 条且不超过总数", () => {
+    expect(COLLAPSED_THREAD_COUNT).toBe(5);
+    expect(nextThreadVisibleLimit(COLLAPSED_THREAD_COUNT, 30)).toBe(15);
+    expect(nextThreadVisibleLimit(15, 30)).toBe(25);
+    expect(nextThreadVisibleLimit(25, 30)).toBe(30);
+  });
+
+  it("可见列表保持 catalog 顺序并排除归档会话", () => {
+    const threads = Array.from(
+      { length: 8 },
+      (_, index): Thread => ({
+        ...regularThread,
+        id: `regular-${index}`,
+      }),
+    );
+    threads.splice(2, 0, archivedThread);
+
+    expect([...visibleRegularThreadIds(threads, COLLAPSED_THREAD_COUNT)]).toEqual([
+      "regular-0",
+      "regular-1",
+      "regular-2",
+      "regular-3",
+      "regular-4",
+    ]);
   });
 });

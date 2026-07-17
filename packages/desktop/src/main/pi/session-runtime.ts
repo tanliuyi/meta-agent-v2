@@ -287,8 +287,10 @@ export class SessionRuntime {
     }
 
     if (event.type === "message_end" && (event.message.role === "user" || event.message.role === "assistant")) {
+      const previousTitle = this.summaryState.title;
       this.updateSummary(event.message);
       this.onSummaryChanged(this);
+      if (this.summaryState.title !== previousTitle) publish = true;
     }
     if (event.type === "session_info_changed") {
       this.summaryState = { ...this.summaryState, title: event.name?.trim() || this.summaryState.title };

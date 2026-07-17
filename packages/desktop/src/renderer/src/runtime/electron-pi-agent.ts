@@ -4,17 +4,23 @@ import {
   BaseEventSchema,
   EventType,
   type Message,
+  MessageSchema,
   MessagesSnapshotEventSchema,
   type RunAgentInput,
   type RunAgentParameters,
 } from "@ag-ui/client";
 import { Observable, type Subscriber } from "rxjs";
-import type { SessionBootstrap, SessionEventBatch } from "../../../shared/contracts.ts";
+import {
+  CONSUMED_USER_MESSAGE_EVENT,
+  type SessionBootstrap,
+  type SessionEventBatch,
+} from "../../../shared/contracts.ts";
 import { sessionEventBus } from "./session-event-bus.ts";
 
 /** 使用 Electron IPC 作为 AG-UI transport 的本地 agent。 */
 export class ElectronPiAgent extends AbstractAgent {
   private readonly onSnapshot?: (messages: Message[]) => void;
+  private readonly onConsumedUserMessage?: (message: Extract<Message, { role: "user" }>) => void;
   private projectId?: string;
   private activeRun?: SessionBootstrap["activeRun"];
   private lastSequence = 0;
@@ -22,7 +28,10 @@ export class ElectronPiAgent extends AbstractAgent {
   private paused = false;
   private pendingSnapshot?: Message[];
 
-  constructor(onSnapshot?: (messages: Message[]) => void) {
+  constructor(
+    onSnapshot?: (messages: Message[]) => void,
+    onConsumedUserMessage?: (message: Extract<Message, { role: "user" }>) => void,
+  ) {
     super({
       agentId: "pi-desktop",
       description: "Pi coding agent over Electron IPC",
@@ -31,6 +40,7 @@ export class ElectronPiAgent extends AbstractAgent {
       initialState: {},
     });
     this.onSnapshot = onSnapshot;
+    this.onConsumedUserMessage = onConsumedUserMessage;
   }
 
   get attachedSession(): { projectId: string; threadId: string } | undefined {
@@ -75,6 +85,7 @@ export class ElectronPiAgent extends AbstractAgent {
           this.requestResync(subscriber, () => {});
           return;
         }
+        this.applyConsumedUserMessage(event);
         subscriber.next(event);
       }
       let release = () => {};
@@ -142,6 +153,7 @@ export class ElectronPiAgent extends AbstractAgent {
         this.applyPendingSnapshot();
         return;
       }
+      this.applyConsumedUserMessage(envelope.event);
       subscriber.next(envelope.event);
       if (envelope.event.type === EventType.RUN_FINISHED) {
         subscriber.complete();
@@ -149,6 +161,12 @@ export class ElectronPiAgent extends AbstractAgent {
         return;
       }
     }
+  }
+
+  private applyConsumedUserMessage(event: BaseEvent): void {
+    if (event.type !== EventType.CUSTOM || event.name !== CONSUMED_USER_MESSAGE_EVENT) return;
+    const message = MessageSchema.safeParse(event.value);
+    if (message.success && message.data.role === "user") this.onConsumedUserMessage?.(message.data);
   }
 
   private applyPendingSnapshot(): void {

@@ -92,10 +92,7 @@ export function Composer(props: ComposerProps) {
         state,
         { projectId: snapshot.projectId, threadId: snapshot.threadId, mode },
         (input) => window.desktop.sessions.enqueue(input),
-        {
-          append: (message) => runtime.thread.append(message),
-          resetComposer: () => composer.reset(),
-        },
+        { resetComposer: () => composer.reset() },
       );
     } catch (value) {
       setError(errorMessage(value));
@@ -337,6 +334,7 @@ function ComposerSubmitControl({
   escapeCancelArmed: boolean;
 }) {
   const isEmpty = useAuiState((state) => state.composer.isEmpty);
+  const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
   if (props.mode === "draft") {
     return (
       <TooltipIconButton
@@ -376,11 +374,11 @@ function ComposerSubmitControl({
     return (
       <TooltipIconButton
         type="submit"
-        tooltip="发送后续消息"
+        tooltip={hasText ? "发送后续消息" : "运行中消息必须包含文字"}
         side="top"
         variant="default"
         className="size-7 rounded-full"
-        disabled={sending || props.snapshot.readiness.state !== "ready"}
+        disabled={sending || !hasText || props.snapshot.readiness.state !== "ready"}
       >
         <ArrowUp className="size-4" />
       </TooltipIconButton>

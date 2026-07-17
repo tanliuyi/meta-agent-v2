@@ -1,18 +1,17 @@
-import type { ThreadComposerState } from "@assistant-ui/react";
+import type { PendingAttachment, ThreadComposerState } from "@assistant-ui/react";
 import { describe, expect, it, vi } from "vitest";
 import { submitRunningMessage } from "../src/renderer/src/runtime/running-session.ts";
 
 describe("running session submission", () => {
-  it("enqueue 成功后追加不启动新 run 的 user message", async () => {
+  it("enqueue 成功后清空 Composer，但不提前追加排队消息", async () => {
     const enqueue = vi.fn(async () => {});
-    const append = vi.fn();
     const resetComposer = vi.fn(async () => {});
 
     await submitRunningMessage(
       composerState("  steer message  "),
       { projectId: "project", threadId: "thread", mode: "steer" },
       enqueue,
-      { append, resetComposer },
+      { resetComposer },
     );
 
     expect(enqueue).toHaveBeenCalledWith({
@@ -22,18 +21,27 @@ describe("running session submission", () => {
       text: "steer message",
       images: [],
     });
-    expect(append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        role: "user",
-        content: [{ type: "text", text: "steer message" }],
-        startRun: false,
-      }),
-    );
     expect(resetComposer).toHaveBeenCalledOnce();
   });
 
-  it("enqueue 失败时不追加消息且保留 Composer", async () => {
-    const append = vi.fn();
+  it("运行中拒绝仅图片消息并保留 Composer", async () => {
+    const enqueue = vi.fn(async () => {});
+    const resetComposer = vi.fn(async () => {});
+
+    await expect(
+      submitRunningMessage(
+        composerState("", [pendingAttachment()]),
+        { projectId: "project", threadId: "thread", mode: "followUp" },
+        enqueue,
+        { resetComposer },
+      ),
+    ).rejects.toThrow("运行中的排队消息必须包含文字");
+
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(resetComposer).not.toHaveBeenCalled();
+  });
+
+  it("enqueue 失败时保留 Composer", async () => {
     const resetComposer = vi.fn(async () => {});
 
     await expect(
@@ -43,15 +51,14 @@ describe("running session submission", () => {
         async () => {
           throw new Error("enqueue failed");
         },
-        { append, resetComposer },
+        { resetComposer },
       ),
     ).rejects.toThrow("enqueue failed");
-    expect(append).not.toHaveBeenCalled();
     expect(resetComposer).not.toHaveBeenCalled();
   });
 });
 
-function composerState(text: string): ThreadComposerState {
+function composerState(text: string, attachments: ThreadComposerState["attachments"] = []): ThreadComposerState {
   return {
     type: "thread",
     canCancel: true,
@@ -60,11 +67,22 @@ function composerState(text: string): ThreadComposerState {
     isEmpty: false,
     text,
     role: "user",
-    attachments: [],
+    attachments,
     runConfig: {},
     attachmentAccept: "image/*",
     dictation: undefined,
     quote: undefined,
     queue: [],
+  };
+}
+
+function pendingAttachment(): PendingAttachment {
+  return {
+    id: "pending",
+    type: "image",
+    name: "queued.png",
+    contentType: "image/png",
+    file: new File(["image"], "queued.png", { type: "image/png" }),
+    status: { type: "requires-action", reason: "composer-send" },
   };
 }

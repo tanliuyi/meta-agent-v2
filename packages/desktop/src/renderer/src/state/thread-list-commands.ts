@@ -15,6 +15,22 @@ export interface DesktopAdapterThread {
   threadId: string;
 }
 
+export const COLLAPSED_THREAD_COUNT = 5;
+export const THREAD_EXPANSION_COUNT = 10;
+
+export function nextThreadVisibleLimit(currentLimit: number, threadCount: number): number {
+  return Math.min(threadCount, Math.max(currentLimit, COLLAPSED_THREAD_COUNT) + THREAD_EXPANSION_COUNT);
+}
+
+export function visibleRegularThreadIds(threads: readonly Thread[], limit: number): ReadonlySet<string> {
+  return new Set(
+    threads
+      .filter(({ archived }) => !archived)
+      .slice(0, limit)
+      .map(({ id }) => id),
+  );
+}
+
 /** 解析全局 assistant-ui item，并允许 thread 切换提交前使用显式目标 Project。 */
 export function resolveDesktopAdapterThread(
   adapterThreadId: string,

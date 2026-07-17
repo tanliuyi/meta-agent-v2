@@ -3,6 +3,9 @@ import type { BaseEvent, Message, RunAgentInput, State } from "@ag-ui/core";
 /** Desktop 与 renderer 之间使用的协议版本。 */
 export const PROTOCOL_VERSION = 3;
 
+/** Pi 开始消费排队 user message 时发送的有序 AG-UI 事件名。 */
+export const CONSUMED_USER_MESSAGE_EVENT = "desktop.user-message-consumed";
+
 /** 可以安全通过 Electron IPC 传输的 JSON 值。 */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 

@@ -7,6 +7,7 @@
 @import "./styles/components.css";
 @import "./styles/layout.css";
 @import "./styles/chat.css";
+@import "./styles/markdown.css";
 @import "./styles/panel.css";
 
 @source "./**/*.{ts,tsx}";

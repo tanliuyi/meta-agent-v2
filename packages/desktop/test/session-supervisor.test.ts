@@ -114,6 +114,44 @@ describe("SessionSupervisor", () => {
     await supervisor.dispose();
   });
 
+  it("切换后继续接收非 active session 的 control，但不接收其数据面事件", async () => {
+    mocks.list.mockResolvedValue([sessionInfo("running"), sessionInfo("active")]);
+    let publishRunning: ((update: SessionPushPayload) => void) | undefined;
+    mocks.create
+      .mockImplementationOnce(async (options: { push(update: SessionPushPayload): void }) => {
+        publishRunning = options.push;
+        return runtime("running");
+      })
+      .mockResolvedValueOnce(runtime("active"));
+    const supervisor = new SessionSupervisor(projectStore());
+    await supervisor.attach(1, "project", "running", () => {});
+    const activePush = vi.fn<(update: SessionPush) => void>();
+    const activeAttachment = await supervisor.attach(1, "project", "active", activePush);
+
+    publishRunning?.({
+      type: "control",
+      projectId: "project",
+      threadId: "running",
+      control: runtime("running").bootstrap().control,
+    });
+    publishRunning?.({
+      type: "tool",
+      projectId: "project",
+      threadId: "running",
+      update: { toolCallId: "tool", status: "complete" },
+    });
+
+    expect(activePush).toHaveBeenCalledOnce();
+    expect(activePush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "control",
+        threadId: "running",
+        attachmentId: activeAttachment.attachmentId,
+      }),
+    );
+    await supervisor.dispose();
+  });
+
   it("较早 attach 晚到且最新 attach 失败时保留原订阅", async () => {
     mocks.list.mockResolvedValue([sessionInfo("current"), sessionInfo("stale"), sessionInfo("failed")]);
     const staleRuntime = deferred<ReturnType<typeof runtime>>();

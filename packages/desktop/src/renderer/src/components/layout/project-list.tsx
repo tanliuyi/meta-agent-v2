@@ -93,7 +93,7 @@ function ProjectItem(props: ProjectItemProps) {
           tooltip="新建任务"
           side="right"
           disabled={!props.project.available || props.newTaskDisabled}
-          className="hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-has-focus-visible:opacity-100"
+          className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-has-focus-visible:opacity-100"
           aria-label={`在 ${props.project.name} 中新建任务`}
           onClick={(event) => {
             event.stopPropagation();
