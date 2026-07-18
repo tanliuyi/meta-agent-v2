@@ -562,6 +562,7 @@ function createDraftConfig(): DraftSessionConfig {
         thinkingLevels: ["off"],
       },
     ],
+    commands: [],
     model: { provider: "reasoning", id: "reasoning-model", name: "Reasoning" },
     thinkingLevel: "low",
     thinkingLevels: ["off", "low", "high"],

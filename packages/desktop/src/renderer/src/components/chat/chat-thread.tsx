@@ -6,7 +6,7 @@ import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { Composer } from "./composer.tsx";
 import { HostRequests } from "./host-requests.tsx";
 import { Messages } from "./messages.tsx";
-import { SessionStatus } from "./session-status.tsx";
+import { ThreadActivityIndicator } from "./thread-activity-indicator.tsx";
 import { followThreadSwitchToBottom } from "./thread-switch-bottom-follow.ts";
 
 /** 中央聊天工作区。 */
@@ -67,10 +67,11 @@ export function ChatThread() {
           className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
         >
           <div ref={contentRef} className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4">
-            <div data-slot="aui_message-group" className="mb-14 flex flex-col  empty:hidden">
+            <div data-slot="aui_message-group" className="mb-14 flex flex-col empty:hidden">
               <Messages />
+              <ThreadActivityIndicator snapshot={snapshot} />
             </div>
-            <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mt-auto flex flex-col gap-2 overflow-visible rounded-t-(--composer-radius) bg-background pb-4">
+            <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mt-auto flex flex-col gap-2 overflow-visible pb-4">
               <ThreadPrimitive.ScrollToBottom asChild>
                 <TooltipIconButton
                   tooltip="滚动到底部"
@@ -81,7 +82,6 @@ export function ChatThread() {
                   <ArrowDown />
                 </TooltipIconButton>
               </ThreadPrimitive.ScrollToBottom>
-              <SessionStatus snapshot={snapshot} />
               <Composer mode="session" snapshot={snapshot} onClearQueue={desktop.clearQueue} />
             </ThreadPrimitive.ViewportFooter>
           </div>

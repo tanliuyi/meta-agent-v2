@@ -24,7 +24,9 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 680,
     show: false,
-    frame: false,
+    frame: process.platform !== "win32",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    trafficLightPosition: process.platform === "darwin" ? { x: 16, y: 16 } : undefined,
     backgroundColor: "#ffffff",
     webPreferences: {
       preload: join(appDir, "../preload/index.cjs"),
@@ -41,12 +43,20 @@ function createWindow(): void {
     console.error(`Preload 加载失败: ${path}`, error);
   });
   window.webContents.on("before-input-event", (event, input) => {
-    if (input.type !== "keyDown" || !input.control || input.alt || input.meta) return;
+    if (input.type !== "keyDown") return;
+
     const key = input.key.toLowerCase();
-    if (key === "r" && !input.shift) {
+    const isReloadKey = input.code === "KeyR" || key === "r";
+    const isDevToolsKey = input.code === "KeyI" || key === "i";
+    const isMac = process.platform === "darwin";
+    const hasPrimaryModifier = isMac ? input.meta : input.control;
+    const hasConflictingModifier = isMac ? input.control : input.meta;
+    if (!hasPrimaryModifier || hasConflictingModifier) return;
+
+    if (isReloadKey && !input.alt && !input.shift) {
       event.preventDefault();
       window.webContents.reload();
-    } else if (key === "i" && input.shift) {
+    } else if (isDevToolsKey && (isMac ? input.alt && !input.shift : input.shift && !input.alt)) {
       event.preventDefault();
       window.webContents.toggleDevTools();
     }

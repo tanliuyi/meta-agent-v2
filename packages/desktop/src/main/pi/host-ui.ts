@@ -57,7 +57,7 @@ export class HostUi {
       editor: (title: string, prefill?: string) =>
         this.ask("editor", title, { message: prefill }, undefined, (response) => response.value),
       notify: (message: string, type?: "info" | "warning" | "error") => this.notify(message, type),
-      onTerminalInput: () => this.unsupported("onTerminalInput"),
+      onTerminalInput: () => () => {},
       setStatus: (key: string, text: string | undefined) => this.setStatus(key, text),
       setWorkingMessage: (message?: string) => this.patch({ workingMessage: message }),
       setWorkingVisible: (visible: boolean) => this.patch({ workingVisible: visible }),
@@ -68,7 +68,7 @@ export class HostUi {
       setFooter: () => this.unsupported("setFooter"),
       setHeader: () => this.unsupported("setHeader"),
       setTitle: (title: string) => this.patch({ windowTitle: title }),
-      custom: () => this.unsupported("custom"),
+      custom: async <T>() => this.unsupported<T>("custom"),
       pasteToEditor: (text: string) => this.setEditorText(`${this.editorText}${text}`),
       setEditorText: (text: string) => this.setEditorText(text),
       getEditorText: () => this.editorText,
@@ -76,7 +76,7 @@ export class HostUi {
       setEditorComponent: () => this.unsupported("setEditorComponent"),
       getEditorComponent: () => undefined,
       get theme() {
-        return host.unsupported("theme");
+        return host.unsupported<ExtensionUIContext["theme"]>("theme");
       },
       getAllThemes: () => [],
       getTheme: () => undefined,
@@ -177,7 +177,7 @@ export class HostUi {
 
   private setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
     if (content !== undefined && (!Array.isArray(content) || !content.every((line) => typeof line === "string"))) {
-      this.unsupported("setWidget(component)");
+      return;
     }
     const widgets = this.state.widgets.filter((widget) => widget.key !== key);
     if (content) {
@@ -195,7 +195,7 @@ export class HostUi {
     this.changed();
   }
 
-  private unsupported(name: string): never {
-    throw new Error(`Desktop 不支持 TUI 专用 ExtensionUIContext.${name}`);
+  private unsupported<T = void>(_name: string): T {
+    return undefined as T;
   }
 }

@@ -11,24 +11,9 @@ export function Topbar() {
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <FolderOpen size={15} />
         <strong>{snapshot?.title ?? project?.name ?? "Meta Agent"}</strong>
-        {project ? <span>{project.cwd}</span> : null}
       </div>
       <div className="topbar-actions">
-        {project ? (
-          <div className="branch-label">
-            <GitBranch size={14} /> cwd
-          </div>
-        ) : null}
-        <TooltipIconButton
-          tooltip="压缩上下文"
-          aria-label="压缩上下文"
-          disabled={!snapshot || phase !== "idle" || snapshot.readiness.state !== "ready"}
-          onClick={() => void compactSession().catch(() => {})}
-        >
-          <Minimize2 size={15} />
-        </TooltipIconButton>
         <Button
           variant="ghost"
           size="icon"

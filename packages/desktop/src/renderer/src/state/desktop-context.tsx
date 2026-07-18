@@ -78,7 +78,7 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
     <DesktopNavigationContext.Provider value={navigation}>
       <DesktopContext.Provider value={desktop}>
         <AssistantRuntimeProvider runtime={runtime}>
-          <DevToolsModal />
+          {/* <DevToolsModal /> */}
           {children}
         </AssistantRuntimeProvider>
       </DesktopContext.Provider>

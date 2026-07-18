@@ -99,6 +99,25 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("重试后的 assistant 开始响应时恢复 running phase", () => {
+    const { session } = sessionHarness([]);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    projector.handle({
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 1,
+      errorMessage: "connection lost",
+    });
+    expect(projector.snapshot().phase).toBe("retrying");
+
+    projector.handle({ type: "message_start", message: assistantMessage("stop", 2, []) });
+
+    expect(projector.snapshot().phase).toBe("running");
+    projector.dispose();
+  });
+
   it("tool partial 只进入 partialResult，turn_end 才按 toolUse 完成 assistant", () => {
     const { session } = sessionHarness([]);
     const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });

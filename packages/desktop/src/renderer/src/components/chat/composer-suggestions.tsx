@@ -1,6 +1,6 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { File, Folder, TerminalSquare } from "lucide-react";
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { FileNode, SlashCommand } from "../../../../shared/contracts.ts";
 
 export interface ComposerSuggestionsHandle {
@@ -28,6 +28,7 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
     const context = completionContext(text);
     const [files, setFiles] = useState<FileNode[]>([]);
     const [selected, setSelected] = useState(0);
+    const list = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
       if (context?.type !== "file") {
@@ -53,18 +54,8 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
 
     const items = useMemo<Suggestion[]>(() => {
       if (!context) return [];
-      if (context.type === "command") {
-        return commands
-          .filter(({ name }) => name.toLowerCase().includes(context.query.toLowerCase()))
-          .slice(0, 10)
-          .map((command) => ({
-            id: `${command.source}:${command.name}`,
-            label: `/${command.name}`,
-            detail: command.description,
-            type: "command",
-            text: `/${command.name} `,
-          }));
-      }
+      if (context.type === "command") return commandSuggestions(commands, context.query);
+
       return files.map((file) => ({
         id: `${file.type}:${file.path}`,
         label: file.path,
@@ -75,6 +66,7 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
     }, [commands, context, files]);
 
     useEffect(() => setSelected(0), [context?.query, context?.type]);
+    useEffect(() => scrollSelectedSuggestion(list.current), [items, selected]);
 
     const accept = (index: number) => {
       const item = items[index];
@@ -97,7 +89,7 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
 
     if (items.length === 0) return null;
     return (
-      <div className="composer-suggestions" role="listbox">
+      <div ref={list} className="composer-suggestions" role="listbox">
         {items.map((item, index) => (
           <button
             type="button"
@@ -123,6 +115,23 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
     );
   },
 );
+
+export function scrollSelectedSuggestion(container: HTMLElement | null): void {
+  container?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+}
+
+export function commandSuggestions(commands: readonly SlashCommand[], query: string): Suggestion[] {
+  const normalizedQuery = query.toLowerCase();
+  return commands
+    .filter(({ name }) => name.toLowerCase().includes(normalizedQuery))
+    .map((command) => ({
+      id: `${command.source}:${command.name}`,
+      label: `/${command.name}`,
+      detail: command.description,
+      type: "command",
+      text: `/${command.name} `,
+    }));
+}
 
 function completionContext(text: string): { type: "command" | "file"; query: string; start: number } | null {
   if (/^\/[^\s]*$/.test(text)) return { type: "command", query: text.slice(1), start: 0 };

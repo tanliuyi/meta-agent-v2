@@ -19,8 +19,11 @@ import type {
   WorkbenchState,
 } from "./contracts.ts";
 
+export type DesktopPlatform = "win32" | "darwin" | "linux";
+
 /** Renderer 可以调用的最小 Desktop API。 */
 export interface DesktopApi {
+  platform: DesktopPlatform;
   versions: {
     electron: string;
     chrome: string;

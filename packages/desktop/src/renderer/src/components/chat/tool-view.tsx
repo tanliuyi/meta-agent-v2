@@ -1,37 +1,38 @@
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import {
-  Check,
-  ChevronRight,
-  FileCode2,
-  Files,
-  ListTree,
-  PencilLine,
-  Search,
-  TerminalSquare,
-  Wrench,
-  X,
-} from "lucide-react";
+import { ChevronRight, FileCode2, Files, ListTree, PencilLine, Search, TerminalSquare, Wrench } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.tsx";
 import { ToolContent } from "./tools/tool-content.tsx";
+
+type ToolState = "running" | "complete" | "error";
+
+interface ToolViewDescription {
+  icon: React.ReactNode;
+  running: string;
+  complete: string;
+  error: string;
+}
 
 /** 按 Pi 原生工具类型渲染紧凑工具状态。 */
 export function ToolView({ toolName, args, result, status, artifact, isError }: ToolCallMessagePartProps) {
   const view = toolView(toolName);
-  const execution = toolArtifact(artifact)?.execution;
-  const running = execution === "streaming-args" || execution === "waiting" || execution === "running";
+  const artifactState = toolArtifact(artifact);
+  const execution = artifactState?.execution;
+  const running =
+    status.type === "running" || execution === "streaming-args" || execution === "waiting" || execution === "running";
   const error = isError === true || execution === "error" || status.type === "incomplete";
-  const displayedResult = result ?? toolArtifact(artifact)?.partialResult;
+  const toolState: ToolState = error ? "error" : running ? "running" : "complete";
+  const target = toolTarget(args);
+  const displayedResult = result ?? artifactState?.partialResult;
 
   return (
-    <Collapsible className="tool-view">
+    <Collapsible className="tool-view" data-tool-status={toolState}>
       <CollapsibleTrigger className="tool-trigger focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px] focus-visible:ring-inset">
         <span className="tool-icon">{view.icon}</span>
-        <span className="tool-name">{view.label}</span>
-        <span className="tool-target">{toolTarget(args)}</span>
-        <span className={`tool-status ${running ? "running" : error ? "error" : "complete"}`}>
-          {running ? <span className="spinner" /> : error ? <X size={13} /> : <Check size={13} />}
+        <span className={`tool-status-label ${toolState}`} aria-live="polite">
+          {view[toolState]}
         </span>
-        <ChevronRight size={13} className="tool-chevron" />
+        {target ? <span className="tool-target">{target}</span> : null}
+        <ChevronRight size={16} className="tool-chevron" />
       </CollapsibleTrigger>
       <CollapsibleContent className="data-closed:animate-collapsible-up data-open:animate-collapsible-down overflow-hidden data-closed:pointer-events-none data-closed:fill-mode-forwards motion-reduce:animate-none">
         <div className="tool-body">
@@ -49,15 +50,26 @@ function toolArtifact(value: unknown): { execution?: string; partialResult?: unk
   return { execution, partialResult };
 }
 
-function toolView(name: string): { label: string; icon: React.ReactNode } {
-  if (name === "bash") return { label: "运行命令", icon: <TerminalSquare size={14} /> };
-  if (name === "read") return { label: "读取文件", icon: <FileCode2 size={14} /> };
-  if (name === "write") return { label: "写入文件", icon: <PencilLine size={14} /> };
-  if (name === "edit") return { label: "编辑文件", icon: <PencilLine size={14} /> };
-  if (name === "grep") return { label: "搜索内容", icon: <Search size={14} /> };
-  if (name === "find") return { label: "查找文件", icon: <Files size={14} /> };
-  if (name === "ls") return { label: "列出目录", icon: <ListTree size={14} /> };
-  return { label: name, icon: <Wrench size={14} /> };
+function toolView(name: string): ToolViewDescription {
+  if (name === "bash")
+    return {
+      running: "正在执行命令",
+      complete: "已执行命令",
+      error: "命令执行失败",
+      icon: <TerminalSquare size={14} />,
+    };
+  if (name === "read")
+    return { running: "正在读取", complete: "已读取", error: "读取失败", icon: <FileCode2 size={14} /> };
+  if (name === "write")
+    return { running: "正在写入", complete: "已写入", error: "写入失败", icon: <PencilLine size={14} /> };
+  if (name === "edit")
+    return { running: "正在编辑", complete: "已编辑", error: "编辑失败", icon: <PencilLine size={14} /> };
+  if (name === "grep")
+    return { running: "正在搜索", complete: "已搜索", error: "搜索失败", icon: <Search size={14} /> };
+  if (name === "find") return { running: "正在查找", complete: "已查找", error: "查找失败", icon: <Files size={14} /> };
+  if (name === "ls")
+    return { running: "正在查看", complete: "已查看", error: "查看失败", icon: <ListTree size={14} /> };
+  return { running: `正在运行 ${name}`, complete: `${name} 已完成`, error: `${name} 失败`, icon: <Wrench size={14} /> };
 }
 
 function toolTarget(args: Readonly<Record<string, unknown>>): string {

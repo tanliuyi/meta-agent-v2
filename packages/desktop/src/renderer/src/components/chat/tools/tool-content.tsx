@@ -25,8 +25,7 @@ export function ToolContent({ name, args, result, error }: ToolContentProps) {
 function CommandContent({ args, result, error }: Omit<ToolContentProps, "name">) {
   return (
     <>
-      <ToolCode label="命令" value={stringArg(args, "command")} className="tool-command" />
-      {typeof args.timeout === "number" ? <ToolMeta items={[`超时 ${args.timeout} 秒`]} /> : null}
+      <pre className="tool-command">{stringArg(args, "command")}</pre>
       <ToolResult result={result} error={error} label="输出" />
     </>
   );
@@ -41,7 +40,6 @@ function ReadContent({ args, result, error }: Omit<ToolContentProps, "name">) {
       : [`行 ${offset ?? 1}${limit ? `-${(offset ?? 1) + limit - 1}` : " 起"}`];
   return (
     <>
-      <ToolMeta items={[stringArg(args, "path", "file_path"), ...range]} />
       <ToolResult result={result} error={error} label="文件内容" />
     </>
   );
@@ -50,7 +48,6 @@ function ReadContent({ args, result, error }: Omit<ToolContentProps, "name">) {
 function WriteContent({ args, result, error }: Omit<ToolContentProps, "name">) {
   return (
     <>
-      <ToolMeta items={[stringArg(args, "path", "file_path")]} />
       <ToolCode label="写入内容" value={stringArg(args, "content")} />
       <ToolResult result={result} error={error} />
     </>
@@ -61,7 +58,6 @@ function EditContent({ args, result, error }: Omit<ToolContentProps, "name">) {
   const edits = Array.isArray(args.edits) ? args.edits.flatMap(toEdit) : [];
   return (
     <>
-      <ToolMeta items={[stringArg(args, "path", "file_path"), `${edits.length} 处修改`]} />
       {edits.map((edit, index) => (
         <section className="tool-edit" key={`${index}:${edit.oldText.length}:${edit.newText.length}`}>
           <div className="tool-section-label">修改 {index + 1}</div>
@@ -83,19 +79,8 @@ function SearchContent({ name, args, result, error }: ToolContentProps) {
   ].filter(Boolean);
   return (
     <>
-      <ToolMeta items={items} />
       <ToolResult result={result} error={error} label="结果" />
     </>
-  );
-}
-
-function ToolMeta({ items }: { items: string[] }) {
-  return (
-    <div className="tool-meta">
-      {items.filter(Boolean).map((item) => (
-        <span key={item}>{item}</span>
-      ))}
-    </div>
   );
 }
 

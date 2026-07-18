@@ -15,9 +15,10 @@ export function App() {
   useEffect(() => {
     document.title = windowTitle;
   }, [windowTitle]);
+  const platform = window.desktop.platform;
   return (
-    <div className="app-frame">
-      <WindowsHeader title={windowTitle} />
+    <div className="app-frame" data-platform={platform}>
+      {platform === "win32" ? <WindowsHeader title={windowTitle} /> : null}
       <div className="app-shell">
         <Sidebar />
         <section className="workspace">

@@ -1,4 +1,4 @@
-import type { ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { ModelRegistry, ResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
   loadDraftSessionConfig,
@@ -40,6 +40,9 @@ describe("draft session configuration", () => {
     expect(config.models).toEqual([
       expect.objectContaining({ provider: "reasoning", thinkingLevels: ["off", "minimal", "low", "medium", "high"] }),
       expect.objectContaining({ provider: "plain", thinkingLevels: ["off"] }),
+    ]);
+    expect(config.commands).toEqual([
+      { name: "memory-insights", description: "Inspect memories", source: "extension" },
     ]);
   });
 
@@ -88,5 +91,16 @@ function services(): SessionConfigurationServices {
     getDefaultModel: () => reasoningModel.id,
     getDefaultThinkingLevel: () => "high" as const,
   } as unknown as SettingsManager;
-  return { auth: {} as SessionConfigurationServices["auth"], models, settings };
+  const resources = {
+    getExtensions: () => ({
+      extensions: [
+        {
+          commands: new Map([["memory-insights", { name: "memory-insights", description: "Inspect memories" }]]),
+        },
+      ],
+    }),
+    getPrompts: () => ({ prompts: [] }),
+    getSkills: () => ({ skills: [] }),
+  } as unknown as ResourceLoader;
+  return { models, settings, resources };
 }

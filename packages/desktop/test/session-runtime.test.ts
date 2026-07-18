@@ -3,21 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTimelineUnavailableError, SessionRuntime } from "../src/main/pi/session-runtime.ts";
 
 const mocks = vi.hoisted(() => ({
-  createAgentSession: vi.fn(),
+  createAgentSessionFromServices: vi.fn(),
+  createAgentSessionServices: vi.fn(),
+  createSessionManager: vi.fn(() => ({})),
   resolveSelection: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   VERSION: "0.80.7",
-  createAgentSession: mocks.createAgentSession,
+  createAgentSessionFromServices: mocks.createAgentSessionFromServices,
+  createAgentSessionServices: mocks.createAgentSessionServices,
+  SessionManager: { create: mocks.createSessionManager },
 }));
 
 vi.mock("../src/main/pi/session-configuration.ts", () => ({
-  createSessionConfigurationServices: () => ({
-    auth: {},
-    models: { getAvailable: () => [], getAll: () => [] },
-    settings: {},
-  }),
   resolveSessionCreateSelection: mocks.resolveSelection,
   sessionReadiness: () => ({ state: "ready" }),
 }));
@@ -39,15 +38,18 @@ vi.mock("../src/main/pi/host-ui.ts", () => ({
 
 describe("SessionRuntime Pi-native commands", () => {
   beforeEach(() => {
-    mocks.createAgentSession.mockReset();
+    mocks.createAgentSessionFromServices.mockReset();
+    mocks.createAgentSessionServices.mockReset();
+    mocks.createSessionManager.mockClear();
     mocks.resolveSelection.mockReset();
+    mocks.createAgentSessionServices.mockResolvedValue(createServices());
   });
 
-  it("创建新 session 时把显式 model 和 thinking 交给 createAgentSession", async () => {
+  it("创建新 session 时加载 Pi 默认 services 并传递显式 model 和 thinking", async () => {
     const session = createSession();
     const model = { provider: "openai", id: "gpt" };
     mocks.resolveSelection.mockReturnValue({ model, thinkingLevel: "high" });
-    mocks.createAgentSession.mockResolvedValue({ session });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
 
     await SessionRuntime.create({
       projectId: "project",
@@ -57,13 +59,20 @@ describe("SessionRuntime Pi-native commands", () => {
       onSummaryChanged: () => {},
     });
 
-    expect(mocks.createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ model, thinkingLevel: "high" }));
+    expect(mocks.createAgentSessionServices).toHaveBeenCalledWith({ cwd: "/workspace" });
+    expect(mocks.createAgentSessionFromServices).toHaveBeenCalledWith(
+      expect.objectContaining({
+        services: expect.objectContaining({ resourceLoader: expect.any(Object) }),
+        model,
+        thinkingLevel: "high",
+      }),
+    );
   });
 
   it("所有 Composer 输入直接交给 session.prompt，并立即更新首条标题", async () => {
     const session = createSession();
     const push = vi.fn();
-    mocks.createAgentSession.mockResolvedValue({ session });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
     const runtime = await SessionRuntime.create({
       projectId: "project",
       cwd: "/workspace",
@@ -92,7 +101,7 @@ describe("SessionRuntime Pi-native commands", () => {
 
   it("配置 queue 后的 running prompt 仍走 prompt streamingBehavior", async () => {
     const session = createSession(true);
-    mocks.createAgentSession.mockResolvedValue({ session });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
     const runtime = await SessionRuntime.create({
       projectId: "project",
       cwd: "/workspace",
@@ -133,7 +142,7 @@ describe("SessionRuntime Pi-native commands", () => {
       if (failBranch) throw new Error("branch unavailable");
       return [];
     };
-    mocks.createAgentSession.mockResolvedValue({ session });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
     const runtime = await SessionRuntime.create({
       projectId: "project",
       cwd: "/workspace",
@@ -157,6 +166,18 @@ describe("SessionRuntime Pi-native commands", () => {
     await runtime.dispose();
   });
 });
+
+function createServices() {
+  return {
+    cwd: "/workspace",
+    modelRegistry: { getAvailable: () => [], getAll: () => [] },
+    resourceLoader: {
+      getExtensions: () => ({ extensions: [], errors: [] }),
+      getSkills: () => ({ skills: [], diagnostics: [] }),
+    },
+    diagnostics: [],
+  };
+}
 
 function createSession(streaming = false): AgentSession & { prompt: ReturnType<typeof vi.fn> } {
   const prompt = vi.fn(async (_text: string, options?: { preflightResult?: (success: boolean) => void }) => {

@@ -45,6 +45,7 @@ export interface DraftModelOption extends ModelOption {
 /** 创建真实 session 前可读取和选择的最小控制配置。 */
 export interface DraftSessionConfig {
   models: DraftModelOption[];
+  commands: SlashCommand[];
   model: { provider: string; id: string; name: string } | null;
   thinkingLevel: ThinkingLevel;
   thinkingLevels: ThinkingLevel[];

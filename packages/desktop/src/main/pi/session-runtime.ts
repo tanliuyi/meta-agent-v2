@@ -1,9 +1,10 @@
 import {
   type AgentSession,
   type AgentSessionEvent,
-  createAgentSession,
+  createAgentSessionFromServices,
+  createAgentSessionServices,
   type ModelRegistry,
-  type SessionManager,
+  SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
   type ClearedQueue,
@@ -22,11 +23,7 @@ import { HostUi } from "./host-ui.ts";
 import { PiCompatibilityAdapter } from "./pi-compatibility-adapter.ts";
 import { PiThreadProjector } from "./pi-thread-projector.ts";
 import { getSessionCommands } from "./session-commands.ts";
-import {
-  createSessionConfigurationServices,
-  resolveSessionCreateSelection,
-  sessionReadiness,
-} from "./session-configuration.ts";
+import { resolveSessionCreateSelection, sessionReadiness } from "./session-configuration.ts";
 
 interface RuntimeOptions {
   projectId: string;
@@ -86,14 +83,13 @@ export class SessionRuntime {
 
   /** 创建新会话或从指定 SessionManager 恢复会话。 */
   static async create(options: RuntimeOptions): Promise<SessionRuntime> {
-    const { auth, models, settings } = createSessionConfigurationServices(options.cwd);
-    const selection = options.createInput ? resolveSessionCreateSelection(options.createInput, models) : undefined;
-    const result = await createAgentSession({
-      cwd: options.cwd,
-      sessionManager: options.sessionManager,
-      modelRegistry: models,
-      authStorage: auth,
-      settingsManager: settings,
+    const services = await createAgentSessionServices({ cwd: options.cwd });
+    const selection = options.createInput
+      ? resolveSessionCreateSelection(options.createInput, services.modelRegistry)
+      : undefined;
+    const result = await createAgentSessionFromServices({
+      services,
+      sessionManager: options.sessionManager ?? SessionManager.create(services.cwd),
       ...(selection ? { model: selection.model, thinkingLevel: selection.thinkingLevel } : {}),
       sessionStartEvent: { type: "session_start", reason: options.sessionManager ? "resume" : "new" },
     });
@@ -103,7 +99,7 @@ export class SessionRuntime {
         options.projectId,
         options.cwd,
         result.session,
-        models,
+        services.modelRegistry,
         options.push,
         options.onSummaryChanged,
       );
@@ -111,7 +107,15 @@ export class SessionRuntime {
       result.session.dispose();
       throw new PiTimelineUnavailableError("initial projection", error);
     }
-    runtime.lastError = result.modelFallbackMessage;
+    runtime.lastError = joinRuntimeDiagnostics(
+      result.modelFallbackMessage,
+      services.diagnostics.map(({ message }) => message),
+      services.resourceLoader.getExtensions().errors.map(({ path, error }) => `扩展加载失败 ${path}: ${error}`),
+      services.resourceLoader
+        .getSkills()
+        .diagnostics.filter(({ type }) => type === "error")
+        .map(({ path, message }) => `Skill 加载失败${path ? ` ${path}` : ""}: ${message}`),
+    );
     await result.session.bindExtensions({
       uiContext: runtime.hostUi.createContext(),
       mode: "rpc",
@@ -411,6 +415,11 @@ function createSummary(session: AgentSession): Omit<Thread, "projectId" | "archi
 function contentText(content: string | Array<{ type: string; text?: string }>): string {
   if (typeof content === "string") return content;
   return content.flatMap((part) => (part.type === "text" && part.text ? [part.text] : [])).join("\n");
+}
+
+function joinRuntimeDiagnostics(primary: string | undefined, ...groups: string[][]): string | undefined {
+  const messages = [primary, ...groups.flat()].filter((message): message is string => Boolean(message));
+  return messages.length > 0 ? messages.join("\n") : undefined;
 }
 
 function errorMessage(value: unknown): string {

@@ -296,6 +296,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 function draftConfig(): DraftSessionConfig {
   return {
     models: [],
+    commands: [],
     model: null,
     thinkingLevel: "off",
     thinkingLevels: ["off"],

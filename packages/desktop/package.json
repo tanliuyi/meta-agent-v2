@@ -6,10 +6,11 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "preview": "electron-vite preview",
+    "build:pi": "npm --prefix ../tui run build && tsgo -p ../ai/tsconfig.build.json && npm --prefix ../agent run build && npm --prefix ../coding-agent run build && node ../../scripts/rebuild-desktop-native.mjs",
+    "dev": "npm run build:pi && electron-vite dev",
+    "preview": "npm run build:pi && electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "build": "npm run typecheck && electron-vite build"
+    "build": "npm run build:pi && npm run typecheck && electron-vite build"
   },
   "dependencies": {
     "@assistant-ui/react": "0.14.26",

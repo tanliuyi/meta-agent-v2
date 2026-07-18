@@ -70,4 +70,17 @@ describe("HostUi", () => {
     ui.pasteToEditor(" + extension");
     expect(host.uiState).toMatchObject({ editorText: "typed in Desktop + extension", editorRevision: 2 });
   });
+
+  it("静默忽略 Desktop 无法渲染的组件型 widget", () => {
+    const changed = vi.fn();
+    const host = new HostUi(changed, () => []);
+    const ui = host.createContext();
+    const setWidget = ui.setWidget as (key: string, content: unknown) => void;
+
+    ui.setWidget("summary", ["保留现有内容"]);
+    expect(() => setWidget("summary", () => undefined)).not.toThrow();
+
+    expect(host.uiState.widgets).toEqual([{ key: "summary", lines: ["保留现有内容"], placement: "belowEditor" }]);
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
 });

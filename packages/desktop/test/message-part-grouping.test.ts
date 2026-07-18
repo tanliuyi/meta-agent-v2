@@ -1,7 +1,9 @@
-import type { PartState } from "@assistant-ui/react";
+import type { GroupByContext, PartState } from "@assistant-ui/react";
 import { describe, expect, it } from "vitest";
 import {
+  createRunGroupPart,
   groupMessagePart,
+  hasTextAfterGroup,
   summarizeChainOfThought,
 } from "../src/renderer/src/components/chat/message-part-grouping.ts";
 
@@ -28,19 +30,73 @@ describe("message part grouping", () => {
     ]);
   });
 
-  it("不区分中间 text 与最终 text，均保持直接展示", () => {
+  it("外层 run group 包含中间消息，并保留内层 step group", () => {
     const parts = [
+      { type: "text", text: "先检查实现", status: COMPLETE },
       { type: "reasoning", text: "分析", status: COMPLETE },
-      { type: "text", text: "阶段说明", status: COMPLETE },
-      { type: "tool-call", toolCallId: "tool", toolName: "read", args: {}, status: COMPLETE },
+      { type: "tool-call", toolCallId: "read", toolName: "read", args: {}, status: COMPLETE },
+      { type: "text", text: "继续修改", status: COMPLETE },
+      { type: "reasoning", text: "复核", status: COMPLETE },
+      { type: "tool-call", toolCallId: "check", toolName: "bash", args: {}, status: COMPLETE },
       { type: "text", text: "最终回复", status: COMPLETE },
     ] satisfies PartState[];
-    expect(parts.map((part) => groupMessagePart(part, {}))).toEqual([
-      ["group-chainOfThought"],
-      [],
-      ["group-chainOfThought"],
+
+    expect(runGroupPaths(parts)).toEqual([
+      ["group-runActivity"],
+      ["group-runActivity", "group-chainOfThought"],
+      ["group-runActivity", "group-chainOfThought"],
+      ["group-runActivity"],
+      ["group-runActivity", "group-chainOfThought"],
+      ["group-runActivity", "group-chainOfThought"],
       [],
     ]);
+  });
+
+  it("取消或错误结束且没有最终 text 时保留完整 activity group", () => {
+    const parts = [
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "text", text: "正在调用工具", status: COMPLETE },
+      { type: "tool-call", toolCallId: "tool", toolName: "read", args: {}, status: COMPLETE },
+    ] satisfies PartState[];
+
+    expect(runGroupPaths(parts)).toEqual([
+      ["group-runActivity", "group-chainOfThought"],
+      ["group-runActivity"],
+      ["group-runActivity", "group-chainOfThought"],
+    ]);
+  });
+
+  it("压缩 notice 与其他 data 消息不进入 run group", () => {
+    const parts = [
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "data", name: "pi-notice", data: { noticeType: "compaction" }, status: COMPLETE },
+      { type: "text", text: "最终回复", status: COMPLETE },
+    ] satisfies PartState[];
+
+    expect(runGroupPaths(parts)).toEqual([["group-runActivity", "group-chainOfThought"], [], []]);
+  });
+
+  it("用户引导类 standalone tool 保持在 run group 外", () => {
+    const parts = [
+      { type: "reasoning", text: "需要用户确认", status: COMPLETE },
+      { type: "tool-call", toolCallId: "ask", toolName: "ask_user", args: {}, status: COMPLETE },
+    ] satisfies PartState[];
+    const context = {
+      toolUIs: { ask_user: [{ render: () => null, standalone: true }] },
+    } satisfies GroupByContext;
+
+    expect(runGroupPaths(parts, context)).toEqual([["group-runActivity", "group-chainOfThought"], []]);
+  });
+
+  it("仅在组后出现 text 时结束自动展开", () => {
+    const parts = [
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "tool-call", toolCallId: "read", toolName: "read", args: {}, status: COMPLETE },
+      { type: "tool-call", toolCallId: "edit", toolName: "edit", args: {}, status: COMPLETE },
+    ] satisfies PartState[];
+
+    expect(hasTextAfterGroup(parts, [0, 1])).toBe(false);
+    expect(hasTextAfterGroup([...parts, { type: "text", text: "结果", status: COMPLETE }], [0, 1, 2])).toBe(true);
   });
 
   it("按工具语义去重汇总折叠标题", () => {
@@ -52,7 +108,7 @@ describe("message part grouping", () => {
       { type: "tool-call", toolCallId: "bash", toolName: "bash", args: {}, status: COMPLETE },
     ] satisfies PartState[];
 
-    expect(summarizeChainOfThought(parts, [0, 1, 2, 3, 4])).toBe("读取了一些文件，修改了一些文件，执行了一些命令");
+    expect(summarizeChainOfThought(parts, [0, 1, 2, 3, 4])).toBe("读取一些文件，修改一些文件，执行一些命令");
     expect(summarizeChainOfThought(parts, [0])).toBe("思考过程");
   });
 
@@ -61,7 +117,7 @@ describe("message part grouping", () => {
       { type: "tool-call", toolCallId: "custom", toolName: "custom_tool", args: {}, status: COMPLETE },
     ] satisfies PartState[];
 
-    expect(summarizeChainOfThought(parts, [0])).toBe("使用了其他工具");
+    expect(summarizeChainOfThought(parts, [0])).toBe("使用其他工具");
   });
 
   it("工具类型较多时限制标题长度", () => {
@@ -72,6 +128,11 @@ describe("message part grouping", () => {
       { type: "tool-call", toolCallId: "grep", toolName: "grep", args: {}, status: COMPLETE },
     ] satisfies PartState[];
 
-    expect(summarizeChainOfThought(parts, [0, 1, 2, 3])).toBe("读取了一些文件，修改了一些文件，执行了一些命令等操作");
+    expect(summarizeChainOfThought(parts, [0, 1, 2, 3])).toBe("读取一些文件，修改一些文件，执行一些命令等操作");
   });
 });
+
+function runGroupPaths(parts: readonly PartState[], context: GroupByContext = {}): readonly (readonly string[])[] {
+  const groupPart = createRunGroupPart(parts);
+  return parts.map((part) => groupPart(part, context));
+}

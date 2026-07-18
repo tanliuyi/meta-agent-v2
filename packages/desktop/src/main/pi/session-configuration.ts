@@ -1,37 +1,36 @@
-import { join } from "node:path";
 import {
-  AuthStorage,
+  createAgentSessionServices,
   findInitialModel,
-  getAgentDir,
-  ModelRegistry,
+  type ModelRegistry,
+  type ResourceLoader,
   resolveThinkingConfiguration,
-  SettingsManager,
+  type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { DraftSessionConfig, Readiness, SessionCreateInput, ThinkingLevel } from "../../shared/contracts.ts";
+import { getDraftCommands } from "./session-commands.ts";
 
 export interface SessionConfigurationServices {
-  auth: AuthStorage;
   models: ModelRegistry;
   settings: SettingsManager;
-}
-
-/** 创建 preview 与真实 session 共用的 Pi 配置服务。 */
-export function createSessionConfigurationServices(cwd: string): SessionConfigurationServices {
-  const agentDir = getAgentDir();
-  const auth = AuthStorage.create(join(agentDir, "auth.json"));
-  return {
-    auth,
-    models: ModelRegistry.create(auth, join(agentDir, "models.json")),
-    settings: SettingsManager.create(cwd, agentDir),
-  };
+  resources?: ResourceLoader;
 }
 
 /** 不创建 AgentSession，只解析新会话可选模型和默认 thinking。 */
 export async function loadDraftSessionConfig(
   cwd: string,
-  services: SessionConfigurationServices = createSessionConfigurationServices(cwd),
+  services?: SessionConfigurationServices,
 ): Promise<DraftSessionConfig> {
-  const { models, settings } = services;
+  let models: ModelRegistry;
+  let settings: SettingsManager;
+  let resources: ResourceLoader | undefined;
+  if (services) {
+    ({ models, settings, resources } = services);
+  } else {
+    const runtimeServices = await createAgentSessionServices({ cwd });
+    models = runtimeServices.modelRegistry;
+    settings = runtimeServices.settingsManager;
+    resources = runtimeServices.resourceLoader;
+  }
   const initial = await findInitialModel({
     scopedModels: [],
     isContinuing: false,
@@ -52,6 +51,7 @@ export async function loadDraftSessionConfig(
       thinking: model.reasoning,
       thinkingLevels: resolveThinkingConfiguration(model, requestedThinking).thinkingLevels,
     })),
+    commands: resources ? getDraftCommands(resources) : [],
     model: initial.model ? { provider: initial.model.provider, id: initial.model.id, name: initial.model.name } : null,
     thinkingLevel: thinking.thinkingLevel,
     thinkingLevels: thinking.thinkingLevels,

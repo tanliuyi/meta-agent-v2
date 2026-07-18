@@ -1,16 +1,15 @@
-import { ComposerPrimitive, useAssistantRuntime, useAuiState } from "@assistant-ui/react";
-import { ArrowUp, RotateCcw } from "lucide-react";
+import { ComposerPrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
+import { ArrowUp, RotateCcw, Square } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { DraftSessionConfig, Project, SessionControlState, SlashCommand } from "../../../../shared/contracts.ts";
+import type { DraftSessionConfig, Project, SessionControlState } from "../../../../shared/contracts.ts";
 import { usePiThreadPhase } from "../../runtime/use-pi-thread-snapshot.ts";
 import type { DraftSessionState } from "../../state/desktop-model.ts";
 import { ComposerAddAttachment, ComposerAttachments } from "../assistant-ui/attachment.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
-import { Button } from "../ui/button.tsx";
+import { TextButton } from "../ui/text-button.tsx";
 import { ModelSelect, ProjectSelect, ThinkingSelect } from "./composer-controls.tsx";
 import { ComposerSuggestions, type ComposerSuggestionsHandle } from "./composer-suggestions.tsx";
 
-const NO_COMMANDS: readonly SlashCommand[] = [];
 const ESCAPE_CANCEL_WINDOW_MS = 1_000;
 
 type ComposerProps =
@@ -26,18 +25,25 @@ type ComposerProps =
       onThinkingChange(level: SessionControlState["thinkingLevel"]): void;
       onSubmit(): Promise<void>;
     }
-  | { mode: "session"; snapshot: SessionControlState; onClearQueue(): Promise<void> };
+  | {
+      mode: "session";
+      snapshot: SessionControlState;
+      onClearQueue(): Promise<void>;
+    };
 
 /** assistant-ui Composer 与 Desktop draft/session 控制面的组合入口。 */
 export function Composer(props: ComposerProps) {
-  const runtime = useAssistantRuntime();
-  const [mode, setMode] = useState<"steer" | "followUp">("followUp");
+  const aui = useAui();
+  const [mode, setMode] = useState<"steer" | "followUp">("steer");
   const [sending, setSending] = useState(false);
   const [selectingProject, setSelectingProject] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [escapeCancelArmed, setEscapeCancelArmed] = useState(false);
   const escapeCancelTimer = useRef<number | undefined>(undefined);
-  const appliedEditorRevision = useRef<{ target: string; revision: number } | null>(null);
+  const appliedEditorRevision = useRef<{
+    target: string;
+    revision: number;
+  } | null>(null);
   const syncedEditor = useRef<{ target: string; text: string } | null>(null);
   const suggestions = useRef<ComposerSuggestionsHandle>(null);
   const snapshot = props.mode === "session" ? props.snapshot : null;
@@ -70,9 +76,8 @@ export function Composer(props: ComposerProps) {
     if (applied?.target === target && applied.revision === revision) return;
     appliedEditorRevision.current = { target, revision };
     const editorText = snapshot.extensionUi.editorText;
-    if (editorText !== undefined && runtime.thread.composer.getState().text !== editorText)
-      runtime.thread.composer.setText(editorText);
-  }, [runtime, snapshot]);
+    if (editorText !== undefined && aui.composer().getState().text !== editorText) aui.composer().setText(editorText);
+  }, [aui, snapshot]);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -89,25 +94,21 @@ export function Composer(props: ComposerProps) {
       .catch((value: unknown) => setError(errorMessage(value)));
   }, [composerText, snapshot]);
 
-  useEffect(
-    () =>
-      runtime.thread.composer.unstable_on("attachmentAddError", ({ message }) => {
-        setError(message);
-      }),
-    [runtime],
-  );
+  useAuiEvent("composer.attachmentAddError", ({ message }) => {
+    setError(message);
+  });
 
   const aboveWidgets = snapshot?.extensionUi.widgets.filter(({ placement }) => placement === "aboveEditor") ?? [];
   const belowWidgets = snapshot?.extensionUi.widgets.filter(({ placement }) => placement === "belowEditor") ?? [];
   const suggestionProjectId = props.mode === "draft" ? props.project?.id : props.snapshot.projectId;
-  const commands = props.mode === "draft" ? NO_COMMANDS : props.snapshot.commands;
+  const commands = props.mode === "draft" ? (props.config?.commands ?? []) : props.snapshot.commands;
 
   const submitRunning = () => {
-    if (!snapshot || runtime.thread.composer.getState().text.trim().length === 0 || sending) return;
+    if (!snapshot || aui.composer().getState().text.trim().length === 0 || sending) return;
     setSending(true);
     setError(null);
     try {
-      runtime.thread.composer.send({ steer: mode === "steer" });
+      aui.composer().send({ steer: mode === "steer" });
     } catch (value) {
       setError(errorMessage(value));
     } finally {
@@ -121,7 +122,7 @@ export function Composer(props: ComposerProps) {
       !props.project?.available ||
       !props.config?.model ||
       props.config.readiness.state !== "ready" ||
-      runtime.thread.composer.getState().isEmpty ||
+      aui.composer().getState().isEmpty ||
       sending ||
       selectingProject ||
       materializing
@@ -172,7 +173,7 @@ export function Composer(props: ComposerProps) {
     if (escapeCancelTimer.current !== undefined) {
       clearEscapeCancelTimer();
       setEscapeCancelArmed(false);
-      runtime.thread.composer.cancel();
+      aui.composer().cancel();
       return;
     }
 
@@ -203,11 +204,12 @@ export function Composer(props: ComposerProps) {
       {snapshot && queueCount > 0 ? (
         <div className="queue-strip">
           <span>{queueCount} 条消息正在排队</span>
-          <Button variant="ghost" size="sm" onClick={() => void clearQueue()}>
-            <RotateCcw size={13} /> 清空
-          </Button>
+          <TextButton className="text-xs" onClick={() => void clearQueue()}>
+            <RotateCcw /> 清空
+          </TextButton>
         </div>
       ) : null}
+
       <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
         <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
           <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-[color-mix(in_oklab,var(--color-muted)_30%,var(--color-background))] p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
@@ -221,10 +223,10 @@ export function Composer(props: ComposerProps) {
               onKeyDown={handleInputKeyDown}
               placeholder={
                 props.mode === "draft"
-                  ? "向 Pi 发送消息，@ 引用文件"
+                  ? "发送消息，@ 引用文件"
                   : isRunning
                     ? "运行中，可发送后续消息"
-                    : "向 Pi 发送消息，@ 引用文件，/ 执行命令"
+                    : "发送消息，@ 引用文件，/ 执行命令"
               }
               rows={1}
               maxRows={9}
@@ -257,17 +259,17 @@ export function Composer(props: ComposerProps) {
                   <div className="mode-control" role="group" aria-label="运行中消息模式">
                     <button
                       type="button"
-                      className={mode === "followUp" ? "is-active" : ""}
-                      onClick={() => setMode("followUp")}
-                    >
-                      排队
-                    </button>
-                    <button
-                      type="button"
                       className={mode === "steer" ? "is-active" : ""}
                       onClick={() => setMode("steer")}
                     >
                       引导
+                    </button>
+                    <button
+                      type="button"
+                      className={mode === "followUp" ? "is-active" : ""}
+                      onClick={() => setMode("followUp")}
+                    >
+                      排队
                     </button>
                   </div>
                 ) : null}
@@ -320,7 +322,6 @@ export function Composer(props: ComposerProps) {
                   disabled={disabled}
                   configLoading={configLoading}
                   sending={sending}
-                  escapeCancelArmed={escapeCancelArmed}
                   isRunning={isRunning}
                 />
               </div>
@@ -339,16 +340,15 @@ function ComposerSubmitControl({
   disabled,
   configLoading,
   sending,
-  escapeCancelArmed,
   isRunning,
 }: {
   props: ComposerProps;
   disabled: boolean;
   configLoading: boolean;
   sending: boolean;
-  escapeCancelArmed: boolean;
   isRunning: boolean;
 }) {
+  const aui = useAui();
   const isEmpty = useAuiState((state) => state.composer.isEmpty);
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
   if (props.mode === "draft") {
@@ -373,14 +373,28 @@ function ComposerSubmitControl({
     );
   }
   if (isRunning) {
+    if (!hasText) {
+      return (
+        <TooltipIconButton
+          type="button"
+          tooltip="停止运行"
+          side="top"
+          variant="default"
+          className="size-7 rounded-full"
+          onClick={() => aui.composer().cancel()}
+        >
+          <Square className="size-4" />
+        </TooltipIconButton>
+      );
+    }
     return (
       <TooltipIconButton
         type="submit"
-        tooltip={!hasText ? (escapeCancelArmed ? "再次按 Esc 停止运行" : "按 Esc 停止运行") : "发送后续消息"}
+        tooltip="发送后续消息"
         side="top"
         variant="default"
         className="size-7 rounded-full"
-        disabled={sending || !hasText || props.snapshot.readiness.state !== "ready"}
+        disabled={sending || props.snapshot.readiness.state !== "ready"}
       >
         <ArrowUp className="size-4" />
       </TooltipIconButton>

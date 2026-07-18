@@ -1,4 +1,4 @@
-import { Folder, Plus } from "lucide-react";
+import { Folder, FolderOpen, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Project } from "../../../../shared/contracts.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
@@ -85,8 +85,8 @@ function ProjectItem(props: ProjectItemProps) {
         }}
       >
         <div className="flex min-w-0 items-center gap-2 px-2.5 text-sm">
-          <Folder className="size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{props.project.name}</span>
+          {props.expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
+          <span className="min-w-0 flex-1 select-none truncate">{props.project.name}</span>
           {props.project.available ? null : <span className="project-warning">不可用</span>}
         </div>
         <TooltipIconButton

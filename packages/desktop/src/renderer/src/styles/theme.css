@@ -1,29 +1,73 @@
 :root {
   color: hsl(var(--foreground));
   background: hsl(var(--background));
-  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  color-scheme: light;
+  font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  font-size: 16px;
   --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
+  --foreground: 220 10% 10%;
   --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
+  --card-foreground: 220 10% 10%;
   --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --primary: 240 5.9% 10%;
+  --popover-foreground: 220 10% 10%;
+  --primary: 220 9% 14%;
   --primary-foreground: 0 0% 98%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 72.2% 50.6%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 220 9% 14%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 220 7% 43%;
+  --accent: 220 13% 94%;
+  --accent-foreground: 220 9% 14%;
+  --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 240 5.9% 10%;
+  --success: 145 70% 31%;
+  --border: 220 13% 89%;
+  --input: 220 13% 89%;
+  --ring: 220 9% 24%;
+  --sidebar: 220 14% 97%;
+  --terminal-background: 220 20% 98%;
+  --terminal-foreground: 220 15% 18%;
+  --terminal-muted: 220 8% 45%;
+  --terminal-border: 220 13% 87%;
+  --terminal-active: 220 14% 92%;
+  --terminal-error-background: 0 45% 93%;
+  --terminal-error-foreground: 0 62% 40%;
   --radius: 7px;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  font-size: 16px;
+  --background: 0 0% 10%;
+  --foreground: 0 0% 92%;
+  --card: 0 0% 12%;
+  --card-foreground: 0 0% 92%;
+  --popover: 0 0% 14%;
+  --popover-foreground: 0 0% 92%;
+  --primary: 0 0% 92%;
+  --primary-foreground: 0 0% 10%;
+  --secondary: 0 0% 17%;
+  --secondary-foreground: 0 0% 92%;
+  --muted: 0 0% 16%;
+  --muted-foreground: 0 0% 63%;
+  --accent: 0 0% 20%;
+  --accent-foreground: 0 0% 94%;
+  --destructive: 0 63% 52%;
+  --destructive-foreground: 0 0% 98%;
+  --success: 145 55% 48%;
+  --border: 0 0% 23%;
+  --input: 0 0% 25%;
+  --ring: 0 0% 72%;
+  --sidebar: 0 0% 8%;
+  --terminal-background: 225 17% 7%;
+  --terminal-foreground: 220 15% 86%;
+  --terminal-muted: 217 11% 65%;
+  --terminal-border: 220 13% 18%;
+  --terminal-active: 218 15% 15%;
+  --terminal-error-background: 218 14% 18%;
+  --terminal-error-foreground: 0 69% 80%;
 }
 
 * {

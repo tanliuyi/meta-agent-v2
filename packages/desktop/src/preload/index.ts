@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { CHANNELS } from "../shared/channels.ts";
 import type { SessionAttachment, SessionPush, SessionPushPayload, TerminalEvent } from "../shared/contracts.ts";
-import type { DesktopApi } from "../shared/desktop-api.ts";
+import type { DesktopApi, DesktopPlatform } from "../shared/desktop-api.ts";
 
 interface ActiveSessionAttachment {
   attachmentId: string;
@@ -31,7 +31,11 @@ ipcRenderer.on(CHANNELS.sessionsPush, (_event, update: SessionPush) => {
   pendingSessionAttachment?.buffered.push(update);
 });
 
+const platform: DesktopPlatform =
+  process.platform === "win32" || process.platform === "darwin" ? process.platform : "linux";
+
 const desktopApi: DesktopApi = {
+  platform,
   versions: {
     electron: process.versions.electron,
     chrome: process.versions.chrome,

@@ -246,8 +246,8 @@ body.is-resizing-row {
 
 .terminal-panel,
 .bottom-terminal {
-  background: #0f1115;
-  color: #d5d9e0;
+  background: hsl(var(--terminal-background));
+  color: hsl(var(--terminal-foreground));
 }
 .terminal-panel {
   display: grid;
@@ -262,8 +262,8 @@ body.is-resizing-row {
   gap: 7px;
   height: 34px;
   padding: 0 10px;
-  border-bottom: 1px solid #272b33;
-  color: #9aa2af;
+  border-bottom: 1px solid hsl(var(--terminal-border));
+  color: hsl(var(--terminal-muted));
 }
 .terminal-view {
   position: relative;
@@ -283,8 +283,8 @@ body.is-resizing-row {
   bottom: 9px;
   padding: 3px 6px;
   border-radius: 4px;
-  background: #282d35;
-  color: #f0a6a6;
+  background: hsl(var(--terminal-error-background));
+  color: hsl(var(--terminal-error-foreground));
   font-size: 10px;
 }
 
@@ -299,7 +299,7 @@ body.is-resizing-row {
   gap: 4px;
   height: 36px;
   padding: 0 8px;
-  border-bottom: 1px solid #272b33;
+  border-bottom: 1px solid hsl(var(--terminal-border));
 }
 .terminal-tab {
   display: flex;
@@ -308,16 +308,16 @@ body.is-resizing-row {
   height: 27px;
   padding: 0 9px;
   border-radius: 5px;
-  color: #9aa2af;
+  color: hsl(var(--terminal-muted));
   font-size: 11px;
 }
 .terminal-tab.is-active {
-  background: #20242b;
-  color: #eef0f4;
+  background: hsl(var(--terminal-active));
+  color: hsl(var(--terminal-foreground));
 }
 .terminal-close {
   margin-left: auto;
-  color: #9aa2af;
+  color: hsl(var(--terminal-muted));
 }
 .bottom-terminal {
   display: grid;

@@ -69,16 +69,16 @@ export function isDesktopThreadItemForProject(item: ThreadListItemIdentity, proj
   return itemProjectId === projectId;
 }
 
-/** 将 assistant-ui item 映射回当前 Project 的 Pi session，并严格校验边界。 */
+/** 将 assistant-ui item 映射回当前 Project 的 Pi session；删除提交过渡帧允许 catalog 已先移除。 */
 export function resolveDesktopThreadItem(
   item: ThreadListItemIdentity,
   projectId: string,
   threads: readonly Thread[],
-): Thread {
+): Thread | null {
   const remoteId = item.remoteId;
   if (!remoteId) throw new Error(`assistant-ui thread 缺少 remoteId: ${item.id}`);
   const thread = threads.find(({ id }) => id === remoteId);
-  if (!thread) throw new Error(`Desktop session catalog 不包含 assistant-ui thread: ${remoteId}`);
+  if (!thread) return null;
   if (thread.projectId !== projectId) throw new Error(`assistant-ui thread 不属于当前 Project: ${item.id}`);
   return thread;
 }

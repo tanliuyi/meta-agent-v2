@@ -1,16 +1,18 @@
 import { ActionBarPrimitive, AuiIf, ErrorPrimitive, MessagePrimitive, useAuiState } from "@assistant-ui/react";
 import { Check, Copy, RotateCcw } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ReasoningContent, ReasoningRoot, ReasoningText, ReasoningTrigger } from "../../assistant-ui/reasoning.tsx";
 import { StreamdownText } from "../../assistant-ui/streamdown-text.tsx";
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
-import { groupMessagePart, summarizeChainOfThought } from "../message-part-grouping.ts";
+import { createRunGroupPart, hasTextAfterGroup, summarizeChainOfThought } from "../message-part-grouping.ts";
 import { PiNoticeView } from "../pi-notice-view.tsx";
 import { ToolView } from "../tool-view.tsx";
 
-export function AssistantMessage() {
+export function AssistantMessage({ isRunActivityRunning }: { isRunActivityRunning: boolean }) {
   const messageParts = useAuiState((state) => state.message.parts);
   const isMessageRunning = useAuiState((state) => state.message.status?.type === "running");
+  const groupMessagePart = useMemo(() => createRunGroupPart(messageParts), [messageParts]);
+
   const isPersistedPiAssistant = useAuiState((state) => {
     const pi = state.message.metadata.custom.pi;
     return (
@@ -23,10 +25,12 @@ export function AssistantMessage() {
       !state.message.metadata.isOptimistic
     );
   });
+
   const hasCopyableText = useMemo(() => {
     const lastPart = messageParts.at(-1);
     return lastPart?.type === "text" && lastPart.text.trim().length > 0;
   }, [messageParts]);
+
   return (
     <MessagePrimitive.Root
       data-slot="aui-assistant-message-root"
@@ -34,14 +38,20 @@ export function AssistantMessage() {
       className="fade-in slide-in-from-bottom-1 animate-in relative -mb-7 pb-7 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
       <div className="flex flex-col gap-3 text-sm leading-relaxed text-foreground wrap-break-word">
-        <MessagePrimitive.GroupedParts groupBy={groupMessagePart}>
+        <MessagePrimitive.GroupedParts groupBy={groupMessagePart} indicator="never">
           {({ part, children }) => {
             switch (part.type) {
+              case "group-runActivity":
+                return <RunActivityGroup running={isRunActivityRunning}>{children}</RunActivityGroup>;
               case "group-chainOfThought": {
                 const isLatestGroup = part.indices.at(-1) === messageParts.length - 1;
                 const running = part.status.type === "running" || (isMessageRunning && isLatestGroup);
                 return (
-                  <ChainOfThoughtGroup indices={part.indices} running={running}>
+                  <ChainOfThoughtGroup
+                    indices={part.indices}
+                    running={running}
+                    hasFollowingText={hasTextAfterGroup(messageParts, part.indices)}
+                  >
                     {children}
                   </ChainOfThoughtGroup>
                 );
@@ -53,12 +63,6 @@ export function AssistantMessage() {
                 return part.toolUI ?? <ToolView {...part} />;
               case "data":
                 return part.name === "pi-notice" ? <PiNoticeView data={part.data} /> : part.dataRendererUI;
-              case "indicator":
-                return (
-                  <span className="animate-pulse text-muted-foreground" aria-label="Assistant 正在工作">
-                    ●
-                  </span>
-                );
               default:
                 return null;
             }
@@ -104,18 +108,57 @@ export function AssistantMessage() {
   );
 }
 
+export function RunActivityGroup({ running, children }: { running: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const previousRunning = useRef(running);
+
+  useEffect(() => {
+    if (previousRunning.current && !running) setOpen(false);
+    previousRunning.current = running;
+  }, [running]);
+
+  return (
+    <ReasoningRoot
+      variant="ghost"
+      className="aui-run-activity-root"
+      open={running || open}
+      onOpenChange={(nextOpen) => {
+        if (!running) setOpen(nextOpen);
+      }}
+    >
+      <ReasoningTrigger
+        className="aui-run-activity-trigger"
+        label={running ? "正在处理" : "已处理"}
+        active={running}
+        disabled={running}
+      />
+      <ReasoningContent className="aui-run-activity-content text-foreground" fade={false} aria-busy={running}>
+        <div className="aui-run-activity-body flex flex-col gap-3 py-2">{children}</div>
+      </ReasoningContent>
+    </ReasoningRoot>
+  );
+}
+
 function ChainOfThoughtGroup({
   indices,
   running,
+  hasFollowingText,
   children,
 }: {
   indices: readonly number[];
   running: boolean;
+  hasFollowingText: boolean;
   children: ReactNode;
 }) {
   const label = useAuiState((state) => summarizeChainOfThought(state.message.parts, indices));
+  const [wasRunning, setWasRunning] = useState(running);
+
+  useEffect(() => {
+    if (running) setWasRunning(true);
+  }, [running]);
+
   return (
-    <ReasoningRoot variant="ghost" streaming={running}>
+    <ReasoningRoot variant="ghost" autoOpen={wasRunning && !hasFollowingText} streaming={running}>
       <ReasoningTrigger label={label} active={running} />
       <ReasoningContent className="text-foreground" aria-busy={running}>
         <ReasoningText>{children}</ReasoningText>

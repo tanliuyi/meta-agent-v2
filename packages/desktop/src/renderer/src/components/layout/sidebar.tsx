@@ -1,5 +1,5 @@
 import { ThreadListPrimitive } from "@assistant-ui/react";
-import { CircleHelp, FolderPlus, Plus, Search, Settings } from "lucide-react";
+import { CircleHelp, Plus, Search } from "lucide-react";
 import { memo, useRef, useState } from "react";
 import { useDesktopNavigation } from "../../state/desktop-context.tsx";
 import {
@@ -7,6 +7,8 @@ import {
   runControlledThreadAction,
   runPendingThreadAction,
 } from "../../state/thread-list-commands.ts";
+import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
+import { ThemePicker } from "../settings/theme-picker.tsx";
 import { Button } from "../ui/button.tsx";
 import { ScrollArea } from "../ui/scroll-area.tsx";
 import { ProjectList } from "./project-list.tsx";
@@ -31,6 +33,7 @@ export const Sidebar = memo(function Sidebar() {
   return (
     <ThreadListPrimitive.Root asChild>
       <aside className="sidebar">
+        {window.desktop.platform === "darwin" ? <div className="macos-titlebar-space" aria-hidden="true" /> : null}
         <div className="sidebar-brand">
           <strong>Meta Agent</strong>
           <Button variant="ghost" size="icon" aria-label="搜索">
@@ -59,9 +62,16 @@ export const Sidebar = memo(function Sidebar() {
 
         <div className="sidebar-section-heading">
           <span>项目</span>
-          <Button variant="ghost" size="icon" aria-label="添加项目" onClick={() => void desktop.chooseProject()}>
-            <FolderPlus size={12} />
-          </Button>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            aria-label="添加项目"
+            tooltip="添加项目"
+            side="top"
+            onClick={() => void desktop.chooseProject()}
+          >
+            <Plus />
+          </TooltipIconButton>
         </div>
         <ScrollArea className="sidebar-projects">
           <ProjectList
@@ -73,10 +83,7 @@ export const Sidebar = memo(function Sidebar() {
           />
         </ScrollArea>
         <div className="sidebar-footer">
-          <button type="button">
-            <Settings size={15} />
-            设置
-          </button>
+          <ThemePicker />
           <Button variant="ghost" size="icon" aria-label="帮助">
             <CircleHelp size={15} />
           </Button>

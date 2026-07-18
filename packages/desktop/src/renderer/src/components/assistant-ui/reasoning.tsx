@@ -186,7 +186,12 @@ function ReasoningTrigger({
   );
 }
 
-function ReasoningContent({ className, children, ...props }: React.ComponentProps<typeof CollapsibleContent>) {
+function ReasoningContent({
+  className,
+  children,
+  fade = true,
+  ...props
+}: React.ComponentProps<typeof CollapsibleContent> & { fade?: boolean }) {
   const isPreview = useContext(ReasoningPreviewContext);
 
   return (
@@ -205,9 +210,9 @@ function ReasoningContent({ className, children, ...props }: React.ComponentProp
       )}
       {...props}
     >
-      <ReasoningFade side="top" />
+      {fade ? <ReasoningFade side="top" /> : null}
       {children}
-      {isPreview ? <ReasoningFade /> : null}
+      {fade && isPreview ? <ReasoningFade /> : null}
     </CollapsibleContent>
   );
 }

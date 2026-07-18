@@ -1,11 +1,15 @@
 .app-frame {
   display: grid;
-  grid-template-rows: 36px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   background: hsl(var(--background));
+}
+
+.app-frame[data-platform="win32"] {
+  grid-template-rows: 36px minmax(0, 1fr);
 }
 
 .windows-header {
@@ -17,7 +21,7 @@
   min-width: 0;
   height: 36px;
   border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.48);
+  background: hsl(var(--sidebar));
   user-select: none;
 }
 
@@ -107,7 +111,17 @@
   min-width: 0;
   min-height: 0;
   border-right: 1px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.48);
+  background: hsl(var(--sidebar));
+}
+
+.app-frame[data-platform="darwin"] .sidebar {
+  grid-template-rows: 48px auto auto auto minmax(0, 1fr) auto;
+}
+
+.macos-titlebar-space {
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
 }
 
 .sidebar-brand,
@@ -118,9 +132,10 @@
 }
 
 .sidebar-brand {
+  box-sizing: content-box;
   justify-content: space-between;
-  height: 54px;
-  padding: 0 12px 0 16px;
+  height: 32px;
+  padding: 4px 12px 4px 16px;
 }
 
 .sidebar-brand strong {
@@ -128,7 +143,7 @@
   font-weight: 680;
 }
 .sidebar-actions {
-  padding: 4px 8px 14px;
+  padding: 4px 8px;
 }
 .sidebar-actions button,
 .sidebar-footer > button:first-child {
@@ -157,11 +172,12 @@
 }
 
 .sidebar-section-heading {
+  box-sizing: content-box;
   justify-content: space-between;
-  height: 34px;
-  padding: 0 9px 0 16px;
+  height: 32px;
+  padding: 4px 14px 4px 16px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .sidebar-projects {
@@ -249,6 +265,18 @@
   padding: 0 10px 0 16px;
   border-bottom: 1px solid hsl(var(--border));
 }
+
+.app-frame[data-platform="darwin"] .topbar {
+  -webkit-app-region: drag;
+  app-region: drag;
+  user-select: none;
+}
+
+.app-frame[data-platform="darwin"] .topbar :is(button, a, input, select, textarea, [role="button"]) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 .topbar-title {
   display: flex;
   align-items: center;

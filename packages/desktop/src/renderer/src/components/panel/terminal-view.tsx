@@ -1,12 +1,28 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
+import { type ITheme, Terminal } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TerminalEvent } from "../../../../shared/contracts.ts";
 import { useDesktop } from "../../state/desktop-context.tsx";
+import { type ResolvedTheme, useTheme } from "../../state/theme.tsx";
 
 export interface TerminalViewHandle {
   restart(): Promise<void>;
 }
+
+const TERMINAL_THEMES: Record<ResolvedTheme, ITheme> = {
+  light: {
+    background: "#f9fafb",
+    foreground: "#272b32",
+    cursor: "#272b32",
+    selectionBackground: "#d9dde4",
+  },
+  dark: {
+    background: "#0f1115",
+    foreground: "#d5d9e0",
+    cursor: "#eef0f4",
+    selectionBackground: "#39414d",
+  },
+};
 
 /** 将当前 session 的 PTY 快照与增量事件渲染到 xterm。 */
 export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string }>(function TerminalView(
@@ -14,6 +30,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
   ref,
 ) {
   const { snapshot } = useDesktop();
+  const { resolvedTheme } = useTheme();
   const projectId = snapshot?.projectId;
   const threadId = snapshot?.threadId;
   const container = useRef<HTMLDivElement>(null);
@@ -53,12 +70,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
       lineHeight: 1.25,
       letterSpacing: 0,
       scrollback: 5000,
-      theme: {
-        background: "#0f1115",
-        foreground: "#d5d9e0",
-        cursor: "#eef0f4",
-        selectionBackground: "#39414d",
-      },
+      theme: TERMINAL_THEMES[resolvedTheme],
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -132,6 +144,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
       terminal.dispose();
     };
   }, [projectId, terminalId, threadId]);
+
+  useEffect(() => {
+    if (terminalRef.current) terminalRef.current.options.theme = TERMINAL_THEMES[resolvedTheme];
+  }, [resolvedTheme]);
 
   return (
     <div className="terminal-view">

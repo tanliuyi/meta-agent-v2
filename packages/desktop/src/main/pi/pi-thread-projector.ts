@@ -162,6 +162,7 @@ export class PiThreadProjector {
         this.activeTurnId = undefined;
         return;
       case "message_start":
+        if (this.phase === "retrying" && event.message.role === "assistant") this.setPhase("running");
         this.startMessage(event.message);
         return;
       case "message_update":

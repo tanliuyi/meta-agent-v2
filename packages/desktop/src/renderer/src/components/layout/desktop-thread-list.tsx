@@ -174,7 +174,7 @@ interface DesktopThreadListItemProps {
 function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   if (!isDesktopThreadItemForProject(props.item, props.project.id)) return null;
   const thread = resolveDesktopThreadItem(props.item, props.project.id, props.threads);
-  if (!props.visibleThreadIds.has(thread.id)) return null;
+  if (!thread || !props.visibleThreadIds.has(thread.id)) return null;
   const isRenaming = props.renaming?.threadId === thread.id;
   const isSwitching = props.navigationDisabled || props.pendingKeys.has(`switch:${thread.id}`);
   const isRenamingPending = props.pendingKeys.has(`rename:${thread.id}`);

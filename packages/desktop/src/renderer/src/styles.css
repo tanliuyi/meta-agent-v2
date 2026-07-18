@@ -34,6 +34,8 @@
   --color-accent-foreground: hsl(var(--accent-foreground));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-sidebar: hsl(var(--sidebar));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
@@ -71,6 +73,8 @@
     @apply border-border outline-ring/50;
   }
 }
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
 

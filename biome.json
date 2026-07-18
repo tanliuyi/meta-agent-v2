@@ -52,6 +52,7 @@
 			"packages/desktop/**/*.css",
 			"packages/desktop/**/*.json",
 			"packages/coding-agent/examples/**/*.ts",
+			"!packages/desktop/out/**/*",
 			"!**/node_modules/**/*",
 			"!**/test-sessions.ts",
 			"!**/models.generated.ts",

@@ -71,9 +71,7 @@ describe("thread-list primitives command bridge", () => {
     expect(() => resolveDesktopThreadItem(threadListItem({ remoteId: undefined }), "project", [regularThread])).toThrow(
       "assistant-ui thread 缺少 remoteId",
     );
-    expect(() => resolveDesktopThreadItem(threadListItem({ remoteId: "missing" }), "project", [regularThread])).toThrow(
-      "Desktop session catalog 不包含",
-    );
+    expect(resolveDesktopThreadItem(threadListItem({ remoteId: "missing" }), "project", [regularThread])).toBeNull();
     expect(() => resolveDesktopThreadItem(threadListItem(), "other-project", [regularThread])).toThrow(
       "assistant-ui thread 不属于当前 Project",
     );
