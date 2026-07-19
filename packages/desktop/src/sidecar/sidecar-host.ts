@@ -51,12 +51,24 @@ export function createSidecarCommandScheduler(): (
   execute: () => Promise<void>,
 ) => Promise<void> {
   let commandTail = Promise.resolve();
+  let runningPrompts = 0;
   return async (commandType, execute) => {
     if (REENTRANT_CONTROL_COMMANDS.has(commandType)) {
       await execute();
       return;
     }
-    const scheduled = commandTail.then(execute);
+    if (commandType === "prompt" && runningPrompts > 0) {
+      await execute();
+      return;
+    }
+    const scheduled = commandTail.then(async () => {
+      if (commandType === "prompt") runningPrompts += 1;
+      try {
+        await execute();
+      } finally {
+        if (commandType === "prompt") runningPrompts -= 1;
+      }
+    });
     commandTail = scheduled.catch(() => undefined);
     await scheduled;
   };

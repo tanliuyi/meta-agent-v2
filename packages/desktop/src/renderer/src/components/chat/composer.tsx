@@ -1,6 +1,4 @@
 import { ComposerPrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
-import { TextButton } from "@renderer/shared/ui/text-button";
-import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
 import { type FormEvent, useCallback, useMemo, useState } from "react";
 import type { SessionControlState } from "../../../../shared/contracts.ts";
 import { usePiThreadPhase } from "../../runtime/use-pi-thread-snapshot.ts";
@@ -9,6 +7,7 @@ import { ComposerAddAttachment } from "../assistant-ui/attachment/composer-add-a
 import { ComposerAttachments } from "../assistant-ui/attachment/composer-attachments.tsx";
 import { ComposerEditorSync } from "./composer-editor-sync.tsx";
 import { ComposerInput } from "./composer-input.tsx";
+import { ComposerQueue } from "./composer-queue.tsx";
 import { ComposerSubmitControl } from "./composer-submit-control.tsx";
 import type { ComposerProps } from "./composer-types.ts";
 import { ComposerWidgets } from "./composer-widgets.tsx";
@@ -32,7 +31,6 @@ export function Composer(props: ComposerProps) {
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const piPhase = usePiThreadPhase();
   const isCancelable = isRunning || piPhase === "compacting" || piPhase === "tree-navigation";
-  const queueCount = useAuiState((state) => state.composer.queue.length);
   const extensionWidgets = props.mode === "session" ? props.widgets : EMPTY_WIDGETS;
   const aboveWidgets = useMemo(
     () => extensionWidgets.filter(({ placement }) => placement === "aboveEditor"),
@@ -101,15 +99,6 @@ export function Composer(props: ComposerProps) {
     submitRunning();
   };
 
-  const clearQueue = async () => {
-    if (props.mode !== "session") return;
-    try {
-      await props.onClearQueue();
-    } catch (value) {
-      reportError(value);
-    }
-  };
-
   const readiness = props.mode === "draft" ? props.config?.readiness : props.readiness;
   const readinessError = readiness?.state === "ready" ? null : readiness?.message;
   const configLoading = props.mode === "draft" && props.configLoading;
@@ -127,14 +116,7 @@ export function Composer(props: ComposerProps) {
           onError={reportError}
         />
       ) : null}
-      {props.mode === "session" && queueCount > 0 ? (
-        <div className="queue-strip" aria-live="polite">
-          <span>{queueCount} 条消息正在排队</span>
-          <TextButton className="text-xs" onClick={() => void clearQueue()}>
-            <RotateCcw /> 清空
-          </TextButton>
-        </div>
-      ) : null}
+      {props.mode === "session" ? <ComposerQueue onClear={props.onClearQueue} onError={reportError} /> : null}
 
       <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
         <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>

@@ -30,7 +30,7 @@ describe("sidecar command scheduling", () => {
     await prompt;
   });
 
-  it("keeps mutating commands serialized", async () => {
+  it("运行中的 prompt 立即接收 steer/follow-up，同时继续串行化其他变更命令", async () => {
     const schedule = createSidecarCommandScheduler();
     let releaseFirst!: () => void;
     const firstBlocked = new Promise<void>((resolve) => {
@@ -43,14 +43,18 @@ describe("sidecar command scheduling", () => {
       await firstBlocked;
       calls.push("prompt-end");
     });
+    await vi.waitFor(() => expect(calls).toEqual(["prompt-start"]));
+    const steer = schedule("prompt", async () => {
+      calls.push("steer");
+    });
     const second = schedule("setThinking", async () => {
       calls.push("set-thinking");
     });
-    await Promise.resolve();
+    await steer;
 
-    expect(calls).toEqual(["prompt-start"]);
+    expect(calls).toEqual(["prompt-start", "steer"]);
     releaseFirst();
     await Promise.all([first, second]);
-    expect(calls).toEqual(["prompt-start", "prompt-end", "set-thinking"]);
+    expect(calls).toEqual(["prompt-start", "steer", "prompt-end", "set-thinking"]);
   });
 });

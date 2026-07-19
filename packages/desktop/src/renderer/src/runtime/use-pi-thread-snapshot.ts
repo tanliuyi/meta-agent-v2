@@ -16,3 +16,11 @@ export function usePiQueueCount() {
     () => piSessionBus.store.getSnapshot().queue.length,
   );
 }
+
+export function usePiQueueItems() {
+  return useSyncExternalStore(
+    piSessionBus.store.subscribe,
+    () => piSessionBus.store.getSnapshot().queue,
+    () => piSessionBus.store.getSnapshot().queue,
+  );
+}

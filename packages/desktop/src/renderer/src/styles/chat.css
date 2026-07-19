@@ -20,7 +20,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  width: fit-content;
   padding: 4px 0;
   border: 0;
   color: inherit;
@@ -228,17 +228,75 @@
   background: hsl(var(--accent));
   color: hsl(var(--foreground));
 }
-.queue-strip {
+.composer-queue {
+  display: grid;
+  gap: 4px;
+  margin: 0 14px -10px;
+  padding: 7px 10px 16px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border) / 0.8);
+  border-bottom: 0;
+  border-radius: var(--shape-radius-lg) var(--shape-radius-lg) 0 0;
+  background: color-mix(in oklab, var(--composer-background) 92%, hsl(var(--background)));
+  box-shadow: var(--elevation-composer);
+}
+.composer-queue-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin: 0 16px -12px;
-  padding: 8px 12px 20px;
-  border-radius: var(--shape-radius-xl) var(--shape-radius-xl) 0 0;
-  background: hsl(var(--muted) / 0.5);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  backdrop-filter: blur(16px) saturate(140%);
+  min-height: 22px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 550;
+}
+.composer-queue-count {
+  min-width: 18px;
+  margin-left: 5px;
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+}
+.composer-queue-clear {
+  margin-left: auto;
+  font-size: 11px;
+}
+.composer-queue-list {
+  display: grid;
+  max-height: 104px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.composer-queue-item {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  border-top: 1px solid hsl(var(--border) / 0.55);
   font-size: 12px;
+}
+.composer-queue-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+}
+.composer-queue-mode::before {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--shape-radius-round);
+  background: currentColor;
+  content: "";
+}
+.composer-queue-item[data-queue-mode="steer"] .composer-queue-mode {
+  color: hsl(var(--primary));
+}
+.composer-queue-prompt {
+  min-width: 0;
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .composer-error {
   margin: 5px 8px 0;
