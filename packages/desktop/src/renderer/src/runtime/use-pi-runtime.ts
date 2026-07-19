@@ -1,5 +1,6 @@
 import {
   type AssistantRuntime,
+  type ExternalStoreAdapter,
   type ExternalStoreThreadListAdapter,
   type ExternalThreadQueueAdapter,
   type ThreadMessage,
@@ -13,12 +14,12 @@ import type {
   Thread,
   WorkbenchState,
 } from "../../../shared/contracts.ts";
-import { resolveDesktopAdapterThread } from "../state/thread-list-commands.ts";
 import { type ComposerReseed, prepareDraftSubmission, reseedComposer } from "./draft-session.ts";
 import { imageAttachmentAdapter } from "./image-attachments.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
 import { piSessionBus } from "./pi-session-bus.ts";
+import { resolveDesktopAdapterThread, threadAdapterId } from "./thread-adapter.ts";
 
 export interface PreparedThread {
   bootstrap: SessionBootstrap;
@@ -33,14 +34,11 @@ export interface DesktopThreadActions {
   open(project: Project, threadId: string): Promise<PreparedThread>;
   commit(prepared: PreparedThread): void;
   enterDraft(): Promise<void>;
-  submitDraft(
-    input: {
-      project: Project;
-      model: SessionCreateInput["model"];
-      thinkingLevel: SessionCreateInput["thinkingLevel"];
-    },
-    onPrepared: () => void,
-  ): Promise<PreparedDraftSubmission>;
+  submitDraft(input: {
+    project: Project;
+    model: SessionCreateInput["model"];
+    thinkingLevel: SessionCreateInput["thinkingLevel"];
+  }): Promise<PreparedDraftSubmission>;
   discardDraft(): Promise<PreparedThread | null>;
   rename(project: Project, threadId: string, title: string): Promise<void>;
   archive(project: Project, threadId: string, archived: boolean): Promise<void>;
@@ -191,23 +189,41 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   );
   const canMutateBranch = snapshot.phase === "idle" && !options.isSendDisabled && Boolean(targetRef.current);
   const isAgentRunning = snapshot.phase === "running" || snapshot.phase === "retrying";
-  const runtime = useExternalStoreRuntime<ThreadMessage>({
-    messageRepository: repository,
-    isRunning: isAgentRunning,
-    isLoading: snapshot.phase === "compacting" || snapshot.phase === "tree-navigation",
-    isSendDisabled:
-      options.isSendDisabled ||
-      snapshot.phase === "retrying" ||
-      snapshot.phase === "compacting" ||
-      snapshot.phase === "tree-navigation",
-    onNew: coordinator.rejectUnexpectedOnNew,
-    queue,
-    onEdit: canMutateBranch ? coordinator.edit : undefined,
-    onReload: canMutateBranch ? coordinator.reload : undefined,
-    onCancel: snapshot.phase === "idle" ? undefined : coordinator.cancel,
-    adapters: { attachments: options.isSendDisabled ? undefined : imageAttachmentAdapter, threadList },
-    unstable_enableToolInvocations: false,
-  });
+  const isLoading = snapshot.phase === "compacting" || snapshot.phase === "tree-navigation";
+  const isSendDisabled =
+    options.isSendDisabled ||
+    snapshot.phase === "retrying" ||
+    snapshot.phase === "compacting" ||
+    snapshot.phase === "tree-navigation";
+  /** assistant-ui 按 adapter identity 短路；无关 Desktop render 必须复用同一个对象。 */
+  const runtimeAdapter = useMemo<ExternalStoreAdapter<ThreadMessage>>(
+    () => ({
+      messageRepository: repository,
+      isRunning: isAgentRunning,
+      isLoading,
+      isSendDisabled,
+      onNew: coordinator.rejectUnexpectedOnNew,
+      queue,
+      onEdit: canMutateBranch ? coordinator.edit : undefined,
+      onReload: canMutateBranch ? coordinator.reload : undefined,
+      onCancel: snapshot.phase === "idle" ? undefined : coordinator.cancel,
+      adapters: { attachments: options.isSendDisabled ? undefined : imageAttachmentAdapter, threadList },
+      unstable_enableToolInvocations: false,
+    }),
+    [
+      canMutateBranch,
+      coordinator,
+      isAgentRunning,
+      isLoading,
+      isSendDisabled,
+      options.isSendDisabled,
+      queue,
+      repository,
+      snapshot.phase,
+      threadList,
+    ],
+  );
+  const runtime = useExternalStoreRuntime<ThreadMessage>(runtimeAdapter);
   runtimeRef.current = runtime;
 
   useEffect(
@@ -247,6 +263,12 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         piSessionBus.attach(committed.projectId, committed.threadId),
         window.desktop.workbench.get(committed.projectId, committed.threadId),
       ]);
+      if (generation !== switchGeneration.current) return null;
+      const currentCommitted = committedThreadRef.current;
+      if (currentCommitted?.projectId !== committed.projectId || currentCommitted.threadId !== committed.threadId) {
+        await resetToDraft();
+        return null;
+      }
       targetRef.current = { ...committed, generation };
       piSessionBus.commit(bootstrap);
       window.desktop.sessions.flush();
@@ -265,8 +287,6 @@ export function usePiRuntime(options: PiRuntimeOptions): {
           const prepared = readRef(preparedRef);
           if (!prepared || prepared.bootstrap.threadId !== threadId)
             throw new Error("assistant-ui thread hydrate 未完成");
-          committedThreadRef.current = { projectId: project.id, threadId };
-          draftModeRef.current = false;
           return prepared;
         } catch (error) {
           if (generation === switchGeneration.current) {
@@ -280,6 +300,11 @@ export function usePiRuntime(options: PiRuntimeOptions): {
       },
       commit(prepared) {
         piSessionBus.commit(prepared.bootstrap);
+        committedThreadRef.current = {
+          projectId: prepared.bootstrap.projectId,
+          threadId: prepared.bootstrap.threadId,
+        };
+        draftModeRef.current = false;
         window.desktop.sessions.flush();
       },
       async enterDraft() {
@@ -289,9 +314,8 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         draftModeRef.current = true;
         await resetToDraft();
       },
-      async submitDraft(input, onPrepared) {
+      async submitDraft(input) {
         const submission = await prepareDraftSubmission(runtime.thread.composer.getState());
-        onPrepared();
         const { project } = input;
         const generation = ++switchGeneration.current;
         targetGenerationRef.current = generation;
@@ -359,7 +383,25 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         else await item.unarchive();
       },
       async remove(project, threadId) {
+        const generation = switchGeneration.current;
         await runtime.threads.getItemById(threadAdapterId(project.id, threadId)).delete();
+        const pendingReseed = pendingReseedRef.current;
+        if (pendingReseed?.projectId === project.id && pendingReseed.threadId === threadId) {
+          pendingReseedRef.current = null;
+        }
+        const created = createdThreadRef.current;
+        if (created?.projectId === project.id && created.threadId === threadId) createdThreadRef.current = null;
+
+        const committed = committedThreadRef.current;
+        if (committed?.projectId !== project.id || committed.threadId !== threadId) return;
+        committedThreadRef.current = null;
+        draftModeRef.current = true;
+
+        const target = targetRef.current;
+        if (target?.projectId !== project.id || target.threadId !== threadId) return;
+        // 仅原 generation 仍拥有 target 时 detach，避免中断删除期间启动的新 attachment。
+        if (generation === switchGeneration.current && target.generation === generation) await resetToDraft();
+        else targetRef.current = null;
       },
       async clearQueue() {
         await coordinator.clearQueue(piSessionBus.store.getSnapshot().queue);
@@ -380,10 +422,6 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   }, [coordinator, runtime]);
 
   return { runtime, actions };
-}
-
-function threadAdapterId(projectId: string, threadId: string): string {
-  return `${projectId}:${threadId}`;
 }
 
 function readRef<T>(reference: { current: T | null }): T | null {

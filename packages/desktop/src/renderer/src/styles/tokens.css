@@ -1,0 +1,243 @@
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-info: hsl(var(--info));
+  --color-info-foreground: hsl(var(--info-foreground));
+  --color-overlay: hsl(var(--overlay));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 5px);
+}
+
+@theme {
+  --animate-collapsible-down: collapsible-down var(--animation-duration, var(--motion-duration-standard))
+    var(--motion-ease-standard);
+  --animate-collapsible-up: collapsible-up var(--animation-duration, var(--motion-duration-standard))
+    var(--motion-ease-standard);
+
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+@layer theme {
+  :root {
+    --font-family-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-family-mono: "Cascadia Mono", Consolas, monospace;
+
+    --type-size-caption: 10px;
+    --type-size-meta: 11px;
+    --type-size-control: 12px;
+    --type-size-ui: 13px;
+    --type-size-body: 14px;
+    --type-size-title: 20px;
+    --type-line-compact: 1.25;
+    --type-line-normal: 1.5;
+    --type-line-relaxed: 1.6;
+
+    --space-1: 2px;
+    --space-2: 4px;
+    --space-3: 6px;
+    --space-4: 8px;
+    --space-5: 10px;
+    --space-6: 12px;
+    --space-7: 16px;
+    --space-8: 24px;
+    --space-9: 32px;
+
+    --control-size-xs: 24px;
+    --control-size-sm: 28px;
+    --control-size-md: 32px;
+    --control-size-lg: 36px;
+
+    --radius: 7px;
+    --shape-radius-xs: 4px;
+    --shape-radius-sm: 5px;
+    --shape-radius-md: 7px;
+    --shape-radius-lg: 9px;
+    --shape-radius-xl: 12px;
+    --shape-radius-round: 999px;
+
+    --motion-duration-fast: 120ms;
+    --motion-duration-standard: 200ms;
+    --motion-duration-slow: 300ms;
+    --motion-duration-spinner: 800ms;
+    --motion-ease-standard: ease-out;
+    --motion-ease-emphasized: cubic-bezier(0.32, 0.72, 0, 1);
+    --motion-ease-linear: linear;
+
+    --stack-resize-handle: 5;
+    --stack-sticky-control: 10;
+    --stack-workbench-overlay: 30;
+    --stack-suggestions: 40;
+    --stack-popover: 50;
+    --stack-dialog: 60;
+    --stack-tooltip: 70;
+    --stack-menu: 80;
+    --stack-blocker: 90;
+    --stack-notification: 100;
+
+    --layout-window-header-height: 36px;
+    --layout-window-control-width: 46px;
+    --layout-topbar-height: 48px;
+    --layout-sidebar-width: 280px;
+    --layout-sidebar-width-compact: 236px;
+    --layout-settings-sidebar-width: 224px;
+    --layout-thread-max-width: 44rem;
+    --composer-radius: 1.5rem;
+    --composer-padding: var(--space-4);
+    --composer-background: color-mix(in oklab, hsl(var(--muted)) 30%, hsl(var(--background)));
+    --layout-workbench-min-width: 360px;
+    --layout-workbench-max-width: 760px;
+    --layout-workbench-default-width: 360px;
+    --layout-terminal-min-height: 160px;
+    --layout-terminal-max-height: 58vh;
+    --layout-terminal-default-height: 280px;
+
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 1px;
+  }
+
+  html[data-theme="light"],
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --background: 0 0% 100%;
+    --foreground: 220 10% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 10% 10%;
+    --primary: 220 9% 14%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 9% 14%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 7% 43%;
+    --accent: 220 13% 94%;
+    --accent-foreground: 220 9% 14%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 145 70% 31%;
+    --warning: 38 92% 40%;
+    --warning-foreground: 36 100% 12%;
+    --info: 210 80% 45%;
+    --info-foreground: 0 0% 100%;
+    --border: 220 13% 89%;
+    --input: 220 13% 89%;
+    --ring: 220 9% 24%;
+    --sidebar: 220 14% 97%;
+    --terminal-background: 220 20% 98%;
+    --terminal-foreground: 220 15% 18%;
+    --terminal-muted: 220 8% 45%;
+    --terminal-border: 220 13% 87%;
+    --terminal-active: 220 14% 92%;
+    --terminal-error-background: 0 45% 93%;
+    --terminal-error-foreground: 0 62% 40%;
+    --terminal-cursor: 220 15% 18%;
+    --terminal-selection: 218 15% 87%;
+    --window-close-background: 4 75% 44%;
+    --window-close-background-active: 4 78% 38%;
+    --window-close-foreground: 0 0% 100%;
+    --overlay: 220 10% 10%;
+    --focus-ring-color: hsl(var(--ring) / 0.35);
+    --selection-background: hsl(var(--primary) / 0.14);
+    --scrollbar-thumb: hsl(var(--foreground) / 0.18);
+    --elevation-popover: 0 10px 30px hsl(var(--foreground) / 0.12);
+    --elevation-workbench: -12px 0 30px hsl(var(--foreground) / 0.08);
+    --elevation-composer: 0 4px 16px -8px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+    --elevation-composer-focus: 0 6px 24px -8px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.05);
+  }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
+    --background: 0 0% 10%;
+    --foreground: 0 0% 92%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 92%;
+    --popover: 0 0% 14%;
+    --popover-foreground: 0 0% 92%;
+    --primary: 0 0% 92%;
+    --primary-foreground: 0 0% 10%;
+    --secondary: 0 0% 17%;
+    --secondary-foreground: 0 0% 92%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 63%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 0 0% 94%;
+    --destructive: 0 63% 52%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 145 55% 48%;
+    --warning: 43 96% 56%;
+    --warning-foreground: 36 100% 10%;
+    --info: 210 85% 65%;
+    --info-foreground: 220 30% 10%;
+    --border: 0 0% 23%;
+    --input: 0 0% 25%;
+    --ring: 0 0% 72%;
+    --sidebar: 0 0% 8%;
+    --terminal-background: 225 17% 7%;
+    --terminal-foreground: 220 15% 86%;
+    --terminal-muted: 217 11% 65%;
+    --terminal-border: 220 13% 18%;
+    --terminal-active: 218 15% 15%;
+    --terminal-error-background: 218 14% 18%;
+    --terminal-error-foreground: 0 69% 80%;
+    --terminal-cursor: 220 17% 95%;
+    --terminal-selection: 215 15% 26%;
+    --window-close-background: 4 75% 44%;
+    --window-close-background-active: 4 78% 38%;
+    --window-close-foreground: 0 0% 100%;
+    --overlay: 0 0% 0%;
+    --focus-ring-color: hsl(var(--ring) / 0.5);
+    --selection-background: hsl(var(--primary) / 0.18);
+    --scrollbar-thumb: hsl(var(--foreground) / 0.24);
+    --elevation-popover: 0 12px 32px rgb(0 0 0 / 0.42);
+    --elevation-workbench: -12px 0 30px rgb(0 0 0 / 0.3);
+    --elevation-composer: 0 1px 2px rgb(0 0 0 / 0.3);
+    --elevation-composer-focus: 0 2px 10px rgb(0 0 0 / 0.35);
+  }
+}
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));

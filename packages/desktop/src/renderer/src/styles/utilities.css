@@ -1,0 +1,27 @@
+@layer utilities {
+  .desktop-drag-region {
+    -webkit-app-region: drag;
+    app-region: drag;
+    user-select: none;
+  }
+
+  .desktop-no-drag-region {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
+  .desktop-focus-ring:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  body.is-resizing-column {
+    cursor: col-resize;
+    user-select: none;
+  }
+
+  body.is-resizing-row {
+    cursor: row-resize;
+    user-select: none;
+  }
+}

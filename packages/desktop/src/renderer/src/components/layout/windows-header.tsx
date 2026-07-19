@@ -1,4 +1,7 @@
-import { Copy, Minus, Square, X } from "lucide-react";
+import Copy from "lucide-react/dist/esm/icons/copy.mjs";
+import Minus from "lucide-react/dist/esm/icons/minus.mjs";
+import Square from "lucide-react/dist/esm/icons/square.mjs";
+import X from "lucide-react/dist/esm/icons/x.mjs";
 import { useEffect, useState } from "react";
 
 interface WindowsHeaderProps {

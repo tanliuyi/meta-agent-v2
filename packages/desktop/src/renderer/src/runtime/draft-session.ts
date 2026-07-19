@@ -60,10 +60,11 @@ export async function prepareDraftSubmission(
 ): Promise<PreparedComposerSubmission> {
   if (!state.text.trim() && state.attachments.length === 0) throw new Error("请输入消息或添加图片");
 
-  const attachments: CompleteAttachment[] = [];
-  for (const attachment of state.attachments) {
-    attachments.push(isCompleteAttachment(attachment) ? attachment : await completeAttachment(attachment));
-  }
+  const attachments = await Promise.all(
+    state.attachments.map((attachment) =>
+      isCompleteAttachment(attachment) ? Promise.resolve(attachment) : completeAttachment(attachment),
+    ),
+  );
   const reseedAttachments = attachments.map<CreateAttachment>(({ id, type, name, contentType, content }) => ({
     id,
     type,

@@ -1,18 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
+import { resolveDesktopAdapterThread } from "../src/renderer/src/runtime/thread-adapter.ts";
 import {
   COLLAPSED_THREAD_COUNT,
   isDesktopThreadItemForProject,
+  isThreadListExpanded,
   nextRegularThreadId,
   nextThreadVisibleLimit,
   normalizeThreadTitle,
   preventPrimitiveThreadAction,
-  resolveDesktopAdapterThread,
   resolveDesktopThreadItem,
   runControlledThreadAction,
   runPendingThreadAction,
   shouldOpenThread,
   type ThreadListItemIdentity,
-  visibleRegularThreadIds,
+  visibleThreadsByArchiveState,
 } from "../src/renderer/src/state/thread-list-commands.ts";
 import type { Project, Thread } from "../src/shared/contracts.ts";
 
@@ -144,7 +145,14 @@ describe("thread-list primitives command bridge", () => {
     expect(nextThreadVisibleLimit(25, 30)).toBe(30);
   });
 
-  it("可见列表保持 catalog 顺序并排除归档会话", () => {
+  it("列表数量缩减到折叠阈值后不保留无效的展开状态", () => {
+    expect(isThreadListExpanded(15, 6)).toBe(true);
+    expect(isThreadListExpanded(15, COLLAPSED_THREAD_COUNT)).toBe(false);
+    expect(isThreadListExpanded(15, 3)).toBe(false);
+    expect(isThreadListExpanded(COLLAPSED_THREAD_COUNT, 30)).toBe(false);
+  });
+
+  it("常规与归档列表分别保持 catalog 顺序，并为归档恢复保留入口", () => {
     const threads = Array.from(
       { length: 8 },
       (_, index): Thread => ({
@@ -154,12 +162,15 @@ describe("thread-list primitives command bridge", () => {
     );
     threads.splice(2, 0, archivedThread);
 
-    expect([...visibleRegularThreadIds(threads, COLLAPSED_THREAD_COUNT)]).toEqual([
+    expect(visibleThreadsByArchiveState(threads, false, COLLAPSED_THREAD_COUNT).map(({ id }) => id)).toEqual([
       "regular-0",
       "regular-1",
       "regular-2",
       "regular-3",
       "regular-4",
+    ]);
+    expect(visibleThreadsByArchiveState(threads, true, COLLAPSED_THREAD_COUNT).map(({ id }) => id)).toEqual([
+      archivedThread.id,
     ]);
   });
 });

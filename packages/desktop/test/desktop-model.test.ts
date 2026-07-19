@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { desktopReducer, INITIAL_STATE } from "../src/renderer/src/state/desktop-model.ts";
 import {
-  desktopReducer,
-  INITIAL_STATE,
   selectActiveThreadId,
   selectNavigationProjectId,
   selectNavigationThreadId,
-} from "../src/renderer/src/state/desktop-model.ts";
+} from "../src/renderer/src/state/desktop-selectors.ts";
 import type {
   DraftSessionConfig,
   Project,
@@ -446,6 +445,57 @@ describe("desktop reducer", () => {
       configLoading: false,
       phase: "editing",
     });
+  });
+
+  it("删除 Project/thread 时清理 session cache 与匹配的 pending load", () => {
+    const targetThread = { ...thread, id: "target-thread" };
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-loaded",
+      project,
+      threads: [thread, targetThread],
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: createBootstrap(1, "会话"),
+      workbench: createWorkbench(),
+    });
+    state = desktopReducer(state, { type: "thread-removed", projectId: project.id, threadId: thread.id });
+
+    expect(state.controls).not.toHaveProperty("project:thread");
+    expect(state.workbenches).not.toHaveProperty("project:thread");
+
+    state = desktopReducer(state, { type: "thread-load-started", project, threadId: targetThread.id });
+    state = desktopReducer(state, { type: "project-removed", projectId: project.id });
+
+    expect(state.pendingThreadLoad).toBeNull();
+    expect(state.loading).toBe(false);
+    expect(state.bootstrap).toBeNull();
+    expect(state.controls).toEqual({});
+    expect(state.workbenches).toEqual({});
+  });
+
+  it("删除 active thread 时同时清除 bootstrap、pending navigation 与 loading", () => {
+    const targetThread = { ...thread, id: "target-thread" };
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-loaded",
+      project,
+      threads: [thread, targetThread],
+    });
+    state = desktopReducer(state, {
+      type: "thread-loaded",
+      project,
+      bootstrap: createBootstrap(1, "当前会话"),
+      workbench: createWorkbench(),
+    });
+    state = desktopReducer(state, { type: "thread-load-started", project, threadId: targetThread.id });
+
+    state = desktopReducer(state, { type: "thread-removed", projectId: project.id, threadId: thread.id });
+
+    expect(state.activeThreadIds[project.id]).toBeUndefined();
+    expect(state.bootstrap).toBeNull();
+    expect(state.pendingThreadLoad).toBeNull();
+    expect(state.loading).toBe(false);
   });
 
   it("draft model 切换按目标模型能力 clamp thinking", () => {

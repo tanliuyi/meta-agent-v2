@@ -1,41 +1,54 @@
-import { FolderOpen, GitBranch, Minimize2, PanelRight, PanelRightOpen, TerminalSquare } from "lucide-react";
-import { usePiThreadPhase } from "../../runtime/use-pi-thread-snapshot.ts";
-import { useDesktop } from "../../state/desktop-context.tsx";
-import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
-import { Button } from "../ui/button.tsx";
+import { Button } from "@renderer/shared/ui/button";
+import PanelRight from "lucide-react/dist/esm/icons/panel-right.mjs";
+import PanelRightOpen from "lucide-react/dist/esm/icons/panel-right-open.mjs";
+import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
+import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
+import {
+  selectActivePanel,
+  selectActivePanelOpen,
+  selectActiveTerminalOpen,
+  selectHasActiveWorkbench,
+  selectWindowTitle,
+} from "../../state/desktop-selectors.ts";
 
 /** 当前 session 的工作台顶栏。 */
 export function Topbar() {
-  const { project, snapshot, workbench, compactSession, updateWorkbench } = useDesktop();
-  const phase = usePiThreadPhase();
+  const actions = useDesktopActions();
+  const title = useDesktopSelector(selectWindowTitle);
+  const hasWorkbench = useDesktopSelector(selectHasActiveWorkbench);
+  const panel = useDesktopSelector(selectActivePanel);
+  const panelOpen = useDesktopSelector(selectActivePanelOpen);
+  const terminalOpen = useDesktopSelector(selectActiveTerminalOpen);
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <strong>{snapshot?.title ?? project?.name ?? "Meta Agent"}</strong>
+        <strong>{title}</strong>
       </div>
       <div className="topbar-actions">
         <Button
           variant="ghost"
           size="icon"
-          aria-label="切换底部终端"
-          disabled={!workbench}
-          onClick={() => updateWorkbench({ terminalOpen: !workbench?.terminalOpen })}
+          aria-label={terminalOpen ? "隐藏底部终端" : "显示底部终端"}
+          aria-pressed={terminalOpen}
+          disabled={!hasWorkbench}
+          onClick={() => actions.updateWorkbench({ terminalOpen: !terminalOpen })}
         >
           <TerminalSquare size={15} />
         </Button>
         <Button
-          variant={workbench?.panelOpen ? "outline" : "ghost"}
+          variant={panelOpen ? "outline" : "ghost"}
           size="icon"
-          aria-label="切换右侧 Panel"
-          disabled={!workbench}
+          aria-label={panelOpen ? "隐藏右侧 Panel" : "显示右侧 Panel"}
+          aria-pressed={panelOpen}
+          disabled={!hasWorkbench}
           onClick={() =>
-            updateWorkbench({
-              panelOpen: !workbench?.panelOpen,
-              panel: workbench?.panel === "chat" ? "files" : workbench?.panel,
+            actions.updateWorkbench({
+              panelOpen: !panelOpen,
+              panel: panel === "chat" ? "files" : (panel ?? "files"),
             })
           }
         >
-          {workbench?.panelOpen ? <PanelRight size={15} /> : <PanelRightOpen size={15} />}
+          {panelOpen ? <PanelRight size={15} /> : <PanelRightOpen size={15} />}
         </Button>
       </div>
     </header>

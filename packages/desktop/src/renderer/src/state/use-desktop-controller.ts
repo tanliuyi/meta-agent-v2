@@ -1,148 +1,212 @@
-import { type RefObject, startTransition, useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { type RefObject, startTransition, useCallback, useEffect, useMemo, useRef } from "react";
 import { unstable_batchedUpdates } from "react-dom";
 import type { Project, ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
-import { errorMessage } from "../lib/error-message.ts";
 import { runDraftSubmissionSingleFlight } from "../runtime/draft-session.ts";
 import { piSessionBus } from "../runtime/pi-session-bus.ts";
 import type { DesktopThreadActions } from "../runtime/use-pi-runtime.ts";
-import {
-  type DesktopContextValue,
-  desktopReducer,
-  INITIAL_STATE,
-  selectActiveThreadId,
-  selectNavigationProjectId,
-  selectNavigationThreadId,
-  sessionKey,
-  threadFromBootstrap,
-} from "./desktop-model.ts";
+import { errorMessage } from "../shared/lib/error-message.ts";
+import type { DesktopActions } from "./desktop-actions.ts";
+import { desktopSessionKey, threadFromBootstrap } from "./desktop-model.ts";
+import { selectActiveThreadId } from "./desktop-selectors.ts";
+import { type DesktopStore, dispatchDesktop } from "./desktop-store.ts";
 import { nextRegularThreadId } from "./thread-list-commands.ts";
 
-/** 组合 Desktop IPC、权威快照和本地 Workbench cache。 */
-export function useDesktopController(threadActions: RefObject<DesktopThreadActions | null>): DesktopContextValue {
-  const [state, dispatch] = useReducer(desktopReducer, INITIAL_STATE);
-  const threads = state.project ? (state.threadCatalogs[state.project.id] ?? []) : [];
-  const activeThreadId = selectActiveThreadId(state);
-  const navigationProjectId = selectNavigationProjectId(state);
-  const navigationThreadId = selectNavigationThreadId(state);
-  const activeThreadIds = useRef(state.activeThreadIds);
-  activeThreadIds.current = state.activeThreadIds;
-  const draft = useRef(state.draft);
-  draft.current = state.draft;
-  const threadCatalogs = useRef(state.threadCatalogs);
-  threadCatalogs.current = state.threadCatalogs;
+/**
+ * 组合 Desktop IPC、权威快照和本地 Workbench cache。
+ *
+ * 所有命令都在调用时读取 store，避免命令引用随状态变化并迫使视图订阅整棵状态树。
+ */
+export function useDesktopController(
+  store: DesktopStore,
+  threadActions: RefObject<DesktopThreadActions | null>,
+): DesktopActions {
+  const dispatch = useCallback(
+    (action: Parameters<typeof dispatchDesktop>[1]) => dispatchDesktop(store, action),
+    [store],
+  );
   const pendingThreadCatalogs = useRef(new Map<string, Promise<void>>());
+  const pendingThreadAttachment = useRef<Promise<void> | null>(null);
   const pendingDraftSubmission = useRef<Promise<void> | null>(null);
   const pendingDraftProjectSelection = useRef<Promise<void> | null>(null);
   const draftProjectGeneration = useRef(0);
-  const activeProjectId = useRef(state.project?.id);
-  activeProjectId.current = state.project?.id;
+  const threadCatalogGenerations = useRef(new Map<string, number>());
+  const navigationGeneration = useRef(0);
+  const projectOpenTail = useRef<Promise<void>>(Promise.resolve());
 
-  const report = useCallback((value: unknown) => {
-    const message = errorMessage(value);
-    console.error("Desktop operation failed", value);
-    dispatch({ type: "error", error: message });
+  const beginNavigation = useCallback(() => {
+    navigationGeneration.current += 1;
+    return navigationGeneration.current;
   }, []);
 
-  const loadDraftConfiguration = useCallback(async (projectId: string, generation: number) => {
-    const task = window.desktop.sessions.getDraftConfig(projectId);
-    const pending = task.then(
-      () => undefined,
-      () => undefined,
-    );
-    pendingDraftProjectSelection.current = pending;
-    try {
-      const config = await task;
-      if (generation !== draftProjectGeneration.current) return;
-      dispatch({ type: "draft-config-loaded", projectId, config });
-    } catch (value) {
-      if (generation !== draftProjectGeneration.current) return;
-      dispatch({ type: "draft-config-failed", projectId });
-      throw value;
-    } finally {
-      if (pendingDraftProjectSelection.current === pending) pendingDraftProjectSelection.current = null;
-    }
-  }, []);
+  const isCurrentNavigation = useCallback((generation: number) => navigationGeneration.current === generation, []);
+
+  /** 串行 ProjectStore.open，确保 main 持久化的 active Project 也遵循用户意图顺序。 */
+  const openProjectForNavigation = useCallback(
+    (projectId: string, generation: number): Promise<Project> => {
+      const task = projectOpenTail.current.then(async () => {
+        if (!isCurrentNavigation(generation)) throw new DOMException("Navigation superseded", "AbortError");
+        const project = await window.desktop.projects.open(projectId);
+        if (!isCurrentNavigation(generation)) throw new DOMException("Navigation superseded", "AbortError");
+        return project;
+      });
+      projectOpenTail.current = task.then(
+        () => undefined,
+        () => undefined,
+      );
+      return task;
+    },
+    [isCurrentNavigation],
+  );
+
+  const report = useCallback(
+    (value: unknown) => {
+      const message = errorMessage(value);
+      console.error("Desktop operation failed", value);
+      dispatch({ type: "error", error: message });
+    },
+    [dispatch],
+  );
+
+  const loadDraftConfiguration = useCallback(
+    async (projectId: string, generation: number) => {
+      const task = window.desktop.sessions.getDraftConfig(projectId);
+      const pending = task.then(
+        () => undefined,
+        () => undefined,
+      );
+      pendingDraftProjectSelection.current = pending;
+      try {
+        const config = await task;
+        if (generation !== draftProjectGeneration.current) return;
+        dispatch({ type: "draft-config-loaded", projectId, config });
+      } catch (value) {
+        if (generation !== draftProjectGeneration.current) return;
+        dispatch({ type: "draft-config-failed", projectId });
+        throw value;
+      } finally {
+        if (pendingDraftProjectSelection.current === pending) pendingDraftProjectSelection.current = null;
+      }
+    },
+    [dispatch],
+  );
 
   const loadThread = useCallback(
-    async (project: Project, threadId: string, optimistic = true) => {
+    async (project: Project, threadId: string, navigation: number, optimistic = true) => {
+      if (!isCurrentNavigation(navigation)) return false;
       if (optimistic) dispatch({ type: "thread-load-started", project, threadId });
       try {
         const actions = threadActions.current;
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
-        const prepared = await actions.open(project, threadId);
+        const task = actions.open(project, threadId);
+        const pending = task.then(
+          () => undefined,
+          () => undefined,
+        );
+        pendingThreadAttachment.current = pending;
+        const prepared = await task.finally(() => {
+          if (pendingThreadAttachment.current === pending) pendingThreadAttachment.current = null;
+        });
+        if (!isCurrentNavigation(navigation)) return false;
         unstable_batchedUpdates(() => {
           actions.commit(prepared);
           dispatch({ type: "thread-loaded", project, bootstrap: prepared.bootstrap, workbench: prepared.workbench });
         });
+        return true;
       } catch (value) {
+        if (!isCurrentNavigation(navigation)) return false;
         dispatch({ type: "thread-load-failed", projectId: project.id, threadId });
-        if (value instanceof DOMException && value.name === "AbortError") return;
+        if (value instanceof DOMException && value.name === "AbortError") return false;
         report(value);
+        return false;
       }
     },
-    [report, threadActions],
+    [dispatch, isCurrentNavigation, report, threadActions],
   );
 
   const loadProject = useCallback(
-    async (project: Project, openExistingThread = true) => {
+    async (project: Project, navigation: number, openExistingThread = true) => {
       const threads = await window.desktop.sessions.list(project.id, true);
+      if (!isCurrentNavigation(navigation)) return;
       dispatch({ type: "project-loaded", project, threads });
-      const preferredThreadId = activeThreadIds.current[project.id];
+      const preferredThreadId = store.getState().activeThreadIds[project.id];
       const target = openExistingThread
         ? (threads.find(({ archived, id }) => !archived && id === preferredThreadId) ??
           threads.find(({ archived }) => !archived))
         : undefined;
-      if (target) await loadThread(project, target.id);
+      if (target) await loadThread(project, target.id, navigation);
       else {
         const actions = threadActions.current;
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
         await actions.enterDraft();
+        if (!isCurrentNavigation(navigation)) return;
         const generation = ++draftProjectGeneration.current;
         dispatch({ type: "draft-started", projectId: project.id });
         await loadDraftConfiguration(project.id, generation);
       }
     },
-    [loadDraftConfiguration, loadThread, threadActions],
+    [dispatch, isCurrentNavigation, loadDraftConfiguration, loadThread, store, threadActions],
   );
 
   const loadProjectThreads = useCallback(
     (projectId: string) => {
-      if (Object.hasOwn(threadCatalogs.current, projectId)) return Promise.resolve();
+      const state = store.getState();
+      if (!state.projects.some(({ id }) => id === projectId)) return Promise.resolve();
+      if (Object.hasOwn(state.threadCatalogs, projectId)) return Promise.resolve();
       const pending = pendingThreadCatalogs.current.get(projectId);
       if (pending) return pending;
+      const generation = (threadCatalogGenerations.current.get(projectId) ?? 0) + 1;
+      threadCatalogGenerations.current.set(projectId, generation);
       const promise = window.desktop.sessions
         .list(projectId, true)
         .then((threads) => {
+          if (
+            threadCatalogGenerations.current.get(projectId) !== generation ||
+            !store.getState().projects.some(({ id }) => id === projectId)
+          )
+            return;
           startTransition(() => {
             dispatch({ type: "project-threads-loaded", projectId, threads });
           });
         })
-        .catch((value: unknown) => report(value))
-        .finally(() => pendingThreadCatalogs.current.delete(projectId));
+        .catch((value: unknown) => {
+          if (
+            threadCatalogGenerations.current.get(projectId) === generation &&
+            store.getState().projects.some(({ id }) => id === projectId)
+          )
+            report(value);
+        })
+        .finally(() => {
+          if (threadCatalogGenerations.current.get(projectId) === generation)
+            pendingThreadCatalogs.current.delete(projectId);
+        });
       pendingThreadCatalogs.current.set(projectId, promise);
       return promise;
     },
-    [report],
+    [dispatch, report, store],
   );
 
   useEffect(() => {
     let active = true;
+    const navigation = beginNavigation();
     void Promise.all([window.desktop.projects.list(), window.desktop.projects.getActive()])
       .then(async ([projects, current]) => {
-        if (!active) return;
+        if (!active || !isCurrentNavigation(navigation)) return;
         dispatch({ type: "projects-loaded", projects });
-        if (current?.available) await loadProject(current, false);
+        if (current?.available) await loadProject(current, navigation, false);
       })
-      .catch(report)
+      .catch((value: unknown) => {
+        if (active && isCurrentNavigation(navigation)) report(value);
+      })
       .finally(() => {
-        if (active) dispatch({ type: "loading", loading: false });
+        if (active && isCurrentNavigation(navigation)) dispatch({ type: "loading", loading: false });
       });
     return () => {
       active = false;
+      if (isCurrentNavigation(navigation)) navigationGeneration.current += 1;
     };
-  }, [loadProject, report]);
+  }, [beginNavigation, dispatch, isCurrentNavigation, loadProject, report]);
 
-  useEffect(() => piSessionBus.onControl((control) => dispatch({ type: "control", control })), []);
+  useEffect(() => piSessionBus.onControl((control) => dispatch({ type: "control", control })), [dispatch]);
   useEffect(
     () =>
       piSessionBus.onRuntime((availability) => {
@@ -155,38 +219,64 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
           });
         }
       }),
-    [],
+    [dispatch],
   );
   useEffect(
     () => () => {
+      navigationGeneration.current += 1;
       void threadActions.current?.detach();
     },
     [threadActions],
   );
 
   const chooseProject = useCallback(async () => {
-    if (draft.current?.phase === "materializing" || pendingDraftProjectSelection.current) return;
+    if (store.getState().draft?.phase === "materializing" || pendingDraftProjectSelection.current) return;
+    let navigation: number | undefined;
     try {
       const project = await window.desktop.projects.choose();
       if (!project) return;
+      navigation = beginNavigation();
       dispatch({ type: "project-upserted", project });
-      if (draft.current) {
+      if (store.getState().draft) {
         const generation = ++draftProjectGeneration.current;
         dispatch({ type: "draft-project-selected", projectId: project.id });
         await loadDraftConfiguration(project.id, generation);
-      } else await loadProject(project);
+      } else await loadProject(project, navigation);
     } catch (value) {
-      report(value);
+      if (navigation === undefined || isCurrentNavigation(navigation)) report(value);
     }
-  }, [loadDraftConfiguration, loadProject, report]);
+  }, [beginNavigation, dispatch, isCurrentNavigation, loadDraftConfiguration, loadProject, report, store]);
 
   const removeProject = useCallback(
     async (projectId: string) => {
-      if (draft.current?.phase === "materializing") return;
+      const initial = store.getState();
+      if (initial.draft?.phase === "materializing") return;
+      const invalidateThreadCatalog = () => {
+        threadCatalogGenerations.current.set(projectId, (threadCatalogGenerations.current.get(projectId) ?? 0) + 1);
+        pendingThreadCatalogs.current.delete(projectId);
+      };
+      invalidateThreadCatalog();
+      const initiallyAffectsNavigation =
+        initial.project?.id === projectId ||
+        initial.draft?.projectId === projectId ||
+        initial.pendingThreadLoad?.projectId === projectId;
+      let navigation = initiallyAffectsNavigation ? beginNavigation() : navigationGeneration.current;
       try {
-        draftProjectGeneration.current += 1;
         await window.desktop.projects.remove(projectId);
-        if (activeProjectId.current === projectId && draft.current?.projectId !== projectId) {
+        invalidateThreadCatalog();
+        const current = store.getState();
+        const currentlyAffectsNavigation =
+          current.project?.id === projectId ||
+          current.draft?.projectId === projectId ||
+          current.pendingThreadLoad?.projectId === projectId;
+        if (!initiallyAffectsNavigation && currentlyAffectsNavigation) navigation = beginNavigation();
+        if (current.draft?.projectId === projectId) draftProjectGeneration.current += 1;
+        if (
+          currentlyAffectsNavigation &&
+          isCurrentNavigation(navigation) &&
+          current.project?.id === projectId &&
+          current.draft?.projectId !== projectId
+        ) {
           await threadActions.current?.detach();
         }
         dispatch({ type: "project-removed", projectId });
@@ -194,12 +284,14 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
         report(value);
       }
     },
-    [report, threadActions],
+    [beginNavigation, dispatch, isCurrentNavigation, report, store, threadActions],
   );
 
   const beginDraft = useCallback(
     async (projectId?: string) => {
-      if (draft.current || pendingDraftSubmission.current) return;
+      const state = store.getState();
+      if (state.draft || pendingDraftSubmission.current) return;
+      const navigation = beginNavigation();
       try {
         const selected = projectId
           ? state.projects.find((project) => project.id === projectId && project.available)
@@ -209,19 +301,21 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
         const actions = threadActions.current;
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
         await actions.enterDraft();
+        if (!isCurrentNavigation(navigation)) return;
         const generation = ++draftProjectGeneration.current;
         dispatch({ type: "draft-started", projectId: selected.id });
         await loadDraftConfiguration(selected.id, generation);
       } catch (value) {
-        report(value);
+        if (isCurrentNavigation(navigation)) report(value);
       }
     },
-    [loadDraftConfiguration, report, state.project, state.projects, threadActions],
+    [beginNavigation, dispatch, isCurrentNavigation, loadDraftConfiguration, report, store, threadActions],
   );
 
   const selectDraftProject = useCallback(
     async (projectId: string) => {
-      if (!draft.current || draft.current.phase === "materializing") return;
+      const state = store.getState();
+      if (!state.draft || state.draft.phase === "materializing") return;
       const project = state.projects.find(({ id }) => id === projectId);
       if (!project?.available) throw new Error("发送前必须选择可用的 Project");
       const generation = ++draftProjectGeneration.current;
@@ -233,23 +327,30 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
         throw value;
       }
     },
-    [loadDraftConfiguration, report, state.projects],
+    [dispatch, loadDraftConfiguration, report, store],
   );
 
-  const selectDraftModel = useCallback((provider: string, modelId: string) => {
-    if (draft.current?.phase !== "editing") return;
-    dispatch({ type: "draft-model-selected", provider, modelId });
-  }, []);
+  const selectDraftModel = useCallback(
+    (provider: string, modelId: string) => {
+      if (store.getState().draft?.phase !== "editing") return;
+      dispatch({ type: "draft-model-selected", provider, modelId });
+    },
+    [dispatch, store],
+  );
 
-  const selectDraftThinking = useCallback((thinkingLevel: ThinkingLevel) => {
-    if (draft.current?.phase !== "editing") return;
-    dispatch({ type: "draft-thinking-selected", thinkingLevel });
-  }, []);
+  const selectDraftThinking = useCallback(
+    (thinkingLevel: ThinkingLevel) => {
+      if (store.getState().draft?.phase !== "editing") return;
+      dispatch({ type: "draft-thinking-selected", thinkingLevel });
+    },
+    [dispatch, store],
+  );
 
   const submitDraft = useCallback(() => {
     return runDraftSubmissionSingleFlight(pendingDraftSubmission, async () => {
       if (pendingDraftProjectSelection.current) throw new Error("Project 切换完成后才能发送");
-      const currentDraft = draft.current;
+      const state = store.getState();
+      const currentDraft = state.draft;
       const project = state.projects.find(({ id }) => id === currentDraft?.projectId);
       if (!currentDraft || !project?.available) throw new Error("发送前必须选择可用的 Project");
       const config = currentDraft.config;
@@ -259,15 +360,13 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
       }
       const actions = threadActions.current;
       if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
+      dispatch({ type: "draft-materializing" });
       try {
-        const prepared = await actions.submitDraft(
-          {
-            project,
-            model: { provider: config.model.provider, id: config.model.id },
-            thinkingLevel: config.thinkingLevel,
-          },
-          () => dispatch({ type: "draft-materializing" }),
-        );
+        const prepared = await actions.submitDraft({
+          project,
+          model: { provider: config.model.provider, id: config.model.id },
+          thinkingLevel: config.thinkingLevel,
+        });
         dispatch({
           type: "draft-committed",
           project,
@@ -281,53 +380,63 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
         throw value;
       }
     });
-  }, [report, state.projects, threadActions]);
+  }, [dispatch, report, store, threadActions]);
 
   const discardDraft = useCallback(async () => {
-    if (!draft.current || pendingDraftSubmission.current) return;
+    if (!store.getState().draft || pendingDraftSubmission.current) return;
+    const navigation = beginNavigation();
     draftProjectGeneration.current += 1;
     const actions = threadActions.current;
     if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
     const prepared = await actions.discardDraft();
+    if (!isCurrentNavigation(navigation)) return;
     if (!prepared) {
       dispatch({ type: "draft-discarded" });
       return;
     }
-    const project = state.projects.find(({ id }) => id === prepared.bootstrap.projectId);
+    const project = store.getState().projects.find(({ id }) => id === prepared.bootstrap.projectId);
     if (!project) throw new Error(`恢复的 session 缺少 Project: ${prepared.bootstrap.projectId}`);
-    const openedProject = await window.desktop.projects.open(project.id);
+    const openedProject = await openProjectForNavigation(project.id, navigation);
+    if (!isCurrentNavigation(navigation)) return;
     dispatch({
       type: "thread-loaded",
       project: openedProject,
       bootstrap: prepared.bootstrap,
       workbench: prepared.workbench,
     });
-  }, [state.projects, threadActions]);
+  }, [beginNavigation, dispatch, isCurrentNavigation, openProjectForNavigation, store, threadActions]);
 
   const openThread = useCallback(
     async (projectId: string, threadId: string) => {
-      if (draft.current?.phase === "materializing") return;
+      const state = store.getState();
+      if (state.draft?.phase === "materializing" || pendingDraftSubmission.current || pendingThreadAttachment.current)
+        return;
       const targetProject = state.projects.find(({ id }) => id === projectId);
       if (!targetProject) return;
+      const navigation = beginNavigation();
       dispatch({ type: "thread-load-started", project: targetProject, threadId });
       try {
-        const leavingDraft = draft.current !== null;
+        const leavingDraft = state.draft !== null;
         draftProjectGeneration.current += 1;
         const project =
           !leavingDraft && state.project?.id === projectId
             ? state.project
-            : await window.desktop.projects.open(projectId);
-        await loadThread(project, threadId, false);
+            : await openProjectForNavigation(projectId, navigation);
+        if (!isCurrentNavigation(navigation)) return;
+        await loadThread(project, threadId, navigation, false);
       } catch (value) {
+        if (!isCurrentNavigation(navigation)) return;
         dispatch({ type: "thread-load-failed", projectId, threadId });
+        if (value instanceof DOMException && value.name === "AbortError") return;
         report(value);
       }
     },
-    [loadThread, report, state.project, state.projects],
+    [beginNavigation, dispatch, isCurrentNavigation, loadThread, openProjectForNavigation, report, store],
   );
 
   const renameThread = useCallback(
     async (projectId: string, threadId: string, title: string) => {
+      const state = store.getState();
       const project = state.projects.find(({ id }) => id === projectId);
       if (!project) return;
       try {
@@ -339,11 +448,13 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
         report(value);
       }
     },
-    [report, state.projects, threadActions],
+    [dispatch, report, store, threadActions],
   );
 
   const setThreadArchived = useCallback(
     async (projectId: string, threadId: string, archived: boolean) => {
+      const state = store.getState();
+      const navigationAtStart = navigationGeneration.current;
       const project = state.projects.find(({ id }) => id === projectId);
       if (!project) return;
       try {
@@ -351,11 +462,19 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
         await actions.archive(project, threadId, archived);
         dispatch({ type: "thread-archived", projectId, threadId, archived });
-        if (archived && state.project?.id === projectId && activeThreadId === threadId) {
-          const nextThreadId = nextRegularThreadId(state.threadCatalogs[projectId] ?? [], threadId);
-          if (nextThreadId) await loadThread(project, nextThreadId);
+        const current = store.getState();
+        if (
+          archived &&
+          navigationGeneration.current === navigationAtStart &&
+          current.project?.id === projectId &&
+          selectActiveThreadId(current) === threadId
+        ) {
+          const navigation = beginNavigation();
+          const nextThreadId = nextRegularThreadId(current.threadCatalogs[projectId] ?? [], threadId);
+          if (nextThreadId) await loadThread(project, nextThreadId, navigation);
           else {
             await actions.detach();
+            if (!isCurrentNavigation(navigation)) return;
             dispatch({ type: "thread-cleared", projectId });
           }
         }
@@ -363,44 +482,51 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
         report(value);
       }
     },
-    [activeThreadId, loadThread, report, state.project?.id, state.projects, state.threadCatalogs, threadActions],
+    [beginNavigation, dispatch, isCurrentNavigation, loadThread, report, store, threadActions],
   );
 
   const removeThread = useCallback(
     async (projectId: string, threadId: string) => {
+      const state = store.getState();
+      const navigationAtStart = navigationGeneration.current;
       const project = state.projects.find(({ id }) => id === projectId);
       if (!project) return;
+      const wasActive =
+        state.draft === null && state.project?.id === projectId && state.activeThreadIds[projectId] === threadId;
       try {
         const actions = threadActions.current;
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
         await actions.remove(project, threadId);
         dispatch({ type: "thread-removed", projectId, threadId });
-        if (state.project?.id === projectId && activeThreadId === threadId) {
-          const nextThreadId = nextRegularThreadId(state.threadCatalogs[projectId] ?? [], threadId);
-          if (nextThreadId) await loadThread(project, nextThreadId);
-          else {
-            await actions.detach();
-            dispatch({ type: "thread-cleared", projectId });
-          }
+        if (wasActive && navigationGeneration.current === navigationAtStart) {
+          const navigation = beginNavigation();
+          const current = store.getState();
+          const nextThreadId = nextRegularThreadId(current.threadCatalogs[projectId] ?? [], threadId);
+          if (nextThreadId && (await loadThread(project, nextThreadId, navigation))) return;
+          if (!isCurrentNavigation(navigation)) return;
+          dispatch({ type: "thread-cleared", projectId });
+          await actions.detach();
         }
       } catch (value) {
         report(value);
       }
     },
-    [activeThreadId, loadThread, report, state.project?.id, state.projects, state.threadCatalogs, threadActions],
+    [beginNavigation, dispatch, isCurrentNavigation, loadThread, report, store, threadActions],
   );
 
   const updateWorkbench = useCallback(
     (value: Partial<WorkbenchState>) => {
+      const state = store.getState();
+      const activeThreadId = selectActiveThreadId(state);
       if (!state.project || !activeThreadId) return;
-      const key = sessionKey(state.project.id, activeThreadId);
+      const key = desktopSessionKey(state.project.id, activeThreadId);
       const previous = state.workbenches[key];
       if (!previous) return;
       const workbench = { ...previous, ...value };
       dispatch({ type: "workbench", workbench });
       void window.desktop.workbench.update(workbench).catch(report);
     },
-    [activeThreadId, report, state.project, state.workbenches],
+    [dispatch, report, store],
   );
 
   const clearQueue = useCallback(async () => {
@@ -415,6 +541,8 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
   }, [report, threadActions]);
 
   const compactSession = useCallback(async () => {
+    const state = store.getState();
+    const activeThreadId = selectActiveThreadId(state);
     if (!state.project || !activeThreadId) throw new Error("压缩前必须打开 Pi session");
     try {
       await window.desktop.sessions.compact(state.project.id, activeThreadId);
@@ -422,26 +550,10 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
       report(value);
       throw value;
     }
-  }, [activeThreadId, report, state.project]);
+  }, [report, store]);
 
-  const key = state.project && activeThreadId ? sessionKey(state.project.id, activeThreadId) : "";
-  const bootstrap =
-    state.bootstrap && sessionKey(state.bootstrap.projectId, state.bootstrap.threadId) === key ? state.bootstrap : null;
   return useMemo(
     () => ({
-      projects: state.projects,
-      project: state.project,
-      draft: state.draft,
-      threads,
-      threadCatalogs: state.threadCatalogs,
-      threadId: activeThreadId,
-      navigationProjectId,
-      navigationThreadId,
-      bootstrap,
-      snapshot: state.controls[key] ?? bootstrap?.control ?? null,
-      workbench: state.workbenches[key] ?? null,
-      loading: state.loading,
-      error: state.error,
       chooseProject,
       loadProjectThreads,
       removeProject,
@@ -461,13 +573,7 @@ export function useDesktopController(threadActions: RefObject<DesktopThreadActio
       clearError: () => dispatch({ type: "error", error: null }),
     }),
     [
-      state,
-      key,
-      bootstrap,
-      threads,
-      activeThreadId,
-      navigationProjectId,
-      navigationThreadId,
+      dispatch,
       chooseProject,
       loadProjectThreads,
       removeProject,

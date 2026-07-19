@@ -1,0 +1,23 @@
+@layer theme, base, components, utilities, overrides;
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "tw-shimmer";
+@import "katex/dist/katex.min.css" layer(components);
+@import "@xterm/xterm/css/xterm.css" layer(components);
+@import "./tokens.css";
+@import "./base.css";
+@import "./components.css" layer(components);
+@import "./layout.css" layer(components);
+@import "./chat.css" layer(components);
+@import "./markdown.css" layer(components);
+@import "./panel.css" layer(components);
+@import "./utilities.css";
+@import "./overrides.css" layer(overrides);
+
+@source "../**/*.{ts,tsx}";
+@source "../../../../../../node_modules/streamdown/dist/*.js";
+@source "../../../../../../node_modules/@streamdown/code/dist/*.js";
+@source "../../../../../../node_modules/@streamdown/math/dist/*.js";
+@source "../../../../../../node_modules/@streamdown/mermaid/dist/*.js";
+@source "../../../../../../node_modules/@streamdown/cjk/dist/*.js";

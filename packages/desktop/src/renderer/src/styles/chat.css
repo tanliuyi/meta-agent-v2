@@ -9,7 +9,6 @@
   margin-top: 8px;
 }
 .tool-view {
-  /* margin: 0 0 8px; */
   margin: 0;
   width: 100%;
   overflow: hidden;
@@ -42,10 +41,10 @@
   flex-shrink: 0;
   color: hsl(var(--muted-foreground));
 }
-.tool-status-label.running {
+.tool-view[data-tool-status="running"] .tool-status-label {
   color: hsl(var(--foreground));
 }
-.tool-status-label.error {
+.tool-view[data-tool-status="error"] .tool-status-label {
   color: hsl(var(--destructive));
 }
 
@@ -63,13 +62,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: hsl(var(--muted-foreground));
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-family-mono);
   font-size: 13px;
 }
 .tool-chevron {
   margin-left: auto;
   opacity: 0;
-  transition: transform 120ms ease;
+  transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
 }
 .tool-view[data-state="open"] .tool-chevron {
   opacity: 0.7;
@@ -79,7 +78,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid hsl(var(--border));
-  border-radius: 6px;
+  border-radius: var(--shape-radius-md);
   background: hsl(var(--border));
   width: 100%;
 }
@@ -96,7 +95,10 @@
   font-weight: 600;
   text-transform: uppercase;
 }
-.tool-body pre {
+.tool-code,
+.tool-command,
+.tool-diff,
+.tool-result {
   max-height: 260px;
   margin: 0;
   padding: 10px 12px;
@@ -104,17 +106,17 @@
   background: hsl(var(--background));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-family-mono);
   font-size: 11px;
   line-height: 1.55;
 }
-.tool-body pre.tool-result {
+.tool-result {
   background: hsl(var(--muted) / 0.3);
 }
-.tool-body pre.tool-result.error {
+.tool-result[data-tone="destructive"] {
   color: hsl(var(--destructive));
 }
-.tool-body pre.tool-command {
+.tool-command {
   display: -webkit-box;
   width: 100%;
   max-height: calc(3.1em + 8px);
@@ -131,16 +133,16 @@
   min-width: 0;
   background: hsl(var(--background));
 }
-.tool-edit .tool-diff {
+.tool-diff {
   max-height: 180px;
   padding-left: 26px;
   border-left: 3px solid transparent;
 }
-.tool-edit .tool-diff-remove {
+.tool-diff-remove {
   border-left-color: hsl(var(--destructive));
   background: hsl(var(--destructive) / 0.07);
 }
-.tool-edit .tool-diff-add {
+.tool-diff-add {
   border-left-color: hsl(var(--success));
   background: hsl(var(--success) / 0.07);
 }
@@ -153,14 +155,13 @@
   right: 0;
   bottom: calc(100% + 6px);
   left: 0;
-  z-index: 40;
+  z-index: var(--stack-suggestions);
   max-height: 280px;
   padding: 5px;
   overflow: auto;
   border: 1px solid hsl(var(--border));
-  border-radius: 7px;
+  border-radius: var(--shape-radius-md);
   background: hsl(var(--popover));
-  /* box-shadow: 0 12px 32px hsl(var(--foreground) / 0.12); */
 }
 .composer-suggestions button {
   display: grid;
@@ -171,12 +172,12 @@
   min-height: 32px;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--shape-radius-sm);
   background: transparent;
   font-size: 12px;
   text-align: left;
 }
-.composer-suggestions button.is-active {
+.composer-suggestions button[data-state="active"] {
   background: hsl(var(--accent));
 }
 .composer-suggestions strong {
@@ -204,7 +205,7 @@
   overflow: auto;
   white-space: pre-wrap;
   color: hsl(var(--muted-foreground));
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-family-mono);
   font-size: 10px;
   line-height: 1.5;
 }
@@ -212,18 +213,18 @@
   display: flex;
   padding: 2px;
   border: 1px solid hsl(var(--border));
-  border-radius: 6px;
+  border-radius: var(--shape-radius-md);
 }
 .mode-control button {
   height: 23px;
   padding: 0 7px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--shape-radius-xs);
   background: transparent;
   color: hsl(var(--muted-foreground));
   font-size: 11px;
 }
-.mode-control button.is-active {
+.mode-control button[data-state="on"] {
   background: hsl(var(--accent));
   color: hsl(var(--foreground));
 }
@@ -233,7 +234,7 @@
   justify-content: space-between;
   margin: 0 16px -12px;
   padding: 8px 12px 20px;
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--shape-radius-xl) var(--shape-radius-xl) 0 0;
   background: hsl(var(--muted) / 0.5);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   backdrop-filter: blur(16px) saturate(140%);
@@ -262,7 +263,7 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: "Cascadia Mono", Consolas, monospace;
+  font-family: var(--font-family-mono);
   font-size: 11px;
   line-height: 1.55;
 }

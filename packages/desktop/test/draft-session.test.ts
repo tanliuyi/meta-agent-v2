@@ -51,6 +51,24 @@ describe("new session draft submission", () => {
     expect(state).toEqual(snapshot);
   });
 
+  it("并行完成多个 pending 附件，并保持原始顺序", async () => {
+    const first = pendingAttachment("first");
+    const second = pendingAttachment("second");
+    const releases = new Map<string, () => void>();
+    const started: string[] = [];
+    const preparing = prepareDraftSubmission(composerState({ attachments: [first, second] }), async (attachment) => {
+      started.push(attachment.id);
+      await new Promise<void>((resolve) => releases.set(attachment.id, resolve));
+      return completeAttachment(attachment.id);
+    });
+
+    expect(started).toEqual(["first", "second"]);
+    releases.get("second")?.();
+    releases.get("first")?.();
+    const prepared = await preparing;
+    expect(prepared.message.attachments?.map(({ id }) => id)).toEqual(["first", "second"]);
+  });
+
   it("拒绝没有正文和附件的无效 submit", async () => {
     await expect(prepareDraftSubmission(composerState())).rejects.toThrow("请输入消息或添加图片");
   });
@@ -73,6 +91,36 @@ describe("new session draft submission", () => {
     expect(target.setRunConfig).toHaveBeenCalledWith({ custom: { mode: "draft" } });
     expect(target.setQuote).toHaveBeenCalledWith(quote);
     expect(target.addAttachment).toHaveBeenCalledWith(prepared.reseed.attachments[0]);
+  });
+
+  it("reseed 按顺序提交共享 Composer 附件状态", async () => {
+    const releases: Array<() => void> = [];
+    const target: ComposerReseedTarget = {
+      setText: vi.fn(),
+      setRole: vi.fn(),
+      setRunConfig: vi.fn(),
+      setQuote: vi.fn(),
+      addAttachment: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releases.push(resolve);
+          }),
+      ),
+    };
+    const reseeding = reseedComposer(target, {
+      text: "",
+      role: "user",
+      runConfig: undefined,
+      quote: undefined,
+      attachments: [completeAttachment("first"), completeAttachment("second")],
+    });
+
+    expect(target.addAttachment).toHaveBeenCalledTimes(1);
+    releases.shift()?.();
+    await Promise.resolve();
+    expect(target.addAttachment).toHaveBeenCalledTimes(2);
+    releases.shift()?.();
+    await reseeding;
   });
 
   it("重复 submit 复用同一个首次发送事务", async () => {
@@ -116,9 +164,9 @@ function composerState(
   };
 }
 
-function pendingAttachment(): PendingAttachment {
+function pendingAttachment(id = "pending"): PendingAttachment {
   return {
-    id: "pending",
+    id,
     type: "image",
     name: "draft.png",
     contentType: "image/png",
@@ -127,9 +175,9 @@ function pendingAttachment(): PendingAttachment {
   };
 }
 
-function completeAttachment(): CompleteAttachment {
+function completeAttachment(id = "complete"): CompleteAttachment {
   return {
-    id: "complete",
+    id,
     type: "image",
     name: "draft.png",
     contentType: "image/png",

@@ -1,131 +1,29 @@
-import { Folder, FolderOpen, LoaderCircle, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { Project, Thread } from "../../../../shared/contracts.ts";
-import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
-import { DesktopThreadList } from "./desktop-thread-list.tsx";
+import { memo } from "react";
+import { useDesktopSelector } from "../../state/desktop-context.tsx";
+import { selectNavigationProjectId, selectProjects } from "../../state/desktop-selectors.ts";
+import { ProjectItem } from "./project-item.tsx";
 
 interface ProjectListProps {
-  projects: Project[];
-  projectId?: string;
-  threadCatalogs: Readonly<Record<string, Thread[]>>;
   newTaskDisabled: boolean;
-  onProjectExpand(projectId: string): Promise<void>;
   onNewTask(projectId: string): void;
 }
 
 /** 渲染 Project 与其活动、归档 session 列表。 */
-export function ProjectList(props: ProjectListProps) {
-  const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(
-    () => new Set(props.projectId ? [props.projectId] : []),
-  );
-  const [loadingProjectIds, setLoadingProjectIds] = useState<ReadonlySet<string>>(() => new Set());
-
-  useEffect(() => {
-    const projectId = props.projectId;
-    if (!projectId) return;
-    setExpandedProjectIds((current) => {
-      if (current.has(projectId)) return current;
-      return new Set(current).add(projectId);
-    });
-  }, [props.projectId]);
+export const ProjectList = memo(function ProjectList({ newTaskDisabled, onNewTask }: ProjectListProps) {
+  const projects = useDesktopSelector(selectProjects);
+  const activeProjectId = useDesktopSelector(selectNavigationProjectId);
 
   return (
     <ul className="m-0 list-none p-0">
-      {props.projects.map((project) => {
-        const active = props.projectId === project.id;
-        const expanded = expandedProjectIds.has(project.id);
-
-        return (
-          <ProjectItem
-            key={project.id}
-            project={project}
-            active={active}
-            expanded={expanded}
-            threadsLoaded={Object.hasOwn(props.threadCatalogs, project.id)}
-            threadsLoading={loadingProjectIds.has(project.id)}
-            newTaskDisabled={props.newTaskDisabled}
-            onNewTask={props.onNewTask}
-            onExpandedChange={(nextExpanded) => {
-              setExpandedProjectIds((current) => {
-                const next = new Set(current);
-                if (nextExpanded) next.add(project.id);
-                else next.delete(project.id);
-                return next;
-              });
-              if (nextExpanded && !Object.hasOwn(props.threadCatalogs, project.id)) {
-                setLoadingProjectIds((current) => new Set(current).add(project.id));
-                void props.onProjectExpand(project.id).finally(() => {
-                  setLoadingProjectIds((current) => {
-                    const next = new Set(current);
-                    next.delete(project.id);
-                    return next;
-                  });
-                });
-              }
-            }}
-          />
-        );
-      })}
+      {projects.map((project) => (
+        <ProjectItem
+          key={project.id}
+          project={project}
+          active={activeProjectId === project.id}
+          newTaskDisabled={newTaskDisabled}
+          onNewTask={onNewTask}
+        />
+      ))}
     </ul>
   );
-}
-
-interface ProjectItemProps {
-  project: Project;
-  active: boolean;
-  expanded: boolean;
-  threadsLoaded: boolean;
-  threadsLoading: boolean;
-  newTaskDisabled: boolean;
-  onExpandedChange(expanded: boolean): void;
-  onNewTask(projectId: string): void;
-}
-
-function ProjectItem(props: ProjectItemProps) {
-  return (
-    <li className="project-group" data-project-id={props.project.id}>
-      <div
-        role="button"
-        tabIndex={0}
-        className="project-row group hover:bg-muted focus-visible:bg-muted focus-visible:ring-ring/50 grid h-8 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center rounded-md pe-1.5 outline-none transition-colors focus-visible:ring-[3px]"
-        data-active={props.active || undefined}
-        aria-current={props.active ? "page" : undefined}
-        aria-expanded={props.expanded}
-        aria-controls={`project-threads-${props.project.id}`}
-        onClick={() => props.onExpandedChange(!props.expanded)}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return;
-          event.preventDefault();
-          props.onExpandedChange(!props.expanded);
-        }}
-      >
-        <div className="flex min-w-0 items-center gap-2 px-2.5 text-sm">
-          {props.expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
-          <span className="min-w-0 flex-1 select-none truncate">{props.project.name}</span>
-          {props.project.available ? null : <span className="project-warning">不可用</span>}
-        </div>
-        <TooltipIconButton
-          tooltip="新建任务"
-          side="right"
-          disabled={!props.project.available || props.newTaskDisabled}
-          className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-has-focus-visible:opacity-100 disabled:opacity-0"
-          aria-label={`在 ${props.project.name} 中新建任务`}
-          onClick={(event) => {
-            event.stopPropagation();
-            props.onNewTask(props.project.id);
-          }}
-        >
-          <Plus className="size-3.5" />
-        </TooltipIconButton>
-      </div>
-      {props.expanded && props.threadsLoaded ? (
-        <DesktopThreadList id={`project-threads-${props.project.id}`} project={props.project} />
-      ) : props.expanded && props.threadsLoading ? (
-        <div className="flex h-8 items-center gap-2 px-8 text-xs text-muted-foreground" role="status">
-          <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
-          <span>加载中</span>
-        </div>
-      ) : null}
-    </li>
-  );
-}
+});

@@ -6,18 +6,25 @@ export const imageAttachmentAdapter = new SimpleImageAttachmentAdapter();
 
 type ComposerAttachment = Attachment;
 type PendingImageAttachment = Parameters<SimpleImageAttachmentAdapter["send"]>[0];
+type CompleteImageAttachment = Awaited<ReturnType<SimpleImageAttachmentAdapter["send"]>>;
+type CompleteImageAttachmentFn = (attachment: PendingImageAttachment) => Promise<CompleteImageAttachment>;
 
-/** 将 assistant-ui Composer 中的图片附件转换为 Pi IPC 输入。 */
-export async function toPiImageInputs(attachments: readonly Attachment[]): Promise<ImageInput[]> {
-  const images: ImageInput[] = [];
-  for (const attachment of attachments) {
-    const complete = isPendingImageAttachment(attachment) ? await imageAttachmentAdapter.send(attachment) : attachment;
-    for (const part of complete.content) {
-      if (part.type !== "image") continue;
-      images.push(parseImageDataUrl(part.image, part.filename ?? attachment.name));
-    }
-  }
-  return images;
+/** 并行完成独立图片附件，并按 Composer 中的原始顺序生成 Pi IPC 输入。 */
+export async function toPiImageInputs(
+  attachments: readonly Attachment[],
+  completeAttachment: CompleteImageAttachmentFn = (attachment) => imageAttachmentAdapter.send(attachment),
+): Promise<ImageInput[]> {
+  const completed = await Promise.all(
+    attachments.map(async (attachment) => ({
+      attachment,
+      complete: isPendingImageAttachment(attachment) ? await completeAttachment(attachment) : attachment,
+    })),
+  );
+  return completed.flatMap(({ attachment, complete }) =>
+    complete.content.flatMap((part) =>
+      part.type === "image" ? [parseImageDataUrl(part.image, part.filename ?? attachment.name)] : [],
+    ),
+  );
 }
 
 function isPendingImageAttachment(attachment: ComposerAttachment): attachment is PendingImageAttachment {

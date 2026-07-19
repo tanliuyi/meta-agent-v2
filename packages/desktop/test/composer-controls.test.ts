@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { createModelSelectorState } from "../src/renderer/src/components/chat/composer-controls.tsx";
+import {
+  createModelSelectorState,
+  getThinkingLevelLabel,
+} from "../src/renderer/src/components/chat/composer-control-model.ts";
 
-describe("createModelSelectorState", () => {
+describe("composer controls", () => {
+  it("显示 thinking level 映射值，同时保留原始 level 作为查找键", () => {
+    const labels = Object.fromEntries(
+      (["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const).map((level) => [
+        level,
+        getThinkingLevelLabel(level),
+      ]),
+    );
+
+    expect(labels).toEqual({
+      off: "关",
+      minimal: "最小",
+      low: "低",
+      medium: "中",
+      high: "高",
+      xhigh: "极高",
+      max: "最高",
+    });
+  });
+
   it("使用 provider 生成稳定且无冲突的模型键", () => {
     const openai = {
       provider: "openai",

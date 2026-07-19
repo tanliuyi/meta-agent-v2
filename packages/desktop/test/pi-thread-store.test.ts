@@ -23,6 +23,60 @@ describe("PiThreadStore", () => {
     expect(nodes[1]).toMatchObject({ content: [{ type: "text", text: "hello!" }] });
   });
 
+  it("同一 batch 多个 delta 只发布最终快照，且不修改旧 snapshot", () => {
+    const user = userNode("u", null);
+    const assistant = assistantNode("a", "u");
+    const initial = snapshot([user, assistant], "a");
+    const store = new PiThreadStore(initial);
+
+    store.apply(
+      eventBatch(1, [
+        { type: "text-delta", messageId: "a", partId: "a:text:0", delta: " first" },
+        { type: "text-delta", messageId: "a", partId: "a:text:0", delta: " second" },
+      ]),
+    );
+
+    expect(initial.nodes[1]).toBe(assistant);
+    expect(assistant.content[0]).toMatchObject({ text: "hello" });
+    expect(store.getSnapshot().nodes[0]).toBe(user);
+    expect(store.getSnapshot().nodes[1]).toMatchObject({ content: [{ text: "hello first second" }] });
+  });
+
+  it("batch 内新增 part 后可立即通过增量索引写入 delta", () => {
+    const assistant = assistantNode("a", null);
+    const store = new PiThreadStore(snapshot([assistant], "a"));
+
+    store.apply(
+      eventBatch(1, [
+        { type: "part-added", messageId: "a", part: { id: "a:text:1", type: "text", text: "next" } },
+        { type: "text-delta", messageId: "a", partId: "a:text:1", delta: "!" },
+      ]),
+    );
+
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      content: [expect.objectContaining({ text: "hello" }), expect.objectContaining({ text: "next!" })],
+    });
+  });
+
+  it("失败 batch 不提交局部 node 或索引变更", () => {
+    const assistant = assistantNode("a", null);
+    const store = new PiThreadStore(snapshot([assistant], "a"));
+    const before = store.getSnapshot();
+
+    expect(() =>
+      store.apply(
+        eventBatch(1, [
+          { type: "part-added", messageId: "a", part: { id: "a:text:1", type: "text", text: "next" } },
+          { type: "text-delta", messageId: "a", partId: "missing", delta: "!" },
+        ]),
+      ),
+    ).toThrow("delta part 不存在");
+    expect(store.getSnapshot()).toBe(before);
+
+    store.apply(batch(1, { type: "text-delta", messageId: "a", partId: "a:text:0", delta: "!" }));
+    expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ text: "hello!" }] });
+  });
+
   it("rekey 原子更新 node、children parent 与 head", () => {
     const live = userNode("live:u", null);
     const assistant = assistantNode("live:a", "live:u");
@@ -176,6 +230,42 @@ describe("PiMessageRepositoryConverter", () => {
     expect(second.messages[1]?.message).not.toBe(first.messages[1]?.message);
   });
 
+  it("messages/head 未变化时复用 repository wrapper，head 变化时只替换 wrapper", () => {
+    const nodes = [userNode("u", null), assistantNode("a", "u")];
+    const converter = new PiMessageRepositoryConverter();
+    const first = converter.build(snapshot(nodes, "a"));
+    const second = converter.build(snapshot(nodes, "a", 1));
+    const differentHead = converter.build(snapshot(nodes, "u", 2));
+
+    expect(second).toBe(first);
+    expect(second.messages).toBe(first.messages);
+    expect(differentHead).not.toBe(first);
+    expect(differentHead.messages).toBe(first.messages);
+  });
+
+  it("text delta 只替换目标 assistant part，并复用历史 tool artifact", () => {
+    const tool = toolPart("a:tool:0", "read-1", "read");
+    const text = { id: "a:text:1", type: "text", text: "before" } as const;
+    const assistant = { ...assistantNode("a", null), content: [tool, text] };
+    const converter = new PiMessageRepositoryConverter();
+    const first = converter.build(snapshot([assistant], "a"));
+    const updated = { ...assistant, content: [tool, { ...text, text: "after" }] };
+    const second = converter.build(snapshot([updated], "a", 1));
+    const firstMessage = first.messages[0]?.message;
+    const secondMessage = second.messages[0]?.message;
+    if (firstMessage?.role !== "assistant" || secondMessage?.role !== "assistant") {
+      throw new Error("assistant message missing");
+    }
+
+    expect(secondMessage.content[0]).toBe(firstMessage.content[0]);
+    expect(secondMessage.content[1]).not.toBe(firstMessage.content[1]);
+    expect(secondMessage.content[0]?.type).toBe("tool-call");
+    if (secondMessage.content[0]?.type !== "tool-call" || firstMessage.content[0]?.type !== "tool-call") {
+      throw new Error("tool part missing");
+    }
+    expect(secondMessage.content[0].artifact).toBe(firstMessage.content[0].artifact);
+  });
+
   it("1,000 nodes + 1,000 deltas 不重复转换未变化历史 message", () => {
     const users = Array.from({ length: 999 }, (_, index) =>
       userNode(`u-${index}`, index === 0 ? null : `u-${index - 1}`),
@@ -193,6 +283,8 @@ describe("PiMessageRepositoryConverter", () => {
 
     expect(latest.messages[0]?.message).toBe(first.messages[0]?.message);
     expect(latest.messages[998]?.message).toBe(first.messages[998]?.message);
+    expect(latest.messages[0]).toBe(first.messages[0]);
+    expect(latest.messages[998]).toBe(first.messages[998]);
     const converted = latest.messages[999]?.message;
     expect(converted?.role).toBe("assistant");
     if (converted?.role !== "assistant") throw new Error("assistant message missing");
@@ -221,6 +313,26 @@ function batch(sequence: number, event: PiThreadEventBatch["events"][number]["ev
     fromSequence: sequence,
     toSequence: sequence,
     events: [{ protocolVersion: PROTOCOL_VERSION, projectId: "project", threadId: "thread", sequence, event }],
+  };
+}
+
+function eventBatch(
+  firstSequence: number,
+  events: readonly PiThreadEventBatch["events"][number]["event"][],
+): PiThreadEventBatch {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    projectId: "project",
+    threadId: "thread",
+    fromSequence: firstSequence,
+    toSequence: firstSequence + events.length - 1,
+    events: events.map((event, index) => ({
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: "project",
+      threadId: "thread",
+      sequence: firstSequence + index,
+      event,
+    })),
   };
 }
 

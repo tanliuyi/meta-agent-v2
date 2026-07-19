@@ -1,33 +1,42 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { File, Folder, TerminalSquare } from "lucide-react";
+import File from "lucide-react/dist/esm/icons/file.mjs";
+import Folder from "lucide-react/dist/esm/icons/folder.mjs";
+import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { FileNode, SlashCommand } from "../../../../shared/contracts.ts";
+import {
+  commandSuggestions,
+  composerCompletionContext,
+  composerSuggestionOptionId,
+  fileSuggestions,
+  scrollSelectedSuggestion,
+} from "./composer-suggestion-model.ts";
 
 export interface ComposerSuggestionsHandle {
   handleKey(key: string): boolean;
 }
 
-interface ComposerSuggestionsProps {
-  projectId: string;
-  commands: readonly SlashCommand[];
+export interface ComposerSuggestionsState {
+  expanded: boolean;
+  activeDescendant: string | undefined;
 }
 
-interface Suggestion {
-  id: string;
-  label: string;
-  detail?: string;
-  type: "command" | "file" | "directory";
-  text: string;
+interface ComposerSuggestionsProps {
+  listboxId: string;
+  projectId: string;
+  commands: readonly SlashCommand[];
+  onStateChange(state: ComposerSuggestionsState): void;
 }
 
 /** 提供 Pi slash command 与 Project 文件的键盘补全。 */
 export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, ComposerSuggestionsProps>(
-  function ComposerSuggestions({ projectId, commands }, ref) {
+  function ComposerSuggestions({ listboxId, projectId, commands, onStateChange }, ref) {
     const aui = useAui();
     const text = useAuiState((state) => state.composer.text);
-    const context = completionContext(text);
+    const context = useMemo(() => composerCompletionContext(text), [text]);
     const [files, setFiles] = useState<FileNode[]>([]);
     const [selected, setSelected] = useState(0);
+    const [dismissedText, setDismissedText] = useState<string | null>(null);
     const list = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -52,24 +61,25 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
       };
     }, [context?.query, context?.type, projectId]);
 
-    const items = useMemo<Suggestion[]>(() => {
+    const items = useMemo(() => {
       if (!context) return [];
-      if (context.type === "command") return commandSuggestions(commands, context.query);
-
-      return files.map((file) => ({
-        id: `${file.type}:${file.path}`,
-        label: file.path,
-        detail: file.type === "directory" ? "目录" : "文件",
-        type: file.type,
-        text: `@${file.path} `,
-      }));
+      return context.type === "command" ? commandSuggestions(commands, context.query) : fileSuggestions(files);
     }, [commands, context, files]);
+    const visibleItems = dismissedText === text ? [] : items;
+    const activeIndex = Math.min(selected, visibleItems.length - 1);
+    const activeDescendant = activeIndex >= 0 ? composerSuggestionOptionId(listboxId, activeIndex) : undefined;
 
     useEffect(() => setSelected(0), [context?.query, context?.type]);
-    useEffect(() => scrollSelectedSuggestion(list.current), [items, selected]);
+    useEffect(() => {
+      if (dismissedText !== null && dismissedText !== text) setDismissedText(null);
+    }, [dismissedText, text]);
+    useEffect(() => scrollSelectedSuggestion(list.current), [activeIndex, visibleItems]);
+    useEffect(() => {
+      onStateChange({ expanded: visibleItems.length > 0, activeDescendant });
+    }, [activeDescendant, onStateChange, visibleItems.length]);
 
     const accept = (index: number) => {
-      const item = items[index];
+      const item = visibleItems[index];
       if (!item || !context) return false;
       aui.composer().setText(`${text.slice(0, context.start)}${item.text}`);
       return true;
@@ -77,25 +87,26 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
 
     useImperativeHandle(ref, () => ({
       handleKey(key) {
-        if (items.length === 0) return false;
-        if (key === "ArrowDown") setSelected((value) => (value + 1) % items.length);
-        else if (key === "ArrowUp") setSelected((value) => (value - 1 + items.length) % items.length);
-        else if (key === "Enter" || key === "Tab") return accept(selected);
-        else if (key === "Escape") setFiles([]);
+        if (visibleItems.length === 0) return false;
+        if (key === "ArrowDown") setSelected((value) => (value + 1) % visibleItems.length);
+        else if (key === "ArrowUp") setSelected((value) => (value - 1 + visibleItems.length) % visibleItems.length);
+        else if (key === "Enter" || key === "Tab") return accept(activeIndex);
+        else if (key === "Escape") setDismissedText(text);
         else return false;
         return true;
       },
     }));
 
-    if (items.length === 0) return null;
+    if (visibleItems.length === 0) return null;
     return (
-      <div ref={list} className="composer-suggestions" role="listbox">
-        {items.map((item, index) => (
+      <div ref={list} id={listboxId} className="composer-suggestions" role="listbox" aria-label="输入建议">
+        {visibleItems.map((item, index) => (
           <button
+            id={composerSuggestionOptionId(listboxId, index)}
             type="button"
             role="option"
-            aria-selected={selected === index}
-            className={selected === index ? "is-active" : ""}
+            aria-selected={activeIndex === index}
+            data-state={activeIndex === index ? "active" : "idle"}
             key={item.id}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => accept(index)}
@@ -115,28 +126,3 @@ export const ComposerSuggestions = forwardRef<ComposerSuggestionsHandle, Compose
     );
   },
 );
-
-export function scrollSelectedSuggestion(container: HTMLElement | null): void {
-  container?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
-}
-
-export function commandSuggestions(commands: readonly SlashCommand[], query: string): Suggestion[] {
-  const normalizedQuery = query.toLowerCase();
-  return commands
-    .filter(({ name }) => name.toLowerCase().includes(normalizedQuery))
-    .map((command) => ({
-      id: `${command.source}:${command.name}`,
-      label: `/${command.name}`,
-      detail: command.description,
-      type: "command",
-      text: `/${command.name} `,
-    }));
-}
-
-function completionContext(text: string): { type: "command" | "file"; query: string; start: number } | null {
-  if (/^\/[^\s]*$/.test(text)) return { type: "command", query: text.slice(1), start: 0 };
-  const match = /(?:^|\s)@([^\s@]*)$/.exec(text);
-  if (!match || match.index === undefined) return null;
-  const at = text.lastIndexOf("@", match.index + match[0].length);
-  return { type: "file", query: match[1] ?? "", start: at };
-}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isSameTerminalGrid } from "../src/renderer/src/components/panel/terminal-view.tsx";
-import { limitSize } from "../src/renderer/src/components/ui/use-resize.ts";
+import { limitSize } from "../src/renderer/src/shared/hooks/use-resizable-region.ts";
 
 describe("limitSize", () => {
   it("限制在最小值和最大值之间", () => {

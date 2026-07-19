@@ -1,30 +1,35 @@
-import { ThreadListItemPrimitive, ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { Archive, ArchiveRestore, Pencil, Trash2 } from "lucide-react";
-import { ContextMenu } from "radix-ui";
-import { type FormEvent, useMemo, useRef, useState } from "react";
+import { useAssistantRuntime, useAuiState } from "@assistant-ui/react";
+import { Button } from "@renderer/shared/ui/button";
+import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
+import { Dialog } from "@renderer/shared/ui/dialog";
+import { DialogClose } from "@renderer/shared/ui/dialog-close";
+import { DialogContent } from "@renderer/shared/ui/dialog-content";
+import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogTitle } from "@renderer/shared/ui/dialog-title";
+import { Input } from "@renderer/shared/ui/input";
+import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
+import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, Thread } from "../../../../shared/contracts.ts";
-import { useDesktopNavigation } from "../../state/desktop-context.tsx";
+import { threadAdapterId } from "../../runtime/thread-adapter.ts";
+import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
+import {
+  selectHasDraft,
+  selectIsDraftMaterializing,
+  selectNavigationThreadIdForProject,
+} from "../../state/desktop-selectors.ts";
 import {
   COLLAPSED_THREAD_COUNT,
-  isDesktopThreadItemForProject,
+  isThreadListExpanded,
   nextThreadVisibleLimit,
   normalizeThreadTitle,
-  preventPrimitiveThreadAction,
-  resolveDesktopThreadItem,
-  runControlledThreadAction,
   runPendingThreadAction,
-  shouldOpenThread,
-  type ThreadListItemIdentity,
-  visibleRegularThreadIds,
+  visibleThreadsByArchiveState,
 } from "../../state/thread-list-commands.ts";
-import { Button } from "../ui/button.tsx";
-import { ConfirmDialog } from "../ui/confirm-dialog.tsx";
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "../ui/dialog.tsx";
-import { Input } from "../ui/input.tsx";
+import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
 
 interface DesktopThreadListProps {
-  id: string;
   project: Project;
+  threads: readonly Thread[];
 }
 
 interface RenameState {
@@ -33,79 +38,123 @@ interface RenameState {
 }
 
 /** 使用 assistant-ui primitives 渲染当前 Project 的 session 列表。 */
-export function DesktopThreadList({ id, project }: DesktopThreadListProps) {
-  const desktop = useDesktopNavigation();
+export function DesktopThreadList({ project, threads }: DesktopThreadListProps) {
+  const actions = useDesktopActions();
+  const assistantRuntime = useAssistantRuntime();
+  const activeThreadId = useDesktopSelector((state) => selectNavigationThreadIdForProject(state, project.id));
+  const hasDraft = useDesktopSelector(selectHasDraft);
+  const navigationDisabled = useDesktopSelector(selectIsDraftMaterializing);
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
   const [pendingOpen, setPendingOpen] = useState<Thread | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [archivedVisibleLimit, setArchivedVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
   const composerIsEmpty = useAuiState((state) => state.composer.isEmpty);
-  const navigationDisabled = desktop.draft?.phase === "materializing";
-  const threads = desktop.threadCatalogs[project.id] ?? [];
-  const regularThreadCount = threads.filter(({ archived }) => !archived).length;
-  const visibleThreadIds = useMemo(() => visibleRegularThreadIds(threads, visibleLimit), [threads, visibleLimit]);
+  const regularThreadCount = useMemo(() => threads.filter(({ archived }) => !archived).length, [threads]);
+  const archivedThreadCount = threads.length - regularThreadCount;
+  const visibleThreads = useMemo(
+    () => visibleThreadsByArchiveState(threads, false, visibleLimit),
+    [threads, visibleLimit],
+  );
+  const visibleArchivedThreads = useMemo(
+    () => (archivedOpen ? visibleThreadsByArchiveState(threads, true, archivedVisibleLimit) : []),
+    [archivedOpen, archivedVisibleLimit, threads],
+  );
+  const renderedThreads = useMemo(
+    () =>
+      visibleThreads.map((thread) => ({
+        runtime: assistantRuntime.threads.getItemById(threadAdapterId(project.id, thread.id)),
+        thread,
+      })),
+    [assistantRuntime.threads, project.id, visibleThreads],
+  );
+  const renderedArchivedThreads = useMemo(
+    () =>
+      visibleArchivedThreads.map((thread) => ({
+        runtime: assistantRuntime.threads.getItemById(threadAdapterId(project.id, thread.id)),
+        thread,
+      })),
+    [assistantRuntime.threads, project.id, visibleArchivedThreads],
+  );
   const hasMoreThreads = regularThreadCount > visibleLimit;
-  const isExpanded = visibleLimit > COLLAPSED_THREAD_COUNT;
+  const isExpanded = isThreadListExpanded(visibleLimit, regularThreadCount);
+  const hasMoreArchivedThreads = archivedThreadCount > archivedVisibleLimit;
+  const isArchivedExpanded = isThreadListExpanded(archivedVisibleLimit, archivedThreadCount);
 
-  const runAction = (key: string, action: () => Promise<void>) => {
+  const runAction = useCallback((key: string, action: () => Promise<void>) => {
     void runPendingThreadAction(pendingActions.current, key, setPendingKeys, action);
-  };
+  }, []);
 
-  const commitRename = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!renaming) return;
-    const thread = threads.find(({ id }) => id === renaming.threadId);
-    const title = normalizeThreadTitle(renaming.title);
-    setRenaming(null);
-    if (!thread || !title || title === thread.title) return;
-    runAction(`rename:${thread.id}`, () => desktop.renameThread(project.id, thread.id, title));
-  };
+  const commitRename = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!renaming) return;
+      const thread = threads.find(({ id }) => id === renaming.threadId);
+      const title = normalizeThreadTitle(renaming.title);
+      setRenaming(null);
+      if (!thread || !title || title === thread.title) return;
+      runAction(`rename:${thread.id}`, () => actions.renameThread(project.id, thread.id, title));
+    },
+    [actions, project.id, renaming, runAction, threads],
+  );
 
-  const confirmDelete = () => {
+  const confirmDelete = useCallback(() => {
     const thread = pendingDelete;
     if (!thread) return;
     setPendingDelete(null);
-    runAction(`delete:${thread.id}`, () => desktop.removeThread(project.id, thread.id));
-  };
+    runAction(`delete:${thread.id}`, () => actions.removeThread(project.id, thread.id));
+  }, [actions, pendingDelete, project.id, runAction]);
 
-  const openThread = (thread: Thread) => {
-    if (desktop.draft && !composerIsEmpty) {
-      setPendingOpen(thread);
-      return;
-    }
-    runAction(`switch:${thread.id}`, () => desktop.openThread(project.id, thread.id));
-  };
+  const openThread = useCallback(
+    (thread: Thread) => {
+      if (hasDraft && !composerIsEmpty) {
+        setPendingOpen(thread);
+        return;
+      }
+      runAction(`switch:${thread.id}`, () => actions.openThread(project.id, thread.id));
+    },
+    [actions, composerIsEmpty, hasDraft, project.id, runAction],
+  );
 
-  const confirmOpen = () => {
+  const confirmOpen = useCallback(() => {
     const thread = pendingOpen;
     if (!thread) return;
     setPendingOpen(null);
-    runAction(`switch:${thread.id}`, () => desktop.openThread(project.id, thread.id));
-  };
+    runAction(`switch:${thread.id}`, () => actions.openThread(project.id, thread.id));
+  }, [actions, pendingOpen, project.id, runAction]);
 
-  const renderThreadItem = ({ threadListItem }: { threadListItem: ThreadListItemIdentity }) => (
-    <DesktopThreadListItem
-      item={threadListItem}
-      project={project}
-      threads={threads}
-      visibleThreadIds={visibleThreadIds}
-      activeThreadId={desktop.navigationProjectId === project.id ? desktop.navigationThreadId : null}
-      pendingKeys={pendingKeys}
-      navigationDisabled={navigationDisabled}
-      onRenameStart={(thread) => setRenaming({ threadId: thread.id, title: thread.title })}
-      onOpen={openThread}
-      onArchive={(thread, archived) =>
-        runAction(`archive:${thread.id}`, () => desktop.setThreadArchived(project.id, thread.id, archived))
-      }
-      onDelete={setPendingDelete}
-    />
+  const startRename = useCallback((thread: Thread) => {
+    setRenaming({ threadId: thread.id, title: thread.title });
+  }, []);
+
+  const archiveThread = useCallback(
+    (thread: Thread, archived: boolean) => {
+      runAction(`archive:${thread.id}`, () => actions.setThreadArchived(project.id, thread.id, archived));
+    },
+    [actions, project.id, runAction],
   );
 
   return (
-    <div id={id} className="thread-list" data-slot="aui_thread-list-items">
-      <ThreadListPrimitive.Items>{renderThreadItem}</ThreadListPrimitive.Items>
+    <div className="thread-list" data-slot="aui_thread-list-items">
+      {renderedThreads.map(({ runtime, thread }) => (
+        <DesktopThreadListItem
+          key={thread.id}
+          runtime={runtime}
+          thread={thread}
+          active={activeThreadId === thread.id}
+          isSwitching={navigationDisabled || pendingKeys.has(`switch:${thread.id}`)}
+          isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
+          isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
+          isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
+          onRenameStart={startRename}
+          onOpen={openThread}
+          onArchive={archiveThread}
+          onDelete={setPendingDelete}
+        />
+      ))}
       {hasMoreThreads || isExpanded ? (
         <div className="flex items-center gap-1 px-8 py-1">
           {hasMoreThreads ? (
@@ -129,6 +178,67 @@ export function DesktopThreadList({ id, project }: DesktopThreadListProps) {
             </Button>
           ) : null}
         </div>
+      ) : null}
+      {archivedThreadCount > 0 ? (
+        <>
+          <button
+            type="button"
+            className="archive-toggle group"
+            aria-expanded={archivedOpen}
+            data-state={archivedOpen ? "open" : "closed"}
+            onClick={() => setArchivedOpen((open) => !open)}
+          >
+            <ChevronRight
+              size={12}
+              aria-hidden="true"
+              className="transition-transform group-data-[state=open]:rotate-90"
+            />
+            <span>已归档</span>
+            <small>{archivedThreadCount}</small>
+          </button>
+          {renderedArchivedThreads.map(({ runtime, thread }) => (
+            <DesktopThreadListItem
+              key={thread.id}
+              runtime={runtime}
+              thread={thread}
+              active={activeThreadId === thread.id}
+              isSwitching={navigationDisabled || pendingKeys.has(`switch:${thread.id}`)}
+              isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
+              isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
+              isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
+              onRenameStart={startRename}
+              onOpen={openThread}
+              onArchive={archiveThread}
+              onDelete={setPendingDelete}
+            />
+          ))}
+          {archivedOpen && (hasMoreArchivedThreads || isArchivedExpanded) ? (
+            <div className="flex items-center gap-1 px-8 py-1">
+              {hasMoreArchivedThreads ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                  onClick={() =>
+                    setArchivedVisibleLimit((current) => nextThreadVisibleLimit(current, archivedThreadCount))
+                  }
+                >
+                  展开更多归档会话
+                </Button>
+              ) : null}
+              {isArchivedExpanded ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                  onClick={() => setArchivedVisibleLimit(COLLAPSED_THREAD_COUNT)}
+                >
+                  收起归档会话
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </>
       ) : null}
       <Dialog
         open={renaming !== null}
@@ -180,107 +290,5 @@ export function DesktopThreadList({ id, project }: DesktopThreadListProps) {
         onConfirm={confirmOpen}
       />
     </div>
-  );
-}
-
-interface DesktopThreadListItemProps {
-  item: ThreadListItemIdentity;
-  project: Project;
-  threads: readonly Thread[];
-  visibleThreadIds: ReadonlySet<string>;
-  activeThreadId: string | null;
-  pendingKeys: ReadonlySet<string>;
-  navigationDisabled: boolean;
-  onRenameStart(thread: Thread): void;
-  onOpen(thread: Thread): void;
-  onArchive(thread: Thread, archived: boolean): void;
-  onDelete(thread: Thread): void;
-}
-
-function DesktopThreadListItem(props: DesktopThreadListItemProps) {
-  if (!isDesktopThreadItemForProject(props.item, props.project.id)) return null;
-  const thread = resolveDesktopThreadItem(props.item, props.project.id, props.threads);
-  if (!thread || !props.visibleThreadIds.has(thread.id)) return null;
-  const isSwitching = props.navigationDisabled || props.pendingKeys.has(`switch:${thread.id}`);
-  const isRenamingPending = props.pendingKeys.has(`rename:${thread.id}`);
-  const isArchivePending = props.pendingKeys.has(`archive:${thread.id}`);
-  const isDeletePending = props.pendingKeys.has(`delete:${thread.id}`);
-  const isPending = isSwitching || isRenamingPending || isArchivePending || isDeletePending;
-
-  return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger asChild>
-        <ThreadListItemPrimitive.Root
-          data-slot="aui_thread-list-item"
-          className="thread-row group hover:bg-muted focus-visible:bg-muted data-active:bg-foreground/10 data-active:hover:bg-foreground/10 has-focus-visible:bg-muted data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors focus-visible:outline-none"
-          data-thread-id={thread.id}
-          data-pending={isPending || undefined}
-        >
-          <ThreadListItemPrimitive.Trigger
-            data-slot="aui_thread-list-item-trigger"
-            className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md ps-8 pe-2 text-start text-sm outline-none focus-visible:ring-[3px]"
-            disabled={isSwitching}
-            onClickCapture={preventPrimitiveThreadAction}
-            onClick={(event) =>
-              runControlledThreadAction(event, () => {
-                if (shouldOpenThread(props.activeThreadId, thread.id)) props.onOpen(thread);
-              })
-            }
-          >
-            <span data-slot="aui_thread-list-item-title" className="min-w-0 flex-1 truncate">
-              <ThreadListItemPrimitive.Title fallback="新会话" />
-            </span>
-            {thread.running ? <span className="running-dot" aria-label="运行中" /> : null}
-          </ThreadListItemPrimitive.Trigger>
-        </ThreadListItemPrimitive.Root>
-      </ContextMenu.Trigger>
-      <ContextMenu.Portal>
-        <ContextMenu.Content
-          data-slot="aui_thread-list-item-context-menu"
-          className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-50 min-w-32 overflow-hidden rounded-xl border p-1.5 shadow-lg backdrop-blur-sm"
-        >
-          <ContextMenu.Item
-            data-slot="aui_thread-list-item-context-menu-item"
-            className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
-            onSelect={() => props.onRenameStart(thread)}
-          >
-            <Pencil size={14} /> 重命名
-          </ContextMenu.Item>
-          {thread.archived ? (
-            <ThreadListItemPrimitive.Unarchive asChild disabled={isArchivePending}>
-              <ContextMenu.Item
-                data-slot="aui_thread-list-item-context-menu-item"
-                className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
-                onClickCapture={preventPrimitiveThreadAction}
-                onClick={(event) => runControlledThreadAction(event, () => props.onArchive(thread, false))}
-              >
-                <ArchiveRestore size={14} /> 恢复
-              </ContextMenu.Item>
-            </ThreadListItemPrimitive.Unarchive>
-          ) : (
-            <ThreadListItemPrimitive.Archive asChild disabled={isArchivePending}>
-              <ContextMenu.Item
-                data-slot="aui_thread-list-item-context-menu-item"
-                className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
-                onClickCapture={preventPrimitiveThreadAction}
-                onClick={(event) => runControlledThreadAction(event, () => props.onArchive(thread, true))}
-              >
-                <Archive size={14} /> 归档
-              </ContextMenu.Item>
-            </ThreadListItemPrimitive.Archive>
-          )}
-          <ThreadListItemPrimitive.Delete asChild disabled={isDeletePending}>
-            <ContextMenu.Item
-              data-slot="aui_thread-list-item-context-menu-item"
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
-              onClickCapture={preventPrimitiveThreadAction}
-              onClick={(event) => runControlledThreadAction(event, () => props.onDelete(thread))}
-            >
-              <Trash2 size={14} /> 删除
-            </ContextMenu.Item>
-          </ThreadListItemPrimitive.Delete>
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
   );
 }

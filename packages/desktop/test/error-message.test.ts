@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorMessage } from "../src/renderer/src/lib/error-message.ts";
+import { errorMessage } from "../src/renderer/src/shared/lib/error-message.ts";
 
 describe("errorMessage", () => {
   it("extracts errors serialized as plain IPC objects", () => {

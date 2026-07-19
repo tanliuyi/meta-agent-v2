@@ -1,101 +1,58 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { DevToolsModal } from "@assistant-ui/react-devtools";
-import { createContext, type ReactNode, useContext, useMemo, useRef } from "react";
+import { createContext, type ReactNode, useContext, useRef, useState } from "react";
+import { useStore } from "zustand";
 import type { DesktopThreadActions } from "../runtime/use-pi-runtime.ts";
 import { usePiRuntime } from "../runtime/use-pi-runtime.ts";
-import type { DesktopContextValue } from "./desktop-model.ts";
+import type { DesktopActions } from "./desktop-actions.ts";
+import type { DesktopState } from "./desktop-model.ts";
+import { selectActiveThreadId, selectIsSendDisabled } from "./desktop-selectors.ts";
+import { createDesktopStore, type DesktopStore } from "./desktop-store.ts";
 import { useDesktopController } from "./use-desktop-controller.ts";
 
-const DesktopContext = createContext<DesktopContextValue | null>(null);
-type DesktopNavigationValue = Pick<
-  DesktopContextValue,
-  | "projects"
-  | "project"
-  | "draft"
-  | "threadCatalogs"
-  | "navigationProjectId"
-  | "navigationThreadId"
-  | "chooseProject"
-  | "loadProjectThreads"
-  | "removeProject"
-  | "beginDraft"
-  | "openThread"
-  | "renameThread"
-  | "setThreadArchived"
-  | "removeThread"
->;
-const DesktopNavigationContext = createContext<DesktopNavigationValue | null>(null);
+const DesktopStoreContext = createContext<DesktopStore | null>(null);
+const DesktopActionsContext = createContext<DesktopActions | null>(null);
 
-/** 向 renderer 组件树注入 Desktop controller。 */
+/**
+ * 向聊天工作区注入唯一 Desktop store 与 assistant-ui runtime。
+ *
+ * Context 只发布稳定的 store/commands identity；组件通过 selector 订阅实际使用的原子字段。
+ */
 export function DesktopProvider({ children }: { children: ReactNode }) {
+  const [store] = useState(createDesktopStore);
   const threadActions = useRef<DesktopThreadActions | null>(null);
-  const desktop = useDesktopController(threadActions);
-  const { runtime, actions } = usePiRuntime({
-    projects: desktop.projects,
-    project: desktop.project,
-    threadCatalogs: desktop.threadCatalogs,
-    threadId: desktop.threadId,
-    isSendDisabled: desktop.draft
-      ? desktop.draft.config?.readiness.state !== "ready"
-      : desktop.snapshot?.readiness.state !== "ready",
+  const desktopActions = useDesktopController(store, threadActions);
+  const projects = useStore(store, (state) => state.projects);
+  const project = useStore(store, (state) => state.project);
+  const threadCatalogs = useStore(store, (state) => state.threadCatalogs);
+  const threadId = useStore(store, selectActiveThreadId);
+  const isSendDisabled = useStore(store, selectIsSendDisabled);
+  const { runtime, actions: runtimeActions } = usePiRuntime({
+    projects,
+    project,
+    threadCatalogs,
+    threadId,
+    isSendDisabled,
   });
-  threadActions.current = actions;
-  const navigation = useMemo<DesktopNavigationValue>(
-    () => ({
-      projects: desktop.projects,
-      project: desktop.project,
-      draft: desktop.draft,
-      threadCatalogs: desktop.threadCatalogs,
-      navigationProjectId: desktop.navigationProjectId,
-      navigationThreadId: desktop.navigationThreadId,
-      chooseProject: desktop.chooseProject,
-      loadProjectThreads: desktop.loadProjectThreads,
-      removeProject: desktop.removeProject,
-      beginDraft: desktop.beginDraft,
-      openThread: desktop.openThread,
-      renameThread: desktop.renameThread,
-      setThreadArchived: desktop.setThreadArchived,
-      removeThread: desktop.removeThread,
-    }),
-    [
-      desktop.projects,
-      desktop.project,
-      desktop.draft,
-      desktop.threadCatalogs,
-      desktop.navigationProjectId,
-      desktop.navigationThreadId,
-      desktop.chooseProject,
-      desktop.loadProjectThreads,
-      desktop.removeProject,
-      desktop.beginDraft,
-      desktop.openThread,
-      desktop.renameThread,
-      desktop.setThreadArchived,
-      desktop.removeThread,
-    ],
-  );
+  threadActions.current = runtimeActions;
   return (
-    <DesktopNavigationContext.Provider value={navigation}>
-      <DesktopContext.Provider value={desktop}>
-        <AssistantRuntimeProvider runtime={runtime}>
-          {/* <DevToolsModal /> */}
-          {children}
-        </AssistantRuntimeProvider>
-      </DesktopContext.Provider>
-    </DesktopNavigationContext.Provider>
+    <DesktopStoreContext.Provider value={store}>
+      <DesktopActionsContext.Provider value={desktopActions}>
+        <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>
+      </DesktopActionsContext.Provider>
+    </DesktopStoreContext.Provider>
   );
 }
 
-/** 读取 Desktop 工作台状态。 */
-export function useDesktop(): DesktopContextValue {
-  const value = useContext(DesktopContext);
-  if (!value) throw new Error("useDesktop 必须在 DesktopProvider 内使用");
-  return value;
+/** 订阅 Desktop store 的单个派生值；selector 应返回 primitive 或稳定领域引用。 */
+export function useDesktopSelector<T>(selector: (state: DesktopState) => T): T {
+  const store = useContext(DesktopStoreContext);
+  if (!store) throw new Error("useDesktopSelector 必须在 DesktopProvider 内使用");
+  return useStore(store, selector);
 }
 
-/** 订阅 Project、session 列表与导航命令，隔离 session control 更新。 */
-export function useDesktopNavigation(): DesktopNavigationValue {
-  const value = useContext(DesktopNavigationContext);
-  if (!value) throw new Error("useDesktopNavigation 必须在 DesktopProvider 内使用");
-  return value;
+/** 读取稳定的 Desktop 命令集合，不订阅任何状态。 */
+export function useDesktopActions(): DesktopActions {
+  const actions = useContext(DesktopActionsContext);
+  if (!actions) throw new Error("useDesktopActions 必须在 DesktopProvider 内使用");
+  return actions;
 }

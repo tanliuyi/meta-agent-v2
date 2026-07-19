@@ -1,6 +1,15 @@
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { ChevronRight, FileCode2, Files, ListTree, PencilLine, Search, TerminalSquare, Wrench } from "lucide-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.tsx";
+import { Collapsible } from "@renderer/shared/ui/collapsible";
+import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
+import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
+import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
+import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
+import Files from "lucide-react/dist/esm/icons/files.mjs";
+import ListTree from "lucide-react/dist/esm/icons/list-tree.mjs";
+import PencilLine from "lucide-react/dist/esm/icons/pencil-line.mjs";
+import Search from "lucide-react/dist/esm/icons/search.mjs";
+import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
+import Wrench from "lucide-react/dist/esm/icons/wrench.mjs";
 import { ToolContent } from "./tools/tool-content.tsx";
 
 type ToolState = "running" | "complete" | "error";
@@ -28,7 +37,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
     <Collapsible className="tool-view" data-tool-status={toolState}>
       <CollapsibleTrigger className="tool-trigger focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px] focus-visible:ring-inset">
         <span className="tool-icon">{view.icon}</span>
-        <span className={`tool-status-label ${toolState}`} aria-live="polite">
+        <span className="tool-status-label" aria-live="polite">
           {view[toolState]}
         </span>
         {target ? <span className="tool-target">{target}</span> : null}

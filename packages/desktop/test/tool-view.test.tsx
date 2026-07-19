@@ -19,6 +19,7 @@ describe("ToolView", () => {
     );
 
     expect(markup).toContain('data-tool-status="running"');
+    expect(markup).not.toContain('class="tool-status-label running"');
     expect(markup).toContain("正在写入");
     expect(markup).toContain("src/main.ts");
   });
@@ -37,6 +38,7 @@ describe("ToolView", () => {
     );
 
     expect(markup).toContain('data-tool-status="error"');
+    expect(markup).not.toContain('class="tool-status-label error"');
     expect(markup).toContain("写入失败");
     expect(markup).toContain("src/main.ts");
   });
@@ -49,6 +51,13 @@ describe("ToolView", () => {
 
     expect(markup).toContain('<pre class="tool-command">');
     expect(markup).toContain(command);
+  });
+
+  it("通过 data-tone 暴露工具结果错误状态", () => {
+    const markup = renderToStaticMarkup(<ToolContent name="read" args={{}} result="failed" error />);
+
+    expect(markup).toContain('class="tool-result" data-tone="destructive"');
+    expect(markup).not.toContain('class="tool-result error"');
   });
 });
 

@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { StreamdownMarkdown } from "../src/renderer/src/components/assistant-ui/streamdown-text.tsx";
+import { StreamdownMarkdown } from "../src/renderer/src/components/assistant-ui/streamdown/streamdown-markdown.tsx";
 import { PiNoticeView } from "../src/renderer/src/components/chat/pi-notice-view.tsx";
 
 describe("PiNoticeView", () => {

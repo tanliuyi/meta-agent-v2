@@ -1,4 +1,4 @@
-import type { Project, Thread } from "../../../shared/contracts.ts";
+import type { Thread } from "../../../shared/contracts.ts";
 
 export interface ThreadListItemIdentity {
   id: string;
@@ -10,11 +10,6 @@ export interface PreventableThreadActionEvent {
   preventDefault(): void;
 }
 
-export interface DesktopAdapterThread {
-  project: Project;
-  threadId: string;
-}
-
 export const COLLAPSED_THREAD_COUNT = 5;
 export const THREAD_EXPANSION_COUNT = 10;
 
@@ -22,33 +17,16 @@ export function nextThreadVisibleLimit(currentLimit: number, threadCount: number
   return Math.min(threadCount, Math.max(currentLimit, COLLAPSED_THREAD_COUNT) + THREAD_EXPANSION_COUNT);
 }
 
-export function visibleRegularThreadIds(threads: readonly Thread[], limit: number): ReadonlySet<string> {
-  return new Set(
-    threads
-      .filter(({ archived }) => !archived)
-      .slice(0, limit)
-      .map(({ id }) => id),
-  );
+export function isThreadListExpanded(visibleLimit: number, threadCount: number): boolean {
+  return visibleLimit > COLLAPSED_THREAD_COUNT && threadCount > COLLAPSED_THREAD_COUNT;
 }
 
-/** 解析全局 assistant-ui item，并允许 thread 切换提交前使用显式目标 Project。 */
-export function resolveDesktopAdapterThread(
-  adapterThreadId: string,
-  projects: readonly Project[],
-  catalogs: Readonly<Record<string, readonly Thread[]>>,
-  targetProject?: Project | null,
-): DesktopAdapterThread {
-  for (const project of projects) {
-    const thread = catalogs[project.id]?.find(({ id }) => `${project.id}:${id}` === adapterThreadId);
-    if (thread) return { project, threadId: thread.id };
-  }
-  if (targetProject) {
-    const prefix = `${targetProject.id}:`;
-    if (adapterThreadId.startsWith(prefix) && adapterThreadId.length > prefix.length) {
-      return { project: targetProject, threadId: adapterThreadId.slice(prefix.length) };
-    }
-  }
-  throw new Error(`Desktop session catalog 不包含 assistant-ui thread: ${adapterThreadId}`);
+export function visibleThreadsByArchiveState(
+  threads: readonly Thread[],
+  archived: boolean,
+  limit: number,
+): readonly Thread[] {
+  return threads.filter((thread) => thread.archived === archived).slice(0, limit);
 }
 
 /** 在 React bubble handler 与 primitive 内部 action 组合前阻止默认提交。 */

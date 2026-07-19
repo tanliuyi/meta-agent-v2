@@ -1,8 +1,13 @@
-import { AlertCircle, ChevronDown, LoaderCircle, RotateCw } from "lucide-react";
+import { Collapsible } from "@renderer/shared/ui/collapsible";
+import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
+import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
+import AlertCircle from "lucide-react/dist/esm/icons/circle-alert.mjs";
+import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
+import RotateCw from "lucide-react/dist/esm/icons/rotate-cw.mjs";
 import type { ReactNode } from "react";
 import type { SessionControlState } from "../../../../shared/contracts.ts";
 import { usePiThreadPhase } from "../../runtime/use-pi-thread-snapshot.ts";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.tsx";
 
 type Activity = {
   kind: "compacting" | "retrying" | "working" | "error";
@@ -11,10 +16,17 @@ type Activity = {
   icon: ReactNode;
 };
 
+interface ThreadActivityIndicatorProps {
+  retry: SessionControlState["retry"];
+  workingVisible: boolean;
+  workingMessage: string | undefined;
+  lastError: string | undefined;
+}
+
 /** Pi-specific activity rendered at the end of the message timeline. */
-export function ThreadActivityIndicator({ snapshot }: { snapshot: SessionControlState }) {
+export function ThreadActivityIndicator(props: ThreadActivityIndicatorProps) {
   const phase = usePiThreadPhase();
-  const activity = getActivity(snapshot, phase);
+  const activity = getActivity(props, phase);
   if (!activity) return null;
 
   const className =
@@ -57,12 +69,15 @@ export function ThreadActivityIndicator({ snapshot }: { snapshot: SessionControl
   );
 }
 
-function getActivity(snapshot: SessionControlState, phase: ReturnType<typeof usePiThreadPhase>): Activity | null {
+function getActivity(
+  control: ThreadActivityIndicatorProps,
+  phase: ReturnType<typeof usePiThreadPhase>,
+): Activity | null {
   if (phase === "retrying") {
     return {
       kind: "retrying",
-      label: snapshot.retry ? `正在重试 ${snapshot.retry.attempt}/${snapshot.retry.maxAttempts}` : "正在重试",
-      ...(snapshot.retry?.message ? { detail: snapshot.retry.message } : undefined),
+      label: control.retry ? `正在重试 ${control.retry.attempt}/${control.retry.maxAttempts}` : "正在重试",
+      ...(control.retry?.message ? { detail: control.retry.message } : undefined),
       icon: <RotateCw className="size-4 shrink-0 animate-spin" />,
     };
   }
@@ -73,18 +88,18 @@ function getActivity(snapshot: SessionControlState, phase: ReturnType<typeof use
       icon: <LoaderCircle className="size-4 shrink-0 animate-spin" />,
     };
   }
-  if (phase === "running" && snapshot.extensionUi.workingVisible) {
+  if (phase === "running" && control.workingVisible) {
     return {
       kind: "working",
-      label: snapshot.extensionUi.workingMessage ?? "Pi 正在处理",
+      label: control.workingMessage ?? "Pi 正在处理",
       icon: <LoaderCircle className="size-4 shrink-0 animate-spin" />,
     };
   }
-  if (phase === "idle" && snapshot.lastError) {
+  if (phase === "idle" && control.lastError) {
     return {
       kind: "error",
       label: "运行出错",
-      detail: snapshot.lastError,
+      detail: control.lastError,
       icon: <AlertCircle className="size-4 shrink-0" />,
     };
   }

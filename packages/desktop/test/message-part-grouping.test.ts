@@ -52,6 +52,23 @@ describe("message part grouping", () => {
     ]);
   });
 
+  it("分组函数暴露稳定 memo key，且查找 part 不依赖线性 indexOf", () => {
+    const parts = [
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "text", text: "回复", status: COMPLETE },
+    ] satisfies PartState[];
+    Object.defineProperty(parts, "indexOf", {
+      value: () => {
+        throw new Error("不应线性查找 part");
+      },
+    });
+
+    const groupPart = createRunGroupPart(parts);
+
+    expect(Reflect.get(groupPart, Symbol.for("@assistant-ui/groupBy.memoKey"))).toBe("pi-run-activity:v1");
+    expect(parts.map((part) => groupPart(part, {}))).toEqual([["group-runActivity", "group-chainOfThought"], []]);
+  });
+
   it("取消或错误结束且没有最终 text 时保留完整 activity group", () => {
     const parts = [
       { type: "reasoning", text: "分析", status: COMPLETE },

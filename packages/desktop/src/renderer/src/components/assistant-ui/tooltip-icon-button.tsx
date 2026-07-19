@@ -1,9 +1,11 @@
 "use client";
 
-import { Button } from "@renderer/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@renderer/components/ui/tooltip";
-import { cn } from "@renderer/lib/cn";
-import { Slot } from "radix-ui";
+import { Slot, Slottable } from "@radix-ui/react-slot";
+import { cn } from "@renderer/shared/lib/cn";
+import { Button } from "@renderer/shared/ui/button";
+import { Tooltip } from "@renderer/shared/ui/tooltip";
+import { TooltipContent } from "@renderer/shared/ui/tooltip-content";
+import { TooltipTrigger } from "@renderer/shared/ui/tooltip-trigger";
 import { type ComponentPropsWithRef, forwardRef } from "react";
 
 export type TooltipIconButtonProps = ComponentPropsWithRef<typeof Button> & {
@@ -23,7 +25,7 @@ export const TooltipIconButton = forwardRef<HTMLButtonElement, TooltipIconButton
             className={cn("aui-button-icon size-6 p-1 active:scale-90", className)}
             ref={ref}
           >
-            <Slot.Slottable>{children}</Slot.Slottable>
+            <Slottable>{children}</Slottable>
             <span className="aui-sr-only sr-only">{tooltip}</span>
           </Button>
         </TooltipTrigger>

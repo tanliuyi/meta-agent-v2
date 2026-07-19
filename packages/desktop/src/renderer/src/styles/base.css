@@ -1,0 +1,100 @@
+@layer base {
+  :root {
+    color: hsl(var(--foreground));
+    background: hsl(var(--background));
+    font-family: var(--font-family-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    font-size: 16px;
+  }
+
+  * {
+    box-sizing: border-box;
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    letter-spacing: 0;
+  }
+
+  ::selection {
+    background: var(--selection-background);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: var(--shape-radius-md);
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  :where(
+      button,
+      input,
+      textarea,
+      select,
+      a[href],
+      [role="button"],
+      [role="radio"],
+      [role="separator"],
+      [role="tab"],
+      [tabindex]:not([tabindex="-1"])
+    ):focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html:focus-within {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :where(
+        button,
+        input,
+        textarea,
+        select,
+        a[href],
+        [role="button"],
+        [role="radio"],
+        [role="separator"],
+        [role="tab"],
+        [tabindex]:not([tabindex="-1"])
+      ):focus-visible {
+      outline: var(--focus-ring-width) solid Highlight !important;
+    }
+  }
+}

@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   commandSuggestions,
+  composerCompletionContext,
+  composerSuggestionOptionId,
   scrollSelectedSuggestion,
-} from "../src/renderer/src/components/chat/composer-suggestions.tsx";
+} from "../src/renderer/src/components/chat/composer-suggestion-model.ts";
 import type { SlashCommand } from "../src/shared/contracts.ts";
 
 describe("ComposerSuggestions", () => {
@@ -36,5 +38,11 @@ describe("ComposerSuggestions", () => {
     ];
 
     expect(commandSuggestions(commands, "MEMORY").map(({ label }) => label)).toEqual(["/memory-insights"]);
+  });
+
+  it("为 combobox 解析补全上下文并生成稳定 option id", () => {
+    expect(composerCompletionContext("/memory")).toEqual({ type: "command", query: "memory", start: 0 });
+    expect(composerCompletionContext("查看 @src/main")).toEqual({ type: "file", query: "src/main", start: 3 });
+    expect(composerSuggestionOptionId("composer-list", 2)).toBe("composer-list-option-2");
   });
 });

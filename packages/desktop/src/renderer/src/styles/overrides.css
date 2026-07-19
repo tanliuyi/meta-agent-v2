@@ -1,0 +1,6 @@
+/* 移除条件：Radix ScrollArea viewport 不再注入限制内容宽度的匿名包装节点。 */
+.sidebar-projects [data-radix-scroll-area-viewport] > div {
+  display: block !important;
+  width: 100%;
+  min-width: 0 !important;
+}

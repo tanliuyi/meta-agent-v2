@@ -6,39 +6,7 @@ import type {
   Thread,
   WorkbenchState,
 } from "../../../shared/contracts.ts";
-
-export interface DesktopContextValue {
-  projects: Project[];
-  project: Project | null;
-  draft: DraftSessionState | null;
-  threads: Thread[];
-  threadCatalogs: Readonly<Record<string, Thread[]>>;
-  threadId: string | null;
-  navigationProjectId: string | null;
-  navigationThreadId: string | null;
-  bootstrap: SessionBootstrap | null;
-  snapshot: SessionControlState | null;
-  workbench: WorkbenchState | null;
-  loading: boolean;
-  error: string | null;
-  chooseProject(): Promise<void>;
-  loadProjectThreads(projectId: string): Promise<void>;
-  removeProject(projectId: string): Promise<void>;
-  beginDraft(projectId?: string): Promise<void>;
-  selectDraftProject(projectId: string): Promise<void>;
-  selectDraftModel(provider: string, modelId: string): void;
-  selectDraftThinking(level: SessionControlState["thinkingLevel"]): void;
-  submitDraft(): Promise<void>;
-  discardDraft(): Promise<void>;
-  openThread(projectId: string, threadId: string): Promise<void>;
-  renameThread(projectId: string, threadId: string, title: string): Promise<void>;
-  setThreadArchived(projectId: string, threadId: string, archived: boolean): Promise<void>;
-  removeThread(projectId: string, threadId: string): Promise<void>;
-  clearQueue(): Promise<void>;
-  compactSession(): Promise<void>;
-  updateWorkbench(value: Partial<WorkbenchState>): void;
-  clearError(): void;
-}
+import { mergeSessionControl } from "./session-control-identity.ts";
 
 export interface DraftSessionState {
   projectId: string | null;
@@ -159,6 +127,7 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
         : state.draft;
     const threadCatalogs = { ...state.threadCatalogs };
     const activeThreadIds = { ...state.activeThreadIds };
+    const pendingRemoved = state.pendingThreadLoad?.projectId === action.projectId;
     delete threadCatalogs[action.projectId];
     delete activeThreadIds[action.projectId];
     return {
@@ -168,7 +137,11 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       draft,
       threadCatalogs,
       activeThreadIds,
-      bootstrap: current ? null : state.bootstrap,
+      pendingThreadLoad: pendingRemoved ? null : state.pendingThreadLoad,
+      bootstrap: state.bootstrap?.projectId === action.projectId ? null : state.bootstrap,
+      controls: withoutProjectSessions(state.controls, action.projectId),
+      workbenches: withoutProjectSessions(state.workbenches, action.projectId),
+      loading: pendingRemoved ? false : state.loading,
     };
   }
   if (action.type === "draft-started") {
@@ -240,7 +213,7 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
     return { ...state, pendingThreadLoad: null, loading: false };
   }
   if (action.type === "thread-loaded" || action.type === "thread-created" || action.type === "draft-committed") {
-    const key = sessionKey(action.bootstrap.projectId, action.bootstrap.threadId);
+    const key = desktopSessionKey(action.bootstrap.projectId, action.bootstrap.threadId);
     const projectThreads = state.threadCatalogs[action.bootstrap.projectId] ?? [];
     const created = action.type === "thread-created" || action.type === "draft-committed";
     const control = newerControl(state.controls[key], action.bootstrap.control);
@@ -282,14 +255,32 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       ),
     };
   }
-  if (action.type === "thread-removed")
+  if (action.type === "thread-removed") {
+    const key = desktopSessionKey(action.projectId, action.threadId);
+    const activeRemoved = state.activeThreadIds[action.projectId] === action.threadId;
+    const pendingRemoved =
+      state.pendingThreadLoad?.projectId === action.projectId && state.pendingThreadLoad.threadId === action.threadId;
+    const clearNavigation = activeRemoved || pendingRemoved;
     return {
       ...state,
       threadCatalogs: {
         ...state.threadCatalogs,
         [action.projectId]: (state.threadCatalogs[action.projectId] ?? []).filter(({ id }) => id !== action.threadId),
       },
+      activeThreadIds: activeRemoved
+        ? { ...state.activeThreadIds, [action.projectId]: undefined }
+        : state.activeThreadIds,
+      pendingThreadLoad: clearNavigation ? null : state.pendingThreadLoad,
+      bootstrap:
+        activeRemoved ||
+        (state.bootstrap?.projectId === action.projectId && state.bootstrap.threadId === action.threadId)
+          ? null
+          : state.bootstrap,
+      controls: withoutSession(state.controls, key),
+      workbenches: withoutSession(state.workbenches, key),
+      loading: clearNavigation ? false : state.loading,
     };
+  }
   if (action.type === "thread-cleared")
     return {
       ...state,
@@ -300,7 +291,7 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
     };
   if (action.type === "control") return applyControl(state, action.control);
   if (action.type === "workbench") {
-    const key = sessionKey(action.workbench.projectId, action.workbench.threadId);
+    const key = desktopSessionKey(action.workbench.projectId, action.workbench.threadId);
     return { ...state, workbenches: { ...state.workbenches, [key]: action.workbench } };
   }
   if (action.type === "loading") return { ...state, loading: action.loading || state.pendingThreadLoad !== null };
@@ -308,19 +299,20 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
 }
 
 function applyControl(state: DesktopState, control: SessionControlState): DesktopState {
-  const key = sessionKey(control.projectId, control.threadId);
+  const key = desktopSessionKey(control.projectId, control.threadId);
   const previous = state.controls[key];
   if (previous && previous.revision >= control.revision) return state;
-  const threadCatalogs = updateThreadSummary(state.threadCatalogs, control);
+  const merged = mergeSessionControl(previous, control);
+  const threadCatalogs = updateThreadSummary(state.threadCatalogs, merged);
   return {
     ...state,
-    controls: { ...state.controls, [key]: control },
+    controls: { ...state.controls, [key]: merged },
     threadCatalogs,
   };
 }
 
 function newerControl(previous: SessionControlState | undefined, bootstrap: SessionControlState): SessionControlState {
-  return previous && previous.revision > bootstrap.revision ? previous : bootstrap;
+  return previous && previous.revision > bootstrap.revision ? previous : mergeSessionControl(previous, bootstrap);
 }
 
 function updateThreadSummary(
@@ -342,24 +334,12 @@ function updateThreadSummary(
   return { ...catalogs, [control.projectId]: next };
 }
 
-export function sessionKey(projectId: string, threadId: string): string {
+/** 将 Project/thread identity 编码为 Desktop reducer 的本地缓存键。 */
+export function desktopSessionKey(projectId: string, threadId: string): string {
   return `${projectId}:${threadId}`;
 }
 
-export function selectActiveThreadId(state: DesktopState): string | null {
-  if (state.draft || !state.project) return null;
-  return state.activeThreadIds[state.project.id] ?? null;
-}
-
-export function selectNavigationProjectId(state: DesktopState): string | null {
-  return state.pendingThreadLoad?.projectId ?? state.project?.id ?? null;
-}
-
-export function selectNavigationThreadId(state: DesktopState): string | null {
-  if (state.pendingThreadLoad) return state.pendingThreadLoad.threadId;
-  return selectActiveThreadId(state);
-}
-
+/** 从首次 attach 的权威 bootstrap 构造新 thread catalog 摘要。 */
 export function threadFromBootstrap(bootstrap: SessionBootstrap): Thread {
   return {
     id: bootstrap.threadId,
@@ -381,6 +361,26 @@ function updateProjectThreads(
   update: (thread: Thread) => Thread,
 ): Record<string, Thread[]> {
   return { ...catalogs, [projectId]: (catalogs[projectId] ?? []).map(update) };
+}
+
+function withoutSession<T>(entries: Record<string, T>, key: string): Record<string, T> {
+  if (!Object.hasOwn(entries, key)) return entries;
+  const next = { ...entries };
+  delete next[key];
+  return next;
+}
+
+function withoutProjectSessions<T extends { projectId: string }>(
+  entries: Record<string, T>,
+  projectId: string,
+): Record<string, T> {
+  let next: Record<string, T> | undefined;
+  for (const [key, value] of Object.entries(entries)) {
+    if (value.projectId !== projectId) continue;
+    next ??= { ...entries };
+    delete next[key];
+  }
+  return next ?? entries;
 }
 
 function reuseThreadCatalog(previous: Thread[] | undefined, next: Thread[]): Thread[] {

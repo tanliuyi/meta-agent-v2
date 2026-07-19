@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { RunActivityGroup } from "../src/renderer/src/components/chat/message/assistant-message.tsx";
+import { RunActivityGroup } from "../src/renderer/src/components/chat/message/run-activity-group.tsx";
 
 describe("RunActivityGroup", () => {
   it("run 进行中强制展开并禁用折叠入口", () => {

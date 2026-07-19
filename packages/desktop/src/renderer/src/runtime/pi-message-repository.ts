@@ -1,80 +1,126 @@
-import {
-  type ExportedMessageRepository,
-  fromThreadMessageLike,
-  type ThreadMessage,
-  type ThreadMessageLike,
-} from "@assistant-ui/react";
-import type { PiAssistantMessage, PiThreadSnapshot, PiTimelineNode } from "../../../shared/contracts.ts";
+import type { ExportedMessageRepository, ThreadAssistantMessagePart, ThreadMessage } from "@assistant-ui/react";
+import type {
+  PiAssistantMessage,
+  PiAssistantPart,
+  PiThreadSnapshot,
+  PiTimelineNode,
+} from "../../../shared/contracts.ts";
+import { getPiThreadNodesChange } from "./pi-thread-store.ts";
 
-/** 增量复用 ThreadMessage，同时每个 snapshot 生成新的 repository wrapper。 */
+type RepositoryItem = ExportedMessageRepository["messages"][number];
+
+interface ProjectionEntry {
+  startIndex: number;
+  endIndex: number;
+  members: readonly PiTimelineNode[];
+  item: RepositoryItem;
+}
+
+interface ProjectionCache {
+  nodes: readonly PiTimelineNode[];
+  entries: readonly ProjectionEntry[];
+  displayIds: ReadonlyMap<string, string>;
+  messages: ExportedMessageRepository["messages"];
+}
+
+interface RepositoryCache {
+  headId: string | null;
+  messages: ExportedMessageRepository["messages"];
+  repository: ExportedMessageRepository;
+}
+
+/** 将 Pi timeline 增量投影为 assistant-ui repository，并把 identity 保持到 message part。 */
 export class PiMessageRepositoryConverter {
   private readonly messages = new WeakMap<PiTimelineNode, ThreadMessage>();
+  private readonly assistantParts = new WeakMap<PiAssistantPart, ThreadAssistantMessagePart | null>();
   private readonly assistantGroups = new WeakMap<
     PiAssistantMessage,
     { members: readonly PiAssistantMessage[]; message: ThreadMessage }
   >();
+  private projection: ProjectionCache | undefined;
+  private repository: RepositoryCache | undefined;
 
   build(snapshot: PiThreadSnapshot): ExportedMessageRepository {
-    const entries: Array<{ nodes: readonly PiTimelineNode[]; parentId: string | null }> = [];
-    const displayIds = new Map<string, string>();
+    const projection = this.project(snapshot.nodes);
+    const headId = displayId(projection.displayIds, snapshot.headId);
+    if (this.repository?.messages === projection.messages && this.repository.headId === headId) {
+      return this.repository.repository;
+    }
+    const repository = { headId, messages: projection.messages };
+    this.repository = { headId, messages: projection.messages, repository };
+    return repository;
+  }
 
-    for (let index = 0; index < snapshot.nodes.length; ) {
-      const node = snapshot.nodes[index];
-      if (!node) break;
-      if (node.kind !== "assistant") {
-        entries.push({ nodes: [node], parentId: node.parentId });
-        displayIds.set(node.id, node.id);
-        index += 1;
-        continue;
-      }
+  /** 复用未变化 projection 前缀；连续 assistant group 从首个受影响成员开始重建。 */
+  private project(nodes: readonly PiTimelineNode[]): ProjectionCache {
+    const previous = this.projection;
+    if (previous?.nodes === nodes) return previous;
 
-      const group: PiAssistantMessage[] = [node];
-      index += 1;
-      while (true) {
-        const next = snapshot.nodes[index];
-        if (!next || next.kind !== "assistant") break;
-        group.push(next);
-        index += 1;
-      }
-      entries.push({ nodes: group, parentId: node.parentId });
-      for (const member of group) displayIds.set(member.id, node.id);
+    const dirtyFrom = projectionDirtyFrom(previous, nodes);
+    if (previous && dirtyFrom === nodes.length && dirtyFrom === previous.nodes.length) {
+      const unchanged = { ...previous, nodes };
+      this.projection = unchanged;
+      return unchanged;
     }
 
-    const displayId = (id: string | null) => (id ? (displayIds.get(id) ?? id) : null);
-    return {
-      headId: displayId(snapshot.headId),
-      messages: entries.map(({ nodes, parentId }) => ({
-        message: this.convertGroup(nodes),
-        parentId: displayId(parentId),
-      })),
-    };
+    const rebuildFrom = projectionRebuildStart(previous, nodes, dirtyFrom);
+    const prefixCount = previous ? firstEntryEndingAfter(previous.entries, rebuildFrom) : 0;
+    const entries = previous ? previous.entries.slice(0, prefixCount) : [];
+    const messages = previous ? previous.messages.slice(0, prefixCount) : [];
+    const displayIds = new Map(previous?.displayIds);
+    if (previous) {
+      for (let index = prefixCount; index < previous.entries.length; index += 1) {
+        for (const member of previous.entries[index]?.members ?? []) displayIds.delete(member.id);
+      }
+    }
+
+    let index = rebuildFrom;
+    while (index < nodes.length) {
+      const startIndex = index;
+      const node = nodes[index];
+      if (!node) break;
+      const members: PiTimelineNode[] = [node];
+      index += 1;
+      if (node.kind === "assistant") {
+        while (nodes[index]?.kind === "assistant") {
+          const member = nodes[index];
+          if (member) members.push(member);
+          index += 1;
+        }
+      }
+
+      const projectedId = node.id;
+      for (const member of members) displayIds.set(member.id, projectedId);
+      const item = {
+        message: this.convertGroup(members),
+        parentId: displayId(displayIds, node.parentId),
+      };
+      entries.push({ startIndex, endIndex: index, members, item });
+      messages.push(item);
+    }
+
+    const projection = { nodes, entries, displayIds, messages };
+    this.projection = projection;
+    return projection;
   }
 
   private convertGroup(nodes: readonly PiTimelineNode[]): ThreadMessage {
     const first = nodes[0];
     if (!first) throw new Error("assistant-ui message group 不能为空");
     if (nodes.length === 1) return this.convert(first);
-    if (first.kind !== "assistant" || !nodes.every((node) => node.kind === "assistant"))
+    if (first.kind !== "assistant" || !nodes.every((node) => node.kind === "assistant")) {
       throw new Error("assistant-ui message group 类型不一致");
+    }
 
     const members = nodes as readonly PiAssistantMessage[];
     const cached = this.assistantGroups.get(first);
     if (cached && sameMembers(cached.members, members)) return cached.message;
     const last = members.at(-1) ?? first;
-    const merged: PiAssistantMessage = {
-      id: first.id,
-      parentId: first.parentId,
-      createdAt: first.createdAt,
-      kind: "assistant",
-      ...(last.sourceEntryId ? { sourceEntryId: last.sourceEntryId } : {}),
-      ...(last.label ? { label: last.label } : {}),
-      content: members.flatMap((node) => node.content),
-      status: last.status,
-      provenance: last.provenance,
-      usage: last.usage,
-      ...(last.diagnostics !== undefined ? { diagnostics: last.diagnostics } : {}),
-    };
-    const message = fromThreadMessageLike(messageLike(merged), merged.id, { type: "complete", reason: "unknown" });
+    const message = this.assistantMessage(
+      first,
+      members.flatMap((member) => member.content),
+      last,
+    );
     this.assistantGroups.set(first, { members: [...members], message });
     return message;
   }
@@ -82,97 +128,185 @@ export class PiMessageRepositoryConverter {
   private convert(node: PiTimelineNode): ThreadMessage {
     const cached = this.messages.get(node);
     if (cached) return cached;
-    const message = fromThreadMessageLike(messageLike(node), node.id, { type: "complete", reason: "unknown" });
+    const message =
+      node.kind === "assistant"
+        ? this.assistantMessage(node, node.content, node)
+        : node.kind === "user"
+          ? userMessage(node)
+          : noticeMessage(node);
     this.messages.set(node, message);
     return message;
   }
+
+  /** PiThreadStore 只 clone 目标 part；WeakMap 将该引用边界原样传给 assistant-ui。 */
+  private assistantPart(part: PiAssistantPart): ThreadAssistantMessagePart | null {
+    const cached = this.assistantParts.get(part);
+    if (cached !== undefined) return cached;
+    let converted: ThreadAssistantMessagePart | null;
+    if (part.type === "text" || part.type === "reasoning") {
+      converted = part.text.trim() ? { type: part.type, text: part.text } : null;
+    } else {
+      converted = {
+        type: "tool-call",
+        toolCallId: part.toolCallId,
+        toolName: part.toolName,
+        args: part.args,
+        argsText: part.argsText,
+        artifact: { execution: part.execution, partialResult: part.partialResult },
+        ...(part.result !== undefined ? { result: part.result } : {}),
+        ...(part.isError !== undefined ? { isError: part.isError } : {}),
+      };
+    }
+    this.assistantParts.set(part, converted);
+    return converted;
+  }
+
+  private assistantMessage(
+    first: PiAssistantMessage,
+    parts: readonly PiAssistantPart[],
+    last: PiAssistantMessage,
+  ): ThreadMessage {
+    return {
+      id: first.id,
+      role: "assistant",
+      createdAt: new Date(first.createdAt),
+      content: parts.flatMap((part) => {
+        const converted = this.assistantPart(part);
+        return converted ? [converted] : [];
+      }),
+      status: last.status,
+      metadata: {
+        unstable_state: null,
+        unstable_annotations: [],
+        unstable_data: [],
+        steps: [],
+        custom: {
+          pi: {
+            kind: "assistant",
+            ...(last.sourceEntryId ? { sourceEntryId: last.sourceEntryId } : {}),
+            ...(last.label ? { label: last.label } : {}),
+            provenance: last.provenance,
+            usage: last.usage,
+            ...(last.diagnostics !== undefined ? { diagnostics: last.diagnostics } : {}),
+          },
+        },
+      },
+    };
+  }
+}
+
+function projectionDirtyFrom(previous: ProjectionCache | undefined, nodes: readonly PiTimelineNode[]): number {
+  if (!previous) return 0;
+  const change = getPiThreadNodesChange(nodes);
+  if (change?.previousNodes === previous.nodes) return Math.min(change.dirtyFrom, nodes.length);
+
+  const sharedLength = Math.min(previous.nodes.length, nodes.length);
+  let index = 0;
+  while (index < sharedLength && previous.nodes[index] === nodes[index]) index += 1;
+  return index;
+}
+
+function projectionRebuildStart(
+  previous: ProjectionCache | undefined,
+  nodes: readonly PiTimelineNode[],
+  dirtyFrom: number,
+): number {
+  let start = Math.min(dirtyFrom, nodes.length);
+  if (previous && dirtyFrom < previous.nodes.length) {
+    const affected = entryContaining(previous.entries, dirtyFrom);
+    if (affected) start = Math.min(start, affected.startIndex);
+  }
+  while (start > 0 && nodes[start]?.kind === "assistant" && nodes[start - 1]?.kind === "assistant") start -= 1;
+  return start;
+}
+
+function entryContaining(entries: readonly ProjectionEntry[], nodeIndex: number): ProjectionEntry | undefined {
+  let low = 0;
+  let high = entries.length - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const entry = entries[middle];
+    if (!entry) return undefined;
+    if (nodeIndex < entry.startIndex) high = middle - 1;
+    else if (nodeIndex >= entry.endIndex) low = middle + 1;
+    else return entry;
+  }
+  return undefined;
+}
+
+function firstEntryEndingAfter(entries: readonly ProjectionEntry[], nodeIndex: number): number {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((entries[middle]?.endIndex ?? Number.POSITIVE_INFINITY) <= nodeIndex) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+function displayId(displayIds: ReadonlyMap<string, string>, id: string | null): string | null {
+  return id ? (displayIds.get(id) ?? id) : null;
 }
 
 function sameMembers(left: readonly PiAssistantMessage[], right: readonly PiAssistantMessage[]): boolean {
   return left.length === right.length && left.every((node, index) => node === right[index]);
 }
 
-function messageLike(node: PiTimelineNode): ThreadMessageLike {
-  const metadata = {
-    custom: {
-      pi: {
-        kind: node.kind,
-        ...(node.sourceEntryId ? { sourceEntryId: node.sourceEntryId } : {}),
-        ...(node.label ? { label: node.label } : {}),
+function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>): ThreadMessage {
+  const images = node.content.flatMap((part, index) => (part.type === "image" ? [{ part, index }] : []));
+  return {
+    id: node.id,
+    role: "user",
+    createdAt: new Date(node.createdAt),
+    content: node.content.flatMap((part) => (part.type === "text" ? [{ type: "text" as const, text: part.text }] : [])),
+    attachments: images.map(({ part, index }) => ({
+      id: `${node.id}:image:${index}`,
+      type: "image",
+      name: imageName(part.mimeType, index),
+      contentType: part.mimeType,
+      status: { type: "complete" },
+      content: [
+        {
+          type: "image",
+          image: `data:${part.mimeType};base64,${part.data}`,
+          filename: imageName(part.mimeType, index),
+        },
+      ],
+    })),
+    metadata: {
+      custom: {
+        pi: {
+          kind: "user",
+          ...(node.sourceEntryId ? { sourceEntryId: node.sourceEntryId } : {}),
+          ...(node.label ? { label: node.label } : {}),
+          delivery: node.delivery,
+        },
       },
     },
   };
-  if (node.kind === "user") {
-    const images = node.content.flatMap((part, index) => (part.type === "image" ? [{ part, index }] : []));
-    return {
-      id: node.id,
-      role: "user",
-      createdAt: new Date(node.createdAt),
-      content: node.content.flatMap((part) =>
-        part.type === "text" ? [{ type: "text" as const, text: part.text }] : [],
-      ),
-      attachments: images.map(({ part, index }) => ({
-        id: `${node.id}:image:${index}`,
-        type: "image",
-        name: imageName(part.mimeType, index),
-        contentType: part.mimeType,
-        status: { type: "complete" },
-        content: [
-          {
-            type: "image",
-            image: `data:${part.mimeType};base64,${part.data}`,
-            filename: imageName(part.mimeType, index),
-          },
-        ],
-      })),
-      metadata: {
-        custom: {
-          ...metadata.custom,
-          pi: { ...metadata.custom.pi, delivery: node.delivery },
-        },
-      },
-    };
-  }
-  if (node.kind === "assistant") {
-    return {
-      id: node.id,
-      role: "assistant",
-      createdAt: new Date(node.createdAt),
-      content: node.content.map((part) => {
-        if (part.type === "text") return { type: "text" as const, text: part.text };
-        if (part.type === "reasoning") return { type: "reasoning" as const, text: part.text };
-        return {
-          type: "tool-call" as const,
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          args: part.args,
-          argsText: part.argsText,
-          artifact: { execution: part.execution, partialResult: part.partialResult },
-          ...(part.result !== undefined ? { result: part.result } : {}),
-          ...(part.isError !== undefined ? { isError: part.isError } : {}),
-        };
-      }),
-      status: node.status,
-      metadata: {
-        custom: {
-          ...metadata.custom,
-          pi: {
-            ...metadata.custom.pi,
-            provenance: node.provenance,
-            usage: node.usage,
-            ...(node.diagnostics !== undefined ? { diagnostics: node.diagnostics } : {}),
-          },
-        },
-      },
-    };
-  }
+}
+
+function noticeMessage(node: Extract<PiTimelineNode, { kind: "notice" }>): ThreadMessage {
   return {
     id: node.id,
     role: "assistant",
     createdAt: new Date(node.createdAt),
     content: [{ type: "data", name: "pi-notice", data: node }],
     status: { type: "complete", reason: "unknown" },
-    metadata,
+    metadata: {
+      unstable_state: null,
+      unstable_annotations: [],
+      unstable_data: [],
+      steps: [],
+      custom: {
+        pi: {
+          kind: "notice",
+          ...(node.sourceEntryId ? { sourceEntryId: node.sourceEntryId } : {}),
+          ...(node.label ? { label: node.label } : {}),
+        },
+      },
+    },
   };
 }
 
