@@ -1,13 +1,20 @@
 import type { ExportedMessageRepository, ThreadAssistantMessagePart, ThreadMessage } from "@assistant-ui/react";
 import type {
   PiAssistantMessage,
+  PiAssistantNotificationPart,
   PiAssistantPart,
+  PiNoticeMessage,
   PiThreadSnapshot,
   PiTimelineNode,
 } from "../../../shared/contracts.ts";
 import { getPiThreadNodesChange } from "./pi-thread-store.ts";
 
 type RepositoryItem = ExportedMessageRepository["messages"][number];
+type PiNoticePart = {
+  type: "data";
+  name: "pi-notice";
+  data: Extract<PiTimelineNode, { kind: "notice" }>;
+};
 
 interface ProjectionEntry {
   startIndex: number;
@@ -35,7 +42,7 @@ export class PiMessageRepositoryConverter {
   private readonly assistantParts = new WeakMap<PiAssistantPart, ThreadAssistantMessagePart | null>();
   private readonly assistantGroups = new WeakMap<
     PiAssistantMessage,
-    { members: readonly PiAssistantMessage[]; message: ThreadMessage }
+    { members: readonly PiTimelineNode[]; message: ThreadMessage }
   >();
   private projection: ProjectionCache | undefined;
   private repository: RepositoryCache | undefined;
@@ -82,7 +89,9 @@ export class PiMessageRepositoryConverter {
       const members: PiTimelineNode[] = [node];
       index += 1;
       if (node.kind === "assistant") {
-        while (nodes[index]?.kind === "assistant") {
+        let groupEnd = index;
+        while (groupEnd < nodes.length && !isAssistantGroupBoundary(nodes[groupEnd])) groupEnd += 1;
+        while (index < groupEnd) {
           const member = nodes[index];
           if (member) members.push(member);
           index += 1;
@@ -108,20 +117,24 @@ export class PiMessageRepositoryConverter {
     const first = nodes[0];
     if (!first) throw new Error("assistant-ui message group 不能为空");
     if (nodes.length === 1) return this.convert(first);
-    if (first.kind !== "assistant" || !nodes.every((node) => node.kind === "assistant")) {
-      throw new Error("assistant-ui message group 类型不一致");
-    }
+    if (first.kind !== "assistant") throw new Error("assistant-ui message group 必须以 assistant 开始");
 
-    const members = nodes as readonly PiAssistantMessage[];
     const cached = this.assistantGroups.get(first);
-    if (cached && sameMembers(cached.members, members)) return cached.message;
-    const last = members.at(-1) ?? first;
+    if (cached && sameMembers(cached.members, nodes)) return cached.message;
+    const lastAssistant = nodes.findLast((node): node is PiAssistantMessage => node.kind === "assistant");
+    if (!lastAssistant) throw new Error("assistant-ui message group 缺少 assistant");
     const message = this.assistantMessage(
       first,
-      members.flatMap((member) => member.content),
-      last,
+      nodes.flatMap<PiAssistantPart | PiNoticePart>((member) =>
+        member.kind === "assistant"
+          ? member.content
+          : member.kind === "notice"
+            ? [{ type: "data" as const, name: "pi-notice", data: member }]
+            : [],
+      ),
+      lastAssistant,
     );
-    this.assistantGroups.set(first, { members: [...members], message });
+    this.assistantGroups.set(first, { members: [...nodes], message });
     return message;
   }
 
@@ -145,6 +158,8 @@ export class PiMessageRepositoryConverter {
     let converted: ThreadAssistantMessagePart | null;
     if (part.type === "text" || part.type === "reasoning") {
       converted = part.text.trim() ? { type: part.type, text: part.text } : null;
+    } else if (part.type === "notification") {
+      converted = { type: "data", name: "pi-notice", data: notificationNotice(part) };
     } else {
       converted = {
         type: "tool-call",
@@ -163,7 +178,7 @@ export class PiMessageRepositoryConverter {
 
   private assistantMessage(
     first: PiAssistantMessage,
-    parts: readonly PiAssistantPart[],
+    parts: readonly (PiAssistantPart | PiNoticePart)[],
     last: PiAssistantMessage,
   ): ThreadMessage {
     return {
@@ -171,6 +186,7 @@ export class PiMessageRepositoryConverter {
       role: "assistant",
       createdAt: new Date(first.createdAt),
       content: parts.flatMap((part) => {
+        if (part.type === "data") return [part];
         const converted = this.assistantPart(part);
         return converted ? [converted] : [];
       }),
@@ -216,8 +232,15 @@ function projectionRebuildStart(
     const affected = entryContaining(previous.entries, dirtyFrom);
     if (affected) start = Math.min(start, affected.startIndex);
   }
-  while (start > 0 && nodes[start]?.kind === "assistant" && nodes[start - 1]?.kind === "assistant") start -= 1;
+  const current = nodes[start];
+  if (current?.kind === "assistant" || (current?.kind === "notice" && current.noticeType !== "compaction")) {
+    while (start > 0 && !isAssistantGroupBoundary(nodes[start - 1])) start -= 1;
+  }
   return start;
+}
+
+function isAssistantGroupBoundary(node: PiTimelineNode | undefined): boolean {
+  return !node || node.kind === "user" || (node.kind === "notice" && node.noticeType === "compaction");
 }
 
 function entryContaining(entries: readonly ProjectionEntry[], nodeIndex: number): ProjectionEntry | undefined {
@@ -249,7 +272,7 @@ function displayId(displayIds: ReadonlyMap<string, string>, id: string | null): 
   return id ? (displayIds.get(id) ?? id) : null;
 }
 
-function sameMembers(left: readonly PiAssistantMessage[], right: readonly PiAssistantMessage[]): boolean {
+function sameMembers(left: readonly PiTimelineNode[], right: readonly PiTimelineNode[]): boolean {
   return left.length === right.length && left.every((node, index) => node === right[index]);
 }
 
@@ -307,6 +330,19 @@ function noticeMessage(node: Extract<PiTimelineNode, { kind: "notice" }>): Threa
         },
       },
     },
+  };
+}
+
+function notificationNotice(part: PiAssistantNotificationPart): PiNoticeMessage {
+  return {
+    id: part.id,
+    parentId: null,
+    createdAt: part.createdAt,
+    kind: "notice",
+    noticeType: "notification",
+    notificationType: part.notificationType,
+    title: part.text,
+    content: { type: "text", text: part.text },
   };
 }
 

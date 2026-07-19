@@ -13,10 +13,13 @@ import type {
   WorkbenchState,
 } from "../shared/contracts.ts";
 import type { NodeRuntimeProgress, NodeRuntimeStatus } from "../shared/desktop-api.ts";
+import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
 import type { FileService } from "./files/file-service.ts";
+import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
 import type { ProjectStore } from "./store/project-store.ts";
 import type { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
+import type { WindowDirtyGuard } from "./window-dirty-guard.ts";
 
 /** 注册 Desktop 的 Project、Pi session、文件和 Workbench IPC。 */
 export function registerIpc(
@@ -24,6 +27,8 @@ export function registerIpc(
   sessions: SessionSupervisor,
   files: FileService,
   terminals: TerminalSupervisor,
+  models: ModelsConfigService,
+  dirtyGuard: WindowDirtyGuard,
   nodeRuntime: {
     getStatus(): NodeRuntimeStatus;
     install(): Promise<NodeRuntimeStatus>;
@@ -31,6 +36,7 @@ export function registerIpc(
   },
 ): void {
   const subscribedWebContents = new Set<number>();
+  const modelEditorWebContents = new Set<number>();
   ipcMain.on(CHANNELS.windowMinimize, (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
   ipcMain.on(CHANNELS.windowToggleMaximize, (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
@@ -38,8 +44,31 @@ export function registerIpc(
     if (owner.isMaximized()) owner.unmaximize();
     else owner.maximize();
   });
-  ipcMain.on(CHANNELS.windowClose, (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  ipcMain.on(CHANNELS.windowClose, (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (owner) void dirtyGuard.requestClose(owner);
+  });
   ipcMain.handle(CHANNELS.linksOpen, (_event, target: string) => openLink(target, projects));
+  ipcMain.handle(CHANNELS.modelsGetConfig, () => models.getConfig());
+  ipcMain.handle(CHANNELS.modelsGetConfigRevision, () => models.getConfigRevision());
+  ipcMain.handle(CHANNELS.modelsSaveConfig, (_event, input: SaveModelsConfigInput) => models.saveConfig(input));
+  ipcMain.handle(CHANNELS.modelsOpenConfigExternally, async () => openPath(await models.getExternalOpenTarget()));
+  ipcMain.on(CHANNELS.modelsSetEditorDirty, (event, dirty: unknown) => {
+    if (typeof dirty !== "boolean") {
+      event.returnValue = false;
+      return;
+    }
+    const ownerId = event.sender.id;
+    dirtyGuard.setDirty(ownerId, dirty);
+    if (!modelEditorWebContents.has(ownerId)) {
+      modelEditorWebContents.add(ownerId);
+      event.sender.once("destroyed", () => {
+        modelEditorWebContents.delete(ownerId);
+        dirtyGuard.remove(ownerId);
+      });
+    }
+    event.returnValue = true;
+  });
   ipcMain.handle(CHANNELS.projectsList, () => projects.list());
   ipcMain.handle(CHANNELS.projectsActive, () => projects.getActive());
   ipcMain.handle(CHANNELS.projectsChoose, async (event) => {
@@ -121,6 +150,10 @@ export function registerIpc(
     files.list(projectId, path, query),
   );
   ipcMain.handle(CHANNELS.filesRead, (_event, projectId: string, path: string) => files.read(projectId, path));
+  ipcMain.handle(CHANNELS.filesResolvePath, (_event, path: string) => resolveFilePath(path, projects));
+  ipcMain.handle(CHANNELS.filesOpen, async (_event, path: string) => {
+    await openPath(await resolveFilePath(path, projects));
+  });
   ipcMain.handle(
     CHANNELS.terminalsOpen,
     (_event, projectId: string, threadId: string, terminalId: string, cols: number, rows: number) =>
@@ -186,6 +219,16 @@ async function openLink(target: string, projects: ProjectStore): Promise<void> {
   }
 
   throw new Error(`Unsupported link protocol: ${url.protocol}`);
+}
+
+async function resolveFilePath(path: string, projects: ProjectStore): Promise<string> {
+  const value = path.trim();
+  if (!value) throw new Error("Cannot resolve an empty file path");
+  if (isAbsolute(value)) return value;
+
+  const project = await projects.getActive();
+  if (!project?.available) throw new Error(project?.issue ?? "No active project is available");
+  return resolve(project.cwd, value);
 }
 
 async function openPath(path: string): Promise<void> {

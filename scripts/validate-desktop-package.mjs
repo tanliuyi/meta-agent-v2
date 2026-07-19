@@ -22,6 +22,24 @@ export default async function validateDesktopPackage(context) {
 
   assertTargetRuntime(context, manifest);
 
+  if (context.electronPlatformName === "darwin") {
+    const spawnHelper = join(
+      resources,
+      "app.asar.unpacked",
+      "node_modules",
+      "node-pty",
+      "prebuilds",
+      `darwin-${manifest.compatibility.arch}`,
+      "spawn-helper",
+    );
+    if (!existsSync(spawnHelper) || !statSync(spawnHelper).isFile()) {
+      throw new Error(`node-pty spawn-helper is missing from package: ${spawnHelper}`);
+    }
+    if ((statSync(spawnHelper).mode & 0o111) === 0) {
+      throw new Error(`node-pty spawn-helper is not executable: ${spawnHelper}`);
+    }
+  }
+
   for (const [description, path, expectedHash] of [
     ["Node executable", nodePath, usesSystemNode ? "" : manifest.integrity.nodePath],
     ...(npmCliPath ? [["npm CLI", npmCliPath, manifest.integrity.npmCliPath]] : []),

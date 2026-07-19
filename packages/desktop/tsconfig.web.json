@@ -9,11 +9,18 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
+      "@earendil-works/pi-coding-agent/models-config": ["../coding-agent/src/core/models-config.ts"],
       "@renderer/*": ["src/renderer/src/*"]
     },
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/src/**/*.ts", "src/renderer/src/**/*.tsx", "src/shared/**/*.ts"],
+  "include": [
+    "src/renderer/src/**/*.ts",
+    "src/renderer/src/**/*.tsx",
+    "src/shared/**/*.ts",
+    "../coding-agent/src/core/models-config.ts",
+    "../coding-agent/src/core/provider-display-names.ts"
+  ],
   "exclude": ["src/shared/sidecar-wire.ts"]
 }

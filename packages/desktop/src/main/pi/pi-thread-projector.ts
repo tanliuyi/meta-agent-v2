@@ -129,6 +129,33 @@ export class PiThreadProjector {
     this.synchronizePersistedBranch();
   }
 
+  notify(message: string, notificationType: "info" | "warning" | "error"): void {
+    const createdAt = Date.now();
+    const active = this.activeAssistantId ? this.byId.get(this.activeAssistantId) : undefined;
+    if (active?.kind === "assistant") {
+      this.ensurePart(active.id, {
+        id: this.transientId("notification-part"),
+        type: "notification",
+        notificationType,
+        text: message,
+        createdAt,
+      });
+      return;
+    }
+
+    const node = {
+      id: this.transientId("notification"),
+      parentId: this.nodes.at(-1)?.id ?? null,
+      createdAt,
+      kind: "notice",
+      noticeType: "notification",
+      notificationType,
+      title: message,
+      content: { type: "text", text: message },
+    } satisfies PiTimelineNode;
+    this.addNode(node);
+  }
+
   checkpoint(): void {
     this.synchronizePersistedBranch();
   }
@@ -402,7 +429,7 @@ export class PiThreadProjector {
         if (!current || current.kind !== "assistant") throw new ProjectionError(`assistant owner 不存在: ${id}`);
         const canonical = assistantNode(id, current.parentId, message, true);
         canonical.sourceEntryId = current.sourceEntryId;
-        canonical.content = mergeToolExecution(canonical.content, current.content);
+        canonical.content = mergeAssistantContent(canonical.content, current.content);
         this.finalAssistantMessages.set(id, message);
         this.replaceNode(canonical);
         return;
@@ -1030,7 +1057,7 @@ function mergeCanonicalNode(current: PiTimelineNode, canonical: PiTimelineNode):
   if (current.kind === "assistant" && canonical.kind === "assistant") {
     return {
       ...canonical,
-      content: mergeToolExecution(canonical.content, current.content),
+      content: mergeAssistantContent(canonical.content, current.content),
       status: current.status,
     };
   }
@@ -1039,23 +1066,45 @@ function mergeCanonicalNode(current: PiTimelineNode, canonical: PiTimelineNode):
   throw new ProjectionError(`rekey kind 不匹配: ${current.kind}/${canonical.kind}`);
 }
 
-function mergeToolExecution(canonical: PiAssistantPart[], current: PiAssistantPart[]): PiAssistantPart[] {
-  const currentTools = new Map(
-    current.flatMap((part) => (part.type === "tool-call" ? ([[part.toolCallId, part]] as const) : [])),
+function mergeAssistantContent(canonical: PiAssistantPart[], current: PiAssistantPart[]): PiAssistantPart[] {
+  const canonicalByKey = new Map(
+    canonical.flatMap((part) => {
+      const key = assistantPartKey(part);
+      return key ? ([[key, part]] as const) : [];
+    }),
   );
-  return canonical.map((part) => {
-    if (part.type !== "tool-call") return part;
-    const previous = currentTools.get(part.toolCallId);
-    return previous
-      ? {
-          ...part,
-          execution: previous.execution,
-          ...(previous.partialResult !== undefined ? { partialResult: previous.partialResult } : {}),
-          ...(previous.result !== undefined ? { result: previous.result } : {}),
-          ...(previous.isError !== undefined ? { isError: previous.isError } : {}),
-        }
-      : part;
+  const retainedCanonicalKeys = new Set<string>();
+  const merged = current.flatMap((part): PiAssistantPart[] => {
+    if (part.type === "notification") return [part];
+    const key = assistantPartKey(part);
+    const replacement = key ? canonicalByKey.get(key) : undefined;
+    if (!key || !replacement) return [];
+    retainedCanonicalKeys.add(key);
+    if (replacement.type !== "tool-call" || part.type !== "tool-call") return [replacement];
+    return [
+      {
+        ...replacement,
+        execution: part.execution,
+        ...(part.partialResult !== undefined ? { partialResult: part.partialResult } : {}),
+        ...(part.result !== undefined ? { result: part.result } : {}),
+        ...(part.isError !== undefined ? { isError: part.isError } : {}),
+      },
+    ];
   });
+  merged.push(
+    ...canonical.filter((part) => {
+      const key = assistantPartKey(part);
+      return key !== undefined && !retainedCanonicalKeys.has(key);
+    }),
+  );
+  return merged;
+}
+
+function assistantPartKey(part: PiAssistantPart): string | undefined {
+  if (part.type === "notification") return undefined;
+  if (part.type === "tool-call") return `tool:${part.toolCallId}`;
+  const contentIndex = part.id.slice(part.id.lastIndexOf(":") + 1);
+  return `${part.type}:${contentIndex}`;
 }
 
 function userContent(content: string | readonly unknown[]): PiUserContentPart[] {
@@ -1157,12 +1206,15 @@ function sameLiveProjection(left: PiTimelineNode, right: PiTimelineNode): boolea
   if (left.kind === "notice" && right.kind === "notice")
     return left.noticeType === right.noticeType && left.title === right.title && sameJson(left.content, right.content);
   if (left.kind !== "assistant" || right.kind !== "assistant") return false;
-  const stableParts = (parts: readonly PiAssistantPart[]) =>
-    parts.map((part) => {
-      if (part.type === "text") return { type: part.type, text: part.text };
-      if (part.type === "reasoning") return { type: part.type, text: part.text };
-      return { type: part.type, toolCallId: part.toolCallId, toolName: part.toolName, args: part.args };
-    });
+  const stableParts = (parts: readonly PiAssistantPart[]): JsonValue[] => {
+    const stable: JsonValue[] = [];
+    for (const part of parts) {
+      if (part.type === "text" || part.type === "reasoning") stable.push({ type: part.type, text: part.text });
+      else if (part.type === "tool-call")
+        stable.push({ type: part.type, toolCallId: part.toolCallId, toolName: part.toolName, args: part.args });
+    }
+    return stable;
+  };
   return sameJson(stableParts(left.content), stableParts(right.content));
 }
 

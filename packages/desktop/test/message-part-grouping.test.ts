@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRunGroupPart,
   groupMessagePart,
+  hasFinalResponseText,
   hasTextAfterGroup,
   summarizeChainOfThought,
 } from "../src/renderer/src/components/chat/message-part-grouping.ts";
@@ -83,14 +84,46 @@ describe("message part grouping", () => {
     ]);
   });
 
-  it("压缩 notice 与其他 data 消息不进入 run group", () => {
+  it("普通通知和其他 pi-notice 保持在 run group 内，只有压缩 notice 打断折叠", () => {
     const parts = [
       { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "data", name: "pi-notice", data: { noticeType: "custom" }, status: COMPLETE },
+      { type: "data", name: "pi-notice", data: { noticeType: "notification" }, status: COMPLETE },
       { type: "data", name: "pi-notice", data: { noticeType: "compaction" }, status: COMPLETE },
+      { type: "data", name: "extension-data", data: {}, status: COMPLETE },
       { type: "text", text: "最终回复", status: COMPLETE },
     ] satisfies PartState[];
 
-    expect(runGroupPaths(parts)).toEqual([["group-runActivity", "group-chainOfThought"], [], []]);
+    expect(runGroupPaths(parts)).toEqual([
+      ["group-runActivity", "group-chainOfThought"],
+      ["group-runActivity"],
+      ["group-runActivity"],
+      [],
+      [],
+      [],
+    ]);
+  });
+
+  it("notification 保持在最终回复之前，不改变 final text 判断", () => {
+    const parts = [
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "data", name: "pi-notice", data: { noticeType: "notification" }, status: COMPLETE },
+      { type: "text", text: "最终回复", status: COMPLETE },
+    ] satisfies PartState[];
+
+    expect(runGroupPaths(parts)).toEqual([["group-runActivity", "group-chainOfThought"], ["group-runActivity"], []]);
+    expect(hasTextAfterGroup(parts, [0, 1])).toBe(true);
+  });
+
+  it("最终回复后的 notification 不隐藏 assistant 消息操作栏", () => {
+    const parts = [
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "text", text: "最终回复", status: COMPLETE },
+      { type: "data", name: "pi-notice", data: { noticeType: "notification" }, status: COMPLETE },
+    ] satisfies PartState[];
+
+    expect(hasFinalResponseText(parts)).toBe(true);
+    expect(hasFinalResponseText([parts[0]!, parts[2]!])).toBe(false);
   });
 
   it("用户引导类 standalone tool 保持在 run group 外", () => {

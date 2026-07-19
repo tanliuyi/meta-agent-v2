@@ -77,14 +77,6 @@ export function OpenWorkbenchPanel({ width, panel }: OpenWorkbenchPanelProps) {
         >
           <Plus size={14} />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="关闭 Panel"
-          onClick={() => actions.updateWorkbench({ panelOpen: false })}
-        >
-          <PanelRightClose size={14} />
-        </Button>
       </header>
       <div id="workbench-panel-content" className="panel-content-stack">
         <Tabs.Content className="panel-content" value="files">

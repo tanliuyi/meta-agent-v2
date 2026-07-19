@@ -6,6 +6,10 @@
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@earendil-works/pi-coding-agent/models-config": ["../coding-agent/src/core/models-config.ts"]
+    },
     "noEmit": true,
     "types": ["node", "electron-vite/node"]
   },

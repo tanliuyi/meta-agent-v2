@@ -77,6 +77,13 @@ const desktopApi: DesktopApi = {
   links: {
     open: (url) => ipcRenderer.invoke(CHANNELS.linksOpen, url),
   },
+  models: {
+    getConfig: () => ipcRenderer.invoke(CHANNELS.modelsGetConfig),
+    getConfigRevision: () => ipcRenderer.invoke(CHANNELS.modelsGetConfigRevision),
+    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.modelsSaveConfig, input),
+    openConfigExternally: () => ipcRenderer.invoke(CHANNELS.modelsOpenConfigExternally),
+    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.modelsSetEditorDirty, dirty) === true,
+  },
   nodeRuntime: {
     getStatus: () => ipcRenderer.invoke(CHANNELS.nodeRuntimeStatus),
     install: () => ipcRenderer.invoke(CHANNELS.nodeRuntimeInstall),
@@ -180,6 +187,8 @@ const desktopApi: DesktopApi = {
   files: {
     list: (projectId, path, query) => ipcRenderer.invoke(CHANNELS.filesList, projectId, path, query),
     read: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesRead, projectId, path),
+    resolvePath: (path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, path),
+    open: (path) => ipcRenderer.invoke(CHANNELS.filesOpen, path),
   },
   terminals: {
     open: (projectId, threadId, terminalId, cols, rows) =>

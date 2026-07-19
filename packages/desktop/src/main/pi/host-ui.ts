@@ -28,10 +28,16 @@ export class HostUi {
   private editorText = "";
   private readonly changed: () => void;
   private readonly activeToolIds: () => string[];
+  private readonly publishNotification: (message: string, type: "info" | "warning" | "error") => void;
 
-  constructor(changed: () => void, activeToolIds: () => string[]) {
+  constructor(
+    changed: () => void,
+    activeToolIds: () => string[],
+    publishNotification: (message: string, type: "info" | "warning" | "error") => void = () => undefined,
+  ) {
     this.changed = changed;
     this.activeToolIds = activeToolIds;
+    this.publishNotification = publishNotification;
   }
 
   /** 返回当前尚未响应的交互请求。 */
@@ -144,14 +150,7 @@ export class HostUi {
   }
 
   private notify(message: string, notifyType?: "info" | "warning" | "error"): void {
-    const id = randomUUID();
-    this.pending.set(id, {
-      request: { id, type: "notify", title: message, notifyType, createdAt: Date.now() },
-      resolve: () => undefined,
-      reject: () => undefined,
-      timer: setTimeout(() => this.cancel(id), 6000),
-    });
-    this.changed();
+    this.publishNotification(message, notifyType ?? "info");
   }
 
   private cancel(id: string): void {

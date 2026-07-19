@@ -182,6 +182,26 @@ export {
 	type ScopedModel,
 	type ThinkingConfiguration,
 } from "./core/model-resolver.ts";
+export {
+	formatModelsConfigDiagnostics,
+	getModelsConfigMetadata,
+	type ModelsAnthropicMessagesCompat,
+	type ModelsChatTemplateKwarg,
+	type ModelsCompat,
+	type ModelsCompatWithoutFreeMaps,
+	type ModelsConfig,
+	type ModelsConfigDiagnostic,
+	type ModelsConfigMetadata,
+	type ModelsConfigParseResult,
+	type ModelsConfigValidationResult,
+	type ModelsModelDefinition,
+	type ModelsModelOverride,
+	type ModelsOpenAICompletionsCompat,
+	type ModelsOpenAIResponsesCompat,
+	type ModelsProviderConfig,
+	parseModelsConfigSource,
+	validateModelsConfigValue,
+} from "./core/models-config.ts";
 export type {
 	PackageManager,
 	PathMetadata,

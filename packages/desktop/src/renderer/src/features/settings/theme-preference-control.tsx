@@ -18,19 +18,15 @@ export function ThemePreferenceControl() {
 
   return (
     <RadioGroup.Root
-      className="grid min-w-0 max-w-72 flex-1 grid-cols-3 gap-1 rounded-md bg-muted p-1"
+      className="settings-segmented-control"
       aria-label="主题"
       orientation="horizontal"
       value={preference}
       onValueChange={(value) => setPreference(parseThemePreference(value))}
     >
       {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
-        <RadioGroup.Item
-          key={value}
-          value={value}
-          className="flex h-9 items-center justify-center gap-1.5 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground data-[state=checked]:bg-background data-[state=checked]:text-foreground data-[state=checked]:shadow-sm"
-        >
-          <Icon size={14} />
+        <RadioGroup.Item key={value} value={value} className="settings-segmented-item">
+          <Icon aria-hidden="true" />
           {label}
         </RadioGroup.Item>
       ))}

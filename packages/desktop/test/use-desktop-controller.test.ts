@@ -9,7 +9,7 @@ import type {
 import type { DesktopActions } from "../src/renderer/src/state/desktop-actions.ts";
 import { INITIAL_STATE } from "../src/renderer/src/state/desktop-model.ts";
 import { createDesktopStore } from "../src/renderer/src/state/desktop-store.ts";
-import { useDesktopController } from "../src/renderer/src/state/use-desktop-controller.ts";
+import { shouldRestoreActiveThread, useDesktopController } from "../src/renderer/src/state/use-desktop-controller.ts";
 import type { DraftSessionConfig, Project, SessionBootstrap, Thread } from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
 
@@ -19,6 +19,21 @@ afterEach(() => {
 });
 
 describe("useDesktopController navigation", () => {
+  it("只恢复窗口内存中的 active thread，冷启动不恢复", () => {
+    const targetProject = project("project");
+    const store = createDesktopStore();
+
+    expect(shouldRestoreActiveThread(store.getState(), targetProject.id)).toBe(false);
+
+    store.setState((state) => ({
+      ...state,
+      activeThreadIds: { [targetProject.id]: "active-thread" },
+    }));
+
+    expect(shouldRestoreActiveThread(store.getState(), targetProject.id)).toBe(true);
+    expect(shouldRestoreActiveThread(store.getState(), "other-project")).toBe(false);
+  });
+
   it("取消 Project 选择不会使进行中的 thread load 失效", async () => {
     const currentProject = project("current");
     const currentThread = thread(currentProject, "current-thread");

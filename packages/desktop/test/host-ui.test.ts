@@ -71,6 +71,27 @@ describe("HostUi", () => {
     expect(host.uiState).toMatchObject({ editorText: "typed in Desktop + extension", editorRevision: 2 });
   });
 
+  it("将通知直接发布到消息流，并将缺省类型归一化为 info", () => {
+    const publishNotification = vi.fn();
+    const host = new HostUi(
+      () => undefined,
+      () => [],
+      publishNotification,
+    );
+    const ui = host.createContext();
+
+    ui.notify("普通消息");
+    ui.notify("需要注意", "warning");
+    ui.notify("执行失败", "error");
+
+    expect(publishNotification.mock.calls).toEqual([
+      ["普通消息", "info"],
+      ["需要注意", "warning"],
+      ["执行失败", "error"],
+    ]);
+    expect(host.requests).toEqual([]);
+  });
+
   it("静默忽略 Desktop 无法渲染的组件型 widget", () => {
     const changed = vi.fn();
     const host = new HostUi(changed, () => []);

@@ -10,6 +10,7 @@ import {
   selectHasActiveWorkbench,
   selectWindowTitle,
 } from "../../state/desktop-selectors.ts";
+import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 
 /** 当前 session 的工作台顶栏。 */
 export function Topbar() {
@@ -25,20 +26,24 @@ export function Topbar() {
         <strong>{title}</strong>
       </div>
       <div className="topbar-actions">
-        <Button
+        <TooltipIconButton
           variant="ghost"
           size="icon"
           aria-label={terminalOpen ? "隐藏底部终端" : "显示底部终端"}
+          tooltip="显示/隐藏终端"
+          side="bottom"
           aria-pressed={terminalOpen}
           disabled={!hasWorkbench}
           onClick={() => actions.updateWorkbench({ terminalOpen: !terminalOpen })}
         >
           <TerminalSquare size={15} />
-        </Button>
-        <Button
+        </TooltipIconButton>
+        <TooltipIconButton
           variant={panelOpen ? "outline" : "ghost"}
           size="icon"
           aria-label={panelOpen ? "隐藏右侧 Panel" : "显示右侧 Panel"}
+          tooltip={"显示/隐藏侧边栏"}
+          side="bottom"
           aria-pressed={panelOpen}
           disabled={!hasWorkbench}
           onClick={() =>
@@ -48,8 +53,9 @@ export function Topbar() {
             })
           }
         >
-          {panelOpen ? <PanelRight size={15} /> : <PanelRightOpen size={15} />}
-        </Button>
+          {/* {panelOpen ? <PanelRight size={15} /> : <PanelRightOpen size={15} />} */}
+          <PanelRight size={15} />
+        </TooltipIconButton>
       </div>
     </header>
   );

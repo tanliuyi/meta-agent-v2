@@ -1,5 +1,5 @@
 /** Desktop 与 renderer 之间使用的协议版本。 */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /** 可以安全通过 Electron IPC 传输的 JSON 值。 */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -185,10 +185,19 @@ export interface PiToolCallPart {
   isError?: boolean;
 }
 
+export interface PiAssistantNotificationPart {
+  id: string;
+  type: "notification";
+  notificationType: "info" | "warning" | "error";
+  text: string;
+  createdAt: number;
+}
+
 export type PiAssistantPart =
   | { id: string; type: "text"; text: string }
   | { id: string; type: "reasoning"; text: string }
-  | PiToolCallPart;
+  | PiToolCallPart
+  | PiAssistantNotificationPart;
 
 export interface PiAssistantMessage extends PiTimelineNodeBase {
   kind: "assistant";
@@ -215,7 +224,8 @@ export type PiNoticeContent =
 
 export interface PiNoticeMessage extends PiTimelineNodeBase {
   kind: "notice";
-  noticeType: "bash" | "custom" | "compaction" | "branch-summary";
+  noticeType: "bash" | "custom" | "compaction" | "branch-summary" | "notification";
+  notificationType?: "info" | "warning" | "error";
   title: string;
   content: PiNoticeContent;
   metadata?: JsonValue;

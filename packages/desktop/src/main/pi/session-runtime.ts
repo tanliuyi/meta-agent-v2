@@ -69,15 +69,16 @@ export class SessionRuntime {
     this.models = models;
     this.push = push;
     this.onSummaryChanged = onSummaryChanged;
-    this.hostUi = new HostUi(
-      () => this.publishControl(),
-      () => [...this.session.state.pendingToolCalls],
-    );
     this.projector = new PiThreadProjector({
       projectId,
       session,
       publish: (batch) => this.push({ type: "timeline", projectId, threadId: this.id, batch }),
     });
+    this.hostUi = new HostUi(
+      () => this.publishControl(),
+      () => [...this.session.state.pendingToolCalls],
+      (message, type) => this.projector.notify(message, type),
+    );
     this.compatibility = new PiCompatibilityAdapter({ session, projector: this.projector });
     this.summaryState = createSummary(session);
   }

@@ -35,7 +35,7 @@ export function ReasoningTrigger({
           <span
             aria-hidden
             data-slot="reasoning-trigger-shimmer"
-            className="aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
+            className="aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 [--shimmer-color:hsl(var(--foreground))] motion-reduce:animate-none"
           >
             {labelText}
           </span>

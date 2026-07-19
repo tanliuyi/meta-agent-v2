@@ -5,6 +5,7 @@ import { app, BrowserWindow, Menu } from "electron";
 import { CHANNELS } from "../shared/channels.ts";
 import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, registerIpc } from "./ipc.ts";
+import { ModelsConfigService } from "./models/models-config-service.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
 import { NodeRuntimeInstaller } from "./sidecar/node-runtime-installer.ts";
@@ -17,11 +18,14 @@ import { SidecarLog } from "./sidecar/sidecar-log.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
 import { ProjectStore } from "./store/project-store.ts";
 import { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
+import { WindowDirtyGuard } from "./window-dirty-guard.ts";
 
 let sessions: SessionSupervisor | undefined;
 let metadata: MetadataWorkerClient | undefined;
 let sidecarLog: SidecarLog | undefined;
 let terminals: TerminalSupervisor | undefined;
+let quitGuardPending = false;
+const dirtyGuard = new WindowDirtyGuard();
 const appDir = dirname(fileURLToPath(import.meta.url));
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -59,6 +63,7 @@ function createWindow(): void {
     },
   });
 
+  dirtyGuard.attach(window);
   window.once("ready-to-show", () => window.show());
   window.on("maximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, true));
   window.on("unmaximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, false));
@@ -78,7 +83,7 @@ function createWindow(): void {
 
     if (isReloadKey && !input.alt && !input.shift) {
       event.preventDefault();
-      window.webContents.reload();
+      void dirtyGuard.requestReload(window);
     } else if (isDevToolsKey && (isMac ? input.alt && !input.shift : input.shift && !input.alt)) {
       event.preventDefault();
       window.webContents.toggleDevTools();
@@ -99,6 +104,9 @@ app.whenReady().then(async () => {
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
+  const models = new ModelsConfigService(agentDir, {
+    log: (text) => sidecarLog?.write("models", text),
+  });
   const installer = new NodeRuntimeInstaller(userDataDir, () => undefined);
   const configuredNode = detectNodeRuntime();
   const installedNode =
@@ -145,7 +153,7 @@ app.whenReady().then(async () => {
   });
   sessions = supervisor;
   terminals = new TerminalSupervisor(projects, broadcastTerminalEvent);
-  registerIpc(projects, sessions, new FileService(projects), terminals, {
+  registerIpc(projects, sessions, new FileService(projects), terminals, models, dirtyGuard, {
     getStatus: () => {
       const system = detectNodeRuntime();
       return system.state === "ready" ? system : detectNodeRuntime(installer.activeNodePath());
@@ -166,6 +174,21 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", (event) => {
+  if (!dirtyGuard.isApplicationQuitConfirmed() && dirtyGuard.hasDirtyWindows(BrowserWindow.getAllWindows())) {
+    event.preventDefault();
+    if (!quitGuardPending) {
+      quitGuardPending = true;
+      void dirtyGuard
+        .confirmApplicationQuit(BrowserWindow.getAllWindows())
+        .then((confirmed) => {
+          if (confirmed) app.quit();
+        })
+        .finally(() => {
+          quitGuardPending = false;
+        });
+    }
+    return;
+  }
   if (!sessions && !metadata && !sidecarLog && !terminals) return;
   sidecarLog?.write("main", "Desktop shutdown started");
   event.preventDefault();

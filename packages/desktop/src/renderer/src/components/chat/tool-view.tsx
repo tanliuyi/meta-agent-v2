@@ -10,6 +10,7 @@ import PencilLine from "lucide-react/dist/esm/icons/pencil-line.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import Wrench from "lucide-react/dist/esm/icons/wrench.mjs";
+import { ToolFileTarget } from "./tool-file-target.tsx";
 import { ToolContent } from "./tools/tool-content.tsx";
 
 type ToolState = "running" | "complete" | "error";
@@ -21,6 +22,8 @@ interface ToolViewDescription {
   error: string;
 }
 
+type ToolTarget = { type: "file"; path: string } | { type: "text"; value: string };
+
 /** 按 Pi 原生工具类型渲染紧凑工具状态。 */
 export function ToolView({ toolName, args, result, status, artifact, isError }: ToolCallMessagePartProps) {
   const view = toolView(toolName);
@@ -30,19 +33,22 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
     status.type === "running" || execution === "streaming-args" || execution === "waiting" || execution === "running";
   const error = isError === true || execution === "error" || status.type === "incomplete";
   const toolState: ToolState = error ? "error" : running ? "running" : "complete";
-  const target = toolTarget(args);
+  const target = toolTarget(toolName, args);
   const displayedResult = result ?? artifactState?.partialResult;
 
   return (
     <Collapsible className="tool-view" data-tool-status={toolState}>
-      <CollapsibleTrigger className="tool-trigger focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px] focus-visible:ring-inset">
-        <span className="tool-icon">{view.icon}</span>
-        <span className="tool-status-label" aria-live="polite">
-          {view[toolState]}
-        </span>
-        {target ? <span className="tool-target">{target}</span> : null}
-        <ChevronRight size={16} className="tool-chevron" />
-      </CollapsibleTrigger>
+      <div className="tool-trigger-row">
+        <CollapsibleTrigger className="tool-trigger focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px] focus-visible:ring-inset">
+          <span className="tool-icon">{view.icon}</span>
+          <span className="tool-status-label" aria-live="polite">
+            {view[toolState]}
+          </span>
+          {target?.type === "text" ? <span className="tool-target">{target.value}</span> : null}
+          <ChevronRight size={16} className="tool-chevron" aria-hidden="true" />
+        </CollapsibleTrigger>
+        {target?.type === "file" ? <ToolFileTarget path={target.path} /> : null}
+      </div>
       <CollapsibleContent className="data-closed:animate-collapsible-up data-open:animate-collapsible-down overflow-hidden data-closed:pointer-events-none data-closed:fill-mode-forwards motion-reduce:animate-none">
         <div className="tool-body">
           <ToolContent name={toolName} args={args} result={displayedResult} error={error} />
@@ -62,9 +68,9 @@ function toolArtifact(value: unknown): { execution?: string; partialResult?: unk
 function toolView(name: string): ToolViewDescription {
   if (name === "bash")
     return {
-      running: "正在执行命令",
-      complete: "已执行命令",
-      error: "命令执行失败",
+      running: "正在执行",
+      complete: "",
+      error: "命令执行",
       icon: <TerminalSquare size={14} />,
     };
   if (name === "read")
@@ -81,10 +87,18 @@ function toolView(name: string): ToolViewDescription {
   return { running: `正在运行 ${name}`, complete: `${name} 已完成`, error: `${name} 失败`, icon: <Wrench size={14} /> };
 }
 
-function toolTarget(args: Readonly<Record<string, unknown>>): string {
+function toolTarget(name: string, args: Readonly<Record<string, unknown>>): ToolTarget | undefined {
+  if (name === "read" || name === "write" || name === "edit") {
+    for (const key of ["path", "file_path"]) {
+      const value = args[key];
+      if (typeof value === "string" && value) return { type: "file", path: value };
+    }
+    return undefined;
+  }
+
   for (const key of ["path", "file_path", "command", "pattern", "query"]) {
     const value = args[key];
-    if (typeof value === "string") return value;
+    if (typeof value === "string") return { type: "text", value };
   }
-  return "";
+  return undefined;
 }

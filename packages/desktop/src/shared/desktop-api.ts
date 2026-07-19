@@ -18,6 +18,7 @@ import type {
   Thread,
   WorkbenchState,
 } from "./contracts.ts";
+import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
 
 export type DesktopPlatform = "win32" | "darwin" | "linux";
 
@@ -52,6 +53,13 @@ export interface DesktopApi {
   };
   links: {
     open(url: string): Promise<void>;
+  };
+  models: {
+    getConfig(): Promise<ModelsConfigSnapshot>;
+    getConfigRevision(): Promise<string>;
+    saveConfig(input: SaveModelsConfigInput): Promise<SaveModelsConfigResult>;
+    openConfigExternally(): Promise<void>;
+    setEditorDirty(dirty: boolean): boolean;
   };
   windowControls: {
     minimize(): void;
@@ -94,6 +102,8 @@ export interface DesktopApi {
   files: {
     list(projectId: string, path?: string, query?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
+    resolvePath(path: string): Promise<string>;
+    open(path: string): Promise<void>;
   };
   terminals: {
     open(

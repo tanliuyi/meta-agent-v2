@@ -10,9 +10,9 @@ export const selectTriggerVariants = cva(
         muted: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
       },
       size: {
-        default: "h-9 px-3 py-2",
-        sm: "h-8 px-2.5 py-1.5 text-xs",
-        lg: "h-10 px-4 py-2.5",
+        default: "h-(--control-height-select) px-3 py-2",
+        sm: "h-(--control-height-button-sm) px-2.5 py-1.5 text-xs",
+        lg: "h-(--control-height-button-lg) px-4 py-2.5",
       },
     },
     defaultVariants: {

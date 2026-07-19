@@ -11,22 +11,42 @@ export const groupMessagePart = groupPartByType({
 
 /** 预计算 part identity 索引，并声明 assistant-ui 可识别的稳定分组配置。 */
 export function createRunGroupPart(parts: readonly PartState[]) {
-  const lastStepIndex = parts.findLastIndex((part) => part.type === "reasoning" || part.type === "tool-call");
-  const lastTextIndex = parts.findLastIndex((part) => part.type === "text" && part.text.trim().length > 0);
-  const finalTextIndex = lastTextIndex > lastStepIndex ? lastTextIndex : -1;
+  const finalTextIndex = findFinalResponseTextIndex(parts);
   const partIndexes = new Map(parts.map((part, index) => [part, index]));
 
   const groupPart = (part: PartState, context: GroupByContext): readonly `group-${string}`[] => {
     const index = partIndexes.get(part) ?? -1;
     const stepPath = groupMessagePart(part, context);
     const standaloneTool = part.type === "tool-call" && stepPath.length === 0;
-    const eligibleType = part.type === "text" || part.type === "reasoning" || part.type === "tool-call";
+    const eligibleType =
+      part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isNonCompactionNotice(part);
     const belongsToRunGroup =
       index >= 0 && eligibleType && !standaloneTool && (finalTextIndex < 0 || index < finalTextIndex);
     return belongsToRunGroup ? ["group-runActivity", ...stepPath] : stepPath;
   };
   Object.defineProperty(groupPart, GROUP_BY_MEMO_KEY, { value: RUN_GROUP_MEMO_KEY });
   return groupPart;
+}
+
+function isNonCompactionNotice(part: PartState): boolean {
+  return (
+    part.type === "data" &&
+    part.name === "pi-notice" &&
+    typeof part.data === "object" &&
+    part.data !== null &&
+    "noticeType" in part.data &&
+    part.data.noticeType !== "compaction"
+  );
+}
+
+export function hasFinalResponseText(parts: readonly PartState[]): boolean {
+  return findFinalResponseTextIndex(parts) >= 0;
+}
+
+function findFinalResponseTextIndex(parts: readonly PartState[]): number {
+  const lastStepIndex = parts.findLastIndex((part) => part.type === "reasoning" || part.type === "tool-call");
+  const lastTextIndex = parts.findLastIndex((part) => part.type === "text" && part.text.trim().length > 0);
+  return lastTextIndex > lastStepIndex ? lastTextIndex : -1;
 }
 
 export function hasTextAfterGroup(parts: readonly PartState[], indices: readonly number[]): boolean {

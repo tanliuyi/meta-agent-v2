@@ -4,6 +4,7 @@ import { DialogClose } from "@renderer/shared/ui/dialog-close";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
+import { useRef } from "react";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -23,14 +24,23 @@ export function ConfirmDialog({
   onOpenChange,
   onConfirm,
 }: ConfirmDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-3 sm:max-w-md">
+      <DialogContent
+        className="gap-3 sm:max-w-md"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          cancelRef.current?.focus();
+        }}
+      >
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
         <div className="mt-3 flex justify-end gap-2">
           <DialogClose asChild>
-            <Button variant="ghost">取消</Button>
+            <Button ref={cancelRef} variant="ghost">
+              取消
+            </Button>
           </DialogClose>
           <Button variant="destructive" onClick={onConfirm}>
             {confirmLabel}

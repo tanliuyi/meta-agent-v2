@@ -13,13 +13,29 @@ export function isPiNotice(value: unknown): value is PiNoticeMessage {
     !("kind" in value) ||
     value.kind !== "notice" ||
     !("noticeType" in value) ||
-    typeof value.noticeType !== "string" ||
-    !("content" in value)
+    !isPiNoticeType(value.noticeType) ||
+    !("content" in value) ||
+    !isPiNoticeContent(value.content)
   ) {
     return false;
   }
 
-  return isPiNoticeContent(value.content);
+  if (value.noticeType !== "notification") return true;
+  return (
+    value.content.type === "text" &&
+    "notificationType" in value &&
+    (value.notificationType === "info" || value.notificationType === "warning" || value.notificationType === "error")
+  );
+}
+
+function isPiNoticeType(value: unknown): value is PiNoticeMessage["noticeType"] {
+  return (
+    value === "bash" ||
+    value === "custom" ||
+    value === "compaction" ||
+    value === "branch-summary" ||
+    value === "notification"
+  );
 }
 
 function isPiNoticeContent(value: unknown): value is PiNoticeContent {

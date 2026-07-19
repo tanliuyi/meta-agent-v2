@@ -1,8 +1,15 @@
 import { type Attachment, SimpleImageAttachmentAdapter } from "@assistant-ui/react";
 import type { ImageInput } from "../../../shared/contracts.ts";
 
+class PiImageAttachmentAdapter extends SimpleImageAttachmentAdapter {
+  override async add(state: { file: File }) {
+    const attachment = await super.add(state);
+    return { ...attachment, id: crypto.randomUUID() };
+  }
+}
+
 /** Composer 与 Pi enqueue 共用的图片附件适配器。 */
-export const imageAttachmentAdapter = new SimpleImageAttachmentAdapter();
+export const imageAttachmentAdapter = new PiImageAttachmentAdapter();
 
 type ComposerAttachment = Attachment;
 type PendingImageAttachment = Parameters<SimpleImageAttachmentAdapter["send"]>[0];

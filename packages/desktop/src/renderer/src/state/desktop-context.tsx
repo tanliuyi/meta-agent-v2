@@ -1,24 +1,23 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { createContext, type ReactNode, useContext, useRef, useState } from "react";
+import { createContext, type ReactNode, useContext, useRef } from "react";
 import { useStore } from "zustand";
 import type { DesktopThreadActions } from "../runtime/use-pi-runtime.ts";
 import { usePiRuntime } from "../runtime/use-pi-runtime.ts";
 import type { DesktopActions } from "./desktop-actions.ts";
 import type { DesktopState } from "./desktop-model.ts";
 import { selectActiveThreadId, selectIsSendDisabled } from "./desktop-selectors.ts";
-import { createDesktopStore, type DesktopStore } from "./desktop-store.ts";
+import { useDesktopStore } from "./desktop-store-context.tsx";
 import { useDesktopController } from "./use-desktop-controller.ts";
 
-const DesktopStoreContext = createContext<DesktopStore | null>(null);
 const DesktopActionsContext = createContext<DesktopActions | null>(null);
 
 /**
- * 向聊天工作区注入唯一 Desktop store 与 assistant-ui runtime。
+ * 向聊天工作区注入 route-scoped controller 与 assistant-ui runtime。
  *
  * Context 只发布稳定的 store/commands identity；组件通过 selector 订阅实际使用的原子字段。
  */
 export function DesktopProvider({ children }: { children: ReactNode }) {
-  const [store] = useState(createDesktopStore);
+  const store = useDesktopStore();
   const threadActions = useRef<DesktopThreadActions | null>(null);
   const desktopActions = useDesktopController(store, threadActions);
   const projects = useStore(store, (state) => state.projects);
@@ -35,19 +34,15 @@ export function DesktopProvider({ children }: { children: ReactNode }) {
   });
   threadActions.current = runtimeActions;
   return (
-    <DesktopStoreContext.Provider value={store}>
-      <DesktopActionsContext.Provider value={desktopActions}>
-        <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>
-      </DesktopActionsContext.Provider>
-    </DesktopStoreContext.Provider>
+    <DesktopActionsContext.Provider value={desktopActions}>
+      <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>
+    </DesktopActionsContext.Provider>
   );
 }
 
 /** 订阅 Desktop store 的单个派生值；selector 应返回 primitive 或稳定领域引用。 */
 export function useDesktopSelector<T>(selector: (state: DesktopState) => T): T {
-  const store = useContext(DesktopStoreContext);
-  if (!store) throw new Error("useDesktopSelector 必须在 DesktopProvider 内使用");
-  return useStore(store, selector);
+  return useStore(useDesktopStore(), selector);
 }
 
 /** 读取稳定的 Desktop 命令集合，不订阅任何状态。 */

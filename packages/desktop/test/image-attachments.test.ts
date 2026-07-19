@@ -15,6 +15,19 @@ describe("assistant-ui 图片附件", () => {
     ]);
   });
 
+  it("为同名剪贴板图片生成不同的附件 ID", async () => {
+    const first = await imageAttachmentAdapter.add({
+      file: new File([new Uint8Array([1])], "image.png", { type: "image/png" }),
+    });
+    const second = await imageAttachmentAdapter.add({
+      file: new File([new Uint8Array([2])], "image.png", { type: "image/png" }),
+    });
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.name).toBe("image.png");
+    expect(second.name).toBe("image.png");
+  });
+
   it("保留已完成附件的文件名", async () => {
     await expect(
       toPiImageInputs([

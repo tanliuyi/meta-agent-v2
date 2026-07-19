@@ -3,6 +3,7 @@ import { PiMessageRepositoryConverter } from "../src/renderer/src/runtime/pi-mes
 import { PiThreadStore, PiThreadStoreError } from "../src/renderer/src/runtime/pi-thread-store.ts";
 import {
   type PiAssistantMessage,
+  type PiNoticeMessage,
   type PiThreadEventBatch,
   type PiThreadSnapshot,
   type PiUserMessage,
@@ -199,6 +200,111 @@ describe("PiMessageRepositoryConverter", () => {
     ]);
   });
 
+  it("将 active assistant 的 notification part 原位转换为 pi-notice data", () => {
+    const assistant = {
+      ...assistantNode("a", null),
+      content: [
+        { id: "a:reasoning:0", type: "reasoning", text: "分析" },
+        {
+          id: "a:notification:1",
+          type: "notification",
+          notificationType: "warning",
+          text: "需要注意",
+          createdAt: 2,
+        },
+        { id: "a:text:2", type: "text", text: "最终回复" },
+      ],
+    } satisfies PiAssistantMessage;
+    const converter = new PiMessageRepositoryConverter();
+
+    const repository = converter.build(snapshot([assistant], "a"));
+    const converted = repository.messages[0]?.message;
+    expect(converted?.role).toBe("assistant");
+    if (converted?.role !== "assistant") throw new Error("assistant message missing");
+    expect(converted.content).toEqual([
+      expect.objectContaining({ type: "reasoning", text: "分析" }),
+      expect.objectContaining({
+        type: "data",
+        name: "pi-notice",
+        data: expect.objectContaining({
+          noticeType: "notification",
+          notificationType: "warning",
+          content: { type: "text", text: "需要注意" },
+        }),
+      }),
+      expect.objectContaining({ type: "text", text: "最终回复" }),
+    ]);
+  });
+
+  it("跨过 pi-notice 合并同一轮 assistant，并将 notice 保留为 data part", () => {
+    const user = userNode("u", null);
+    const first = assistantNode("a-1", "u");
+    const notice = noticeNode("notice", "a-1", "custom");
+    const second = assistantNode("a-2", "notice");
+    const nextUser = userNode("u-2", "a-2");
+    const converter = new PiMessageRepositoryConverter();
+
+    const repository = converter.build(snapshot([user, first, notice, second, nextUser], "u-2"));
+
+    expect(repository.messages.map(({ message, parentId }) => [message.id, parentId])).toEqual([
+      ["u", null],
+      ["a-1", "u"],
+      ["u-2", "a-1"],
+    ]);
+    const merged = repository.messages[1]?.message;
+    expect(merged?.role).toBe("assistant");
+    if (merged?.role !== "assistant") throw new Error("assistant message missing");
+    expect(merged.content).toEqual([
+      expect.objectContaining({ type: "text", text: "hello" }),
+      { type: "data", name: "pi-notice", data: notice },
+      expect.objectContaining({ type: "text", text: "hello" }),
+    ]);
+  });
+
+  it("压缩 notice 单独成条，并打断前后 assistant group", () => {
+    const first = assistantNode("a-1", null);
+    const compaction = noticeNode("compaction", "a-1", "compaction");
+    const second = assistantNode("a-2", "compaction");
+    const converter = new PiMessageRepositoryConverter();
+
+    const repository = converter.build(snapshot([first, compaction, second], "a-2"));
+
+    expect(repository.messages.map(({ message, parentId }) => [message.id, parentId])).toEqual([
+      ["a-1", null],
+      ["compaction", "a-1"],
+      ["a-2", "compaction"],
+    ]);
+    expect(repository.headId).toBe("a-2");
+    expect(repository.messages[1]?.message).toMatchObject({
+      id: "compaction",
+      role: "assistant",
+      content: [{ type: "data", name: "pi-notice", data: compaction }],
+    });
+  });
+
+  it("普通尾部 notice 立即并入前一 assistant，后续 assistant 不触发消息重组", () => {
+    const first = assistantNode("a-1", null);
+    const notice = noticeNode("notice", "a-1", "custom");
+    const converter = new PiMessageRepositoryConverter();
+    const before = converter.build(snapshot([first, notice], "notice"));
+    const second = assistantNode("a-2", "notice");
+    const after = converter.build(snapshot([first, notice, second], "a-2", 1));
+
+    expect(before.messages.map(({ message }) => message.id)).toEqual(["a-1"]);
+    expect(before.headId).toBe("a-1");
+    const beforeMessage = before.messages[0]?.message;
+    expect(beforeMessage?.role).toBe("assistant");
+    if (beforeMessage?.role !== "assistant") throw new Error("assistant message missing");
+    expect(beforeMessage.content.map((part) => part.type)).toEqual(["text", "data"]);
+
+    expect(after.messages.map(({ message }) => message.id)).toEqual(["a-1"]);
+    expect(after.headId).toBe("a-1");
+    const afterMessage = after.messages[0]?.message;
+    expect(afterMessage?.role).toBe("assistant");
+    if (afterMessage?.role !== "assistant") throw new Error("assistant message missing");
+    expect(afterMessage.content.map((part) => part.type)).toEqual(["text", "data", "text"]);
+  });
+
   it("连续 assistant group 未变化时复用 ThreadMessage，成员变化时重建", () => {
     const user = userNode("u", null);
     const firstAssistant = assistantNode("a-1", "u");
@@ -291,6 +397,18 @@ describe("PiMessageRepositoryConverter", () => {
     expect(converted.content[0]).toMatchObject({ text: `hello${"x".repeat(1_000)}` });
   });
 });
+
+function noticeNode(id: string, parentId: string | null, noticeType: PiNoticeMessage["noticeType"]): PiNoticeMessage {
+  return {
+    id,
+    parentId,
+    createdAt: 2,
+    kind: "notice",
+    noticeType,
+    title: noticeType === "compaction" ? "上下文压缩" : "通知",
+    content: { type: "text", text: "summary" },
+  };
+}
 
 function snapshot(nodes: PiThreadSnapshot["nodes"], headId: string | null, cursor = 0): PiThreadSnapshot {
   return {

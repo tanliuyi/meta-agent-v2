@@ -1,5 +1,6 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { cn } from "@renderer/shared/lib/cn";
+import ChevronDownIcon from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import { SelectContent } from "./select-content.tsx";
 import { SelectItem } from "./select-item.tsx";
 import { SelectRoot } from "./select-root.tsx";
@@ -12,7 +13,7 @@ export function Select({ options, placeholder, className, ...props }: SelectProp
     <SelectRoot {...props}>
       <SelectPrimitive.Trigger
         className={cn(
-          "flex items-center gap-1.5 rounded-md py-1 ps-3 pe-2 text-sm transition-colors outline-none",
+          "group flex items-center gap-1.5 rounded-md py-1 ps-3 pe-2 text-sm transition-colors outline-none",
           "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2",
           "disabled:cursor-not-allowed disabled:opacity-50",
           !selectedOption && placeholder ? "italic opacity-70" : null,
@@ -20,6 +21,9 @@ export function Select({ options, placeholder, className, ...props }: SelectProp
         )}
       >
         <span>{selectedOption?.label ?? placeholder}</span>
+        <SelectPrimitive.Icon asChild>
+          <ChevronDownIcon className="size-4 opacity-50 transition-transform group-data-[state=open]:rotate-180" />
+        </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
 
       <SelectContent>

@@ -10,6 +10,7 @@ const electron = vi.hoisted(() => ({
   listeners: new Map<string, (event: unknown, payload: unknown) => void>(),
   invoke: vi.fn(),
   send: vi.fn(),
+  sendSync: vi.fn(),
   removeListener: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock("electron", () => ({
   ipcRenderer: {
     invoke: electron.invoke,
     send: electron.send,
+    sendSync: electron.sendSync,
     on: (channel: string, listener: (event: unknown, payload: unknown) => void) => {
       electron.listeners.set(channel, listener);
     },
@@ -30,6 +32,28 @@ vi.mock("electron", () => ({
 }));
 
 describe("preload desktop bridge", () => {
+  it("映射模型配置调用并同步提交 dirty 状态", async () => {
+    const api = electron.exposed;
+    if (!api) throw new Error("DesktopApi 未暴露");
+    electron.invoke.mockReset().mockResolvedValue(undefined);
+    electron.sendSync.mockReset().mockReturnValue(true);
+    const input = { expectedRevision: "revision", providers: [] };
+
+    await api.models.getConfig();
+    await api.models.getConfigRevision();
+    await api.models.saveConfig(input);
+    await api.models.openConfigExternally();
+    expect(api.models.setEditorDirty(true)).toBe(true);
+
+    expect(electron.invoke.mock.calls).toEqual([
+      [CHANNELS.modelsGetConfig],
+      [CHANNELS.modelsGetConfigRevision],
+      [CHANNELS.modelsSaveConfig, input],
+      [CHANNELS.modelsOpenConfigExternally],
+    ]);
+    expect(electron.sendSync).toHaveBeenCalledWith(CHANNELS.modelsSetEditorDirty, true);
+  });
+
   it("映射窗口控制并订阅最大化状态", () => {
     const api = electron.exposed;
     if (!api) throw new Error("DesktopApi 未暴露");
@@ -54,6 +78,20 @@ describe("preload desktop bridge", () => {
       CHANNELS.windowMaximizedChanged,
       electron.listeners.get(CHANNELS.windowMaximizedChanged),
     );
+  });
+
+  it("通过 main 解析并打开工具文件路径", async () => {
+    const api = electron.exposed;
+    if (!api) throw new Error("DesktopApi 未暴露");
+    electron.invoke.mockReset().mockResolvedValueOnce("/project/src/main.ts").mockResolvedValueOnce(undefined);
+
+    await expect(api.files.resolvePath("src/main.ts")).resolves.toBe("/project/src/main.ts");
+    await api.files.open("src/main.ts");
+
+    expect(electron.invoke.mock.calls).toEqual([
+      [CHANNELS.filesResolvePath, "src/main.ts"],
+      [CHANNELS.filesOpen, "src/main.ts"],
+    ]);
   });
 
   it("将真实 Composer 文本同步到当前 Pi session", async () => {

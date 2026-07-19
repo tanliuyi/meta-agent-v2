@@ -3,11 +3,11 @@ import Check from "lucide-react/dist/esm/icons/check.mjs";
 import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
+import { hasFinalResponseText } from "../message-part-grouping.ts";
 
 export function AssistantMessageActionBar() {
   const visible = useAuiState((state) => {
     const pi = state.message.metadata.custom.pi;
-    const lastPart = state.message.parts.at(-1);
     return (
       pi !== null &&
       typeof pi === "object" &&
@@ -16,8 +16,8 @@ export function AssistantMessageActionBar() {
       "sourceEntryId" in pi &&
       typeof pi.sourceEntryId === "string" &&
       !state.message.metadata.isOptimistic &&
-      lastPart?.type === "text" &&
-      lastPart.text.trim().length > 0
+      state.message.status?.type !== "running" &&
+      hasFinalResponseText(state.message.parts)
     );
   });
 
@@ -26,7 +26,7 @@ export function AssistantMessageActionBar() {
   return (
     <div className="flex min-h-7 items-center pt-1">
       <ActionBarPrimitive.Root
-        hideWhenRunning
+        data-slot="assistant-message-action-bar"
         autohide="not-last"
         className="animate-in fade-in flex gap-1 text-muted-foreground duration-200"
       >

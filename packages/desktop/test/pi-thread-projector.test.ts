@@ -46,6 +46,112 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("将扩展通知按顺序追加为带类型语义的 transient notice", () => {
+    const { session } = sessionHarness([messageEntry("assistant", null, assistantMessage("stop", 1, []))]);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    projector.notify("普通消息", "info");
+    projector.notify("需要注意", "warning");
+    projector.notify("执行失败", "error");
+
+    expect(projector.snapshot().nodes).toEqual([
+      expect.objectContaining({ id: "assistant", kind: "assistant" }),
+      expect.objectContaining({
+        parentId: "assistant",
+        kind: "notice",
+        noticeType: "notification",
+        notificationType: "info",
+        content: { type: "text", text: "普通消息" },
+      }),
+      expect.objectContaining({
+        kind: "notice",
+        noticeType: "notification",
+        notificationType: "warning",
+        content: { type: "text", text: "需要注意" },
+      }),
+      expect.objectContaining({
+        kind: "notice",
+        noticeType: "notification",
+        notificationType: "error",
+        content: { type: "text", text: "执行失败" },
+      }),
+    ]);
+    expect(projector.snapshot().headId).toMatch(/:notification:3$/);
+    projector.dispose();
+  });
+
+  it("active assistant 内按事件顺序插入通知，并在完成与 rekey 后保留最终文本位置", async () => {
+    const entries: SessionEntry[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const started = assistantMessage("stop", 2, [{ type: "thinking", thinking: "分析", redacted: false }]);
+    const finished = assistantMessage("stop", 2, [
+      { type: "thinking", thinking: "分析", redacted: false },
+      { type: "text", text: "最终回复" },
+    ]);
+
+    projector.handle({ type: "agent_start" });
+    projector.handle({ type: "turn_start" });
+    projector.handle({ type: "message_start", message: started });
+    projector.notify("处理中", "info");
+    projector.handle({ type: "message_end", message: finished });
+    projector.handle({ type: "turn_end", message: finished, toolResults: [] });
+    entries.push(messageEntry("canonical-assistant", null, finished));
+    await Promise.resolve();
+
+    expect(projector.snapshot().nodes).toHaveLength(1);
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      id: "canonical-assistant",
+      kind: "assistant",
+      content: [
+        expect.objectContaining({ type: "reasoning", text: "分析" }),
+        expect.objectContaining({ type: "notification", notificationType: "info", text: "处理中" }),
+        expect.objectContaining({ type: "text", text: "最终回复" }),
+      ],
+      status: { type: "complete", reason: "stop" },
+    });
+    projector.dispose();
+  });
+
+  it("notification 跨 assistant rekey 时保留工具执行状态和相对顺序", async () => {
+    const entries: SessionEntry[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const started = assistantMessage("toolUse", 2, [toolCall("call-1")]);
+    const finished = assistantMessage("toolUse", 2, [toolCall("call-1"), { type: "text", text: "工具完成" }]);
+
+    projector.handle({ type: "message_start", message: started });
+    projector.handle({
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "result" }] },
+      isError: false,
+    });
+    projector.notify("工具通知", "warning");
+    projector.handle({ type: "message_end", message: finished });
+    entries.push(messageEntry("canonical-assistant", null, finished));
+    await Promise.resolve();
+
+    expect(projector.snapshot().nodes).toHaveLength(1);
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      id: "canonical-assistant",
+      kind: "assistant",
+      content: [
+        expect.objectContaining({
+          type: "tool-call",
+          toolCallId: "call-1",
+          execution: "complete",
+          result: { content: [{ type: "text", text: "result" }] },
+          isError: false,
+        }),
+        expect.objectContaining({ type: "notification", notificationType: "warning", text: "工具通知" }),
+        expect.objectContaining({ type: "text", text: "工具完成" }),
+      ],
+    });
+    projector.dispose();
+  });
+
   it("message_end 后通过公开 branch checkpoint 将 transient ID rekey 为 SessionEntry.id", async () => {
     const entries: SessionEntry[] = [];
     const batches: PiThreadEventBatch[] = [];

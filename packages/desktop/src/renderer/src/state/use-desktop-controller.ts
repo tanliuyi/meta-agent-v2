@@ -6,7 +6,7 @@ import { piSessionBus } from "../runtime/pi-session-bus.ts";
 import type { DesktopThreadActions } from "../runtime/use-pi-runtime.ts";
 import { errorMessage } from "../shared/lib/error-message.ts";
 import type { DesktopActions } from "./desktop-actions.ts";
-import { desktopSessionKey, threadFromBootstrap } from "./desktop-model.ts";
+import { type DesktopState, desktopSessionKey, threadFromBootstrap } from "./desktop-model.ts";
 import { selectActiveThreadId } from "./desktop-selectors.ts";
 import { type DesktopStore, dispatchDesktop } from "./desktop-store.ts";
 import { nextRegularThreadId } from "./thread-list-commands.ts";
@@ -192,7 +192,9 @@ export function useDesktopController(
       .then(async ([projects, current]) => {
         if (!active || !isCurrentNavigation(navigation)) return;
         dispatch({ type: "projects-loaded", projects });
-        if (current?.available) await loadProject(current, navigation, false);
+        if (current?.available) {
+          await loadProject(current, navigation, shouldRestoreActiveThread(store.getState(), current.id));
+        }
       })
       .catch((value: unknown) => {
         if (active && isCurrentNavigation(navigation)) report(value);
@@ -204,7 +206,7 @@ export function useDesktopController(
       active = false;
       if (isCurrentNavigation(navigation)) navigationGeneration.current += 1;
     };
-  }, [beginNavigation, dispatch, isCurrentNavigation, loadProject, report]);
+  }, [beginNavigation, dispatch, isCurrentNavigation, loadProject, report, store]);
 
   useEffect(() => piSessionBus.onControl((control) => dispatch({ type: "control", control })), [dispatch]);
   useEffect(
@@ -592,4 +594,9 @@ export function useDesktopController(
       updateWorkbench,
     ],
   );
+}
+
+/** 仅恢复当前 renderer 窗口内存中的 active thread；冷启动没有该状态。 */
+export function shouldRestoreActiveThread(state: DesktopState, projectId: string): boolean {
+  return state.activeThreadIds[projectId] !== undefined;
 }

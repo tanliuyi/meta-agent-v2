@@ -53,6 +53,12 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [archivedVisibleLimit, setArchivedVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
   const composerIsEmpty = useAuiState((state) => state.composer.isEmpty);
+  const runtimeThreadIds = useAuiState((state) => state.threads.threadIds);
+  const runtimeArchivedThreadIds = useAuiState((state) => state.threads.archivedThreadIds);
+  const availableRuntimeThreadIds = useMemo(
+    () => new Set([...runtimeThreadIds, ...runtimeArchivedThreadIds]),
+    [runtimeArchivedThreadIds, runtimeThreadIds],
+  );
   const regularThreadCount = useMemo(() => threads.filter(({ archived }) => !archived).length, [threads]);
   const archivedThreadCount = threads.length - regularThreadCount;
   const visibleThreads = useMemo(
@@ -65,19 +71,21 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
   );
   const renderedThreads = useMemo(
     () =>
-      visibleThreads.map((thread) => ({
-        runtime: assistantRuntime.threads.getItemById(threadAdapterId(project.id, thread.id)),
-        thread,
-      })),
-    [assistantRuntime.threads, project.id, visibleThreads],
+      visibleThreads.flatMap((thread) => {
+        const adapterId = threadAdapterId(project.id, thread.id);
+        if (!availableRuntimeThreadIds.has(adapterId)) return [];
+        return [{ runtime: assistantRuntime.threads.getItemById(adapterId), thread }];
+      }),
+    [assistantRuntime.threads, availableRuntimeThreadIds, project.id, visibleThreads],
   );
   const renderedArchivedThreads = useMemo(
     () =>
-      visibleArchivedThreads.map((thread) => ({
-        runtime: assistantRuntime.threads.getItemById(threadAdapterId(project.id, thread.id)),
-        thread,
-      })),
-    [assistantRuntime.threads, project.id, visibleArchivedThreads],
+      visibleArchivedThreads.flatMap((thread) => {
+        const adapterId = threadAdapterId(project.id, thread.id);
+        if (!availableRuntimeThreadIds.has(adapterId)) return [];
+        return [{ runtime: assistantRuntime.threads.getItemById(adapterId), thread }];
+      }),
+    [assistantRuntime.threads, availableRuntimeThreadIds, project.id, visibleArchivedThreads],
   );
   const hasMoreThreads = regularThreadCount > visibleLimit;
   const isExpanded = isThreadListExpanded(visibleLimit, regularThreadCount);

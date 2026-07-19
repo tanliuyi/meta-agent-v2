@@ -27,10 +27,10 @@
   --color-ring: hsl(var(--ring));
   --font-sans: var(--font-family-sans);
   --font-mono: var(--font-family-mono);
-  --radius-sm: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 0.125rem);
   --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
-  --radius-xl: calc(var(--radius) + 5px);
+  --radius-lg: calc(var(--radius) + 0.125rem);
+  --radius-xl: calc(var(--radius) + 0.3125rem);
 }
 
 @theme {
@@ -63,38 +63,44 @@
     --font-family-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
     --font-family-mono: "Cascadia Mono", Consolas, monospace;
 
-    --type-size-caption: 10px;
-    --type-size-meta: 11px;
-    --type-size-control: 12px;
-    --type-size-ui: 13px;
-    --type-size-body: 14px;
-    --type-size-title: 20px;
+    --type-size-caption: 0.625rem;
+    --type-size-meta: 0.6875rem;
+    --type-size-control: 0.75rem;
+    --type-size-ui: 0.8125rem;
+    --type-size-body: 0.875rem;
+    --type-size-title: 1.25rem;
     --type-line-compact: 1.25;
     --type-line-normal: 1.5;
     --type-line-relaxed: 1.6;
 
-    --space-1: 2px;
-    --space-2: 4px;
-    --space-3: 6px;
-    --space-4: 8px;
-    --space-5: 10px;
-    --space-6: 12px;
-    --space-7: 16px;
-    --space-8: 24px;
-    --space-9: 32px;
+    --space-1: 0.125rem;
+    --space-2: 0.25rem;
+    --space-3: 0.375rem;
+    --space-4: 0.5rem;
+    --space-5: 0.625rem;
+    --space-6: 0.75rem;
+    --space-7: 1rem;
+    --space-8: 1.5rem;
+    --space-9: 2rem;
 
-    --control-size-xs: 24px;
-    --control-size-sm: 28px;
-    --control-size-md: 32px;
-    --control-size-lg: 36px;
+    --control-size-xs: 1.5rem;
+    --control-size-sm: 1.75rem;
+    --control-size-md: 2rem;
+    --control-size-lg: 2.25rem;
+    --control-height-input: var(--control-size-lg);
+    --control-height-select: var(--control-size-lg);
+    --control-height-button: var(--control-size-lg);
+    --control-height-button-sm: var(--control-size-md);
+    --control-height-button-lg: 2.5rem;
+    --control-height-button-icon: var(--control-size-xs);
 
-    --radius: 7px;
-    --shape-radius-xs: 4px;
-    --shape-radius-sm: 5px;
-    --shape-radius-md: 7px;
-    --shape-radius-lg: 9px;
-    --shape-radius-xl: 12px;
-    --shape-radius-round: 999px;
+    --radius: 0.4375rem;
+    --shape-radius-xs: 0.25rem;
+    --shape-radius-sm: 0.3125rem;
+    --shape-radius-md: 0.4375rem;
+    --shape-radius-lg: 0.5625rem;
+    --shape-radius-xl: 0.75rem;
+    --shape-radius-round: 62.4375rem;
 
     --motion-duration-fast: 120ms;
     --motion-duration-standard: 200ms;
@@ -115,25 +121,25 @@
     --stack-blocker: 90;
     --stack-notification: 100;
 
-    --layout-window-header-height: 36px;
-    --layout-window-control-width: 46px;
-    --layout-topbar-height: 48px;
-    --layout-sidebar-width: 280px;
-    --layout-sidebar-width-compact: 236px;
-    --layout-settings-sidebar-width: 224px;
+    --layout-window-header-height: 2.25rem;
+    --layout-window-control-width: 2.875rem;
+    --layout-topbar-height: 2.5rem;
+    --layout-sidebar-width: 17.5rem;
+    --layout-sidebar-min-width: 13.75rem;
+    --layout-sidebar-max-width: 26.25rem;
     --layout-thread-max-width: 44rem;
     --composer-radius: 1.5rem;
     --composer-padding: var(--space-4);
     --composer-background: color-mix(in oklab, hsl(var(--muted)) 30%, hsl(var(--background)));
-    --layout-workbench-min-width: 360px;
-    --layout-workbench-max-width: 760px;
-    --layout-workbench-default-width: 360px;
-    --layout-terminal-min-height: 160px;
+    --layout-workbench-min-width: 22.5rem;
+    --layout-workbench-max-width: 47.5rem;
+    --layout-workbench-default-width: 22.5rem;
+    --layout-terminal-min-height: 10rem;
     --layout-terminal-max-height: 58vh;
-    --layout-terminal-default-height: 280px;
+    --layout-terminal-default-height: 17.5rem;
 
-    --focus-ring-width: 2px;
-    --focus-ring-offset: 1px;
+    --focus-ring-width: 0.125rem;
+    --focus-ring-offset: 0.0625rem;
   }
 
   html[data-theme="light"],
@@ -178,12 +184,16 @@
     --window-close-foreground: 0 0% 100%;
     --overlay: 220 10% 10%;
     --focus-ring-color: hsl(var(--ring) / 0.35);
+    --settings-accent: 211 100% 43%;
+    --settings-accent-foreground: 0 0% 100%;
+    --settings-group-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.04);
+    --settings-control-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.06);
     --selection-background: hsl(var(--primary) / 0.14);
     --scrollbar-thumb: hsl(var(--foreground) / 0.18);
-    --elevation-popover: 0 10px 30px hsl(var(--foreground) / 0.12);
-    --elevation-workbench: -12px 0 30px hsl(var(--foreground) / 0.08);
-    --elevation-composer: 0 4px 16px -8px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
-    --elevation-composer-focus: 0 6px 24px -8px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.05);
+    --elevation-popover: 0 0.625rem 1.875rem hsl(var(--foreground) / 0.12);
+    --elevation-workbench: -0.75rem 0 1.875rem hsl(var(--foreground) / 0.08);
+    --elevation-composer: 0 0.25rem 1rem -0.5rem rgb(0 0 0 / 0.08), 0 0.0625rem 0.125rem rgb(0 0 0 / 0.04);
+    --elevation-composer-focus: 0 0.375rem 1.5rem -0.5rem rgb(0 0 0 / 0.12), 0 0.0625rem 0.125rem rgb(0 0 0 / 0.05);
   }
 
   html[data-theme="dark"] {
@@ -227,12 +237,16 @@
     --window-close-foreground: 0 0% 100%;
     --overlay: 0 0% 0%;
     --focus-ring-color: hsl(var(--ring) / 0.5);
+    --settings-accent: 211 100% 62%;
+    --settings-accent-foreground: 220 30% 10%;
+    --settings-group-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.28);
+    --settings-control-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.3);
     --selection-background: hsl(var(--primary) / 0.18);
     --scrollbar-thumb: hsl(var(--foreground) / 0.24);
-    --elevation-popover: 0 12px 32px rgb(0 0 0 / 0.42);
-    --elevation-workbench: -12px 0 30px rgb(0 0 0 / 0.3);
-    --elevation-composer: 0 1px 2px rgb(0 0 0 / 0.3);
-    --elevation-composer-focus: 0 2px 10px rgb(0 0 0 / 0.35);
+    --elevation-popover: 0 0.75rem 2rem rgb(0 0 0 / 0.42);
+    --elevation-workbench: -0.75rem 0 1.875rem rgb(0 0 0 / 0.3);
+    --elevation-composer: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.3);
+    --elevation-composer-focus: 0 0.125rem 0.625rem rgb(0 0 0 / 0.35);
   }
 }
 

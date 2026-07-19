@@ -1,7 +1,12 @@
-import { ComposerPrimitive, MessagePrimitive } from "@assistant-ui/react";
+import { ComposerPrimitive, MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@renderer/shared/ui/button";
 
 export function EditComposer() {
+  const aui = useAui();
+  const canSend = useAuiState((state) => state.composer.canSend);
+  const isRunning = useAuiState((state) => state.thread.isRunning);
+  const canQueue = useAuiState((state) => state.thread.capabilities.queue);
+
   return (
     <MessagePrimitive.Root
       data-slot="aui_edit-composer-wrapper"
@@ -18,11 +23,14 @@ export function EditComposer() {
               取消
             </Button>
           </ComposerPrimitive.Cancel>
-          <ComposerPrimitive.Send asChild>
-            <Button size="sm" className="h-8 rounded-full px-3.5">
-              更新
-            </Button>
-          </ComposerPrimitive.Send>
+          <Button
+            size="sm"
+            className="h-8 rounded-full px-3.5"
+            disabled={!canSend || (isRunning && !canQueue)}
+            onClick={() => aui.composer().send({ startRun: true })}
+          >
+            更新
+          </Button>
         </div>
       </ComposerPrimitive.Root>
     </MessagePrimitive.Root>
