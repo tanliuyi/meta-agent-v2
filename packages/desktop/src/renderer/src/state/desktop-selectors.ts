@@ -243,5 +243,5 @@ export function selectIsSendDisabled(state: DesktopState): boolean {
 /** 选择窗口标题 primitive，control 其他字段变化不会触发窗口框架更新。 */
 export function selectWindowTitle(state: DesktopState): string {
   const control = selectActiveControl(state);
-  return control?.extensionUi.windowTitle ?? control?.title ?? state.project?.name ?? "Meta Agent";
+  return control?.extensionUi.windowTitle ?? control?.title ?? state.project?.name ?? "pi desktop";
 }

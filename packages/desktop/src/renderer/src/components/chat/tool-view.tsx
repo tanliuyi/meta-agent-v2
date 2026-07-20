@@ -68,23 +68,59 @@ function toolArtifact(value: unknown): { execution?: string; partialResult?: unk
 function toolView(name: string): ToolViewDescription {
   if (name === "bash")
     return {
-      running: "正在执行",
+      running: "命令",
       complete: "",
-      error: "命令执行",
+      error: "",
       icon: <TerminalSquare size={14} />,
     };
   if (name === "read")
-    return { running: "正在读取", complete: "已读取", error: "读取失败", icon: <FileCode2 size={14} /> };
+    return {
+      running: "读取",
+      complete: "读取",
+      error: "读取失败",
+      icon: <FileCode2 size={14} />,
+    };
   if (name === "write")
-    return { running: "正在写入", complete: "已写入", error: "写入失败", icon: <PencilLine size={14} /> };
+    return {
+      running: "正在写入",
+      complete: "已写入",
+      error: "写入失败",
+      icon: <PencilLine size={14} />,
+    };
   if (name === "edit")
-    return { running: "正在编辑", complete: "已编辑", error: "编辑失败", icon: <PencilLine size={14} /> };
+    return {
+      running: "正在编辑",
+      complete: "已编辑",
+      error: "编辑失败",
+      icon: <PencilLine size={14} />,
+    };
   if (name === "grep")
-    return { running: "正在搜索", complete: "已搜索", error: "搜索失败", icon: <Search size={14} /> };
-  if (name === "find") return { running: "正在查找", complete: "已查找", error: "查找失败", icon: <Files size={14} /> };
+    return {
+      running: "正在搜索",
+      complete: "已搜索",
+      error: "搜索失败",
+      icon: <Search size={14} />,
+    };
+  if (name === "find")
+    return {
+      running: "正在查找",
+      complete: "已查找",
+      error: "查找失败",
+      icon: <Files size={14} />,
+    };
   if (name === "ls")
-    return { running: "正在查看", complete: "已查看", error: "查看失败", icon: <ListTree size={14} /> };
-  return { running: `正在运行 ${name}`, complete: `${name} 已完成`, error: `${name} 失败`, icon: <Wrench size={14} /> };
+    return {
+      running: "正在查看",
+      complete: "已查看",
+      error: "查看失败",
+      icon: <ListTree size={14} />,
+    };
+  return {
+    running: `正在运行 ${name}`,
+    complete: `${name} 已完成`,
+    error: `${name} 失败`,
+    icon: <Wrench size={14} />,
+  };
 }
 
 function toolTarget(name: string, args: Readonly<Record<string, unknown>>): ToolTarget | undefined {

@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
+import type { SaveAuthConfigInput } from "../shared/auth-config-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   HostResponse,
@@ -14,6 +15,7 @@ import type {
 } from "../shared/contracts.ts";
 import type { NodeRuntimeProgress, NodeRuntimeStatus } from "../shared/desktop-api.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
+import type { AuthConfigService } from "./auth/auth-config-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
@@ -22,12 +24,15 @@ import type { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
 import type { WindowDirtyGuard } from "./window-dirty-guard.ts";
 
 /** 注册 Desktop 的 Project、Pi session、文件和 Workbench IPC。 */
+const authEditorWebContents = new Set<number>();
+
 export function registerIpc(
   projects: ProjectStore,
   sessions: SessionSupervisor,
   files: FileService,
   terminals: TerminalSupervisor,
   models: ModelsConfigService,
+  auth: AuthConfigService,
   dirtyGuard: WindowDirtyGuard,
   nodeRuntime: {
     getStatus(): NodeRuntimeStatus;
@@ -53,6 +58,27 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.modelsGetConfigRevision, () => models.getConfigRevision());
   ipcMain.handle(CHANNELS.modelsSaveConfig, (_event, input: SaveModelsConfigInput) => models.saveConfig(input));
   ipcMain.handle(CHANNELS.modelsOpenConfigExternally, async () => openPath(await models.getExternalOpenTarget()));
+  ipcMain.handle(CHANNELS.authGetConfig, () => auth.getConfig());
+  ipcMain.handle(CHANNELS.authGetConfigRevision, () => auth.getConfigRevision());
+  ipcMain.handle(CHANNELS.authSaveConfig, (_event, input: SaveAuthConfigInput) => auth.saveConfig(input));
+  ipcMain.handle(CHANNELS.authOpenConfigExternally, async () => openPath(await auth.getExternalOpenTarget()));
+  ipcMain.on(CHANNELS.authSetEditorDirty, (event, dirty: unknown) => {
+    if (typeof dirty !== "boolean") {
+      event.returnValue = false;
+      return;
+    }
+    const ownerId = event.sender.id;
+    dirtyGuard.setDirty(ownerId, dirty);
+    if (!authEditorWebContents.has(ownerId)) {
+      authEditorWebContents.add(ownerId);
+      event.sender.once("destroyed", () => {
+        authEditorWebContents.delete(ownerId);
+        dirtyGuard.remove(ownerId);
+      });
+    }
+    event.returnValue = true;
+  });
+
   ipcMain.on(CHANNELS.modelsSetEditorDirty, (event, dirty: unknown) => {
     if (typeof dirty !== "boolean") {
       event.returnValue = false;

@@ -8,6 +8,7 @@ import {
   selectActivePanelOpen,
   selectActiveTerminalOpen,
   selectHasActiveWorkbench,
+  selectHasDraft,
   selectWindowTitle,
 } from "../../state/desktop-selectors.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
@@ -16,6 +17,7 @@ import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 export function Topbar() {
   const actions = useDesktopActions();
   const title = useDesktopSelector(selectWindowTitle);
+  const hasDraft = useDesktopSelector(selectHasDraft);
   const hasWorkbench = useDesktopSelector(selectHasActiveWorkbench);
   const panel = useDesktopSelector(selectActivePanel);
   const panelOpen = useDesktopSelector(selectActivePanelOpen);
@@ -23,7 +25,7 @@ export function Topbar() {
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <strong>{title}</strong>
+        <strong>{hasDraft ? "新会话" : title}</strong>
       </div>
       <div className="topbar-actions">
         <TooltipIconButton
@@ -53,7 +55,6 @@ export function Topbar() {
             })
           }
         >
-          {/* {panelOpen ? <PanelRight size={15} /> : <PanelRightOpen size={15} />} */}
           <PanelRight size={15} />
         </TooltipIconButton>
       </div>

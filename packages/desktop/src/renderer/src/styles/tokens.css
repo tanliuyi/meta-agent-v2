@@ -85,11 +85,11 @@
 
     --control-size-xs: 1.5rem;
     --control-size-sm: 1.75rem;
-    --control-size-md: 2rem;
+    --control-size-md: 1.9rem;
     --control-size-lg: 2.25rem;
     --control-height-input: var(--control-size-lg);
     --control-height-select: var(--control-size-lg);
-    --control-height-button: var(--control-size-lg);
+    --control-height-button: var(--control-size-md);
     --control-height-button-sm: var(--control-size-md);
     --control-height-button-lg: 2.5rem;
     --control-height-button-icon: var(--control-size-xs);

@@ -84,6 +84,13 @@ const desktopApi: DesktopApi = {
     openConfigExternally: () => ipcRenderer.invoke(CHANNELS.modelsOpenConfigExternally),
     setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.modelsSetEditorDirty, dirty) === true,
   },
+  auth: {
+    getConfig: () => ipcRenderer.invoke(CHANNELS.authGetConfig),
+    getConfigRevision: () => ipcRenderer.invoke(CHANNELS.authGetConfigRevision),
+    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.authSaveConfig, input),
+    openConfigExternally: () => ipcRenderer.invoke(CHANNELS.authOpenConfigExternally),
+    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.authSetEditorDirty, dirty) === true,
+  },
   nodeRuntime: {
     getStatus: () => ipcRenderer.invoke(CHANNELS.nodeRuntimeStatus),
     install: () => ipcRenderer.invoke(CHANNELS.nodeRuntimeInstall),

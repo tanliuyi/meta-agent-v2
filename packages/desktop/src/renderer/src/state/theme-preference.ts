@@ -2,7 +2,7 @@ export const THEME_PREFERENCES = ["system", "light", "dark"] as const;
 export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 export type ResolvedTheme = Exclude<ThemePreference, "system">;
 
-export const THEME_STORAGE_KEY = "meta-agent:theme";
+export const THEME_STORAGE_KEY = "pi-desktop:theme";
 export const DARK_MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 interface ThemeAttributeTarget {

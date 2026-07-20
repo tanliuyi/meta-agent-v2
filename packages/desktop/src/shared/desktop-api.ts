@@ -1,3 +1,4 @@
+import type { AuthConfigSnapshot, SaveAuthConfigInput, SaveAuthConfigResult } from "./auth-config-contracts.ts";
 import type {
   ClearedQueue,
   DraftSessionConfig,
@@ -58,6 +59,13 @@ export interface DesktopApi {
     getConfig(): Promise<ModelsConfigSnapshot>;
     getConfigRevision(): Promise<string>;
     saveConfig(input: SaveModelsConfigInput): Promise<SaveModelsConfigResult>;
+    openConfigExternally(): Promise<void>;
+    setEditorDirty(dirty: boolean): boolean;
+  };
+  auth: {
+    getConfig(): Promise<AuthConfigSnapshot>;
+    getConfigRevision(): Promise<string>;
+    saveConfig(input: SaveAuthConfigInput): Promise<SaveAuthConfigResult>;
     openConfigExternally(): Promise<void>;
     setEditorDirty(dirty: boolean): boolean;
   };

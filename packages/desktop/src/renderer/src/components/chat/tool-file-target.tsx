@@ -34,7 +34,7 @@ export function ToolFileTarget({ path }: { path: string }) {
           {fileName}
         </button>
       </TooltipTrigger>
-      <TooltipContent className="max-w-[min(640px,calc(100vw-24px))] break-all" side="top">
+      <TooltipContent className="max-w-[min(320px,calc(100vw-24px))] break-all" side="top">
         {absolutePath}
       </TooltipContent>
     </Tooltip>

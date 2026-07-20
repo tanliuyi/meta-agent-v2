@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
+import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
 
@@ -30,6 +31,11 @@ const SettingsIndexRoute = SettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsAuthRoute = SettingsAuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsModelsRoute = SettingsModelsRouteImport.update({
   id: '/models',
   path: '/models',
@@ -44,12 +50,14 @@ const SettingsPersonalizationRoute = SettingsPersonalizationRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings': typeof SettingsIndexRoute
@@ -58,6 +66,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/': typeof SettingsIndexRoute
@@ -67,15 +76,22 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/settings'
+    | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings/models' | '/settings/personalization' | '/settings'
+  to:
+    | '/'
+    | '/settings/auth'
+    | '/settings/models'
+    | '/settings/personalization'
+    | '/settings'
   id:
     | '__root__'
     | '/'
     | '/settings'
+    | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/'
@@ -109,6 +125,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsIndexRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/auth': {
+      id: '/settings/auth'
+      path: '/auth'
+      fullPath: '/settings/auth'
+      preLoaderRoute: typeof SettingsAuthRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/models': {
       id: '/settings/models'
       path: '/models'
@@ -127,12 +150,14 @@ declare module '@tanstack/react-router' {
 }
 
 interface SettingsRouteChildren {
+  SettingsAuthRoute: typeof SettingsAuthRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
 
 const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsAuthRoute: SettingsAuthRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,
   SettingsIndexRoute: SettingsIndexRoute,

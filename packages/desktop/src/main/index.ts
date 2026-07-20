@@ -5,6 +5,7 @@ import { app, BrowserWindow, Menu } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
+import { AuthConfigService } from "./auth/auth-config-service.ts";
 import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, registerIpc } from "./ipc.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
@@ -133,6 +134,9 @@ app.whenReady().then(async () => {
   const models = new ModelsConfigService(agentDir, {
     log: (text) => sidecarLog?.write("models", text),
   });
+  const auth = new AuthConfigService(agentDir, {
+    log: (text) => sidecarLog?.write("auth", text),
+  });
   const installer = new NodeRuntimeInstaller(userDataDir, () => undefined);
   const configuredNode = detectNodeRuntime();
   const installedNode =
@@ -179,7 +183,7 @@ app.whenReady().then(async () => {
   });
   sessions = supervisor;
   terminals = new TerminalSupervisor(projects, broadcastTerminalEvent);
-  registerIpc(projects, sessions, new FileService(projects), terminals, models, dirtyGuard, {
+  registerIpc(projects, sessions, new FileService(projects), terminals, models, auth, dirtyGuard, {
     getStatus: () => {
       const system = detectNodeRuntime();
       return system.state === "ready" ? system : detectNodeRuntime(installer.activeNodePath());

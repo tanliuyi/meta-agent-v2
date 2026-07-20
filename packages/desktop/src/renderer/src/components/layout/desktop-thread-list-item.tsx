@@ -3,9 +3,23 @@ import * as ContextMenu from "@radix-ui/react-context-menu";
 import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
 import { preventPrimitiveThreadAction, runControlledThreadAction } from "../../state/thread-list-commands.ts";
+
+function formatElapsedTime(updatedAt: number, now: number): string {
+  const diffMs = now - updatedAt;
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  if (diffMinutes < 1) return "刚刚";
+  if (diffMinutes < 60) return `${diffMinutes} 分钟`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} 小时`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays} 天`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `${diffMonths} 个月`;
+  return `${Math.floor(diffMonths / 12)} 年`;
+}
 
 interface DesktopThreadListItemProps {
   thread: Thread;
@@ -24,6 +38,12 @@ interface DesktopThreadListItemProps {
 export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   const { thread } = props;
   const isPending = props.isSwitching || props.isRenamingPending || props.isArchivePending || props.isDeletePending;
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <ContextMenu.Root>
@@ -36,7 +56,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         >
           <ThreadListItemPrimitive.Trigger
             data-slot="aui_thread-list-item-trigger"
-            className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md ps-8 pe-2 text-start text-sm outline-none focus-visible:ring-[3px]"
+            className="thread-main focus-visible:ring-ring/50 flex gap-1 h-full min-w-0 flex-1 items-center rounded-md ps-8 pe-2 text-start text-sm outline-none focus-visible:ring-[3px]"
             disabled={props.isSwitching}
             onClickCapture={preventPrimitiveThreadAction}
             onClick={(event) =>
@@ -48,7 +68,13 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             <span data-slot="aui_thread-list-item-title" className="min-w-0 flex-1 truncate">
               <ThreadListItemPrimitive.Title fallback="新会话" />
             </span>
-            {thread.running ? <span className="running-dot" aria-label="运行中" /> : null}
+            {thread.running ? (
+              <span className="running-dot" aria-label="运行中" />
+            ) : (
+              <span className="thread-time" aria-label="更新时间">
+                {formatElapsedTime(thread.updatedAt, now)}
+              </span>
+            )}
           </ThreadListItemPrimitive.Trigger>
         </ThreadListItemPrimitive.Root>
       </ContextMenu.Trigger>

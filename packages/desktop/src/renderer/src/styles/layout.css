@@ -218,6 +218,13 @@
 .thread-row button:disabled {
   cursor: wait;
 }
+.thread-time {
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground) / 0.65);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .running-dot {
   width: 12px;
   height: 12px;
