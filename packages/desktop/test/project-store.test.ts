@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ProjectStore } from "../src/main/store/project-store.ts";
 
@@ -50,6 +50,44 @@ describe("ProjectStore", () => {
       }),
     );
   });
+
+  it("将项目 registry 与 Desktop UI 状态分开持久化", async () => {
+    const { file, project, store } = await createStore();
+    await store.setArchived(project.id, "thread-1", true);
+
+    const desktopState = JSON.parse(await readFile(file, "utf8"));
+    const projectMetadata = JSON.parse(await readFile(join(rootDirectory(file), "projects.json"), "utf8"));
+    expect(desktopState).not.toHaveProperty("projects");
+    expect(desktopState.archivedThreads).toEqual({ [project.id]: ["thread-1"] });
+    expect(projectMetadata.projects[0]).toMatchObject({ projectId: project.id, path: project.cwd });
+    expect(projectMetadata.projects[0]).not.toHaveProperty("cwd");
+  });
+
+  it("迁移旧 desktop-state 中嵌套的项目记录", async () => {
+    const root = await mkdtemp(join(tmpdir(), "meta-agent-project-migration-"));
+    roots.push(root);
+    const cwd = join(root, "workspace");
+    const file = join(root, "state", "desktop-state.json");
+    await mkdir(cwd);
+    await mkdir(join(root, "state"));
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        activeProjectId: "legacy-project",
+        projects: [{ id: "legacy-project", name: "Legacy", cwd, lastOpenedAt: 1_700_000_000_000 }],
+        archivedThreads: {},
+        workbenches: {},
+      }),
+    );
+
+    const store = new ProjectStore(file);
+    await store.load();
+    expect(await store.getActive()).toMatchObject({ id: "legacy-project", cwd, available: true });
+    const metadata = JSON.parse(await readFile(join(root, "state", "projects.json"), "utf8"));
+    expect(metadata.projects[0]).toMatchObject({ projectId: "legacy-project", path: cwd });
+    expect(JSON.parse(await readFile(file, "utf8"))).not.toHaveProperty("projects");
+  });
 });
 
 async function createStore() {
@@ -62,4 +100,8 @@ async function createStore() {
   await store.load();
   const project = await store.add(cwd);
   return { file, project, store };
+}
+
+function rootDirectory(file: string): string {
+  return dirname(file);
 }

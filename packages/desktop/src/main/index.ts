@@ -2,6 +2,8 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Menu } from "electron";
+import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
+import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
 import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, registerIpc } from "./ipc.ts";
@@ -27,7 +29,10 @@ let terminals: TerminalSupervisor | undefined;
 let quitGuardPending = false;
 const dirtyGuard = new WindowDirtyGuard();
 const appDir = dirname(fileURLToPath(import.meta.url));
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const defaultWindowBounds = { width: 1440, height: 920 };
+const minimumWindowBounds = { width: 1024, height: 680 };
+// 开发实例允许并行启动；发布版保持单实例，避免多个主进程同时管理同一份状态。
+const hasSingleInstanceLock = app.isPackaged ? app.requestSingleInstanceLock() : true;
 
 if (!hasSingleInstanceLock) app.quit();
 
@@ -43,13 +48,33 @@ if (!app.isPackaged) {
   app.commandLine.appendSwitch("remote-debugging-port", "9222");
 }
 
+/** 在开发环境加载 React DevTools，生产构建不下载开发扩展。 */
+async function installReactDevTools(): Promise<void> {
+  if (app.isPackaged) return;
+
+  try {
+    const extensions = await installExtension(REACT_DEVELOPER_TOOLS, {
+      loadExtensionOptions: { allowFileAccess: true },
+    });
+    console.info(`React DevTools 已加载: ${extensions.name}`);
+  } catch (error) {
+    console.warn("React DevTools 加载失败:", error);
+  }
+}
+
 /** 创建主工作台窗口。 */
 function createWindow(): void {
+  const windowState = windowStateKeeper({
+    defaultWidth: defaultWindowBounds.width,
+    defaultHeight: defaultWindowBounds.height,
+  });
   const window = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 1024,
-    minHeight: 680,
+    x: windowState.x,
+    y: windowState.y,
+    width: windowState.width,
+    height: windowState.height,
+    minWidth: minimumWindowBounds.width,
+    minHeight: minimumWindowBounds.height,
     show: false,
     frame: process.platform !== "win32",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
@@ -62,6 +87,7 @@ function createWindow(): void {
       sandbox: true,
     },
   });
+  windowState.manage(window);
 
   dirtyGuard.attach(window);
   window.once("ready-to-show", () => window.show());
@@ -98,10 +124,10 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   Menu.setApplicationMenu(null);
-  const projects = new ProjectStore(join(app.getPath("userData"), "desktop-state.json"));
-  await projects.load();
   const userDataDir = app.getPath("userData");
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+  const projects = new ProjectStore(join(userDataDir, "desktop-state.json"), join(agentDir, "projects.json"));
+  await projects.load();
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
   const models = new ModelsConfigService(agentDir, {
@@ -166,6 +192,7 @@ app.whenReady().then(async () => {
     },
     onProgress: (listener) => installer.onProgress(listener),
   });
+  await installReactDevTools();
   createWindow();
 
   app.on("activate", () => {

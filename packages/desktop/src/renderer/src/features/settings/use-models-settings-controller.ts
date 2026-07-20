@@ -1,5 +1,5 @@
+import { useBlocker } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useBlocker } from "react-router";
 import type {
   ModelsConfigDiagnostic,
   ModelsConfigSnapshot,
@@ -70,7 +70,11 @@ export function useModelsSettingsController(): ModelsSettingsController {
 
   const diagnostics = useMemo(() => [...serverDiagnostics, ...validateModelsDraft(draft)], [draft, serverDiagnostics]);
   const dirty = snapshot ? !modelsDraftsEqual(draft, snapshot.providers) : false;
-  const routeBlocker = useBlocker(dirty);
+  const routeBlocker = useBlocker({
+    shouldBlockFn: () => dirty,
+    withResolver: true,
+    enableBeforeUnload: false,
+  });
 
   const replaceSnapshot = useCallback((next: ModelsConfigSnapshot, nextStatus?: ModelsSettingsStatus) => {
     snapshotRef.current = next;
@@ -299,7 +303,7 @@ export function useModelsSettingsController(): ModelsSettingsController {
     error,
     externallyChanged,
     pendingConfirmation,
-    routeBlocked: routeBlocker.state === "blocked",
+    routeBlocked: routeBlocker.status === "blocked",
     selectedProviderIndex,
     selectProvider: setSelectedProviderIndex,
     mutate,

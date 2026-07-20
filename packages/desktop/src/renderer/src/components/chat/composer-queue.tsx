@@ -1,5 +1,7 @@
+import { ComposerPrimitive, QueueItemPrimitive, useAuiState } from "@assistant-ui/react";
 import { TextButton } from "@renderer/shared/ui/text-button";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
+import { useMemo } from "react";
 import { usePiQueueItems } from "../../runtime/use-pi-thread-snapshot.ts";
 
 interface ComposerQueueProps {
@@ -7,16 +9,18 @@ interface ComposerQueueProps {
   onError(error: unknown): void;
 }
 
-/** 仅响应 Pi queue identity 变化，流式 timeline delta 不会重渲染该列表。 */
+/** 使用 assistant-ui queue state 渲染待处理消息，Pi snapshot 只补充 Desktop 的模式标签。 */
 export function ComposerQueue({ onClear, onError }: ComposerQueueProps) {
   const items = usePiQueueItems();
-  if (items.length === 0) return null;
+  const queueCount = useAuiState((state) => state.composer.queue.length);
+  const modes = useMemo(() => new Map(items.map(({ id, mode }) => [id, mode])), [items]);
+  if (queueCount === 0) return null;
 
   return (
     <section className="composer-queue" aria-label="待处理消息" aria-live="polite">
       <header className="composer-queue-header">
         <span>待处理消息</span>
-        <span className="composer-queue-count">{items.length}</span>
+        <span className="composer-queue-count">{queueCount}</span>
         <TextButton
           className="composer-queue-clear"
           aria-label="清空待处理消息"
@@ -26,14 +30,17 @@ export function ComposerQueue({ onClear, onError }: ComposerQueueProps) {
         </TextButton>
       </header>
       <div className="composer-queue-list" role="list">
-        {items.map((item) => (
-          <div className="composer-queue-item" data-queue-mode={item.mode} key={item.id} role="listitem">
-            <span className="composer-queue-mode">{item.mode === "steer" ? "引导" : "排队"}</span>
-            <span className="composer-queue-prompt" title={item.prompt}>
-              {item.prompt}
-            </span>
-          </div>
-        ))}
+        <ComposerPrimitive.Queue>
+          {({ queueItem }) => {
+            const mode = modes.get(queueItem.id) ?? "followUp";
+            return (
+              <div className="composer-queue-item" data-queue-mode={mode} key={queueItem.id} role="listitem">
+                <span className="composer-queue-mode">{mode === "steer" ? "引导" : "排队"}</span>
+                <QueueItemPrimitive.Text className="composer-queue-prompt" title={queueItem.prompt} />
+              </div>
+            );
+          }}
+        </ComposerPrimitive.Queue>
       </div>
     </section>
   );

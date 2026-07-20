@@ -256,11 +256,13 @@ export class ModelsConfigService {
       handle = undefined;
       await rename(tempPath, this.path);
       await chmod(this.path, 0o600);
-      const directory = await open(this.agentDir, "r");
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
+      if (process.platform !== "win32") {
+        const directory = await open(this.agentDir, "r");
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
       }
     } finally {
       await handle?.close().catch(() => undefined);

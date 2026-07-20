@@ -152,7 +152,7 @@ describe("thread-list primitives command bridge", () => {
     expect(isThreadListExpanded(COLLAPSED_THREAD_COUNT, 30)).toBe(false);
   });
 
-  it("常规与归档列表分别保持 catalog 顺序，并为归档恢复保留入口", () => {
+  it("常规与归档状态保持 catalog 顺序，归档项不会混入常规列表", () => {
     const threads = Array.from(
       { length: 8 },
       (_, index): Thread => ({

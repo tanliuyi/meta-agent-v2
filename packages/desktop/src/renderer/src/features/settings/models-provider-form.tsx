@@ -4,6 +4,7 @@ import { Select } from "@renderer/components/assistant-ui/select/select";
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Input } from "@renderer/shared/ui/input";
+import { ScrollArea } from "@renderer/shared/ui/scroll-area";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useEffect, useState } from "react";
@@ -62,91 +63,98 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
           <Tabs.Trigger value="compat">兼容性</Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="connection" className="models-tab-content">
-          <div className="models-form-grid">
-            <label>
-              <span>Provider ID</span>
-              <Input value={provider.key} onChange={(event) => onChange({ ...provider, key: event.target.value })} />
-            </label>
-            <label>
-              <span>显示名称</span>
-              <Input
-                value={provider.config.name ?? ""}
-                onChange={(event) => updateConfig(setOptional(provider.config, "name", event.target.value))}
-              />
-            </label>
-            <label>
-              <span>Base URL</span>
-              <Input
-                value={provider.config.baseUrl ?? ""}
-                placeholder="http://localhost:11434/v1"
-                onChange={(event) => updateConfig(setOptional(provider.config, "baseUrl", event.target.value))}
-              />
-            </label>
-            <label>
-              <span>API</span>
-              <div className="models-combo-row">
-                <Input
-                  value={provider.config.api ?? ""}
-                  onChange={(event) => updateConfig(setOptional(provider.config, "api", event.target.value))}
-                />
-                <Select
-                  className="models-select models-suggestion-select"
-                  value={metadata.knownApis.includes(provider.config.api ?? "") ? provider.config.api! : "custom"}
-                  onValueChange={(nextValue) => {
-                    if (nextValue !== "custom") updateConfig({ ...provider.config, api: nextValue });
-                  }}
-                  options={[
-                    { value: "custom", label: "自定义" },
-                    ...metadata.knownApis.map((api) => ({ value: api, label: api })),
-                  ]}
-                />
+          <ScrollArea className="models-tab-scroll">
+            <div className="models-tab-scroll-content">
+              <div className="models-form-grid">
+                <label>
+                  <span>Provider ID</span>
+                  <Input
+                    value={provider.key}
+                    onChange={(event) => onChange({ ...provider, key: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>显示名称</span>
+                  <Input
+                    value={provider.config.name ?? ""}
+                    onChange={(event) => updateConfig(setOptional(provider.config, "name", event.target.value))}
+                  />
+                </label>
+                <label>
+                  <span>Base URL</span>
+                  <Input
+                    value={provider.config.baseUrl ?? ""}
+                    placeholder="http://localhost:11434/v1"
+                    onChange={(event) => updateConfig(setOptional(provider.config, "baseUrl", event.target.value))}
+                  />
+                </label>
+                <label>
+                  <span>API</span>
+                  <div className="models-combo-row">
+                    <Input
+                      value={provider.config.api ?? ""}
+                      onChange={(event) => updateConfig(setOptional(provider.config, "api", event.target.value))}
+                    />
+                    <Select
+                      className="models-select models-suggestion-select"
+                      value={metadata.knownApis.includes(provider.config.api ?? "") ? provider.config.api! : "custom"}
+                      onValueChange={(nextValue) => {
+                        if (nextValue !== "custom") updateConfig({ ...provider.config, api: nextValue });
+                      }}
+                      options={[
+                        { value: "custom", label: "自定义" },
+                        ...metadata.knownApis.map((api) => ({ value: api, label: api })),
+                      ]}
+                    />
+                  </div>
+                </label>
+                <label>
+                  <span>API key</span>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={provider.config.apiKey ?? ""}
+                    placeholder="literal、$ENV 或 !command"
+                    onChange={(event) => updateConfig({ ...provider.config, apiKey: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>OAuth</span>
+                  <Select
+                    className="models-select"
+                    value={provider.config.oauth ?? "unset"}
+                    onValueChange={(nextValue) =>
+                      updateConfig(setOptional(provider.config, "oauth", nextValue === "unset" ? "" : nextValue))
+                    }
+                    options={[
+                      { value: "unset", label: "未设置" },
+                      { value: "radius", label: "radius" },
+                    ]}
+                  />
+                </label>
+                <label>
+                  <span>Authorization header</span>
+                  <Select
+                    className="models-select"
+                    value={provider.config.authHeader === undefined ? "unset" : String(provider.config.authHeader)}
+                    onValueChange={(nextValue) =>
+                      updateConfig(setOptionalBoolean(provider.config, "authHeader", nextValue))
+                    }
+                    options={[
+                      { value: "unset", label: "未设置" },
+                      { value: "true", label: "true" },
+                      { value: "false", label: "false" },
+                    ]}
+                  />
+                </label>
               </div>
-            </label>
-            <label>
-              <span>API key</span>
-              <Input
-                type="password"
-                autoComplete="off"
-                value={provider.config.apiKey ?? ""}
-                placeholder="literal、$ENV 或 !command"
-                onChange={(event) => updateConfig({ ...provider.config, apiKey: event.target.value })}
+              <ModelsMapEditor
+                label="Provider headers"
+                entries={provider.headers}
+                onChange={(headers) => onChange({ ...provider, headers })}
               />
-            </label>
-            <label>
-              <span>OAuth</span>
-              <Select
-                className="models-select"
-                value={provider.config.oauth ?? "unset"}
-                onValueChange={(nextValue) =>
-                  updateConfig(setOptional(provider.config, "oauth", nextValue === "unset" ? "" : nextValue))
-                }
-                options={[
-                  { value: "unset", label: "未设置" },
-                  { value: "radius", label: "radius" },
-                ]}
-              />
-            </label>
-            <label>
-              <span>Authorization header</span>
-              <Select
-                className="models-select"
-                value={provider.config.authHeader === undefined ? "unset" : String(provider.config.authHeader)}
-                onValueChange={(nextValue) =>
-                  updateConfig(setOptionalBoolean(provider.config, "authHeader", nextValue))
-                }
-                options={[
-                  { value: "unset", label: "未设置" },
-                  { value: "true", label: "true" },
-                  { value: "false", label: "false" },
-                ]}
-              />
-            </label>
-          </div>
-          <ModelsMapEditor
-            label="Provider headers"
-            entries={provider.headers}
-            onChange={(headers) => onChange({ ...provider, headers })}
-          />
+            </div>
+          </ScrollArea>
         </Tabs.Content>
         <Tabs.Content value="models" className="models-tab-content">
           <div className="models-entity-toolbar">
@@ -186,27 +194,31 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                 </button>
               ))}
             </div>
-            {provider.models[selectedModel] ? (
+            <ScrollArea className="models-entity-scroll">
               <div className="models-entity-detail">
-                <div className="models-inline-actions models-entity-delete">
-                  <Button size="sm" variant="ghost" onClick={() => setDeleteTarget("model")}>
-                    <Trash2 />
-                    删除模型
-                  </Button>
-                </div>
-                <ModelsModelForm
-                  model={provider.models[selectedModel]}
-                  metadata={metadata}
-                  onChange={(model) => {
-                    const models = [...provider.models];
-                    models[selectedModel] = model;
-                    onChange({ ...provider, models });
-                  }}
-                />
+                {provider.models[selectedModel] ? (
+                  <>
+                    <div className="models-inline-actions models-entity-delete">
+                      <Button size="sm" variant="ghost" onClick={() => setDeleteTarget("model")}>
+                        <Trash2 />
+                        删除模型
+                      </Button>
+                    </div>
+                    <ModelsModelForm
+                      model={provider.models[selectedModel]}
+                      metadata={metadata}
+                      onChange={(model) => {
+                        const models = [...provider.models];
+                        models[selectedModel] = model;
+                        onChange({ ...provider, models });
+                      }}
+                    />
+                  </>
+                ) : (
+                  <p className="models-empty-detail">添加模型后在此配置。</p>
+                )}
               </div>
-            ) : (
-              <p className="models-empty-detail">添加模型后在此配置。</p>
-            )}
+            </ScrollArea>
           </div>
         </Tabs.Content>
         <Tabs.Content value="overrides" className="models-tab-content">
@@ -258,30 +270,38 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                 </button>
               ))}
             </div>
-            {provider.modelOverrides[selectedOverride] ? (
+            <ScrollArea className="models-entity-scroll">
               <div className="models-entity-detail">
-                <div className="models-inline-actions models-entity-delete">
-                  <Button size="sm" variant="ghost" onClick={() => setDeleteTarget("override")}>
-                    <Trash2 />
-                    删除覆盖
-                  </Button>
-                </div>
-                <ModelsOverrideForm
-                  override={provider.modelOverrides[selectedOverride]}
-                  onChange={(override) => {
-                    const modelOverrides = [...provider.modelOverrides];
-                    modelOverrides[selectedOverride] = override;
-                    onChange({ ...provider, modelOverrides });
-                  }}
-                />
+                {provider.modelOverrides[selectedOverride] ? (
+                  <>
+                    <div className="models-inline-actions models-entity-delete">
+                      <Button size="sm" variant="ghost" onClick={() => setDeleteTarget("override")}>
+                        <Trash2 />
+                        删除覆盖
+                      </Button>
+                    </div>
+                    <ModelsOverrideForm
+                      override={provider.modelOverrides[selectedOverride]}
+                      onChange={(override) => {
+                        const modelOverrides = [...provider.modelOverrides];
+                        modelOverrides[selectedOverride] = override;
+                        onChange({ ...provider, modelOverrides });
+                      }}
+                    />
+                  </>
+                ) : (
+                  <p className="models-empty-detail">添加覆盖后在此配置。</p>
+                )}
               </div>
-            ) : (
-              <p className="models-empty-detail">添加覆盖后在此配置。</p>
-            )}
+            </ScrollArea>
           </div>
         </Tabs.Content>
         <Tabs.Content value="compat" className="models-tab-content">
-          <ModelsCompatEditor value={provider.compat} onChange={(compat) => onChange({ ...provider, compat })} />
+          <ScrollArea className="models-tab-scroll">
+            <div className="models-tab-scroll-content">
+              <ModelsCompatEditor value={provider.compat} onChange={(compat) => onChange({ ...provider, compat })} />
+            </div>
+          </ScrollArea>
         </Tabs.Content>
       </Tabs.Root>
 

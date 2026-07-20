@@ -247,6 +247,95 @@ describe("useDesktopController navigation", () => {
     expect(store.getState().activeThreadIds[targetProject.id]).toBe(firstThread.id);
   });
 
+  it("归档 baseline 后丢弃草稿不会恢复 archived thread", async () => {
+    const targetProject = project("project");
+    const archivedBaseline = { ...thread(targetProject, "baseline"), archived: true };
+    const nextThread = thread(targetProject, "next-thread");
+    const openRuntime = vi.fn(async (openedProject: Project, threadId: string) => prepared(openedProject, threadId));
+    const commitRuntime = vi.fn();
+    const runtimeActions = createRuntimeActions({
+      open: openRuntime,
+      commit: commitRuntime,
+      discardDraft: async () => null,
+    });
+    const store = createDesktopStore();
+    store.setState(
+      {
+        ...INITIAL_STATE,
+        projects: [targetProject],
+        project: targetProject,
+        draft: { projectId: targetProject.id, config: draftConfig(), configLoading: false, phase: "editing" },
+        threadCatalogs: { [targetProject.id]: [archivedBaseline, nextThread] },
+        activeThreadIds: { [targetProject.id]: archivedBaseline.id },
+        loading: false,
+      },
+      true,
+    );
+    const controller = renderController(store, runtimeActions);
+
+    await controller.discardDraft();
+
+    expect(openRuntime).not.toHaveBeenCalledWith(targetProject, archivedBaseline.id);
+    expect(openRuntime).toHaveBeenCalledWith(targetProject, nextThread.id);
+    expect(commitRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ bootstrap: expect.objectContaining({ threadId: nextThread.id }) }),
+    );
+    expect(store.getState().draft).toBeNull();
+    expect(store.getState().activeThreadIds[targetProject.id]).toBe(nextThread.id);
+  });
+
+  it("归档完成后待切换 thread attach 失败会清理 archived active baseline", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const targetProject = project("project");
+    const activeThread = thread(targetProject, "active-thread");
+    const failedThread = thread(targetProject, "failed-thread");
+    const nextThread = thread(targetProject, "next-thread");
+    const failedAttachment = deferred<PreparedThread>();
+    const openRuntime = vi.fn((openedProject: Project, threadId: string) =>
+      threadId === failedThread.id ? failedAttachment.promise : Promise.resolve(prepared(openedProject, threadId)),
+    );
+    const commitRuntime = vi.fn();
+    const archiveRuntime = vi.fn(async () => undefined);
+    const store = createDesktopStore();
+    store.setState(
+      {
+        ...INITIAL_STATE,
+        projects: [targetProject],
+        project: targetProject,
+        threadCatalogs: { [targetProject.id]: [activeThread, failedThread, nextThread] },
+        activeThreadIds: { [targetProject.id]: activeThread.id },
+        bootstrap: prepared(targetProject, activeThread.id).bootstrap,
+        loading: false,
+      },
+      true,
+    );
+    const controller = renderController(
+      store,
+      createRuntimeActions({ open: openRuntime, commit: commitRuntime, archive: archiveRuntime }),
+    );
+
+    const opening = controller.openThread(targetProject.id, failedThread.id);
+    await vi.waitFor(() => {
+      expect(openRuntime).toHaveBeenCalledWith(targetProject, failedThread.id);
+      expect(store.getState().pendingThreadLoad).toEqual({
+        projectId: targetProject.id,
+        threadId: failedThread.id,
+      });
+    });
+    await controller.setThreadArchived(targetProject.id, activeThread.id, true);
+    failedAttachment.reject(new Error("attach failed"));
+    await opening;
+
+    expect(openRuntime).toHaveBeenCalledWith(targetProject, nextThread.id);
+    expect(commitRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ bootstrap: expect.objectContaining({ threadId: nextThread.id }) }),
+    );
+    expect(store.getState().threadCatalogs[targetProject.id]?.find(({ id }) => id === activeThread.id)?.archived).toBe(
+      true,
+    );
+    expect(store.getState().activeThreadIds[targetProject.id]).toBe(nextThread.id);
+  });
+
   it("删除 active thread 后下一条 attach 失败会保持显式 empty 状态", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const targetProject = project("project");
@@ -495,15 +584,20 @@ function bootstrapFor(projectId: string, threadId: string): SessionBootstrap {
   };
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void; reject(value: unknown): void } {
   let resolvePromise: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((resolve) => {
+  let rejectPromise: ((reason?: unknown) => void) | undefined;
+  const promise = new Promise<T>((resolve, reject) => {
     resolvePromise = resolve;
+    rejectPromise = reject;
   });
   return {
     promise,
     resolve(value) {
       resolvePromise?.(value);
+    },
+    reject(value) {
+      rejectPromise?.(value);
     },
   };
 }

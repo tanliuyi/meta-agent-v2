@@ -8,7 +8,7 @@ interface ProjectListProps {
   onNewTask(projectId: string): void;
 }
 
-/** 渲染 Project 与其活动、归档 session 列表。 */
+/** 渲染 Project 与其活动 session 列表。 */
 export const ProjectList = memo(function ProjectList({ newTaskDisabled, onNewTask }: ProjectListProps) {
   const projects = useDesktopSelector(selectProjects);
   const activeProjectId = useDesktopSelector(selectNavigationProjectId);

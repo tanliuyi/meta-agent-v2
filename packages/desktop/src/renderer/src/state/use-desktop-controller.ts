@@ -123,6 +123,33 @@ export function useDesktopController(
     [dispatch, isCurrentNavigation, report, threadActions],
   );
 
+  const recoverArchivedActiveThread = useCallback(
+    async (projectId: string, excludedThreadId?: string) => {
+      const state = store.getState();
+      if (state.draft || state.pendingThreadLoad || state.project?.id !== projectId) return;
+      const activeThreadId = state.activeThreadIds[projectId];
+      if (!activeThreadId) return;
+      const activeThread = state.threadCatalogs[projectId]?.find(({ id }) => id === activeThreadId);
+      if (!activeThread?.archived) return;
+      const project = state.projects.find(({ id }) => id === projectId);
+      if (!project) return;
+
+      const navigation = beginNavigation();
+      const candidates = excludedThreadId
+        ? (state.threadCatalogs[projectId] ?? []).filter(({ id }) => id !== excludedThreadId)
+        : (state.threadCatalogs[projectId] ?? []);
+      const nextThreadId = nextRegularThreadId(candidates, activeThreadId);
+      if (nextThreadId && (await loadThread(project, nextThreadId, navigation))) return;
+      if (!isCurrentNavigation(navigation)) return;
+      const actions = threadActions.current;
+      if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
+      await actions.detach();
+      if (!isCurrentNavigation(navigation)) return;
+      dispatch({ type: "thread-cleared", projectId });
+    },
+    [beginNavigation, dispatch, isCurrentNavigation, loadThread, store, threadActions],
+  );
+
   const loadProject = useCallback(
     async (project: Project, navigation: number, openExistingThread = true) => {
       const threads = await window.desktop.sessions.list(project.id, true);
@@ -388,12 +415,14 @@ export function useDesktopController(
     if (!store.getState().draft || pendingDraftSubmission.current) return;
     const navigation = beginNavigation();
     draftProjectGeneration.current += 1;
+    const previousProjectId = store.getState().project?.id;
     const actions = threadActions.current;
     if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
     const prepared = await actions.discardDraft();
     if (!isCurrentNavigation(navigation)) return;
     if (!prepared) {
       dispatch({ type: "draft-discarded" });
+      if (previousProjectId) await recoverArchivedActiveThread(previousProjectId);
       return;
     }
     const project = store.getState().projects.find(({ id }) => id === prepared.bootstrap.projectId);
@@ -406,7 +435,15 @@ export function useDesktopController(
       bootstrap: prepared.bootstrap,
       workbench: prepared.workbench,
     });
-  }, [beginNavigation, dispatch, isCurrentNavigation, openProjectForNavigation, store, threadActions]);
+  }, [
+    beginNavigation,
+    dispatch,
+    isCurrentNavigation,
+    openProjectForNavigation,
+    recoverArchivedActiveThread,
+    store,
+    threadActions,
+  ]);
 
   const openThread = useCallback(
     async (projectId: string, threadId: string) => {
@@ -425,7 +462,8 @@ export function useDesktopController(
             ? state.project
             : await openProjectForNavigation(projectId, navigation);
         if (!isCurrentNavigation(navigation)) return;
-        await loadThread(project, threadId, navigation, false);
+        const loaded = await loadThread(project, threadId, navigation, false);
+        if (!loaded && isCurrentNavigation(navigation)) await recoverArchivedActiveThread(projectId, threadId);
       } catch (value) {
         if (!isCurrentNavigation(navigation)) return;
         dispatch({ type: "thread-load-failed", projectId, threadId });
@@ -433,7 +471,16 @@ export function useDesktopController(
         report(value);
       }
     },
-    [beginNavigation, dispatch, isCurrentNavigation, loadThread, openProjectForNavigation, report, store],
+    [
+      beginNavigation,
+      dispatch,
+      isCurrentNavigation,
+      loadThread,
+      openProjectForNavigation,
+      recoverArchivedActiveThread,
+      report,
+      store,
+    ],
   );
 
   const renameThread = useCallback(
@@ -464,27 +511,14 @@ export function useDesktopController(
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
         await actions.archive(project, threadId, archived);
         dispatch({ type: "thread-archived", projectId, threadId, archived });
-        const current = store.getState();
-        if (
-          archived &&
-          navigationGeneration.current === navigationAtStart &&
-          current.project?.id === projectId &&
-          selectActiveThreadId(current) === threadId
-        ) {
-          const navigation = beginNavigation();
-          const nextThreadId = nextRegularThreadId(current.threadCatalogs[projectId] ?? [], threadId);
-          if (nextThreadId) await loadThread(project, nextThreadId, navigation);
-          else {
-            await actions.detach();
-            if (!isCurrentNavigation(navigation)) return;
-            dispatch({ type: "thread-cleared", projectId });
-          }
+        if (archived && navigationGeneration.current === navigationAtStart) {
+          await recoverArchivedActiveThread(projectId);
         }
       } catch (value) {
         report(value);
       }
     },
-    [beginNavigation, dispatch, isCurrentNavigation, loadThread, report, store, threadActions],
+    [dispatch, recoverArchivedActiveThread, report, store, threadActions],
   );
 
   const removeThread = useCallback(

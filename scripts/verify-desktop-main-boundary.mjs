@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = join(repoRoot, "packages", "desktop", "out", "main");
-const forbidden = [/@earendil-works\/pi-(?:ai|agent-core|coding-agent|tui)/, /\bSessionRuntime\b/];
+const forbidden = [
+  /@earendil-works\/pi-(?:ai|agent-core|tui)(?:\/[^"']*)?/,
+  /@earendil-works\/pi-coding-agent(?:["']|\/(?!models-config(?:["']|\/)))/,
+  /\bSessionRuntime\b/,
+];
 const violations = [];
 for (const entry of readdirSync(root, { recursive: true, encoding: "utf8" })) {
   if (!entry.endsWith(".js") && !entry.endsWith(".cjs") && !entry.endsWith(".mjs")) continue;

@@ -2,11 +2,11 @@ import { WindowsHeader } from "@renderer/components/layout/windows-header";
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import { useLayout } from "@renderer/state/layout";
 import { getSidebarMaxWidth, SIDEBAR_MIN_WIDTH } from "@renderer/state/layout-preference";
+import { Link, Outlet } from "@tanstack/react-router";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
 import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import { type CSSProperties, useEffect } from "react";
-import { Link, NavLink, Outlet } from "react-router";
 
 const SETTINGS_TITLE = "设置 - Meta Agent";
 
@@ -61,14 +61,14 @@ export function SettingsPage() {
               </Link>
               <div className="settings-menu-divider" aria-hidden="true" />
               <p className="settings-menu-section-label">偏好设置</p>
-              <NavLink to="personalization" className="settings-menu-item">
+              <Link to="/settings/personalization" className="settings-menu-item" activeOptions={{ exact: true }}>
                 <Palette />
                 <span>个性化</span>
-              </NavLink>
-              <NavLink to="models" className="settings-menu-item">
+              </Link>
+              <Link to="/settings/models" className="settings-menu-item" activeOptions={{ exact: true }}>
                 <Boxes />
                 <span>模型</span>
-              </NavLink>
+              </Link>
             </nav>
           </div>
         </aside>

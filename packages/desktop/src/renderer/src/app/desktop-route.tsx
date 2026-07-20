@@ -1,7 +1,7 @@
 import { DesktopProvider } from "@renderer/state/desktop-context";
 import { DesktopApp } from "./desktop-app.tsx";
 
-/** 为聊天工作台创建 route-scoped Desktop runtime，离开路由时释放 session 订阅。 */
+/** 渲染聊天工作台；离开聊天路由时由 TanStack Router 正常卸载。 */
 export function DesktopRoute() {
   return (
     <DesktopProvider>

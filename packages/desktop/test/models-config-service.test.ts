@@ -92,8 +92,10 @@ describe("ModelsConfigService", () => {
     expect(saved).toContain('"futureModelField": true');
     expect(saved).toContain('"baseUrl": "http://localhost:1234/v1"');
     expect(saved).toContain('"apiKey": "$NEW_API_KEY"');
-    expect((await lstat(configPath)).mode & 0o777).toBe(0o600);
-    expect((await lstat(directory)).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      expect((await lstat(configPath)).mode & 0o777).toBe(0o600);
+      expect((await lstat(directory)).mode & 0o777).toBe(0o700);
+    }
   });
 
   test("renames provider and header keys without losing attached comments", async () => {

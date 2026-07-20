@@ -6,7 +6,7 @@ import {
   type ThreadMessage,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type {
   Project,
   SessionBootstrap,
@@ -61,6 +61,11 @@ interface AttachedTarget {
   generation: number;
 }
 
+interface ThreadIdentity {
+  projectId: string;
+  threadId: string;
+}
+
 /** 使用 assistant-ui External Store Runtime 投影 Pi-native timeline。 */
 export function usePiRuntime(options: PiRuntimeOptions): {
   runtime: AssistantRuntime;
@@ -76,16 +81,19 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   const targetRef = useRef<AttachedTarget | null>(null);
   const projectRef = useRef(options.project);
+  const threadCatalogsRef = useRef(options.threadCatalogs);
   const targetProjectRef = useRef<Project | null>(null);
   const targetCreateInputRef = useRef<SessionCreateInput | null>(null);
   const preparedRef = useRef<PreparedThread | null>(null);
   const createdThreadRef = useRef<{ projectId: string; threadId: string } | null>(null);
   const pendingReseedRef = useRef<{ projectId: string; threadId: string; reseed: ComposerReseed } | null>(null);
-  const committedThreadRef = useRef<{ projectId: string; threadId: string } | null>(null);
+  const committedThreadRef = useRef<ThreadIdentity | null>(null);
+  const archiveInvalidationRef = useRef<ThreadIdentity | null>(null);
   const draftModeRef = useRef(false);
   const switchGeneration = useRef(0);
   const targetGenerationRef = useRef(0);
   projectRef.current = options.project;
+  threadCatalogsRef.current = options.threadCatalogs;
 
   const coordinator = useMemo(
     () =>
@@ -102,6 +110,22 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   useEffect(() => {
     coordinator.observeQueue(snapshot.queue);
   }, [coordinator, snapshot.queue]);
+
+  const hydrateThread = useCallback(async (project: Project, threadId: string, generation: number) => {
+    const [bootstrap, workbench] = await Promise.all([
+      piSessionBus.attach(project.id, threadId),
+      window.desktop.workbench.get(project.id, threadId),
+    ]);
+    if (generation !== switchGeneration.current) throw new DOMException("Thread switch superseded", "AbortError");
+    targetRef.current = { projectId: project.id, threadId, generation };
+    const prepared = { bootstrap, workbench };
+    preparedRef.current = prepared;
+    return prepared;
+  }, []);
+
+  const isArchivedThread = useCallback((projectId: string, threadId: string): boolean => {
+    return threadCatalogsRef.current[projectId]?.some((thread) => thread.id === threadId && thread.archived) ?? false;
+  }, []);
 
   const threadList = useMemo<ExternalStoreThreadListAdapter>(() => {
     const project = options.project;
@@ -134,13 +158,8 @@ export function usePiRuntime(options: PiRuntimeOptions): {
       async onSwitchToThread(adapterThreadId) {
         const generation = targetGenerationRef.current;
         const { project: activeProject, threadId } = resolveAdapterThread(adapterThreadId);
-        const [bootstrap, workbench] = await Promise.all([
-          piSessionBus.attach(activeProject.id, threadId),
-          window.desktop.workbench.get(activeProject.id, threadId),
-        ]);
-        if (generation !== switchGeneration.current) throw new DOMException("Thread switch superseded", "AbortError");
-        targetRef.current = { projectId: activeProject.id, threadId, generation };
-        preparedRef.current = { bootstrap, workbench };
+        if (isArchivedThread(activeProject.id, threadId)) throw new Error("已归档 session 不可打开");
+        await hydrateThread(activeProject, threadId, generation);
       },
       async onSwitchToNewThread() {
         const generation = targetGenerationRef.current;
@@ -175,7 +194,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         await window.desktop.sessions.remove(activeProject.id, threadId);
       },
     };
-  }, [options.project, options.projects, options.threadCatalogs, options.threadId]);
+  }, [hydrateThread, isArchivedThread, options.project, options.projects, options.threadCatalogs, options.threadId]);
 
   const queue = useMemo<ExternalThreadQueueAdapter>(
     () => ({
@@ -245,6 +264,10 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   }, [options.threadId, projectId, runtime]);
 
   const actions = useMemo<DesktopThreadActions>(() => {
+    const clearCommittedThread = () => {
+      committedThreadRef.current = null;
+      archiveInvalidationRef.current = null;
+    };
     const resetToDraft = async () => {
       piSessionBus.detach();
       targetRef.current = null;
@@ -255,6 +278,13 @@ export function usePiRuntime(options: PiRuntimeOptions): {
     const restoreCommittedThread = async () => {
       const committed = committedThreadRef.current;
       if (!committed) {
+        await resetToDraft();
+        return null;
+      }
+      const committedCatalog = threadCatalogsRef.current[committed.projectId];
+      const committedEntry = committedCatalog?.find(({ id }) => id === committed.threadId);
+      if (!committedEntry || committedEntry.archived) {
+        clearCommittedThread();
         await resetToDraft();
         return null;
       }
@@ -276,13 +306,21 @@ export function usePiRuntime(options: PiRuntimeOptions): {
     };
     return {
       async open(project, threadId) {
+        if (isArchivedThread(project.id, threadId)) throw new Error("已归档 session 不可打开");
         const wasDraft = draftModeRef.current;
         const generation = ++switchGeneration.current;
         targetGenerationRef.current = generation;
         targetProjectRef.current = project;
         preparedRef.current = null;
         try {
-          await runtime.threads.switchToThread(threadAdapterId(project.id, threadId));
+          const adapterThreadId = threadAdapterId(project.id, threadId);
+          // Route remounts preserve Desktop's active thread, so assistant-ui may treat the
+          // target as already selected and skip onSwitchToThread entirely.
+          if (options.project?.id === project.id && options.threadId === threadId) {
+            await hydrateThread(project, threadId, generation);
+          } else {
+            await runtime.threads.switchToThread(adapterThreadId, { unarchive: false });
+          }
           if (generation !== switchGeneration.current) throw new DOMException("Thread switch superseded", "AbortError");
           const prepared = readRef(preparedRef);
           if (!prepared || prepared.bootstrap.threadId !== threadId)
@@ -300,6 +338,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
       },
       commit(prepared) {
         piSessionBus.commit(prepared.bootstrap);
+        archiveInvalidationRef.current = null;
         committedThreadRef.current = {
           projectId: prepared.bootstrap.projectId,
           threadId: prepared.bootstrap.threadId,
@@ -335,6 +374,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
           const prepared = readRef(preparedRef);
           if (!prepared) throw new Error("assistant-ui new thread hydrate 未完成");
           piSessionBus.commit(prepared.bootstrap);
+          archiveInvalidationRef.current = null;
           committedThreadRef.current = { projectId: project.id, threadId: prepared.bootstrap.threadId };
           draftModeRef.current = false;
           if (prepared.bootstrap.control.readiness.state !== "ready") {
@@ -355,7 +395,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
           if (created) await Promise.allSettled([window.desktop.sessions.remove(created.projectId, created.threadId)]);
           if (generation === switchGeneration.current) {
             pendingReseedRef.current = null;
-            committedThreadRef.current = null;
+            clearCommittedThread();
             draftModeRef.current = true;
             await resetToDraft();
           }
@@ -379,8 +419,26 @@ export function usePiRuntime(options: PiRuntimeOptions): {
       },
       async archive(project, threadId, archived) {
         const item = runtime.threads.getItemById(threadAdapterId(project.id, threadId));
-        if (archived) await item.archive();
-        else await item.unarchive();
+        const committed = committedThreadRef.current;
+        const invalidatedCommitted =
+          archived && committed?.projectId === project.id && committed.threadId === threadId ? committed : null;
+        if (invalidatedCommitted) {
+          committedThreadRef.current = null;
+          archiveInvalidationRef.current = invalidatedCommitted;
+        }
+        try {
+          if (archived) await item.archive();
+          else await item.unarchive();
+        } catch (error) {
+          if (invalidatedCommitted && archiveInvalidationRef.current === invalidatedCommitted) {
+            archiveInvalidationRef.current = null;
+            if (!committedThreadRef.current) committedThreadRef.current = invalidatedCommitted;
+          }
+          throw error;
+        }
+        if (invalidatedCommitted && archiveInvalidationRef.current === invalidatedCommitted) {
+          archiveInvalidationRef.current = null;
+        }
       },
       async remove(project, threadId) {
         const generation = switchGeneration.current;
@@ -393,8 +451,12 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         if (created?.projectId === project.id && created.threadId === threadId) createdThreadRef.current = null;
 
         const committed = committedThreadRef.current;
-        if (committed?.projectId !== project.id || committed.threadId !== threadId) return;
-        committedThreadRef.current = null;
+        const invalidated = archiveInvalidationRef.current;
+        const committedMatches = committed?.projectId === project.id && committed.threadId === threadId;
+        const invalidatedMatches = invalidated?.projectId === project.id && invalidated.threadId === threadId;
+        if (invalidatedMatches) archiveInvalidationRef.current = null;
+        if (!committedMatches) return;
+        clearCommittedThread();
         draftModeRef.current = true;
 
         const target = targetRef.current;
@@ -415,11 +477,11 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         preparedRef.current = null;
         createdThreadRef.current = null;
         pendingReseedRef.current = null;
-        committedThreadRef.current = null;
+        clearCommittedThread();
         draftModeRef.current = false;
       },
     };
-  }, [coordinator, runtime]);
+  }, [coordinator, hydrateThread, isArchivedThread, options.project?.id, options.threadId, runtime]);
 
   return { runtime, actions };
 }

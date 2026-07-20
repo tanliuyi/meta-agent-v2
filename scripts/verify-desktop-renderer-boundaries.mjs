@@ -507,6 +507,36 @@ function checkSourceOwner(file, rendererRoot, diagnostics) {
 	);
 }
 
+function isTanStackRouteModule(sourceFile) {
+	const routeFactoryBindings = new Set();
+	for (const statement of sourceFile.statements) {
+		if (
+			!ts.isImportDeclaration(statement) ||
+			!ts.isStringLiteralLike(statement.moduleSpecifier) ||
+			statement.moduleSpecifier.text !== "@tanstack/react-router"
+		) {
+			continue;
+		}
+		const namedBindings = statement.importClause?.namedBindings;
+		if (!namedBindings || !ts.isNamedImports(namedBindings)) continue;
+		for (const element of namedBindings.elements) {
+			const importedName = element.propertyName?.text ?? element.name.text;
+			if (/^create(?:Lazy)?(?:File|Root)Route$/.test(importedName)) routeFactoryBindings.add(element.name.text);
+		}
+	}
+	if (routeFactoryBindings.size === 0) return false;
+	let isRoute = false;
+	function visit(node) {
+		if (isRoute || !ts.isCallExpression(node) || !ts.isIdentifier(node.expression)) {
+			ts.forEachChild(node, visit);
+			return;
+		}
+		if (routeFactoryBindings.has(node.expression.text)) isRoute = true;
+	}
+	visit(sourceFile);
+	return isRoute;
+}
+
 /** 校验 renderer 的组件文件和单向依赖边界，返回稳定、可测试的诊断文本。 */
 export function verifyRendererBoundaries(rendererRoot, scopes) {
 	const files = [];
@@ -514,9 +544,6 @@ export function verifyRendererBoundaries(rendererRoot, scopes) {
 	const uniqueFiles = [...new Set(files)].sort();
 	const diagnostics = [];
 	for (const file of uniqueFiles) {
-		if (basename(file) === "index.ts" || basename(file) === "index.tsx") {
-			diagnostics.push(`${relative(process.cwd(), file)}: local barrel files are not allowed`);
-		}
 		const sourceFile = ts.createSourceFile(
 			file,
 			readFileSync(file, "utf8"),
@@ -524,6 +551,11 @@ export function verifyRendererBoundaries(rendererRoot, scopes) {
 			true,
 			file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
 		);
+		const isTanStackRouteFile =
+			file.includes(`${sep}app${sep}routes${sep}`) && isTanStackRouteModule(sourceFile);
+		if ((basename(file) === "index.ts" || basename(file) === "index.tsx") && !isTanStackRouteFile) {
+			diagnostics.push(`${relative(process.cwd(), file)}: local barrel files are not allowed`);
+		}
 		checkSourceOwner(file, rendererRoot, diagnostics);
 		checkComponents(file, sourceFile, diagnostics);
 		checkComponentColorTokens(file, sourceFile, diagnostics);

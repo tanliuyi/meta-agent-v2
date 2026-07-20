@@ -1,19 +1,173 @@
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
+import { Dialog } from "@renderer/shared/ui/dialog";
+import { DialogClose } from "@renderer/shared/ui/dialog-close";
+import { DialogContent } from "@renderer/shared/ui/dialog-content";
+import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
+import { DialogHeader } from "@renderer/shared/ui/dialog-header";
+import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import ExternalLink from "lucide-react/dist/esm/icons/external-link.mjs";
+import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
+import { useEffect, useRef, useState } from "react";
+import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsProviderForm } from "./models-provider-form.tsx";
 import { ModelsProviderList } from "./models-provider-list.tsx";
-import { createProviderDraft } from "./models-settings-model.ts";
+import { ModelsProviderOverview } from "./models-provider-overview.tsx";
+import { createProviderDraft, modelsDraftsEqual } from "./models-settings-model.ts";
 import { useModelsSettingsController } from "./use-models-settings-controller.ts";
+
+interface ProviderEditSession {
+  index: number;
+  originKey?: string;
+  currentKey: string;
+  baseline?: ModelsProviderDraft;
+  baselineRevision?: string;
+  isNew: boolean;
+  hasChanges: boolean;
+}
+
+function findProviderIndex(providers: ModelsProviderDraft[], session: ProviderEditSession): number | undefined {
+  if (session.originKey !== undefined) {
+    const originIndex = providers.findIndex((provider) => provider.origin?.providerKey === session.originKey);
+    if (originIndex >= 0) return originIndex;
+  }
+
+  const indexedProvider = providers[session.index];
+  if (indexedProvider?.key === session.currentKey) return session.index;
+
+  const keyIndex = providers.findIndex((provider) => provider.key === session.currentKey);
+  return keyIndex >= 0 ? keyIndex : undefined;
+}
 
 /** Session-independent structured editor for the global Pi models.json file. */
 export function ModelsSettingsPage() {
   const controller = useModelsSettingsController();
+  const [providerEdit, setProviderEdit] = useState<ProviderEditSession>();
+  const providerEditRef = useRef<ProviderEditSession | undefined>(undefined);
   const selectedProvider =
     controller.selectedProviderIndex === undefined ? undefined : controller.draft[controller.selectedProviderIndex];
+  const editorProviderIndex = providerEdit ? findProviderIndex(controller.draft, providerEdit) : undefined;
+  const editorProvider = editorProviderIndex === undefined ? undefined : controller.draft[editorProviderIndex];
   const canSave = controller.dirty && controller.diagnostics.length === 0 && controller.status !== "saving";
+
+  function setProviderEditSession(next: ProviderEditSession | undefined): void {
+    providerEditRef.current = next;
+    setProviderEdit(next);
+  }
+
+  function openProviderEditor(
+    provider: ModelsProviderDraft | undefined,
+    index: number | undefined,
+    isNew = false,
+  ): void {
+    if (!provider || index === undefined) return;
+    const current = providerEditRef.current;
+    if (current) cancelProviderEditor();
+    setProviderEditSession({
+      index,
+      originKey: provider.origin?.providerKey,
+      currentKey: provider.key,
+      baseline: isNew ? undefined : structuredClone(provider),
+      baselineRevision: controller.snapshot?.revision,
+      isNew,
+      hasChanges: false,
+    });
+  }
+
+  function updateProviderEditor(nextProvider: ModelsProviderDraft): void {
+    const session = providerEditRef.current;
+    if (!session) return;
+
+    const currentIndex = findProviderIndex(controller.draft, session);
+    const currentProvider = currentIndex === undefined ? undefined : controller.draft[currentIndex];
+    if (currentIndex === undefined) return;
+    if (session.baselineRevision !== controller.snapshot?.revision) {
+      if (currentProvider && !controller.dirty) {
+        setProviderEditSession({
+          ...session,
+          baseline: structuredClone(currentProvider),
+          baselineRevision: controller.snapshot?.revision,
+          hasChanges: false,
+        });
+      }
+      return;
+    }
+
+    controller.mutate((providers) => {
+      const targetIndex = findProviderIndex(providers, session);
+      if (targetIndex !== undefined) providers[targetIndex] = structuredClone(nextProvider);
+    });
+    session.currentKey = nextProvider.key;
+    session.hasChanges = session.isNew || !session.baseline || !modelsDraftsEqual([nextProvider], [session.baseline]);
+    setProviderEditSession({ ...session });
+  }
+
+  function finishProviderEditor(): void {
+    setProviderEditSession(undefined);
+  }
+
+  function cancelProviderEditor(): void {
+    const session = providerEditRef.current;
+    if (!session) return;
+    const currentIndex = findProviderIndex(controller.draft, session);
+    if (currentIndex !== undefined) {
+      if (session.isNew) {
+        const remainingCount = controller.draft.length - 1;
+        controller.mutate((providers) => {
+          const targetIndex = findProviderIndex(providers, session);
+          if (targetIndex !== undefined) providers.splice(targetIndex, 1);
+        });
+        controller.selectProvider(remainingCount > 0 ? Math.min(currentIndex, remainingCount - 1) : undefined);
+      } else if (session.baseline) {
+        const baseline = session.baseline;
+        controller.mutate((providers) => {
+          const targetIndex = findProviderIndex(providers, session);
+          if (targetIndex !== undefined) providers[targetIndex] = structuredClone(baseline);
+        });
+      }
+    }
+    setProviderEditSession(undefined);
+  }
+
+  function deleteProviderEditor(): void {
+    const session = providerEditRef.current;
+    if (!session) return;
+    const currentIndex = findProviderIndex(controller.draft, session);
+    if (currentIndex === undefined) {
+      setProviderEditSession(undefined);
+      return;
+    }
+    const remainingCount = controller.draft.length - 1;
+    controller.mutate((providers) => {
+      const targetIndex = findProviderIndex(providers, session);
+      if (targetIndex !== undefined) providers.splice(targetIndex, 1);
+    });
+    controller.selectProvider(remainingCount > 0 ? Math.min(currentIndex, remainingCount - 1) : undefined);
+    setProviderEditSession(undefined);
+  }
+
+  useEffect(() => {
+    const session = providerEditRef.current;
+    if (!session || session.baselineRevision === controller.snapshot?.revision) return;
+    if (!editorProvider) {
+      if (!session.isNew) setProviderEditSession(undefined);
+      return;
+    }
+    if (controller.dirty && session.hasChanges) return;
+    setProviderEditSession({
+      ...session,
+      index: editorProviderIndex ?? session.index,
+      originKey: editorProvider.origin?.providerKey,
+      currentKey: editorProvider.key,
+      baseline: structuredClone(editorProvider),
+      baselineRevision: controller.snapshot?.revision,
+      isNew: false,
+      hasChanges: false,
+    });
+  }, [controller.dirty, controller.snapshot?.revision, editorProvider, editorProviderIndex, providerEdit]);
 
   return (
     <div className="models-settings-page">
@@ -116,44 +270,70 @@ export function ModelsSettingsPage() {
               const existingIndex = controller.draft.findIndex((provider) => provider.key === key);
               if (existingIndex >= 0) {
                 controller.selectProvider(existingIndex);
+                openProviderEditor(controller.draft[existingIndex], existingIndex);
                 return;
               }
               const nextIndex = controller.draft.length;
-              controller.mutate((providers) => providers.push(createProviderDraft(key)));
+              const builtIn = controller.snapshot?.metadata.builtInProviders.find((provider) => provider.id === key);
+              const draft = createProviderDraft(key);
+              if (builtIn) {
+                draft.config = {
+                  name: builtIn.displayName,
+                  api: builtIn.models[0]?.api,
+                };
+              }
+              controller.mutate((providers) => providers.push(draft));
               controller.selectProvider(nextIndex);
+              openProviderEditor(draft, nextIndex, true);
             }}
           />
           <main className="models-detail-pane">
             {selectedProvider ? (
-              <ModelsProviderForm
+              <ModelsProviderOverview
                 provider={selectedProvider}
                 metadata={controller.snapshot.metadata}
-                onChange={(nextProvider) => {
-                  const selectedIndex = controller.selectedProviderIndex;
-                  if (selectedIndex === undefined) return;
-                  controller.mutate((providers) => {
-                    if (providers[selectedIndex]) providers[selectedIndex] = nextProvider;
-                  });
-                }}
-                onDelete={() => {
-                  const selectedIndex = controller.selectedProviderIndex;
-                  if (selectedIndex === undefined) return;
-                  controller.mutate((providers) => {
-                    providers.splice(selectedIndex, 1);
-                  });
-                  const remainingCount = controller.draft.length - 1;
-                  controller.selectProvider(
-                    remainingCount > 0 ? Math.min(selectedIndex, remainingCount - 1) : undefined,
-                  );
-                }}
+                onEdit={() => openProviderEditor(selectedProvider, controller.selectedProviderIndex)}
               />
             ) : (
               <div className="models-empty-detail">
-                <h3>选择或添加 Provider</h3>
+                <div className="models-empty-icon">
+                  <Plus />
+                </div>
+                <h3>添加一个模型 Provider</h3>
+                <p>从左侧选择内置服务，或添加自定义兼容接口。</p>
               </div>
             )}
           </main>
         </div>
+      ) : null}
+
+      {editorProvider && controller.snapshot ? (
+        <Dialog
+          open={providerEdit !== undefined}
+          onOpenChange={(open) => {
+            if (!open) cancelProviderEditor();
+          }}
+        >
+          <DialogContent className="models-editor-dialog" style={{ width: "90vw", maxWidth: "80rem" }}>
+            <DialogHeader>
+              <DialogTitle>编辑 Provider</DialogTitle>
+              <DialogDescription>修改连接信息、模型和兼容性选项。</DialogDescription>
+            </DialogHeader>
+            <div className="models-editor-dialog-body">
+              <ModelsProviderForm
+                provider={editorProvider}
+                metadata={controller.snapshot.metadata}
+                onChange={updateProviderEditor}
+                onDelete={deleteProviderEditor}
+              />
+            </div>
+            <DialogFooter className="models-editor-dialog-footer">
+              <DialogClose asChild>
+                <Button onClick={finishProviderEditor}>完成</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       <ConfirmDialog

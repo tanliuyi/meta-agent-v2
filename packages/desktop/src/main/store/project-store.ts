@@ -3,122 +3,167 @@ import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/
 import { basename, dirname, join, resolve } from "node:path";
 import type { Project, WorkbenchState } from "../../shared/contracts.ts";
 
+type ProjectStatus = "available" | "missing" | "permissionDenied" | "invalid";
+
 interface StoredProject {
-  id: string;
+  projectId: string;
   name: string;
-  cwd: string;
-  lastOpenedAt: number;
+  path: string;
+  status: ProjectStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastOpenedAt?: string;
+  trust?: unknown;
 }
 
-interface StoredState {
+interface ProjectMetadataFile {
+  version: 1;
+  projects: StoredProject[];
+}
+
+interface DesktopState {
   version: 1;
   activeProjectId?: string;
-  projects: StoredProject[];
   archivedThreads: Record<string, string[]>;
   workbenches: Record<string, WorkbenchState>;
 }
 
-const EMPTY_STATE: StoredState = { version: 1, projects: [], archivedThreads: {}, workbenches: {} };
+interface LegacyDesktopState extends DesktopState {
+  projects?: Array<{ id: string; name: string; cwd: string; lastOpenedAt: number }>;
+}
 
-/** 持久化 Project、最近使用项和本地会话归档状态。 */
+const EMPTY_PROJECTS: ProjectMetadataFile = { version: 1, projects: [] };
+const EMPTY_DESKTOP_STATE: DesktopState = { version: 1, archivedThreads: {}, workbenches: {} };
+
+/** 持久化 Pi-compatible Project metadata 与 Desktop 专属 UI 状态。 */
 export class ProjectStore {
-  private state: StoredState = EMPTY_STATE;
-  private readonly file: string;
-  private saveTask: Promise<void> = Promise.resolve();
+  private projectMetadata: ProjectMetadataFile = EMPTY_PROJECTS;
+  private desktopState: DesktopState = EMPTY_DESKTOP_STATE;
+  private readonly projectFile: string;
+  private readonly desktopFile: string;
+  private saveProjectsTask: Promise<void> = Promise.resolve();
+  private saveDesktopTask: Promise<void> = Promise.resolve();
 
-  constructor(file: string) {
-    this.file = file;
+  constructor(desktopFile: string, projectFile = join(dirname(desktopFile), "projects.json")) {
+    this.desktopFile = desktopFile;
+    this.projectFile = projectFile;
   }
 
-  /** 从用户数据目录恢复 Project 状态。 */
   async load(): Promise<void> {
-    try {
-      const text = await readFile(this.file, "utf8");
-      const value: unknown = JSON.parse(text);
-      if (!isStoredState(value)) throw new Error("Project 状态文件格式无效");
-      this.state = value;
-    } catch (error) {
-      if (isMissingFile(error)) {
-        this.state = { ...EMPTY_STATE, projects: [], archivedThreads: {}, workbenches: {} };
-        return;
-      }
-      throw error;
+    const desktop = await readOptionalJson(this.desktopFile);
+    if (desktop === undefined) {
+      this.desktopState = { ...EMPTY_DESKTOP_STATE, archivedThreads: {}, workbenches: {} };
+    } else {
+      if (!isDesktopState(desktop)) throw new Error("Desktop 状态文件格式无效");
+      this.desktopState = {
+        version: 1,
+        activeProjectId: desktop.activeProjectId,
+        archivedThreads: desktop.archivedThreads,
+        workbenches: desktop.workbenches,
+      };
     }
+
+    const projects = await readOptionalJson(this.projectFile);
+    if (projects !== undefined) {
+      if (!isProjectMetadataFile(projects)) throw new Error("Project metadata 文件格式无效");
+      this.projectMetadata = projects;
+      return;
+    }
+
+    const legacy = desktop as LegacyDesktopState | undefined;
+    if (legacy?.projects) {
+      this.projectMetadata = {
+        version: 1,
+        projects: legacy.projects.map((project) => fromLegacyProject(project)),
+      };
+      await this.saveProjects();
+      await this.saveDesktop();
+      return;
+    }
+    this.projectMetadata = { ...EMPTY_PROJECTS, projects: [] };
   }
 
-  /** 返回包含目录有效性检查的 Project 列表。 */
   async list(): Promise<Project[]> {
-    return Promise.all(this.state.projects.map((project) => this.toProject(project)));
+    return Promise.all(this.projectMetadata.projects.map((project) => this.toProject(project)));
   }
 
-  /** 返回当前 Project；目录失效时仍返回具体原因。 */
   async getActive(): Promise<Project | null> {
-    const project = this.state.projects.find(({ id }) => id === this.state.activeProjectId);
+    const project = this.projectMetadata.projects.find(
+      ({ projectId }) => projectId === this.desktopState.activeProjectId,
+    );
     return project ? this.toProject(project) : null;
   }
 
-  /** 将目录注册为 Project，重复目录会复用已有记录。 */
   async add(folder: string): Promise<Project> {
-    const cwd = await normalizeDirectory(folder);
-    let project = this.state.projects.find((item) => samePath(item.cwd, cwd));
+    const path = await normalizeDirectory(folder);
+    let project = this.projectMetadata.projects.find((item) => samePath(item.path, path));
     if (!project) {
-      project = { id: randomUUID(), name: basename(cwd), cwd, lastOpenedAt: Date.now() };
-      this.state.projects.push(project);
+      const now = new Date().toISOString();
+      project = {
+        projectId: randomUUID(),
+        name: basename(path),
+        path,
+        status: "available",
+        createdAt: now,
+        updatedAt: now,
+        lastOpenedAt: now,
+      };
+      this.projectMetadata.projects.push(project);
+    } else {
+      project.lastOpenedAt = new Date().toISOString();
+      project.updatedAt = project.lastOpenedAt;
+      project.status = "available";
     }
-    project.lastOpenedAt = Date.now();
-    this.state.activeProjectId = project.id;
-    await this.save();
+    this.desktopState.activeProjectId = project.projectId;
+    await Promise.all([this.saveProjects(), this.saveDesktop()]);
     return this.toProject(project);
   }
 
-  /** 打开已有 Project 并更新最近使用时间。 */
   async open(projectId: string): Promise<Project> {
     const project = this.requireStored(projectId);
     const result = await this.toProject(project);
     if (!result.available) throw new Error(result.issue ?? "Project 目录不可用");
-    project.lastOpenedAt = Date.now();
-    this.state.activeProjectId = projectId;
-    await this.save();
-    return { ...result, lastOpenedAt: project.lastOpenedAt };
+    const now = new Date().toISOString();
+    project.lastOpenedAt = now;
+    project.updatedAt = now;
+    project.status = "available";
+    this.desktopState.activeProjectId = projectId;
+    await Promise.all([this.saveProjects(), this.saveDesktop()]);
+    return { ...result, lastOpenedAt: Date.parse(now) };
   }
 
-  /** 仅从应用列表移除 Project，不删除磁盘目录或 Pi 会话。 */
   async remove(projectId: string): Promise<void> {
     this.requireStored(projectId);
-    this.state.projects = this.state.projects.filter(({ id }) => id !== projectId);
-    delete this.state.archivedThreads[projectId];
-    for (const key of Object.keys(this.state.workbenches)) {
-      if (key.startsWith(`${projectId}:`)) delete this.state.workbenches[key];
+    this.projectMetadata.projects = this.projectMetadata.projects.filter(({ projectId: id }) => id !== projectId);
+    delete this.desktopState.archivedThreads[projectId];
+    for (const key of Object.keys(this.desktopState.workbenches)) {
+      if (key.startsWith(`${projectId}:`)) delete this.desktopState.workbenches[key];
     }
-    if (this.state.activeProjectId === projectId) this.state.activeProjectId = undefined;
-    await this.save();
+    if (this.desktopState.activeProjectId === projectId) this.desktopState.activeProjectId = undefined;
+    await Promise.all([this.saveProjects(), this.saveDesktop()]);
   }
 
-  /** 返回可信的 Project cwd，renderer 无法覆盖该路径。 */
   getCwd(projectId: string): string {
-    return this.requireStored(projectId).cwd;
+    return this.requireStored(projectId).path;
   }
 
-  /** 检查线程是否归档。 */
   isArchived(projectId: string, threadId: string): boolean {
-    return this.state.archivedThreads[projectId]?.includes(threadId) ?? false;
+    return this.desktopState.archivedThreads[projectId]?.includes(threadId) ?? false;
   }
 
-  /** 更新线程归档状态。 */
   async setArchived(projectId: string, threadId: string, archived: boolean): Promise<void> {
     this.requireStored(projectId);
-    const values = new Set(this.state.archivedThreads[projectId] ?? []);
+    const values = new Set(this.desktopState.archivedThreads[projectId] ?? []);
     if (archived) values.add(threadId);
     else values.delete(threadId);
-    this.state.archivedThreads[projectId] = [...values];
-    await this.save();
+    this.desktopState.archivedThreads[projectId] = [...values];
+    await this.saveDesktop();
   }
 
-  /** 返回 session 独立的 Workbench 布局。 */
   getWorkbench(projectId: string, threadId: string): WorkbenchState {
     this.requireStored(projectId);
     return (
-      this.state.workbenches[workbenchKey(projectId, threadId)] ?? {
+      this.desktopState.workbenches[workbenchKey(projectId, threadId)] ?? {
         projectId,
         threadId,
         panel: "chat",
@@ -132,60 +177,114 @@ export class ProjectStore {
     );
   }
 
-  /** 持久化 session 独立的 Workbench 布局。 */
   async setWorkbench(value: WorkbenchState): Promise<void> {
     this.requireStored(value.projectId);
-    this.state.workbenches[workbenchKey(value.projectId, value.threadId)] = value;
-    await this.save();
+    this.desktopState.workbenches[workbenchKey(value.projectId, value.threadId)] = value;
+    await this.saveDesktop();
   }
 
-  /** 删除 session 时一并清理其 Workbench 状态。 */
   async removeWorkbench(projectId: string, threadId: string): Promise<void> {
-    delete this.state.workbenches[workbenchKey(projectId, threadId)];
-    await this.save();
+    delete this.desktopState.workbenches[workbenchKey(projectId, threadId)];
+    await this.saveDesktop();
   }
 
   private requireStored(projectId: string): StoredProject {
-    const project = this.state.projects.find(({ id }) => id === projectId);
+    const project = this.projectMetadata.projects.find(({ projectId: id }) => id === projectId);
     if (!project) throw new Error(`Project 不存在: ${projectId}`);
     return project;
   }
 
   private async toProject(project: StoredProject): Promise<Project> {
     try {
-      const info = await stat(project.cwd);
+      const info = await stat(project.path);
       if (!info.isDirectory()) throw new Error("路径不是目录");
-      return { ...project, available: true };
+      project.status = "available";
+      return {
+        id: project.projectId,
+        name: project.name,
+        cwd: project.path,
+        lastOpenedAt: parseTimestamp(project.lastOpenedAt),
+        available: true,
+      };
     } catch (error) {
-      return { ...project, available: false, issue: errorMessage(error) };
+      project.status = statusFromError(error);
+      return {
+        id: project.projectId,
+        name: project.name,
+        cwd: project.path,
+        lastOpenedAt: parseTimestamp(project.lastOpenedAt),
+        available: false,
+        issue: errorMessage(error),
+      };
     }
   }
 
-  private async save(): Promise<void> {
-    const text = `${JSON.stringify(this.state, null, 2)}\n`;
-    const task = this.saveTask
-      .catch(() => undefined)
-      .then(async () => {
-        await mkdir(dirname(this.file), { recursive: true });
-        const temp = join(dirname(this.file), `${basename(this.file)}.${randomUUID()}.tmp`);
-        try {
-          await writeFile(temp, text, "utf8");
-          await rename(temp, this.file);
-        } finally {
-          await rm(temp, { force: true });
-        }
-      });
-    this.saveTask = task;
-    await task;
+  private saveProjects(): Promise<void> {
+    const text = `${JSON.stringify(this.projectMetadata, null, 2)}\n`;
+    const task = this.saveProjectsTask.catch(() => undefined).then(() => writeAtomic(this.projectFile, text));
+    this.saveProjectsTask = task;
+    return task;
+  }
+
+  private saveDesktop(): Promise<void> {
+    const text = `${JSON.stringify(this.desktopState, null, 2)}\n`;
+    const task = this.saveDesktopTask.catch(() => undefined).then(() => writeAtomic(this.desktopFile, text));
+    this.saveDesktopTask = task;
+    return task;
   }
 }
 
-/** 将目录解析为真实绝对路径，并拒绝普通文件。 */
 async function normalizeDirectory(folder: string): Promise<string> {
   const path = await realpath(resolve(folder));
   const info = await stat(path);
   if (!info.isDirectory()) throw new Error("选择的路径不是目录");
   return path;
+}
+
+async function readOptionalJson(path: string): Promise<unknown | undefined> {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (isMissingFile(error)) return undefined;
+    throw error;
+  }
+}
+
+async function writeAtomic(path: string, text: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temp = join(dirname(path), `${basename(path)}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temp, text, "utf8");
+    await rename(temp, path);
+  } finally {
+    await rm(temp, { force: true });
+  }
+}
+
+function fromLegacyProject(project: NonNullable<LegacyDesktopState["projects"]>[number]): StoredProject {
+  const now = new Date().toISOString();
+  const lastOpenedAt = new Date(project.lastOpenedAt).toISOString();
+  return {
+    projectId: project.id,
+    name: project.name,
+    path: project.cwd,
+    status: "available",
+    createdAt: now,
+    updatedAt: now,
+    lastOpenedAt,
+  };
+}
+
+function parseTimestamp(value: string | undefined): number {
+  const parsed = value ? Date.parse(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function statusFromError(error: unknown): ProjectStatus {
+  const code = error instanceof Error && "code" in error ? error.code : undefined;
+  if (code === "ENOENT") return "missing";
+  if (code === "EACCES" || code === "EPERM") return "permissionDenied";
+  return "invalid";
 }
 
 function samePath(left: string, right: string): boolean {
@@ -200,12 +299,36 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isStoredState(value: unknown): value is StoredState {
+function isProjectMetadataFile(value: unknown): value is ProjectMetadataFile {
   if (!value || typeof value !== "object") return false;
   const state = value as Record<string, unknown>;
-  if (state.version !== 1 || !Array.isArray(state.projects) || typeof state.archivedThreads !== "object") return false;
-  if (typeof state.workbenches !== "object" || state.workbenches === null) state.workbenches = {};
-  return true;
+  return state.version === 1 && Array.isArray(state.projects) && state.projects.every(isStoredProject);
+}
+
+function isStoredProject(value: unknown): value is StoredProject {
+  if (!value || typeof value !== "object") return false;
+  const project = value as Record<string, unknown>;
+  return (
+    typeof project.projectId === "string" &&
+    typeof project.name === "string" &&
+    typeof project.path === "string" &&
+    typeof project.status === "string" &&
+    ["available", "missing", "permissionDenied", "invalid"].includes(project.status) &&
+    typeof project.createdAt === "string" &&
+    typeof project.updatedAt === "string"
+  );
+}
+
+function isDesktopState(value: unknown): value is LegacyDesktopState {
+  if (!value || typeof value !== "object") return false;
+  const state = value as Record<string, unknown>;
+  return (
+    state.version === 1 &&
+    typeof state.archivedThreads === "object" &&
+    state.archivedThreads !== null &&
+    typeof state.workbenches === "object" &&
+    state.workbenches !== null
+  );
 }
 
 function workbenchKey(projectId: string, threadId: string): string {

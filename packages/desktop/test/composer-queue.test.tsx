@@ -1,3 +1,10 @@
+import {
+  type AssistantRuntime,
+  AssistantRuntimeProvider,
+  type ExportedMessageRepository,
+  type ExternalThreadQueueAdapter,
+  useExternalStoreRuntime,
+} from "@assistant-ui/react";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +17,7 @@ describe("ComposerQueue", () => {
   beforeEach(() => setQueue([]));
 
   it("空队列不占用 Composer 上方空间", () => {
-    expect(renderToStaticMarkup(<ComposerQueue onClear={vi.fn()} onError={vi.fn()} />)).toBe("");
+    expect(renderQueue()).toBe("");
   });
 
   it("按 Pi queue 顺序展示引导和排队消息", () => {
@@ -19,7 +26,10 @@ describe("ComposerQueue", () => {
       { id: "follow-up", mode: "followUp", prompt: "完成后补充测试", source: "desktop" },
     ]);
 
-    const markup = renderToStaticMarkup(<ComposerQueue onClear={vi.fn()} onError={vi.fn()} />);
+    const markup = renderQueue([
+      { id: "steer", mode: "steer", prompt: "立即检查当前实现", source: "desktop" },
+      { id: "follow-up", mode: "followUp", prompt: "完成后补充测试", source: "desktop" },
+    ]);
 
     expect(markup).toContain('aria-label="待处理消息"');
     expect(markup).toContain('data-queue-mode="steer"');
@@ -31,6 +41,35 @@ describe("ComposerQueue", () => {
     expect(markup).toContain('aria-label="清空待处理消息"');
   });
 });
+
+function renderQueue(queue: readonly PiQueueItem[] = []): string {
+  const adapter: ExternalThreadQueueAdapter = {
+    items: queue.map(({ id, prompt }) => ({ id, prompt })),
+    enqueue: vi.fn(),
+    steer: vi.fn(),
+    remove: vi.fn(),
+    clear: vi.fn(),
+  };
+  let runtime: AssistantRuntime | undefined;
+  function RuntimeProbe() {
+    runtime = useExternalStoreRuntime({
+      messageRepository: emptyRepository(),
+      isRunning: queue.length > 0,
+      onNew: async () => undefined,
+      queue: adapter,
+    });
+    return runtime ? (
+      <AssistantRuntimeProvider runtime={runtime}>
+        <ComposerQueue onClear={vi.fn()} onError={vi.fn()} />
+      </AssistantRuntimeProvider>
+    ) : null;
+  }
+  return renderToStaticMarkup(<RuntimeProbe />);
+}
+
+function emptyRepository(): ExportedMessageRepository {
+  return { headId: null, messages: [] };
+}
 
 function setQueue(queue: readonly PiQueueItem[]): void {
   piSessionBus.store.replace({

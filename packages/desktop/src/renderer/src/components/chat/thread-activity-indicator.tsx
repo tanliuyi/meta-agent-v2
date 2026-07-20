@@ -32,7 +32,7 @@ export function ThreadActivityIndicator(props: ThreadActivityIndicatorProps) {
   const className =
     activity.kind === "error"
       ? "group/thread-activity flex w-full flex-col text-sm text-destructive"
-      : "group/thread-activity flex w-full flex-col text-sm text-muted-foreground";
+      : "group/thread-activity flex w-full flex-col text-sm text-muted-foreground my-2";
 
   if (!activity.detail) {
     return (
@@ -91,7 +91,7 @@ function getActivity(
   if (phase === "running" && control.workingVisible) {
     return {
       kind: "working",
-      label: control.workingMessage ?? "Pi 正在处理",
+      label: control.workingMessage ?? "正在处理",
       icon: <LoaderCircle className="size-4 shrink-0 animate-spin" />,
     };
   }

@@ -10,8 +10,10 @@ export function ChatThread() {
   const projectId = useDesktopSelector((state) => state.project?.id ?? null);
   const threadId = useDesktopSelector(selectActiveThreadId);
   const hasBootstrap = useDesktopSelector((state) => selectActiveBootstrap(state) !== null);
+  const loading = useDesktopSelector((state) => state.loading);
 
   if (isDraft) return <DraftChatThread />;
+  if (loading && !projectId) return <EmptyChatState title="正在初始化" detail="正在加载 Project。" />;
   if (!projectId) return <EmptyChatState title="打开一个 Project" detail="" />;
   if (!threadId || !hasBootstrap) return <EmptyChatState title="准备新会话" detail="正在初始化 Composer。" />;
   return <SessionChatThread threadId={threadId} />;

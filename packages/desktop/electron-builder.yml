@@ -2,11 +2,11 @@ appId: works.earendil.meta-agent.desktop
 productName: Meta Agent
 asar: true
 directories:
+  buildResources: build
   output: output/installers
 files:
   - out/**/*
   - package.json
-  - node_modules/**/*
 asarUnpack:
   - out/sidecar/**/*
   - node_modules/**/*
@@ -16,6 +16,7 @@ extraResources:
 afterPack: ../../scripts/validate-desktop-package.mjs
 afterSign: ../../scripts/validate-desktop-signing.mjs
 mac:
+  icon: build/icon.png
   category: public.app-category.developer-tools
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
@@ -25,12 +26,25 @@ mac:
     - dmg
     - zip
 win:
+  icon: build/icon.ico
   target:
     - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
 linux:
+  icon: build/icon.png
   category: Development
   target:
     - AppImage
     - deb
 npmRebuild: false
 buildDependenciesFromSource: false
+publish:
+  provider: github
+  owner: tanliuyi
+  repo: meta-agent-harness
+  releaseType: release
