@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ToolView } from "../src/renderer/src/components/chat/tool-view.tsx";
 import { ToolContent } from "../src/renderer/src/components/chat/tools/tool-content.tsx";
+import { diffToolEdit } from "../src/renderer/src/components/chat/tools/tool-format.ts";
 
 describe("ToolView", () => {
   it("用文字展示运行中的工具与目标", () => {
@@ -77,6 +78,58 @@ describe("ToolView", () => {
 
     expect(markup).toContain('class="tool-result" data-tone="destructive"');
     expect(markup).not.toContain('class="tool-result error"');
+  });
+
+  it("渲染 edit diff 并在失败时保留具体错误", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="edit"
+        args={{ edits: [{ oldText: "before\nkeep", newText: "after\nkeep" }] }}
+        result="oldText 匹配不唯一"
+        error
+      />,
+    );
+
+    expect(markup).toContain("tool-diff-line-remove");
+    expect(markup).toContain(">before</span>");
+    expect(markup).toContain("tool-diff-line-add");
+    expect(markup).toContain(">after</span>");
+    expect(markup).toContain("tool-diff-line-context");
+    expect(markup).toContain("oldText 匹配不唯一");
+    expect(markup).toContain('data-tone="destructive"');
+  });
+
+  it.each([
+    [{ edits: JSON.stringify([{ oldText: "old", newText: "new" }]) }, "old", "new"],
+    [{ oldText: "legacy-old", newText: "legacy-new" }, "legacy-old", "legacy-new"],
+  ])("兼容 edit 参数格式 %#", (args, oldText, newText) => {
+    const markup = renderToStaticMarkup(<ToolContent name="edit" args={args} result={undefined} error={false} />);
+
+    expect(markup).toContain(`>${oldText}</span>`);
+    expect(markup).toContain(`>${newText}</span>`);
+  });
+
+  it("无法解析 edit 参数时保留 raw fallback", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent name="edit" args={{ edits: "invalid" }} result={undefined} error={false} />,
+    );
+
+    expect(markup).toContain("参数");
+    expect(markup).toContain("invalid");
+  });
+
+  it("标记 EOF 换行变化", () => {
+    expect(diffToolEdit("line", "line\n")).toContainEqual({ type: "meta", text: "旧内容末尾无换行" });
+    expect(diffToolEdit("line\n", "line")).toContainEqual({ type: "meta", text: "新内容末尾无换行" });
+  });
+
+  it("限制大 edit diff 的渲染行数", () => {
+    const oldText = Array.from({ length: 700 }, (_, index) => `old-${index}`).join("\n");
+    const newText = Array.from({ length: 700 }, (_, index) => `new-${index}`).join("\n");
+    const lines = diffToolEdit(oldText, newText);
+
+    expect(lines.length).toBeLessThanOrEqual(500);
+    expect(lines).toContainEqual(expect.objectContaining({ type: "meta", text: expect.stringContaining("已省略") }));
   });
 });
 

@@ -122,7 +122,6 @@
 }
 .tool-code,
 .tool-command,
-.tool-diff,
 .tool-result {
   max-height: 260px;
   margin: 0;
@@ -158,18 +157,45 @@
   min-width: 0;
   background: hsl(var(--background));
 }
-.tool-diff {
-  max-height: 180px;
-  padding-left: 26px;
-  border-left: 3px solid transparent;
+.tool-diff-hunk {
+  margin: 0;
+  background: hsl(var(--background));
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  line-height: 1.55;
 }
-.tool-diff-remove {
-  border-left-color: hsl(var(--destructive));
-  background: hsl(var(--destructive) / 0.07);
+.tool-diff-line {
+  display: flex;
+  min-width: 0;
+  padding-right: 12px;
 }
-.tool-diff-add {
-  border-left-color: hsl(var(--success));
-  background: hsl(var(--success) / 0.07);
+.tool-diff-line > .tool-diff-sign {
+  flex: 0 0 1.75em;
+  padding-left: 6px;
+  text-align: center;
+  user-select: none;
+  opacity: 0.75;
+}
+.tool-diff-line > .tool-diff-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tool-diff-line-context,
+.tool-diff-line-meta {
+  color: hsl(var(--muted-foreground));
+}
+.tool-diff-line-meta {
+  font-style: italic;
+}
+.tool-diff-line-remove {
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive));
+}
+.tool-diff-line-add {
+  background: hsl(var(--success) / 0.1);
+  color: hsl(var(--success));
 }
 
 .composer-wrap {
