@@ -1,6 +1,6 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { type ReactNode, useCallback, useMemo } from "react";
-import type { WorkbenchState } from "../../../shared/contracts.ts";
+import { type ReactNode, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import type { ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useTransportManager } from "../runtime/session-transport-context.tsx";
 import { usePiSessionRuntime } from "../runtime/use-pi-session-runtime.ts";
@@ -12,14 +12,66 @@ interface SessionProviderProps {
   children: ReactNode;
 }
 
-/** Owns one session runtime and the session-scoped view commands for a cached Activity. */
+/** Owns the mounted session runtime and its session-scoped view commands. */
 export function SessionProvider({ record, active, children }: SessionProviderProps) {
   const transport = useTransportManager();
-  const runtime = usePiSessionRuntime({ record, active, transport });
-  const clearQueue = useCallback(async () => {
-    if (!active || !transport.hasCommittedLease(record)) throw new Error("Session is not ready for commands");
-    await window.desktop.sessions.clearQueue(record.identity.projectId, record.identity.threadId);
+  const connection = useSyncExternalStore(
+    record.stores.connection.subscribe,
+    record.stores.connection.getSnapshot,
+    record.stores.connection.getSnapshot,
+  );
+  const commandsReady = active && connection === "ready" && transport.hasCommittedLease(record);
+  const { runtime, clearQueue: clearRuntimeQueue } = usePiSessionRuntime({ record, active, transport });
+  const requireCommandsReady = useCallback(() => {
+    if (!active || record.stores.connection.getSnapshot() !== "ready" || !transport.hasCommittedLease(record)) {
+      throw new Error("Session is not ready for commands");
+    }
   }, [active, record, transport]);
+  const clearQueue = useCallback(async () => {
+    requireCommandsReady();
+    await clearRuntimeQueue();
+  }, [clearRuntimeQueue, requireCommandsReady]);
+  const branch = useCallback(
+    async (sourceEntryId: string) => {
+      requireCommandsReady();
+      return window.desktop.sessions.branch({
+        requestId: crypto.randomUUID(),
+        projectId: record.identity.projectId,
+        threadId: record.identity.threadId,
+        sourceEntryId,
+        position: "at",
+      });
+    },
+    [record, requireCommandsReady],
+  );
+  const setModel = useCallback(
+    async (provider: string, modelId: string) => {
+      requireCommandsReady();
+      await window.desktop.sessions.setModel(record.identity.projectId, record.identity.threadId, provider, modelId);
+    },
+    [record, requireCommandsReady],
+  );
+  const setThinking = useCallback(
+    async (level: ThinkingLevel) => {
+      requireCommandsReady();
+      await window.desktop.sessions.setThinking(record.identity.projectId, record.identity.threadId, level);
+    },
+    [record, requireCommandsReady],
+  );
+  const editorTextTail = useRef(Promise.resolve());
+  const syncEditorText = useCallback(
+    (text: string) => {
+      const task = editorTextTail.current
+        .catch(() => undefined)
+        .then(async () => {
+          requireCommandsReady();
+          await window.desktop.sessions.setEditorText(record.identity.projectId, record.identity.threadId, text);
+        });
+      editorTextTail.current = task;
+      return task;
+    },
+    [record, requireCommandsReady],
+  );
   const updateWorkbench = useCallback(
     (value: Partial<WorkbenchState>) => {
       const current = record.stores.workbench.getSnapshot();
@@ -33,8 +85,18 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
     [record],
   );
   const scope = useMemo(
-    () => ({ record, active, clearQueue, updateWorkbench }),
-    [active, clearQueue, record, updateWorkbench],
+    () => ({
+      record,
+      active,
+      commandsReady,
+      clearQueue,
+      branch,
+      setModel,
+      setThinking,
+      syncEditorText,
+      updateWorkbench,
+    }),
+    [active, branch, clearQueue, commandsReady, record, setModel, setThinking, syncEditorText, updateWorkbench],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>

@@ -462,7 +462,11 @@ export class PiThreadProjector {
     const current = this.byId.get(id);
     if (!current || current.kind !== "assistant") return;
     const finalMessage = this.finalAssistantMessages.get(id) ?? message;
-    const finished = { ...current, status: assistantStatus(finalMessage) } satisfies PiAssistantMessage;
+    const finished = {
+      ...current,
+      completedAt: current.completedAt ?? Date.now(),
+      status: assistantStatus(finalMessage),
+    } satisfies PiAssistantMessage;
     this.replaceNode(finished, false);
     this.emit({ type: "message-finished", message: finished });
     this.finalAssistantMessages.delete(id);
@@ -876,7 +880,7 @@ function projectEntry(entry: SessionEntry, parentId: string | null): PiTimelineN
 function projectPersistedMessage(
   id: string,
   parentId: string | null,
-  createdAt: number,
+  completedAt: number,
   message: AgentMessage,
 ): PiTimelineNode | undefined {
   switch (message.role) {
@@ -885,19 +889,19 @@ function projectPersistedMessage(
         id,
         sourceEntryId: id,
         parentId,
-        createdAt,
+        createdAt: completedAt,
         kind: "user",
         content: userContent(message.content),
         delivery: { state: "persisted" },
       };
     case "assistant":
-      return assistantNode(id, parentId, message, false, id, createdAt);
+      return assistantNode(id, parentId, message, false, id, completedAt);
     case "bashExecution":
       return {
         id,
         sourceEntryId: id,
         parentId,
-        createdAt,
+        createdAt: completedAt,
         kind: "notice",
         noticeType: "bash",
         title: message.command,
@@ -913,13 +917,13 @@ function projectPersistedMessage(
         },
       };
     case "custom":
-      return message.display ? customNotice(id, parentId, message, id, createdAt) : undefined;
+      return message.display ? customNotice(id, parentId, message, id, completedAt) : undefined;
     case "compactionSummary":
       return {
         id,
         sourceEntryId: id,
         parentId,
-        createdAt,
+        createdAt: completedAt,
         kind: "notice",
         noticeType: "compaction",
         title: "上下文压缩",
@@ -931,7 +935,7 @@ function projectPersistedMessage(
         id,
         sourceEntryId: id,
         parentId,
-        createdAt,
+        createdAt: completedAt,
         kind: "notice",
         noticeType: "branch-summary",
         title: "分支摘要",
@@ -951,13 +955,14 @@ function assistantNode(
   message: AssistantMessage,
   running: boolean,
   sourceEntryId?: string,
-  createdAt = message.timestamp,
+  completedAt?: number,
 ): PiAssistantMessage {
   return {
     id,
     ...(sourceEntryId ? { sourceEntryId } : {}),
     parentId,
-    createdAt,
+    createdAt: message.timestamp,
+    ...(completedAt !== undefined ? { completedAt } : {}),
     kind: "assistant",
     content: message.content.flatMap((content, index): PiAssistantPart[] => {
       if (content.type === "text") return [{ id: partId(id, "text", index), type: "text", text: content.text }];

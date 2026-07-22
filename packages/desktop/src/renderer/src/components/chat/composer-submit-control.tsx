@@ -56,6 +56,7 @@ export function ComposerSubmitControl({
           side="top"
           variant="default"
           className="size-7 rounded-full"
+          disabled={disabled}
           onClick={() => aui.composer().cancel()}
         >
           <Square className="size-4" />
@@ -69,7 +70,7 @@ export function ComposerSubmitControl({
         side="top"
         variant="default"
         className="size-7 rounded-full"
-        disabled={sending || composer.readiness.state !== "ready"}
+        disabled={disabled || sending || composer.readiness.state !== "ready"}
       >
         <ArrowUp className="size-4" />
       </TooltipIconButton>
@@ -77,7 +78,13 @@ export function ComposerSubmitControl({
   }
   return (
     <ComposerPrimitive.Send asChild>
-      <TooltipIconButton tooltip="发送消息" side="top" variant="default" className="size-7 rounded-full">
+      <TooltipIconButton
+        tooltip="发送消息"
+        side="top"
+        variant="default"
+        className="size-7 rounded-full"
+        disabled={disabled}
+      >
         <ArrowUp className="size-4" />
       </TooltipIconButton>
     </ComposerPrimitive.Send>

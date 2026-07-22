@@ -416,6 +416,19 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("persisted assistant 同时保留 run 开始与完成时间", () => {
+    const message = assistantMessage("stop", 1_000, [{ type: "text", text: "answer" }]);
+    const { session } = sessionHarness([messageEntry("assistant", null, message, 13_000)]);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      kind: "assistant",
+      createdAt: 1_000,
+      completedAt: 13_000,
+    });
+    projector.dispose();
+  });
+
   it("redacted reasoning 不进入 timeline", () => {
     const message = assistantMessage("stop", 10, [
       { type: "thinking", thinking: "encrypted", redacted: true },
@@ -523,8 +536,13 @@ function customEntry(
   };
 }
 
-function messageEntry(id: string, parentId: string | null, message: AgentSession["messages"][number]): SessionEntry {
-  return { type: "message", id, parentId, timestamp: iso(message.timestamp), message };
+function messageEntry(
+  id: string,
+  parentId: string | null,
+  message: AgentSession["messages"][number],
+  persistedAt = message.timestamp,
+): SessionEntry {
+  return { type: "message", id, parentId, timestamp: iso(persistedAt), message };
 }
 
 function iso(timestamp: number): string {

@@ -1,5 +1,5 @@
-appId: works.earendil.pi.desktop
-productName: pi desktop
+appId: com.meta-agent.desktop
+productName: Meta Agent
 asar: true
 directories:
   buildResources: build

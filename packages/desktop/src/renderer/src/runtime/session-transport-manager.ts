@@ -194,6 +194,7 @@ export class SessionTransportManager {
       throw new Error("Session bootstrap identity does not match cache record");
     }
     record.stores.timeline.replace(bootstrap.timeline);
+    record.stores.runActivity.sync(bootstrap.timeline);
     record.stores.control.replace(bootstrap.control);
     record.stores.workbench.replace(workbench);
     record.stores.summary.set({
@@ -241,6 +242,7 @@ export class SessionTransportManager {
     try {
       record.stores.timeline.apply(update.batch);
       const snapshot = record.stores.timeline.getSnapshot();
+      record.stores.runActivity.sync(snapshot);
       record.stores.summary.set({
         running: snapshot.phase === "running" || snapshot.phase === "retrying",
         loading: snapshot.phase === "compacting" || snapshot.phase === "tree-navigation",

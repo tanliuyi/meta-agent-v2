@@ -1,11 +1,16 @@
 import { createContext, type ReactNode, useContext, useMemo, useSyncExternalStore } from "react";
-import type { WorkbenchState } from "../../../shared/contracts.ts";
+import type { SessionBranchResult, ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 
 interface SessionScope {
   record: CachedSessionRecord;
   active: boolean;
+  commandsReady: boolean;
   clearQueue(): Promise<void>;
+  branch(sourceEntryId: string): Promise<SessionBranchResult>;
+  setModel(provider: string, modelId: string): Promise<void>;
+  setThinking(level: ThinkingLevel): Promise<void>;
+  syncEditorText(text: string): Promise<void>;
   updateWorkbench(value: Partial<WorkbenchState>): void;
 }
 

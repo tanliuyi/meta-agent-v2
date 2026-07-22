@@ -9,6 +9,8 @@ import { useDesktopActions, useDesktopSelector } from "../../state/desktop-conte
 import { selectHasAvailableProject } from "../../state/desktop-selectors.ts";
 import { useLayout } from "../../state/layout.tsx";
 import { getSidebarMaxWidth, SIDEBAR_MIN_WIDTH } from "../../state/layout-preference.ts";
+import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
+import { draftSearch } from "../../state/session-navigation.ts";
 import { runControlledThreadAction } from "../../state/thread-list-commands.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { ProjectList } from "./project-list.tsx";
@@ -17,6 +19,7 @@ import { ProjectList } from "./project-list.tsx";
 export const Sidebar = memo(function Sidebar() {
   const actions = useDesktopActions();
   const canStartDraft = useDesktopSelector(selectHasAvailableProject);
+  const { draftMaterializing } = useSessionCacheSnapshot();
   const { sidebarWidth, setSidebarWidth } = useLayout();
   const matchRoute = useMatchRoute();
   const navigate = useNavigate();
@@ -39,7 +42,7 @@ export const Sidebar = memo(function Sidebar() {
     (projectId?: string) => {
       void navigate({
         to: "/new",
-        search: projectId ? { projectId } : undefined,
+        search: draftSearch(projectId),
       });
     },
     [navigate],
@@ -71,7 +74,7 @@ export const Sidebar = memo(function Sidebar() {
         <nav className="sidebar-actions" aria-label="主要操作">
           <Button
             variant="ghost"
-            disabled={!canStartDraft}
+            disabled={!canStartDraft || draftMaterializing}
             className="hover:bg-muted data-active:bg-muted h-8 w-full justify-start gap-2 rounded-md px-2.5 text-sm font-normal"
             onClick={(event) =>
               runControlledThreadAction(event, () => {
@@ -92,13 +95,13 @@ export const Sidebar = memo(function Sidebar() {
             aria-label="添加项目"
             tooltip="添加项目"
             side="top"
-            onClick={() => void actions.chooseProject()}
+            onClick={() => void actions.chooseProject().catch(() => undefined)}
           >
             <Plus />
           </TooltipIconButton>
         </div>
         <ScrollArea className="sidebar-projects">
-          <ProjectList activeProjectId={activeProjectId} newTaskDisabled={false} onNewTask={startDraft} />
+          <ProjectList activeProjectId={activeProjectId} newTaskDisabled={draftMaterializing} onNewTask={startDraft} />
         </ScrollArea>
         <div className="sidebar-footer">
           <Link to="/settings/personalization" search={settingsSearch} className="sidebar-settings-link">

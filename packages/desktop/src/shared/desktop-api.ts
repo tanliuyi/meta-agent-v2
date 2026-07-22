@@ -63,7 +63,7 @@ export interface DesktopApi {
     onProgress(listener: (progress: NodeRuntimeProgress) => void): () => void;
   };
   links: {
-    open(url: string): Promise<void>;
+    open(projectId: string, url: string): Promise<void>;
   };
   models: {
     getConfig(): Promise<ModelsConfigSnapshot>;
@@ -122,8 +122,8 @@ export interface DesktopApi {
   files: {
     list(projectId: string, path?: string, query?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
-    resolvePath(path: string): Promise<string>;
-    open(path: string): Promise<void>;
+    resolvePath(projectId: string, path: string): Promise<string>;
+    open(projectId: string, path: string): Promise<void>;
   };
   terminals: {
     open(

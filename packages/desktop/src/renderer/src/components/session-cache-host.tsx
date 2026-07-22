@@ -1,21 +1,19 @@
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
-import { CachedSessionActivity } from "./cached-session-activity.tsx";
+import { SessionProvider } from "./session-provider.tsx";
+import { SessionSurface } from "./session-surface.tsx";
 
 interface SessionCacheHostProps {
   records: CachedSessionRecord[];
   activeKey: string | null;
 }
 
-/**
- * 对所有已注册 record 渲染稳定 keyed activity。
- * 每个 Activity 持有独立的 SessionProvider 和 assistant-ui runtime。
- */
+/** Mounts UI only for the active record; inactive records retain data but no React subtree. */
 export function SessionCacheHost({ records, activeKey }: SessionCacheHostProps) {
+  const activeRecord = activeKey ? records.find((record) => record.key === activeKey) : undefined;
+  if (!activeRecord) return null;
   return (
-    <>
-      {records.map((record) => (
-        <CachedSessionActivity key={record.key} record={record} active={record.key === activeKey} />
-      ))}
-    </>
+    <SessionProvider key={activeRecord.key} record={activeRecord} active>
+      <SessionSurface />
+    </SessionProvider>
   );
 }

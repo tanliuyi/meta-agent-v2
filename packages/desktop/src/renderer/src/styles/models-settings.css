@@ -287,7 +287,7 @@
   justify-content: space-between;
   padding: 0 0.5625rem;
   border: 0.0625rem solid hsl(var(--input));
-  border-radius: var(--shape-radius-sm);
+  border-radius: 0.625rem;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
   font-size: var(--type-size-control);

@@ -283,13 +283,17 @@
   display: grid;
   gap: 4px;
   margin: 0 14px -10px;
-  padding: 8px 12px 16px;
+  padding: 8px 12px 12px;
   overflow: hidden;
-  border: 1px solid hsl(var(--border) / 0.8);
+  border: 1px solid hsl(var(--foreground) / 0.07);
   border-bottom: 0;
   border-radius: var(--shape-radius-lg) var(--shape-radius-lg) 0 0;
-  background: color-mix(in oklab, var(--composer-background) 92%, hsl(var(--background)));
-  box-shadow: var(--elevation-composer);
+  background: hsl(var(--background) / 0.52);
+  box-shadow:
+    var(--composer-queue-shadow),
+    inset 0 1px 0 hsl(var(--background) / 0.72);
+  -webkit-backdrop-filter: saturate(145%) blur(24px);
+  backdrop-filter: saturate(145%) blur(24px);
 }
 .composer-queue-header {
   display: flex;
@@ -315,19 +319,19 @@
   font-variant-numeric: tabular-nums;
 }
 
-.composer-queue-header .composer-queue-clear {
+.composer-queue-clear {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   color: hsl(var(--muted-foreground) / 0.7);
   transition: color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
-.composer-queue-header .composer-queue-clear:hover {
+.composer-queue-clear:hover {
   color: hsl(var(--destructive) / 0.85);
 }
 
-.composer-queue-header .composer-queue-clear svg {
+.composer-queue-clear svg {
   width: 11px;
   height: 11px;
   opacity: 0.6;
@@ -353,7 +357,7 @@
   align-items: center;
   gap: 5px;
   color: hsl(var(--muted-foreground));
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 .composer-queue-mode::before {

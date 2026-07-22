@@ -3,8 +3,6 @@ import type {
   PiQueueItem,
   PiThreadPhase,
   PiThreadSnapshot,
-  SessionBranchInput,
-  SessionBranchResult,
   SessionCommandResult,
   SessionPromptInput,
 } from "../../../shared/contracts.ts";
@@ -77,6 +75,7 @@ export class PiCommandCoordinator {
     if (!message.sourceId) throw new Error("assistant-ui edit 缺少 sourceId");
     const input = await promptInput(message, target, undefined);
     const result = await window.desktop.sessions.edit({ ...input, sourceId: message.sourceId });
+    assertAccepted(result);
     if (result.error) this.report(result.error);
   };
 
@@ -91,20 +90,8 @@ export class PiCommandCoordinator {
       threadId: target.threadId,
       parentId: userEntryId,
     });
+    assertAccepted(result);
     if (result.error) this.report(result.error);
-  };
-
-  /** 从指定 entry fork 出新 session（新文件），返回新会话 id。 */
-  branch = async (sourceEntryId: string, position?: SessionBranchInput["position"]): Promise<SessionBranchResult> => {
-    this.assertIdle("branch");
-    const target = this.requireTarget();
-    return window.desktop.sessions.branch({
-      requestId: crypto.randomUUID(),
-      projectId: target.projectId,
-      threadId: target.threadId,
-      sourceEntryId,
-      ...(position ? { position } : {}),
-    });
   };
 
   cancel = async (): Promise<void> => {
@@ -170,6 +157,7 @@ export class PiCommandCoordinator {
       throw new Error("Pi running queue 不接受仅包含图片的输入");
     const input = await promptInput(message, target, desiredMode, requestId);
     const result = await window.desktop.sessions.prompt(input);
+    assertAccepted(result);
     if (result.error) this.report(result.error);
     return result;
   }
@@ -216,6 +204,10 @@ export class PiCommandCoordinator {
   private forgetInput(requestId: string): void {
     this.pendingInputs.delete(requestId);
   }
+}
+
+function assertAccepted(result: SessionCommandResult): void {
+  if (!result.accepted) throw new Error(result.error ?? "Pi 未接受此输入");
 }
 
 async function promptInput(

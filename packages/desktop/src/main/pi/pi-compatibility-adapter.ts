@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { type AgentSession, VERSION } from "@earendil-works/pi-coding-agent";
+import { type AgentSession, SessionManager, VERSION } from "@earendil-works/pi-coding-agent";
 import type {
   ClearedQueue,
   SessionBranchInput,
@@ -61,13 +60,16 @@ export class PiCompatibilityAdapter {
   async branch(input: SessionBranchInput): Promise<SessionBranchResult> {
     const manager = this.session.sessionManager;
     if (!manager.isPersisted()) throw new Error("只能 fork 已持久化的 session");
+    const sourceSessionFile = this.session.sessionFile;
+    if (!sourceSessionFile) throw new Error("已持久化的 Pi session 缺少文件路径");
     const entry = manager.getEntry(input.sourceEntryId);
     if (!entry) throw new Error(`Pi branch 目标 entry 不存在: ${input.sourceEntryId}`);
-    // createBranchedSession 复制 root→leaf 入新文件，等价 Runtime.fork position="at"。
-    const branchSessionFile = manager.createBranchedSession(input.sourceEntryId);
+    // createBranchedSession 会原地替换 manager identity；必须在独立 manager 上执行，保持 source worker 归属不变。
+    const branchManager = SessionManager.open(sourceSessionFile, manager.getSessionDir(), manager.getCwd());
+    const branchSessionFile = branchManager.createBranchedSession(input.sourceEntryId);
     if (!branchSessionFile) throw new Error("Pi createBranchedSession 未生成新 session 文件");
-    const header = readSessionHeader(branchSessionFile);
-    if (!header) throw new Error(`Pi branch 新 session 文件 header 无效: ${branchSessionFile}`);
+    const header = branchManager.getHeader();
+    if (!header?.id) throw new Error(`Pi branch 新 session header 无效: ${branchSessionFile}`);
     return { branchThreadId: header.id, branchSessionFile };
   }
 
@@ -113,14 +115,19 @@ export class PiCompatibilityAdapter {
   ): Promise<SessionCommandResult> {
     const oldLeaf = this.session.sessionManager.getLeafId();
     await this.navigate(targetId, "Pi extension 取消了 tree navigation", true);
+    let result: SessionCommandResult;
     try {
-      return await this.submit(input, expandPromptTemplates);
+      result = await this.submit(input, expandPromptTemplates);
     } catch (error) {
       if (oldLeaf && this.session.sessionManager.getEntry(oldLeaf)) {
         await this.navigate(oldLeaf, `Pi branch 恢复被取消: ${errorMessage(error)}`);
       }
       throw error;
     }
+    if (!result.accepted && oldLeaf && this.session.sessionManager.getEntry(oldLeaf)) {
+      await this.navigate(oldLeaf, `Pi branch 恢复被取消: ${result.error ?? "Pi 未接受输入"}`);
+    }
+    return result;
   }
 
   private async navigate(targetId: string, cancelledMessage: string, requireUserRewind = false): Promise<void> {
@@ -136,34 +143,43 @@ export class PiCompatibilityAdapter {
   }
 
   private async submit(input: SessionPromptInput, expandPromptTemplates: boolean): Promise<SessionCommandResult> {
-    let accepted = false;
     const queueEligible = this.session.isStreaming;
     if (queueEligible && input.text.trim().length === 0) throw new Error("Pi running queue 不接受仅包含图片的输入");
     this.projector.beginPrompt(input.requestId, input.desiredMode, queueEligible);
-    try {
-      await this.session.prompt(input.text, {
-        images: input.images.map(({ data, mimeType }) => ({ type: "image", data, mimeType })),
-        expandPromptTemplates,
-        source: expandPromptTemplates ? "interactive" : "extension",
-        ...(queueEligible ? { streamingBehavior: input.desiredMode ?? "followUp" } : {}),
-        preflightResult: (success) => {
-          accepted = success;
-          this.projector.markPromptPreflight(input.requestId, success);
-        },
-      });
-      if (!accepted) throw new Error("Pi prompt resolved without preflight acceptance");
-      return { accepted, queued: this.projector.hasQueuedRequest(input.requestId) };
-    } catch (error) {
-      if (accepted)
-        return {
-          accepted: true,
-          queued: this.projector.hasQueuedRequest(input.requestId),
-          error: errorMessage(error),
-        };
-      throw error;
-    } finally {
-      this.projector.finishPrompt(input.requestId);
-    }
+    return new Promise((resolve, reject) => {
+      let preflight: boolean | undefined;
+      const prompt = Promise.resolve(
+        this.session.prompt(input.text, {
+          images: input.images.map(({ data, mimeType }) => ({ type: "image", data, mimeType })),
+          expandPromptTemplates,
+          source: expandPromptTemplates ? "interactive" : "extension",
+          ...(queueEligible ? { streamingBehavior: input.desiredMode ?? "followUp" } : {}),
+          preflightResult: (success) => {
+            if (preflight !== undefined) return;
+            preflight = success;
+            this.projector.markPromptPreflight(input.requestId, success);
+            if (success) {
+              resolve({ accepted: true, queued: this.projector.hasQueuedRequest(input.requestId) });
+            }
+          },
+        }),
+      );
+      void prompt
+        .then(
+          () => {
+            if (preflight === undefined) {
+              reject(new Error("Pi prompt resolved without preflight acceptance"));
+            } else if (!preflight) {
+              resolve({ accepted: false, queued: false });
+            }
+          },
+          (error: unknown) => {
+            if (preflight === undefined) reject(error);
+            else if (!preflight) resolve({ accepted: false, queued: false, error: errorMessage(error) });
+          },
+        )
+        .finally(() => this.projector.finishPrompt(input.requestId));
+    });
   }
 }
 
@@ -226,31 +242,4 @@ function userInput(content: Extract<AgentSession["messages"][number], { role: "u
 
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
-}
-
-/** 读取 fork 出来的新 session 文件首行 header，避免为了一个 id 加载整份 jsonl。 */
-function readSessionHeader(path: string): { id: string } | null {
-  let firstLine = "";
-  try {
-    const content = readFileSync(path, "utf8");
-    firstLine = content.split(/\r?\n/, 1)[0] ?? "";
-  } catch {
-    return null;
-  }
-  if (!firstLine) return null;
-  try {
-    const parsed: unknown = JSON.parse(firstLine);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "type" in parsed &&
-      parsed.type === "session" &&
-      "id" in parsed &&
-      typeof (parsed as { id: unknown }).id === "string"
-    )
-      return { id: (parsed as { id: string }).id };
-  } catch {
-    return null;
-  }
-  return null;
 }

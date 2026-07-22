@@ -8,21 +8,42 @@ import { ToolView } from "../tool-view.tsx";
 import { ChainOfThoughtGroup } from "./chain-of-thought-group.tsx";
 import { RunActivityGroup } from "./run-activity-group.tsx";
 
-export function AssistantMessageContent({ isRunActivityRunning }: { isRunActivityRunning: boolean }) {
+export function AssistantMessageContent({
+  isRunActivityRunning,
+  isMessageRunning,
+}: {
+  isRunActivityRunning: boolean;
+  isMessageRunning: boolean;
+}) {
   const { showThinking } = useThinkingVisibility();
   const messageParts = useAuiState((state) => state.message.parts);
+  const toolUIs = useAuiState((state) => state.tools.toolUIs);
   const runStartedAt = useAuiState((state) => state.message.createdAt.getTime());
-  const isMessageRunning = useAuiState((state) => state.message.status?.type === "running");
+  const runCompletedAt = useAuiState((state) => piCompletedAt(state.message.metadata.custom));
   const groupMessagePart = useMemo(() => createRunGroupPart(messageParts), [messageParts]);
+  const hasGroupedRunActivity = useMemo(
+    () => messageParts.some((part) => groupMessagePart(part, { toolUIs })[0] === "group-runActivity"),
+    [groupMessagePart, messageParts, toolUIs],
+  );
 
   return (
     <div className="flex flex-col gap-3 text-sm leading-relaxed text-foreground wrap-break-word">
+      {isRunActivityRunning && !hasGroupedRunActivity ? (
+        <RunActivityGroup running startedAt={runStartedAt} completedAt={runCompletedAt} hasContent={false}>
+          {null}
+        </RunActivityGroup>
+      ) : null}
       <MessagePrimitive.GroupedParts groupBy={groupMessagePart} indicator="never">
         {({ part, children }) => {
           switch (part.type) {
             case "group-runActivity":
               return (
-                <RunActivityGroup running={isRunActivityRunning} startedAt={runStartedAt}>
+                <RunActivityGroup
+                  running={isRunActivityRunning}
+                  startedAt={runStartedAt}
+                  completedAt={runCompletedAt}
+                  hasContent={showThinking || part.indices.some((index) => messageParts[index]?.type !== "reasoning")}
+                >
                   {children}
                 </RunActivityGroup>
               );
@@ -61,4 +82,11 @@ export function AssistantMessageContent({ isRunActivityRunning }: { isRunActivit
       </MessagePrimitive.Error>
     </div>
   );
+}
+
+function piCompletedAt(custom: unknown): number | undefined {
+  if (!custom || typeof custom !== "object" || !("pi" in custom)) return undefined;
+  const pi = custom.pi;
+  if (!pi || typeof pi !== "object" || !("completedAt" in pi)) return undefined;
+  return typeof pi.completedAt === "number" && Number.isFinite(pi.completedAt) ? pi.completedAt : undefined;
 }

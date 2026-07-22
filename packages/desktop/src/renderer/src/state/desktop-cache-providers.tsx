@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { TransportProvider } from "../runtime/session-transport-context";
+import { DraftSessionProvider } from "./draft-session-context";
 import { SessionCacheProvider } from "./session-cache-context";
 
 /**
@@ -9,7 +10,9 @@ import { SessionCacheProvider } from "./session-cache-context";
 export function DesktopCacheProviders({ children }: { children: ReactNode }) {
   return (
     <TransportProvider>
-      <SessionCacheProvider>{children}</SessionCacheProvider>
+      <SessionCacheProvider>
+        <DraftSessionProvider>{children}</DraftSessionProvider>
+      </SessionCacheProvider>
     </TransportProvider>
   );
 }

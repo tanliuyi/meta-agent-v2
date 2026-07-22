@@ -156,10 +156,24 @@ describe("PiMessageRepositoryConverter", () => {
     ]);
   });
 
+  it("在 metadata 中保留 Pi canonical status 与完成时间", () => {
+    const assistant = {
+      ...assistantNode("a", null),
+      completedAt: 12_000,
+      status: { type: "running" as const },
+    };
+    const repository = new PiMessageRepositoryConverter().build(snapshot([assistant], "a"));
+
+    expect(repository.messages[0]?.message.metadata.custom).toMatchObject({
+      pi: { status: { type: "running" }, completedAt: 12_000 },
+    });
+  });
+
   it("将同一轮连续 assistant 节点合并，使两个 text 之间的 reasoning/tool 保持相邻", () => {
     const user = userNode("u", null);
     const first = {
       ...assistantNode("a-1", "u"),
+      createdAt: 1_000,
       content: [
         { id: "a-1:text:0", type: "text", text: "before" },
         { id: "a-1:reasoning:1", type: "reasoning", text: "first reasoning" },
@@ -175,6 +189,7 @@ describe("PiMessageRepositoryConverter", () => {
     } satisfies PiAssistantMessage;
     const third = {
       ...assistantNode("a-3", "a-2"),
+      completedAt: 13_000,
       content: [{ id: "a-3:text:0", type: "text", text: "after" }],
     } satisfies PiAssistantMessage;
     const nextUser = userNode("u-2", "a-3");
@@ -190,6 +205,8 @@ describe("PiMessageRepositoryConverter", () => {
     const merged = repository.messages[1]?.message;
     expect(merged?.role).toBe("assistant");
     if (merged?.role !== "assistant") throw new Error("assistant message missing");
+    expect(merged.createdAt.getTime()).toBe(1_000);
+    expect(merged.metadata.custom).toMatchObject({ pi: { completedAt: 13_000 } });
     expect(merged.content.map((part) => part.type)).toEqual([
       "text",
       "reasoning",

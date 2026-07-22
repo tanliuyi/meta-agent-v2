@@ -1,7 +1,6 @@
 import { ComposerPrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
 import { type FormEvent, useCallback, useMemo, useState } from "react";
 import type { SessionControlState } from "../../../../shared/contracts.ts";
-import { usePiThreadPhase } from "../../runtime/use-pi-thread-snapshot.ts";
 import { errorMessage } from "../../shared/lib/error-message.ts";
 import { ComposerAddAttachment } from "../assistant-ui/attachment/composer-add-attachment.tsx";
 import { ComposerAttachments } from "../assistant-ui/attachment/composer-attachments.tsx";
@@ -29,8 +28,8 @@ export function Composer(props: ComposerProps) {
   const [error, setError] = useState<string | null>(null);
   const materializing = props.mode === "draft" && props.phase === "materializing";
   const isRunning = useAuiState((state) => state.thread.isRunning);
-  const piPhase = usePiThreadPhase();
-  const isCancelable = isRunning || piPhase === "compacting" || piPhase === "tree-navigation";
+  const isCancelable =
+    isRunning || (props.mode === "session" && (props.phase === "compacting" || props.phase === "tree-navigation"));
   const extensionWidgets = props.mode === "session" ? props.widgets : EMPTY_WIDGETS;
   const aboveWidgets = useMemo(
     () => extensionWidgets.filter(({ placement }) => placement === "aboveEditor"),
@@ -102,7 +101,7 @@ export function Composer(props: ComposerProps) {
   const readiness = props.mode === "draft" ? props.config?.readiness : props.readiness;
   const readinessError = readiness?.state === "ready" ? null : readiness?.message;
   const configLoading = props.mode === "draft" && props.configLoading;
-  const disabled = sending || selectingProject || materializing;
+  const disabled = sending || selectingProject || materializing || (props.mode === "session" && !props.commandsReady);
   const attachmentsDisabled = disabled || readiness?.state !== "ready";
 
   return (
@@ -113,10 +112,19 @@ export function Composer(props: ComposerProps) {
           threadId={props.threadId}
           editorRevision={props.editorRevision}
           editorText={props.editorText}
+          disabled={!props.commandsReady}
+          onSync={props.onSyncEditorText}
           onError={reportError}
         />
       ) : null}
-      {props.mode === "session" ? <ComposerQueue onClear={props.onClearQueue} onError={reportError} /> : null}
+      {props.mode === "session" ? (
+        <ComposerQueue
+          items={props.queue}
+          disabled={!props.commandsReady}
+          onClear={props.onClearQueue}
+          onError={reportError}
+        />
+      ) : null}
 
       <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
         <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
@@ -195,21 +203,19 @@ export function Composer(props: ComposerProps) {
                     <ModelSelect
                       availableModels={props.models}
                       model={props.model}
+                      disabled={disabled || props.phase !== "idle"}
                       onValueChange={(provider, modelId) => {
                         setError(null);
-                        void window.desktop.sessions
-                          .setModel(props.projectId, props.threadId, provider, modelId)
-                          .catch(reportError);
+                        void props.onSetModel(provider, modelId).catch(reportError);
                       }}
                     />
                     <ThinkingSelect
                       value={props.thinkingLevel}
                       levels={props.thinkingLevels}
+                      disabled={disabled || props.phase !== "idle"}
                       onValueChange={(level) => {
                         setError(null);
-                        void window.desktop.sessions
-                          .setThinking(props.projectId, props.threadId, level)
-                          .catch(reportError);
+                        void props.onSetThinking(level).catch(reportError);
                       }}
                     />
                   </>

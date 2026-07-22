@@ -75,6 +75,7 @@ describe("CachedSessionRecord", () => {
     expect(record.stores.control).toBeDefined();
     expect(record.stores.workbench).toBeDefined();
     expect(record.stores.summary).toBeDefined();
+    expect(record.stores.runActivity).toBeDefined();
     expect(record.stores.connection).toBeDefined();
   });
 
@@ -146,6 +147,43 @@ describe("SessionSummaryStore", () => {
     expect(record.stores.summary.getSnapshot().running).toBe(true);
     record.stores.summary.setRunning(false);
     expect(record.stores.summary.getSnapshot().running).toBe(false);
+  });
+});
+
+describe("SessionRunActivityStore", () => {
+  it("真实 Pi assistant 开始后跨 running 步骤保留参与状态，并在 run 结束时清空", () => {
+    const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
+    const idle = record.stores.timeline.getSnapshot();
+    const runningAssistant = {
+      id: "assistant-1",
+      parentId: null,
+      createdAt: 1,
+      kind: "assistant" as const,
+      content: [],
+      status: { type: "running" as const },
+      provenance: { api: "test", provider: "test", model: "test" },
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    };
+
+    record.stores.runActivity.sync({ ...idle, phase: "running", nodes: [runningAssistant] });
+    expect(record.stores.runActivity.hasParticipated()).toBe(true);
+
+    record.stores.runActivity.sync({
+      ...idle,
+      phase: "running",
+      nodes: [{ ...runningAssistant, status: { type: "complete", reason: "stop" } }],
+    });
+    expect(record.stores.runActivity.hasParticipated()).toBe(true);
+
+    record.stores.runActivity.sync(idle);
+    expect(record.stores.runActivity.hasParticipated()).toBe(false);
   });
 });
 

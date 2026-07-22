@@ -99,6 +99,33 @@ describe("SessionRuntime Pi-native commands", () => {
     );
   });
 
+  it("fork session 摘要使用新 header 时间更新 updatedAt", async () => {
+    const session = createSession();
+    const mutable = session as unknown as {
+      messages: AgentSession["messages"];
+      sessionManager: AgentSession["sessionManager"];
+    };
+    mutable.messages = [
+      { role: "user", content: "old prompt", timestamp: 1_000 },
+      { role: "assistant", content: [{ type: "text", text: "old response" }], timestamp: 2_000 },
+    ] as AgentSession["messages"];
+    mutable.sessionManager.getHeader = () => ({
+      id: "forked-thread",
+      timestamp: "2026-07-22T08:00:00.000Z",
+    });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    expect(runtime.threadSummary(false).updatedAt).toBe(Date.parse("2026-07-22T08:00:00.000Z"));
+    await runtime.dispose();
+  });
+
   it("所有 Composer 输入直接交给 session.prompt，并立即更新首条标题", async () => {
     const session = createSession();
     const push = vi.fn();

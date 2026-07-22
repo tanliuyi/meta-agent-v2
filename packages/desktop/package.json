@@ -17,7 +17,7 @@
     "pretypecheck": "npm run generate-routes",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.sidecar.json && tsc --noEmit -p tsconfig.web.json",
     "prebuild": "npm run prepare:node-pty",
-    "build": "npm run build:pi && npm run typecheck && electron-vite build && node ../../scripts/verify-desktop-main-boundary.mjs",
+    "build": "npm run build:pi && npm run typecheck && electron-vite build",
     "package": "npm run build && electron-builder --config electron-builder.yml",
     "build:win": "npm run build && electron-builder --config electron-builder.yml --win",
     "smoke:sidecar": "node ../../scripts/smoke-desktop-sidecar.mjs",

@@ -58,6 +58,16 @@ describe("PiCommandCoordinator", () => {
     expect(setText).toHaveBeenCalledWith("retry me");
   });
 
+  it("accepted false 结果按 preflight rejection 恢复当前 Composer", async () => {
+    prompt.mockResolvedValueOnce({ accepted: false, queued: false, error: "missing credentials" });
+    const coordinator = createCoordinator();
+
+    coordinator.enqueue(userMessage("retry me"), { steer: false });
+
+    await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
+    expect(setText).toHaveBeenCalledWith("retry me");
+  });
+
   it("Pi 已接受后的真实 command error 只报告，不恢复 Composer", async () => {
     prompt.mockResolvedValueOnce({ accepted: true, queued: false, error: "provider failed" });
     const coordinator = createCoordinator();

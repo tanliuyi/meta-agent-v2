@@ -9,7 +9,7 @@ export function Topbar() {
   const { updateWorkbench } = useSessionScope();
   const control = useSessionControl();
   const workbench = useSessionWorkbench();
-  const title = control?.extensionUi.windowTitle ?? control?.title ?? "pi desktop";
+  const title = control?.extensionUi.windowTitle ?? control?.title ?? "Pi Meta Agent";
   const panelOpen = workbench?.panelOpen ?? false;
   const terminalOpen = workbench?.terminalOpen ?? false;
   return (
@@ -17,7 +17,8 @@ export function Topbar() {
       <div className="topbar-title">
         <strong>{title}</strong>
       </div>
-      <div className="topbar-actions">
+      {/* 暂时隐藏 */}
+      {/* <div className="topbar-actions">
         <TooltipIconButton
           variant="ghost"
           size="icon"
@@ -47,7 +48,7 @@ export function Topbar() {
         >
           {panelOpen ? <PanelRightOpen size={15} /> : <PanelRight size={15} />}
         </TooltipIconButton>
-      </div>
+      </div> */}
     </header>
   );
 }

@@ -18,14 +18,17 @@ export function createRunGroupPart(parts: readonly PartState[]) {
     const index = partIndexes.get(part) ?? -1;
     const stepPath = groupMessagePart(part, context);
     const standaloneTool = part.type === "tool-call" && stepPath.length === 0;
-    const eligibleType =
-      part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isNonCompactionNotice(part);
+    const eligibleType = isRunActivityPart(part);
     const belongsToRunGroup =
       index >= 0 && eligibleType && !standaloneTool && (finalTextIndex < 0 || index < finalTextIndex);
     return belongsToRunGroup ? ["group-runActivity", ...stepPath] : stepPath;
   };
   Object.defineProperty(groupPart, GROUP_BY_MEMO_KEY, { value: RUN_GROUP_MEMO_KEY });
   return groupPart;
+}
+
+function isRunActivityPart(part: PartState): boolean {
+  return part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isNonCompactionNotice(part);
 }
 
 function isNonCompactionNotice(part: PartState): boolean {

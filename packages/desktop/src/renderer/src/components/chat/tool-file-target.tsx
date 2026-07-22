@@ -2,14 +2,17 @@ import { Tooltip } from "@renderer/shared/ui/tooltip";
 import { TooltipContent } from "@renderer/shared/ui/tooltip-content";
 import { TooltipTrigger } from "@renderer/shared/ui/tooltip-trigger";
 import { type MouseEvent, useEffect, useState } from "react";
+import { useSessionScope } from "../session-context.tsx";
 
 export function ToolFileTarget({ path }: { path: string }) {
+  const { record } = useSessionScope();
+  const projectId = record.identity.projectId;
   const [absolutePath, setAbsolutePath] = useState(path);
 
   useEffect(() => {
     let active = true;
     void window.desktop.files
-      .resolvePath(path)
+      .resolvePath(projectId, path)
       .then((resolvedPath) => {
         if (active) setAbsolutePath(resolvedPath);
       })
@@ -17,11 +20,13 @@ export function ToolFileTarget({ path }: { path: string }) {
     return () => {
       active = false;
     };
-  }, [path]);
+  }, [path, projectId]);
 
   function openFile(event: MouseEvent<HTMLButtonElement>): void {
     event.stopPropagation();
-    void window.desktop.files.open(path).catch((error: unknown) => console.error("Failed to open tool file:", error));
+    void window.desktop.files
+      .open(projectId, path)
+      .catch((error: unknown) => console.error("Failed to open tool file:", error));
   }
 
   const segments = path.split(/[\\/]/);

@@ -5,8 +5,10 @@ import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import type { LinkSafetyModalProps } from "streamdown";
+import { useSessionScope } from "../../session-context.tsx";
 
 export function LinkSafetyModal({ url, isOpen, onClose }: LinkSafetyModalProps) {
+  const { record } = useSessionScope();
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="gap-3 sm:max-w-lg">
@@ -18,7 +20,7 @@ export function LinkSafetyModal({ url, isOpen, onClose }: LinkSafetyModalProps) 
           </DialogClose>
           <Button
             onClick={() => {
-              void window.desktop.links.open(url).catch((error: unknown) => {
+              void window.desktop.links.open(record.identity.projectId, url).catch((error: unknown) => {
                 console.error("Failed to open link:", error);
               });
               onClose();

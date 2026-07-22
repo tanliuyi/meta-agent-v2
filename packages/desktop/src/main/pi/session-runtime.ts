@@ -433,11 +433,15 @@ function createSummary(session: AgentSession): Omit<Thread, "projectId" | "archi
   const visible = session.messages.filter((message) => message.role === "user" || message.role === "assistant");
   const first = visible.find((message) => message.role === "user");
   const preview = first?.role === "user" ? contentText(first.content).slice(0, 120) : "";
+  const headerTimestamp = Date.parse(session.sessionManager.getHeader()?.timestamp ?? "");
+  const lastMessageTimestamp = visible.at(-1)?.timestamp ?? 0;
+  const updatedAt =
+    Math.max(lastMessageTimestamp, Number.isFinite(headerTimestamp) ? headerTimestamp : 0) || Date.now();
   return {
     id: session.sessionId,
     title: session.sessionName || preview.slice(0, 48) || "新会话",
     createdAt: visible[0]?.timestamp ?? Date.now(),
-    updatedAt: visible.at(-1)?.timestamp ?? Date.now(),
+    updatedAt,
     messageCount: visible.length,
     preview,
   };

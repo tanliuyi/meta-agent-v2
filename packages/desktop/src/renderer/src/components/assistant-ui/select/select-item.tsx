@@ -8,7 +8,7 @@ export function SelectItem({ className, children, ...props }: ComponentPropsWith
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-lg py-2 ps-3 pe-9 text-sm outline-none select-none",
+        "relative flex w-full cursor-default items-center gap-2 rounded-[0.625rem] py-2 ps-3 pe-9 text-sm outline-none select-none",
         "focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,

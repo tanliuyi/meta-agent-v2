@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority";
 
 export const selectTriggerVariants = cva(
-  "focus-visible:ring-ring/50 data-[placeholder]:text-muted-foreground flex w-fit items-center justify-between gap-2 rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&>span]:line-clamp-1",
+  "focus-visible:ring-ring/50 data-[placeholder]:text-muted-foreground flex w-fit items-center justify-between gap-2 rounded-[0.625rem] text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&>span]:line-clamp-1",
   {
     variants: {
       variant: {

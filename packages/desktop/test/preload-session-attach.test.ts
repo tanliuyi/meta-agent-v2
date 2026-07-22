@@ -83,6 +83,37 @@ describe("preload session attachment leases", () => {
     expect(receivedB).toHaveLength(1);
   });
 
+  it("buffers pushes that arrive before the attach invoke resolves", async () => {
+    const api = requiredApi();
+    const pending = deferred<SessionAttachment>();
+    electron.invoke.mockReset().mockReturnValueOnce(pending.promise);
+    electron.send.mockReset();
+    const received: SessionPushPayload[] = [];
+    const attaching = api.sessions.attach(input("early", "early-request"), (update) => received.push(update));
+
+    push(controlPush("early-attachment", "early", 1));
+    pending.resolve(attachment("early-attachment", "early"));
+    const attached = await attaching;
+
+    expect(api.sessions.flush(attached.attachmentId)).toEqual({ state: "flushed" });
+    expect(received).toHaveLength(1);
+  });
+
+  it("acknowledges late pushes for a detached lease without reviving its listener", async () => {
+    const api = requiredApi();
+    electron.invoke.mockReset().mockResolvedValueOnce(attachment("late", "late-thread"));
+    electron.send.mockReset();
+    const received: SessionPushPayload[] = [];
+    const attached = await api.sessions.attach(input("late-thread", "late-request"), (update) => received.push(update));
+    api.sessions.flush(attached.attachmentId);
+    api.sessions.detach(attached.attachmentId);
+
+    push(controlPush(attached.attachmentId, "late-thread", 7));
+
+    expect(received).toEqual([]);
+    expect(electron.send).toHaveBeenCalledWith(CHANNELS.sessionsAck, attached.attachmentId, "worker-7", 7);
+  });
+
   it("replacement attach 会释放 preload 中的旧 listener", async () => {
     const api = requiredApi();
     electron.invoke
@@ -99,6 +130,14 @@ describe("preload session attachment leases", () => {
     expect(receivedOld).toEqual([]);
   });
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 function requiredApi(): DesktopApi {
   if (!electron.exposed) throw new Error("DesktopApi was not exposed");

@@ -1,5 +1,5 @@
 /** Desktop 与 renderer 之间使用的协议版本。 */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /** 可以安全通过 Electron IPC 传输的 JSON 值。 */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -201,6 +201,7 @@ export type PiAssistantPart =
 
 export interface PiAssistantMessage extends PiTimelineNodeBase {
   kind: "assistant";
+  completedAt?: number;
   content: PiAssistantPart[];
   status: PiAssistantStatus;
   provenance: PiAssistantProvenance;

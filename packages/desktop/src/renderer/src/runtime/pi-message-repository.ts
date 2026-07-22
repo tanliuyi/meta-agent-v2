@@ -203,6 +203,8 @@ export class PiMessageRepositoryConverter {
             kind: "assistant",
             ...(last.sourceEntryId ? { sourceEntryId: last.sourceEntryId } : {}),
             ...(last.label ? { label: last.label } : {}),
+            status: last.status,
+            ...(last.completedAt !== undefined ? { completedAt: last.completedAt } : {}),
             provenance: last.provenance,
             usage: last.usage,
             ...(last.diagnostics !== undefined ? { diagnostics: last.diagnostics } : {}),

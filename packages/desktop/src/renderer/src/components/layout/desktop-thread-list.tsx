@@ -9,8 +9,8 @@ import { Input } from "@renderer/shared/ui/input";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, Thread } from "../../../../shared/contracts.ts";
-import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
-import { selectHasDraft, selectIsDraftMaterializing } from "../../state/desktop-selectors.ts";
+import { useDesktopActions } from "../../state/desktop-context.tsx";
+import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
 import {
   COLLAPSED_THREAD_COUNT,
   isThreadListExpanded,
@@ -37,8 +37,7 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const activeThreadId = params.projectId === project.id ? (params.threadId ?? null) : null;
-  const hasDraft = useDesktopSelector(selectHasDraft);
-  const navigationDisabled = useDesktopSelector(selectIsDraftMaterializing);
+  const { draftMaterializing: navigationDisabled } = useSessionCacheSnapshot();
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
@@ -49,13 +48,11 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
     () => visibleThreadsByArchiveState(threads, false, visibleLimit),
     [threads, visibleLimit],
   );
-  const threadsById = useMemo(() => new Map(threads.map((thread) => [thread.id, thread])), [threads]);
-  const visibleThreadIds = useMemo(() => new Set(visibleThreads.map(({ id }) => id)), [visibleThreads]);
   const hasMoreThreads = regularThreadCount > visibleLimit;
   const isExpanded = isThreadListExpanded(visibleLimit, regularThreadCount);
 
   const runAction = useCallback((key: string, action: () => Promise<void>) => {
-    void runPendingThreadAction(pendingActions.current, key, setPendingKeys, action);
+    void runPendingThreadAction(pendingActions.current, key, setPendingKeys, action).catch(() => undefined);
   }, []);
 
   const commitRename = useCallback(

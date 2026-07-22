@@ -1,76 +1,91 @@
-import type { AssistantRuntime } from "@assistant-ui/react";
-import { type ShouldBlockFn, useBlocker, useNavigate, useSearch } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { DraftSessionConfig, Project, ThinkingLevel } from "../../../shared/contracts.ts";
+import { useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo } from "react";
+import { useStore } from "zustand";
+import type { ThinkingLevel } from "../../../shared/contracts.ts";
 import { toPiImageInputs } from "../runtime/image-attachments.ts";
-import { Button } from "../shared/ui/button.tsx";
-import { Dialog } from "../shared/ui/dialog.tsx";
-import { DialogContent } from "../shared/ui/dialog-content.tsx";
-import { DialogDescription } from "../shared/ui/dialog-description.tsx";
-import { DialogTitle } from "../shared/ui/dialog-title.tsx";
+import { selectProjects } from "../state/desktop-selectors.ts";
+import { dispatchDesktop } from "../state/desktop-store.ts";
+import { useDesktopStore } from "../state/desktop-store-context.tsx";
+import { materializeDraftSession } from "../state/draft-creation.ts";
+import { useDraftSession } from "../state/draft-session-context.tsx";
+import { useSessionCache } from "../state/session-cache-context.tsx";
+import { resolveDraftProjectId, useDraftSearchParams } from "../state/session-navigation.ts";
 import { DraftComposerThread } from "./chat/draft-composer-thread.tsx";
 import { EmptyChatState } from "./chat/empty-chat-state.tsx";
 
-type DraftPhase = "loading" | "editing" | "materializing" | "no-project";
-
 /** Loads draft configuration and materializes the first accepted prompt into a routed Pi session. */
-export function NewSessionSurface({ runtime }: { runtime: AssistantRuntime }) {
-  const search = useSearch({ strict: false }) as Record<string, string | undefined>;
+export function NewSessionSurface() {
+  const search = useDraftSearchParams();
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState<string | null>(search.projectId ?? null);
-  const [config, setConfig] = useState<DraftSessionConfig | null>(null);
-  const [phase, setPhase] = useState<DraftPhase>("loading");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const submitInFlight = useRef(false);
-  const committedTarget = useRef<{ projectId: string; threadId: string } | null>(null);
-  const allowNavigation = useRef(false);
-  const draftIsDirty = useCallback(() => !runtime.thread.composer.getState().isEmpty, [runtime]);
-  const shouldBlockNavigation = useCallback<ShouldBlockFn>(
-    ({ next }) => next.pathname !== "/new" && !allowNavigation.current && draftIsDirty(),
-    [draftIsDirty],
-  );
-  const blocker = useBlocker({
-    shouldBlockFn: shouldBlockNavigation,
-    enableBeforeUnload: draftIsDirty,
-    withResolver: true,
-  });
+  const sessionCache = useSessionCache();
+  const desktopStore = useDesktopStore();
+  const draft = useDraftSession();
+  const { runtime, projectId, setProjectId, config, setConfig, configProjectId, setConfigProjectId, phase, setPhase } =
+    draft;
+  const {
+    loadError,
+    setLoadError,
+    navigationTarget,
+    setNavigationTarget,
+    submitInFlight,
+    createRequestIds,
+    projectFallbackAllowed,
+  } = draft;
+  const catalogProjects = useStore(desktopStore, selectProjects);
+  const catalogLoading = useStore(desktopStore, (state) => state.loading);
+  const projects = useMemo(() => catalogProjects.filter((project) => project.available), [catalogProjects]);
 
   useEffect(() => {
-    let active = true;
-    void window.desktop.projects
-      .list()
-      .then((next) => {
-        if (!active) return;
-        const available = next.filter((project) => project.available);
-        setProjects(available);
-        setProjectId((selected) =>
-          available.some((project) => project.id === selected) ? selected : (available[0]?.id ?? null),
-        );
-        setPhase(available.length ? "editing" : "no-project");
-      })
-      .catch((reason: unknown) => {
-        if (!active) return;
-        setLoadError(reason instanceof Error ? reason.message : String(reason));
-        setPhase("no-project");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (!navigationTarget) return;
+    const target = navigationTarget;
+    setNavigationTarget(null);
+    void navigate({ to: "/projects/$projectId/session/$threadId", params: target, replace: true }).catch(
+      (reason: unknown) => setLoadError(reason instanceof Error ? reason.message : String(reason)),
+    );
+  }, [navigate, navigationTarget, setLoadError, setNavigationTarget]);
 
   useEffect(() => {
-    if (!projectId) {
-      setConfig(null);
+    if (catalogLoading) {
+      setPhase((current) => (current === "materializing" ? current : "loading"));
       return;
     }
+    setProjectId((selected) => {
+      const resolved = resolveDraftProjectId(projects, search.projectId, selected, projectFallbackAllowed.current);
+      if (search.projectId && resolved === search.projectId) projectFallbackAllowed.current = true;
+      else if (selected && resolved === null) projectFallbackAllowed.current = false;
+      return resolved;
+    });
+    setPhase((current) => {
+      if (current === "materializing") return current;
+      return projects.length ? "editing" : "no-project";
+    });
+  }, [catalogLoading, projects, search.projectId]);
+
+  useEffect(() => {
+    if (!catalogLoading && projectId && !projects.some((project) => project.id === projectId)) {
+      setConfig(null);
+      setConfigProjectId(null);
+      setLoadError(null);
+    }
+  }, [catalogLoading, projectId, projects]);
+
+  useEffect(() => {
+    if (catalogLoading) return;
+    if (!projectId) {
+      setConfig(null);
+      setConfigProjectId(null);
+      return;
+    }
+    if (configProjectId === projectId) return;
     let active = true;
     setConfig(null);
     setLoadError(null);
     void window.desktop.sessions
       .getDraftConfig(projectId)
       .then((next) => {
-        if (active) setConfig(next);
+        if (!active) return;
+        setConfig(next);
+        setConfigProjectId(projectId);
       })
       .catch((reason: unknown) => {
         if (active) setLoadError(reason instanceof Error ? reason.message : String(reason));
@@ -78,11 +93,12 @@ export function NewSessionSurface({ runtime }: { runtime: AssistantRuntime }) {
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [catalogLoading, configProjectId, projectId]);
 
   const project = projects.find((entry) => entry.id === projectId) ?? null;
 
   async function selectProject(nextProjectId: string) {
+    projectFallbackAllowed.current = true;
     setProjectId(nextProjectId);
     await navigate({ to: "/new", search: { projectId: nextProjectId }, replace: true });
   }
@@ -110,70 +126,49 @@ export function NewSessionSurface({ runtime }: { runtime: AssistantRuntime }) {
 
   async function submit() {
     if (submitInFlight.current) return;
-    if (committedTarget.current) {
-      submitInFlight.current = true;
-      allowNavigation.current = true;
-      try {
-        await navigate({
-          to: "/projects/$projectId/session/$threadId",
-          params: committedTarget.current,
-          replace: true,
-        });
-      } finally {
-        allowNavigation.current = false;
-        submitInFlight.current = false;
-      }
-      return;
-    }
     if (!projectId || !config?.model || config.readiness.state !== "ready") return;
     const composer = runtime.thread.composer;
     const state = composer.getState();
     if (state.isEmpty) return;
     submitInFlight.current = true;
+    sessionCache.setDraftMaterializing(true);
     setPhase("materializing");
-    let threadId: string | null = null;
-    let rejectedByPi = false;
     try {
       const images = await toPiImageInputs(state.attachments);
-      const bootstrap = await window.desktop.sessions.create({
-        projectId,
-        createRequestId: crypto.randomUUID(),
-        model: { provider: config.model.provider, id: config.model.id },
-        thinkingLevel: config.thinkingLevel,
-      });
-      threadId = bootstrap.threadId;
-      const result = await window.desktop.sessions.prompt({
-        requestId: crypto.randomUUID(),
-        projectId,
-        threadId,
-        text: state.text,
-        images,
-      });
-      if (!result.accepted) {
-        rejectedByPi = true;
-        throw new Error(result.error ?? "Pi 未接受此输入");
-      }
-      committedTarget.current = { projectId, threadId };
-      allowNavigation.current = true;
-      await navigate({ to: "/projects/$projectId/session/$threadId", params: committedTarget.current, replace: true });
+      const materialized = await materializeDraftSession(
+        {
+          projectId,
+          model: { provider: config.model.provider, id: config.model.id },
+          thinkingLevel: config.thinkingLevel,
+          text: state.text,
+          images,
+        },
+        {
+          requestIds: createRequestIds,
+          sessions: window.desktop.sessions,
+          cache: sessionCache,
+          onMaterialized(bootstrap) {
+            dispatchDesktop(desktopStore, { type: "thread-catalog-added", bootstrap });
+          },
+        },
+      );
+      const target = materialized.target;
+      const nextProjectId = projects.some((project) => project.id === target.projectId)
+        ? target.projectId
+        : (projects[0]?.id ?? null);
+      await draft.clear(nextProjectId, target);
     } catch (reason) {
-      if (threadId && rejectedByPi) {
-        await window.desktop.sessions.remove(projectId, threadId).catch(() => undefined);
-      } else if (threadId && !committedTarget.current) {
-        committedTarget.current = { projectId, threadId };
-        setLoadError("会话已创建，但发送结果未知。再次发送将重试打开该会话。");
-      }
       setPhase("editing");
       throw reason;
     } finally {
-      allowNavigation.current = false;
       submitInFlight.current = false;
+      sessionCache.setDraftMaterializing(false);
     }
   }
 
   if (phase === "no-project") {
     return (
-      <main className="workspace">
+      <>
         <header className="topbar">
           <div className="topbar-title">
             <strong>新会话</strong>
@@ -184,12 +179,12 @@ export function NewSessionSurface({ runtime }: { runtime: AssistantRuntime }) {
             <EmptyChatState title="没有可用 Project" detail={loadError ?? "请先在侧边栏添加 Project。"} />
           </main>
         </div>
-      </main>
+      </>
     );
   }
 
   return (
-    <main className="workspace">
+    <>
       <header className="topbar">
         <div className="topbar-title">
           <strong>新会话</strong>
@@ -211,25 +206,6 @@ export function NewSessionSurface({ runtime }: { runtime: AssistantRuntime }) {
         </main>
       </div>
       {loadError ? <div className="composer-error">{loadError}</div> : null}
-      <Dialog
-        open={blocker.status === "blocked"}
-        onOpenChange={(open) => {
-          if (!open && blocker.status === "blocked") blocker.reset();
-        }}
-      >
-        <DialogContent className="gap-3 sm:max-w-md">
-          <DialogTitle>丢弃新会话草稿</DialogTitle>
-          <DialogDescription>当前输入尚未发送，离开会丢弃这些内容。</DialogDescription>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => blocker.status === "blocked" && blocker.reset()}>
-              取消
-            </Button>
-            <Button variant="destructive" onClick={() => blocker.status === "blocked" && blocker.proceed()}>
-              丢弃并离开
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </main>
+    </>
   );
 }

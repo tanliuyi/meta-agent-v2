@@ -2,16 +2,17 @@ import { ComposerPrimitive, QueueItemPrimitive, useAuiState } from "@assistant-u
 import { TextButton } from "@renderer/shared/ui/text-button";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
 import { useMemo } from "react";
-import { usePiQueueItems } from "../../runtime/use-pi-thread-snapshot.ts";
+import type { PiQueueItem } from "../../../../shared/contracts.ts";
 
 interface ComposerQueueProps {
+  items: readonly PiQueueItem[];
+  disabled: boolean;
   onClear(): Promise<void>;
   onError(error: unknown): void;
 }
 
 /** 使用 assistant-ui queue state 渲染待处理消息，Pi snapshot 只补充 Desktop 的模式标签。 */
-export function ComposerQueue({ onClear, onError }: ComposerQueueProps) {
-  const items = usePiQueueItems();
+export function ComposerQueue({ items, disabled, onClear, onError }: ComposerQueueProps) {
   const queueCount = useAuiState((state) => state.composer.queue.length);
   const modes = useMemo(() => new Map(items.map(({ id, mode }) => [id, mode])), [items]);
   if (queueCount === 0) return null;
@@ -24,6 +25,7 @@ export function ComposerQueue({ onClear, onError }: ComposerQueueProps) {
         <TextButton
           className="composer-queue-clear"
           aria-label="清空待处理消息"
+          disabled={disabled}
           onClick={() => void onClear().catch(onError)}
         >
           <RotateCcw /> 清空

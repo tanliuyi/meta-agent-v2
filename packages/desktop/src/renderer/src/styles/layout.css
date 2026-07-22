@@ -20,8 +20,6 @@
   justify-content: space-between;
   min-width: 0;
   height: var(--layout-window-header-height);
-  border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--sidebar));
   user-select: none;
 }
 
@@ -71,7 +69,7 @@
   app-region: no-drag;
   display: grid;
   width: var(--layout-window-control-width);
-  height: 35px;
+  height: 100%;
   padding: 0;
   place-items: center;
   border: 0;
@@ -106,7 +104,6 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  background: hsl(var(--background));
 }
 
 .sidebar {
@@ -115,8 +112,6 @@
   min-width: var(--layout-sidebar-min-width);
   max-width: var(--layout-sidebar-max-width);
   min-height: 0;
-  border-right: 1px solid hsl(var(--border));
-  background: hsl(var(--sidebar));
 }
 
 .sidebar-content {
@@ -237,10 +232,8 @@
 
 .sidebar-footer {
   justify-content: space-between;
-  height: 42px;
   margin-top: auto;
-  padding: 0 8px;
-  border-top: 1px solid hsl(var(--border));
+  padding: 12px 8px;
 }
 .sidebar-settings-link {
   width: auto;
@@ -252,6 +245,10 @@
   grid-template-rows: var(--layout-topbar-height) minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px 0 0 16px;
+  box-shadow: var(--workspace-edge-shadow);
+  overflow: hidden;
 }
 
 .topbar {
@@ -371,7 +368,6 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  background: hsl(var(--background));
 }
 
 .settings-menu {
@@ -380,8 +376,6 @@
   min-width: var(--layout-sidebar-min-width);
   max-width: var(--layout-sidebar-max-width);
   min-height: 0;
-  border-right: 0.0625rem solid hsl(var(--border) / 0.9);
-  background: color-mix(in srgb, hsl(var(--sidebar)) 90%, transparent);
   backdrop-filter: saturate(150%) blur(1.125rem);
 }
 
@@ -465,6 +459,7 @@
 }
 
 .settings-back-link {
+  margin-bottom: var(--space-4);
   color: hsl(var(--muted-foreground));
 }
 
@@ -474,10 +469,13 @@
 
 .settings-main {
   display: grid;
-  grid-template-rows: var(--layout-topbar-height) minmax(0, 1fr);
+  grid-template-rows: var(--layout-topbar-height) minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
-  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px 0 0 16px;
+  box-shadow: var(--workspace-edge-shadow);
+  overflow: hidden;
 }
 
 .settings-header {

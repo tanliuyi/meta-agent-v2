@@ -87,8 +87,8 @@
     --control-size-sm: 1.75rem;
     --control-size-md: 1.9rem;
     --control-size-lg: 2.25rem;
-    --control-height-input: var(--control-size-lg);
-    --control-height-select: var(--control-size-lg);
+    --control-height-input: 1.875rem;
+    --control-height-select: 1.875rem;
     --control-height-button: var(--control-size-md);
     --control-height-button-sm: var(--control-size-md);
     --control-height-button-lg: 2.5rem;
@@ -121,9 +121,9 @@
     --stack-blocker: 90;
     --stack-notification: 100;
 
-    --layout-window-header-height: 2.25rem;
+    --layout-window-header-height: 2.5rem;
     --layout-window-control-width: 2.875rem;
-    --layout-topbar-height: 2.5rem;
+    --layout-topbar-height: 2.8rem;
     --layout-sidebar-width: 17.5rem;
     --layout-sidebar-min-width: 13.75rem;
     --layout-sidebar-max-width: 26.25rem;
@@ -188,6 +188,8 @@
     --settings-accent-foreground: 0 0% 100%;
     --settings-group-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.04);
     --settings-control-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.06);
+    --workspace-edge-shadow: -0.125rem 0 0.375rem rgb(0 0 0 / 0.04);
+    --composer-queue-shadow: 0 -0.5rem 1.5rem rgb(0 0 0 / 0.035);
     --selection-background: hsl(var(--primary) / 0.14);
     --scrollbar-thumb: hsl(var(--foreground) / 0.18);
     --elevation-popover: 0 0.625rem 1.875rem hsl(var(--foreground) / 0.12);
@@ -241,6 +243,8 @@
     --settings-accent-foreground: 220 30% 10%;
     --settings-group-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.28);
     --settings-control-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.3);
+    --workspace-edge-shadow: -0.125rem 0 0.375rem rgb(0 0 0 / 0.3);
+    --composer-queue-shadow: 0 -0.5rem 1.5rem rgb(0 0 0 / 0.035);
     --selection-background: hsl(var(--primary) / 0.18);
     --scrollbar-thumb: hsl(var(--foreground) / 0.24);
     --elevation-popover: 0 0.75rem 2rem rgb(0 0 0 / 0.42);

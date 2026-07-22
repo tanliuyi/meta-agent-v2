@@ -1,15 +1,16 @@
-import type { SessionControlState, WorkbenchState } from "../../../shared/contracts.ts";
+import type { PiThreadSnapshot, SessionControlState, WorkbenchState } from "../../../shared/contracts.ts";
 import { PiThreadStore } from "./pi-thread-store.ts";
 
 /**
  * 一个 cached session 持有的所有领域 store。
- * record 生命周期内持久存在，不依赖 React effect 或 Activity visible 状态。
+ * record 生命周期内持久存在，不依赖当前 session React subtree 是否挂载。
  */
 export interface SessionRecordStores {
   readonly timeline: PiThreadStore;
   readonly control: SessionControlStore;
   readonly workbench: WorkbenchStore;
   readonly summary: SessionSummaryStore;
+  readonly runActivity: SessionRunActivityStore;
   readonly connection: SessionConnectionStore;
 }
 
@@ -33,6 +34,13 @@ export interface SessionSummaryStore {
   setComposerDirty(dirty: boolean): void;
   set(value: Partial<CachedSessionSummary>): void;
   subscribe(listener: () => void): () => void;
+}
+
+export interface SessionRunActivityStore {
+  hasParticipated(): boolean;
+  markParticipated(): void;
+  reset(): void;
+  sync(snapshot: PiThreadSnapshot): void;
 }
 
 export type SessionConnectionState = "attaching" | "ready" | "recovering" | "error";
@@ -95,6 +103,7 @@ export function createSessionRecordStores(): SessionRecordStores {
     control: createControlStore(),
     workbench: createWorkbenchStore(),
     summary: createSummaryStore(),
+    runActivity: createRunActivityStore(),
     connection: createConnectionStore(),
   };
 }
@@ -175,6 +184,30 @@ function createSummaryStore(): SessionSummaryStore {
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+  };
+}
+
+function createRunActivityStore(): SessionRunActivityStore {
+  let participated = false;
+
+  return {
+    hasParticipated() {
+      return participated;
+    },
+    markParticipated() {
+      participated = true;
+    },
+    reset() {
+      participated = false;
+    },
+    sync(snapshot: PiThreadSnapshot) {
+      if (snapshot.phase !== "running" && snapshot.phase !== "retrying") {
+        participated = false;
+        return;
+      }
+      const lastAssistant = snapshot.nodes.findLast((node) => node.kind === "assistant");
+      if (lastAssistant?.status.type === "running") participated = true;
     },
   };
 }

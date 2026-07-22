@@ -1,4 +1,5 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import type { Project } from "../../../shared/contracts.ts";
 import { useTransportManager } from "../runtime/session-transport-context";
 
 /**
@@ -13,6 +14,27 @@ export interface SessionRouteParams {
 
 export interface DraftSearchParams {
   projectId?: string;
+}
+
+export function validateDraftSearch(search: Record<string, unknown>): DraftSearchParams {
+  const projectId = typeof search.projectId === "string" && search.projectId.length > 0 ? search.projectId : undefined;
+  return projectId ? { projectId } : {};
+}
+
+export function draftSearch(projectId?: string): DraftSearchParams {
+  return projectId ? { projectId } : {};
+}
+
+export function resolveDraftProjectId(
+  projects: readonly Pick<Project, "id">[],
+  requestedProjectId: string | undefined,
+  selectedProjectId: string | null,
+  allowFallback: boolean,
+): string | null {
+  if (requestedProjectId && projects.some((project) => project.id === requestedProjectId)) return requestedProjectId;
+  if (selectedProjectId && projects.some((project) => project.id === selectedProjectId)) return selectedProjectId;
+  if (selectedProjectId || !allowFallback) return null;
+  return projects[0]?.id ?? null;
 }
 
 /**
@@ -33,7 +55,7 @@ export function useSessionNavigation() {
     openDraft(projectId?: string) {
       return navigate({
         to: "/new",
-        search: projectId ? { projectId } : undefined,
+        search: draftSearch(projectId),
       });
     },
 
@@ -48,7 +70,7 @@ export function useSessionNavigation() {
     replaceDraft(projectId?: string) {
       return navigate({
         to: "/new",
-        search: projectId ? { projectId } : undefined,
+        search: draftSearch(projectId),
         replace: true,
       });
     },

@@ -2,10 +2,11 @@ import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { Project } from "../../../../shared/contracts.ts";
 import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
 import { selectProjectThreads } from "../../state/desktop-selectors.ts";
+import { readStoredProjectExpanded, writeStoredProjectExpanded } from "../../state/project-expansion-preference.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { DesktopThreadList } from "./desktop-thread-list.tsx";
 
@@ -25,30 +26,38 @@ export const ProjectItem = memo(function ProjectItem({
 }: ProjectItemProps) {
   const actions = useDesktopActions();
   const threads = useDesktopSelector((state) => selectProjectThreads(state, project.id));
-  const [expanded, setExpanded] = useState(active);
+  const [expanded, setExpanded] = useState(() => readStoredProjectExpanded(project.id, active));
   const [loading, setLoading] = useState(false);
+  const wasActive = useRef(active);
   const threadListId = `project-threads-${project.id}`;
 
   useEffect(() => {
-    if (!active) return;
+    const becameActive = active && !wasActive.current;
+    wasActive.current = active;
+    if (!becameActive) return;
     setExpanded(true);
-    if (threads !== undefined) return;
+    writeStoredProjectExpanded(project.id, true);
+  }, [active, project.id]);
+
+  useEffect(() => {
+    if (!expanded || threads !== undefined) return;
     let current = true;
     setLoading(true);
-    void actions.loadProjectThreads(project.id).finally(() => {
-      if (current) setLoading(false);
-    });
+    void actions
+      .loadProjectThreads(project.id)
+      .catch(() => undefined)
+      .finally(() => {
+        if (current) setLoading(false);
+      });
     return () => {
       current = false;
     };
-  }, [actions, active, project.id, threads]);
+  }, [actions, expanded, project.id, threads]);
 
   const toggleExpanded = () => {
     const next = !expanded;
     setExpanded(next);
-    if (!next || threads !== undefined) return;
-    setLoading(true);
-    void actions.loadProjectThreads(project.id).finally(() => setLoading(false));
+    writeStoredProjectExpanded(project.id, next);
   };
 
   return (

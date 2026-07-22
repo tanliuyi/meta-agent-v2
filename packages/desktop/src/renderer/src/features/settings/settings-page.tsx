@@ -65,8 +65,6 @@ export function SettingsPage() {
                 <span>返回聊天</span>
               </Link>
             )}
-            <div className="settings-menu-divider" aria-hidden="true" />
-            <p className="settings-menu-section-label">偏好设置</p>
             <Link
               to="/settings/personalization"
               search={search}

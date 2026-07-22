@@ -8,12 +8,11 @@ import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogHeader } from "@renderer/shared/ui/dialog-header";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
-
-import ExternalLink from "lucide-react/dist/esm/icons/external-link.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
+import SquareArrowOutUpRight from "lucide-react/dist/esm/icons/square-arrow-out-up-right.mjs";
 import { useEffect, useRef, useState } from "react";
 import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsProviderForm } from "./models-provider-form.tsx";
@@ -202,7 +201,7 @@ export function ModelsSettingsPage() {
         </div>
         <div className="models-actions">
           <TooltipIconButton tooltip="在外部编辑器打开" side="bottom" onClick={() => void controller.openExternally()}>
-            <ExternalLink />
+            <SquareArrowOutUpRight />
           </TooltipIconButton>
           <TooltipIconButton
             tooltip="重新载入"
@@ -262,7 +261,7 @@ export function ModelsSettingsPage() {
             <span>修复源文件后重新载入。为避免覆盖原内容，结构化编辑器当前不可用。</span>
             <div className="models-inline-actions">
               <Button variant="outline" onClick={() => void controller.openExternally()}>
-                <ExternalLink />
+                <SquareArrowOutUpRight />
                 打开文件
               </Button>
               <Button onClick={() => void controller.reload()}>

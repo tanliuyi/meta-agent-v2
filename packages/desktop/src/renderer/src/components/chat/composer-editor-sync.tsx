@@ -6,6 +6,8 @@ interface ComposerEditorSyncProps {
   threadId: string;
   editorRevision: number;
   editorText: string | undefined;
+  disabled: boolean;
+  onSync(text: string): Promise<void>;
   onError(error: unknown): void;
 }
 
@@ -18,6 +20,8 @@ export function ComposerEditorSync({
   threadId,
   editorRevision,
   editorText,
+  disabled,
+  onSync,
   onError,
 }: ComposerEditorSyncProps) {
   const aui = useAui();
@@ -43,12 +47,12 @@ export function ComposerEditorSync({
       syncedEditor.current = { target, text: composerText };
       return;
     }
-    if (synced.text === composerText) return;
+    if (synced.text === composerText || disabled) return;
     syncedEditor.current = { target, text: composerText };
-    void window.desktop.sessions.setEditorText(projectId, threadId, composerText).catch((error: unknown) => {
+    void onSync(composerText).catch((error: unknown) => {
       if (activeTarget.current === target) onError(error);
     });
-  }, [composerText, onError, projectId, target, threadId]);
+  }, [composerText, disabled, onError, onSync, target]);
 
   return null;
 }

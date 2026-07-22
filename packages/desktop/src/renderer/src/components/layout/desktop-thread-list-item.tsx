@@ -82,18 +82,21 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         <ContextMenu.Content className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-32 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm">
           <ContextMenu.Item
             className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
+            disabled={props.isSwitching}
             onSelect={() => props.onRenameStart(thread)}
           >
             <Pencil size={14} /> 重命名
           </ContextMenu.Item>
           <ContextMenu.Item
             className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
+            disabled={props.isSwitching}
             onSelect={() => props.onArchive(thread, true)}
           >
             <Archive size={14} /> 归档
           </ContextMenu.Item>
           <ContextMenu.Item
             className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
+            disabled={props.isSwitching}
             onSelect={() => props.onDelete(thread)}
           >
             <Trash2 size={14} /> 删除

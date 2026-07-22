@@ -9,29 +9,34 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as NewRouteImport } from './routes/new'
+import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ChatIndexRouteImport } from './routes/_chat.index'
+import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
-import { Route as ProjectsProjectIdSessionThreadIdRouteImport } from './routes/projects.$projectId.session.$threadId'
+import { Route as ChatProjectsProjectIdSessionThreadIdRouteImport } from './routes/_chat.projects.$projectId.session.$threadId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const NewRoute = NewRouteImport.update({
-  id: '/new',
-  path: '/new',
+const ChatRoute = ChatRouteImport.update({
+  id: '/_chat',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ChatIndexRoute = ChatIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatNewRoute = ChatNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => ChatRoute,
 } as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
   id: '/',
@@ -53,49 +58,50 @@ const SettingsPersonalizationRoute = SettingsPersonalizationRouteImport.update({
   path: '/personalization',
   getParentRoute: () => SettingsRoute,
 } as any)
-const ProjectsProjectIdSessionThreadIdRoute =
-  ProjectsProjectIdSessionThreadIdRouteImport.update({
+const ChatProjectsProjectIdSessionThreadIdRoute =
+  ChatProjectsProjectIdSessionThreadIdRouteImport.update({
     id: '/projects/$projectId/session/$threadId',
     path: '/projects/$projectId/session/$threadId',
-    getParentRoute: () => rootRouteImport,
+    getParentRoute: () => ChatRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/new': typeof NewRoute
+  '/': typeof ChatIndexRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/new': typeof ChatNewRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/': typeof SettingsIndexRoute
-  '/projects/$projectId/session/$threadId': typeof ProjectsProjectIdSessionThreadIdRoute
+  '/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/new': typeof NewRoute
+  '/new': typeof ChatNewRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
+  '/': typeof ChatIndexRoute
   '/settings': typeof SettingsIndexRoute
-  '/projects/$projectId/session/$threadId': typeof ProjectsProjectIdSessionThreadIdRoute
+  '/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/new': typeof NewRoute
+  '/_chat': typeof ChatRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
+  '/_chat/new': typeof ChatNewRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
+  '/_chat/': typeof ChatIndexRoute
   '/settings/': typeof SettingsIndexRoute
-  '/projects/$projectId/session/$threadId': typeof ProjectsProjectIdSessionThreadIdRoute
+  '/_chat/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/new'
     | '/settings'
+    | '/new'
     | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
@@ -103,46 +109,38 @@ export interface FileRouteTypes {
     | '/projects/$projectId/session/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/new'
     | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
+    | '/'
     | '/settings'
     | '/projects/$projectId/session/$threadId'
   id:
     | '__root__'
-    | '/'
-    | '/new'
+    | '/_chat'
     | '/settings'
+    | '/_chat/new'
     | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
+    | '/_chat/'
     | '/settings/'
-    | '/projects/$projectId/session/$threadId'
+    | '/_chat/projects/$projectId/session/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  NewRoute: typeof NewRoute
+  ChatRoute: typeof ChatRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
-  ProjectsProjectIdSessionThreadIdRoute: typeof ProjectsProjectIdSessionThreadIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_chat': {
+      id: '/_chat'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/new': {
-      id: '/new'
-      path: '/new'
-      fullPath: '/new'
-      preLoaderRoute: typeof NewRouteImport
+      preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -151,6 +149,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_chat/': {
+      id: '/_chat/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof ChatIndexRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/new': {
+      id: '/_chat/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
     }
     '/settings/': {
       id: '/settings/'
@@ -180,15 +192,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsPersonalizationRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/projects/$projectId/session/$threadId': {
-      id: '/projects/$projectId/session/$threadId'
+    '/_chat/projects/$projectId/session/$threadId': {
+      id: '/_chat/projects/$projectId/session/$threadId'
       path: '/projects/$projectId/session/$threadId'
       fullPath: '/projects/$projectId/session/$threadId'
-      preLoaderRoute: typeof ProjectsProjectIdSessionThreadIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof ChatProjectsProjectIdSessionThreadIdRouteImport
+      parentRoute: typeof ChatRoute
     }
   }
 }
+
+interface ChatRouteChildren {
+  ChatNewRoute: typeof ChatNewRoute
+  ChatIndexRoute: typeof ChatIndexRoute
+  ChatProjectsProjectIdSessionThreadIdRoute: typeof ChatProjectsProjectIdSessionThreadIdRoute
+}
+
+const ChatRouteChildren: ChatRouteChildren = {
+  ChatNewRoute: ChatNewRoute,
+  ChatIndexRoute: ChatIndexRoute,
+  ChatProjectsProjectIdSessionThreadIdRoute:
+    ChatProjectsProjectIdSessionThreadIdRoute,
+}
+
+const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
 interface SettingsRouteChildren {
   SettingsAuthRoute: typeof SettingsAuthRoute
@@ -209,10 +236,8 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 )
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  NewRoute: NewRoute,
+  ChatRoute: ChatRouteWithChildren,
   SettingsRoute: SettingsRouteWithChildren,
-  ProjectsProjectIdSessionThreadIdRoute: ProjectsProjectIdSessionThreadIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

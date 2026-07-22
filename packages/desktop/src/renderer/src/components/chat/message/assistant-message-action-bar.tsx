@@ -2,9 +2,10 @@ import { ActionBarPrimitive, AuiIf, useAuiState } from "@assistant-ui/react";
 import { useNavigate } from "@tanstack/react-router";
 import Check from "lucide-react/dist/esm/icons/check.mjs";
 import Copy from "lucide-react/dist/esm/icons/copy.mjs";
-import GitFork from "lucide-react/dist/esm/icons/git-fork.mjs";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
+import Split from "lucide-react/dist/esm/icons/split.mjs";
 import { useState } from "react";
+import { useDesktopActions } from "../../../state/desktop-context.tsx";
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope } from "../../session-context.tsx";
 import { hasFinalResponseText } from "../message-part-grouping.ts";
@@ -32,27 +33,23 @@ export function AssistantMessageActionBar() {
       ? pi.sourceEntryId
       : null;
   });
-  const { record, active } = useSessionScope();
+  const { record, active, branch, commandsReady } = useSessionScope();
+  const actions = useDesktopActions();
   const navigate = useNavigate();
   const [branching, setBranching] = useState(false);
 
   const onBranch = () => {
-    if (!visible || !sourceEntryId || !active || branching) return;
+    if (!visible || !sourceEntryId || !active || !commandsReady || branching) return;
     setBranching(true);
-    void window.desktop.sessions
-      .branch({
-        requestId: crypto.randomUUID(),
-        projectId: record.identity.projectId,
-        threadId: record.identity.threadId,
-        sourceEntryId,
-        position: "at",
-      })
-      .then((result) =>
-        navigate({
+    void branch(sourceEntryId)
+      .then(async (result) => {
+        await actions.refreshProjectThreads(record.identity.projectId);
+        await navigate({
           to: "/projects/$projectId/session/$threadId",
           params: { projectId: record.identity.projectId, threadId: result.branchThreadId },
-        }),
-      )
+        });
+      })
+      .catch(() => undefined)
       .finally(() => setBranching(false));
   };
 
@@ -75,8 +72,13 @@ export function AssistantMessageActionBar() {
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
-        <TooltipIconButton tooltip="从这里分支" side="top" disabled={!active || branching} onClick={onBranch}>
-          <GitFork className={branching ? "animate-in fade-in" : undefined} />
+        <TooltipIconButton
+          tooltip="从这里分支"
+          side="top"
+          disabled={!active || !commandsReady || branching}
+          onClick={onBranch}
+        >
+          <Split className={branching ? "animate-in fade-in" : undefined} />
         </TooltipIconButton>
         {/* 产品约束：非最终回复不展示入口；assistant-ui reload 链路保持注册。 */}
         <AuiIf condition={(state) => state.message.isLast && state.message.status?.type === "complete"}>

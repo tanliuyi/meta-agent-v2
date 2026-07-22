@@ -4,12 +4,8 @@ import Square from "lucide-react/dist/esm/icons/square.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { useEffect, useState } from "react";
 
-interface WindowsHeaderProps {
-  title: string;
-}
-
 /** 无边框 BrowserWindow 的 Windows 标题栏。 */
-export function WindowsHeader({ title }: WindowsHeaderProps) {
+export function WindowsHeader() {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => window.desktop.windowControls.onMaximizedChanged(setMaximized), []);
@@ -18,9 +14,8 @@ export function WindowsHeader({ title }: WindowsHeaderProps) {
     <header className="windows-header">
       <div className="windows-header-title">
         <span className="windows-header-mark" aria-hidden="true">
-          M
+          Pi
         </span>
-        <span>{title}</span>
       </div>
       <div className="windows-header-controls" aria-label="窗口控制">
         <button

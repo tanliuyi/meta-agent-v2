@@ -1,35 +1,13 @@
-import {
-  AssistantRuntimeProvider,
-  type ExternalStoreAdapter,
-  type ThreadMessage,
-  useExternalStoreRuntime,
-} from "@assistant-ui/react";
-import { useMemo } from "react";
-import { imageAttachmentAdapter } from "../runtime/image-attachments.ts";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { useDraftSession } from "../state/draft-session-context.tsx";
 import { NewSessionSurface } from "./new-session-surface.tsx";
 
-const EMPTY_MESSAGES: readonly ThreadMessage[] = [];
-
-/** Owns the assistant-ui Composer state for the single renderer-only draft. */
+/** Mounts the route UI over the window-scoped draft runtime. */
 export function NewSessionRoute() {
-  const adapter = useMemo<ExternalStoreAdapter<ThreadMessage>>(
-    () => ({
-      messages: EMPTY_MESSAGES,
-      isSendDisabled: true,
-      onNew: rejectUnexpectedDraftSend,
-      adapters: { attachments: imageAttachmentAdapter },
-      unstable_enableToolInvocations: false,
-    }),
-    [],
-  );
-  const runtime = useExternalStoreRuntime(adapter);
+  const { runtime } = useDraftSession();
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <NewSessionSurface runtime={runtime} />
+      <NewSessionSurface />
     </AssistantRuntimeProvider>
   );
-}
-
-async function rejectUnexpectedDraftSend(): Promise<void> {
-  throw new Error("Draft submission must be handled before creating a Pi session");
 }

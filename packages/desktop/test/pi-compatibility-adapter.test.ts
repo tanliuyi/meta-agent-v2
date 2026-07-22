@@ -1,10 +1,10 @@
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { type AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { PiCompatibilityAdapter } from "../src/main/pi/pi-compatibility-adapter.ts";
 import type { PiThreadProjector } from "../src/main/pi/pi-thread-projector.ts";
 
 describe("PiCompatibilityAdapter", () => {
-  it("edit preflight 失败时恢复旧 leaf，每次 navigate 只结束一次 tree navigation", async () => {
+  it("edit preflight 失败时返回 rejected result 并恢复旧 leaf", async () => {
     const navigateTree = vi
       .fn()
       .mockResolvedValueOnce({ cancelled: false, editorText: "original" })
@@ -26,7 +26,7 @@ describe("PiCompatibilityAdapter", () => {
         text: "edited",
         images: [],
       }),
-    ).rejects.toThrow("preflight failed");
+    ).resolves.toEqual({ accepted: false, queued: false, error: "preflight failed" });
 
     expect(navigateTree).toHaveBeenNthCalledWith(1, "user", { summarize: false });
     expect(navigateTree).toHaveBeenNthCalledWith(2, "assistant", { summarize: false });
@@ -42,6 +42,41 @@ describe("PiCompatibilityAdapter", () => {
     expect(adapter.clearQueue()).toEqual({ steering: ["s"], followUp: ["f"] });
     expect(projector.beginQueueClear).toHaveBeenCalledOnce();
     expect(projector.endQueueClear).toHaveBeenCalledOnce();
+  });
+
+  it("fork 使用独立 SessionManager，避免改写 source worker identity", async () => {
+    const sourceCreateBranch = vi.fn();
+    const session = createSession({
+      sessionFile: "/sessions/source.jsonl",
+      sessionManager: createSessionManager({
+        getEntry: (id: string) =>
+          id === "assistant" ? { type: "message", message: { role: "assistant" } } : undefined,
+        createBranchedSession: sourceCreateBranch,
+      }),
+    });
+    const branchCreate = vi.fn(() => "/sessions/forked.jsonl");
+    const branchManager = {
+      createBranchedSession: branchCreate,
+      getHeader: () => ({ id: "forked", timestamp: "2026-07-22T08:00:00.000Z" }),
+    } as unknown as SessionManager;
+    const open = vi.spyOn(SessionManager, "open").mockReturnValue(branchManager);
+    const adapter = new PiCompatibilityAdapter({ session, projector: createProjector() });
+
+    await expect(
+      adapter.branch({
+        requestId: "request",
+        projectId: "project",
+        threadId: "thread",
+        sourceEntryId: "assistant",
+        position: "at",
+      }),
+    ).resolves.toEqual({ branchThreadId: "forked", branchSessionFile: "/sessions/forked.jsonl" });
+
+    expect(open).toHaveBeenCalledWith("/sessions/source.jsonl", "/sessions", "/workspace");
+    expect(branchCreate).toHaveBeenCalledWith("assistant");
+    expect(sourceCreateBranch).not.toHaveBeenCalled();
+    expect(session.sessionId).toBe("thread");
+    expect(session.sessionFile).toBe("/sessions/source.jsonl");
   });
 
   it("public property/surface 缺失时给出版本化 fail-fast 诊断", () => {
@@ -101,6 +136,24 @@ describe("PiCompatibilityAdapter", () => {
     ).rejects.toThrow("without preflight acceptance");
   });
 
+  it("prompt preflight 失败时返回 accepted false 与错误", async () => {
+    const prompt = vi.fn(async (_text: string, options: { preflightResult(success: boolean): void }) => {
+      options.preflightResult(false);
+      throw new Error("missing credentials");
+    });
+    const adapter = new PiCompatibilityAdapter({ session: createSession({ prompt }), projector: createProjector() });
+
+    await expect(
+      adapter.prompt({
+        requestId: "request",
+        projectId: "project",
+        threadId: "thread",
+        text: "hello",
+        images: [],
+      }),
+    ).resolves.toEqual({ accepted: false, queued: false, error: "missing credentials" });
+  });
+
   it("running prompt 拒绝仅包含图片的输入，避免创建 Pi 空文本 queue item", async () => {
     const session = createSession({ isStreaming: true });
     const projector = createProjector();
@@ -149,6 +202,30 @@ describe("PiCompatibilityAdapter", () => {
     if (isStreaming) expect(options).toEqual(expect.objectContaining({ streamingBehavior: "followUp" }));
     else expect(options).not.toHaveProperty("streamingBehavior");
   });
+
+  it("prompt 在 preflight 成功后立即返回，不等待完整 agent run", async () => {
+    const run = deferred<void>();
+    const prompt = vi.fn(async (_text: string, options: { preflightResult(success: boolean): void }) => {
+      options.preflightResult(true);
+      await run.promise;
+    });
+    const projector = createProjector();
+    const adapter = new PiCompatibilityAdapter({ session: createSession({ prompt }), projector });
+
+    await expect(
+      adapter.prompt({
+        requestId: "request",
+        projectId: "project",
+        threadId: "thread",
+        text: "hello",
+        images: [],
+      }),
+    ).resolves.toEqual({ accepted: true, queued: false });
+    expect(projector.finishPrompt).not.toHaveBeenCalled();
+
+    run.resolve();
+    await vi.waitFor(() => expect(projector.finishPrompt).toHaveBeenCalledWith("request"));
+  });
 });
 
 function createSession(overrides: Record<string, unknown> = {}): AgentSession {
@@ -159,17 +236,7 @@ function createSession(overrides: Record<string, unknown> = {}): AgentSession {
   return {
     sessionId: "thread",
     isStreaming: false,
-    sessionManager: {
-      getLeafId: () => "assistant",
-      getBranch: () => [],
-      getEntry: (id: string) => entries.get(id),
-      getLabel: () => undefined,
-      getSessionDir: () => "/sessions",
-      getCwd: () => "/workspace",
-      getHeader: () => ({ id: "thread" }),
-      isPersisted: () => true,
-      createBranchedSession: () => "/sessions/branch.jsonl",
-    },
+    sessionManager: createSessionManager({ getEntry: (id: string) => entries.get(id) }),
     prompt: vi.fn(),
     sendUserMessage: vi.fn(),
     abort: vi.fn(),
@@ -185,12 +252,28 @@ function createSession(overrides: Record<string, unknown> = {}): AgentSession {
   } as unknown as AgentSession;
 }
 
+function createSessionManager(overrides: Record<string, unknown> = {}): AgentSession["sessionManager"] {
+  return {
+    getLeafId: () => "assistant",
+    getBranch: () => [],
+    getEntry: () => undefined,
+    getLabel: () => undefined,
+    getSessionDir: () => "/sessions",
+    getCwd: () => "/workspace",
+    getHeader: () => ({ id: "thread", timestamp: "2026-07-22T07:00:00.000Z" }),
+    isPersisted: () => true,
+    createBranchedSession: () => "/sessions/branch.jsonl",
+    ...overrides,
+  } as unknown as AgentSession["sessionManager"];
+}
+
 function createProjector(): PiThreadProjector & {
   beginTreeNavigation: ReturnType<typeof vi.fn>;
   endTreeNavigation: ReturnType<typeof vi.fn>;
   beginQueueClear: ReturnType<typeof vi.fn>;
   endQueueClear: ReturnType<typeof vi.fn>;
   hasQueuedRequest: ReturnType<typeof vi.fn>;
+  finishPrompt: ReturnType<typeof vi.fn>;
 } {
   return {
     snapshot: () => ({ phase: "idle" }),
@@ -208,5 +291,19 @@ function createProjector(): PiThreadProjector & {
     beginQueueClear: ReturnType<typeof vi.fn>;
     endQueueClear: ReturnType<typeof vi.fn>;
     hasQueuedRequest: ReturnType<typeof vi.fn>;
+    finishPrompt: ReturnType<typeof vi.fn>;
+  };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolvePromise: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve(value) {
+      resolvePromise?.(value);
+    },
   };
 }

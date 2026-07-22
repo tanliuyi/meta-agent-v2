@@ -59,7 +59,9 @@ export function registerIpc(
     const owner = BrowserWindow.fromWebContents(event.sender);
     if (owner) void dirtyGuard.requestClose(owner);
   });
-  ipcMain.handle(CHANNELS.linksOpen, (_event, target: string) => openLink(target, projects));
+  ipcMain.handle(CHANNELS.linksOpen, (_event, projectId: string, target: string) =>
+    openLink(projectId, target, projects),
+  );
   ipcMain.handle(CHANNELS.modelsGetConfig, () => models.getConfig());
   ipcMain.handle(CHANNELS.modelsGetConfigRevision, () => models.getConfigRevision());
   ipcMain.handle(CHANNELS.modelsSaveConfig, (_event, input: SaveModelsConfigInput) => models.saveConfig(input));
@@ -191,9 +193,11 @@ export function registerIpc(
     files.list(projectId, path, query),
   );
   ipcMain.handle(CHANNELS.filesRead, (_event, projectId: string, path: string) => files.read(projectId, path));
-  ipcMain.handle(CHANNELS.filesResolvePath, (_event, path: string) => resolveFilePath(path, projects));
-  ipcMain.handle(CHANNELS.filesOpen, async (_event, path: string) => {
-    await openPath(await resolveFilePath(path, projects));
+  ipcMain.handle(CHANNELS.filesResolvePath, (_event, projectId: string, path: string) =>
+    resolveFilePath(projectId, path, projects),
+  );
+  ipcMain.handle(CHANNELS.filesOpen, async (_event, projectId: string, path: string) => {
+    await openPath(await resolveFilePath(projectId, path, projects));
   });
   ipcMain.handle(
     CHANNELS.terminalsOpen,
@@ -228,7 +232,7 @@ export function registerIpc(
   });
 }
 
-async function openLink(target: string, projects: ProjectStore): Promise<void> {
+async function openLink(projectId: string, target: string, projects: ProjectStore): Promise<void> {
   const value = target.trim();
   if (!value) throw new Error("Cannot open an empty link");
 
@@ -243,9 +247,7 @@ async function openLink(target: string, projects: ProjectStore): Promise<void> {
   try {
     url = new URL(value);
   } catch {
-    const project = await projects.getActive();
-    if (!project?.available) throw new Error(project?.issue ?? "No active project is available");
-    await openPath(resolve(project.cwd, decodeURIComponent(localTarget)));
+    await openPath(resolve(projects.getCwd(projectId), decodeURIComponent(localTarget)));
     return;
   }
 
@@ -262,14 +264,11 @@ async function openLink(target: string, projects: ProjectStore): Promise<void> {
   throw new Error(`Unsupported link protocol: ${url.protocol}`);
 }
 
-async function resolveFilePath(path: string, projects: ProjectStore): Promise<string> {
+async function resolveFilePath(projectId: string, path: string, projects: ProjectStore): Promise<string> {
   const value = path.trim();
   if (!value) throw new Error("Cannot resolve an empty file path");
   if (isAbsolute(value)) return value;
-
-  const project = await projects.getActive();
-  if (!project?.available) throw new Error(project?.issue ?? "No active project is available");
-  return resolve(project.cwd, value);
+  return resolve(projects.getCwd(projectId), value);
 }
 
 async function openPath(path: string): Promise<void> {

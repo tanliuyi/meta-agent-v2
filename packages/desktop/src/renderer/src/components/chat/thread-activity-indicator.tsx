@@ -6,8 +6,7 @@ import AlertCircle from "lucide-react/dist/esm/icons/circle-alert.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import RotateCw from "lucide-react/dist/esm/icons/rotate-cw.mjs";
 import type { ReactNode } from "react";
-import type { SessionControlState } from "../../../../shared/contracts.ts";
-import { usePiThreadPhase } from "../../runtime/use-pi-thread-snapshot.ts";
+import type { PiThreadPhase, SessionControlState } from "../../../../shared/contracts.ts";
 
 type Activity = {
   kind: "compacting" | "retrying" | "working" | "error";
@@ -17,6 +16,7 @@ type Activity = {
 };
 
 interface ThreadActivityIndicatorProps {
+  phase: PiThreadPhase;
   retry: SessionControlState["retry"];
   workingVisible: boolean;
   workingMessage: string | undefined;
@@ -25,8 +25,7 @@ interface ThreadActivityIndicatorProps {
 
 /** Pi-specific activity rendered at the end of the message timeline. */
 export function ThreadActivityIndicator(props: ThreadActivityIndicatorProps) {
-  const phase = usePiThreadPhase();
-  const activity = getActivity(props, phase);
+  const activity = getActivity(props);
   if (!activity) return null;
 
   const className =
@@ -69,11 +68,8 @@ export function ThreadActivityIndicator(props: ThreadActivityIndicatorProps) {
   );
 }
 
-function getActivity(
-  control: ThreadActivityIndicatorProps,
-  phase: ReturnType<typeof usePiThreadPhase>,
-): Activity | null {
-  if (phase === "retrying") {
+function getActivity(control: ThreadActivityIndicatorProps): Activity | null {
+  if (control.phase === "retrying") {
     return {
       kind: "retrying",
       label: control.retry ? `正在重试 ${control.retry.attempt}/${control.retry.maxAttempts}` : "正在重试",
@@ -81,21 +77,21 @@ function getActivity(
       icon: <RotateCw className="size-4 shrink-0 animate-spin" />,
     };
   }
-  if (phase === "compacting") {
+  if (control.phase === "compacting") {
     return {
       kind: "compacting",
       label: "会话压缩中",
       icon: <LoaderCircle className="size-4 shrink-0 animate-spin" />,
     };
   }
-  if (phase === "running" && control.workingVisible) {
+  if (control.phase === "running" && control.workingVisible) {
     return {
       kind: "working",
       label: control.workingMessage ?? "正在处理",
       icon: <LoaderCircle className="size-4 shrink-0 animate-spin" />,
     };
   }
-  if (phase === "idle" && control.lastError) {
+  if (control.phase === "idle" && control.lastError) {
     return {
       kind: "error",
       label: "运行出错",

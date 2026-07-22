@@ -20,7 +20,9 @@ export function ProjectSelect({ projects, projectId, disabled, onValueChange }: 
       }))}
       placeholder="选择项目"
       disabled={disabled}
-      onValueChange={onValueChange}
+      onValueChange={(nextProjectId) => {
+        if (nextProjectId.length > 0) onValueChange(nextProjectId);
+      }}
     />
   );
 }

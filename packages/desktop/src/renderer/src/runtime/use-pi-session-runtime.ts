@@ -5,7 +5,7 @@ import {
   type ThreadMessage,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { imageAttachmentAdapter } from "./image-attachments.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
@@ -18,8 +18,13 @@ interface PiSessionRuntimeOptions {
   transport: SessionTransportManager;
 }
 
+export interface PiSessionRuntimeBinding {
+  runtime: AssistantRuntime;
+  clearQueue(): Promise<void>;
+}
+
 /** Creates the one assistant-ui runtime owned by a cached session activity. */
-export function usePiSessionRuntime({ record, active, transport }: PiSessionRuntimeOptions): AssistantRuntime {
+export function usePiSessionRuntime({ record, active, transport }: PiSessionRuntimeOptions): PiSessionRuntimeBinding {
   const stores = record.stores;
   const snapshot = useSyncExternalStore(
     stores.timeline.subscribe,
@@ -30,6 +35,11 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
     stores.control.subscribe,
     stores.control.getSnapshot,
     stores.control.getSnapshot,
+  );
+  const connection = useSyncExternalStore(
+    stores.connection.subscribe,
+    stores.connection.getSnapshot,
+    stores.connection.getSnapshot,
   );
   const runtimeRef = useRef<AssistantRuntime | null>(null);
   const activeRef = useRef(active);
@@ -73,24 +83,42 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
   );
 
   const readiness = controlSnapshot?.readiness;
-  const isSendDisabled = !active || stores.connection.getSnapshot() !== "ready" || readiness?.state !== "ready";
+  const isLoading = snapshot.phase === "compacting" || snapshot.phase === "tree-navigation";
+  const isAgentRunning =
+    !isLoading && (controlSnapshot?.running === true || snapshot.phase === "running" || snapshot.phase === "retrying");
+  const isCancelable = controlSnapshot?.running === true || snapshot.phase !== "idle";
+  const acceptsInput = snapshot.phase === "idle" || snapshot.phase === "running";
+  const hasCommandTarget = active && connection === "ready" && transport.hasCommittedLease(record);
+  const isSendDisabled = !hasCommandTarget || !acceptsInput || readiness?.state !== "ready";
   const runtimeAdapter = useMemo<ExternalStoreAdapter<ThreadMessage>>(
     () => ({
       messageRepository: repository,
-      isRunning: snapshot.phase === "running" || snapshot.phase === "retrying",
-      isLoading: snapshot.phase === "compacting" || snapshot.phase === "tree-navigation",
+      isRunning: isAgentRunning,
+      isLoading,
       isSendDisabled,
       onNew: coordinator.rejectUnexpectedOnNew,
       queue,
       onEdit: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.edit : undefined,
       onReload: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.reload : undefined,
-      onCancel: active && snapshot.phase !== "idle" && !isSendDisabled ? coordinator.cancel : undefined,
-      adapters: { attachments: active && !isSendDisabled ? imageAttachmentAdapter : undefined },
+      onCancel: hasCommandTarget && isCancelable ? coordinator.cancel : undefined,
+      adapters: { attachments: !isSendDisabled ? imageAttachmentAdapter : undefined },
       unstable_enableToolInvocations: false,
     }),
-    [active, coordinator, isSendDisabled, queue, repository, snapshot.phase],
+    [
+      active,
+      coordinator,
+      hasCommandTarget,
+      isAgentRunning,
+      isCancelable,
+      isLoading,
+      isSendDisabled,
+      queue,
+      repository,
+      snapshot.phase,
+    ],
   );
   const runtime = useExternalStoreRuntime<ThreadMessage>(runtimeAdapter);
   runtimeRef.current = runtime;
-  return runtime;
+  const clearQueue = useCallback(() => coordinator.clearQueue(snapshotRef.current.queue), [coordinator]);
+  return useMemo(() => ({ runtime, clearQueue }), [clearQueue, runtime]);
 }

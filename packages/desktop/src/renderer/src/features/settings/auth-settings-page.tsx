@@ -4,11 +4,11 @@ import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
-import ExternalLink from "lucide-react/dist/esm/icons/external-link.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
+import SquareArrowOutUpRight from "lucide-react/dist/esm/icons/square-arrow-out-up-right.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useMemo, useState } from "react";
 import type { AuthProviderDraft, AuthProviderInfo } from "../../../../shared/auth-config-contracts.ts";
@@ -95,7 +95,7 @@ export function AuthSettingsPage() {
         </div>
         <div className="auth-actions">
           <TooltipIconButton tooltip="在外部编辑器打开" side="bottom" onClick={() => void controller.openExternally()}>
-            <ExternalLink />
+            <SquareArrowOutUpRight />
           </TooltipIconButton>
           <TooltipIconButton
             tooltip="重新载入"
@@ -150,7 +150,7 @@ export function AuthSettingsPage() {
             <span>修复源文件后重新载入。为避免覆盖原内容，结构化编辑器当前不可用。</span>
             <div className="auth-inline-actions">
               <Button variant="outline" onClick={() => void controller.openExternally()}>
-                <ExternalLink />
+                <SquareArrowOutUpRight />
                 打开文件
               </Button>
               <Button onClick={() => void controller.reload()}>

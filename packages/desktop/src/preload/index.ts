@@ -20,17 +20,30 @@ interface ActiveSessionAttachment {
   overflowed: boolean;
 }
 
+interface UnclaimedSessionPushes {
+  buffered: SessionPush[];
+  bufferedBytes: number;
+  overflowed: boolean;
+  expiry: ReturnType<typeof setTimeout>;
+}
+
 const MAX_BUFFERED_SESSION_PUSHES = 128;
 const MAX_BUFFERED_SESSION_BYTES = 16 * 1024 * 1024;
+const MAX_UNCLAIMED_ATTACHMENTS = 64;
+const UNCLAIMED_ATTACHMENT_TTL_MS = 30_000;
+const DETACHED_ATTACHMENT_TTL_MS = 30_000;
 const attachments = new Map<string, ActiveSessionAttachment>();
-const unclaimedPushes = new Map<string, SessionPush[]>();
+const unclaimedPushes = new Map<string, UnclaimedSessionPushes>();
+const detachedAttachments = new Map<string, ReturnType<typeof setTimeout>>();
 
 ipcRenderer.on(CHANNELS.sessionsPush, (_event, update: SessionPush) => {
   const attachment = attachments.get(update.attachmentId);
   if (!attachment) {
-    const pending = unclaimedPushes.get(update.attachmentId) ?? [];
-    pending.push(update);
-    unclaimedPushes.set(update.attachmentId, pending);
+    if (detachedAttachments.has(update.attachmentId)) {
+      acknowledgeSessionUpdate(update);
+      return;
+    }
+    bufferUnclaimedSessionUpdate(update);
     return;
   }
   if (!attachment.ready) {
@@ -40,9 +53,57 @@ ipcRenderer.on(CHANNELS.sessionsPush, (_event, update: SessionPush) => {
   deliverSessionUpdate(attachment, update);
 });
 
+function bufferUnclaimedSessionUpdate(update: SessionPush): void {
+  let pending = unclaimedPushes.get(update.attachmentId);
+  if (!pending) {
+    if (unclaimedPushes.size >= MAX_UNCLAIMED_ATTACHMENTS) {
+      acknowledgeSessionUpdate(update);
+      return;
+    }
+    const attachmentId = update.attachmentId;
+    pending = {
+      buffered: [],
+      bufferedBytes: 0,
+      overflowed: false,
+      expiry: setTimeout(() => unclaimedPushes.delete(attachmentId), UNCLAIMED_ATTACHMENT_TTL_MS),
+    };
+    unclaimedPushes.set(attachmentId, pending);
+  }
+  if (pending.overflowed) return;
+  const bytes = estimateSessionUpdateBytes(update);
+  if (
+    pending.buffered.length >= MAX_BUFFERED_SESSION_PUSHES ||
+    pending.bufferedBytes + bytes > MAX_BUFFERED_SESSION_BYTES
+  ) {
+    pending.buffered = [];
+    pending.bufferedBytes = 0;
+    pending.overflowed = true;
+    return;
+  }
+  pending.buffered.push(update);
+  pending.bufferedBytes += bytes;
+}
+
+function deleteUnclaimedPushes(attachmentId: string): UnclaimedSessionPushes | undefined {
+  const pending = unclaimedPushes.get(attachmentId);
+  if (!pending) return undefined;
+  clearTimeout(pending.expiry);
+  unclaimedPushes.delete(attachmentId);
+  return pending;
+}
+
+function tombstoneAttachment(attachmentId: string): void {
+  attachments.delete(attachmentId);
+  deleteUnclaimedPushes(attachmentId);
+  const current = detachedAttachments.get(attachmentId);
+  if (current) clearTimeout(current);
+  const expiry = setTimeout(() => detachedAttachments.delete(attachmentId), DETACHED_ATTACHMENT_TTL_MS);
+  detachedAttachments.set(attachmentId, expiry);
+}
+
 function bufferSessionUpdate(attachment: ActiveSessionAttachment, update: SessionPush): void {
   if (attachment.overflowed) return;
-  const bytes = JSON.stringify(update).length * 2;
+  const bytes = estimateSessionUpdateBytes(update);
   if (
     attachment.buffered.length >= MAX_BUFFERED_SESSION_PUSHES ||
     attachment.bufferedBytes + bytes > MAX_BUFFERED_SESSION_BYTES
@@ -57,12 +118,24 @@ function bufferSessionUpdate(attachment: ActiveSessionAttachment, update: Sessio
 }
 
 function deliverSessionUpdate(attachment: ActiveSessionAttachment, update: SessionPush): void {
+  if (update.projectId !== attachment.identity.projectId || update.threadId !== attachment.identity.threadId) {
+    acknowledgeSessionUpdate(update);
+    return;
+  }
   const { attachmentId: _attachmentId, ...payload } = update;
   try {
     attachment.listener(payload);
   } finally {
-    ipcRenderer.send(CHANNELS.sessionsAck, attachment.attachmentId, update.workerInstanceId, update.sidecarSequence);
+    acknowledgeSessionUpdate(update);
   }
+}
+
+function acknowledgeSessionUpdate(update: SessionPush): void {
+  ipcRenderer.send(CHANNELS.sessionsAck, update.attachmentId, update.workerInstanceId, update.sidecarSequence);
+}
+
+function estimateSessionUpdateBytes(update: SessionPush): number {
+  return JSON.stringify(update).length * 2;
 }
 
 const platform: DesktopPlatform =
@@ -76,7 +149,7 @@ const desktopApi: DesktopApi = {
     node: process.versions.node,
   },
   links: {
-    open: (url) => ipcRenderer.invoke(CHANNELS.linksOpen, url),
+    open: (projectId, url) => ipcRenderer.invoke(CHANNELS.linksOpen, projectId, url),
   },
   models: {
     getConfig: () => ipcRenderer.invoke(CHANNELS.modelsGetConfig),
@@ -137,14 +210,14 @@ const desktopApi: DesktopApi = {
         ready: false,
         overflowed: false,
       };
-      if (input.replaceAttachmentId) {
-        attachments.delete(input.replaceAttachmentId);
-        unclaimedPushes.delete(input.replaceAttachmentId);
-      }
+      if (input.replaceAttachmentId) tombstoneAttachment(input.replaceAttachmentId);
+      const detachedExpiry = detachedAttachments.get(attachment.attachmentId);
+      if (detachedExpiry) clearTimeout(detachedExpiry);
+      detachedAttachments.delete(attachment.attachmentId);
       attachments.set(attachment.attachmentId, active);
-      const unclaimed = unclaimedPushes.get(attachment.attachmentId);
-      unclaimedPushes.delete(attachment.attachmentId);
-      for (const update of unclaimed ?? []) bufferSessionUpdate(active, update);
+      const unclaimed = deleteUnclaimedPushes(attachment.attachmentId);
+      active.overflowed = unclaimed?.overflowed ?? false;
+      for (const update of unclaimed?.buffered ?? []) bufferSessionUpdate(active, update);
       return attachment;
     },
     flush(attachmentId: string): SessionFlushResult {
@@ -160,8 +233,7 @@ const desktopApi: DesktopApi = {
       return { state: "flushed" };
     },
     detach(attachmentId: string) {
-      attachments.delete(attachmentId);
-      unclaimedPushes.delete(attachmentId);
+      tombstoneAttachment(attachmentId);
       ipcRenderer.send(CHANNELS.sessionsDetach, attachmentId);
     },
     prewarm: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsPrewarm, projectId, threadId),
@@ -188,8 +260,8 @@ const desktopApi: DesktopApi = {
   files: {
     list: (projectId, path, query) => ipcRenderer.invoke(CHANNELS.filesList, projectId, path, query),
     read: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesRead, projectId, path),
-    resolvePath: (path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, path),
-    open: (path) => ipcRenderer.invoke(CHANNELS.filesOpen, path),
+    resolvePath: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, projectId, path),
+    open: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesOpen, projectId, path),
   },
   terminals: {
     open: (projectId, threadId, terminalId, cols, rows) =>
