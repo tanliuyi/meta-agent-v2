@@ -1,11 +1,9 @@
-import { ThreadListItemPrimitive } from "@assistant-ui/react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { memo, useEffect, useState } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
-import { preventPrimitiveThreadAction, runControlledThreadAction } from "../../state/thread-list-commands.ts";
 
 function formatElapsedTime(updatedAt: number, now: number): string {
   const diffMs = now - updatedAt;
@@ -35,7 +33,7 @@ interface DesktopThreadListItemProps {
   onPrewarm(thread: Thread): void;
 }
 
-/** 在官方 ThreadListPrimitive.Items context 下渲染单个 session。 */
+/** 使用语义化 list、link 和 ContextMenu 实现的可访问性等效项。 */
 export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   const { thread } = props;
   const isPending = props.isSwitching || props.isRenamingPending || props.isArchivePending || props.isDeletePending;
@@ -49,10 +47,10 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
-        <ThreadListItemPrimitive.Root
-          data-slot="aui_thread-list-item"
+        <div
           className="thread-row group hover:bg-muted focus-visible:bg-muted data-active:bg-foreground/10 data-active:hover:bg-foreground/10 has-focus-visible:bg-muted data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors focus-visible:outline-none"
           data-thread-id={thread.id}
+          data-active={props.active || undefined}
           data-pending={isPending || undefined}
           onMouseEnter={() => {
             if (!props.active && !props.isSwitching) props.onPrewarm(thread);
@@ -61,20 +59,15 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             if (!props.active && !props.isSwitching) props.onPrewarm(thread);
           }}
         >
-          <ThreadListItemPrimitive.Trigger
-            data-slot="aui_thread-list-item-trigger"
+          <button
+            type="button"
             className="thread-main focus-visible:ring-ring/50 flex gap-1 h-full min-w-0 flex-1 items-center rounded-md ps-8 pe-2 text-start text-sm outline-none focus-visible:ring-[3px]"
             disabled={props.isSwitching}
-            onClickCapture={preventPrimitiveThreadAction}
-            onClick={(event) =>
-              runControlledThreadAction(event, () => {
-                if (!props.active) props.onOpen(thread);
-              })
-            }
+            onClick={() => {
+              if (!props.active) props.onOpen(thread);
+            }}
           >
-            <span data-slot="aui_thread-list-item-title" className="min-w-0 flex-1 truncate">
-              <ThreadListItemPrimitive.Title fallback="新会话" />
-            </span>
+            <span className="min-w-0 flex-1 truncate">{thread.title || "新会话"}</span>
             {thread.running ? (
               <span className="running-dot" aria-label="运行中" />
             ) : (
@@ -82,41 +75,29 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
                 {formatElapsedTime(thread.updatedAt, now)}
               </span>
             )}
-          </ThreadListItemPrimitive.Trigger>
-        </ThreadListItemPrimitive.Root>
+          </button>
+        </div>
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content
-          data-slot="aui_thread-list-item-context-menu"
-          className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-32 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm"
-        >
+        <ContextMenu.Content className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-32 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm">
           <ContextMenu.Item
-            data-slot="aui_thread-list-item-context-menu-item"
             className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
             onSelect={() => props.onRenameStart(thread)}
           >
             <Pencil size={14} /> 重命名
           </ContextMenu.Item>
-          <ThreadListItemPrimitive.Archive asChild disabled={props.isArchivePending}>
-            <ContextMenu.Item
-              data-slot="aui_thread-list-item-context-menu-item"
-              className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
-              onClickCapture={preventPrimitiveThreadAction}
-              onClick={(event) => runControlledThreadAction(event, () => props.onArchive(thread, true))}
-            >
-              <Archive size={14} /> 归档
-            </ContextMenu.Item>
-          </ThreadListItemPrimitive.Archive>
-          <ThreadListItemPrimitive.Delete asChild disabled={props.isDeletePending}>
-            <ContextMenu.Item
-              data-slot="aui_thread-list-item-context-menu-item"
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
-              onClickCapture={preventPrimitiveThreadAction}
-              onClick={(event) => runControlledThreadAction(event, () => props.onDelete(thread))}
-            >
-              <Trash2 size={14} /> 删除
-            </ContextMenu.Item>
-          </ThreadListItemPrimitive.Delete>
+          <ContextMenu.Item
+            className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
+            onSelect={() => props.onArchive(thread, true)}
+          >
+            <Archive size={14} /> 归档
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
+            onSelect={() => props.onDelete(thread)}
+          >
+            <Trash2 size={14} /> 删除
+          </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>

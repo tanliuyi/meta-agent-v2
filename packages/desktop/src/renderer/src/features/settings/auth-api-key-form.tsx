@@ -4,7 +4,6 @@ import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import EyeOff from "lucide-react/dist/esm/icons/eye-off.mjs";
 import { useMemo, useState } from "react";
 import type { AuthProviderDraft, AuthProviderInfo } from "../../../../shared/auth-config-contracts.ts";
-import { AuthEnvEditor } from "./auth-env-editor.tsx";
 import { validateAuthKeySyntax } from "./auth-settings-model.ts";
 
 interface AuthApiKeyFormProps {
@@ -57,16 +56,6 @@ export function AuthApiKeyForm({ provider, knownProviders, onChange }: AuthApiKe
           </p>
         )}
       </div>
-
-      <AuthEnvEditor
-        env={provider.apiKey.env ?? []}
-        onChange={(env) => {
-          onChange({
-            ...provider,
-            apiKey: { ...provider.apiKey!, env },
-          });
-        }}
-      />
 
       {knownProvider && knownProvider.envKeys.length > 0 && (
         <div className="auth-known-env-info">

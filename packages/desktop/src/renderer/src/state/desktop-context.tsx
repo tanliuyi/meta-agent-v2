@@ -9,7 +9,7 @@ import { selectActiveThreadId, selectIsSendDisabled } from "./desktop-selectors.
 import { useDesktopStore } from "./desktop-store-context.tsx";
 import { useDesktopController } from "./use-desktop-controller.ts";
 
-const DesktopActionsContext = createContext<DesktopActions | null>(null);
+export const DesktopActionsContext = createContext<DesktopActions | null>(null);
 
 /**
  * 向聊天工作区注入 route-scoped controller 与 assistant-ui runtime。

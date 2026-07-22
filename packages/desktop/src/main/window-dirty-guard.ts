@@ -8,6 +8,7 @@ type GuardAction = "close" | "reload";
 
 interface WindowDirtyGuardOptions {
   confirm?(window: BrowserWindow): Promise<boolean>;
+  beforeReload?(window: BrowserWindow): void;
 }
 
 /** Coordinates one native discard prompt across every main-owned destructive window action. */
@@ -16,11 +17,13 @@ export class WindowDirtyGuard {
   private readonly pending = new Map<number, Promise<void>>();
   private readonly bypass = new Map<number, GuardAction>();
   private readonly confirm: (window: BrowserWindow) => Promise<boolean>;
+  private readonly beforeReload?: WindowDirtyGuardOptions["beforeReload"];
   private quitConfirmed = false;
   private quitPrompt: Promise<boolean> | undefined;
 
   constructor(options: WindowDirtyGuardOptions = {}) {
     this.confirm = options.confirm ?? showDiscardConfirmation;
+    this.beforeReload = options.beforeReload;
   }
 
   setDirty(webContentsId: number, dirty: boolean): void {
@@ -106,7 +109,10 @@ export class WindowDirtyGuard {
 
   private perform(window: BrowserWindow, action: GuardAction): void {
     if (action === "close") window.close();
-    else window.webContents.reload();
+    else {
+      this.beforeReload?.(window);
+      window.webContents.reload();
+    }
   }
 
   private consumeBypass(webContentsId: number, action: GuardAction): boolean {

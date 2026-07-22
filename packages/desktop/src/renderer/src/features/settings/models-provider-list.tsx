@@ -1,38 +1,35 @@
 import type { ModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
-import { Select } from "@renderer/components/assistant-ui/select/select";
-import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import { useMemo, useState } from "react";
 import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
+import { TooltipIconButton } from "../../components/assistant-ui/tooltip-icon-button.tsx";
 
 interface ModelsProviderListProps {
   providers: ModelsProviderDraft[];
   metadata: ModelsConfigMetadata;
   selectedIndex?: number;
   onSelect(index: number): void;
-  onAdd(key: string): void;
+  onAdd(): void;
 }
 
 /** Searchable provider navigation with built-in and custom add modes. */
 export function ModelsProviderList({ providers, metadata, selectedIndex, onSelect, onAdd }: ModelsProviderListProps) {
   const [query, setQuery] = useState("");
-  const [newKey, setNewKey] = useState("");
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    const indexedProviders = providers.map((provider, index) => ({ provider, index }));
+    const indexedProviders = providers.map((provider, index) => ({
+      provider,
+      index,
+    }));
     if (!normalized) return indexedProviders;
     return indexedProviders.filter(({ provider }) =>
       `${provider.key} ${provider.config.name ?? ""}`.toLowerCase().includes(normalized),
     );
   }, [providers, query]);
-  const availableBuiltIns = metadata.builtInProviders.filter(
-    (provider) => !providers.some((current) => current.key === provider.id),
-  );
-
   return (
     <aside className="models-provider-pane" aria-label="Provider 列表">
-      <div className="models-provider-tools">
+      <div className="models-provider-tools flex w-full">
         <Input
           type="search"
           value={query}
@@ -40,39 +37,17 @@ export function ModelsProviderList({ providers, metadata, selectedIndex, onSelec
           aria-label="搜索 Provider"
           onChange={(event) => setQuery(event.target.value)}
         />
-        <div className="models-add-provider">
-          <Input
-            value={newKey}
-            placeholder="Provider ID"
-            aria-label="新 Provider ID"
-            onChange={(event) => setNewKey(event.target.value)}
-          />
-          <Select
-            className="models-select models-suggestion-select"
-            value={availableBuiltIns.some((provider) => provider.id === newKey) ? newKey : "custom"}
-            onValueChange={(nextValue) => {
-              if (nextValue !== "custom") setNewKey(nextValue);
-            }}
-            options={[
-              { value: "custom", label: "自定义 Provider" },
-              ...availableBuiltIns.map((provider) => ({ value: provider.id, label: provider.displayName })),
-            ]}
-          />
-          <Button
-            size="icon"
-            variant="outline"
-            disabled={!newKey.trim()}
-            title="添加 Provider"
-            aria-label="添加 Provider"
-            onClick={() => {
-              onAdd(newKey.trim());
-              setNewKey("");
-            }}
-          >
-            <Plus />
-          </Button>
-        </div>
+        <TooltipIconButton
+          variant="outline"
+          className="flex-shrink-0 size-[30px]"
+          aria-label="添加 Provider"
+          tooltip={"添加 Provider"}
+          onClick={() => onAdd()}
+        >
+          <Plus />
+        </TooltipIconButton>
       </div>
+
       <div className="models-provider-list" role="listbox" aria-label="已配置 Provider">
         {filtered.map(({ provider, index }) => {
           const builtIn = metadata.builtInProviders.find((item) => item.id === provider.key);

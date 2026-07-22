@@ -32,6 +32,8 @@ export interface DesktopState {
   workbenches: Record<string, WorkbenchState>;
   loading: boolean;
   error: string | null;
+  /** Set by session route to prevent controller auto-draft on route-driven nav */
+  routeNavigation: { projectId: string; threadId: string } | null;
 }
 
 export const INITIAL_STATE: DesktopState = {
@@ -45,6 +47,7 @@ export const INITIAL_STATE: DesktopState = {
   controls: {},
   workbenches: {},
   loading: true,
+  routeNavigation: null,
   error: null,
 };
 
@@ -105,10 +108,14 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
   if (action.type === "project-loaded") {
     const activeThreadId = state.activeThreadIds[action.project.id];
     const preserveActiveThread = action.threads.some((thread) => thread.id === activeThreadId && !thread.archived);
+    const preserveActiveBootstrap =
+      preserveActiveThread &&
+      state.bootstrap?.projectId === action.project.id &&
+      state.bootstrap.threadId === activeThreadId;
     return {
       ...state,
       project: action.project,
-      bootstrap: null,
+      bootstrap: preserveActiveBootstrap ? state.bootstrap : null,
       threadCatalogs: {
         ...state.threadCatalogs,
         [action.project.id]: reuseThreadCatalog(state.threadCatalogs[action.project.id], action.threads),
@@ -236,6 +243,11 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       bootstrap: action.bootstrap,
       controls: { ...state.controls, [key]: control },
       workbenches: { ...state.workbenches, [key]: action.workbench },
+      routeNavigation:
+        state.routeNavigation?.projectId === action.bootstrap.projectId &&
+        state.routeNavigation?.threadId === action.bootstrap.threadId
+          ? null
+          : state.routeNavigation,
       loading: false,
     };
   }

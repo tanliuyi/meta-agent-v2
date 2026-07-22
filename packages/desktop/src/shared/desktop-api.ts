@@ -5,6 +5,8 @@ import type {
   FileNode,
   HostResponse,
   Project,
+  SessionAttachInput,
+  SessionAttachment,
   SessionBootstrap,
   SessionBranchInput,
   SessionBranchResult,
@@ -12,6 +14,7 @@ import type {
   SessionControlState,
   SessionCreateInput,
   SessionEditInput,
+  SessionFlushResult,
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
@@ -22,6 +25,11 @@ import type {
   WorkbenchState,
 } from "./contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
+import type {
+  SaveSettingsConfigInput,
+  SaveSettingsConfigResult,
+  SettingsConfigSnapshot,
+} from "./settings-config-contracts.ts";
 
 export type DesktopPlatform = "win32" | "darwin" | "linux";
 
@@ -71,6 +79,10 @@ export interface DesktopApi {
     openConfigExternally(): Promise<void>;
     setEditorDirty(dirty: boolean): boolean;
   };
+  settings: {
+    getConfig(): Promise<SettingsConfigSnapshot>;
+    saveConfig(input: SaveSettingsConfigInput): Promise<SaveSettingsConfigResult>;
+  };
   windowControls: {
     minimize(): void;
     toggleMaximize(): void;
@@ -88,13 +100,9 @@ export interface DesktopApi {
     list(projectId: string, includeArchived?: boolean): Promise<Thread[]>;
     getDraftConfig(projectId: string): Promise<DraftSessionConfig>;
     create(input: SessionCreateInput): Promise<SessionBootstrap>;
-    attach(
-      projectId: string,
-      threadId: string,
-      listener: (update: SessionPushPayload) => void,
-    ): Promise<SessionBootstrap>;
-    flush(): void;
-    detach(): void;
+    attach(input: SessionAttachInput, listener: (update: SessionPushPayload) => void): Promise<SessionAttachment>;
+    flush(attachmentId: string): SessionFlushResult;
+    detach(attachmentId: string): void;
     prewarm(projectId: string, threadId: string): Promise<void>;
     rename(projectId: string, threadId: string, title: string): Promise<void>;
     archive(projectId: string, threadId: string, archived: boolean): Promise<void>;

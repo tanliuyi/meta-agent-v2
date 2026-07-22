@@ -3,7 +3,7 @@
 状态：Superseded
 最后更新：2026-07-17
 
-> 本规范中的 `UseAgUiThreadListAdapter`、AG-UI bootstrap、history import 和 active-run join 已由 [Desktop Pi-native assistant-ui External Store Runtime 规范](./pi-native-assistant-ui-runtime-spec.md) 取代。本文仅保留历史决策背景，不再作为实现依据。
+> 本规范中的 `UseAgUiThreadListAdapter`、窗口级单 active attachment、AG-UI bootstrap、history import 和 active-run join 已由 [Desktop Session 路由与 Runtime 缓存规范](./session-route-cache-spec.md) 取代。本文仅保留历史决策背景，不再作为实现依据。
 
 ## 1. 背景
 

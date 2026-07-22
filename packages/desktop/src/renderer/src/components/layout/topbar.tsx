@@ -1,31 +1,21 @@
-import { Button } from "@renderer/shared/ui/button";
 import PanelRight from "lucide-react/dist/esm/icons/panel-right.mjs";
 import PanelRightOpen from "lucide-react/dist/esm/icons/panel-right-open.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
-import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
-import {
-  selectActivePanel,
-  selectActivePanelOpen,
-  selectActiveTerminalOpen,
-  selectHasActiveWorkbench,
-  selectHasDraft,
-  selectWindowTitle,
-} from "../../state/desktop-selectors.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
+import { useSessionControl, useSessionScope, useSessionWorkbench } from "../session-context.tsx";
 
-/** 当前 session 的工作台顶栏。 */
+/** Session-scoped workbench controls retained with the cached activity. */
 export function Topbar() {
-  const actions = useDesktopActions();
-  const title = useDesktopSelector(selectWindowTitle);
-  const hasDraft = useDesktopSelector(selectHasDraft);
-  const hasWorkbench = useDesktopSelector(selectHasActiveWorkbench);
-  const panel = useDesktopSelector(selectActivePanel);
-  const panelOpen = useDesktopSelector(selectActivePanelOpen);
-  const terminalOpen = useDesktopSelector(selectActiveTerminalOpen);
+  const { updateWorkbench } = useSessionScope();
+  const control = useSessionControl();
+  const workbench = useSessionWorkbench();
+  const title = control?.extensionUi.windowTitle ?? control?.title ?? "pi desktop";
+  const panelOpen = workbench?.panelOpen ?? false;
+  const terminalOpen = workbench?.terminalOpen ?? false;
   return (
     <header className="topbar">
       <div className="topbar-title">
-        <strong>{hasDraft ? "新会话" : title}</strong>
+        <strong>{title}</strong>
       </div>
       <div className="topbar-actions">
         <TooltipIconButton
@@ -35,8 +25,8 @@ export function Topbar() {
           tooltip="显示/隐藏终端"
           side="bottom"
           aria-pressed={terminalOpen}
-          disabled={!hasWorkbench}
-          onClick={() => actions.updateWorkbench({ terminalOpen: !terminalOpen })}
+          disabled={!workbench}
+          onClick={() => updateWorkbench({ terminalOpen: !terminalOpen })}
         >
           <TerminalSquare size={15} />
         </TooltipIconButton>
@@ -44,18 +34,18 @@ export function Topbar() {
           variant={panelOpen ? "outline" : "ghost"}
           size="icon"
           aria-label={panelOpen ? "隐藏右侧 Panel" : "显示右侧 Panel"}
-          tooltip={"显示/隐藏侧边栏"}
+          tooltip="显示/隐藏侧边栏"
           side="bottom"
           aria-pressed={panelOpen}
-          disabled={!hasWorkbench}
+          disabled={!workbench}
           onClick={() =>
-            actions.updateWorkbench({
+            updateWorkbench({
               panelOpen: !panelOpen,
-              panel: panel === "chat" ? "files" : (panel ?? "files"),
+              panel: workbench?.panel === "chat" ? "files" : (workbench?.panel ?? "files"),
             })
           }
         >
-          <PanelRight size={15} />
+          {panelOpen ? <PanelRightOpen size={15} /> : <PanelRight size={15} />}
         </TooltipIconButton>
       </div>
     </header>

@@ -1,3 +1,5 @@
+import X from "lucide-react/dist/esm/icons/x.mjs";
+
 interface ErrorToastProps {
   message: string;
   onDismiss(): void;
@@ -8,8 +10,8 @@ export function ErrorToast({ message, onDismiss }: ErrorToastProps) {
   return (
     <div className="error-toast" role="alert">
       <pre>{message}</pre>
-      <button type="button" onClick={onDismiss}>
-        关闭
+      <button type="button" onClick={onDismiss} aria-label="关闭">
+        <X aria-hidden="true" />
       </button>
     </div>
   );

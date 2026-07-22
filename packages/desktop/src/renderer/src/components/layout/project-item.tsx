@@ -30,8 +30,18 @@ export const ProjectItem = memo(function ProjectItem({
   const threadListId = `project-threads-${project.id}`;
 
   useEffect(() => {
-    if (active) setExpanded(true);
-  }, [active]);
+    if (!active) return;
+    setExpanded(true);
+    if (threads !== undefined) return;
+    let current = true;
+    setLoading(true);
+    void actions.loadProjectThreads(project.id).finally(() => {
+      if (current) setLoading(false);
+    });
+    return () => {
+      current = false;
+    };
+  }, [actions, active, project.id, threads]);
 
   const toggleExpanded = () => {
     const next = !expanded;

@@ -1,19 +1,11 @@
-import { useDesktopSelector } from "../../state/desktop-context.tsx";
-import {
-  selectActivePanel,
-  selectActivePanelOpen,
-  selectActivePanelWidth,
-  selectHasActiveControl,
-} from "../../state/desktop-selectors.ts";
+import { useSessionControl, useSessionWorkbench } from "../session-context.tsx";
 import { OpenWorkbenchPanel } from "./open-workbench-panel.tsx";
 import { normalizeWorkbenchPanel } from "./panel-model.ts";
 
-/** 与当前 session 绑定的可停靠 Workbench Panel。 */
+/** Workbench state is stored with the cached session record. */
 export function WorkbenchPanel() {
-  const hasControl = useDesktopSelector(selectHasActiveControl);
-  const panelOpen = useDesktopSelector(selectActivePanelOpen);
-  const panelWidth = useDesktopSelector(selectActivePanelWidth);
-  const panel = useDesktopSelector(selectActivePanel);
-  if (!hasControl || !panelOpen || panelWidth === null) return null;
-  return <OpenWorkbenchPanel width={panelWidth} panel={normalizeWorkbenchPanel(panel)} />;
+  const control = useSessionControl();
+  const workbench = useSessionWorkbench();
+  if (!control || !workbench?.panelOpen) return null;
+  return <OpenWorkbenchPanel width={workbench.panelWidth} panel={normalizeWorkbenchPanel(workbench.panel)} />;
 }

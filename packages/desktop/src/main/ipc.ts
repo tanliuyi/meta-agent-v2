@@ -5,6 +5,7 @@ import type { SaveAuthConfigInput } from "../shared/auth-config-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   HostResponse,
+  SessionAttachInput,
   SessionBranchInput,
   SessionBranchResult,
   SessionControlState,
@@ -17,10 +18,12 @@ import type {
 } from "../shared/contracts.ts";
 import type { NodeRuntimeProgress, NodeRuntimeStatus } from "../shared/desktop-api.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
+import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
+import type { SettingsConfigService } from "./settings/settings-config-service.ts";
 import type { ProjectStore } from "./store/project-store.ts";
 import type { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
 import type { WindowDirtyGuard } from "./window-dirty-guard.ts";
@@ -35,6 +38,7 @@ export function registerIpc(
   terminals: TerminalSupervisor,
   models: ModelsConfigService,
   auth: AuthConfigService,
+  settings: SettingsConfigService,
   dirtyGuard: WindowDirtyGuard,
   nodeRuntime: {
     getStatus(): NodeRuntimeStatus;
@@ -64,6 +68,8 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.authGetConfigRevision, () => auth.getConfigRevision());
   ipcMain.handle(CHANNELS.authSaveConfig, (_event, input: SaveAuthConfigInput) => auth.saveConfig(input));
   ipcMain.handle(CHANNELS.authOpenConfigExternally, async () => openPath(await auth.getExternalOpenTarget()));
+  ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
+  ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
   ipcMain.on(CHANNELS.authSetEditorDirty, (event, dirty: unknown) => {
     if (typeof dirty !== "boolean") {
       event.returnValue = false;
@@ -118,23 +124,23 @@ export function registerIpc(
   );
   ipcMain.handle(CHANNELS.sessionsDraftConfig, (_event, projectId: string) => sessions.getDraftConfig(projectId));
   ipcMain.handle(CHANNELS.sessionsCreate, (_event, input: SessionCreateInput) => sessions.create(input));
-  ipcMain.handle(CHANNELS.sessionsAttach, (event, projectId: string, threadId: string) => {
+  ipcMain.handle(CHANNELS.sessionsAttach, (event, input: SessionAttachInput) => {
     const ownerId = event.sender.id;
     if (!subscribedWebContents.has(ownerId)) {
       subscribedWebContents.add(ownerId);
       event.sender.once("destroyed", () => {
         subscribedWebContents.delete(ownerId);
-        sessions.detach(ownerId);
+        sessions.detachAll(ownerId);
       });
     }
-    return sessions.attach(ownerId, projectId, threadId, (update) => {
+    return sessions.attach(ownerId, input, (update) => {
       if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.sessionsPush, update);
     });
   });
   ipcMain.handle(CHANNELS.sessionsPrewarm, (_event, projectId: string, threadId: string) =>
     sessions.prewarm(projectId, threadId),
   );
-  ipcMain.on(CHANNELS.sessionsDetach, (event, attachmentId?: string) => sessions.detach(event.sender.id, attachmentId));
+  ipcMain.on(CHANNELS.sessionsDetach, (event, attachmentId: string) => sessions.detach(event.sender.id, attachmentId));
   ipcMain.on(CHANNELS.sessionsAck, (event, attachmentId: string, workerInstanceId: string, sidecarSequence: number) => {
     if (!Number.isSafeInteger(sidecarSequence) || sidecarSequence < 1) return;
     sessions.acknowledge(event.sender.id, attachmentId, workerInstanceId, sidecarSequence);

@@ -56,6 +56,7 @@ describe("auth IPC", () => {
       { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
       models as never,
       auth as never,
+      {} as never,
       dirtyGuard as never,
       { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
     );

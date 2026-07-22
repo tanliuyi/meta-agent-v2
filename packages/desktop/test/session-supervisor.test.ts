@@ -2,204 +2,119 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionSupervisor } from "../src/main/pi/session-supervisor.ts";
 import type { ThreadWorkerRegistry } from "../src/main/sidecar/thread-worker-registry.ts";
 import type { ProjectStore } from "../src/main/store/project-store.ts";
-import type {
-  DraftSessionConfig,
-  SessionBootstrap,
-  SessionCreateInput,
-  SessionPush,
-  Thread,
-} from "../src/shared/contracts.ts";
+import type { SessionAttachInput, SessionBootstrap, SessionPush } from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
 
 interface RegistryMock {
   value: ThreadWorkerRegistry;
-  list: ReturnType<typeof vi.fn>;
-  getDraftConfig: ReturnType<typeof vi.fn>;
-  create: ReturnType<typeof vi.fn>;
   attach: ReturnType<typeof vi.fn>;
   detach: ReturnType<typeof vi.fn>;
   acknowledge: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 }
 
-describe("SessionSupervisor", () => {
+describe("SessionSupervisor attachment leases", () => {
   let workers: RegistryMock;
 
   beforeEach(() => {
     workers = registryMock();
   });
 
-  it("overlays ProjectStore archive state on sidecar catalog", async () => {
-    workers.list.mockResolvedValue([thread("visible"), thread("archived")]);
-    const supervisor = new SessionSupervisor(projectStore({ archived: true }), workers.value);
-
-    await expect(supervisor.list("project")).resolves.toEqual([thread("visible")]);
-    await expect(supervisor.list("project", true)).resolves.toEqual([
-      thread("visible"),
-      { ...thread("archived"), archived: true },
-    ]);
-    await supervisor.dispose();
-  });
-
-  it("forwards draft config and explicit create input to sidecars", async () => {
-    const config = draftConfig();
-    const input: SessionCreateInput = {
-      projectId: "project",
-      createRequestId: "create-request",
-      model: { provider: "openai", id: "gpt" },
-      thinkingLevel: "high",
-    };
-    workers.getDraftConfig.mockResolvedValue(config);
-    workers.create.mockResolvedValue(bootstrap());
+  it("keeps independent A/B leases for one renderer window and routes pushes by identity", async () => {
     const supervisor = new SessionSupervisor(projectStore(), workers.value);
+    const aPush = vi.fn<(update: SessionPush) => void>();
+    const bPush = vi.fn<(update: SessionPush) => void>();
+    const a = await supervisor.attach(1, input("a", "request-a"), aPush);
+    const b = await supervisor.attach(1, input("b", "request-b"), bPush);
 
-    await expect(supervisor.getDraftConfig("project")).resolves.toEqual(config);
-    await expect(supervisor.create(input)).resolves.toEqual(bootstrap());
-    expect(workers.getDraftConfig).toHaveBeenCalledWith("project");
-    expect(workers.create).toHaveBeenCalledWith(input);
+    supervisor.receive(controlPush("a"), "worker-a", 1);
+    supervisor.receive(controlPush("b"), "worker-b", 1);
+
+    expect(aPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: a.attachmentId, threadId: "a" }));
+    expect(bPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: b.attachmentId, threadId: "b" }));
+    expect(aPush).toHaveBeenCalledTimes(1);
+    expect(bPush).toHaveBeenCalledTimes(1);
     await supervisor.dispose();
   });
 
-  it("atomically replaces attachments and ignores stale detach", async () => {
+  it("rejects a duplicate first attach for one owner/session", async () => {
+    const supervisor = new SessionSupervisor(projectStore(), workers.value);
+    await supervisor.attach(1, input("thread", "first"), vi.fn());
+    await expect(supervisor.attach(1, input("thread", "duplicate"), vi.fn())).rejects.toThrow("already attached");
+    await supervisor.dispose();
+  });
+
+  it("replaces only the supplied CAS lease and stale detach cannot remove the newer lease", async () => {
     const supervisor = new SessionSupervisor(projectStore(), workers.value);
     const firstPush = vi.fn<(update: SessionPush) => void>();
     const secondPush = vi.fn<(update: SessionPush) => void>();
-    const first = await supervisor.attach(1, "project", "thread", firstPush);
-    const second = await supervisor.attach(1, "project", "thread", secondPush);
+    const first = await supervisor.attach(1, input("thread", "first"), firstPush);
+    const second = await supervisor.attach(1, input("thread", "second", first.attachmentId), secondPush);
 
     supervisor.detach(1, first.attachmentId);
     supervisor.receive(controlPush("thread"), "worker", 1);
 
     expect(firstPush).not.toHaveBeenCalled();
-    expect(secondPush).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachmentId: second.attachmentId,
-        workerInstanceId: "worker",
-        sidecarSequence: 1,
-      }),
-    );
+    expect(secondPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: second.attachmentId }));
+    expect(workers.detach).toHaveBeenCalledWith("project", "thread");
     await supervisor.dispose();
   });
 
-  it("routes all thread-owned pushes only to the active attachment", async () => {
+  it("does not allow a stale replacement token to detach a current lease", async () => {
     const supervisor = new SessionSupervisor(projectStore(), workers.value);
-    const push = vi.fn<(update: SessionPush) => void>();
-    await supervisor.attach(1, "project", "active", push);
+    const first = await supervisor.attach(1, input("thread", "first"), vi.fn());
+    const second = await supervisor.attach(1, input("thread", "second", first.attachmentId), vi.fn());
 
-    supervisor.receive(controlPush("background"), "background-worker", 1);
-    supervisor.receive(timelinePush("background"), "background-worker", 2);
-
-    expect(push).not.toHaveBeenCalled();
-    expect(workers.acknowledge).toHaveBeenCalledWith("background-worker", 1);
-    expect(workers.acknowledge).toHaveBeenCalledWith("background-worker", 2);
+    await expect(supervisor.attach(1, input("thread", "stale", first.attachmentId), vi.fn())).rejects.toThrow("Stale");
+    supervisor.receive(controlPush("thread"), "worker", 1);
+    supervisor.acknowledge(1, second.attachmentId, "worker", 1);
+    expect(workers.acknowledge).toHaveBeenCalledWith("worker", 1);
     await supervisor.dispose();
   });
 
-  it("returns worker event credit only after the matching renderer attachment acknowledges", async () => {
+  it("waits for every lease consumer before returning worker credit", async () => {
     const supervisor = new SessionSupervisor(projectStore(), workers.value);
-    const push = vi.fn<(update: SessionPush) => void>();
-    const attachment = await supervisor.attach(7, "project", "thread", push);
+    const one = await supervisor.attach(1, input("thread", "one"), vi.fn());
+    const two = await supervisor.attach(2, input("thread", "two"), vi.fn());
 
-    supervisor.receive(timelinePush("thread"), "thread-worker", 9);
+    supervisor.receive(timelinePush("thread"), "worker", 8);
+    supervisor.acknowledge(1, one.attachmentId, "worker", 8);
     expect(workers.acknowledge).not.toHaveBeenCalled();
-
-    supervisor.acknowledge(7, "stale-attachment", "thread-worker", 9);
-    expect(workers.acknowledge).not.toHaveBeenCalled();
-
-    supervisor.acknowledge(7, attachment.attachmentId, "thread-worker", 9);
-    expect(workers.acknowledge).toHaveBeenCalledWith("thread-worker", 9);
+    supervisor.acknowledge(2, two.attachmentId, "worker", 8);
+    expect(workers.acknowledge).toHaveBeenCalledWith("worker", 8);
     await supervisor.dispose();
   });
 
-  it("bounds an attachment delivery queue and requests a fresh bootstrap on overflow", async () => {
+  it("removes every owner lease on window teardown", async () => {
     const supervisor = new SessionSupervisor(projectStore(), workers.value);
-    const push = vi.fn<(update: SessionPush) => void>();
-    await supervisor.attach(1, "project", "thread", push);
-
-    for (let sequence = 1; sequence <= 129; sequence += 1) {
-      supervisor.receive(timelinePush("thread"), "thread-worker", sequence);
-    }
-
-    expect(push).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        type: "runtime-availability",
-        availability: expect.objectContaining({ state: "recovering" }),
-      }),
-    );
-    expect(workers.acknowledge).toHaveBeenCalledWith("thread-worker", 129);
-    await supervisor.dispose();
-  });
-
-  it("requests a fresh bootstrap when an attachment stops acknowledging", async () => {
-    vi.useFakeTimers();
-    try {
-      const supervisor = new SessionSupervisor(projectStore(), workers.value);
-      const push = vi.fn<(update: SessionPush) => void>();
-      await supervisor.attach(1, "project", "thread", push);
-
-      supervisor.receive(timelinePush("thread"), "thread-worker", 1);
-      vi.advanceTimersByTime(5_001);
-
-      expect(push).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          type: "runtime-availability",
-          availability: expect.objectContaining({ state: "recovering" }),
-        }),
-      );
-      expect(workers.acknowledge).toHaveBeenCalledWith("thread-worker", 1);
-      await supervisor.dispose();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the current attachment when a stale attach resolves after a newer failure", async () => {
-    const stale = deferred<SessionBootstrap>();
-    workers.attach
-      .mockResolvedValueOnce(bootstrap("current"))
-      .mockImplementationOnce(() => stale.promise)
-      .mockRejectedValueOnce(new Error("latest failed"));
-    const supervisor = new SessionSupervisor(projectStore(), workers.value);
-    const currentPush = vi.fn<(update: SessionPush) => void>();
-    const stalePush = vi.fn<(update: SessionPush) => void>();
-    const failedPush = vi.fn<(update: SessionPush) => void>();
-    const current = await supervisor.attach(1, "project", "current", currentPush);
-    const staleAttach = supervisor.attach(1, "project", "stale", stalePush);
-    const failedAttach = supervisor.attach(1, "project", "failed", failedPush);
-
-    await expect(failedAttach).rejects.toThrow("latest failed");
-    stale.resolve(bootstrap("stale"));
-    const staleResult = await staleAttach;
-    supervisor.detach(1, staleResult.attachmentId);
-    supervisor.receive(controlPush("current"), "current-worker", 1);
-
-    expect(currentPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: current.attachmentId }));
-    expect(stalePush).not.toHaveBeenCalled();
-    expect(failedPush).not.toHaveBeenCalled();
+    await supervisor.attach(1, input("a", "a"), vi.fn());
+    await supervisor.attach(1, input("b", "b"), vi.fn());
+    supervisor.detachAll(1);
+    supervisor.receive(controlPush("a"), "worker", 1);
+    expect(workers.detach).toHaveBeenCalledTimes(2);
+    expect(workers.acknowledge).toHaveBeenCalledWith("worker", 1);
     await supervisor.dispose();
   });
 });
 
+function input(threadId: string, requestId: string, replaceAttachmentId?: string): SessionAttachInput {
+  return { projectId: "project", threadId, requestId, ...(replaceAttachmentId ? { replaceAttachmentId } : {}) };
+}
+
 function registryMock(): RegistryMock {
-  const list = vi.fn(async () => [thread()]);
-  const getDraftConfig = vi.fn(async () => draftConfig());
-  const create = vi.fn(async () => bootstrap());
   const attach = vi.fn(async (_projectId: string, threadId: string) => bootstrap(threadId));
   const detach = vi.fn();
   const acknowledge = vi.fn();
   const dispose = vi.fn(async () => {});
   return {
-    list,
-    getDraftConfig,
-    create,
     attach,
     detach,
     acknowledge,
     dispose,
     value: {
-      list,
-      getDraftConfig,
-      create,
+      list: vi.fn(async () => []),
+      getDraftConfig: vi.fn(),
+      create: vi.fn(),
       attach,
       detach,
       acknowledge,
@@ -208,27 +123,11 @@ function registryMock(): RegistryMock {
   };
 }
 
-function projectStore(options?: { archived?: boolean }): ProjectStore {
-  return {
-    isArchived: (_projectId: string, threadId: string) => Boolean(options?.archived && threadId === "archived"),
-  } as unknown as ProjectStore;
+function projectStore(): ProjectStore {
+  return { isArchived: () => false } as unknown as ProjectStore;
 }
 
-function thread(id = "thread"): Thread {
-  return {
-    id,
-    projectId: "project",
-    title: "question",
-    createdAt: 1,
-    updatedAt: 2,
-    messageCount: 1,
-    preview: "question",
-    archived: false,
-    running: false,
-  };
-}
-
-function bootstrap(threadId = "thread"): SessionBootstrap {
+function bootstrap(threadId: string): SessionBootstrap {
   return {
     protocolVersion: PROTOCOL_VERSION,
     projectId: "project",
@@ -248,8 +147,8 @@ function bootstrap(threadId = "thread"): SessionBootstrap {
       revision: 0,
       projectId: "project",
       threadId,
-      title: "question",
-      updatedAt: 2,
+      title: threadId,
+      updatedAt: 0,
       cwd: "/workspace",
       running: false,
       queueModes: { steering: "one-at-a-time", followUp: "one-at-a-time" },
@@ -259,7 +158,7 @@ function bootstrap(threadId = "thread"): SessionBootstrap {
       thinkingLevels: ["off"],
       readiness: { state: "ready" },
       hostRequests: [],
-      extensionUi: { statuses: {}, workingVisible: true, editorRevision: 0, toolsExpanded: false, widgets: [] },
+      extensionUi: { statuses: {}, workingVisible: false, editorRevision: 0, toolsExpanded: false, widgets: [] },
     },
   };
 }
@@ -289,24 +188,5 @@ function timelinePush(threadId: string) {
         },
       ],
     },
-  };
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
-  let resolvePromise: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return { promise, resolve: (value) => resolvePromise?.(value) };
-}
-
-function draftConfig(): DraftSessionConfig {
-  return {
-    models: [],
-    commands: [],
-    model: null,
-    thinkingLevel: "off",
-    thinkingLevels: ["off"],
-    readiness: { state: "missing-model" },
   };
 }

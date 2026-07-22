@@ -4,7 +4,7 @@ import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type CSSProperties, Suspense, useRef } from "react";
-import { useDesktopActions } from "../../state/desktop-context.tsx";
+import { useSessionScope } from "../session-context.tsx";
 import { LazyTerminalView } from "./lazy-terminal-view.tsx";
 import type { TerminalViewHandle } from "./terminal-view.tsx";
 
@@ -17,7 +17,7 @@ const getTerminalMaxSize = () => window.innerHeight * 0.58;
 
 /** 渲染已打开的底部终端，并将拖拽瞬态尺寸保留在 DOM。 */
 export function OpenBottomTerminal({ height, name }: OpenBottomTerminalProps) {
-  const actions = useDesktopActions();
+  const { updateWorkbench } = useSessionScope();
   const terminal = useRef<TerminalViewHandle>(null);
   const resize = useResizableRegion<HTMLElement>({
     value: height,
@@ -25,7 +25,7 @@ export function OpenBottomTerminal({ height, name }: OpenBottomTerminalProps) {
     getMaxSize: getTerminalMaxSize,
     direction: -1,
     orientation: "horizontal",
-    onCommit: (terminalHeight) => actions.updateWorkbench({ terminalHeight }),
+    onCommit: (terminalHeight) => updateWorkbench({ terminalHeight }),
   });
 
   return (
@@ -63,7 +63,7 @@ export function OpenBottomTerminal({ height, name }: OpenBottomTerminalProps) {
           size="icon"
           aria-label="关闭终端"
           className="terminal-close"
-          onClick={() => actions.updateWorkbench({ terminalOpen: false })}
+          onClick={() => updateWorkbench({ terminalOpen: false })}
         >
           <X size={14} />
         </Button>

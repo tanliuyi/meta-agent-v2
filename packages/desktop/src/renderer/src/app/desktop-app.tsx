@@ -1,23 +1,20 @@
 import { Sidebar } from "@renderer/components/layout/sidebar";
-import { Topbar } from "@renderer/components/layout/topbar";
+import { SessionCacheHost } from "@renderer/components/session-cache-host";
 import { NodeRuntimeGate } from "@renderer/features/node-runtime/node-runtime-gate";
+import { useSessionCache } from "@renderer/state/session-cache-context";
 import { DesktopErrorToast } from "./desktop-error-toast.tsx";
-import { DesktopSessionWorkspace } from "./desktop-session-workspace.tsx";
 import { DesktopWindowTitle } from "./desktop-window-title.tsx";
 
-/** 组合聊天路由的静态窗口框架；动态状态由叶子订阅组件读取。 */
+/** Window shell: catalog navigation stays outside the cached session activities. */
 export function DesktopApp() {
-  const platform = window.desktop.platform;
+  const cache = useSessionCache();
   return (
-    <div className="app-frame" data-platform={platform}>
+    <div className="app-frame" data-platform={window.desktop.platform}>
       <DesktopWindowTitle />
       <div className="app-shell">
         <NodeRuntimeGate />
         <Sidebar />
-        <section className="workspace">
-          <Topbar />
-          <DesktopSessionWorkspace />
-        </section>
+        <SessionCacheHost records={cache.getAllRecords()} activeKey={cache.getActiveKey()} />
         <DesktopErrorToast />
       </div>
     </div>

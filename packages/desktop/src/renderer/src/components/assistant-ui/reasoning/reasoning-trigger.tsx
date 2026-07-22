@@ -6,12 +6,14 @@ import type { ComponentProps } from "react";
 export function ReasoningTrigger({
   active,
   duration,
+  hideChevron = false,
   label = "Reasoning",
   className,
   ...props
 }: ComponentProps<typeof CollapsibleTrigger> & {
   active?: boolean;
   duration?: number;
+  hideChevron?: boolean;
   label?: string;
 }) {
   const durationText = duration ? ` (${duration}s)` : "";
@@ -41,16 +43,18 @@ export function ReasoningTrigger({
           </span>
         ) : null}
       </span>
-      <ChevronDownIcon
-        data-slot="reasoning-trigger-chevron"
-        className={cn(
-          "aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0 opacity-0",
-          "transition-[transform,opacity] duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
-          "-rotate-90 group-hover/trigger:opacity-100",
-          "group-data-open/trigger:rotate-0 group-data-open/trigger:opacity-100",
-          "group-data-panel-open/trigger:rotate-0 group-data-panel-open/trigger:opacity-100",
-        )}
-      />
+      {!hideChevron ? (
+        <ChevronDownIcon
+          data-slot="reasoning-trigger-chevron"
+          className={cn(
+            "aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0 opacity-0",
+            "transition-[transform,opacity] duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+            "-rotate-90 group-hover/trigger:opacity-100",
+            "group-data-open/trigger:rotate-0 group-data-open/trigger:opacity-100",
+            "group-data-panel-open/trigger:rotate-0 group-data-panel-open/trigger:opacity-100",
+          )}
+        />
+      ) : null}
     </CollapsibleTrigger>
   );
 }

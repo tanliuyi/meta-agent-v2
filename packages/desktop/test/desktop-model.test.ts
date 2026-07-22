@@ -278,6 +278,7 @@ describe("desktop reducer", () => {
     state = desktopReducer(state, { type: "project-loaded", project, threads: [{ ...thread }] });
 
     expect(state.activeThreadIds[project.id]).toBe(thread.id);
+    expect(state.bootstrap?.threadId).toBe(thread.id);
     expect(state.threadCatalogs[project.id]).toBe(cachedThreads);
   });
 

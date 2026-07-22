@@ -49,6 +49,8 @@ describe("models IPC", () => {
       {} as never,
       { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
       models as never,
+      {} as never,
+      {} as never,
       dirtyGuard as never,
       { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
     );

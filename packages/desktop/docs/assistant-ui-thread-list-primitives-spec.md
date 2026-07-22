@@ -1,9 +1,9 @@
 # Desktop assistant-ui ThreadList Primitives 集成规范
 
-状态：Proposed
+状态：Superseded
 最后更新：2026-07-16
 
-> 本规范的 Project 分组、受控 ThreadList primitives 和 thread CRUD 产品语义继续有效。文中的 `@assistant-ui/react-ag-ui`、`UseAgUiThreadListAdapter`、`ElectronPiAgent`、history hydrate 和 active-run attach 实施细节已由 [Desktop Pi-native assistant-ui External Store Runtime 规范](./pi-native-assistant-ui-runtime-spec.md) 取代，不再作为实现依据。
+> 本规范的 Project 分组和 thread CRUD 产品语义继续有效。其 `@assistant-ui/react-ag-ui`、`UseAgUiThreadListAdapter`、窗口级 thread navigation、`ElectronPiAgent`、history hydrate 和 active-run attach 实施细节已由 [Desktop Session 路由与 Runtime 缓存规范](./session-route-cache-spec.md) 取代，不再作为实现依据。
 
 ## 1. 背景
 

@@ -325,6 +325,21 @@ export interface SessionAttachment {
   bootstrap: SessionBootstrap;
 }
 
+/** A renderer-owned identity. It is intentionally structured instead of encoded in route or transport strings. */
+export interface SessionIdentity {
+  projectId: string;
+  threadId: string;
+}
+
+/** Input for one renderer attachment lease. `replaceAttachmentId` is a main-process CAS token. */
+export interface SessionAttachInput extends SessionIdentity {
+  requestId: string;
+  replaceAttachmentId?: string;
+}
+
+/** Result of releasing a preload buffer for one attachment lease. */
+export type SessionFlushResult = { state: "flushed" } | { state: "recovering"; reason: "preload-buffer-overflow" };
+
 export interface SessionRuntimeAvailability {
   state: "ready" | "recovering" | "unavailable";
   workerInstanceId?: string;

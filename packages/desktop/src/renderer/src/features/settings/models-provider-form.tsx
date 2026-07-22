@@ -70,6 +70,7 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                   <span>Provider ID</span>
                   <Input
                     value={provider.key}
+                    size={30}
                     onChange={(event) => onChange({ ...provider, key: event.target.value })}
                   />
                 </label>
@@ -156,8 +157,8 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
             </div>
           </ScrollArea>
         </Tabs.Content>
-        <Tabs.Content value="models" className="models-tab-content">
-          <div className="p-(--space-6)">
+        <Tabs.Content value="models" className="models-tab-content ">
+          <div className="min-w-0 h-full flex flex-col p-(--space-6)">
             <div className="models-entity-toolbar">
               <Input
                 value={newModelId}

@@ -1,3 +1,4 @@
+import { TooltipIconButton } from "@renderer/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Dialog } from "@renderer/shared/ui/dialog";
@@ -7,15 +8,15 @@ import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogHeader } from "@renderer/shared/ui/dialog-header";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
+
 import ExternalLink from "lucide-react/dist/esm/icons/external-link.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
+import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
 import { useEffect, useRef, useState } from "react";
 import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsProviderForm } from "./models-provider-form.tsx";
-import { ModelsProviderList } from "./models-provider-list.tsx";
-import { ModelsProviderOverview } from "./models-provider-overview.tsx";
 import { createProviderDraft, modelsDraftsEqual } from "./models-settings-model.ts";
 import { useModelsSettingsController } from "./use-models-settings-controller.ts";
 
@@ -27,6 +28,8 @@ interface ProviderEditSession {
   baselineRevision?: string;
   isNew: boolean;
   hasChanges: boolean;
+  /** For isNew providers not yet in controller.draft, the live draft being edited. */
+  draft?: ModelsProviderDraft;
 }
 
 function findProviderIndex(providers: ModelsProviderDraft[], session: ProviderEditSession): number | undefined {
@@ -47,10 +50,13 @@ export function ModelsSettingsPage() {
   const controller = useModelsSettingsController();
   const [providerEdit, setProviderEdit] = useState<ProviderEditSession>();
   const providerEditRef = useRef<ProviderEditSession | undefined>(undefined);
-  const selectedProvider =
-    controller.selectedProviderIndex === undefined ? undefined : controller.draft[controller.selectedProviderIndex];
   const editorProviderIndex = providerEdit ? findProviderIndex(controller.draft, providerEdit) : undefined;
-  const editorProvider = editorProviderIndex === undefined ? undefined : controller.draft[editorProviderIndex];
+  const editorProvider =
+    editorProviderIndex === undefined
+      ? providerEdit?.isNew
+        ? providerEdit.draft
+        : undefined
+      : controller.draft[editorProviderIndex];
   const canSave = controller.dirty && controller.diagnostics.length === 0 && controller.status !== "saving";
 
   function setProviderEditSession(next: ProviderEditSession | undefined): void {
@@ -74,12 +80,21 @@ export function ModelsSettingsPage() {
       baselineRevision: controller.snapshot?.revision,
       isNew,
       hasChanges: false,
+      draft: isNew ? structuredClone(provider) : undefined,
     });
   }
 
   function updateProviderEditor(nextProvider: ModelsProviderDraft): void {
     const session = providerEditRef.current;
     if (!session) return;
+
+    if (session.isNew) {
+      session.draft = structuredClone(nextProvider);
+      session.currentKey = nextProvider.key;
+      session.hasChanges = !session.baseline || !modelsDraftsEqual([nextProvider], [session.baseline!]);
+      setProviderEditSession({ ...session });
+      return;
+    }
 
     const currentIndex = findProviderIndex(controller.draft, session);
     const currentProvider = currentIndex === undefined ? undefined : controller.draft[currentIndex];
@@ -101,27 +116,31 @@ export function ModelsSettingsPage() {
       if (targetIndex !== undefined) providers[targetIndex] = structuredClone(nextProvider);
     });
     session.currentKey = nextProvider.key;
-    session.hasChanges = session.isNew || !session.baseline || !modelsDraftsEqual([nextProvider], [session.baseline]);
+    session.hasChanges = session.isNew || !session.baseline || !modelsDraftsEqual([nextProvider], [session.baseline!]);
     setProviderEditSession({ ...session });
   }
 
   function finishProviderEditor(): void {
+    const session = providerEditRef.current;
+    if (session?.isNew && session.draft) {
+      const draft = session.draft;
+      const nextIndex = controller.draft.length;
+      controller.mutate((providers) => providers.push(structuredClone(draft)));
+      controller.selectProvider(nextIndex);
+    }
     setProviderEditSession(undefined);
   }
 
   function cancelProviderEditor(): void {
     const session = providerEditRef.current;
     if (!session) return;
+    if (session.isNew) {
+      setProviderEditSession(undefined);
+      return;
+    }
     const currentIndex = findProviderIndex(controller.draft, session);
     if (currentIndex !== undefined) {
-      if (session.isNew) {
-        const remainingCount = controller.draft.length - 1;
-        controller.mutate((providers) => {
-          const targetIndex = findProviderIndex(providers, session);
-          if (targetIndex !== undefined) providers.splice(targetIndex, 1);
-        });
-        controller.selectProvider(remainingCount > 0 ? Math.min(currentIndex, remainingCount - 1) : undefined);
-      } else if (session.baseline) {
+      if (session.baseline) {
         const baseline = session.baseline;
         controller.mutate((providers) => {
           const targetIndex = findProviderIndex(providers, session);
@@ -135,6 +154,10 @@ export function ModelsSettingsPage() {
   function deleteProviderEditor(): void {
     const session = providerEditRef.current;
     if (!session) return;
+    if (session.isNew) {
+      setProviderEditSession(undefined);
+      return;
+    }
     const currentIndex = findProviderIndex(controller.draft, session);
     if (currentIndex === undefined) {
       setProviderEditSession(undefined);
@@ -156,6 +179,7 @@ export function ModelsSettingsPage() {
       if (!session.isNew) setProviderEditSession(undefined);
       return;
     }
+    if (session.isNew) return;
     if (controller.dirty && session.hasChanges) return;
     setProviderEditSession({
       ...session,
@@ -170,36 +194,25 @@ export function ModelsSettingsPage() {
   }, [controller.dirty, controller.snapshot?.revision, editorProvider, editorProviderIndex, providerEdit]);
 
   return (
-    <div className="models-settings-page">
-      <header className="models-settings-toolbar">
-        <div className="models-settings-title">
+    <div className="settings-content">
+      <header className="settings-page-heading models-page-heading">
+        <div>
           <h2>模型</h2>
-          <span title={controller.snapshot?.path}>{controller.snapshot?.path ?? "加载 models.json"}</span>
+          <span className="models-subtitle">{statusText(controller.status)}</span>
         </div>
-        <div className="models-settings-status" role="status">
-          {statusText(controller.status)}
-        </div>
-        <div className="models-settings-actions">
-          <Button
-            size="icon"
-            variant="ghost"
-            title="在外部编辑器打开"
-            aria-label="在外部编辑器打开"
-            onClick={() => void controller.openExternally()}
-          >
+        <div className="models-actions">
+          <TooltipIconButton tooltip="在外部编辑器打开" side="bottom" onClick={() => void controller.openExternally()}>
             <ExternalLink />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            title="重新载入"
-            aria-label="重新载入"
+          </TooltipIconButton>
+          <TooltipIconButton
+            tooltip="重新载入"
+            side="bottom"
             disabled={controller.status === "loading" || controller.status === "saving"}
             onClick={() => void controller.reload()}
           >
             <RefreshCw />
-          </Button>
-          <Button disabled={!canSave} onClick={() => void controller.save()}>
+          </TooltipIconButton>
+          <Button size="sm" disabled={!canSave} onClick={() => void controller.save()}>
             <Save />
             保存
           </Button>
@@ -241,70 +254,69 @@ export function ModelsSettingsPage() {
           <span />
         </div>
       ) : controller.status === "source-invalid" ? (
-        <section className="models-source-invalid">
-          <h3>models.json 无法解析</h3>
-          <p>修复源文件后重新载入。为避免覆盖原内容，结构化编辑器当前不可用。</p>
-          <div className="models-inline-actions">
-            <Button variant="outline" onClick={() => void controller.openExternally()}>
-              <ExternalLink />
-              打开文件
-            </Button>
-            <Button onClick={() => void controller.reload()}>
-              <RefreshCw />
-              重新载入
-            </Button>
+        <section className="settings-section">
+          <div className="settings-section-heading">
+            <h3>models.json 无法解析</h3>
+          </div>
+          <div className="settings-row">
+            <span>修复源文件后重新载入。为避免覆盖原内容，结构化编辑器当前不可用。</span>
+            <div className="models-inline-actions">
+              <Button variant="outline" onClick={() => void controller.openExternally()}>
+                <ExternalLink />
+                打开文件
+              </Button>
+              <Button onClick={() => void controller.reload()}>
+                <RefreshCw />
+                重新载入
+              </Button>
+            </div>
           </div>
         </section>
       ) : controller.snapshot ? (
-        <div
-          className="models-workbench"
+        <section
+          className="settings-section"
           aria-busy={controller.status === "saving"}
           inert={controller.status === "saving" ? true : undefined}
         >
-          <ModelsProviderList
-            providers={controller.draft}
-            metadata={controller.snapshot.metadata}
-            selectedIndex={controller.selectedProviderIndex}
-            onSelect={controller.selectProvider}
-            onAdd={(key) => {
-              const existingIndex = controller.draft.findIndex((provider) => provider.key === key);
-              if (existingIndex >= 0) {
-                controller.selectProvider(existingIndex);
-                openProviderEditor(controller.draft[existingIndex], existingIndex);
-                return;
-              }
-              const nextIndex = controller.draft.length;
-              const builtIn = controller.snapshot?.metadata.builtInProviders.find((provider) => provider.id === key);
-              const draft = createProviderDraft(key);
-              if (builtIn) {
-                draft.config = {
-                  name: builtIn.displayName,
-                  api: builtIn.models[0]?.api,
-                };
-              }
-              controller.mutate((providers) => providers.push(draft));
-              controller.selectProvider(nextIndex);
-              openProviderEditor(draft, nextIndex, true);
-            }}
-          />
-          <main className="models-detail-pane">
-            {selectedProvider ? (
-              <ModelsProviderOverview
-                provider={selectedProvider}
-                metadata={controller.snapshot.metadata}
-                onEdit={() => openProviderEditor(selectedProvider, controller.selectedProviderIndex)}
-              />
-            ) : (
-              <div className="models-empty-detail">
-                <div className="models-empty-icon">
-                  <Plus />
-                </div>
-                <h3>添加一个模型 Provider</h3>
-                <p>从左侧选择内置服务，或添加自定义兼容接口。</p>
-              </div>
-            )}
-          </main>
-        </div>
+          <div className="settings-section-heading">
+            <h3>已配置 Provider</h3>
+            <Button
+              variant="outline"
+              onClick={() => openProviderEditor(createProviderDraft(""), controller.draft.length, true)}
+            >
+              <Plus />
+              新增
+            </Button>
+          </div>
+          {controller.draft.length > 0 ? (
+            <div className="models-provider-cards">
+              {controller.draft.map((provider, index) => {
+                const builtIn = controller.snapshot!.metadata.builtInProviders.find((item) => item.id === provider.key);
+                const modelCount = provider.models.length + provider.modelOverrides.length;
+                return (
+                  <button
+                    type="button"
+                    key={provider.origin ? `origin:${provider.origin.providerKey}` : `new:${index}`}
+                    className="settings-row models-provider-row"
+                    onClick={() => openProviderEditor(provider, index)}
+                  >
+                    <span className="models-provider-row-name">
+                      {provider.config.name || builtIn?.displayName || provider.key}
+                    </span>
+                    <span className="models-provider-row-meta">
+                      {provider.key} · {provider.config.api || "未指定 API"} · {modelCount} 个模型
+                    </span>
+                    <Settings2 />
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="settings-row models-empty-row">
+              <span>暂无 Provider，点击上方按钮添加第一个。</span>
+            </div>
+          )}
+        </section>
       ) : null}
 
       {editorProvider && controller.snapshot ? (

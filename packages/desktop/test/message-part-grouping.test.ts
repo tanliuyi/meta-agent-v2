@@ -70,6 +70,25 @@ describe("message part grouping", () => {
     expect(parts.map((part) => groupPart(part, {}))).toEqual([["group-runActivity", "group-chainOfThought"], []]);
   });
 
+  it("thinking 可见性不参与工具和 reasoning 的分组", () => {
+    const parts = [
+      { type: "text", text: "先检查实现", status: COMPLETE },
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "tool-call", toolCallId: "read", toolName: "read", args: {}, status: COMPLETE },
+      { type: "reasoning", text: "复核", status: COMPLETE },
+      { type: "text", text: "最终回复", status: COMPLETE },
+    ] satisfies PartState[];
+    const groupPart = createRunGroupPart(parts);
+
+    expect(parts.map((part) => groupPart(part, {}))).toEqual([
+      ["group-runActivity"],
+      ["group-runActivity", "group-chainOfThought"],
+      ["group-runActivity", "group-chainOfThought"],
+      ["group-runActivity", "group-chainOfThought"],
+      [],
+    ]);
+  });
+
   it("取消或错误结束且没有最终 text 时保留完整 activity group", () => {
     const parts = [
       { type: "reasoning", text: "分析", status: COMPLETE },

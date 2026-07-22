@@ -56,4 +56,6 @@ export const CHANNELS = {
   authSaveConfig: "desktop:auth:save-config",
   authOpenConfigExternally: "desktop:auth:open-config-externally",
   authSetEditorDirty: "desktop:auth:set-editor-dirty",
+  settingsGetConfig: "desktop:settings:get-config",
+  settingsSaveConfig: "desktop:settings:save-config",
 } as const;

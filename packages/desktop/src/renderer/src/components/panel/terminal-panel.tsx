@@ -1,17 +1,16 @@
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { Suspense } from "react";
-import { useDesktopSelector } from "../../state/desktop-context.tsx";
-import { selectActiveProjectCwd } from "../../state/desktop-selectors.ts";
+import { useSessionControl } from "../session-context.tsx";
 import { LazyTerminalView } from "./lazy-terminal-view.tsx";
 
-/** 渲染 Workbench 中与 active session 绑定的终端。 */
+/** Workbench terminal is scoped to the cached session record. */
 export function TerminalPanel() {
-  const cwd = useDesktopSelector(selectActiveProjectCwd);
+  const control = useSessionControl();
   return (
     <div className="terminal-panel">
       <div className="terminal-title">
         <TerminalSquare size={14} />
-        <span>{cwd}</span>
+        <span>{control?.cwd ?? ""}</span>
       </div>
       <Suspense fallback={<div className="terminal-view" aria-busy="true" />}>
         <LazyTerminalView terminalId="panel" />

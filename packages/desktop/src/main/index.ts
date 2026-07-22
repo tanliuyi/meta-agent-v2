@@ -10,6 +10,7 @@ import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, registerIpc } from "./ipc.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
+import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
 import { NodeRuntimeInstaller } from "./sidecar/node-runtime-installer.ts";
 import {
@@ -28,7 +29,9 @@ let metadata: MetadataWorkerClient | undefined;
 let sidecarLog: SidecarLog | undefined;
 let terminals: TerminalSupervisor | undefined;
 let quitGuardPending = false;
-const dirtyGuard = new WindowDirtyGuard();
+const dirtyGuard = new WindowDirtyGuard({
+  beforeReload: (window) => sessions?.detachAll(window.webContents.id),
+});
 const appDir = dirname(fileURLToPath(import.meta.url));
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minimumWindowBounds = { width: 1024, height: 680 };
@@ -46,7 +49,7 @@ app.on("second-instance", () => {
 });
 
 if (!app.isPackaged) {
-  app.commandLine.appendSwitch("remote-debugging-port", "9222");
+  app.commandLine.appendSwitch("remote-debugging-port", process.env.ELECTRON_REMOTE_DEBUGGING_PORT ?? "9222");
 }
 
 /** 在开发环境加载 React DevTools，生产构建不下载开发扩展。 */
@@ -137,6 +140,7 @@ app.whenReady().then(async () => {
   const auth = new AuthConfigService(agentDir, {
     log: (text) => sidecarLog?.write("auth", text),
   });
+  const settings = new SettingsConfigService(userDataDir);
   const installer = new NodeRuntimeInstaller(userDataDir, () => undefined);
   const configuredNode = detectNodeRuntime();
   const installedNode =
@@ -183,7 +187,7 @@ app.whenReady().then(async () => {
   });
   sessions = supervisor;
   terminals = new TerminalSupervisor(projects, broadcastTerminalEvent);
-  registerIpc(projects, sessions, new FileService(projects), terminals, models, auth, dirtyGuard, {
+  registerIpc(projects, sessions, new FileService(projects), terminals, models, auth, settings, dirtyGuard, {
     getStatus: () => {
       const system = detectNodeRuntime();
       return system.state === "ready" ? system : detectNodeRuntime(installer.activeNodePath());

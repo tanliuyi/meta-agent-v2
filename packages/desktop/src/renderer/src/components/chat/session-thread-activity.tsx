@@ -1,24 +1,15 @@
-import { useDesktopSelector } from "../../state/desktop-context.tsx";
-import {
-  selectActiveLastError,
-  selectActiveRetry,
-  selectActiveWorkingMessage,
-  selectActiveWorkingVisible,
-} from "../../state/desktop-selectors.ts";
+import { useSessionControl } from "../session-context.tsx";
 import { ThreadActivityIndicator } from "./thread-activity-indicator.tsx";
 
-/** 仅让 activity 区域订阅 retry/working/error 叶子状态。 */
+/** Session activity state belongs to the record control store, not window selection. */
 export function SessionThreadActivity() {
-  const retry = useDesktopSelector(selectActiveRetry);
-  const workingVisible = useDesktopSelector(selectActiveWorkingVisible);
-  const workingMessage = useDesktopSelector(selectActiveWorkingMessage);
-  const lastError = useDesktopSelector(selectActiveLastError);
+  const control = useSessionControl();
   return (
     <ThreadActivityIndicator
-      retry={retry}
-      workingVisible={workingVisible}
-      workingMessage={workingMessage}
-      lastError={lastError}
+      retry={control?.retry}
+      workingVisible={control?.extensionUi.workingVisible ?? false}
+      workingMessage={control?.extensionUi.workingMessage}
+      lastError={control?.lastError}
     />
   );
 }

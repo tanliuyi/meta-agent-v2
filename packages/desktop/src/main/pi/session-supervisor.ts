@@ -3,6 +3,7 @@ import type {
   ClearedQueue,
   DraftSessionConfig,
   HostResponse,
+  SessionAttachInput,
   SessionAttachment,
   SessionBootstrap,
   SessionBranchInput,
@@ -31,7 +32,6 @@ interface RendererSubscription {
 }
 
 interface PendingRendererAttachment {
-  requestId: symbol;
   projectId: string;
   threadId: string;
 }
@@ -39,8 +39,8 @@ interface PendingRendererAttachment {
 interface PendingDeliveryAck {
   workerInstanceId: string;
   sidecarSequence: number;
-  ownerIds: Set<number>;
-  ownerBytes: Map<number, number>;
+  consumerIds: Set<string>;
+  consumerBytes: Map<string, number>;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -52,10 +52,10 @@ const MAX_ATTACHMENT_PENDING_EVENTS = 128;
 const MAX_ATTACHMENT_PENDING_BYTES = 16 * 1024 * 1024;
 const DELIVERY_ACK_TIMEOUT_MS = 5_000;
 
-/** Electron-only facade for renderer attachments, ProjectStore overlays, and sidecar routing. */
+/** Electron-only facade for attachment leases, ProjectStore overlays, and sidecar routing. */
 export class SessionSupervisor {
-  private readonly subscriptions = new Map<number, RendererSubscription>();
-  private readonly pendingAttachments = new Map<number, PendingRendererAttachment>();
+  private readonly subscriptions = new Map<number, Map<string, RendererSubscription>>();
+  private readonly pendingAttachments = new Map<number, Map<string, PendingRendererAttachment>>();
   private readonly pendingDeliveryAcks = new Map<string, PendingDeliveryAck>();
   private runtimeStatusSequence = 0;
   private readonly projects: ProjectStore;
@@ -79,7 +79,6 @@ export class SessionSupervisor {
     return this.workers.getDraftConfig(projectId);
   }
 
-  /** 预热 thread worker，不建立 attachment，仅为后续 attach 跳过冷启动。 */
   prewarm(projectId: string, threadId: string): Promise<void> {
     return this.workers.prewarm(projectId, threadId);
   }
@@ -90,37 +89,57 @@ export class SessionSupervisor {
 
   async attach(
     ownerId: number,
-    projectId: string,
-    threadId: string,
+    input: SessionAttachInput,
     send: (update: SessionPush) => void,
   ): Promise<SessionAttachment> {
-    const requestId = Symbol("session-attachment");
-    this.pendingAttachments.set(ownerId, { requestId, projectId, threadId });
+    const { projectId, threadId, requestId, replaceAttachmentId } = input;
+    const pending = this.pendingFor(ownerId);
+    if (pending.has(requestId)) throw new Error(`Duplicate session attachment request: ${requestId}`);
+
+    const existing = this.findSubscription(ownerId, projectId, threadId);
+    if (!replaceAttachmentId && existing) throw new Error(`Session already attached: ${projectId}/${threadId}`);
+    if (replaceAttachmentId) {
+      const replacement = this.subscriptionFor(ownerId, replaceAttachmentId);
+      if (!replacement || replacement.projectId !== projectId || replacement.threadId !== threadId) {
+        throw new Error("Stale session attachment replacement token");
+      }
+    }
+
+    pending.set(requestId, { projectId, threadId });
     try {
       const bootstrap = await this.workers.attach(projectId, threadId);
-      const attachmentId = randomUUID();
-      if (this.pendingAttachments.get(ownerId)?.requestId === requestId) {
-        this.pendingAttachments.delete(ownerId);
-        const previous = this.subscriptions.get(ownerId);
-        if (previous) {
-          this.releaseOwnerAcks(ownerId);
-          this.workers.detach(previous.projectId, previous.threadId);
-        }
-        this.subscriptions.set(ownerId, {
-          attachmentId,
-          projectId,
-          threadId,
-          send,
-          pendingEvents: 0,
-          pendingBytes: 0,
-          resyncing: false,
-        });
-      } else {
+      const currentPending = this.pendingAttachments.get(ownerId)?.get(requestId);
+      if (!currentPending || currentPending.projectId !== projectId || currentPending.threadId !== threadId) {
         this.workers.detach(projectId, threadId);
+        throw new DOMException("Session attach superseded", "AbortError");
       }
+      this.pendingAttachments.get(ownerId)?.delete(requestId);
+
+      if (replaceAttachmentId) {
+        const replacement = this.subscriptionFor(ownerId, replaceAttachmentId);
+        if (!replacement || replacement.projectId !== projectId || replacement.threadId !== threadId) {
+          this.workers.detach(projectId, threadId);
+          throw new DOMException("Session attachment replacement superseded", "AbortError");
+        }
+        this.detachSubscription(ownerId, replaceAttachmentId);
+      } else if (this.findSubscription(ownerId, projectId, threadId)) {
+        this.workers.detach(projectId, threadId);
+        throw new Error(`Session already attached: ${projectId}/${threadId}`);
+      }
+
+      const attachmentId = randomUUID();
+      this.subscriptionsFor(ownerId).set(attachmentId, {
+        attachmentId,
+        projectId,
+        threadId,
+        send,
+        pendingEvents: 0,
+        pendingBytes: 0,
+        resyncing: false,
+      });
       return { protocolVersion: bootstrap.protocolVersion, attachmentId, bootstrap };
     } catch (error) {
-      if (this.pendingAttachments.get(ownerId)?.requestId === requestId) this.pendingAttachments.delete(ownerId);
+      this.pendingAttachments.get(ownerId)?.delete(requestId);
       throw error;
     }
   }
@@ -172,6 +191,10 @@ export class SessionSupervisor {
 
   async archive(projectId: string, threadId: string, archived: boolean): Promise<void> {
     await this.projects.setArchived(projectId, threadId, archived);
+    if (archived) {
+      this.clearPendingAttachments(projectId, threadId);
+      this.clearSessionSubscriptions(projectId, threadId);
+    }
   }
 
   async remove(projectId: string, threadId: string): Promise<void> {
@@ -182,16 +205,17 @@ export class SessionSupervisor {
   }
 
   async removeProject(projectId: string): Promise<void> {
-    for (const [ownerId, subscription] of this.subscriptions) {
-      if (subscription.projectId === projectId) {
-        this.subscriptions.delete(ownerId);
-        this.workers.detach(subscription.projectId, subscription.threadId);
-        this.releaseOwnerAcks(ownerId);
+    for (const [ownerId, leases] of this.subscriptions) {
+      for (const subscription of [...leases.values()]) {
+        if (subscription.projectId === projectId) this.detachSubscription(ownerId, subscription.attachmentId);
       }
     }
     await this.workers.removeProject(projectId);
     for (const [ownerId, pending] of this.pendingAttachments) {
-      if (pending.projectId === projectId) this.pendingAttachments.delete(ownerId);
+      for (const [requestId, attachment] of pending) {
+        if (attachment.projectId === projectId) pending.delete(requestId);
+      }
+      if (pending.size === 0) this.pendingAttachments.delete(ownerId);
     }
   }
 
@@ -199,34 +223,25 @@ export class SessionSupervisor {
     return this.workers.respond(projectId, threadId, response);
   }
 
-  detach(ownerId: number, attachmentId?: string): void {
-    const current = this.subscriptions.get(ownerId);
-    if (attachmentId !== undefined && current?.attachmentId !== attachmentId) return;
-    this.pendingAttachments.delete(ownerId);
-    if (current) {
-      this.subscriptions.delete(ownerId);
-      this.workers.detach(current.projectId, current.threadId);
+  detach(ownerId: number, attachmentId: string): void {
+    const pending = this.pendingAttachments.get(ownerId);
+    if (pending?.delete(attachmentId) && pending.size === 0) this.pendingAttachments.delete(ownerId);
+    this.detachSubscription(ownerId, attachmentId);
+  }
+
+  detachAll(ownerId: number): void {
+    for (const attachmentId of [...(this.subscriptions.get(ownerId)?.keys() ?? [])]) {
+      this.detachSubscription(ownerId, attachmentId);
     }
-    this.releaseOwnerAcks(ownerId);
+    this.pendingAttachments.delete(ownerId);
   }
 
   acknowledge(ownerId: number, attachmentId: string, workerInstanceId: string, sidecarSequence: number): void {
-    if (this.subscriptions.get(ownerId)?.attachmentId !== attachmentId) return;
+    if (!this.subscriptionFor(ownerId, attachmentId)) return;
     const key = deliveryKey(workerInstanceId, sidecarSequence);
     const pending = this.pendingDeliveryAcks.get(key);
     if (!pending) return;
-    const subscription = this.subscriptions.get(ownerId);
-    if (!pending.ownerIds.delete(ownerId)) return;
-    if (subscription) {
-      subscription.pendingEvents = Math.max(0, subscription.pendingEvents - 1);
-      subscription.pendingBytes = Math.max(0, subscription.pendingBytes - (pending.ownerBytes.get(ownerId) ?? 0));
-    }
-    pending.ownerBytes.delete(ownerId);
-    if (pending.ownerIds.size === 0) {
-      clearTimeout(pending.timer);
-      this.pendingDeliveryAcks.delete(key);
-      this.workers.acknowledge(workerInstanceId, sidecarSequence);
-    }
+    this.releaseConsumerAck(consumerKey(ownerId, attachmentId), pending, key);
   }
 
   workerFailed(projectId: string, threadId: string, error: Error): void {
@@ -238,58 +253,63 @@ export class SessionSupervisor {
   }
 
   receive(update: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void {
-    const ownerIds = new Set<number>();
-    const ownerBytes = new Map<number, number>();
-    for (const [ownerId, subscription] of this.subscriptions) {
-      const active = subscription.projectId === update.projectId && subscription.threadId === update.threadId;
-      if (!active) continue;
-      if (subscription.resyncing) continue;
-      ownerIds.add(ownerId);
-      const deliveredUpdate =
-        update.type === "control"
-          ? {
-              ...update,
-              control: {
-                ...update.control,
-                hostRequests: update.control.hostRequests.map((request) => ({ ...request, workerInstanceId })),
-              },
-            }
-          : update;
-      const delivered: SessionPush = {
-        ...deliveredUpdate,
-        attachmentId: subscription.attachmentId,
-        workerInstanceId,
-        sidecarSequence,
-      };
-      const bytes = estimateDeliveryBytes(delivered);
-      if (
-        subscription.pendingEvents >= MAX_ATTACHMENT_PENDING_EVENTS ||
-        subscription.pendingBytes + bytes > MAX_ATTACHMENT_PENDING_BYTES
-      ) {
-        ownerIds.delete(ownerId);
-        this.markAttachmentResync(ownerId, subscription, "renderer-delivery-queue-overflow");
-        continue;
+    const consumerIds = new Set<string>();
+    const consumerBytes = new Map<string, number>();
+    for (const [ownerId, leases] of this.subscriptions) {
+      for (const subscription of leases.values()) {
+        if (
+          subscription.projectId !== update.projectId ||
+          subscription.threadId !== update.threadId ||
+          subscription.resyncing
+        )
+          continue;
+        const consumerId = consumerKey(ownerId, subscription.attachmentId);
+        const deliveredUpdate =
+          update.type === "control"
+            ? {
+                ...update,
+                control: {
+                  ...update.control,
+                  hostRequests: update.control.hostRequests.map((request) => ({ ...request, workerInstanceId })),
+                },
+              }
+            : update;
+        const delivered: SessionPush = {
+          ...deliveredUpdate,
+          attachmentId: subscription.attachmentId,
+          workerInstanceId,
+          sidecarSequence,
+        };
+        const bytes = estimateDeliveryBytes(delivered);
+        if (
+          subscription.pendingEvents >= MAX_ATTACHMENT_PENDING_EVENTS ||
+          subscription.pendingBytes + bytes > MAX_ATTACHMENT_PENDING_BYTES
+        ) {
+          this.markAttachmentResync(ownerId, subscription, "renderer-delivery-queue-overflow");
+          continue;
+        }
+        try {
+          subscription.send(delivered);
+        } catch {
+          this.markAttachmentResync(ownerId, subscription, "renderer-delivery-failed");
+          continue;
+        }
+        subscription.pendingEvents += 1;
+        subscription.pendingBytes += bytes;
+        consumerIds.add(consumerId);
+        consumerBytes.set(consumerId, bytes);
       }
-      try {
-        subscription.send(delivered);
-      } catch {
-        ownerIds.delete(ownerId);
-        this.markAttachmentResync(ownerId, subscription, "renderer-delivery-failed");
-        continue;
-      }
-      subscription.pendingEvents += 1;
-      subscription.pendingBytes += bytes;
-      ownerBytes.set(ownerId, bytes);
     }
-    if (ownerIds.size === 0) {
+    if (consumerIds.size === 0) {
       this.workers.acknowledge(workerInstanceId, sidecarSequence);
       return;
     }
-    this.pendingDeliveryAcks.set(deliveryKey(workerInstanceId, sidecarSequence), {
+    const key = deliveryKey(workerInstanceId, sidecarSequence);
+    this.pendingDeliveryAcks.set(key, {
       workerInstanceId,
       sidecarSequence,
-      ownerIds,
-      ownerBytes,
+      consumerIds,
+      consumerBytes,
       timer: setTimeout(
         () => this.handleDeliveryAckTimeout(workerInstanceId, sidecarSequence),
         DELIVERY_ACK_TIMEOUT_MS,
@@ -299,68 +319,130 @@ export class SessionSupervisor {
 
   dispose(): Promise<void> {
     this.disposed = true;
-    this.subscriptions.clear();
-    this.pendingAttachments.clear();
     for (const pending of this.pendingDeliveryAcks.values()) {
       clearTimeout(pending.timer);
       this.workers.acknowledge(pending.workerInstanceId, pending.sidecarSequence);
     }
     this.pendingDeliveryAcks.clear();
+    this.subscriptions.clear();
+    this.pendingAttachments.clear();
     return this.workers.dispose();
+  }
+
+  private subscriptionsFor(ownerId: number): Map<string, RendererSubscription> {
+    let subscriptions = this.subscriptions.get(ownerId);
+    if (!subscriptions) {
+      subscriptions = new Map();
+      this.subscriptions.set(ownerId, subscriptions);
+    }
+    return subscriptions;
+  }
+
+  private pendingFor(ownerId: number): Map<string, PendingRendererAttachment> {
+    let pending = this.pendingAttachments.get(ownerId);
+    if (!pending) {
+      pending = new Map();
+      this.pendingAttachments.set(ownerId, pending);
+    }
+    return pending;
+  }
+
+  private subscriptionFor(ownerId: number, attachmentId: string): RendererSubscription | undefined {
+    return this.subscriptions.get(ownerId)?.get(attachmentId);
+  }
+
+  private findSubscription(ownerId: number, projectId: string, threadId: string): RendererSubscription | undefined {
+    return [...(this.subscriptions.get(ownerId)?.values() ?? [])].find(
+      (subscription) => subscription.projectId === projectId && subscription.threadId === threadId,
+    );
+  }
+
+  private detachSubscription(ownerId: number, attachmentId: string): void {
+    const leases = this.subscriptions.get(ownerId);
+    const subscription = leases?.get(attachmentId);
+    if (!subscription) return;
+    leases?.delete(attachmentId);
+    if (leases?.size === 0) this.subscriptions.delete(ownerId);
+    this.workers.detach(subscription.projectId, subscription.threadId);
+    this.releaseAttachmentAcks(ownerId, attachmentId);
   }
 
   private publishRuntimeUnavailable(projectId: string, threadId: string, error: string, unknownOutcome: boolean): void {
     this.runtimeStatusSequence += 1;
-    for (const subscription of this.subscriptions.values()) {
-      if (subscription.projectId !== projectId || subscription.threadId !== threadId || subscription.resyncing)
-        continue;
-      this.sendControl(subscription, {
-        type: "runtime-availability",
-        projectId,
-        threadId,
-        availability: { state: "unavailable", error, unknownOutcome },
-      });
-    }
+    this.forEachMatchingSubscription(projectId, threadId, (ownerId, subscription) => {
+      if (!subscription.resyncing)
+        this.sendControl(ownerId, subscription, {
+          type: "runtime-availability",
+          projectId,
+          threadId,
+          availability: { state: "unavailable", error, unknownOutcome },
+        });
+    });
   }
 
   private publishRuntimeRecovering(projectId: string, threadId: string, reason: string): void {
     this.runtimeStatusSequence += 1;
-    for (const subscription of this.subscriptions.values()) {
-      if (subscription.projectId !== projectId || subscription.threadId !== threadId || subscription.resyncing)
-        continue;
-      this.sendControl(subscription, {
-        type: "runtime-availability",
-        projectId,
-        threadId,
-        availability: { state: "recovering", reason, unknownOutcome: false },
-      });
-    }
+    this.forEachMatchingSubscription(projectId, threadId, (ownerId, subscription) => {
+      if (!subscription.resyncing)
+        this.sendControl(ownerId, subscription, {
+          type: "runtime-availability",
+          projectId,
+          threadId,
+          availability: { state: "recovering", reason, unknownOutcome: false },
+        });
+    });
   }
 
   private clearSessionSubscriptions(projectId: string, threadId: string): void {
-    for (const [ownerId, subscription] of this.subscriptions) {
-      if (subscription.projectId === projectId && subscription.threadId === threadId) {
-        this.subscriptions.delete(ownerId);
-        this.workers.detach(subscription.projectId, subscription.threadId);
-        this.releaseOwnerAcks(ownerId);
+    for (const [ownerId, leases] of this.subscriptions) {
+      for (const subscription of [...leases.values()]) {
+        if (subscription.projectId === projectId && subscription.threadId === threadId)
+          this.detachSubscription(ownerId, subscription.attachmentId);
       }
     }
   }
 
-  private releaseOwnerAcks(ownerId: number): void {
-    for (const [key, pending] of this.pendingDeliveryAcks) {
-      const subscription = this.subscriptions.get(ownerId);
-      if (!pending.ownerIds.delete(ownerId)) continue;
-      if (subscription) {
-        subscription.pendingEvents = Math.max(0, subscription.pendingEvents - 1);
-        subscription.pendingBytes = Math.max(0, subscription.pendingBytes - (pending.ownerBytes.get(ownerId) ?? 0));
+  private clearPendingAttachments(projectId: string, threadId: string): void {
+    for (const [ownerId, pending] of this.pendingAttachments) {
+      for (const [requestId, attachment] of pending) {
+        if (attachment.projectId === projectId && attachment.threadId === threadId) pending.delete(requestId);
       }
-      pending.ownerBytes.delete(ownerId);
-      if (pending.ownerIds.size === 0) {
-        clearTimeout(pending.timer);
-        this.pendingDeliveryAcks.delete(key);
-        this.workers.acknowledge(pending.workerInstanceId, pending.sidecarSequence);
+      if (pending.size === 0) this.pendingAttachments.delete(ownerId);
+    }
+  }
+
+  private forEachMatchingSubscription(
+    projectId: string,
+    threadId: string,
+    callback: (ownerId: number, subscription: RendererSubscription) => void,
+  ): void {
+    for (const [ownerId, leases] of this.subscriptions) {
+      for (const subscription of leases.values()) {
+        if (subscription.projectId === projectId && subscription.threadId === threadId) callback(ownerId, subscription);
       }
+    }
+  }
+
+  private releaseAttachmentAcks(ownerId: number, attachmentId: string): void {
+    const consumerId = consumerKey(ownerId, attachmentId);
+    for (const [key, pending] of this.pendingDeliveryAcks) this.releaseConsumerAck(consumerId, pending, key);
+  }
+
+  private releaseConsumerAck(consumerId: string, pending: PendingDeliveryAck, key: string): void {
+    if (!pending.consumerIds.delete(consumerId)) return;
+    const bytes = pending.consumerBytes.get(consumerId) ?? 0;
+    pending.consumerBytes.delete(consumerId);
+    const [ownerId, attachmentId] = parseConsumerKey(consumerId);
+    const subscription =
+      ownerId === null || attachmentId === null ? undefined : this.subscriptionFor(ownerId, attachmentId);
+    if (subscription) {
+      subscription.pendingEvents = Math.max(0, subscription.pendingEvents - 1);
+      subscription.pendingBytes = Math.max(0, subscription.pendingBytes - bytes);
+    }
+    if (pending.consumerIds.size === 0) {
+      clearTimeout(pending.timer);
+      this.pendingDeliveryAcks.delete(key);
+      this.workers.acknowledge(pending.workerInstanceId, pending.sidecarSequence);
     }
   }
 
@@ -370,12 +452,15 @@ export class SessionSupervisor {
     if (!pending) return;
     this.log?.(
       "renderer",
-      `Delivery ACK timeout: worker=${workerInstanceId}, sequence=${sidecarSequence}, owners=${pending.ownerIds.size}`,
+      `Delivery ACK timeout: worker=${workerInstanceId}, sequence=${sidecarSequence}, leases=${pending.consumerIds.size}`,
     );
-    for (const ownerId of [...pending.ownerIds]) {
-      const subscription = this.subscriptions.get(ownerId);
-      if (subscription) this.markAttachmentResync(ownerId, subscription, "renderer-delivery-ack-timeout");
-      else this.releaseOwnerAcks(ownerId);
+    for (const consumerId of [...pending.consumerIds]) {
+      const [ownerId, attachmentId] = parseConsumerKey(consumerId);
+      const subscription =
+        ownerId === null || attachmentId === null ? undefined : this.subscriptionFor(ownerId, attachmentId);
+      if (subscription && ownerId !== null)
+        this.markAttachmentResync(ownerId, subscription, "renderer-delivery-ack-timeout");
+      else this.releaseConsumerAck(consumerId, pending, key);
     }
   }
 
@@ -386,21 +471,17 @@ export class SessionSupervisor {
       `Attachment recovery: attachment=${subscription.attachmentId}, project=${subscription.projectId}, thread=${subscription.threadId}, reason=${reason}, pendingEvents=${subscription.pendingEvents}, pendingBytes=${subscription.pendingBytes}`,
     );
     subscription.resyncing = true;
-    this.releaseOwnerAcks(ownerId);
+    this.releaseAttachmentAcks(ownerId, subscription.attachmentId);
     this.runtimeStatusSequence += 1;
-    this.sendControl(subscription, {
+    this.sendControl(ownerId, subscription, {
       type: "runtime-availability",
       projectId: subscription.projectId,
       threadId: subscription.threadId,
-      availability: {
-        state: "recovering",
-        reason,
-        unknownOutcome: false,
-      },
+      availability: { state: "recovering", reason, unknownOutcome: false },
     });
   }
 
-  private sendControl(subscription: RendererSubscription, payload: SessionPushPayload): void {
+  private sendControl(_ownerId: number, subscription: RendererSubscription, payload: SessionPushPayload): void {
     try {
       subscription.send({
         ...payload,
@@ -409,19 +490,24 @@ export class SessionSupervisor {
         sidecarSequence: this.runtimeStatusSequence,
       });
     } catch {
-      // The renderer is already unavailable; its attachment cleanup will release state.
-    }
-  }
-
-  private clearPendingAttachments(projectId: string, threadId: string): void {
-    for (const [ownerId, pending] of this.pendingAttachments) {
-      if (pending.projectId === projectId && pending.threadId === threadId) this.pendingAttachments.delete(ownerId);
+      // The renderer is already unavailable; cleanup releases this lease's state.
     }
   }
 }
 
+function consumerKey(ownerId: number, attachmentId: string): string {
+  return `${ownerId}\u0000${attachmentId}`;
+}
+
+function parseConsumerKey(key: string): [number | null, string | null] {
+  const separator = key.indexOf("\u0000");
+  if (separator === -1) return [null, null];
+  const ownerId = Number(key.slice(0, separator));
+  return Number.isSafeInteger(ownerId) ? [ownerId, key.slice(separator + 1)] : [null, null];
+}
+
 function deliveryKey(workerInstanceId: string, sidecarSequence: number): string {
-  return `${workerInstanceId}\0${sidecarSequence}`;
+  return `${workerInstanceId}\u0000${sidecarSequence}`;
 }
 
 function estimateDeliveryBytes(update: SessionPush | SessionPushPayload): number {

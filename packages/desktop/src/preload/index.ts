@@ -1,45 +1,47 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { CHANNELS } from "../shared/channels.ts";
-import type { SessionAttachment, SessionPush, SessionPushPayload, TerminalEvent } from "../shared/contracts.ts";
+import type {
+  SessionAttachInput,
+  SessionAttachment,
+  SessionFlushResult,
+  SessionPush,
+  SessionPushPayload,
+  TerminalEvent,
+} from "../shared/contracts.ts";
 import type { DesktopApi, DesktopPlatform, NodeRuntimeProgress } from "../shared/desktop-api.ts";
 
 interface ActiveSessionAttachment {
   attachmentId: string;
+  identity: { projectId: string; threadId: string };
   listener(update: SessionPushPayload): void;
   buffered: SessionPush[];
   bufferedBytes: number;
   ready: boolean;
-}
-
-interface PendingSessionAttachment {
-  listener(update: SessionPushPayload): void;
-  buffered: SessionPush[];
-  bufferedBytes: number;
+  overflowed: boolean;
 }
 
 const MAX_BUFFERED_SESSION_PUSHES = 128;
 const MAX_BUFFERED_SESSION_BYTES = 16 * 1024 * 1024;
+const attachments = new Map<string, ActiveSessionAttachment>();
+const unclaimedPushes = new Map<string, SessionPush[]>();
 
-let sessionGeneration = 0;
-const overflowRecoveryTargets = new Set<string>();
-let activeSessionAttachment: ActiveSessionAttachment | undefined;
-let pendingSessionAttachment: PendingSessionAttachment | undefined;
 ipcRenderer.on(CHANNELS.sessionsPush, (_event, update: SessionPush) => {
-  if (activeSessionAttachment?.attachmentId === update.attachmentId) {
-    if (!activeSessionAttachment.ready) {
-      bufferSessionUpdate(activeSessionAttachment, update);
-      return;
-    }
-    deliverSessionUpdate(activeSessionAttachment, update);
+  const attachment = attachments.get(update.attachmentId);
+  if (!attachment) {
+    const pending = unclaimedPushes.get(update.attachmentId) ?? [];
+    pending.push(update);
+    unclaimedPushes.set(update.attachmentId, pending);
     return;
   }
-  if (pendingSessionAttachment) bufferSessionUpdate(pendingSessionAttachment, update);
+  if (!attachment.ready) {
+    bufferSessionUpdate(attachment, update);
+    return;
+  }
+  deliverSessionUpdate(attachment, update);
 });
 
-function bufferSessionUpdate(
-  attachment: ActiveSessionAttachment | PendingSessionAttachment,
-  update: SessionPush,
-): void {
+function bufferSessionUpdate(attachment: ActiveSessionAttachment, update: SessionPush): void {
+  if (attachment.overflowed) return;
   const bytes = JSON.stringify(update).length * 2;
   if (
     attachment.buffered.length >= MAX_BUFFERED_SESSION_PUSHES ||
@@ -47,8 +49,7 @@ function bufferSessionUpdate(
   ) {
     attachment.buffered = [];
     attachment.bufferedBytes = 0;
-    overflowRecoveryTargets.add(sessionTargetKey(update.projectId, update.threadId));
-    ipcRenderer.send(CHANNELS.sessionsDetach, update.attachmentId);
+    attachment.overflowed = true;
     return;
   }
   attachment.buffered.push(update);
@@ -91,6 +92,10 @@ const desktopApi: DesktopApi = {
     openConfigExternally: () => ipcRenderer.invoke(CHANNELS.authOpenConfigExternally),
     setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.authSetEditorDirty, dirty) === true,
   },
+  settings: {
+    getConfig: () => ipcRenderer.invoke(CHANNELS.settingsGetConfig),
+    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.settingsSaveConfig, input),
+  },
   nodeRuntime: {
     getStatus: () => ipcRenderer.invoke(CHANNELS.nodeRuntimeStatus),
     install: () => ipcRenderer.invoke(CHANNELS.nodeRuntimeInstall),
@@ -121,56 +126,43 @@ const desktopApi: DesktopApi = {
     list: (projectId, includeArchived) => ipcRenderer.invoke(CHANNELS.sessionsList, projectId, includeArchived),
     getDraftConfig: (projectId) => ipcRenderer.invoke(CHANNELS.sessionsDraftConfig, projectId),
     create: (input) => ipcRenderer.invoke(CHANNELS.sessionsCreate, input),
-    async attach(projectId, threadId, listener) {
-      const generation = ++sessionGeneration;
-      const previous = activeSessionAttachment;
-      const pending: PendingSessionAttachment = { listener, buffered: [], bufferedBytes: 0 };
-      pendingSessionAttachment = pending;
-      try {
-        const attachment: SessionAttachment = await ipcRenderer.invoke(CHANNELS.sessionsAttach, projectId, threadId);
-        if (generation !== sessionGeneration || pendingSessionAttachment !== pending) {
-          ipcRenderer.send(CHANNELS.sessionsDetach, attachment.attachmentId);
-          throw new DOMException("Session attach superseded", "AbortError");
-        }
-        pendingSessionAttachment = undefined;
-        const targetKey = sessionTargetKey(projectId, threadId);
-        if (overflowRecoveryTargets.delete(targetKey)) {
-          ipcRenderer.send(CHANNELS.sessionsDetach, attachment.attachmentId);
-          activeSessionAttachment = undefined;
-          return desktopApi.sessions.attach(projectId, threadId, listener);
-        }
-        const buffered = pending.buffered.filter((update) => update.attachmentId === attachment.attachmentId);
-        activeSessionAttachment = {
-          attachmentId: attachment.attachmentId,
-          listener,
-          buffered,
-          bufferedBytes: buffered.reduce((total, update) => total + JSON.stringify(update).length * 2, 0),
-          ready: false,
-        };
-        return attachment.bootstrap;
-      } catch (error) {
-        if (generation === sessionGeneration && pendingSessionAttachment === pending) {
-          pendingSessionAttachment = undefined;
-          activeSessionAttachment = previous;
-        }
-        throw error;
+    async attach(input: SessionAttachInput, listener): Promise<SessionAttachment> {
+      const attachment = (await ipcRenderer.invoke(CHANNELS.sessionsAttach, input)) as SessionAttachment;
+      const active: ActiveSessionAttachment = {
+        attachmentId: attachment.attachmentId,
+        identity: { projectId: input.projectId, threadId: input.threadId },
+        listener,
+        buffered: [],
+        bufferedBytes: 0,
+        ready: false,
+        overflowed: false,
+      };
+      if (input.replaceAttachmentId) {
+        attachments.delete(input.replaceAttachmentId);
+        unclaimedPushes.delete(input.replaceAttachmentId);
       }
+      attachments.set(attachment.attachmentId, active);
+      const unclaimed = unclaimedPushes.get(attachment.attachmentId);
+      unclaimedPushes.delete(attachment.attachmentId);
+      for (const update of unclaimed ?? []) bufferSessionUpdate(active, update);
+      return attachment;
     },
-    flush() {
-      const current = activeSessionAttachment;
-      if (!current || current.ready) return;
-      current.ready = true;
-      const buffered = current.buffered;
-      current.buffered = [];
-      current.bufferedBytes = 0;
-      for (const update of buffered) deliverSessionUpdate(current, update);
+    flush(attachmentId: string): SessionFlushResult {
+      const attachment = attachments.get(attachmentId);
+      if (!attachment) return { state: "flushed" };
+      if (attachment.overflowed) return { state: "recovering", reason: "preload-buffer-overflow" };
+      if (attachment.ready) return { state: "flushed" };
+      attachment.ready = true;
+      const buffered = attachment.buffered;
+      attachment.buffered = [];
+      attachment.bufferedBytes = 0;
+      for (const update of buffered) deliverSessionUpdate(attachment, update);
+      return { state: "flushed" };
     },
-    detach() {
-      sessionGeneration += 1;
-      pendingSessionAttachment = undefined;
-      const current = activeSessionAttachment;
-      activeSessionAttachment = undefined;
-      ipcRenderer.send(CHANNELS.sessionsDetach, current?.attachmentId);
+    detach(attachmentId: string) {
+      attachments.delete(attachmentId);
+      unclaimedPushes.delete(attachmentId);
+      ipcRenderer.send(CHANNELS.sessionsDetach, attachmentId);
     },
     prewarm: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsPrewarm, projectId, threadId),
     rename: (projectId, threadId, title) => ipcRenderer.invoke(CHANNELS.sessionsRename, projectId, threadId, title),
@@ -221,7 +213,3 @@ const desktopApi: DesktopApi = {
 };
 
 contextBridge.exposeInMainWorld("desktop", desktopApi);
-
-function sessionTargetKey(projectId: string, threadId: string): string {
-  return `${projectId}\u0000${threadId}`;
-}

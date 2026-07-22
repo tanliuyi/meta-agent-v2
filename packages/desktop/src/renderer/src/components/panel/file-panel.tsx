@@ -4,26 +4,19 @@ import Search from "lucide-react/dist/esm/icons/search.mjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileNode, TextFile } from "../../../../shared/contracts.ts";
 import { errorMessage } from "../../shared/lib/error-message.ts";
-import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
-import {
-  selectActiveExpandedPaths,
-  selectActiveFile,
-  selectActiveOpenFiles,
-  selectActiveProjectId,
-  selectHasActiveWorkbench,
-} from "../../state/desktop-selectors.ts";
+import { useSessionScope, useSessionWorkbench } from "../session-context.tsx";
 import { FileTree } from "./file-tree.tsx";
 
 const FILE_SEARCH_DELAY = 180;
 
 /** session 独立的文件预览和 Project cwd 文件树。 */
 export function FilePanel() {
-  const actions = useDesktopActions();
-  const projectId = useDesktopSelector(selectActiveProjectId);
-  const hasWorkbench = useDesktopSelector(selectHasActiveWorkbench);
-  const activeFile = useDesktopSelector(selectActiveFile);
-  const openFiles = useDesktopSelector(selectActiveOpenFiles);
-  const expandedPaths = useDesktopSelector(selectActiveExpandedPaths);
+  const { record, updateWorkbench } = useSessionScope();
+  const workbench = useSessionWorkbench();
+  const projectId = record.identity.projectId;
+  const activeFile = workbench?.activeFile ?? null;
+  const openFiles = workbench?.openFiles ?? [];
+  const expandedPaths = workbench?.expandedPaths ?? [];
   const [query, setQuery] = useState("");
   const [roots, setRoots] = useState<FileNode[]>([]);
   const [children, setChildren] = useState<Record<string, FileNode[]>>({});
@@ -99,11 +92,11 @@ export function FilePanel() {
       if (node.type !== "directory" || !projectId) return;
       const nextExpanded = new Set(expandedPaths);
       if (nextExpanded.delete(node.path)) {
-        actions.updateWorkbench({ expandedPaths: [...nextExpanded] });
+        updateWorkbench({ expandedPaths: [...nextExpanded] });
         return;
       }
       nextExpanded.add(node.path);
-      actions.updateWorkbench({ expandedPaths: [...nextExpanded] });
+      updateWorkbench({ expandedPaths: [...nextExpanded] });
       if (children[node.path]) return;
 
       let request = directoryRequests.current.get(node.path);
@@ -121,7 +114,7 @@ export function FilePanel() {
         if (activeProjectId.current === projectId) setTreeError(errorMessage(value));
       }
     },
-    [actions, children, expandedPaths, projectId],
+    [children, expandedPaths, projectId, updateWorkbench],
   );
 
   const openNode = useCallback(
@@ -130,15 +123,15 @@ export function FilePanel() {
         void toggleDirectory(node);
         return;
       }
-      actions.updateWorkbench({
+      updateWorkbench({
         openFiles: openFiles.includes(node.path) ? [...openFiles] : [...openFiles, node.path],
         activeFile: node.path,
       });
     },
-    [actions, openFiles, toggleDirectory],
+    [openFiles, toggleDirectory, updateWorkbench],
   );
 
-  if (!projectId || !hasWorkbench) return null;
+  if (!workbench) return null;
 
   return (
     <div className="file-workspace">

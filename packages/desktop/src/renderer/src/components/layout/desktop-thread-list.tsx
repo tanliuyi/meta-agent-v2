@@ -1,4 +1,3 @@
-import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Dialog } from "@renderer/shared/ui/dialog";
@@ -7,14 +6,11 @@ import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
+import { useNavigate, useParams } from "@tanstack/react-router";
 import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, Thread } from "../../../../shared/contracts.ts";
 import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
-import {
-  selectHasDraft,
-  selectIsDraftMaterializing,
-  selectNavigationThreadIdForProject,
-} from "../../state/desktop-selectors.ts";
+import { selectHasDraft, selectIsDraftMaterializing } from "../../state/desktop-selectors.ts";
 import {
   COLLAPSED_THREAD_COUNT,
   isThreadListExpanded,
@@ -35,19 +31,19 @@ interface RenameState {
   title: string;
 }
 
-/** 使用 assistant-ui primitives 渲染当前 Project 的 session 列表。 */
+/** 使用 Router 导航渲染当前 Project 的 session 列表。 */
 export function DesktopThreadList({ project, threads }: DesktopThreadListProps) {
   const actions = useDesktopActions();
-  const activeThreadId = useDesktopSelector((state) => selectNavigationThreadIdForProject(state, project.id));
+  const navigate = useNavigate();
+  const params = useParams({ strict: false }) as Record<string, string | undefined>;
+  const activeThreadId = params.projectId === project.id ? (params.threadId ?? null) : null;
   const hasDraft = useDesktopSelector(selectHasDraft);
   const navigationDisabled = useDesktopSelector(selectIsDraftMaterializing);
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
-  const [pendingOpen, setPendingOpen] = useState<Thread | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
-  const composerIsEmpty = useAuiState((state) => state.composer.isEmpty);
   const regularThreadCount = useMemo(() => threads.filter(({ archived }) => !archived).length, [threads]);
   const visibleThreads = useMemo(
     () => visibleThreadsByArchiveState(threads, false, visibleLimit),
@@ -84,21 +80,13 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
 
   const openThread = useCallback(
     (thread: Thread) => {
-      if (hasDraft && !composerIsEmpty) {
-        setPendingOpen(thread);
-        return;
-      }
-      runAction(`switch:${thread.id}`, () => actions.openThread(project.id, thread.id));
+      void navigate({
+        to: "/projects/$projectId/session/$threadId",
+        params: { projectId: project.id, threadId: thread.id },
+      });
     },
-    [actions, composerIsEmpty, hasDraft, project.id, runAction],
+    [navigate, project.id],
   );
-
-  const confirmOpen = useCallback(() => {
-    const thread = pendingOpen;
-    if (!thread) return;
-    setPendingOpen(null);
-    runAction(`switch:${thread.id}`, () => actions.openThread(project.id, thread.id));
-  }, [actions, pendingOpen, project.id, runAction]);
 
   const prewarmThread = useCallback(
     (thread: Thread) => actions.prewarmThread(project.id, thread.id),
@@ -117,31 +105,23 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
   );
 
   return (
-    <div className="thread-list" data-slot="aui_thread-list-items">
-      <ThreadListPrimitive.Items>
-        {({ threadListItem }) => {
-          if (threadListItem.custom?.projectId !== project.id || !threadListItem.remoteId) return null;
-          if (!visibleThreadIds.has(threadListItem.remoteId)) return null;
-          const thread = threadsById.get(threadListItem.remoteId);
-          if (!thread || thread.archived) return null;
-          return (
-            <DesktopThreadListItem
-              key={thread.id}
-              thread={thread}
-              active={activeThreadId === thread.id}
-              isSwitching={navigationDisabled || pendingKeys.has(`switch:${thread.id}`)}
-              isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
-              isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
-              isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
-              onRenameStart={startRename}
-              onOpen={openThread}
-              onArchive={archiveThread}
-              onDelete={setPendingDelete}
-              onPrewarm={prewarmThread}
-            />
-          );
-        }}
-      </ThreadListPrimitive.Items>
+    <div className="thread-list">
+      {visibleThreads.map((thread) => (
+        <DesktopThreadListItem
+          key={thread.id}
+          thread={thread}
+          active={activeThreadId === thread.id}
+          isSwitching={navigationDisabled || pendingKeys.has(`switch:${thread.id}`)}
+          isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
+          isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
+          isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
+          onRenameStart={startRename}
+          onOpen={openThread}
+          onArchive={archiveThread}
+          onDelete={setPendingDelete}
+          onPrewarm={prewarmThread}
+        />
+      ))}
       {hasMoreThreads || isExpanded ? (
         <div className="flex items-center gap-1 px-8 py-1">
           {hasMoreThreads ? (
@@ -199,21 +179,11 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
       <ConfirmDialog
         open={pendingDelete !== null}
         title="删除会话"
-        description={`永久删除 Pi 会话“${pendingDelete?.title ?? ""}”及其本地会话文件。`}
+        description={`永久删除 Pi 会话"${pendingDelete?.title ?? ""}"及其本地会话文件。`}
         onOpenChange={(open) => {
           if (!open) setPendingDelete(null);
         }}
         onConfirm={confirmDelete}
-      />
-      <ConfirmDialog
-        open={pendingOpen !== null}
-        title="丢弃新会话草稿"
-        description="当前输入尚未发送，打开其他会话会丢弃这些内容。"
-        confirmLabel="丢弃并打开"
-        onOpenChange={(open) => {
-          if (!open) setPendingOpen(null);
-        }}
-        onConfirm={confirmOpen}
       />
     </div>
   );

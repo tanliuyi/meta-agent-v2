@@ -7,7 +7,7 @@ import PanelRightClose from "lucide-react/dist/esm/icons/panel-right-close.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import type { CSSProperties } from "react";
-import { useDesktopActions } from "../../state/desktop-context.tsx";
+import { useSessionScope } from "../session-context.tsx";
 import { FilePanel } from "./file-panel.tsx";
 import { isWorkbenchPanelValue, type WorkbenchPanelValue } from "./panel-model.ts";
 import { PanelTab } from "./panel-tab.tsx";
@@ -23,14 +23,14 @@ const getPanelMaxSize = () => Math.min(window.innerWidth * 0.68, 760);
 
 /** 渲染已打开的可调整 Workbench，并由 Radix Tabs 管理 tab/tabpanel 语义。 */
 export function OpenWorkbenchPanel({ width, panel }: OpenWorkbenchPanelProps) {
-  const actions = useDesktopActions();
+  const { updateWorkbench } = useSessionScope();
   const resize = useResizableRegion<HTMLDivElement>({
     value: width,
     min: 360,
     getMaxSize: getPanelMaxSize,
     direction: -1,
     orientation: "vertical",
-    onCommit: (panelWidth) => actions.updateWorkbench({ panelWidth }),
+    onCommit: (panelWidth) => updateWorkbench({ panelWidth }),
   });
 
   return (
@@ -43,7 +43,7 @@ export function OpenWorkbenchPanel({ width, panel }: OpenWorkbenchPanelProps) {
       role="complementary"
       aria-label="工作台 Panel"
       onValueChange={(value) => {
-        if (isWorkbenchPanelValue(value)) actions.updateWorkbench({ panel: value });
+        if (isWorkbenchPanelValue(value)) updateWorkbench({ panel: value });
       }}
     >
       <div

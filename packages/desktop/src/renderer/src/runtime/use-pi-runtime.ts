@@ -250,7 +250,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
   useEffect(
     () =>
       piSessionBus.onResync(() => {
-        window.desktop.sessions.flush();
+        piSessionBus.flush();
       }),
     [],
   );
@@ -303,7 +303,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
       }
       targetRef.current = { ...committed, generation };
       piSessionBus.commit(bootstrap);
-      window.desktop.sessions.flush();
+      piSessionBus.flush();
       return { bootstrap, workbench };
     };
     return {
@@ -315,14 +315,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         targetProjectRef.current = project;
         preparedRef.current = null;
         try {
-          const adapterThreadId = threadAdapterId(project.id, threadId);
-          // Route remounts preserve Desktop's active thread, so assistant-ui may treat the
-          // target as already selected and skip onSwitchToThread entirely.
-          if (options.project?.id === project.id && options.threadId === threadId) {
-            await hydrateThread(project, threadId, generation);
-          } else {
-            await runtime.threads.switchToThread(adapterThreadId, { unarchive: false });
-          }
+          await hydrateThread(project, threadId, generation);
           if (generation !== switchGeneration.current) throw new DOMException("Thread switch superseded", "AbortError");
           const prepared = readRef(preparedRef);
           if (!prepared || prepared.bootstrap.threadId !== threadId)
@@ -350,7 +343,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
           threadId: prepared.bootstrap.threadId,
         };
         draftModeRef.current = false;
-        window.desktop.sessions.flush();
+        piSessionBus.flush();
       },
       async enterDraft() {
         switchGeneration.current += 1;
@@ -389,12 +382,12 @@ export function usePiRuntime(options: PiRuntimeOptions): {
               threadId: prepared.bootstrap.threadId,
               reseed: submission.reseed,
             };
-            window.desktop.sessions.flush();
+            piSessionBus.flush();
             return { ...prepared, sent: false, reseed: submission.reseed };
           }
           await runtime.thread.append(submission.message);
           await runtime.thread.composer.reset();
-          window.desktop.sessions.flush();
+          piSessionBus.flush();
           return { ...prepared, sent: true };
         } catch (error) {
           const created = readRef(createdThreadRef);
@@ -487,7 +480,7 @@ export function usePiRuntime(options: PiRuntimeOptions): {
         draftModeRef.current = false;
       },
     };
-  }, [coordinator, hydrateThread, isArchivedThread, options.project?.id, options.threadId, runtime]);
+  }, [coordinator, hydrateThread, isArchivedThread, runtime]);
 
   return { runtime, actions };
 }

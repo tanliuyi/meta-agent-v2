@@ -1,4 +1,5 @@
 import { ThemePreferenceControl } from "./theme-preference-control.tsx";
+import { THINKING_VISIBILITY_LABEL_ID, ThinkingVisibilityControl } from "./thinking-visibility-control.tsx";
 
 /** 承载 renderer 的个性化设置项。 */
 export function PersonalizationSettingsPage() {
@@ -14,6 +15,15 @@ export function PersonalizationSettingsPage() {
         <div className="settings-row">
           <span>主题</span>
           <ThemePreferenceControl />
+        </div>
+      </section>
+      <section className="settings-section mt-4" aria-labelledby="chat-heading">
+        <div className="settings-section-heading">
+          <h3 id="chat-heading">聊天</h3>
+        </div>
+        <div className="settings-row">
+          <span id={THINKING_VISIBILITY_LABEL_ID}>显示 Thinking</span>
+          <ThinkingVisibilityControl />
         </div>
       </section>
     </div>

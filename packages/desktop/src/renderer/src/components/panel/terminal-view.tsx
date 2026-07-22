@@ -4,9 +4,8 @@ import { Terminal } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TerminalEvent } from "../../../../shared/contracts.ts";
 import { errorMessage } from "../../shared/lib/error-message.ts";
-import { useDesktopSelector } from "../../state/desktop-context.tsx";
-import { selectActiveProjectId, selectActiveThreadId } from "../../state/desktop-selectors.ts";
 import { useTheme } from "../../state/theme.tsx";
+import { useSessionScope } from "../session-context.tsx";
 
 export interface TerminalViewHandle {
   restart(): Promise<void>;
@@ -17,8 +16,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
   { terminalId },
   ref,
 ) {
-  const projectId = useDesktopSelector(selectActiveProjectId);
-  const threadId = useDesktopSelector(selectActiveThreadId);
+  const { record } = useSessionScope();
+  const { projectId, threadId } = record.identity;
   const { resolvedTheme } = useTheme();
   const container = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);

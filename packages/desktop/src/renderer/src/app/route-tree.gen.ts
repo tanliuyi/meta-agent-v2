@@ -10,15 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as NewRouteImport } from './routes/new'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
+import { Route as ProjectsProjectIdSessionThreadIdRouteImport } from './routes/projects.$projectId.session.$threadId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NewRoute = NewRouteImport.update({
+  id: '/new',
+  path: '/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -46,60 +53,80 @@ const SettingsPersonalizationRoute = SettingsPersonalizationRouteImport.update({
   path: '/personalization',
   getParentRoute: () => SettingsRoute,
 } as any)
+const ProjectsProjectIdSessionThreadIdRoute =
+  ProjectsProjectIdSessionThreadIdRouteImport.update({
+    id: '/projects/$projectId/session/$threadId',
+    path: '/projects/$projectId/session/$threadId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/new': typeof NewRoute
   '/settings': typeof SettingsRouteWithChildren
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/': typeof SettingsIndexRoute
+  '/projects/$projectId/session/$threadId': typeof ProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/new': typeof NewRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings': typeof SettingsIndexRoute
+  '/projects/$projectId/session/$threadId': typeof ProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/new': typeof NewRoute
   '/settings': typeof SettingsRouteWithChildren
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/': typeof SettingsIndexRoute
+  '/projects/$projectId/session/$threadId': typeof ProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/new'
     | '/settings'
     | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/'
+    | '/projects/$projectId/session/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/new'
     | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings'
+    | '/projects/$projectId/session/$threadId'
   id:
     | '__root__'
     | '/'
+    | '/new'
     | '/settings'
     | '/settings/auth'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/'
+    | '/projects/$projectId/session/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  NewRoute: typeof NewRoute
   SettingsRoute: typeof SettingsRouteWithChildren
+  ProjectsProjectIdSessionThreadIdRoute: typeof ProjectsProjectIdSessionThreadIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -109,6 +136,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/new': {
+      id: '/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof NewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -146,6 +180,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsPersonalizationRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/projects/$projectId/session/$threadId': {
+      id: '/projects/$projectId/session/$threadId'
+      path: '/projects/$projectId/session/$threadId'
+      fullPath: '/projects/$projectId/session/$threadId'
+      preLoaderRoute: typeof ProjectsProjectIdSessionThreadIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -169,7 +210,9 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  NewRoute: NewRoute,
   SettingsRoute: SettingsRouteWithChildren,
+  ProjectsProjectIdSessionThreadIdRoute: ProjectsProjectIdSessionThreadIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

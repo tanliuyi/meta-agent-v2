@@ -33,6 +33,8 @@ export class PiSessionBus {
   private latestAttachmentGeneration = 0;
   private committedAttachmentGeneration = 0;
   private readonly bootstrapGenerations = new WeakMap<SessionBootstrap, number>();
+  private readonly bootstrapAttachments = new WeakMap<SessionBootstrap, string>();
+  private activeAttachmentId: string | null = null;
   private pendingResync?: PendingResync;
   private recoveryIntent?: RecoveryIntent;
   private recoveryTimer?: number;
@@ -42,9 +44,20 @@ export class PiSessionBus {
     this.cancelRecoveryTimer();
     this.pendingResync = undefined;
     try {
-      const bootstrap = await window.desktop.sessions.attach(projectId, threadId, (update) => this.receive(update));
-      this.bootstrapGenerations.set(bootstrap, generation);
-      return bootstrap;
+      const attachment = await window.desktop.sessions.attach(
+        {
+          projectId,
+          threadId,
+          requestId: crypto.randomUUID(),
+          ...(this.activeKey === transportSessionKey(projectId, threadId) && this.activeAttachmentId
+            ? { replaceAttachmentId: this.activeAttachmentId }
+            : {}),
+        },
+        (update) => this.receive(update),
+      );
+      this.bootstrapGenerations.set(attachment.bootstrap, generation);
+      this.bootstrapAttachments.set(attachment.bootstrap, attachment.attachmentId);
+      return attachment.bootstrap;
     } catch (error) {
       if (this.latestAttachmentGeneration === generation) {
         this.latestAttachmentGeneration = this.committedAttachmentGeneration;
@@ -60,6 +73,7 @@ export class PiSessionBus {
     const generation = preparedGeneration ?? ++this.latestAttachmentGeneration;
     if (generation !== this.latestAttachmentGeneration) return;
     this.committedAttachmentGeneration = generation;
+    this.activeAttachmentId = this.bootstrapAttachments.get(bootstrap) ?? this.activeAttachmentId;
     this.clearRecovery();
     this.pendingResync = undefined;
     this.activeKey = transportSessionKey(bootstrap.projectId, bootstrap.threadId);
@@ -68,8 +82,13 @@ export class PiSessionBus {
     for (const listener of this.runtimeListeners) listener({ state: "ready", unknownOutcome: false });
   }
 
+  flush(): void {
+    if (this.activeAttachmentId) window.desktop.sessions.flush(this.activeAttachmentId);
+  }
+
   detach(): void {
-    window.desktop.sessions.detach();
+    if (this.activeAttachmentId) window.desktop.sessions.detach(this.activeAttachmentId);
+    this.activeAttachmentId = null;
     this.latestAttachmentGeneration += 1;
     this.committedAttachmentGeneration = this.latestAttachmentGeneration;
     this.activeKey = "";

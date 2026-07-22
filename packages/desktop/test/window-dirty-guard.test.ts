@@ -85,6 +85,19 @@ describe("WindowDirtyGuard", () => {
     expect(window.webContents.reload).toHaveBeenCalledTimes(1);
   });
 
+  test("releases renderer-owned resources immediately before reload", async () => {
+    const calls: string[] = [];
+    const guard = new WindowDirtyGuard({
+      beforeReload: () => calls.push("cleanup"),
+    });
+    const window = new FakeWindow(8);
+    window.webContents.reload.mockImplementation(() => calls.push("reload"));
+
+    await guard.requestReload(asBrowserWindow(window));
+
+    expect(calls).toEqual(["cleanup", "reload"]);
+  });
+
   test("tracks dirty state per webContents and clears it on destroy", () => {
     const guard = new WindowDirtyGuard({ confirm: async () => false });
     const first = new FakeWindow(4);

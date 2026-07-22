@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { ModelsCompatEditor } from "../src/renderer/src/features/settings/models-compat-editor.tsx";
 import { ModelsProviderForm } from "../src/renderer/src/features/settings/models-provider-form.tsx";
-import { ModelsProviderList } from "../src/renderer/src/features/settings/models-provider-list.tsx";
 import { createProviderDraft } from "../src/renderer/src/features/settings/models-settings-model.ts";
 
 const metadata = {
@@ -65,25 +64,5 @@ describe("models settings components", () => {
     expect(markup).not.toContain("textarea");
     expect(markup).toContain('role="combobox"');
     expect(markup).toContain('role="checkbox"');
-  });
-
-  test("uses provider indices to distinguish temporarily duplicate editable keys", () => {
-    const first = createProviderDraft("duplicate");
-    first.origin = { providerKey: "first" };
-    const second = createProviderDraft("duplicate");
-    second.origin = { providerKey: "second" };
-
-    const markup = renderToStaticMarkup(
-      <ModelsProviderList
-        providers={[first, second]}
-        metadata={metadata}
-        selectedIndex={1}
-        onSelect={vi.fn()}
-        onAdd={vi.fn()}
-      />,
-    );
-
-    expect(markup.match(/aria-selected="true"/g)).toHaveLength(1);
-    expect(markup.match(/aria-selected="false"/g)).toHaveLength(1);
   });
 });

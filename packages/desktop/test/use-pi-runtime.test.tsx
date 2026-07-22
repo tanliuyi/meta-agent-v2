@@ -8,7 +8,14 @@ import {
   type PreparedThread,
   usePiRuntime,
 } from "../src/renderer/src/runtime/use-pi-runtime.ts";
-import type { Project, SessionBootstrap, Thread, WorkbenchState } from "../src/shared/contracts.ts";
+import type {
+  Project,
+  SessionAttachInput,
+  SessionAttachment,
+  SessionBootstrap,
+  Thread,
+  WorkbenchState,
+} from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
 
 const targetProject: Project = {
@@ -29,7 +36,7 @@ describe("usePiRuntime attachment commit", () => {
   let rename: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    attach = vi.fn(async (projectId: string, threadId: string) => bootstrap(projectId, threadId));
+    attach = vi.fn(async (input: SessionAttachInput) => sessionAttachment(input.projectId, input.threadId));
     clearQueue = vi.fn(async () => ({ steering: [], followUp: [] }));
     detach = vi.fn();
     remove = vi.fn(async () => undefined);
@@ -67,8 +74,17 @@ describe("usePiRuntime attachment commit", () => {
 
     const prepared = await actions.open(targetProject, "active");
 
-    expect(attach).toHaveBeenCalledWith("project", "active", expect.any(Function));
+    expect(attach).toHaveBeenCalledWith(expectedAttachInput("active"), expect.any(Function));
     expect(prepared.bootstrap.threadId).toBe("active");
+  });
+
+  it("打开当前 assistant-ui catalog 尚未包含的 fork thread 时直接 hydrate", async () => {
+    const { actions } = renderPiRuntime([thread("existing")]);
+
+    const prepared = await actions.open(targetProject, "forked");
+
+    expect(attach).toHaveBeenCalledWith(expectedAttachInput("forked"), expect.any(Function));
+    expect(prepared.bootstrap.threadId).toBe("forked");
   });
 
   it("官方 thread item rename 会落到 Desktop session IPC", async () => {
@@ -105,11 +121,11 @@ describe("usePiRuntime attachment commit", () => {
 
     await expect(actions.open(targetProject, "failed")).rejects.toThrow("attach failed");
 
-    expect(attach).toHaveBeenLastCalledWith("project", "committed", expect.any(Function));
+    expect(attach).toHaveBeenLastCalledWith(expectedAttachInput("committed"), expect.any(Function));
   });
 
   it("较新的 switch 提交后忽略迟到的 committed thread recovery", async () => {
-    const restore = deferred<SessionBootstrap>();
+    const restore = deferred<SessionAttachment>();
     const { actions } = renderPiRuntime([thread("committed"), thread("failed"), thread("latest")]);
     const committed = await actions.open(targetProject, "committed");
     actions.commit(committed);
@@ -120,7 +136,7 @@ describe("usePiRuntime attachment commit", () => {
     await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(3));
     const latest = await actions.open(targetProject, "latest");
     actions.commit(latest);
-    restore.resolve(bootstrap("project", "committed"));
+    restore.resolve(sessionAttachment("project", "committed", "restore-committed"));
 
     await expect(failed).rejects.toThrow("attach failed");
     await actions.clearQueue();
@@ -141,7 +157,7 @@ describe("usePiRuntime attachment commit", () => {
 
   it("删除 committed thread 时不破坏更新 generation 的 attachment", async () => {
     const removal = deferred<void>();
-    const nextAttachment = deferred<SessionBootstrap>();
+    const nextAttachment = deferred<SessionAttachment>();
     const { actions } = renderPiRuntime([thread("active"), thread("latest")]);
     const active = await actions.open(targetProject, "active");
     actions.commit(active);
@@ -157,14 +173,14 @@ describe("usePiRuntime attachment commit", () => {
     await deleting;
     expect(detach).not.toHaveBeenCalled();
 
-    nextAttachment.resolve(bootstrap("project", "latest"));
+    nextAttachment.resolve(sessionAttachment("project", "latest", "latest-attachment"));
     const latest = await switching;
     actions.commit(latest);
     expect(piSessionBus.store.getSnapshot().threadId).toBe("latest");
   });
 
   it("committed recovery 迟到时不重新提交已删除的 baseline", async () => {
-    const recovery = deferred<SessionBootstrap>();
+    const recovery = deferred<SessionAttachment>();
     const { actions } = renderPiRuntime([thread("baseline"), thread("failed")]);
     const baseline = await actions.open(targetProject, "baseline");
     actions.commit(baseline);
@@ -174,7 +190,7 @@ describe("usePiRuntime attachment commit", () => {
     const failed = actions.open(targetProject, "failed");
     await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(3));
     await actions.remove(targetProject, "baseline");
-    recovery.resolve(bootstrap("project", "baseline"));
+    recovery.resolve(sessionAttachment("project", "baseline", "baseline-recovery"));
 
     await expect(failed).rejects.toThrow("attach failed");
     expect(piSessionBus.store.getSnapshot().threadId).toBe("");
@@ -240,7 +256,7 @@ describe("usePiRuntime attachment commit", () => {
     const restored = await actions.discardDraft();
 
     expect(restored?.bootstrap.threadId).toBe("baseline");
-    expect(attach).toHaveBeenCalledWith("project", "baseline", expect.any(Function));
+    expect(attach).toHaveBeenCalledWith(expectedAttachInput("baseline"), expect.any(Function));
   });
 
   it("归档进行中删除 baseline 后迟到失败不会恢复已删除 thread", async () => {
@@ -303,6 +319,22 @@ function thread(id: string): Thread {
     preview: "",
     archived: false,
     running: false,
+  };
+}
+
+function expectedAttachInput(threadId: string) {
+  return expect.objectContaining({ projectId: "project", threadId, requestId: expect.any(String) });
+}
+
+function sessionAttachment(
+  projectId: string,
+  threadId: string,
+  attachmentId = `attachment-${threadId}`,
+): SessionAttachment {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    attachmentId,
+    bootstrap: bootstrap(projectId, threadId),
   };
 }
 

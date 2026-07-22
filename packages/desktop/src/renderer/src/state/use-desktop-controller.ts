@@ -155,13 +155,21 @@ export function useDesktopController(
       const threads = await window.desktop.sessions.list(project.id, true);
       if (!isCurrentNavigation(navigation)) return;
       dispatch({ type: "project-loaded", project, threads });
-      const preferredThreadId = store.getState().activeThreadIds[project.id];
-      const target = openExistingThread
-        ? (threads.find(({ archived, id }) => !archived && id === preferredThreadId) ??
-          threads.find(({ archived }) => !archived))
+
+      // Check if route navigation already set a target for this project.
+      // If so, the session route handles attach — don't enter draft or detach.
+      const stateBeforeLoad = store.getState();
+      const routeNav = stateBeforeLoad.routeNavigation;
+      const routeHandlingThisProject = routeNav?.projectId === project.id;
+
+      const preferredThreadId = openExistingThread
+        ? ((routeHandlingThisProject ? routeNav!.threadId : undefined) ?? stateBeforeLoad.activeThreadIds[project.id])
+        : undefined;
+      const target = preferredThreadId
+        ? threads.find(({ archived, id }) => !archived && id === preferredThreadId)
         : undefined;
       if (target) await loadThread(project, target.id, navigation);
-      else {
+      else if (!routeHandlingThisProject) {
         const actions = threadActions.current;
         if (!actions) throw new Error("assistant-ui thread adapter 尚未就绪");
         await actions.enterDraft();
@@ -219,8 +227,14 @@ export function useDesktopController(
       .then(async ([projects, current]) => {
         if (!active || !isCurrentNavigation(navigation)) return;
         dispatch({ type: "projects-loaded", projects });
-        if (current?.available) {
-          await loadProject(current, navigation, shouldRestoreActiveThread(store.getState(), current.id));
+        const state = store.getState();
+        // Prefer route navigation target over main's active project
+        const routeNav = state.routeNavigation;
+        const projectToLoad = routeNav
+          ? (projects.find((p) => p.id === routeNav.projectId && p.available) ?? current)
+          : current;
+        if (projectToLoad?.available) {
+          await loadProject(projectToLoad, navigation, shouldRestoreActiveThread(store.getState(), projectToLoad.id));
         }
       })
       .catch((value: unknown) => {

@@ -1,13 +1,12 @@
-import { useDesktopSelector } from "../../state/desktop-context.tsx";
-import { selectActiveHostRequest, selectActiveProjectId, selectActiveThreadId } from "../../state/desktop-selectors.ts";
+import { useSessionControl, useSessionScope } from "../session-context.tsx";
 import { HostRequests } from "./host-requests.tsx";
 
-/** 仅让扩展请求表面订阅首个 request 与 session identity。 */
+/** Host UI requests are routed to the session record that received the control push. */
 export function SessionHostRequests() {
-  const request = useDesktopSelector(selectActiveHostRequest);
-  const projectId = useDesktopSelector(selectActiveProjectId);
-  const threadId = useDesktopSelector(selectActiveThreadId);
-  return request && projectId && threadId ? (
-    <HostRequests request={request} projectId={projectId} threadId={threadId} />
+  const { record } = useSessionScope();
+  const control = useSessionControl();
+  const request = control?.hostRequests[0];
+  return request ? (
+    <HostRequests request={request} projectId={record.identity.projectId} threadId={record.identity.threadId} />
   ) : null;
 }

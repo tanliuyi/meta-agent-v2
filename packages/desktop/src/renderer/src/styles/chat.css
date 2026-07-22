@@ -283,7 +283,7 @@
   display: grid;
   gap: 4px;
   margin: 0 14px -10px;
-  padding: 7px 10px 16px;
+  padding: 8px 12px 16px;
   overflow: hidden;
   border: 1px solid hsl(var(--border) / 0.8);
   border-bottom: 0;
@@ -294,21 +294,43 @@
 .composer-queue-header {
   display: flex;
   align-items: center;
-  min-height: 22px;
+  min-height: 20px;
   color: hsl(var(--muted-foreground));
   font-size: 11px;
-  font-weight: 550;
+  font-weight: 500;
 }
 .composer-queue-count {
-  min-width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
   margin-left: 5px;
+  padding: 0 4px;
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--muted) / 0.45);
   color: hsl(var(--foreground));
+  font-size: 10px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.composer-queue-clear {
+.composer-queue-header .composer-queue-clear {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground) / 0.7);
+  transition: color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.composer-queue-header .composer-queue-clear:hover {
+  color: hsl(var(--destructive) / 0.85);
+}
+
+.composer-queue-header .composer-queue-clear svg {
+  width: 11px;
+  height: 11px;
+  opacity: 0.6;
 }
 
 .composer-queue-list {
@@ -322,8 +344,8 @@
   grid-template-columns: 38px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  border-top: 1px solid hsl(var(--border) / 0.55);
+  min-height: 28px;
+  border-top: 1px solid hsl(var(--border) / 0.4);
   font-size: 12px;
 }
 .composer-queue-mode {

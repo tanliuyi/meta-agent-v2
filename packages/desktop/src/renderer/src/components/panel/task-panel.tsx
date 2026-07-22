@@ -1,32 +1,33 @@
-import { usePiQueueCount, usePiThreadPhase } from "../../runtime/use-pi-thread-snapshot.ts";
-import { useDesktopSelector } from "../../state/desktop-context.tsx";
-import { selectActiveContextPercent, selectActiveExtensionStatuses } from "../../state/desktop-selectors.ts";
+import { useSessionControl, useSessionTimeline } from "../session-context.tsx";
 
-/** 以最小 selector 展示 active session 的运行与扩展状态。 */
+/** Session diagnostics derive from the record's timeline and control stores. */
 export function TaskPanel() {
-  const contextPercent = useDesktopSelector(selectActiveContextPercent);
-  const statuses = useDesktopSelector(selectActiveExtensionStatuses);
-  const phase = usePiThreadPhase();
-  const queueCount = usePiQueueCount();
+  const control = useSessionControl();
+  const timeline = useSessionTimeline();
+  const statuses = control?.extensionUi.statuses ?? {};
   return (
     <div className="task-panel">
       <h3>会话状态</h3>
       <dl>
         <div>
           <dt>运行</dt>
-          <dd>{phase === "idle" ? "空闲" : "进行中"}</dd>
+          <dd>{timeline.phase === "idle" ? "空闲" : "进行中"}</dd>
         </div>
         <div>
           <dt>上下文</dt>
-          <dd>{contextPercent === null ? "--" : `${contextPercent.toFixed(1)}%`}</dd>
+          <dd>
+            {control?.context?.percent === null || control?.context?.percent === undefined
+              ? "--"
+              : `${control.context.percent.toFixed(1)}%`}
+          </dd>
         </div>
         <div>
           <dt>队列</dt>
-          <dd>{queueCount}</dd>
+          <dd>{timeline.queue.length}</dd>
         </div>
         <div>
           <dt>压缩</dt>
-          <dd>{phase === "compacting" ? "进行中" : "空闲"}</dd>
+          <dd>{timeline.phase === "compacting" ? "进行中" : "空闲"}</dd>
         </div>
       </dl>
       {Object.keys(statuses).length > 0 ? (
