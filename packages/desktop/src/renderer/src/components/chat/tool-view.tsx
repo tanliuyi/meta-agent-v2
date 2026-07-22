@@ -2,57 +2,94 @@ import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { Collapsible } from "@renderer/shared/ui/collapsible";
 import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
 import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
+import { ScrollArea } from "@renderer/shared/ui/scroll-area";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
-import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
-import Files from "lucide-react/dist/esm/icons/files.mjs";
-import ListTree from "lucide-react/dist/esm/icons/list-tree.mjs";
-import PencilLine from "lucide-react/dist/esm/icons/pencil-line.mjs";
-import Search from "lucide-react/dist/esm/icons/search.mjs";
-import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
-import Wrench from "lucide-react/dist/esm/icons/wrench.mjs";
+import { useState } from "react";
 import { ToolFileTarget } from "./tool-file-target.tsx";
 import { ToolContent } from "./tools/tool-content.tsx";
+import { readToolStringArgument } from "./tools/tool-format.ts";
 
 type ToolState = "running" | "complete" | "error";
+type ToolTarget = { type: "file"; value: string } | { type: "text"; value: string };
 
-interface ToolViewDescription {
-  icon: React.ReactNode;
-  running: string;
-  complete: string;
-  error: string;
+interface ToolHeader {
+  label: string;
+  target?: ToolTarget;
+  context?: string;
 }
 
-type ToolTarget = { type: "file"; path: string } | { type: "text"; value: string };
-
-/** 按 Pi 原生工具类型渲染紧凑工具状态。 */
+/** 按 pi-coding-agent TUI 的标题、状态底色与折叠预览渲染工具。 */
 export function ToolView({ toolName, args, result, status, artifact, isError }: ToolCallMessagePartProps) {
-  const view = toolView(toolName);
+  const [expanded, setExpanded] = useState(false);
   const artifactState = toolArtifact(artifact);
   const execution = artifactState?.execution;
   const running =
     status.type === "running" || execution === "streaming-args" || execution === "waiting" || execution === "running";
   const error = isError === true || execution === "error" || status.type === "incomplete";
   const toolState: ToolState = error ? "error" : running ? "running" : "complete";
-  const target = toolTarget(toolName, args);
   const displayedResult = result ?? artifactState?.partialResult;
+  const header = toolHeader(toolName, args);
+  const cursorFollowsArgs = running && execution === "streaming-args";
+  const cursorAtEnd = running && execution !== "streaming-args";
+  const stateLabel = toolState === "running" ? "运行中" : toolState === "error" ? "失败" : "已完成";
 
   return (
-    <Collapsible className="tool-view" data-tool-status={toolState}>
-      <div className="tool-trigger-row">
-        <CollapsibleTrigger className="tool-trigger focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px] focus-visible:ring-inset">
-          <span className="tool-icon">{view.icon}</span>
-          <span className="tool-status-label" aria-live="polite">
-            {view[toolState]}
-          </span>
-          {target?.type === "text" ? <span className="tool-target">{target.value}</span> : null}
-          <ChevronRight size={16} className="tool-chevron" aria-hidden="true" />
+    <Collapsible
+      className="tool-view"
+      data-tool-name={toolName}
+      data-tool-status={toolState}
+      open={expanded}
+      onOpenChange={setExpanded}
+    >
+      <div className="tool-trigger-row" data-cursor-position={cursorAtEnd ? "end" : undefined}>
+        <CollapsibleTrigger asChild>
+          <button
+            className="tool-trigger"
+            data-running={running ? "true" : undefined}
+            data-target-type={header.target?.type}
+            type="button"
+          >
+            <span className="tool-name">{header.label}</span>
+            {header.target?.type === "text" ? <span className="tool-target">{header.target.value}</span> : null}
+            {header.target?.type !== "file" && header.context ? (
+              <span className="tool-context">{header.context}</span>
+            ) : null}
+            {cursorFollowsArgs && header.target?.type !== "file" ? (
+              <span className="tool-running-cursor" aria-hidden="true" />
+            ) : null}
+          </button>
         </CollapsibleTrigger>
-        {target?.type === "file" ? <ToolFileTarget path={target.path} /> : null}
+        {header.target?.type === "file" ? <ToolFileTarget path={header.target.value} /> : null}
+        {header.target?.type === "file" && header.context ? (
+          <span className="tool-context">{header.context}</span>
+        ) : null}
+        {cursorFollowsArgs && header.target?.type === "file" ? (
+          <span className="tool-running-cursor" aria-hidden="true" />
+        ) : null}
+        {cursorAtEnd ? <span className="tool-running-cursor tool-running-cursor-end" aria-hidden="true" /> : null}
+        <span className="sr-only" aria-live="polite">
+          {stateLabel}
+        </span>
+        <CollapsibleTrigger
+          className="tool-expand-trigger"
+          aria-label={`${expanded ? "收起" : "展开"}${header.label}详情`}
+        >
+          <ChevronRight size={15} className="tool-chevron" aria-hidden="true" />
+        </CollapsibleTrigger>
       </div>
       <CollapsibleContent className="data-closed:animate-collapsible-up data-open:animate-collapsible-down overflow-hidden data-closed:pointer-events-none data-closed:fill-mode-forwards motion-reduce:animate-none">
-        <div className="tool-body">
-          <ToolContent name={toolName} args={args} result={displayedResult} error={error} />
-        </div>
+        <ScrollArea className="tool-scroll-area">
+          <div className="tool-body">
+            <ToolContent
+              name={toolName}
+              args={args}
+              result={displayedResult}
+              error={error}
+              expanded
+              argsComplete={execution !== "streaming-args"}
+            />
+          </div>
+        </ScrollArea>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -65,76 +102,69 @@ function toolArtifact(value: unknown): { execution?: string; partialResult?: unk
   return { execution, partialResult };
 }
 
-function toolView(name: string): ToolViewDescription {
-  if (name === "bash")
+function toolHeader(name: string, args: Readonly<Record<string, unknown>>): ToolHeader {
+  const path = readToolStringArgument(args, "path", "file_path");
+  if (name === "bash") {
+    return { label: "$", target: textTarget(readToolStringArgument(args, "command") || "…") };
+  }
+  if (name === "read") {
+    return { label: "read", target: fileTarget(path), context: readLineRange(args) };
+  }
+  if (name === "write" || name === "edit") {
+    return { label: name, target: fileTarget(path) };
+  }
+  if (name === "grep") {
+    const pattern = readToolStringArgument(args, "pattern");
+    const glob = readToolStringArgument(args, "glob");
     return {
-      running: "命令",
-      complete: "",
-      error: "",
-      icon: <TerminalSquare size={14} />,
+      label: "grep",
+      target: textTarget(`/${pattern}/`),
+      context: `in ${path || "."}${glob ? ` (${glob})` : ""}${numberSuffix(args.limit, "limit")}`,
     };
-  if (name === "read")
+  }
+  if (name === "find") {
     return {
-      running: "读取",
-      complete: "读取",
-      error: "读取失败",
-      icon: <FileCode2 size={14} />,
+      label: "find",
+      target: textTarget(readToolStringArgument(args, "pattern") || "…"),
+      context: `in ${path || "."}${numberSuffix(args.limit, "limit", true)}`,
     };
-  if (name === "write")
+  }
+  if (name === "ls") {
     return {
-      running: "正在写入",
-      complete: "已写入",
-      error: "写入失败",
-      icon: <PencilLine size={14} />,
+      label: "ls",
+      target: textTarget(path || "."),
+      context: numberSuffix(args.limit, "limit", true).trimStart(),
     };
-  if (name === "edit")
-    return {
-      running: "正在编辑",
-      complete: "已编辑",
-      error: "编辑失败",
-      icon: <PencilLine size={14} />,
-    };
-  if (name === "grep")
-    return {
-      running: "正在搜索",
-      complete: "已搜索",
-      error: "搜索失败",
-      icon: <Search size={14} />,
-    };
-  if (name === "find")
-    return {
-      running: "正在查找",
-      complete: "已查找",
-      error: "查找失败",
-      icon: <Files size={14} />,
-    };
-  if (name === "ls")
-    return {
-      running: "正在查看",
-      complete: "已查看",
-      error: "查看失败",
-      icon: <ListTree size={14} />,
-    };
-  return {
-    running: `正在运行 ${name}`,
-    complete: `${name} 已完成`,
-    error: `${name} 失败`,
-    icon: <Wrench size={14} />,
-  };
+  }
+  return { label: name, target: textTarget(toolFallbackTarget(args)) };
 }
 
-function toolTarget(name: string, args: Readonly<Record<string, unknown>>): ToolTarget | undefined {
-  if (name === "read" || name === "write" || name === "edit") {
-    for (const key of ["path", "file_path"]) {
-      const value = args[key];
-      if (typeof value === "string" && value) return { type: "file", path: value };
-    }
-    return undefined;
-  }
+function fileTarget(value: string): ToolTarget | undefined {
+  return value ? { type: "file", value } : undefined;
+}
 
+function textTarget(value: string): ToolTarget {
+  return { type: "text", value };
+}
+
+function readLineRange(args: Readonly<Record<string, unknown>>): string {
+  const offset = typeof args.offset === "number" ? args.offset : undefined;
+  const limit = typeof args.limit === "number" ? args.limit : undefined;
+  if (offset === undefined && limit === undefined) return "";
+  const start = offset ?? 1;
+  return `:${start}${limit === undefined ? "" : `-${start + limit - 1}`}`;
+}
+
+function numberSuffix(value: unknown, label: string, parentheses = false): string {
+  if (typeof value !== "number") return "";
+  const text = `${label} ${value}`;
+  return parentheses ? ` (${text})` : ` ${text}`;
+}
+
+function toolFallbackTarget(args: Readonly<Record<string, unknown>>): string {
   for (const key of ["path", "file_path", "command", "pattern", "query"]) {
     const value = args[key];
-    if (typeof value === "string") return { type: "text", value };
+    if (typeof value === "string") return value;
   }
-  return undefined;
+  return "";
 }

@@ -8,19 +8,25 @@ import { formatToolValue } from "./tool-format.ts";
 import { ToolResult } from "./tool-result.tsx";
 import { WriteContent } from "./write-content.tsx";
 
-/** 为 Pi 常用工具选择结构化内容，未知工具保留 JSON fallback。 */
-export function ToolContent({ name, args, result, error }: ToolContentProps) {
-  if (name === "bash") return <CommandContent args={args} result={result} error={error} />;
-  if (name === "read") return <ReadContent result={result} error={error} />;
-  if (name === "write") return <WriteContent args={args} result={result} error={error} />;
-  if (name === "edit") return <EditContent args={args} result={result} error={error} />;
+/** 为 Pi 常用工具复刻 TUI 的标题/预览信息密度，未知工具保留 JSON fallback。 */
+export function ToolContent({ name, args, result, error, expanded, argsComplete }: ToolContentProps) {
+  if (name === "bash") {
+    return <CommandContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />;
+  }
+  if (name === "read") return <ReadContent result={result} error={error} expanded={expanded} />;
+  if (name === "write") {
+    return <WriteContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />;
+  }
+  if (name === "edit") {
+    return <EditContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />;
+  }
   if (name === "grep" || name === "find" || name === "ls") {
-    return <SearchContent result={result} error={error} />;
+    return <SearchContent result={result} error={error} expanded={expanded} previewLines={name === "grep" ? 15 : 20} />;
   }
   return (
     <>
-      <ToolCode label="参数" value={formatToolValue(args)} />
-      <ToolResult result={result} error={error} />
+      <ToolCode value={formatToolValue(args)} expanded={expanded} />
+      <ToolResult result={result} error={error} expanded={expanded} />
     </>
   );
 }

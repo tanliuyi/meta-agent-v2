@@ -199,9 +199,16 @@ export class PiThreadProjector {
         this.endMessage(event.message);
         this.scheduleCheckpoint();
         return;
-      case "tool_execution_start":
-        this.replaceTool(event.toolCallId, (part) => ({ ...part, execution: "running" }));
+      case "tool_execution_start": {
+        const args = toJson(event.args);
+        this.replaceTool(event.toolCallId, (part) => ({
+          ...part,
+          args: isJsonObject(args) ? args : part.args,
+          argsText: JSON.stringify(args),
+          execution: "running",
+        }));
         return;
+      }
       case "tool_execution_update":
         this.replaceTool(event.toolCallId, (part) => ({
           ...part,
@@ -399,7 +406,12 @@ export class PiThreadProjector {
         if (content?.type !== "toolCall") return;
         const owner = this.toolOwners.get(content.id);
         if (!owner) throw new ProjectionError(`toolcall_delta 缺少 owner: ${content.id}`);
-        this.replaceTool(content.id, (part) => ({ ...part, argsText: part.argsText + update.delta }));
+        const args = toJson(content.arguments);
+        this.replaceTool(content.id, (part) => ({
+          ...part,
+          args: isJsonObject(args) ? args : part.args,
+          argsText: part.argsText + update.delta,
+        }));
         return;
       }
       case "toolcall_end": {
@@ -1032,7 +1044,7 @@ function toolPart(
     toolCallId: content.id,
     toolName: content.name,
     args: isJsonObject(args) ? args : {},
-    argsText: JSON.stringify(args),
+    argsText: execution === "streaming-args" ? "" : JSON.stringify(args),
     execution,
   };
 }

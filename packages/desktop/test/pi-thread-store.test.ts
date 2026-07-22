@@ -433,6 +433,41 @@ describe("PiMessageRepositoryConverter", () => {
     expect(secondMessage.content[0].artifact).toBe(firstMessage.content[0].artifact);
   });
 
+  it("tool replacement 将参数与 partialResult 增量投影为新的 repository part", () => {
+    const tool = toolPart("a:tool:0", "write-1", "write");
+    const assistant = { ...assistantNode("a", null), content: [tool] };
+    const store = new PiThreadStore(snapshot([assistant], "a"));
+    const converter = new PiMessageRepositoryConverter();
+    const first = converter.build(store.getSnapshot());
+    const replacement = {
+      ...tool,
+      args: { path: "src/main.ts", content: "const value" },
+      argsText: '{"path":"src/main.ts","content":"const value',
+      execution: "running" as const,
+      partialResult: { content: [{ type: "text", text: "written 8 bytes" }] },
+    };
+
+    store.apply(batch(1, { type: "tool-call-replaced", messageId: "a", part: replacement }));
+    const second = converter.build(store.getSnapshot());
+    const firstMessage = first.messages[0]?.message;
+    const secondMessage = second.messages[0]?.message;
+    if (firstMessage?.role !== "assistant" || secondMessage?.role !== "assistant") {
+      throw new Error("assistant message missing");
+    }
+    const firstPart = firstMessage.content[0];
+    const secondPart = secondMessage.content[0];
+    expect(secondPart).not.toBe(firstPart);
+    expect(secondPart).toMatchObject({
+      type: "tool-call",
+      args: { path: "src/main.ts", content: "const value" },
+      argsText: '{"path":"src/main.ts","content":"const value',
+      artifact: {
+        execution: "running",
+        partialResult: { content: [{ type: "text", text: "written 8 bytes" }] },
+      },
+    });
+  });
+
   it("1,000 nodes + 1,000 deltas 不重复转换未变化历史 message", () => {
     const users = Array.from({ length: 999 }, (_, index) =>
       userNode(`u-${index}`, index === 0 ? null : `u-${index - 1}`),
@@ -529,7 +564,11 @@ function userNode(id: string, parentId: string | null, image = false): PiUserMes
   };
 }
 
-function toolPart(id: string, toolCallId: string, toolName: string): PiAssistantMessage["content"][number] {
+function toolPart(
+  id: string,
+  toolCallId: string,
+  toolName: string,
+): Extract<PiAssistantMessage["content"][number], { type: "tool-call" }> {
   return {
     id,
     type: "tool-call",

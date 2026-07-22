@@ -36,7 +36,7 @@ export function ReasoningText({ className, children, ...props }: ComponentProps<
       ref={scrollRef}
       data-slot="reasoning-text"
       className={cn(
-        "aui-reasoning-text relative z-0 max-h-64 overflow-y-auto ps-0 pt-2 pb-2 leading-relaxed text-pretty",
+        "aui-reasoning-text relative z-0 max-h-[50vh] overflow-y-auto ps-0 pt-2 pb-2 leading-relaxed text-pretty",
         "transform-gpu transition-[transform,opacity] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none",
         "group-data-open/collapsible-content:animate-in group-data-closed/collapsible-content:animate-out",
         "group-data-open/collapsible-content:fade-in-0 group-data-closed/collapsible-content:fade-out-0",

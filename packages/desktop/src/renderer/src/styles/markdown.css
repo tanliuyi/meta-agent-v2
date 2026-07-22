@@ -1,3 +1,106 @@
 .aui-md {
   margin-bottom: 0;
 }
+
+.markdown-inline-code {
+  padding: 0.125em 0.35em;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: var(--shape-radius-xs);
+  background: hsl(var(--muted) / 0.45);
+  font-family: var(--font-family-mono);
+  font-size: 0.9em;
+}
+
+.markdown-code-block {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--background));
+}
+
+.markdown-code-header {
+  display: flex;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 11px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
+  background: hsl(var(--muted) / 0.28);
+}
+
+.markdown-code-language {
+  min-width: 0;
+  overflow: hidden;
+  color: hsl(var(--muted-foreground));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.markdown-code-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.markdown-code-scroll {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+.markdown-code-scroll:focus-visible {
+  outline: 1px solid hsl(var(--ring));
+  outline-offset: -1px;
+}
+
+.markdown-code-content {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 8px 0;
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.markdown-code-line {
+  display: grid;
+  min-height: 1.65em;
+  grid-template-columns: calc(var(--markdown-code-line-number-width) + 20px) minmax(0, 1fr);
+}
+
+.markdown-code-line-number {
+  padding-right: 10px;
+  color: hsl(var(--muted-foreground) / 0.55);
+  text-align: right;
+  user-select: none;
+}
+
+.markdown-code-line-text {
+  min-width: 0;
+  padding-right: 14px;
+  white-space: pre;
+}
+
+.markdown-code-token {
+  color: var(--markdown-code-token-color, inherit);
+  background: var(--markdown-code-token-background, transparent);
+}
+
+.dark .markdown-code-token {
+  color: var(--shiki-dark, var(--markdown-code-token-color, inherit));
+  background: var(--shiki-dark-bg, var(--markdown-code-token-background, transparent));
+}

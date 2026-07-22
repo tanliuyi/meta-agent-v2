@@ -23,7 +23,7 @@ export function ComposerQueue({ items, disabled, onClear, onError }: ComposerQue
         <span>待处理消息</span>
         <span className="composer-queue-count">{queueCount}</span>
         <TextButton
-          className="composer-queue-clear"
+          className="composer-queue-clear text-[11px] [&_svg]:size-[11px] [&_svg]:opacity-60"
           aria-label="清空待处理消息"
           disabled={disabled}
           onClick={() => void onClear().catch(onError)}

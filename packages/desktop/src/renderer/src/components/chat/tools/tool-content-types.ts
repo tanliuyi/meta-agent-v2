@@ -4,10 +4,15 @@ export interface ToolContentProps {
   args: Readonly<Record<string, unknown>>;
   result: unknown;
   error: boolean;
+  expanded: boolean;
+  argsComplete: boolean;
 }
 
 /** 仅展示工具结果的组件属性。 */
-export type ToolResultContentProps = Pick<ToolContentProps, "result" | "error">;
+export type ToolResultContentProps = Pick<ToolContentProps, "result" | "error" | "expanded">;
 
 /** 同时展示工具参数与结果的组件属性。 */
-export type ToolArgumentsContentProps = Pick<ToolContentProps, "args" | "result" | "error">;
+export type ToolArgumentsContentProps = Pick<
+  ToolContentProps,
+  "args" | "result" | "error" | "expanded" | "argsComplete"
+>;

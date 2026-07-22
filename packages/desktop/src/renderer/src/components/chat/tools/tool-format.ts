@@ -10,6 +10,18 @@ export type DiffLineType = "context" | "remove" | "add" | "meta";
 export interface DiffLine {
   type: DiffLineType;
   text: string;
+  lineNumber?: string;
+}
+
+export interface ParsedToolResult {
+  text: string;
+  details?: Readonly<Record<string, unknown>>;
+  images?: readonly ParsedToolImage[];
+}
+
+export interface ParsedToolImage {
+  data: string;
+  mimeType: string;
 }
 
 interface SplitText {
@@ -33,6 +45,42 @@ export function readToolStringArgument(args: Readonly<Record<string, unknown>>, 
     if (typeof value === "string") return value;
   }
   return "";
+}
+
+/** 将 Pi toolResult 协议解包为 TUI renderer 使用的文本与 details。 */
+export function parseToolResult(value: unknown): ParsedToolResult | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || !("content" in value) || !Array.isArray(value.content)) {
+    return { text: formatToolValue(value) };
+  }
+
+  const text = value.content
+    .flatMap((part) => {
+      if (!part || typeof part !== "object" || !("type" in part)) return [];
+      return part.type === "text" && "text" in part && typeof part.text === "string" ? [stripAnsi(part.text)] : [];
+    })
+    .join("\n")
+    .replace(/\r/g, "");
+  const images = value.content.flatMap((part): ParsedToolImage[] => {
+    if (!part || typeof part !== "object" || !("type" in part) || part.type !== "image") return [];
+    if (!("data" in part) || typeof part.data !== "string") return [];
+    if (!("mimeType" in part) || typeof part.mimeType !== "string") return [];
+    return [{ data: part.data, mimeType: part.mimeType }];
+  });
+  const details = "details" in value && isRecord(value.details) ? value.details : undefined;
+  return { text, details, ...(images.length > 0 ? { images } : {}) };
+}
+
+/** 解析 TUI edit renderer 生成的带行号 diff。 */
+export function parseRenderedToolDiff(value: unknown): DiffLine[] | undefined {
+  const diff = parseToolResult(value)?.details?.diff;
+  if (typeof diff !== "string") return undefined;
+  return diff.split("\n").map((line): DiffLine => {
+    const match = line.match(/^([+\- ])(\s*\d*)\s(.*)$/);
+    if (!match) return { type: "meta", text: line };
+    const type = match[1] === "+" ? "add" : match[1] === "-" ? "remove" : "context";
+    return { type, lineNumber: match[2].trim(), text: match[3] };
+  });
 }
 
 /** 从未知输入中提取结构有效的编辑记录。 */
@@ -156,6 +204,14 @@ export function diffToolEdit(oldText: string, newText: string): DiffLine[] {
   while (i < m) lines.push({ type: "remove", text: a[i++] });
   while (j < n) lines.push({ type: "add", text: b[j++] });
   return limitDiffLines(appendEofMarker(lines, oldValue, newValue));
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 /** 将字符串或 JSON 值格式化为工具面板可直接展示的文本。 */

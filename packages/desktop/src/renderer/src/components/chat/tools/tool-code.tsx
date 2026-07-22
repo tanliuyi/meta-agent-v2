@@ -1,15 +1,25 @@
 interface ToolCodeProps {
-  label: string;
   value: string;
-  className?: string;
+  expanded: boolean;
+  previewLines?: number;
 }
 
-/** 渲染带标签的工具参数或代码片段。 */
-export function ToolCode({ label, value, className = "tool-code" }: ToolCodeProps) {
+/** 按 TUI write renderer 的行数规则展示代码参数。 */
+export function ToolCode({ value, expanded, previewLines = 10 }: ToolCodeProps) {
+  const lines = trimTrailingEmptyLines(value.replace(/\r/g, "").split("\n"));
+  const visibleLines = expanded ? lines : lines.slice(0, previewLines);
+  const hiddenCount = lines.length - visibleLines.length;
+
   return (
-    <section className="tool-section">
-      <div className="tool-section-label">{label}</div>
-      <pre className={className}>{value || "(空)"}</pre>
-    </section>
+    <div className="tool-output">
+      <pre className="tool-code">{visibleLines.join("\n") || "(空)"}</pre>
+      {hiddenCount > 0 ? <div className="tool-output-truncation">… 另有 {hiddenCount} 行</div> : null}
+    </div>
   );
+}
+
+function trimTrailingEmptyLines(lines: string[]): string[] {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1] === "") end -= 1;
+  return lines.slice(0, end);
 }

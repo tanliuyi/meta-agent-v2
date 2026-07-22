@@ -86,7 +86,7 @@ export function SessionChatThread({ threadId }: SessionChatThreadProps) {
         </ThreadPrimitive.Viewport>
         <div
           ref={setFooterHost}
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-(--stack-sticky-control)"
+          className="pointer-events-none absolute bottom-0 left-0 right-[var(--thread-scrollbar-width,0px)] z-(--stack-sticky-control)"
         />
       </ThreadPrimitive.Root>
       <SessionHostRequests />

@@ -2,120 +2,299 @@ import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { TooltipProvider } from "@renderer/shared/ui/tooltip-provider";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/renderer/src/components/chat/tool-file-target.tsx", () => ({
+  ToolFileTarget: ({ path }: { path: string }) => (
+    <button type="button" className="tool-target tool-file-target">
+      {path}
+    </button>
+  ),
+}));
+
 import { ToolView } from "../src/renderer/src/components/chat/tool-view.tsx";
 import { ToolContent } from "../src/renderer/src/components/chat/tools/tool-content.tsx";
-import { diffToolEdit } from "../src/renderer/src/components/chat/tools/tool-format.ts";
+import {
+  diffToolEdit,
+  parseRenderedToolDiff,
+  parseToolResult,
+} from "../src/renderer/src/components/chat/tools/tool-format.ts";
 
-describe("ToolView", () => {
-  it("用文字展示运行中的工具与目标", () => {
+describe("ToolView TUI parity", () => {
+  it("用 TUI 标题与 pending 底色展示流式 write 参数", () => {
     const markup = renderToolView(
       toolCall({
         toolName: "write",
-        args: { path: "src/main.ts" },
+        args: { path: "src/main.ts", content: "const value = 1;" },
         status: { type: "running" },
-        artifact: { execution: "running" },
+        artifact: { execution: "streaming-args" },
       }),
     );
 
+    expect(markup).toContain('data-tool-name="write"');
     expect(markup).toContain('data-tool-status="running"');
-    expect(markup).not.toContain('class="tool-status-label running"');
-    expect(markup).toContain("正在写入");
-    expect(markup).toContain('class="tool-target tool-file-target"');
-    expect(markup).toContain(">main.ts</button>");
-    expect(markup).not.toContain(">src/main.ts</button>");
+    expect(markup).toContain('class="tool-name">write</span>');
+    expect(markup).toContain('class="tool-target tool-file-target">src/main.ts</button>');
+    expect(markup).not.toContain("const value = 1;");
+    expect(markup).toContain("运行中");
+    const fileTargetEnd = markup.indexOf("</button>", markup.indexOf("tool-file-target"));
+    const runningCursor = markup.indexOf("tool-running-cursor");
+    const expandTrigger = markup.indexOf("tool-expand-trigger");
+    expect(fileTargetEnd).toBeLessThan(runningCursor);
+    expect(runningCursor).toBeLessThan(expandTrigger);
+    expect(markup).not.toContain("tool-state-indicator");
+    expect(markup.match(/aria-expanded="false"/g)).toHaveLength(2);
+    expect(markup).toContain('class="tool-trigger"');
+    expect(markup).toContain('data-state="closed"');
+    expect(markup).toContain("animate-collapsible-up");
   });
 
-  it("用文字展示失败的工具与目标", () => {
+  it("bash content 默认完全折叠", () => {
+    const partialResult = toolResult(Array.from({ length: 7 }, (_, index) => `line-${index + 1}`).join("\n"));
     const markup = renderToolView(
       toolCall({
-        toolName: "write",
-        args: { path: "src/main.ts" },
-        status: { type: "incomplete", reason: "error" },
-        artifact: { execution: "error" },
-        isError: true,
+        toolName: "bash",
+        args: { command: "generate output" },
+        status: { type: "running" },
+        artifact: { execution: "running", partialResult },
       }),
     );
 
-    expect(markup).toContain('data-tool-status="error"');
-    expect(markup).not.toContain('class="tool-status-label error"');
-    expect(markup).toContain("写入失败");
-    expect(markup).toContain(">main.ts</button>");
+    expect(markup).toContain('class="tool-name">$</span>');
+    expect(markup).toContain("generate output");
+    expect(markup).toContain('data-cursor-position="end"');
+    expect(markup).toContain("tool-running-cursor-end");
+    expect(markup.indexOf("tool-running-cursor-end")).toBeLessThan(markup.indexOf("tool-expand-trigger"));
+    expect(markup).not.toContain("line-1");
+    expect(markup).not.toContain("tool-output");
   });
 
-  it.each([
-    ["read", { path: "/Users/test/project/src/read.ts" }, "read.ts"],
-    ["write", { file_path: "C:\\project\\src\\write.ts" }, "write.ts"],
-    ["edit", { path: "src/edit.ts" }, "edit.ts"],
-  ])("%s 工具只展示文件名", (toolName, args, fileName) => {
-    const markup = renderToolView(toolCall({ toolName, args, status: { type: "complete" } }));
+  it("展开后的 bash content 随 delta 原位更新", () => {
+    const renderDelta = (result: unknown) =>
+      renderToStaticMarkup(
+        <ToolContent
+          name="bash"
+          args={{ command: "stream output" }}
+          result={result}
+          error={false}
+          expanded
+          argsComplete
+        />,
+      );
+    const first = renderDelta(toolResult("one\ntwo"));
+    const next = renderDelta(toolResult("one\ntwo\nthree\nfour\nfive\nsix"));
 
-    expect(markup).toContain(`>${fileName}</button>`);
+    expect(first).toContain("one\ntwo");
+    expect(first).not.toContain("six");
+    expect(next).toContain("one\ntwo\nthree\nfour\nfive\nsix");
   });
 
-  it("将文件操作渲染为折叠触发器的同级按钮", () => {
-    const markup = renderToolView(toolCall({ toolName: "read", args: { path: "src/read.ts" } }));
-    const triggerStart = markup.indexOf("<button");
-    const triggerEnd = markup.indexOf("</button>", triggerStart);
-    const fileTarget = markup.indexOf('class="tool-target tool-file-target"');
-
-    expect(triggerStart).toBeGreaterThanOrEqual(0);
-    expect(triggerEnd).toBeLessThan(fileTarget);
-  });
-
-  it("保留 shell 命令的原始换行供两行样式截断", () => {
-    const command = "printf first\nprintf second\nprintf third";
+  it("write 成功后隐藏重复的协议结果", () => {
     const markup = renderToStaticMarkup(
-      <ToolContent name="bash" args={{ command }} result={undefined} error={false} />,
+      <ToolContent
+        name="write"
+        args={{ path: "src/main.ts", content: "const value = 1;" }}
+        result={toolResult("Successfully wrote 16 bytes to src/main.ts")}
+        error={false}
+        expanded
+        argsComplete
+      />,
     );
 
-    expect(markup).toContain('<pre class="tool-command">');
-    expect(markup).toContain(command);
+    expect(markup).toContain("const value = 1;");
+    expect(markup).not.toContain("Successfully wrote");
+    expect(markup).not.toContain("&quot;content&quot;");
   });
 
-  it("通过 data-tone 暴露工具结果错误状态", () => {
-    const markup = renderToStaticMarkup(<ToolContent name="read" args={{}} result="failed" error />);
+  it("read 成功结果默认隐藏，展开后显示解包文本", () => {
+    const collapsed = renderToStaticMarkup(
+      <ToolContent
+        name="read"
+        args={{ path: "notes.txt" }}
+        result={toolResult("line one\nline two")}
+        error={false}
+        expanded={false}
+        argsComplete
+      />,
+    );
+    const expanded = renderToStaticMarkup(
+      <ToolContent
+        name="read"
+        args={{ path: "notes.txt" }}
+        result={toolResult("line one\nline two")}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
 
-    expect(markup).toContain('class="tool-result" data-tone="destructive"');
-    expect(markup).not.toContain('class="tool-result error"');
+    expect(collapsed).toBe("");
+    expect(expanded).toContain("line one\nline two");
   });
 
-  it("渲染 edit diff 并在失败时保留具体错误", () => {
+  it("edit 参数 delta 完成前不展示半成品 diff", () => {
     const markup = renderToStaticMarkup(
       <ToolContent
         name="edit"
-        args={{ edits: [{ oldText: "before\nkeep", newText: "after\nkeep" }] }}
-        result="oldText 匹配不唯一"
-        error
+        args={{ path: "src/main.ts", edits: [{ oldText: "before", newText: "after" }] }}
+        result={undefined}
+        error={false}
+        expanded={false}
+        argsComplete={false}
+      />,
+    );
+
+    expect(markup).toBe("");
+  });
+
+  it("优先展示 TUI details.diff 的文件行号并隐藏成功文案", () => {
+    const result = toolResult("Successfully replaced 1 block(s)", {
+      diff: " 9 keep\n-10 before\n+10 after\n 11 keep",
+    });
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="edit"
+        args={{ path: "src/main.ts", edits: [{ oldText: "before", newText: "after" }] }}
+        result={result}
+        error={false}
+        expanded
+        argsComplete
       />,
     );
 
     expect(markup).toContain("tool-diff-line-remove");
+    expect(markup).toContain('class="tool-diff-number">10</span>');
     expect(markup).toContain(">before</span>");
     expect(markup).toContain("tool-diff-line-add");
     expect(markup).toContain(">after</span>");
-    expect(markup).toContain("tool-diff-line-context");
-    expect(markup).toContain("oldText 匹配不唯一");
-    expect(markup).toContain('data-tone="destructive"');
+    expect(markup).not.toContain("Successfully replaced");
+  });
+
+  it("edit diff 始终完整渲染，不做二级裁剪", () => {
+    const diff = [
+      ...Array.from({ length: 14 }, (_, index) => ` ${index + 1} context-${index + 1}`),
+      "-15 before",
+      "+15 after",
+      ...Array.from({ length: 15 }, (_, index) => ` ${index + 16} context-${index + 16}`),
+    ].join("\n");
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="edit"
+        args={{ path: "src/main.ts" }}
+        result={toolResult("done", { diff })}
+        error={false}
+        expanded={false}
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain(">context-1</span>");
+    expect(markup).toContain(">before</span>");
+    expect(markup).toContain(">after</span>");
+    expect(markup).toContain(">context-30</span>");
+  });
+
+  it("edit 失败时只展示真实错误，不展示参数级伪 diff", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="edit"
+        args={{ path: "src/main.ts", edits: [{ oldText: "before", newText: "after" }] }}
+        result={toolResult("Could not find the exact text")}
+        error
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("Could not find the exact text");
+    expect(markup).not.toContain("tool-diff-line-remove");
+    expect(markup).not.toContain(">before</span>");
+  });
+
+  it("失败结果使用 destructive tone 并保留具体错误", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="read"
+        args={{ path: "missing.ts" }}
+        result={toolResult("File not found")}
+        error
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain('class="tool-output" data-tone="destructive"');
+    expect(markup).toContain("File not found");
+  });
+
+  it("标题与尾部均可折叠，文件按钮保持同级", () => {
+    const markup = renderToolView(toolCall({ toolName: "read", args: { path: "src/read.ts" } }));
+    const titleTrigger = markup.indexOf('class="tool-trigger"');
+    const titleTriggerEnd = markup.indexOf("</button>", titleTrigger);
+    const fileTarget = markup.indexOf('class="tool-target tool-file-target"');
+    const fileTargetEnd = markup.indexOf("</button>", fileTarget);
+    const expandTrigger = markup.indexOf('class="tool-expand-trigger"');
+
+    expect(titleTrigger).toBeGreaterThanOrEqual(0);
+    expect(titleTriggerEnd).toBeLessThan(fileTarget);
+    expect(fileTargetEnd).toBeLessThan(expandTrigger);
+    expect(markup.match(/aria-expanded=/g)).toHaveLength(2);
+    expect(markup).toContain(">src/read.ts</button>");
+  });
+
+  it("展示 read 行范围与 grep 查询上下文", () => {
+    const readMarkup = renderToolView(
+      toolCall({ toolName: "read", args: { path: "src/read.ts", offset: 120, limit: 20 } }),
+    );
+    const grepMarkup = renderToolView(
+      toolCall({ toolName: "grep", args: { pattern: "ToolView", path: "src", glob: "*.tsx" } }),
+    );
+
+    expect(readMarkup).toContain(":120-139");
+    expect(grepMarkup).toContain("/ToolView/");
+    expect(grepMarkup).toContain("in src (*.tsx)");
+  });
+});
+
+describe("tool TUI formatting", () => {
+  it("解包 Pi toolResult 并去除 ANSI 控制符", () => {
+    expect(parseToolResult(toolResult("\u001b[31mfailed\u001b[0m", { source: "test" }))).toEqual({
+      text: "failed",
+      details: { source: "test" },
+    });
+  });
+
+  it("保留图像结果供展开 content 渲染", () => {
+    const result = {
+      content: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+    };
+    const parsed = parseToolResult(result);
+    const markup = renderToStaticMarkup(
+      <ToolContent name="read" args={{ path: "image.png" }} result={result} error={false} expanded argsComplete />,
+    );
+
+    expect(parsed?.images).toEqual([{ data: "aW1hZ2U=", mimeType: "image/png" }]);
+    expect(markup).toContain('src="data:image/png;base64,aW1hZ2U="');
+    expect(markup).toContain('class="tool-result-image"');
+  });
+
+  it("解析 TUI 带行号 diff", () => {
+    expect(parseRenderedToolDiff(toolResult("done", { diff: "-12 old\n+12 new" }))).toEqual([
+      { type: "remove", lineNumber: "12", text: "old" },
+      { type: "add", lineNumber: "12", text: "new" },
+    ]);
   });
 
   it.each([
     [{ edits: JSON.stringify([{ oldText: "old", newText: "new" }]) }, "old", "new"],
     [{ oldText: "legacy-old", newText: "legacy-new" }, "legacy-old", "legacy-new"],
   ])("兼容 edit 参数格式 %#", (args, oldText, newText) => {
-    const markup = renderToStaticMarkup(<ToolContent name="edit" args={args} result={undefined} error={false} />);
+    const markup = renderToStaticMarkup(
+      <ToolContent name="edit" args={args} result={undefined} error={false} expanded={false} argsComplete />,
+    );
 
     expect(markup).toContain(`>${oldText}</span>`);
     expect(markup).toContain(`>${newText}</span>`);
-  });
-
-  it("无法解析 edit 参数时保留 raw fallback", () => {
-    const markup = renderToStaticMarkup(
-      <ToolContent name="edit" args={{ edits: "invalid" }} result={undefined} error={false} />,
-    );
-
-    expect(markup).toContain("参数");
-    expect(markup).toContain("invalid");
   });
 
   it("标记 EOF 换行变化", () => {
@@ -139,6 +318,10 @@ function renderToolView(props: ToolCallMessagePartProps): string {
       <ToolView {...props} />
     </TooltipProvider>,
   );
+}
+
+function toolResult(text: string, details?: Readonly<Record<string, unknown>>) {
+  return { content: [{ type: "text", text }], ...(details ? { details } : {}) };
 }
 
 function toolCall(overrides: Partial<ToolCallMessagePartProps>): ToolCallMessagePartProps {

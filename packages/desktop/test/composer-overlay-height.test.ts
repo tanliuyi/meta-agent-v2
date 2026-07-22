@@ -33,9 +33,11 @@ describe("composer overlay height", () => {
     let scrollHeight = 700;
     let scrollTop = 200;
     const clientHeight = 500;
+    const clientWidth = 990;
+    const offsetWidth = 1000;
     const style = {
-      setProperty: vi.fn((_property: string, value: string) => {
-        scrollHeight = 604 + Number.parseInt(value, 10);
+      setProperty: vi.fn((property: string, value: string) => {
+        if (property === "--composer-overlay-height") scrollHeight = 604 + Number.parseInt(value, 10);
       }),
       removeProperty: vi.fn(),
     };
@@ -43,6 +45,12 @@ describe("composer overlay height", () => {
     const viewport = {
       get clientHeight() {
         return clientHeight;
+      },
+      get clientWidth() {
+        return clientWidth;
+      },
+      get offsetWidth() {
+        return offsetWidth;
       },
       get scrollHeight() {
         return scrollHeight;
@@ -62,13 +70,15 @@ describe("composer overlay height", () => {
 
     const cleanup = observeComposerOverlayHeight(root, viewport, footer);
 
-    expect(style.setProperty).toHaveBeenLastCalledWith("--composer-overlay-height", "96px");
+    expect(style.setProperty).toHaveBeenCalledWith("--composer-overlay-height", "96px");
+    expect(style.setProperty).toHaveBeenCalledWith("--thread-scrollbar-width", "10px");
+    expect(ResizeObserverStub.instances[0]?.observe).toHaveBeenCalledWith(viewport);
     expect(ResizeObserverStub.instances[0]?.observe).toHaveBeenCalledWith(footer);
     expect(scrollTop).toBe(200);
 
     footerHeight = 144;
     ResizeObserverStub.instances[0]?.resize();
-    expect(style.setProperty).toHaveBeenLastCalledWith("--composer-overlay-height", "144px");
+    expect(style.setProperty).toHaveBeenCalledWith("--composer-overlay-height", "144px");
     expect(scrollTop).toBe(248);
 
     scrollTop = 100;
@@ -79,5 +89,6 @@ describe("composer overlay height", () => {
     cleanup();
     expect(ResizeObserverStub.instances[0]?.disconnect).toHaveBeenCalledOnce();
     expect(style.removeProperty).toHaveBeenCalledWith("--composer-overlay-height");
+    expect(style.removeProperty).toHaveBeenCalledWith("--thread-scrollbar-width");
   });
 });

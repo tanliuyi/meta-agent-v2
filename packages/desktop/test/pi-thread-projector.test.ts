@@ -224,6 +224,62 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("toolcall delta 直接使用 provider 的结构化参数，并在执行开始时校正", () => {
+    const { session } = sessionHarness([]);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const message = assistantMessage("toolUse", 2, []);
+    const streamedCall = {
+      type: "toolCall" as const,
+      id: "call-1",
+      name: "write",
+      arguments: {} as Record<string, unknown>,
+    };
+    const partial = assistantMessage("toolUse", 2, [streamedCall]);
+
+    projector.handle({ type: "message_start", message });
+    projector.handle({
+      type: "message_update",
+      message,
+      assistantMessageEvent: { type: "toolcall_start", contentIndex: 0, partial },
+    });
+    streamedCall.arguments = { path: "src/main.ts", content: "const value" };
+    projector.handle({
+      type: "message_update",
+      message,
+      assistantMessageEvent: {
+        type: "toolcall_delta",
+        contentIndex: 0,
+        delta: '{"path":"src/main.ts","content":"const value',
+        partial,
+      },
+    });
+
+    let node = projector.snapshot().nodes[0];
+    expect(node?.kind).toBe("assistant");
+    if (node?.kind !== "assistant") throw new Error("assistant node missing");
+    expect(node.content[0]).toMatchObject({
+      args: { path: "src/main.ts", content: "const value" },
+      argsText: '{"path":"src/main.ts","content":"const value',
+      execution: "streaming-args",
+    });
+
+    projector.handle({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "write",
+      args: { path: "src/main.ts", content: "const value = 1;" },
+    });
+    node = projector.snapshot().nodes[0];
+    expect(node?.kind).toBe("assistant");
+    if (node?.kind !== "assistant") throw new Error("assistant node missing");
+    expect(node.content[0]).toMatchObject({
+      args: { path: "src/main.ts", content: "const value = 1;" },
+      argsText: '{"path":"src/main.ts","content":"const value = 1;"}',
+      execution: "running",
+    });
+    projector.dispose();
+  });
+
   it("tool partial 只进入 partialResult，turn_end 才按 toolUse 完成 assistant", () => {
     const { session } = sessionHarness([]);
     const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });

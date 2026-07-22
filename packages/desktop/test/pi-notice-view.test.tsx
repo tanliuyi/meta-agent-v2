@@ -1,3 +1,4 @@
+import { TooltipProvider } from "@renderer/shared/ui/tooltip-provider";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -77,6 +78,23 @@ describe("PiNoticeView", () => {
     expect(markup).toContain('data-streamdown="strong">重点</span>');
     expect(markup).toContain('data-streamdown="unordered-list"');
     expect(markup).toContain('data-streamdown="list-item">第一项</li>');
+  });
+
+  it("代码围栏使用 Desktop 自定义 block，inline code 保持紧凑", () => {
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <StreamdownMarkdown>{"正文 `value`\n\n```tsx\nconst value = 1;\nreturn value;\n```"}</StreamdownMarkdown>
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('class="markdown-inline-code"');
+    expect(markup).toContain('class="markdown-code-block"');
+    expect(markup).toContain('data-streamdown="code-block-header"');
+    expect(markup).toContain('class="markdown-code-language">tsx</span>');
+    expect(markup).toContain('data-streamdown="code-block-actions"');
+    expect(markup).toContain('class="markdown-code-line-number" aria-hidden="true">1</span>');
+    expect(markup).toContain("const value = 1;");
+    expect(markup).toContain("return value;");
   });
 
   it("忽略缺少通知类型语义的 notification", () => {

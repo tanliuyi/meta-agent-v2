@@ -29,14 +29,11 @@ export function ToolFileTarget({ path }: { path: string }) {
       .catch((error: unknown) => console.error("Failed to open tool file:", error));
   }
 
-  const segments = path.split(/[\\/]/);
-  const fileName = segments.at(-1) || path;
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button type="button" className="tool-target tool-file-target" onClick={openFile}>
-          {fileName}
+          {path}
         </button>
       </TooltipTrigger>
       <TooltipContent className="max-w-[min(320px,calc(100vw-24px))] break-all" side="top">
