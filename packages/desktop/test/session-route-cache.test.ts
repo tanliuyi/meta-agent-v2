@@ -29,17 +29,8 @@ const EMPTY_CONTROL: SessionControlState = {
   readiness: { state: "ready" },
   lastError: undefined,
   hostRequests: [],
-  extensionUi: {
-    statuses: {},
-    widgets: [],
-    workingMessage: undefined,
-    workingVisible: false,
-    hiddenThinkingLabel: undefined,
-    windowTitle: undefined,
-    editorText: undefined,
-    editorRevision: 0,
-    toolsExpanded: false,
-  },
+  extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
+  extensionHost: { statuses: {}, widgets: [] },
 };
 
 describe("SessionIdentity", () => {

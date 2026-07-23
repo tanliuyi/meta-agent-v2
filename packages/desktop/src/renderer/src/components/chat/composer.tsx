@@ -4,7 +4,7 @@ import type { SessionControlState } from "../../../../shared/contracts.ts";
 import { errorMessage } from "../../shared/lib/error-message.ts";
 import { ComposerAddAttachment } from "../assistant-ui/attachment/composer-add-attachment.tsx";
 import { ComposerAttachments } from "../assistant-ui/attachment/composer-attachments.tsx";
-import { ComposerEditorSync } from "./composer-editor-sync.tsx";
+import { ComposerExtensionCommand } from "./composer-extension-command.tsx";
 import { ComposerInput } from "./composer-input.tsx";
 import { ComposerQueue } from "./composer-queue.tsx";
 import { ComposerSubmitControl } from "./composer-submit-control.tsx";
@@ -17,7 +17,7 @@ import { ThinkingSelect } from "./thinking-select.tsx";
 const EMPTY_COMMANDS: SessionControlState["commands"] = [];
 const EMPTY_MODELS: SessionControlState["models"] = [];
 const EMPTY_THINKING_LEVELS: SessionControlState["thinkingLevels"] = [];
-const EMPTY_WIDGETS: SessionControlState["extensionUi"]["widgets"] = [];
+const EMPTY_WIDGETS: SessionControlState["extensionHost"]["widgets"] = [];
 
 /** assistant-ui Composer 与 Desktop draft/session 控制面的低频编排入口。 */
 export function Composer(props: ComposerProps) {
@@ -107,14 +107,10 @@ export function Composer(props: ComposerProps) {
   return (
     <div className="composer-wrap" data-draft-composer={props.mode === "draft" || undefined}>
       {props.mode === "session" ? (
-        <ComposerEditorSync
+        <ComposerExtensionCommand
           projectId={props.projectId}
           threadId={props.threadId}
-          editorRevision={props.editorRevision}
-          editorText={props.editorText}
-          disabled={!props.commandsReady}
-          onSync={props.onSyncEditorText}
-          onError={reportError}
+          command={props.composerCommand}
         />
       ) : null}
       {props.mode === "session" ? (

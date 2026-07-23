@@ -83,12 +83,7 @@ function control(running: boolean): SessionControlState {
     thinkingLevels: [],
     readiness: { state: "ready" },
     hostRequests: [],
-    extensionUi: {
-      statuses: {},
-      widgets: [],
-      workingVisible: false,
-      editorRevision: 0,
-      toolsExpanded: false,
-    },
+    extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
+    extensionHost: { statuses: {}, widgets: [] },
   };
 }

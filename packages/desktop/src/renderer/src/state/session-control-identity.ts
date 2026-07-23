@@ -1,5 +1,5 @@
 import type {
-  ExtensionUiState,
+  DesktopExtensionHostState,
   HostRequest,
   ModelOption,
   SessionControlState,
@@ -27,11 +27,20 @@ export function mergeSessionControl(
     ...(equalOptionalRecord(previous.context, incoming.context) ? { context: previous.context } : {}),
     readiness: equalRecord(previous.readiness, incoming.readiness) ? previous.readiness : incoming.readiness,
     hostRequests: reuseArray(previous.hostRequests, incoming.hostRequests, equalHostRequest),
-    extensionUi: mergeExtensionUi(previous.extensionUi, incoming.extensionUi),
+    extensionSet:
+      previous.extensionSet.generation === incoming.extensionSet.generation &&
+      previous.extensionSet.reloadRequired === incoming.extensionSet.reloadRequired &&
+      equalArray(previous.extensionSet.diagnostics, incoming.extensionSet.diagnostics, equalRecord)
+        ? previous.extensionSet
+        : incoming.extensionSet,
+    extensionHost: mergeExtensionHost(previous.extensionHost, incoming.extensionHost),
   };
 }
 
-function mergeExtensionUi(previous: ExtensionUiState, incoming: ExtensionUiState): ExtensionUiState {
+function mergeExtensionHost(
+  previous: DesktopExtensionHostState,
+  incoming: DesktopExtensionHostState,
+): DesktopExtensionHostState {
   const statuses = equalRecord(previous.statuses, incoming.statuses) ? previous.statuses : incoming.statuses;
   const widgets = reuseArray(
     previous.widgets,
@@ -42,13 +51,8 @@ function mergeExtensionUi(previous: ExtensionUiState, incoming: ExtensionUiState
   if (
     statuses === previous.statuses &&
     widgets === previous.widgets &&
-    previous.workingMessage === incoming.workingMessage &&
-    previous.workingVisible === incoming.workingVisible &&
-    previous.hiddenThinkingLabel === incoming.hiddenThinkingLabel &&
     previous.windowTitle === incoming.windowTitle &&
-    previous.editorText === incoming.editorText &&
-    previous.editorRevision === incoming.editorRevision &&
-    previous.toolsExpanded === incoming.toolsExpanded
+    equalOptionalRecord(previous.composerCommand, incoming.composerCommand)
   )
     return previous;
   return { ...incoming, statuses, widgets };
@@ -76,7 +80,6 @@ function equalHostRequest(left: HostRequest, right: HostRequest): boolean {
     left.message === right.message &&
     left.placeholder === right.placeholder &&
     equalOptionalArray(left.options, right.options, Object.is) &&
-    left.notifyType === right.notifyType &&
     left.toolCallId === right.toolCallId &&
     left.workerInstanceId === right.workerInstanceId &&
     left.createdAt === right.createdAt

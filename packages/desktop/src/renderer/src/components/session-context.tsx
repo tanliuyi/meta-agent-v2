@@ -11,7 +11,6 @@ interface SessionScope {
   refreshModels(): Promise<void>;
   setModel(provider: string, modelId: string): Promise<void>;
   setThinking(level: ThinkingLevel): Promise<void>;
-  syncEditorText(text: string): Promise<void>;
   updateWorkbench(value: Partial<WorkbenchState>): void;
 }
 

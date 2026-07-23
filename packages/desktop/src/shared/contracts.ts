@@ -1,5 +1,14 @@
+import type {
+  DesktopExtensionDiagnostic,
+  DesktopExtensionHostState,
+  DraftExtensionContext,
+  StaleDraftExtensionSetErrorDetails,
+} from "./desktop-extension-contracts.ts";
+
+export type { DesktopExtensionHostState } from "./desktop-extension-contracts.ts";
+
 /** Desktop 与 renderer 之间使用的协议版本。 */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /** 可以安全通过 Electron IPC 传输的 JSON 值。 */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -50,12 +59,14 @@ export interface DraftSessionConfig {
   thinkingLevel: ThinkingLevel;
   thinkingLevels: ThinkingLevel[];
   readiness: Readiness;
+  extensions: DraftExtensionContext;
 }
 
 /** 首次 prompt materialize session 时原子应用的配置。 */
 export interface SessionCreateInput {
   projectId: string;
   createRequestId: string;
+  extensionSetGeneration: string;
   model: { provider: string; id: string };
   thinkingLevel: ThinkingLevel;
 }
@@ -90,12 +101,11 @@ export interface Readiness {
 /** 扩展向 Desktop 请求的交互。 */
 export interface HostRequest {
   id: string;
-  type: "confirm" | "select" | "input" | "editor" | "notify";
+  type: "confirm" | "select" | "input" | "editor";
   title: string;
   message?: string;
   placeholder?: string;
   options?: string[];
-  notifyType?: "info" | "warning" | "error";
   toolCallId?: string;
   workerInstanceId?: string;
   createdAt: number;
@@ -108,20 +118,6 @@ export interface HostResponse {
   dismissed?: boolean;
   confirmed?: boolean;
   value?: string;
-}
-
-/** 扩展对 Desktop 工作台的非阻塞 UI 状态。 */
-export interface ExtensionUiState {
-  statuses: Record<string, string>;
-  workingMessage?: string;
-  workingVisible: boolean;
-  hiddenThinkingLabel?: string;
-  windowTitle?: string;
-  editorText?: string;
-  /** Extension setEditorText/pasteToEditor 的命令序号；renderer 只应用新序号。 */
-  editorRevision: number;
-  toolsExpanded: boolean;
-  widgets: Array<{ key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" }>;
 }
 
 export type PiThreadPhase = "idle" | "running" | "retrying" | "compacting" | "tree-navigation";
@@ -307,7 +303,12 @@ export interface SessionControlState {
   readiness: Readiness;
   lastError?: string;
   hostRequests: HostRequest[];
-  extensionUi: ExtensionUiState;
+  extensionSet: {
+    generation: string;
+    diagnostics: DesktopExtensionDiagnostic[];
+    reloadRequired: boolean;
+  };
+  extensionHost: DesktopExtensionHostState;
 }
 
 /** renderer attach 所需的权威 Pi timeline 与低频控制基线。 */
@@ -320,6 +321,17 @@ export interface SessionBootstrap {
 }
 
 /** main 原子建立窗口订阅后返回的 session 基线。 */
+export type SessionCreateIpcResult =
+  | { ok: true; bootstrap: SessionBootstrap }
+  | {
+      ok: false;
+      error: {
+        code: "STALE_DRAFT_EXTENSION_SET";
+        message: string;
+        details: StaleDraftExtensionSetErrorDetails;
+      };
+    };
+
 export interface SessionAttachment {
   protocolVersion: typeof PROTOCOL_VERSION;
   attachmentId: string;

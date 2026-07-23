@@ -9,7 +9,7 @@ export function Topbar() {
   const { updateWorkbench } = useSessionScope();
   const control = useSessionControl();
   const workbench = useSessionWorkbench();
-  const title = control?.extensionUi.windowTitle ?? control?.title ?? "Pi Meta Agent";
+  const title = control?.extensionHost.windowTitle ?? control?.title ?? "Pi Meta Agent";
   const panelOpen = workbench?.panelOpen ?? false;
   const terminalOpen = workbench?.terminalOpen ?? false;
   return (

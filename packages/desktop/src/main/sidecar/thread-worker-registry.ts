@@ -17,7 +17,14 @@ import type {
   SessionReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
+import type {
+  ApplyDesktopExtensionSetResult,
+  DesktopExtensionDiagnostic,
+  ResolvedExtensionSet,
+  StaleDraftExtensionSetErrorDetails,
+} from "../../shared/desktop-extension-contracts.ts";
 import type { CreationReservation, SidecarEvent, ThreadWorkerBinding } from "../../shared/sidecar-contracts.ts";
+import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
 import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
 import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
@@ -42,6 +49,10 @@ interface WorkerRecord {
   attachments: number;
   createRequestId?: string;
   sessionFile?: string;
+  extensionSet: ResolvedExtensionSet;
+  desiredExtensionGeneration: string;
+  desiredExtensionDiagnostics: DesktopExtensionDiagnostic[];
+  extensionDiagnostics: DesktopExtensionDiagnostic[];
   retired: boolean;
   shutdownPromise?: Promise<void>;
   failureReported?: boolean;
@@ -52,6 +63,7 @@ export interface ThreadWorkerRegistryOptions {
   metadata: MetadataWorkerClient;
   userDataDir: string;
   agentDir: string;
+  extensionSourcePolicy: DesktopExtensionSourcePolicy;
   getCwd(projectId: string): string;
   push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
   failed(projectId: string, threadId: string, error: Error): void;
@@ -62,6 +74,26 @@ export interface ThreadWorkerRegistryOptions {
   maxLiveWorkers?: number;
 }
 
+export class StaleDraftExtensionSetError extends Error {
+  readonly code = "STALE_DRAFT_EXTENSION_SET";
+  readonly details: StaleDraftExtensionSetErrorDetails;
+
+  constructor(requestedGeneration: string, currentGeneration: string) {
+    super("Draft extension set changed; refresh the draft before creating a session");
+    this.name = "StaleDraftExtensionSetError";
+    this.details = { code: this.code, requestedGeneration, currentGeneration };
+  }
+}
+
+export class StaleExtensionSetApplyError extends Error {
+  readonly code = "STALE_EXTENSION_SET_APPLY";
+
+  constructor(expectedGeneration: string, currentGeneration: string) {
+    super(`Extension settings changed during apply: expected ${expectedGeneration}, got ${currentGeneration}`);
+    this.name = "StaleExtensionSetApplyError";
+  }
+}
+
 export class ThreadWorkerRegistry {
   private readonly options: ThreadWorkerRegistryOptions;
   private readonly records = new Map<string, WorkerRecord>();
@@ -69,6 +101,9 @@ export class ThreadWorkerRegistry {
   private readonly pending = new Map<string, Promise<WorkerRecord>>();
   private readonly pendingCreations = new Map<string, Promise<SessionBootstrap>>();
   private readonly operationTails = new Map<string, Promise<void>>();
+  private readonly drainingThreads = new Set<string>();
+  private readonly blockedDevelopmentSets = new Map<string, string>();
+  private readonly developmentCrashCounts = new Map<string, { count: number; lastAt: number }>();
   private readonly drainingProjects = new Set<string>();
   private readonly idleTimer: NodeJS.Timeout;
   private capacityTail = Promise.resolve();
@@ -102,7 +137,46 @@ export class ThreadWorkerRegistry {
   async getDraftConfig(projectId: string): Promise<DraftSessionConfig> {
     this.assertProjectAvailable(projectId);
     const cwd = this.options.getCwd(projectId);
-    return this.options.metadata.getDraftConfig(projectId, cwd);
+    const extensionSet = await this.options.extensionSourcePolicy.resolve(projectId);
+    return this.options.metadata.getDraftConfig(projectId, cwd, extensionSet);
+  }
+
+  async getExtensionState(projectId: string, threadId: string) {
+    this.assertProjectAvailable(projectId);
+    const desired = await this.options.extensionSourcePolicy.resolve(projectId);
+    const current = this.records.get(workerKey(projectId, threadId));
+    if (current) {
+      if (current.desiredExtensionGeneration !== desired.generation) {
+        current.desiredExtensionDiagnostics = desired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
+      }
+      current.desiredExtensionGeneration = desired.generation;
+    }
+    return {
+      appliedGeneration: current?.extensionSet.generation,
+      desiredGeneration: desired.generation,
+      reloadRequired: Boolean(current && current.extensionSet.generation !== desired.generation),
+      diagnostics: (current?.extensionSet.generation === desired.generation
+        ? current.extensionDiagnostics
+        : (current?.desiredExtensionDiagnostics ?? desired.diagnostics)
+      ).map((diagnostic) => ({ ...diagnostic })),
+    };
+  }
+
+  async extensionSettingsChanged(): Promise<void> {
+    const projects = new Set(
+      [...this.records.values()].filter((record) => !record.retired).map((record) => record.projectId),
+    );
+    for (const projectId of projects) {
+      const desired = await this.options.extensionSourcePolicy.resolve(projectId);
+      for (const record of this.records.values()) {
+        if (record.retired || record.projectId !== projectId) continue;
+        record.desiredExtensionGeneration = desired.generation;
+        record.desiredExtensionDiagnostics = desired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
+        if (record.extensionSet.generation !== desired.generation) {
+          this.options.resync(record.projectId, record.threadId, "extension-settings-changed");
+        }
+      }
+    }
   }
 
   create(input: SessionCreateInput): Promise<SessionBootstrap> {
@@ -119,6 +193,10 @@ export class ThreadWorkerRegistry {
     const recovered = await this.recoverCreationRequest(input.projectId, input.createRequestId);
     if (recovered) return recovered;
     const cwd = this.options.getCwd(input.projectId);
+    const extensionSet = await this.options.extensionSourcePolicy.resolve(input.projectId);
+    if (input.extensionSetGeneration !== extensionSet.generation) {
+      throw new StaleDraftExtensionSetError(input.extensionSetGeneration, extensionSet.generation);
+    }
     this.assertProjectAvailable(input.projectId);
     const sessionId = randomUUID();
     this.writeCreationReservation(input.projectId, cwd, sessionId, input.createRequestId, "reserved", undefined);
@@ -129,6 +207,7 @@ export class ThreadWorkerRegistry {
       agentDir: this.options.agentDir,
       sessionId,
       createInput: input,
+      extensionSet,
     };
     const record = await this.spawn(binding);
     if (record.retired || record.client.available === false) {
@@ -160,14 +239,14 @@ export class ThreadWorkerRegistry {
     }
     this.records.set(key, record);
     record.inFlight -= 1;
-    return bootstrap;
+    return decorateBootstrap(record, bootstrap);
   }
 
   async attach(projectId: string, threadId: string): Promise<SessionBootstrap> {
     const bootstrap = await this.use(projectId, threadId, async (record) => {
       const result = await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
       record.attachments += 1;
-      return result;
+      return decorateBootstrap(record, result);
     });
     return bootstrap;
   }
@@ -229,8 +308,107 @@ export class ThreadWorkerRegistry {
     await this.use(projectId, threadId, (record) => record.client.request({ type: "setThinking", level }));
   }
 
-  async setEditorText(projectId: string, threadId: string, text: string): Promise<void> {
-    await this.use(projectId, threadId, (record) => record.client.request({ type: "setEditorText", text }, 10_000));
+  async applyExtensionSet(
+    projectId: string,
+    threadId: string,
+    expectedDesiredGeneration: string,
+    abortRunning = false,
+  ): Promise<ApplyDesktopExtensionSetResult> {
+    const key = workerKey(projectId, threadId);
+    if (this.drainingThreads.has(key))
+      throw new Error(`Extension set apply is already running for ${projectId}/${threadId}`);
+    this.drainingThreads.add(key);
+    try {
+      return await this.withThreadLock(key, async () => {
+        const current = await this.requireUnlocked(projectId, threadId);
+        const desired = await this.options.extensionSourcePolicy.resolve(projectId);
+        if (desired.generation !== expectedDesiredGeneration) {
+          throw new StaleExtensionSetApplyError(expectedDesiredGeneration, desired.generation);
+        }
+        current.desiredExtensionGeneration = desired.generation;
+        current.desiredExtensionDiagnostics = desired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
+        if (current.extensionSet.generation === desired.generation) {
+          return { status: "unchanged", generation: desired.generation };
+        }
+        if (current.inFlight > 0) throw new Error(`Cannot apply extensions while thread commands are in flight`);
+        if (current.summary?.running) {
+          if (!abortRunning) throw new Error("Thread is running; confirm abort before applying extensions");
+          await current.client.request({ type: "cancel" }, null);
+          await waitForIdleSummary(current);
+        }
+        if (!current.sessionFile) throw new Error("Cannot apply extensions before the session file is materialized");
+        const previousSet = cloneExtensionSet(current.extensionSet);
+        const attachments = current.attachments;
+        const sessionFile = current.sessionFile;
+        this.options.resync(projectId, threadId, "extension-set-applying");
+        current.retired = true;
+        await this.awaitRecordShutdown(current);
+        if (this.records.get(key) === current) this.records.delete(key);
+        let replacement: WorkerRecord | undefined;
+        let latestDesired = desired;
+        try {
+          replacement = await this.spawn({
+            mode: "open",
+            projectId,
+            cwd: this.options.getCwd(projectId),
+            agentDir: this.options.agentDir,
+            threadId,
+            sessionFile,
+            extensionSet: desired,
+          });
+          latestDesired = await this.options.extensionSourcePolicy.resolve(projectId);
+          if (latestDesired.generation !== expectedDesiredGeneration) {
+            throw new StaleExtensionSetApplyError(expectedDesiredGeneration, latestDesired.generation);
+          }
+          activateAppliedRecord(replacement, attachments);
+          this.options.resync(projectId, threadId, "extension-set-applied");
+          return { status: "applied", generation: desired.generation };
+        } catch (error) {
+          try {
+            latestDesired = await this.options.extensionSourcePolicy.resolve(projectId);
+          } catch {
+            // Rollback remains available even when the desired set can no longer be resolved.
+          }
+          if (replacement && !replacement.retired) {
+            replacement.retired = true;
+            await this.awaitRecordShutdown(replacement);
+            if (this.records.get(key) === replacement) this.records.delete(key);
+          }
+          const rollback = await this.spawn({
+            mode: "open",
+            projectId,
+            cwd: this.options.getCwd(projectId),
+            agentDir: this.options.agentDir,
+            threadId,
+            sessionFile,
+            extensionSet: previousSet,
+          });
+          activateAppliedRecord(rollback, attachments);
+          rollback.desiredExtensionGeneration = latestDesired.generation;
+          rollback.desiredExtensionDiagnostics = [
+            ...latestDesired.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+            ...(latestDesired.generation === desired.generation ? desired.entries : []).map((entry) => ({
+              extensionId: entry.id,
+              source: entry.source,
+              extensionSetGeneration: desired.generation,
+              projectId,
+              threadId,
+              phase: "start" as const,
+              code: "DESKTOP_EXTENSION_STARTUP_FAILED",
+              message: error instanceof Error ? error.message : String(error),
+            })),
+          ];
+          this.options.resync(projectId, threadId, "extension-set-rollback");
+          return {
+            status: "rolled-back",
+            generation: previousSet.generation,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      });
+    } finally {
+      this.drainingThreads.delete(key);
+    }
   }
 
   async respond(projectId: string, threadId: string, response: HostResponse): Promise<void> {
@@ -344,6 +522,7 @@ export class ThreadWorkerRegistry {
     operation: (record: WorkerRecord) => Promise<T>,
   ): Promise<T> {
     const key = workerKey(projectId, threadId);
+    if (this.drainingThreads.has(key)) throw new Error(`Thread ${projectId}/${threadId} is applying extensions`);
     let record!: WorkerRecord;
     await this.withThreadLock(key, async () => {
       record = await this.requireUnlocked(projectId, threadId);
@@ -407,6 +586,7 @@ export class ThreadWorkerRegistry {
   private async open(projectId: string, threadId: string): Promise<WorkerRecord> {
     const cwd = this.options.getCwd(projectId);
     const session = await this.options.metadata.resolve(projectId, cwd, threadId);
+    const extensionSet = await this.options.extensionSourcePolicy.resolve(projectId);
     return this.spawn({
       mode: "open",
       projectId,
@@ -414,10 +594,15 @@ export class ThreadWorkerRegistry {
       agentDir: this.options.agentDir,
       threadId,
       sessionFile: session.path,
+      extensionSet,
     });
   }
 
   private async spawn(binding: ThreadWorkerBinding): Promise<WorkerRecord> {
+    const blockedReason = this.blockedDevelopmentSets.get(binding.extensionSet.generation);
+    if (blockedReason) {
+      throw new Error(`Development extension set is blocked after repeated failures: ${blockedReason}`);
+    }
     await this.reserveWorkerSlot();
     try {
       let lastError: unknown;
@@ -448,11 +633,18 @@ export class ThreadWorkerRegistry {
             throw new Error(`Thread worker already exists for ${record.projectId}/${record.threadId}`);
           }
           this.records.set(key, record);
+          this.blockedDevelopmentSets.delete(binding.extensionSet.generation);
           return record;
         } catch (error) {
           if (isNonRetryableStartupError(error)) throw error;
           lastError = error;
         }
+      }
+      if (binding.extensionSet.entries.some((entry) => entry.source === "development")) {
+        this.blockedDevelopmentSets.set(
+          binding.extensionSet.generation,
+          lastError instanceof Error ? lastError.message : String(lastError),
+        );
       }
       throw lastError;
     } finally {
@@ -475,6 +667,15 @@ export class ThreadWorkerRegistry {
         const key = workerKey(record.projectId, record.threadId);
         if (this.records.get(key)?.client !== client) return;
         this.records.delete(key);
+        if (record.extensionSet.entries.some((entry) => entry.source === "development")) {
+          const now = Date.now();
+          const previous = this.developmentCrashCounts.get(record.extensionSet.generation);
+          const count = previous && now - previous.lastAt <= 60_000 ? previous.count + 1 : 1;
+          this.developmentCrashCounts.set(record.extensionSet.generation, { count, lastAt: now });
+          if (count >= 3) {
+            this.blockedDevelopmentSets.set(record.extensionSet.generation, error.message);
+          }
+        }
         if (!record.failureReported) {
           record.failureReported = true;
           this.options.failed(record.projectId, record.threadId, error);
@@ -492,6 +693,10 @@ export class ThreadWorkerRegistry {
       attachments: 0,
       createRequestId: binding.mode === "create" ? binding.createInput.createRequestId : undefined,
       sessionFile: binding.mode === "open" ? binding.sessionFile : undefined,
+      extensionSet: cloneExtensionSet(binding.extensionSet),
+      desiredExtensionGeneration: binding.extensionSet.generation,
+      desiredExtensionDiagnostics: binding.extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+      extensionDiagnostics: binding.extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
       retired: false,
     };
     try {
@@ -504,6 +709,10 @@ export class ThreadWorkerRegistry {
       record.threadId = bootstrap.threadId;
       record.initialBootstrap = bootstrap;
       record.summary = summaryFromBootstrap(bootstrap);
+      record.extensionDiagnostics = bootstrap.control.extensionSet.diagnostics.map((diagnostic) => ({
+        ...diagnostic,
+        workerInstanceId: client.instanceId,
+      }));
       if (record.sessionFile) {
         await this.options.metadata.upsert(
           record.projectId,
@@ -548,7 +757,25 @@ export class ThreadWorkerRegistry {
     if (record.retired) return;
     record.lastActivityAt = Date.now();
     if (event.event.type === "session-push") {
-      this.options.push(event.event.payload, event.workerInstanceId, event.sequence);
+      let payload = event.event.payload;
+      if (payload.type === "control") {
+        record.extensionDiagnostics = payload.control.extensionSet.diagnostics.map((diagnostic) => ({
+          ...diagnostic,
+          workerInstanceId: record.client.instanceId,
+        }));
+        payload = {
+          ...payload,
+          control: {
+            ...payload.control,
+            extensionSet: {
+              ...payload.control.extensionSet,
+              diagnostics: record.extensionDiagnostics.map((diagnostic) => ({ ...diagnostic })),
+              reloadRequired: record.extensionSet.generation !== record.desiredExtensionGeneration,
+            },
+          },
+        };
+      }
+      this.options.push(payload, event.workerInstanceId, event.sequence);
     } else if (event.event.type === "summary-changed") {
       record.summary = event.event.summary;
       if (!record.sessionFile) {
@@ -798,6 +1025,44 @@ function delay(milliseconds: number): Promise<void> {
 
 function workerKey(projectId: string, threadId: string): string {
   return `${projectId}\0${threadId}`;
+}
+
+function decorateBootstrap(record: WorkerRecord, bootstrap: SessionBootstrap): SessionBootstrap {
+  return {
+    ...bootstrap,
+    control: {
+      ...bootstrap.control,
+      extensionSet: {
+        ...bootstrap.control.extensionSet,
+        diagnostics: record.extensionDiagnostics.map((diagnostic) => ({ ...diagnostic })),
+        reloadRequired: record.extensionSet.generation !== record.desiredExtensionGeneration,
+      },
+    },
+  };
+}
+
+function activateAppliedRecord(record: WorkerRecord, attachments: number): void {
+  record.attachments = attachments;
+  record.initialBootstrap = undefined;
+  record.inFlight = Math.max(0, record.inFlight - 1);
+}
+
+async function waitForIdleSummary(record: WorkerRecord): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const summary = await record.client.request<Thread>({ type: "getSummary", archived: false }, 10_000);
+    record.summary = summary;
+    if (!summary.running) return;
+    await delay(50);
+  }
+  throw new Error("Thread did not become idle after abort");
+}
+
+function cloneExtensionSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
+  return {
+    ...set,
+    entries: set.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+    diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+  };
 }
 
 function summaryFromBootstrap(bootstrap: SessionBootstrap): Thread {

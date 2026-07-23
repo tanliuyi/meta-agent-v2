@@ -61,7 +61,6 @@ export class SessionSupervisor {
   private readonly projects: ProjectStore;
   private readonly workers: ThreadWorkerRegistry;
   private readonly log?: SessionSupervisorOptions["log"];
-  private disposed = false;
 
   constructor(projects: ProjectStore, workers: ThreadWorkerRegistry, options: SessionSupervisorOptions = {}) {
     this.projects = projects;
@@ -77,6 +76,14 @@ export class SessionSupervisor {
 
   getDraftConfig(projectId: string): Promise<DraftSessionConfig> {
     return this.workers.getDraftConfig(projectId);
+  }
+
+  getExtensionState(projectId: string, threadId: string) {
+    return this.workers.getExtensionState(projectId, threadId);
+  }
+
+  extensionSettingsChanged(): Promise<void> {
+    return this.workers.extensionSettingsChanged();
   }
 
   prewarm(projectId: string, threadId: string): Promise<void> {
@@ -184,9 +191,8 @@ export class SessionSupervisor {
     return this.workers.setThinking(projectId, threadId, level);
   }
 
-  setEditorText(projectId: string, threadId: string, text: string): Promise<void> {
-    if (this.disposed) return Promise.resolve();
-    return this.workers.setEditorText(projectId, threadId, text);
+  applyExtensionSet(projectId: string, threadId: string, expectedDesiredGeneration: string, abortRunning = false) {
+    return this.workers.applyExtensionSet(projectId, threadId, expectedDesiredGeneration, abortRunning);
   }
 
   rename(projectId: string, threadId: string, title: string): Promise<void> {
@@ -322,7 +328,6 @@ export class SessionSupervisor {
   }
 
   dispose(): Promise<void> {
-    this.disposed = true;
     for (const pending of this.pendingDeliveryAcks.values()) {
       clearTimeout(pending.timer);
       this.workers.acknowledge(pending.workerInstanceId, pending.sidecarSequence);

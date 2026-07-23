@@ -3,6 +3,7 @@ import { CHANNELS } from "../shared/channels.ts";
 import type {
   SessionAttachInput,
   SessionAttachment,
+  SessionCreateIpcResult,
   SessionFlushResult,
   SessionPush,
   SessionPushPayload,
@@ -170,6 +171,12 @@ const desktopApi: DesktopApi = {
     getConfig: () => ipcRenderer.invoke(CHANNELS.settingsGetConfig),
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.settingsSaveConfig, input),
   },
+  extensions: {
+    getConfig: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.extensionsGetConfig, projectId, threadId),
+    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.extensionsSaveConfig, input),
+    chooseDevelopmentEntry: (input) => ipcRenderer.invoke(CHANNELS.extensionsChooseDevelopmentEntry, input),
+    apply: (input) => ipcRenderer.invoke(CHANNELS.extensionsApply, input),
+  },
   updater: {
     getState: () => ipcRenderer.invoke(CHANNELS.updaterGetState),
     check: () => ipcRenderer.invoke(CHANNELS.updaterCheck),
@@ -210,7 +217,14 @@ const desktopApi: DesktopApi = {
   sessions: {
     list: (projectId, includeArchived) => ipcRenderer.invoke(CHANNELS.sessionsList, projectId, includeArchived),
     getDraftConfig: (projectId) => ipcRenderer.invoke(CHANNELS.sessionsDraftConfig, projectId),
-    create: (input) => ipcRenderer.invoke(CHANNELS.sessionsCreate, input),
+    create: async (input) => {
+      const result = (await ipcRenderer.invoke(CHANNELS.sessionsCreate, input)) as SessionCreateIpcResult;
+      if (result.ok) return result.bootstrap;
+      throw Object.assign(new Error(result.error.message), {
+        code: result.error.code,
+        details: result.error.details,
+      });
+    },
     async attach(input: SessionAttachInput, listener): Promise<SessionAttachment> {
       const attachment = (await ipcRenderer.invoke(CHANNELS.sessionsAttach, input)) as SessionAttachment;
       const active: ActiveSessionAttachment = {
@@ -265,8 +279,6 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.sessionsSetModel, projectId, threadId, provider, modelId),
     setThinking: (projectId, threadId, level) =>
       ipcRenderer.invoke(CHANNELS.sessionsSetThinking, projectId, threadId, level),
-    setEditorText: (projectId, threadId, text) =>
-      ipcRenderer.invoke(CHANNELS.sessionsSetEditorText, projectId, threadId, text),
     respond: (projectId, threadId, response) =>
       ipcRenderer.invoke(CHANNELS.sessionsRespond, projectId, threadId, response),
   },

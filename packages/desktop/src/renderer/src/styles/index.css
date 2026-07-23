@@ -12,6 +12,7 @@
 @import "./updater.css" layer(components);
 @import "./models-settings.css" layer(components);
 @import "./auth-settings.css" layer(components);
+@import "./extensions-settings.css" layer(components);
 @import "./chat.css" layer(components);
 @import "./markdown.css" layer(components);
 @import "./panel.css" layer(components);

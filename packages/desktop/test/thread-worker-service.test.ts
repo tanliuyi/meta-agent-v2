@@ -56,6 +56,13 @@ describe("ThreadWorkerService open validation", () => {
       agentDir: join(root, "agent"),
       threadId: "requested-thread",
       sessionFile,
+      extensionSet: {
+        generation: "extensions-generation",
+        projectId: "project",
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
     };
 
     await expect(

@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -12,6 +12,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("Pi coding-agent 0.80.7 public compatibility", () => {
@@ -48,6 +49,65 @@ describe("Pi coding-agent 0.80.7 public compatibility", () => {
       "user",
       "assistant",
     ]);
+  });
+
+  it("runs controlled commands, input events, and custom messages through public Pi APIs", async () => {
+    await harness.session.prompt("/desktop-test argument");
+    expect(harness.extensionObservations).toContain("command:argument");
+
+    harness.faux.setResponses([fauxAssistantMessage("event answer")]);
+    await harness.session.prompt("event input");
+    expect(harness.extensionObservations).toContain("input:event input");
+
+    await harness.session.sendCustomMessage({
+      customType: "desktop-test",
+      content: "custom content",
+      display: true,
+      details: { controlled: true },
+    });
+    expect(harness.session.messages).toContainEqual(
+      expect.objectContaining({ role: "custom", customType: "desktop-test" }),
+    );
+  });
+
+  it("runs an extension tool and preserves Pi tool lifecycle events", async () => {
+    harness.faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("desktop_echo", { text: "hello" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage("tool complete"),
+    ]);
+
+    await harness.session.prompt("use the tool");
+
+    expect(harness.events).toContainEqual(
+      expect.objectContaining({ type: "tool_execution_start", toolName: "desktop_echo" }),
+    );
+    expect(harness.events).toContainEqual(
+      expect.objectContaining({ type: "tool_execution_end", toolName: "desktop_echo", isError: false }),
+    );
+    expect(harness.session.messages.some(({ role }) => role === "toolResult")).toBe(true);
+  });
+
+  it("aborts a public Pi run and settles with an aborted assistant message", async () => {
+    harness.faux.setResponses([fauxAssistantMessage("x".repeat(20_000))]);
+    const running = harness.session.prompt("abort this");
+    await vi.waitFor(() => expect(harness.events.some(({ type }) => type === "message_update")).toBe(true));
+
+    await harness.session.abort();
+    await running;
+
+    expect(harness.events.at(-1)?.type).toBe("agent_settled");
+    expect(harness.session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "aborted" });
+  });
+
+  it("allows a controlled extension to provide public compaction output", async () => {
+    harness.faux.setResponses([fauxAssistantMessage("one answer"), fauxAssistantMessage("two answer")]);
+    await harness.session.prompt("one");
+    await harness.session.prompt("two");
+
+    const result = await harness.session.compact();
+
+    expect(result.summary).toBe("desktop extension summary");
+    expect(harness.session.messages[0]?.role).toBe("compactionSummary");
   });
 
   it("running prompt 的 queue_update removal 先于 consumed user message_start", async () => {
@@ -101,12 +161,45 @@ async function createPublicHarness() {
       maxTokens: model.maxTokens,
     })),
   });
-  const settingsManager = SettingsManager.inMemory();
+  const settingsManager = SettingsManager.inMemory({ compaction: { keepRecentTokens: 1 } });
+  const extensionObservations: string[] = [];
   const resourceLoader = new DefaultResourceLoader({
     cwd: tempDir,
     agentDir: tempDir,
     settingsManager,
     noExtensions: true,
+    extensionFactories: [
+      {
+        name: "desktop:compatibility-characterization",
+        factory: (pi) => {
+          pi.registerCommand("desktop-test", {
+            description: "Desktop compatibility command",
+            handler: async (args) => extensionObservations.push(`command:${args}`),
+          });
+          pi.on("input", (event) => {
+            extensionObservations.push(`input:${event.text}`);
+          });
+          pi.on("session_before_compact", async (event) => ({
+            compaction: {
+              summary: "desktop extension summary",
+              firstKeptEntryId: event.preparation.firstKeptEntryId,
+              tokensBefore: event.preparation.tokensBefore,
+              details: { source: "desktop-test" },
+            },
+          }));
+          pi.registerTool({
+            name: "desktop_echo",
+            label: "Desktop echo",
+            description: "Echo controlled extension input",
+            parameters: Type.Object({ text: Type.String() }),
+            execute: async (_toolCallId, input) => ({
+              content: [{ type: "text", text: input.text }],
+              details: {},
+            }),
+          });
+        },
+      },
+    ],
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
@@ -119,14 +212,15 @@ async function createPublicHarness() {
     authStorage,
     modelRegistry,
     model: faux.getModel(),
-    noTools: "all",
+    noTools: "builtin",
     resourceLoader,
     sessionManager: SessionManager.inMemory(tempDir),
     settingsManager,
   });
+  await session.bindExtensions({});
   const events: AgentSessionEvent[] = [];
   session.subscribe((event) => events.push(event));
-  return { tempDir, faux, session, events };
+  return { tempDir, faux, session, events, extensionObservations };
 }
 
 function messageText(message: AgentSession["messages"][number]): string {

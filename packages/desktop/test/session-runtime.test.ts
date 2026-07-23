@@ -23,10 +23,18 @@ vi.mock("../src/main/pi/session-configuration.ts", () => ({
   sessionReadiness: () => ({ state: "ready" }),
 }));
 
-vi.mock("../src/main/pi/host-ui.ts", () => ({
-  HostUi: class {
+vi.mock("../src/main/pi/desktop-extension-host.ts", () => ({
+  DesktopExtensionCompatibilityError: class extends Error {
+    readonly code: string;
+
+    constructor(code: string) {
+      super(code);
+      this.code = code;
+    }
+  },
+  DesktopExtensionHost: class {
     readonly requests = [];
-    readonly uiState = { statuses: {}, workingVisible: true, toolsExpanded: false, widgets: [] };
+    readonly hostState = { statuses: {}, widgets: [] };
 
     createContext() {
       return {};
@@ -48,6 +56,94 @@ describe("SessionRuntime Pi-native commands", () => {
     mocks.createAgentSessionServices.mockResolvedValue(createServices());
   });
 
+  it("fails worker startup before AgentSession creation when a curated extension cannot load", async () => {
+    const services = createServices();
+    services.resourceLoader.getExtensions = () => ({
+      extensions: [],
+      errors: [{ path: "/approved/broken.ts", error: "syntax error" }],
+    });
+    mocks.createAgentSessionServices.mockResolvedValue(services);
+
+    await expect(
+      SessionRuntime.create({
+        projectId: "project",
+        cwd: "/workspace",
+        extensionSet: {
+          generation: "broken",
+          projectId: "project",
+          entries: [
+            {
+              id: "curated:broken",
+              displayName: "Broken",
+              source: "curated",
+              entryPath: "/approved/broken.ts",
+              hostProfileVersion: 1,
+              capabilities: [],
+            },
+          ],
+          diagnostics: [],
+          resolvedAt: 0,
+        },
+        push: () => {},
+        onSummaryChanged: () => {},
+      }),
+    ).rejects.toMatchObject({ code: "DESKTOP_EXTENSION_STARTUP_FAILED" });
+    expect(mocks.createAgentSessionFromServices).not.toHaveBeenCalled();
+  });
+
+  it("fails worker startup when controlled provider registration fails", async () => {
+    const services = createServices();
+    services.diagnostics.push({
+      type: "error",
+      message: 'Extension "<inline:desktop-provider>" error: duplicate provider',
+    });
+    mocks.createAgentSessionServices.mockResolvedValue(services);
+
+    await expect(
+      SessionRuntime.create({
+        projectId: "project",
+        cwd: "/workspace",
+        push: () => {},
+        onSummaryChanged: () => {},
+      }),
+    ).rejects.toMatchObject({ code: "DESKTOP_EXTENSION_STARTUP_FAILED" });
+  });
+
+  it("fails worker startup when a session_start handler crashes", async () => {
+    const session = createSession();
+    session.bindExtensions.mockImplementationOnce(
+      async (bindings: { onError?(error: { extensionPath: string; error: string }): void }) => {
+        bindings.onError?.({ extensionPath: "development:broken", error: "session start crashed" });
+      },
+    );
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    await expect(
+      SessionRuntime.create({
+        projectId: "project",
+        cwd: "/workspace",
+        extensionSet: {
+          generation: "broken-start",
+          projectId: "project",
+          entries: [
+            {
+              id: "development:broken",
+              displayName: "Broken",
+              source: "development",
+              entryPath: "/approved/broken.ts",
+              hostProfileVersion: 1,
+              capabilities: [],
+            },
+          ],
+          diagnostics: [],
+          resolvedAt: 0,
+        },
+        push: () => {},
+        onSummaryChanged: () => {},
+      }),
+    ).rejects.toMatchObject({ code: "DESKTOP_EXTENSION_STARTUP_FAILED" });
+  });
+
   it("创建新 session 时加载 Pi 默认 services 并传递显式 model 和 thinking", async () => {
     const session = createSession();
     const model = { provider: "openai", id: "gpt" };
@@ -57,7 +153,13 @@ describe("SessionRuntime Pi-native commands", () => {
     await SessionRuntime.create({
       projectId: "project",
       cwd: "/workspace",
-      createInput: { projectId: "project", model, thinkingLevel: "max" },
+      createInput: {
+        projectId: "project",
+        createRequestId: "create",
+        extensionSetGeneration: "desktop-builtins-only",
+        model,
+        thinkingLevel: "max",
+      },
       push: () => {},
       onSummaryChanged: () => {},
     });
@@ -70,6 +172,73 @@ describe("SessionRuntime Pi-native commands", () => {
         thinkingLevel: "high",
       }),
     );
+  });
+
+  it("binds real waitForIdle and fails unsupported command actions closed", async () => {
+    const session = createSession();
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+    const bindings = session.bindExtensions.mock.calls[0]?.[0];
+    if (!bindings?.commandContextActions) throw new Error("Command context actions were not bound");
+
+    await bindings.commandContextActions.waitForIdle();
+    expect(session.waitForIdle).toHaveBeenCalledOnce();
+    await expect(bindings.commandContextActions.reload()).rejects.toMatchObject({
+      code: "DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE",
+    });
+    await expect(bindings.commandContextActions.newSession()).rejects.toMatchObject({
+      code: "DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE",
+    });
+    await runtime.dispose();
+  });
+
+  it("binds real waitForIdle and fail-closed session-changing command actions", async () => {
+    const session = createSession();
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+    const binding = session.bindExtensions.mock.calls[0]?.[0] as {
+      commandContextActions: Record<string, (...args: unknown[]) => Promise<unknown>>;
+    };
+
+    await binding.commandContextActions.waitForIdle?.();
+    expect(session.waitForIdle).toHaveBeenCalledOnce();
+    for (const action of ["newSession", "fork", "navigateTree", "switchSession", "reload"]) {
+      await expect(binding.commandContextActions[action]?.()).rejects.toMatchObject({
+        code: "DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE",
+      });
+    }
+    await runtime.dispose();
+  });
+
+  it("emits session_shutdown before disposing the controlled extension runtime", async () => {
+    const session = createSession();
+    const runner = session.extensionRunner as unknown as {
+      hasHandlers: ReturnType<typeof vi.fn>;
+      emit: ReturnType<typeof vi.fn>;
+    };
+    runner.hasHandlers.mockReturnValue(true);
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    await runtime.dispose();
+
+    expect(runner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
   });
 
   it("恢复已有 session 时传递 session 文件中的 model 和 thinking", async () => {
@@ -265,7 +434,11 @@ function createServices() {
   };
 }
 
-function createSession(streaming = false): AgentSession & { prompt: ReturnType<typeof vi.fn> } {
+function createSession(streaming = false): AgentSession & {
+  prompt: ReturnType<typeof vi.fn>;
+  bindExtensions: ReturnType<typeof vi.fn>;
+  waitForIdle: ReturnType<typeof vi.fn>;
+} {
   const prompt = vi.fn(async (_text: string, options?: { preflightResult?: (success: boolean) => void }) => {
     options?.preflightResult?.(true);
   });
@@ -279,7 +452,11 @@ function createSession(streaming = false): AgentSession & { prompt: ReturnType<t
     thinkingLevel: "off",
     steeringMode: "one-at-a-time",
     followUpMode: "one-at-a-time",
-    extensionRunner: { getRegisteredCommands: () => [] },
+    extensionRunner: {
+      getRegisteredCommands: () => [],
+      hasHandlers: vi.fn(() => false),
+      emit: vi.fn(async () => undefined),
+    },
     promptTemplates: [],
     resourceLoader: { getSkills: () => ({ skills: [] }) },
     sessionManager: {
@@ -305,9 +482,14 @@ function createSession(streaming = false): AgentSession & { prompt: ReturnType<t
     abortBranchSummary: vi.fn(),
     getContextUsage: () => undefined,
     getAvailableThinkingLevels: () => ["off"],
-    async bindExtensions() {},
+    waitForIdle: vi.fn(async () => undefined),
+    bindExtensions: vi.fn(async () => undefined),
     subscribe: () => () => {},
     dispose() {},
-  } as unknown as AgentSession & { prompt: ReturnType<typeof vi.fn> };
+  } as unknown as AgentSession & {
+    prompt: ReturnType<typeof vi.fn>;
+    bindExtensions: ReturnType<typeof vi.fn>;
+    waitForIdle: ReturnType<typeof vi.fn>;
+  };
   return session;
 }

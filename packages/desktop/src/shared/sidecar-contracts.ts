@@ -14,8 +14,9 @@ import type {
   SessionReloadInput,
   Thread,
 } from "./contracts.ts";
+import type { ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
 
-export const SIDECAR_PROTOCOL_VERSION = 1;
+export const SIDECAR_PROTOCOL_VERSION = 2;
 
 export type SidecarRole = "thread" | "metadata";
 
@@ -40,6 +41,7 @@ export type ThreadWorkerBinding =
       agentDir: string;
       sessionId: string;
       createInput: SessionCreateInput;
+      extensionSet: ResolvedExtensionSet;
     }
   | {
       mode: "open";
@@ -48,6 +50,7 @@ export type ThreadWorkerBinding =
       agentDir: string;
       threadId: string;
       sessionFile: string;
+      extensionSet: ResolvedExtensionSet;
     };
 
 export interface MetadataWorkerBinding {
@@ -178,7 +181,6 @@ export type ThreadSidecarCommand =
   | { type: "refreshModels" }
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinking"; level: SessionControlState["thinkingLevel"] }
-  | { type: "setEditorText"; text: string }
   | { type: "rename"; title: string }
   | { type: "respondHostUi"; response: HostResponse }
   | { type: "getSummary"; archived: boolean }
@@ -206,7 +208,7 @@ export interface ColdOperationLease {
 
 export type MetadataSidecarCommand =
   | { type: "listSessions"; projectId: string; cwd: string }
-  | { type: "getDraftConfig"; projectId: string; cwd: string }
+  | { type: "getDraftConfig"; projectId: string; cwd: string; extensionSet: ResolvedExtensionSet }
   | { type: "resolveSession"; projectId: string; cwd: string; threadId: string }
   | { type: "upsertSession"; projectId: string; cwd: string; sessionFile: string; thread: Thread }
   | {

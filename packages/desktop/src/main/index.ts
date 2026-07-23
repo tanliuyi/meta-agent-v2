@@ -6,6 +6,9 @@ import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-insta
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
 import { AuthConfigService } from "./auth/auth-config-service.ts";
+import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extension-registry.ts";
+import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
+import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, registerIpc } from "./ipc.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
@@ -143,6 +146,18 @@ app.whenReady().then(async () => {
     log: (text) => sidecarLog?.write("auth", text),
   });
   const settings = new SettingsConfigService(userDataDir);
+  const builtinExtensions = DesktopControlledExtensionRegistry.getBuiltinDefinitions();
+  const curatedExtensions = DesktopControlledExtensionRegistry.getCuratedDefinitions();
+  const extensionSettings = new DesktopExtensionSettingsService(userDataDir, {
+    builtinDefinitions: builtinExtensions,
+    curatedDefinitions: curatedExtensions,
+  });
+  const extensionSourcePolicy = new DesktopExtensionSourcePolicy({
+    settings: extensionSettings,
+    getBuiltinDefinitions: () => builtinExtensions,
+    getCuratedDefinitions: () => curatedExtensions,
+    curatedRoot: app.isPackaged ? join(process.resourcesPath, "extensions") : join(appDir, "../extensions"),
+  });
   const updater = new AutoUpdateService({ app });
   const installer = new NodeRuntimeInstaller(userDataDir, () => undefined);
   const configuredNode = detectNodeRuntime();
@@ -175,6 +190,7 @@ app.whenReady().then(async () => {
     metadata,
     userDataDir,
     agentDir,
+    extensionSourcePolicy,
     getCwd: (projectId) => projects.getCwd(projectId),
     push: (payload, workerInstanceId, sidecarSequence) =>
       supervisor.receive(payload, workerInstanceId, sidecarSequence),
@@ -213,6 +229,7 @@ app.whenReady().then(async () => {
       onProgress: (listener) => installer.onProgress(listener),
     },
     updater,
+    extensionSettings,
   );
   await installReactDevTools();
   createWindow();

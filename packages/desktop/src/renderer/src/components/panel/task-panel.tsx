@@ -4,7 +4,7 @@ import { useSessionControl, useSessionTimeline } from "../session-context.tsx";
 export function TaskPanel() {
   const control = useSessionControl();
   const timeline = useSessionTimeline();
-  const statuses = control?.extensionUi.statuses ?? {};
+  const statuses = control?.extensionHost.statuses ?? {};
   return (
     <div className="task-panel">
       <h3>会话状态</h3>

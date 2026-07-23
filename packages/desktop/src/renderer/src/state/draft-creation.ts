@@ -19,6 +19,7 @@ interface DraftMaterializationInput {
   projectId: string;
   model: SessionCreateInput["model"];
   thinkingLevel: SessionCreateInput["thinkingLevel"];
+  extensionSetGeneration: string;
   text: string;
   images: ImageInput[];
 }
@@ -43,6 +44,7 @@ export async function materializeDraftSession(
   const bootstrap = await dependencies.sessions.create({
     projectId: input.projectId,
     createRequestId,
+    extensionSetGeneration: input.extensionSetGeneration,
     model: input.model,
     thinkingLevel: input.thinkingLevel,
   });

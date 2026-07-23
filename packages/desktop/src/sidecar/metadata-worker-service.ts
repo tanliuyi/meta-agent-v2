@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
 import { loadDraftSessionConfig } from "../main/pi/session-configuration.ts";
 import type { MetadataSidecarCommand, SidecarBinding, SidecarCommand } from "../shared/sidecar-contracts.ts";
 import { SessionMetadataIndex } from "./session-metadata-index.ts";
@@ -32,8 +33,10 @@ export class MetadataWorkerService implements SidecarService {
     switch (command.type) {
       case "listSessions":
         return this.index.list(command.projectId, command.cwd);
-      case "getDraftConfig":
-        return loadDraftSessionConfig(command.cwd, undefined, this.agentDir);
+      case "getDraftConfig": {
+        const extensionSet = await validateResolvedExtensionSet(command.projectId, command.extensionSet);
+        return loadDraftSessionConfig(command.cwd, undefined, this.agentDir, extensionSet);
+      }
       case "resolveSession":
         return this.index.resolve(command.projectId, command.cwd, command.threadId);
       case "upsertSession":

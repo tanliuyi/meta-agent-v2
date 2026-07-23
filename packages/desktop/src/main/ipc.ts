@@ -10,6 +10,7 @@ import type {
   SessionBranchResult,
   SessionControlState,
   SessionCreateInput,
+  SessionCreateIpcResult,
   SessionEditInput,
   SessionPromptInput,
   SessionReloadInput,
@@ -17,9 +18,15 @@ import type {
   WorkbenchState,
 } from "../shared/contracts.ts";
 import type { NodeRuntimeProgress, NodeRuntimeStatus } from "../shared/desktop-api.ts";
+import type {
+  ApplyDesktopExtensionSetInput,
+  ApproveDevelopmentExtensionInput,
+  SaveDesktopExtensionSettingsInput,
+} from "../shared/desktop-extension-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
+import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
@@ -47,6 +54,7 @@ export function registerIpc(
     onProgress(listener: (progress: NodeRuntimeProgress) => void): () => void;
   },
   updater?: AutoUpdateService,
+  extensions?: DesktopExtensionSettingsService,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -74,6 +82,49 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.authOpenConfigExternally, async () => openPath(await auth.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
   ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
+  if (extensions) {
+    ipcMain.handle(CHANNELS.extensionsGetConfig, async (_event, projectId?: string, threadId?: string) => {
+      const snapshot = await extensions.getConfig();
+      if (!projectId || !threadId) return snapshot;
+      const state = await sessions.getExtensionState(projectId, threadId);
+      return {
+        ...snapshot,
+        reloadRequired: state.reloadRequired,
+        appliedGeneration: state.appliedGeneration,
+        desiredGeneration: state.desiredGeneration,
+        diagnostics: state.diagnostics,
+      };
+    });
+    ipcMain.handle(CHANNELS.extensionsSaveConfig, async (_event, input: SaveDesktopExtensionSettingsInput) => {
+      const result = await extensions.saveConfig(input);
+      if (result.status === "saved") await sessions.extensionSettingsChanged();
+      return result;
+    });
+    ipcMain.handle(
+      CHANNELS.extensionsChooseDevelopmentEntry,
+      async (event, input: ApproveDevelopmentExtensionInput) => {
+        const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+        const result = owner
+          ? await dialog.showOpenDialog(owner, {
+              properties: ["openFile"],
+              filters: [{ name: "Pi extension", extensions: ["ts", "js", "mjs", "cjs"] }],
+            })
+          : await dialog.showOpenDialog({
+              properties: ["openFile"],
+              filters: [{ name: "Pi extension", extensions: ["ts", "js", "mjs", "cjs"] }],
+            });
+        const saved = await extensions.approveDevelopmentEntry(
+          input,
+          result.canceled ? undefined : result.filePaths[0],
+        );
+        if (saved.status === "saved") await sessions.extensionSettingsChanged();
+        return saved;
+      },
+    );
+    ipcMain.handle(CHANNELS.extensionsApply, (_event, input: ApplyDesktopExtensionSetInput) =>
+      sessions.applyExtensionSet(input.projectId, input.threadId, input.expectedDesiredGeneration, input.abortRunning),
+    );
+  }
   ipcMain.on(CHANNELS.authSetEditorDirty, (event, dirty: unknown) => {
     if (typeof dirty !== "boolean") {
       event.returnValue = false;
@@ -131,7 +182,19 @@ export function registerIpc(
     sessions.list(projectId, includeArchived),
   );
   ipcMain.handle(CHANNELS.sessionsDraftConfig, (_event, projectId: string) => sessions.getDraftConfig(projectId));
-  ipcMain.handle(CHANNELS.sessionsCreate, (_event, input: SessionCreateInput) => sessions.create(input));
+  ipcMain.handle(
+    CHANNELS.sessionsCreate,
+    async (_event, input: SessionCreateInput): Promise<SessionCreateIpcResult> => {
+      try {
+        return { ok: true, bootstrap: await sessions.create(input) };
+      } catch (error) {
+        if (isStaleDraftExtensionSetError(error)) {
+          return { ok: false, error: { code: error.code, message: error.message, details: error.details } };
+        }
+        throw error;
+      }
+    },
+  );
   ipcMain.handle(CHANNELS.sessionsAttach, (event, input: SessionAttachInput) => {
     const ownerId = event.sender.id;
     if (!subscribedWebContents.has(ownerId)) {
@@ -191,9 +254,6 @@ export function registerIpc(
     CHANNELS.sessionsSetThinking,
     (_event, projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]) =>
       sessions.setThinking(projectId, threadId, level),
-  );
-  ipcMain.handle(CHANNELS.sessionsSetEditorText, (_event, projectId: string, threadId: string, text: string) =>
-    sessions.setEditorText(projectId, threadId, text),
   );
   ipcMain.handle(CHANNELS.sessionsRespond, (_event, projectId: string, threadId: string, response: HostResponse) =>
     sessions.respond(projectId, threadId, response),
@@ -299,6 +359,20 @@ async function resolveFilePath(projectId: string, path: string, projects: Projec
 async function openPath(path: string): Promise<void> {
   const error = await shell.openPath(path);
   if (error) throw new Error(error);
+}
+
+function isStaleDraftExtensionSetError(error: unknown): error is Error & {
+  code: "STALE_DRAFT_EXTENSION_SET";
+  details: { code: "STALE_DRAFT_EXTENSION_SET"; requestedGeneration: string; currentGeneration: string };
+} {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "STALE_DRAFT_EXTENSION_SET" &&
+    "details" in error &&
+    typeof error.details === "object" &&
+    error.details !== null
+  );
 }
 
 /** 向所有 renderer 广播 PTY 增量事件。 */

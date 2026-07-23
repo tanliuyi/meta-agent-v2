@@ -8,6 +8,7 @@ import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
 import Key from "lucide-react/dist/esm/icons/key.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
+import Puzzle from "lucide-react/dist/esm/icons/puzzle.mjs";
 import type { CSSProperties } from "react";
 
 /** 提供不依赖 Desktop session runtime 的设置页布局。 */
@@ -89,6 +90,15 @@ export function SettingsPage() {
             <Link to="/settings/auth" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
               <Key />
               <span>凭据</span>
+            </Link>
+            <Link
+              to="/settings/extensions"
+              search={search}
+              className="settings-menu-item"
+              activeOptions={{ exact: true }}
+            >
+              <Puzzle />
+              <span>扩展</span>
             </Link>
             <Link to="/settings/about" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
               <Info />

@@ -34,25 +34,8 @@ describe("ThreadActivityIndicator", () => {
     });
 
     expect(markup).toBe("");
-  });
-
-  it("运行时显示扩展设置的 working message", () => {
-    const snapshot = control();
-    snapshot.extensionUi.workingVisible = true;
-    snapshot.extensionUi.workingMessage = "正在分析项目";
-
-    const markup = renderToStaticMarkup(
-      <ThreadActivityIndicator
-        phase="running"
-        retry={snapshot.retry}
-        workingVisible={snapshot.extensionUi.workingVisible}
-        workingMessage={snapshot.extensionUi.workingMessage}
-        lastError={snapshot.lastError}
-      />,
-    );
-
-    expect(markup).toContain("正在分析项目");
-    expect(markup).toContain("animate-spin");
+    expect(markup).not.toContain("stale retry");
+    expect(markup).not.toContain("stale error");
   });
 
   it("默认展开并警示最终错误", () => {
@@ -71,13 +54,7 @@ function renderIndicator(
 ): string {
   const snapshot = control(overrides);
   return renderToStaticMarkup(
-    <ThreadActivityIndicator
-      phase={phase}
-      retry={snapshot.retry}
-      workingVisible={snapshot.extensionUi.workingVisible}
-      workingMessage={snapshot.extensionUi.workingMessage}
-      lastError={snapshot.lastError}
-    />,
+    <ThreadActivityIndicator phase={phase} retry={snapshot.retry} lastError={snapshot.lastError} />,
   );
 }
 
@@ -99,12 +76,7 @@ function control(overrides: Pick<SessionControlState, "retry" | "lastError"> = {
     thinkingLevels: ["off"],
     readiness: { state: "ready" },
     hostRequests: [],
-    extensionUi: {
-      statuses: {},
-      workingVisible: false,
-      editorRevision: 0,
-      toolsExpanded: false,
-      widgets: [],
-    },
+    extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
+    extensionHost: { statuses: {}, widgets: [] },
   };
 }

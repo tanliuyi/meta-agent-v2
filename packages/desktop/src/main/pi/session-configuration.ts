@@ -8,7 +8,16 @@ import {
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { DraftSessionConfig, Readiness, SessionCreateInput, ThinkingLevel } from "../../shared/contracts.ts";
+import {
+  DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+  type ResolvedExtensionSet,
+} from "../../shared/desktop-extension-contracts.ts";
 import { DesktopBuiltinProviderRegistry } from "./desktop-builtin-provider.ts";
+import {
+  controlledResourceLoaderOptions,
+  extensionLoadDiagnostics,
+  extensionServiceDiagnostics,
+} from "./desktop-extension-runtime-policy.ts";
 import { getDraftCommands } from "./session-commands.ts";
 
 export interface SessionConfigurationServices {
@@ -22,24 +31,28 @@ export async function loadDraftSessionConfig(
   cwd: string,
   services?: SessionConfigurationServices,
   agentDir?: string,
+  resolvedExtensionSet?: ResolvedExtensionSet,
 ): Promise<DraftSessionConfig> {
+  const extensionSet = resolvedExtensionSet ?? fallbackExtensionSet(cwd);
   let models: ModelRegistry;
   let settings: SettingsManager;
   let resources: ResourceLoader | undefined;
+  let serviceDiagnostics: Array<{ type: string; message: string }> = [];
   if (services) {
     ({ models, settings, resources } = services);
   } else {
     const runtimeServices = await createAgentSessionServices({
       cwd,
       agentDir,
-      resourceLoaderOptions: {
-        extensionFactories: DesktopBuiltinProviderRegistry.getExtensionFactories(),
-        packageManagerOnMissing: async () => "error",
-      },
+      resourceLoaderOptions: controlledResourceLoaderOptions(
+        extensionSet,
+        DesktopBuiltinProviderRegistry.getExtensionFactories(),
+      ),
     });
     models = runtimeServices.modelRegistry;
     settings = runtimeServices.settingsManager;
     resources = runtimeServices.resourceLoader;
+    serviceDiagnostics = runtimeServices.diagnostics;
   }
   const initial = await findInitialModel({
     scopedModels: [],
@@ -66,6 +79,13 @@ export async function loadDraftSessionConfig(
     thinkingLevel: thinking.thinkingLevel,
     thinkingLevels: thinking.thinkingLevels,
     readiness: sessionReadiness(Boolean(initial.model), available.length, models.getAll().length),
+    extensions: {
+      extensionSetGeneration: extensionSet.generation,
+      diagnostics: [
+        ...(resources ? extensionLoadDiagnostics(extensionSet, resources.getExtensions()) : extensionSet.diagnostics),
+        ...extensionServiceDiagnostics(extensionSet, serviceDiagnostics),
+      ],
+    },
   };
 }
 
@@ -92,6 +112,20 @@ export function resolveSessionResumeSelection(
   return {
     model,
     thinkingLevel: resolveThinkingConfiguration(model, context.thinkingLevel as ThinkingLevel).thinkingLevel,
+  };
+}
+
+function fallbackExtensionSet(projectId: string): ResolvedExtensionSet {
+  return {
+    generation: "desktop-builtins-only",
+    projectId,
+    entries: DesktopBuiltinProviderRegistry.getExtensionDefinitions().map((definition) => ({
+      ...definition,
+      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+      capabilities: [...definition.capabilities],
+    })),
+    diagnostics: [],
+    resolvedAt: 0,
   };
 }
 

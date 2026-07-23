@@ -21,8 +21,15 @@ import {
   type SessionReloadInput,
   type Thread,
 } from "../../shared/contracts.ts";
+import type { DesktopExtensionDiagnostic, ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
 import { DesktopBuiltinProviderRegistry } from "./desktop-builtin-provider.ts";
-import { HostUi } from "./host-ui.ts";
+import { DesktopExtensionCompatibilityError, DesktopExtensionHost } from "./desktop-extension-host.ts";
+import {
+  controlledResourceLoaderOptions,
+  extensionLoadDiagnostics,
+  extensionServiceDiagnostics,
+  sanitizeExtensionMessage,
+} from "./desktop-extension-runtime-policy.ts";
 import { PiCompatibilityAdapter } from "./pi-compatibility-adapter.ts";
 import { PiThreadProjector } from "./pi-thread-projector.ts";
 import { getSessionCommands } from "./session-commands.ts";
@@ -38,16 +45,20 @@ interface RuntimeOptions {
   agentDir?: string;
   sessionManager?: SessionManager;
   createInput?: SessionCreateInput;
+  extensionSet?: ResolvedExtensionSet;
   push(update: SessionPushPayload): void;
   onSummaryChanged(runtime: SessionRuntime): void;
 }
 
 /** 单个 Pi AgentSession 的生命周期、控制面与 Pi-native timeline。 */
 export class SessionRuntime {
-  private readonly hostUi: HostUi;
+  private readonly extensionHost: DesktopExtensionHost;
   private readonly projector: PiThreadProjector;
   private readonly compatibility: PiCompatibilityAdapter;
   private readonly commands = new Map<string, Promise<SessionCommandResult>>();
+  private readonly extensionSet: ResolvedExtensionSet;
+  private extensionDiagnostics: DesktopExtensionDiagnostic[];
+  private extensionPhase: DesktopExtensionDiagnostic["phase"] = "start";
   private readonly commandExpiryTimers = new Set<ReturnType<typeof setTimeout>>();
   private revision = 0;
   private retry?: SessionControlState["retry"];
@@ -67,6 +78,7 @@ export class SessionRuntime {
     cwd: string,
     session: AgentSession,
     models: ModelRegistry,
+    extensionSet: ResolvedExtensionSet,
     push: (update: SessionPushPayload) => void,
     onSummaryChanged: (runtime: SessionRuntime) => void,
   ) {
@@ -76,12 +88,18 @@ export class SessionRuntime {
     this.models = models;
     this.push = push;
     this.onSummaryChanged = onSummaryChanged;
+    this.extensionSet = {
+      ...extensionSet,
+      entries: extensionSet.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+      diagnostics: extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+    };
+    this.extensionDiagnostics = extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic }));
     this.projector = new PiThreadProjector({
       projectId,
       session,
       publish: (batch) => this.push({ type: "timeline", projectId, threadId: this.id, batch }),
     });
-    this.hostUi = new HostUi(
+    this.extensionHost = new DesktopExtensionHost(
       () => this.publishControl(),
       () => [...this.session.state.pendingToolCalls],
       (message, type) => this.projector.notify(message, type),
@@ -92,14 +110,22 @@ export class SessionRuntime {
 
   /** 创建新会话或从指定 SessionManager 恢复会话。 */
   static async create(options: RuntimeOptions): Promise<SessionRuntime> {
+    const extensionSet = options.extensionSet ?? builtinOnlyExtensionSet(options.projectId);
     const services = await createAgentSessionServices({
       cwd: options.cwd,
       agentDir: options.agentDir,
-      resourceLoaderOptions: {
-        extensionFactories: DesktopBuiltinProviderRegistry.getExtensionFactories(),
-        packageManagerOnMissing: async () => "error",
-      },
+      resourceLoaderOptions: controlledResourceLoaderOptions(
+        extensionSet,
+        DesktopBuiltinProviderRegistry.getExtensionFactories(),
+      ),
     });
+    const extensionDiagnostics = [
+      ...extensionLoadDiagnostics(extensionSet, services.resourceLoader.getExtensions()),
+      ...extensionServiceDiagnostics(extensionSet, services.diagnostics),
+    ];
+    if (extensionDiagnostics.length > 0) {
+      throw new DesktopExtensionStartupError(extensionSet.generation, extensionDiagnostics);
+    }
     const sessionManager = options.sessionManager ?? SessionManager.create(services.cwd);
     const selection = options.createInput
       ? resolveSessionCreateSelection(options.createInput, services.modelRegistry)
@@ -119,9 +145,15 @@ export class SessionRuntime {
         options.cwd,
         result.session,
         services.modelRegistry,
+        extensionSet,
         options.push,
         options.onSummaryChanged,
       );
+      runtime.extensionDiagnostics = extensionDiagnostics.map((diagnostic) => ({
+        ...diagnostic,
+        projectId: options.projectId,
+        threadId: runtime.id,
+      }));
     } catch (error) {
       result.session.dispose();
       throw new PiTimelineUnavailableError("initial projection", error);
@@ -129,20 +161,82 @@ export class SessionRuntime {
     runtime.lastError = joinRuntimeDiagnostics(
       result.modelFallbackMessage,
       services.diagnostics.map(({ message }) => message),
-      services.resourceLoader.getExtensions().errors.map(({ path, error }) => `扩展加载失败 ${path}: ${error}`),
+      runtime.extensionDiagnostics.map(({ extensionId, message }) => `扩展加载失败 ${extensionId}: ${message}`),
       services.resourceLoader
         .getSkills()
         .diagnostics.filter(({ type }) => type === "error")
         .map(({ path, message }) => `Skill 加载失败${path ? ` ${path}` : ""}: ${message}`),
     );
-    await result.session.bindExtensions({
-      uiContext: runtime.hostUi.createContext(),
-      mode: "rpc",
-      onError: (error) => {
-        runtime.lastError = `${error.extensionPath}: ${error.error}`;
-        runtime.publishControl();
-      },
-    });
+    const unavailableCommand = async (capability: string): Promise<never> => {
+      throw new DesktopExtensionCompatibilityError("DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE", capability);
+    };
+    let bindingFailure: unknown;
+    try {
+      await result.session.bindExtensions({
+        uiContext: runtime.extensionHost.createContext(),
+        mode: "rpc",
+        commandContextActions: {
+          waitForIdle: () => runtime.session.waitForIdle(),
+          newSession: () => unavailableCommand("session.replace"),
+          fork: () => unavailableCommand("session.replace"),
+          navigateTree: () => unavailableCommand("session.replace"),
+          switchSession: () => unavailableCommand("session.replace"),
+          reload: () => unavailableCommand("session.reload"),
+        },
+        onError: (error) => {
+          const entry = runtime.extensionSet.entries.find(
+            (candidate) =>
+              candidate.entryPath === error.extensionPath ||
+              error.extensionPath.includes(candidate.id) ||
+              error.extensionPath.includes(candidate.displayName),
+          );
+          const message = sanitizeExtensionMessage(error.error, error.extensionPath, entry?.displayName ?? entry?.id);
+          runtime.extensionDiagnostics = [
+            ...runtime.extensionDiagnostics,
+            {
+              extensionId: entry?.id ?? "unknown",
+              source: entry?.source ?? "development",
+              extensionSetGeneration: runtime.extensionSet.generation,
+              projectId: runtime.projectId,
+              threadId: runtime.id,
+              phase: runtime.extensionPhase,
+              code:
+                runtime.extensionPhase === "start"
+                  ? "DESKTOP_EXTENSION_START_FAILED"
+                  : runtime.extensionPhase === "dispose"
+                    ? "DESKTOP_EXTENSION_DISPOSE_FAILED"
+                    : "DESKTOP_EXTENSION_RUNTIME_ERROR",
+              message,
+            },
+          ];
+          runtime.lastError = `${entry?.id ?? "unknown"}: ${message}`;
+          if (runtime.extensionPhase === "runtime") runtime.publishControl();
+        },
+      });
+    } catch (error) {
+      bindingFailure = error;
+      runtime.extensionDiagnostics = [
+        ...runtime.extensionDiagnostics,
+        {
+          extensionId: "unknown",
+          source: "builtin",
+          extensionSetGeneration: runtime.extensionSet.generation,
+          projectId: runtime.projectId,
+          threadId: runtime.id,
+          phase: "start",
+          code: "DESKTOP_EXTENSION_START_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ];
+    } finally {
+      runtime.extensionPhase = "runtime";
+    }
+    const startupDiagnostics = runtime.extensionDiagnostics.filter(({ phase }) => phase === "start");
+    if (bindingFailure || startupDiagnostics.length > 0) {
+      runtime.extensionHost.dispose();
+      result.session.dispose();
+      throw new DesktopExtensionStartupError(extensionSet.generation, startupDiagnostics);
+    }
     runtime.projector.checkpoint();
     runtime.unsubscribe = result.session.subscribe((event) => runtime.onEvent(event));
     return runtime;
@@ -251,10 +345,6 @@ export class SessionRuntime {
     this.publishControl();
   }
 
-  setEditorText(text: string): void {
-    this.hostUi.syncEditorText(text);
-  }
-
   rename(title: string): void {
     this.session.setSessionName(title.trim());
     this.summaryState = { ...this.summaryState, title: title.trim() || "新会话" };
@@ -262,8 +352,8 @@ export class SessionRuntime {
     this.onSummaryChanged(this);
   }
 
-  respond(response: Parameters<HostUi["respond"]>[0]): void {
-    this.hostUi.respond(response);
+  respond(response: Parameters<DesktopExtensionHost["respond"]>[0]): void {
+    this.extensionHost.respond(response);
   }
 
   async dispose(): Promise<void> {
@@ -274,9 +364,17 @@ export class SessionRuntime {
         // Session disposal below remains authoritative when an operation settled concurrently.
       }
     }
+    this.extensionPhase = "dispose";
+    if (this.session.extensionRunner.hasHandlers("session_shutdown")) {
+      try {
+        await this.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      } catch (error) {
+        this.lastError = `Extension shutdown failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
     this.unsubscribe?.();
     this.projector.dispose();
-    this.hostUi.dispose();
+    this.extensionHost.dispose();
     for (const timer of this.commandExpiryTimers) clearTimeout(timer);
     this.commandExpiryTimers.clear();
     this.commands.clear();
@@ -314,8 +412,13 @@ export class SessionRuntime {
         : undefined,
       readiness: sessionReadiness(Boolean(model), available.length, this.models.getAll().length),
       lastError: this.lastError ?? this.session.state.errorMessage,
-      hostRequests: this.hostUi.requests,
-      extensionUi: this.hostUi.uiState,
+      hostRequests: this.extensionHost.requests,
+      extensionSet: {
+        generation: this.extensionSet.generation,
+        diagnostics: this.extensionDiagnostics,
+        reloadRequired: false,
+      },
+      extensionHost: this.extensionHost.hostState,
     };
   }
 
@@ -432,11 +535,39 @@ export class SessionRuntime {
   }
 }
 
+export class DesktopExtensionStartupError extends Error {
+  readonly code = "DESKTOP_EXTENSION_STARTUP_FAILED";
+  readonly details: { generation: string; diagnostics: DesktopExtensionDiagnostic[] };
+
+  constructor(generation: string, diagnostics: DesktopExtensionDiagnostic[]) {
+    super(
+      `Desktop extension startup failed for generation ${generation}: ${diagnostics
+        .map(({ extensionId, code }) => `${extensionId} (${code})`)
+        .join(", ")}`,
+    );
+    this.name = "DesktopExtensionStartupError";
+    this.details = { generation, diagnostics: diagnostics.map((diagnostic) => ({ ...diagnostic })) };
+  }
+}
+
 export class PiTimelineUnavailableError extends Error {
   constructor(projectionError: unknown, rebuildError: unknown) {
     super(`Pi timeline 不可用: ${errorMessage(projectionError)}; rebuild 失败: ${errorMessage(rebuildError)}`);
     this.name = "PiTimelineUnavailableError";
   }
+}
+
+function builtinOnlyExtensionSet(projectId: string): ResolvedExtensionSet {
+  return {
+    generation: "desktop-builtins-only",
+    projectId,
+    entries: DesktopBuiltinProviderRegistry.getExtensionDefinitions().map((entry) => ({
+      ...entry,
+      capabilities: [...entry.capabilities],
+    })),
+    diagnostics: [],
+    resolvedAt: 0,
+  };
 }
 
 function createSummary(session: AgentSession): Omit<Thread, "projectId" | "archived" | "running"> {

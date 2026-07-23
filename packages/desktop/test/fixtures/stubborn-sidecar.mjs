@@ -13,7 +13,7 @@ process.on("message", (message) => {
     });
     return;
   }
-  if (message?.kind === "request" && message.command?.type === "setEditorText") return;
+  if (message?.kind === "request" && message.command?.type === "rename") return;
 });
 process.on("SIGTERM", () => {});
 process.on("SIGINT", () => {});

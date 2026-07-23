@@ -15,7 +15,8 @@
   },
   "include": ["electron.vite.config.ts", "src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts"],
   "exclude": [
-    "src/main/pi/host-ui.ts",
+    "src/main/pi/desktop-extension-host.ts",
+    "src/main/pi/desktop-extension-runtime-policy.ts",
     "src/main/pi/pi-compatibility-adapter.ts",
     "src/main/pi/pi-thread-projector.ts",
     "src/main/pi/session-commands.ts",

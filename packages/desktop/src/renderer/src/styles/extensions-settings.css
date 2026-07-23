@@ -1,0 +1,124 @@
+.extensions-settings {
+  gap: var(--space-4);
+}
+
+.extensions-page-heading,
+.extensions-section-heading,
+.extensions-row,
+.extensions-row-title,
+.extensions-row-actions,
+.extensions-add-row {
+  display: flex;
+  align-items: center;
+}
+
+.extensions-page-heading,
+.extensions-section-heading,
+.extensions-row {
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.extensions-page-heading > div,
+.extensions-section-heading > div,
+.extensions-row-main {
+  min-width: 0;
+}
+
+.extensions-page-heading span,
+.extensions-section-heading span,
+.extensions-row-meta,
+.extensions-empty {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
+
+.extensions-message {
+  padding: var(--space-3) var(--space-4);
+  border: 0.0625rem solid hsl(var(--border));
+  border-radius: var(--shape-radius-sm);
+  font-size: var(--type-size-control);
+  white-space: pre-wrap;
+}
+
+.extensions-message[data-tone="error"] {
+  border-color: hsl(var(--destructive) / 0.35);
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.06);
+}
+
+.extensions-message[data-tone="warning"] {
+  border-color: hsl(var(--warning) / 0.4);
+  color: hsl(var(--warning-foreground));
+  background: hsl(var(--warning) / 0.1);
+}
+
+.extensions-message[data-tone="info"] {
+  background: hsl(var(--muted) / 0.5);
+}
+
+.extensions-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.extensions-row {
+  min-height: 3.25rem;
+  padding: var(--space-3) var(--space-4);
+  border-top: 0.0625rem solid hsl(var(--border));
+}
+
+.extensions-row:first-child {
+  border-top: 0;
+}
+
+.extensions-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.extensions-row-title {
+  gap: var(--space-2);
+}
+
+.extensions-row-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extensions-row-title > span {
+  flex: 0 0 auto;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
+
+.extensions-row-title > span[data-source="development"] {
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning-foreground));
+}
+
+.extensions-row-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extensions-row-actions,
+.extensions-add-row {
+  gap: var(--space-2);
+}
+
+.extensions-empty,
+.extensions-add-row {
+  padding: var(--space-4);
+}
+
+.extensions-development .settings-section-heading {
+  align-items: flex-start;
+}

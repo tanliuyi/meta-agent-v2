@@ -19,19 +19,20 @@ describe("mergeSessionControl", () => {
     expect(merged.context).toBe(previous.context);
     expect(merged.readiness).toBe(previous.readiness);
     expect(merged.hostRequests).toBe(previous.hostRequests);
-    expect(merged.extensionUi).toBe(previous.extensionUi);
+    expect(merged.extensionSet).toBe(previous.extensionSet);
+    expect(merged.extensionHost).toBe(previous.extensionHost);
   });
 
   it("只替换变化的 extension widget，同时保留其他 extension 引用", () => {
     const previous = control();
     const incoming = structuredClone({ ...previous, revision: 2 });
-    incoming.extensionUi.widgets[0] = { ...incoming.extensionUi.widgets[0]!, lines: ["changed"] };
+    incoming.extensionHost.widgets[0] = { ...incoming.extensionHost.widgets[0]!, lines: ["changed"] };
 
     const merged = mergeSessionControl(previous, incoming);
 
-    expect(merged.extensionUi).not.toBe(previous.extensionUi);
-    expect(merged.extensionUi.widgets).not.toBe(previous.extensionUi.widgets);
-    expect(merged.extensionUi.statuses).toBe(previous.extensionUi.statuses);
+    expect(merged.extensionHost).not.toBe(previous.extensionHost);
+    expect(merged.extensionHost.widgets).not.toBe(previous.extensionHost.widgets);
+    expect(merged.extensionHost.statuses).toBe(previous.extensionHost.statuses);
     expect(merged.models).toBe(previous.models);
   });
 });
@@ -63,11 +64,10 @@ function control(): SessionControlState {
         createdAt: 1,
       },
     ],
-    extensionUi: {
+    extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
+    extensionHost: {
       statuses: { extension: "ready" },
-      workingVisible: false,
-      editorRevision: 1,
-      toolsExpanded: false,
+      composerCommand: { hostId: "host", revision: 1, mode: "replace", text: "draft" },
       widgets: [{ key: "widget", lines: ["line"], placement: "aboveEditor" }],
     },
   };

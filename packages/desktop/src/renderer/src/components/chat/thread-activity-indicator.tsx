@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import type { PiThreadPhase, SessionControlState } from "../../../../shared/contracts.ts";
 
 type Activity = {
-  kind: "compacting" | "retrying" | "working" | "error";
+  kind: "compacting" | "retrying" | "error";
   label: string;
   detail?: string;
   icon: ReactNode;
@@ -18,8 +18,6 @@ type Activity = {
 interface ThreadActivityIndicatorProps {
   phase: PiThreadPhase;
   retry: SessionControlState["retry"];
-  workingVisible: boolean;
-  workingMessage: string | undefined;
   lastError: string | undefined;
 }
 
@@ -81,13 +79,6 @@ function getActivity(control: ThreadActivityIndicatorProps): Activity | null {
     return {
       kind: "compacting",
       label: "会话压缩中",
-      icon: <LoaderCircle className="size-4 shrink-0 animate-spin" />,
-    };
-  }
-  if (control.phase === "running" && control.workingVisible) {
-    return {
-      kind: "working",
-      label: control.workingMessage ?? "正在处理",
       icon: <LoaderCircle className="size-4 shrink-0 animate-spin" />,
     };
   }

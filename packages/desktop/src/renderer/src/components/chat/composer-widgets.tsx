@@ -1,7 +1,7 @@
 import type { SessionControlState } from "../../../../shared/contracts.ts";
 
 interface ComposerWidgetsProps {
-  widgets: SessionControlState["extensionUi"]["widgets"];
+  widgets: SessionControlState["extensionHost"]["widgets"];
 }
 
 /** 渲染扩展注入到 Composer 上下方的只读文本 widget。 */

@@ -1,18 +1,19 @@
-import type { HostRequest } from "../../../../shared/contracts.ts";
+import type { PiNoticeMessage } from "../../../../shared/contracts.ts";
 
-type HostNotificationSemantics = {
-  tone: NonNullable<HostRequest["notifyType"]>;
-  role: "alert" | "status";
-  live: "assertive" | "polite";
-};
+type NotificationType = PiNoticeMessage["notificationType"];
 
-const HOST_NOTIFICATION_SEMANTICS: Readonly<Record<HostNotificationSemantics["tone"], HostNotificationSemantics>> = {
+interface HostNotificationSemantics {
+  tone: NonNullable<NotificationType>;
+  role: "status" | "alert";
+  live: "polite" | "assertive";
+}
+
+const HOST_NOTIFICATION_SEMANTICS: Record<NonNullable<NotificationType>, HostNotificationSemantics> = {
   info: { tone: "info", role: "status", live: "polite" },
-  warning: { tone: "warning", role: "status", live: "polite" },
+  warning: { tone: "warning", role: "alert", live: "assertive" },
   error: { tone: "error", role: "alert", live: "assertive" },
 };
 
-/** 将宿主通知级别映射为稳定的视觉 tone 与无障碍播报语义。 */
-export function getHostNotificationSemantics(notifyType: HostRequest["notifyType"]): HostNotificationSemantics {
-  return HOST_NOTIFICATION_SEMANTICS[notifyType ?? "info"];
+export function getHostNotificationSemantics(type: NotificationType): HostNotificationSemantics {
+  return HOST_NOTIFICATION_SEMANTICS[type ?? "info"];
 }

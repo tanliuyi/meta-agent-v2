@@ -5,13 +5,5 @@ import { ThreadActivityIndicator } from "./thread-activity-indicator.tsx";
 export function SessionThreadActivity() {
   const control = useSessionControl();
   const timeline = useSessionTimeline();
-  return (
-    <ThreadActivityIndicator
-      phase={timeline.phase}
-      retry={control?.retry}
-      workingVisible={control?.extensionUi.workingVisible ?? false}
-      workingMessage={control?.extensionUi.workingMessage}
-      lastError={control?.lastError}
-    />
-  );
+  return <ThreadActivityIndicator phase={timeline.phase} retry={control?.retry} lastError={control?.lastError} />;
 }

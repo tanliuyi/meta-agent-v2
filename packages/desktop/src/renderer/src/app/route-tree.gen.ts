@@ -16,6 +16,7 @@ import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
+import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
 import { Route as ChatProjectsProjectIdSessionThreadIdRouteImport } from './routes/_chat.projects.$projectId.session.$threadId'
@@ -54,6 +55,11 @@ const SettingsAuthRoute = SettingsAuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
+  id: '/extensions',
+  path: '/extensions',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsModelsRoute = SettingsModelsRouteImport.update({
   id: '/models',
   path: '/models',
@@ -77,6 +83,7 @@ export interface FileRoutesByFullPath {
   '/new': typeof ChatNewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/': typeof SettingsIndexRoute
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   '/new': typeof ChatNewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/': typeof ChatIndexRoute
@@ -99,6 +107,7 @@ export interface FileRoutesById {
   '/_chat/new': typeof ChatNewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/_chat/': typeof ChatIndexRoute
@@ -113,6 +122,7 @@ export interface FileRouteTypes {
     | '/new'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/'
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/new'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
     | '/'
@@ -134,6 +145,7 @@ export interface FileRouteTypes {
     | '/_chat/new'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
     | '/_chat/'
@@ -197,6 +209,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAuthRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/extensions': {
+      id: '/settings/extensions'
+      path: '/extensions'
+      fullPath: '/settings/extensions'
+      preLoaderRoute: typeof SettingsExtensionsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/models': {
       id: '/settings/models'
       path: '/models'
@@ -239,6 +258,7 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 interface SettingsRouteChildren {
   SettingsAboutRoute: typeof SettingsAboutRoute
   SettingsAuthRoute: typeof SettingsAuthRoute
+  SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
@@ -247,6 +267,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAboutRoute: SettingsAboutRoute,
   SettingsAuthRoute: SettingsAuthRoute,
+  SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,
   SettingsIndexRoute: SettingsIndexRoute,

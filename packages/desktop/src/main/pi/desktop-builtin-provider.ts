@@ -14,6 +14,10 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { getModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
 import type { AuthProviderInfo } from "../../shared/auth-config-contracts.ts";
+import {
+  DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+  type DesktopExtensionDefinition,
+} from "../../shared/desktop-extension-contracts.ts";
 
 interface DesktopProviderDefinition {
   displayName: string;
@@ -34,6 +38,17 @@ export const DesktopBuiltinProviderRegistry = {
   /** Generate inline extension factories for ResourceLoader. */
   getExtensionFactories(): InlineExtension[] {
     return [...providers.values()].map((provider) => provider.extensionFactory);
+  },
+
+  /** Generate stable built-in extension metadata without exposing executable factories across IPC. */
+  getExtensionDefinitions(): DesktopExtensionDefinition[] {
+    return [...providers].map(([id, provider]) => ({
+      id: `desktop-provider:${id}`,
+      displayName: provider.displayName,
+      source: "builtin",
+      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+      capabilities: ["providers.register"],
+    }));
   },
 
   /** Generate known provider info for the auth settings UI. */

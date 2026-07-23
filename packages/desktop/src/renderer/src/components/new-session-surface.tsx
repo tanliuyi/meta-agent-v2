@@ -86,6 +86,13 @@ export function NewSessionSurface() {
         if (!active) return;
         setConfig(next);
         setConfigProjectId(projectId);
+        setLoadError(
+          next.extensions.diagnostics.length > 0
+            ? next.extensions.diagnostics
+                .map((diagnostic) => `${diagnostic.extensionId}: ${diagnostic.message}`)
+                .join("\n")
+            : null,
+        );
       })
       .catch((reason: unknown) => {
         if (active) setLoadError(reason instanceof Error ? reason.message : String(reason));
@@ -140,6 +147,7 @@ export function NewSessionSurface() {
           projectId,
           model: { provider: config.model.provider, id: config.model.id },
           thinkingLevel: config.thinkingLevel,
+          extensionSetGeneration: config.extensions.extensionSetGeneration,
           text: state.text,
           images,
         },
@@ -159,6 +167,11 @@ export function NewSessionSurface() {
       await draft.clear(nextProjectId, target);
     } catch (reason) {
       setPhase("editing");
+      if (isStaleExtensionSetError(reason)) {
+        createRequestIds.delete(projectId);
+        setConfig(null);
+        setConfigProjectId(null);
+      }
       throw reason;
     } finally {
       submitInFlight.current = false;
@@ -207,5 +220,12 @@ export function NewSessionSurface() {
       </div>
       {loadError ? <div className="composer-error">{loadError}</div> : null}
     </>
+  );
+}
+
+function isStaleExtensionSetError(reason: unknown): boolean {
+  return (
+    (reason instanceof Error && reason.message.includes("Draft extension set changed")) ||
+    (typeof reason === "object" && reason !== null && "code" in reason && reason.code === "STALE_DRAFT_EXTENSION_SET")
   );
 }

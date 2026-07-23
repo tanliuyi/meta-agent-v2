@@ -30,13 +30,20 @@ const plainModel = {
 
 describe("draft session configuration", () => {
   it("使用 Pi 默认模型解析且不需要创建 AgentSession", async () => {
-    const config = await loadDraftSessionConfig("/workspace", services());
+    const config = await loadDraftSessionConfig("/workspace", services(), undefined, {
+      generation: "extensions-generation",
+      projectId: "project",
+      entries: [],
+      diagnostics: [],
+      resolvedAt: 0,
+    });
 
     expect(config).toMatchObject({
       model: { provider: "reasoning", id: "reasoning-model" },
       thinkingLevel: "high",
       thinkingLevels: ["off", "minimal", "low", "medium", "high"],
       readiness: { state: "ready" },
+      extensions: { extensionSetGeneration: "extensions-generation", diagnostics: [] },
     });
     expect(config.models).toEqual([
       expect.objectContaining({ provider: "reasoning", thinkingLevels: ["off", "minimal", "low", "medium", "high"] }),
@@ -54,6 +61,8 @@ describe("draft session configuration", () => {
       resolveSessionCreateSelection(
         {
           projectId: "project",
+          createRequestId: "create",
+          extensionSetGeneration: "extensions-generation",
           model: { provider: "missing", id: "missing" },
           thinkingLevel: "high",
         },
@@ -69,6 +78,8 @@ describe("draft session configuration", () => {
       resolveSessionCreateSelection(
         {
           projectId: "project",
+          createRequestId: "create",
+          extensionSetGeneration: "extensions-generation",
           model: { provider: "plain", id: "plain-model" },
           thinkingLevel: "high",
         },

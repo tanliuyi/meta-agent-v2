@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DraftSessionConfig, Thread } from "../../shared/contracts.ts";
+import type { ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
 import type {
   ColdOperationLease,
   CreationReservation,
@@ -14,7 +15,11 @@ export class MetadataWorkerClient {
   private readonly userDataDir: string;
   private readonly log?: (scope: string, text: string) => void;
   private client?: SidecarWorkerClient;
+  private operationTail: Promise<void> = Promise.resolve();
+  private draftExtensionGeneration?: string;
+  private closing = false;
   private disposed = false;
+  private disposePromise?: Promise<void>;
 
   constructor(
     manifest: NodeRuntimeManifest,
@@ -29,12 +34,20 @@ export class MetadataWorkerClient {
     this.client = undefined;
   }
 
-  async list(projectId: string, cwd: string): Promise<Thread[]> {
-    return this.safeRequest<Thread[]>({ type: "listSessions", projectId, cwd });
+  list(projectId: string, cwd: string): Promise<Thread[]> {
+    return this.enqueue(() => this.safeRequest<Thread[]>({ type: "listSessions", projectId, cwd }));
   }
 
-  getDraftConfig(projectId: string, cwd: string): Promise<DraftSessionConfig> {
-    return this.safeRequest({ type: "getDraftConfig", projectId, cwd });
+  getDraftConfig(projectId: string, cwd: string, extensionSet: ResolvedExtensionSet): Promise<DraftSessionConfig> {
+    return this.enqueue(async () => {
+      if (this.draftExtensionGeneration !== undefined && this.draftExtensionGeneration !== extensionSet.generation) {
+        const previous = this.client;
+        this.client = undefined;
+        await previous?.shutdown();
+      }
+      this.draftExtensionGeneration = extensionSet.generation;
+      return this.safeRequest<DraftSessionConfig>({ type: "getDraftConfig", projectId, cwd, extensionSet });
+    });
   }
 
   get pid(): number | undefined {
@@ -45,37 +58,60 @@ export class MetadataWorkerClient {
     return this.client?.instanceId;
   }
 
-  async resolve(projectId: string, cwd: string, threadId: string): Promise<{ id: string; path: string }> {
-    return this.safeRequest<{ id: string; path: string }>({ type: "resolveSession", projectId, cwd, threadId });
+  resolve(projectId: string, cwd: string, threadId: string): Promise<{ id: string; path: string }> {
+    return this.enqueue(() =>
+      this.safeRequest<{ id: string; path: string }>({ type: "resolveSession", projectId, cwd, threadId }),
+    );
   }
 
-  async upsert(projectId: string, cwd: string, sessionFile: string, thread: Thread): Promise<void> {
-    await this.safeRequest({ type: "upsertSession", projectId, cwd, sessionFile, thread });
+  upsert(projectId: string, cwd: string, sessionFile: string, thread: Thread): Promise<void> {
+    return this.enqueue(() => this.safeRequest({ type: "upsertSession", projectId, cwd, sessionFile, thread }));
   }
 
-  async renameCold(projectId: string, cwd: string, threadId: string, title: string) {
-    const lease = createColdLease(projectId, threadId, "rename");
-    await this.request({ type: "renameColdSession", projectId, cwd, threadId, title, lease }, 30_000);
+  renameCold(projectId: string, cwd: string, threadId: string, title: string): Promise<void> {
+    return this.enqueue(async () => {
+      const lease = createColdLease(projectId, threadId, "rename");
+      await this.request({ type: "renameColdSession", projectId, cwd, threadId, title, lease }, 30_000);
+    });
   }
 
-  async removeCold(projectId: string, cwd: string, threadId: string) {
-    const lease = createColdLease(projectId, threadId, "remove");
-    await this.request({ type: "removeColdSession", projectId, cwd, threadId, lease }, 30_000);
+  removeCold(projectId: string, cwd: string, threadId: string): Promise<void> {
+    return this.enqueue(async () => {
+      const lease = createColdLease(projectId, threadId, "remove");
+      await this.request({ type: "removeColdSession", projectId, cwd, threadId, lease }, 30_000);
+    });
   }
 
   recoverCreationReservation(reservation: CreationReservation): Promise<{ status: "active" | "committed" | "orphan" }> {
-    return this.safeRequest({ type: "recoverCreationReservation", reservation });
+    return this.enqueue(() => this.safeRequest({ type: "recoverCreationReservation", reservation }));
   }
 
-  async invalidateProject(projectId: string): Promise<void> {
-    await this.safeRequest({ type: "invalidateProject", projectId });
+  invalidateProject(projectId: string): Promise<void> {
+    return this.enqueue(() => this.safeRequest({ type: "invalidateProject", projectId }));
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    this.disposePromise ??= this.disposeOnce();
+    return this.disposePromise;
+  }
+
+  private async disposeOnce(): Promise<void> {
+    this.closing = true;
+    await this.operationTail;
     this.disposed = true;
     const current = this.client;
     this.client = undefined;
     await current?.shutdown();
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing || this.disposed) return Promise.reject(new Error("Metadata sidecar client is disposed"));
+    const result = this.operationTail.then(operation);
+    this.operationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private async safeRequest<T>(command: MetadataSidecarCommand): Promise<T> {

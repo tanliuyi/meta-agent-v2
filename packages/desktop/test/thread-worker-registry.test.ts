@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DesktopExtensionSourcePolicy } from "../src/main/extensions/desktop-extension-source-policy.ts";
 import type { MetadataWorkerClient } from "../src/main/sidecar/metadata-worker-client.ts";
 import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
 import {
@@ -60,7 +61,11 @@ describe("ThreadWorkerRegistry", () => {
     const registry = new ThreadWorkerRegistry(harness.options);
 
     await expect(registry.getDraftConfig("project")).resolves.toMatchObject({ readiness: { state: "missing-model" } });
-    expect(harness.options.metadata.getDraftConfig).toHaveBeenCalledWith("project", "/workspace");
+    expect(harness.options.metadata.getDraftConfig).toHaveBeenCalledWith(
+      "project",
+      "/workspace",
+      expect.objectContaining({ generation: "extensions-generation" }),
+    );
     expect(harness.clients).toHaveLength(0);
     await registry.dispose();
   });
@@ -166,6 +171,7 @@ describe("ThreadWorkerRegistry", () => {
     const input: SessionCreateInput = {
       projectId: "project",
       createRequestId: "create-request",
+      extensionSetGeneration: "extensions-generation",
       model: { provider: "provider", id: "model" },
       thinkingLevel: "off",
     };
@@ -177,6 +183,170 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("rejects a stale draft generation before spawning a writer", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(
+      registry.create({
+        projectId: "project",
+        createRequestId: "stale-create",
+        extensionSetGeneration: "stale-generation",
+        model: { provider: "provider", id: "model" },
+        thinkingLevel: "off",
+      }),
+    ).rejects.toMatchObject({ code: "STALE_DRAFT_EXTENSION_SET" });
+    expect(harness.clients).toHaveLength(0);
+    await registry.dispose();
+  });
+
+  it("applies a new extension generation only after the old worker exits", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const original = harness.clients[0];
+    if (!original) throw new Error("Original worker missing");
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-next"));
+
+    await expect(registry.applyExtensionSet("project", "thread", "extensions-next")).resolves.toEqual({
+      status: "applied",
+      generation: "extensions-next",
+    });
+
+    expect(original.shutdownCount).toBe(1);
+    expect(harness.clients[1]?.bindingGeneration).toBe("extensions-next");
+    expect(harness.resync.mock.calls.map((call) => call[2])).toEqual([
+      "extension-set-applying",
+      "extension-set-applied",
+    ]);
+    await registry.dispose();
+  });
+
+  it("rejects new commands while the old worker is draining for replacement", async () => {
+    const shutdownGate = deferred<void>();
+    const harness = createHarness(userDataDir, { shutdownGate });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-next"));
+
+    const applying = registry.applyExtensionSet("project", "thread", "extensions-next");
+    await waitFor(() => harness.clients[0]?.shutdownCount === 1);
+    await expect(
+      registry.prompt({
+        requestId: "during-reload",
+        projectId: "project",
+        threadId: "thread",
+        text: "blocked",
+        images: [],
+      }),
+    ).rejects.toThrow("applying extensions");
+    shutdownGate.resolve();
+    await applying;
+    await registry.dispose();
+  });
+
+  it("requires explicit abort before replacing a running worker", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const original = harness.clients[0];
+    if (!original) throw new Error("Original worker missing");
+    original.emit({ type: "summary-changed", summary: { ...thread("thread"), running: true } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-next"));
+
+    await expect(registry.applyExtensionSet("project", "thread", "extensions-next")).rejects.toThrow("confirm abort");
+    await expect(registry.applyExtensionSet("project", "thread", "extensions-next", true)).resolves.toMatchObject({
+      status: "applied",
+    });
+    expect(original.requests).toContain("cancel");
+    await registry.dispose();
+  });
+
+  it("rolls back to the previous extension set after replacement startup failures", async () => {
+    const harness = createHarness(userDataDir, { failGeneration: "extensions-broken" });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-broken"));
+
+    const result = await registry.applyExtensionSet("project", "thread", "extensions-broken");
+
+    expect(result).toMatchObject({ status: "rolled-back", generation: "extensions-generation" });
+    expect(harness.clients.at(-1)?.bindingGeneration).toBe("extensions-generation");
+    expect(harness.resync).toHaveBeenLastCalledWith("project", "thread", "extension-set-rollback");
+    await registry.dispose();
+  });
+
+  it("rolls back when settings change again while replacement is starting", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    harness.resolveExtensions
+      .mockResolvedValueOnce(extensionSet("project", "extensions-next"))
+      .mockResolvedValue(extensionSet("project", "extensions-newer"));
+
+    const result = await registry.applyExtensionSet("project", "thread", "extensions-next");
+
+    expect(result).toMatchObject({ status: "rolled-back", generation: "extensions-generation" });
+    await expect(registry.getExtensionState("project", "thread")).resolves.toMatchObject({
+      appliedGeneration: "extensions-generation",
+      desiredGeneration: "extensions-newer",
+      reloadRequired: true,
+    });
+    await registry.dispose();
+  });
+
+  it("derives reloadRequired independently for every live thread", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "first");
+    await registry.attach("project", "second");
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-next"));
+
+    await registry.extensionSettingsChanged();
+    await expect(registry.attach("project", "first")).resolves.toMatchObject({
+      control: { extensionSet: { reloadRequired: true } },
+    });
+    await expect(registry.getExtensionState("project", "first")).resolves.toMatchObject({ reloadRequired: true });
+    await expect(registry.getExtensionState("project", "second")).resolves.toMatchObject({ reloadRequired: true });
+    await registry.applyExtensionSet("project", "first", "extensions-next");
+    await expect(registry.getExtensionState("project", "first")).resolves.toMatchObject({ reloadRequired: false });
+    await expect(registry.getExtensionState("project", "second")).resolves.toMatchObject({ reloadRequired: true });
+    await registry.dispose();
+  });
+
+  it("blocks a development generation after repeated live worker crashes and recovers on disable", async () => {
+    const harness = createHarness(userDataDir);
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "development-crashing", true));
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await registry.attach("project", "thread");
+      harness.clients.at(-1)?.crash(new Error(`development crash ${attempt + 1}`));
+    }
+    await expect(registry.attach("project", "thread")).rejects.toThrow("blocked after repeated failures");
+
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "development-disabled"));
+    await expect(registry.attach("project", "thread")).resolves.toMatchObject({ threadId: "thread" });
+    await registry.dispose();
+  });
+
+  it("blocks a development extension generation after its bounded startup retries", async () => {
+    const harness = createHarness(userDataDir, { failGeneration: "development-broken" });
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "development-broken", true));
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(registry.attach("project", "thread")).rejects.toThrow("extension startup failed");
+    const attempts = harness.clients.length;
+    await expect(registry.attach("project", "thread")).rejects.toThrow("blocked after repeated failures");
+    expect(harness.clients).toHaveLength(attempts);
+
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "development-disabled"));
+    await expect(registry.attach("project", "thread")).resolves.toMatchObject({ threadId: "thread" });
+    expect(harness.clients).toHaveLength(attempts + 1);
+    await registry.dispose();
+  });
+
   it("waits for pending creation before completing shutdown", async () => {
     const readyGate = deferred<void>();
     const harness = createHarness(userDataDir, { readyGate });
@@ -184,6 +354,7 @@ describe("ThreadWorkerRegistry", () => {
     const creation = registry.create({
       projectId: "project",
       createRequestId: "create-during-shutdown",
+      extensionSetGeneration: "extensions-generation",
       model: { provider: "provider", id: "model" },
       thinkingLevel: "off",
     });
@@ -220,11 +391,19 @@ interface Harness {
   push: ReturnType<typeof vi.fn>;
   failed: ReturnType<typeof vi.fn>;
   metadataRenameCold: ReturnType<typeof vi.fn>;
+  resolveExtensions: ReturnType<typeof vi.fn>;
+  resync: ReturnType<typeof vi.fn>;
 }
 
 function createHarness(
   userDataDir: string,
-  overrides?: { readyGate?: ReturnType<typeof deferred<void>>; idleTtlMs?: number; maxLiveWorkers?: number },
+  overrides?: {
+    readyGate?: ReturnType<typeof deferred<void>>;
+    idleTtlMs?: number;
+    maxLiveWorkers?: number;
+    failGeneration?: string;
+    shutdownGate?: ReturnType<typeof deferred<void>>;
+  },
 ): Harness {
   const clients: FakeWorkerClient[] = [];
   const push = vi.fn<(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number) => void>();
@@ -239,6 +418,7 @@ function createHarness(
       thinkingLevel: "off",
       thinkingLevels: ["off"],
       readiness: { state: "missing-model" },
+      extensions: { extensionSetGeneration: "extensions-generation", diagnostics: [] },
     })),
     resolve: vi.fn(async (_projectId: string, _cwd: string, threadId: string) => ({
       id: threadId,
@@ -250,47 +430,70 @@ function createHarness(
     recoverCreationReservation: vi.fn(async () => ({ status: "orphan" as const })),
     invalidateProject: vi.fn(async () => {}),
   } as unknown as MetadataWorkerClient;
+  const resolveExtensions = vi.fn(async (projectId: string) => extensionSet(projectId));
+  const extensionSourcePolicy = {
+    resolve: resolveExtensions,
+  } as unknown as DesktopExtensionSourcePolicy;
+  const resync = vi.fn();
   const options: ThreadWorkerRegistryOptions = {
     manifest: manifest(),
     metadata,
     userDataDir,
     agentDir: join(userDataDir, "agent"),
+    extensionSourcePolicy,
     getCwd: () => "/workspace",
     push,
     failed,
-    resync: vi.fn(),
+    resync,
     createWorkerClient: (clientOptions) => {
-      const client = new FakeWorkerClient(clientOptions, overrides?.readyGate);
+      const client = new FakeWorkerClient(
+        clientOptions,
+        overrides?.readyGate,
+        overrides?.failGeneration,
+        overrides?.shutdownGate,
+      );
       clients.push(client);
       return client;
     },
     idleTtlMs: overrides?.idleTtlMs,
     maxLiveWorkers: overrides?.maxLiveWorkers,
   };
-  return { options, clients, push, failed, metadataRenameCold };
+  return { options, clients, push, failed, metadataRenameCold, resolveExtensions, resync };
 }
 
 class FakeWorkerClient implements ThreadWorkerClient {
   readonly instanceId: string;
   readonly requests: SidecarCommand["type"][] = [];
   readonly acknowledgements: number[] = [];
+  readonly bindingGeneration: string;
   shutdownCount = 0;
   private readonly options: WorkerClientOptions;
   private readonly bootstrap: SessionBootstrap;
   private readonly readyGate?: ReturnType<typeof deferred<void>>;
+  private readonly failGeneration?: string;
+  private readonly shutdownGate?: ReturnType<typeof deferred<void>>;
 
-  constructor(options: WorkerClientOptions, readyGate?: ReturnType<typeof deferred<void>>) {
+  constructor(
+    options: WorkerClientOptions,
+    readyGate?: ReturnType<typeof deferred<void>>,
+    failGeneration?: string,
+    shutdownGate?: ReturnType<typeof deferred<void>>,
+  ) {
     this.options = options;
     this.readyGate = readyGate;
+    this.failGeneration = failGeneration;
+    this.shutdownGate = shutdownGate;
     this.instanceId = `worker-${fakeWorkerSequence++}`;
     if (options.binding.role !== "thread") throw new Error(`Unexpected fake worker role: ${options.binding.role}`);
     const threadId =
       options.binding.value.mode === "open" ? options.binding.value.threadId : options.binding.value.sessionId;
-    this.bootstrap = bootstrap(threadId);
+    this.bindingGeneration = options.binding.value.extensionSet.generation;
+    this.bootstrap = bootstrap(threadId, this.bindingGeneration);
   }
 
   async ready(): Promise<SidecarReady> {
     await this.readyGate?.promise;
+    if (this.bindingGeneration === this.failGeneration) throw new Error("extension startup failed");
     return {
       kind: "ready",
       protocolVersion: SIDECAR_PROTOCOL_VERSION,
@@ -314,6 +517,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
 
   async shutdown(): Promise<void> {
     this.shutdownCount += 1;
+    await this.shutdownGate?.promise;
   }
 
   emit(event: SidecarEventBody, sequence = 1): void {
@@ -334,7 +538,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
 
 let fakeWorkerSequence = 1;
 
-function bootstrap(threadId: string): SessionBootstrap {
+function bootstrap(threadId: string, extensionGeneration = "extensions-generation"): SessionBootstrap {
   return {
     protocolVersion: PROTOCOL_VERSION,
     projectId: "project",
@@ -365,8 +569,30 @@ function bootstrap(threadId: string): SessionBootstrap {
       thinkingLevels: ["off"],
       readiness: { state: "ready" },
       hostRequests: [],
-      extensionUi: { statuses: {}, workingVisible: true, editorRevision: 0, toolsExpanded: false, widgets: [] },
+      extensionSet: { generation: extensionGeneration, diagnostics: [], reloadRequired: false },
+      extensionHost: { statuses: {}, widgets: [] },
     },
+  };
+}
+
+function extensionSet(projectId = "project", generation = "extensions-generation", development = false) {
+  return {
+    generation,
+    projectId,
+    entries: development
+      ? [
+          {
+            id: "development:test",
+            displayName: "Development",
+            source: "development" as const,
+            entryPath: "/tmp/development.ts",
+            hostProfileVersion: 1 as const,
+            capabilities: [],
+          },
+        ]
+      : [],
+    diagnostics: [],
+    resolvedAt: 0,
   };
 }
 

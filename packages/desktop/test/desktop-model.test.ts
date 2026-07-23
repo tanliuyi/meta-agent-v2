@@ -159,7 +159,8 @@ function createBootstrap(): SessionBootstrap {
       thinkingLevels: ["off"],
       readiness: { state: "ready" },
       hostRequests: [],
-      extensionUi: { statuses: {}, workingVisible: false, editorRevision: 0, toolsExpanded: false, widgets: [] },
+      extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
+      extensionHost: { statuses: {}, widgets: [] },
     },
   };
 }

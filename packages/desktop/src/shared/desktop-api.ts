@@ -24,6 +24,14 @@ import type {
   Thread,
   WorkbenchState,
 } from "./contracts.ts";
+import type {
+  ApplyDesktopExtensionSetInput,
+  ApplyDesktopExtensionSetResult,
+  ApproveDevelopmentExtensionInput,
+  DesktopExtensionSettingsSnapshot,
+  SaveDesktopExtensionSettingsInput,
+  SaveDesktopExtensionSettingsResult,
+} from "./desktop-extension-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
 import type {
   SaveSettingsConfigInput,
@@ -84,6 +92,12 @@ export interface DesktopApi {
     getConfig(): Promise<SettingsConfigSnapshot>;
     saveConfig(input: SaveSettingsConfigInput): Promise<SaveSettingsConfigResult>;
   };
+  extensions: {
+    getConfig(projectId?: string, threadId?: string): Promise<DesktopExtensionSettingsSnapshot>;
+    saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult>;
+    chooseDevelopmentEntry(input: ApproveDevelopmentExtensionInput): Promise<SaveDesktopExtensionSettingsResult>;
+    apply(input: ApplyDesktopExtensionSetInput): Promise<ApplyDesktopExtensionSetResult>;
+  };
   updater: UpdaterApi;
   windowControls: {
     minimize(): void;
@@ -119,7 +133,6 @@ export interface DesktopApi {
     refreshModels(projectId: string, threadId: string): Promise<void>;
     setModel(projectId: string, threadId: string, provider: string, modelId: string): Promise<void>;
     setThinking(projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]): Promise<void>;
-    setEditorText(projectId: string, threadId: string, text: string): Promise<void>;
     respond(projectId: string, threadId: string, response: HostResponse): Promise<void>;
   };
   files: {

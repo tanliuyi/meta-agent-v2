@@ -1,5 +1,5 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { type ReactNode, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useMemo, useSyncExternalStore } from "react";
 import type { ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useTransportManager } from "../runtime/session-transport-context.tsx";
@@ -62,20 +62,6 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
     },
     [record, requireCommandsReady],
   );
-  const editorTextTail = useRef(Promise.resolve());
-  const syncEditorText = useCallback(
-    (text: string) => {
-      const task = editorTextTail.current
-        .catch(() => undefined)
-        .then(async () => {
-          requireCommandsReady();
-          await window.desktop.sessions.setEditorText(record.identity.projectId, record.identity.threadId, text);
-        });
-      editorTextTail.current = task;
-      return task;
-    },
-    [record, requireCommandsReady],
-  );
   const updateWorkbench = useCallback(
     (value: Partial<WorkbenchState>) => {
       const current = record.stores.workbench.getSnapshot();
@@ -98,21 +84,9 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
       refreshModels,
       setModel,
       setThinking,
-      syncEditorText,
       updateWorkbench,
     }),
-    [
-      active,
-      branch,
-      clearQueue,
-      commandsReady,
-      record,
-      refreshModels,
-      setModel,
-      setThinking,
-      syncEditorText,
-      updateWorkbench,
-    ],
+    [active, branch, clearQueue, commandsReady, record, refreshModels, setModel, setThinking, updateWorkbench],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>

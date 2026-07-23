@@ -114,6 +114,35 @@ describe("preload session attachment leases", () => {
     expect(electron.send).toHaveBeenCalledWith(CHANNELS.sessionsAck, attached.attachmentId, "worker-7", 7);
   });
 
+  it("reconstructs stale draft errors with a stable renderer-visible code", async () => {
+    const api = requiredApi();
+    electron.invoke.mockReset().mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "STALE_DRAFT_EXTENSION_SET",
+        message: "Draft extension set changed",
+        details: {
+          code: "STALE_DRAFT_EXTENSION_SET",
+          requestedGeneration: "old",
+          currentGeneration: "new",
+        },
+      },
+    });
+
+    await expect(
+      api.sessions.create({
+        projectId: "project",
+        createRequestId: "create",
+        extensionSetGeneration: "old",
+        model: { provider: "provider", id: "model" },
+        thinkingLevel: "off",
+      }),
+    ).rejects.toMatchObject({
+      code: "STALE_DRAFT_EXTENSION_SET",
+      details: { requestedGeneration: "old", currentGeneration: "new" },
+    });
+  });
+
   it("replacement attach 会释放 preload 中的旧 listener", async () => {
     const api = requiredApi();
     electron.invoke
@@ -204,7 +233,8 @@ function bootstrap(threadId: string): SessionBootstrap {
       thinkingLevels: ["off"],
       readiness: { state: "ready" },
       hostRequests: [],
-      extensionUi: { statuses: {}, workingVisible: false, editorRevision: 0, toolsExpanded: false, widgets: [] },
+      extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
+      extensionHost: { statuses: {}, widgets: [] },
     },
   };
 }

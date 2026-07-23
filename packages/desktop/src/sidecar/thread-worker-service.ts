@@ -2,6 +2,7 @@ import { createReadStream, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
 import { SessionRuntime } from "../main/pi/session-runtime.ts";
 import type {
   SidecarBinding,
@@ -24,6 +25,7 @@ export class ThreadWorkerService implements SidecarService {
   ): Promise<{ service: ThreadWorkerService; readyResult: unknown }> {
     if (binding.role !== "thread") throw new Error(`Thread worker received ${binding.role} binding`);
     const input = binding.value;
+    const extensionSet = await validateResolvedExtensionSet(input.projectId, input.extensionSet);
     const createSessionId = input.mode === "create" ? input.sessionId : undefined;
     let sessionManager: SessionManager | undefined;
     if (input.mode === "create") {
@@ -38,6 +40,7 @@ export class ThreadWorkerService implements SidecarService {
       agentDir: input.agentDir,
       sessionManager,
       createInput: input.mode === "create" ? input.createInput : undefined,
+      extensionSet,
       push: (payload) => context.emit({ type: "session-push", payload }),
       onSummaryChanged: (current) => context.emit({ type: "summary-changed", summary: current.threadSummary(false) }),
     });
@@ -100,9 +103,6 @@ export class ThreadWorkerService implements SidecarService {
         return null;
       case "setThinking":
         this.runtime.setThinking(command.level);
-        return null;
-      case "setEditorText":
-        this.runtime.setEditorText(command.text);
         return null;
       case "rename":
         this.runtime.rename(command.title);

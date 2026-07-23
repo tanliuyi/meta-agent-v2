@@ -31,13 +31,11 @@ export type ComposerProps =
       readiness: SessionControlState["readiness"];
       phase: PiThreadPhase;
       queue: readonly PiQueueItem[];
-      widgets: SessionControlState["extensionUi"]["widgets"];
-      editorRevision: number;
-      editorText: string | undefined;
+      widgets: SessionControlState["extensionHost"]["widgets"];
+      composerCommand: SessionControlState["extensionHost"]["composerCommand"];
       commandsReady: boolean;
       onClearQueue(): Promise<void>;
       onRefreshModels(): Promise<void>;
       onSetModel(provider: string, modelId: string): Promise<void>;
       onSetThinking(level: SessionControlState["thinkingLevel"]): Promise<void>;
-      onSyncEditorText(text: string): Promise<void>;
     };
