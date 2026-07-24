@@ -224,7 +224,7 @@ function runtimeLibcBaseline(): string {
 
 function runtimeToolchain(): string {
   const variables = process.config.variables as Record<string, string | number | boolean | undefined>;
-  return [variables.host_arch, variables.target_arch, variables.v8_target_arch, variables.clang]
+  return [variables.host_arch, variables.target_arch, variables.v8_target_arch]
     .filter((value) => value !== undefined)
     .join(":");
 }
