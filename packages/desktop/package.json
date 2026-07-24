@@ -3,6 +3,11 @@
   "version": "0.0.29",
   "private": true,
   "description": "Meta Agent desktop application",
+  "homepage": "https://github.com/tanliuyi/meta-agent-harness",
+  "author": {
+    "name": "tanliuyi",
+    "email": "tanliuyi@chichuang.com"
+  },
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {

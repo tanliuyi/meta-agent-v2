@@ -1,0 +1,199 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'v0.0.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v0.0.x release tag
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: desktop-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            arch: x64
+            os: windows-latest
+            builder_args: --win --x64
+            update_channel: latest
+          - platform: macos
+            arch: x64
+            os: macos-15-intel
+            builder_args: --mac --x64
+            update_channel: latest
+          - platform: macos
+            arch: arm64
+            os: macos-latest
+            builder_args: --mac --arm64
+            update_channel: latest-arm64
+          - platform: linux
+            arch: x64
+            os: ubuntu-latest
+            builder_args: --linux --x64
+            update_channel: latest
+    env:
+      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Resolve release version
+        id: release
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          fi
+          if [[ ! "$TAG" =~ ^v0\.0\.[0-9]+$ ]]; then
+            echo "Desktop release tag must look like v0.0.26" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Prepare Apple signing
+        if: matrix.platform == 'macos' && env.MAC_CSC_LINK != ''
+        shell: bash
+        run: |
+          echo "CSC_LINK=$MAC_CSC_LINK" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=$MAC_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+          echo "PI_REQUIRE_DESKTOP_SIGNING=1" >> "$GITHUB_ENV"
+
+      - name: Prepare Windows signing
+        if: matrix.platform == 'windows' && env.WIN_CSC_LINK != ''
+        shell: bash
+        run: |
+          echo "CSC_LINK=$WIN_CSC_LINK" >> "$GITHUB_ENV"
+          echo "CSC_KEY_PASSWORD=$WIN_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Prepare Apple notarization key
+        if: >-
+          matrix.platform == 'macos' &&
+          env.APPLE_API_KEY_BASE64 != '' &&
+          env.APPLE_API_KEY_ID != '' &&
+          env.APPLE_API_ISSUER != ''
+        shell: bash
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build Desktop
+        run: npm --prefix packages/desktop run build
+
+      - name: Package Desktop
+        working-directory: packages/desktop
+        shell: bash
+        run: >-
+          npm exec -- electron-builder
+          --config electron-builder.yml
+          ${{ matrix.builder_args }}
+          --publish never
+          -c.extraMetadata.version=${{ steps.release.outputs.version }}
+          -c.publish.channel=${{ matrix.update_channel }}
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          mkdir release-assets
+          find packages/desktop/output/installers -maxdepth 1 -type f \
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' \
+            -o -name '*.deb' -o -name '*.blockmap' -o -name 'latest*.yml' \) \
+            -exec cp {} release-assets/ \;
+          test -n "$(find release-assets -type f -print -quit)"
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          fi
+          if [[ ! "$TAG" =~ ^v0\.0\.[0-9]+$ ]]; then
+            echo "Desktop release tag must look like v0.0.26" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          {
+            echo "## 更新内容"
+            echo
+            git log -1 --pretty=format:'- %s (`%h`)'
+            echo
+          } > release-notes.md
+
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: release-assets/*
