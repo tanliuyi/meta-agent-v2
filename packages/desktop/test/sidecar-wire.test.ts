@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { SIDECAR_PROTOCOL_VERSION } from "../src/shared/sidecar-contracts.ts";
-import { createSidecarChunks, SidecarChunkAssembler, SidecarEventAckTracker } from "../src/shared/sidecar-wire.ts";
+import {
+  createSidecarChunks,
+  currentRuntimeCompatibility,
+  SidecarChunkAssembler,
+  SidecarEventAckTracker,
+} from "../src/shared/sidecar-wire.ts";
+
+describe("sidecar runtime compatibility", () => {
+  it("uses architecture without compiler build flags for the toolchain identity", () => {
+    const variables = process.config.variables as Record<string, string | number | boolean | undefined>;
+    const expected = [variables.host_arch, variables.target_arch, variables.v8_target_arch]
+      .filter((value) => value !== undefined)
+      .join(":");
+
+    expect(currentRuntimeCompatibility("test", "test").toolchain).toBe(expected);
+  });
+});
 
 describe("sidecar chunk transport", () => {
   it("round-trips a response larger than one IPC envelope", () => {
