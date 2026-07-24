@@ -1,4 +1,4 @@
-import { ThreadPrimitive } from "@assistant-ui/react";
+import { ThreadPrimitive, useAuiEvent } from "@assistant-ui/react";
 import ArrowDown from "lucide-react/dist/esm/icons/arrow-down.mjs";
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -25,6 +25,17 @@ export function SessionChatThread({ threadId }: SessionChatThreadProps) {
   const footerRef = useRef<HTMLDivElement>(null);
   const [footerHost, setFooterHost] = useState<HTMLDivElement | null>(null);
 
+  // turnAnchor="top" 语义：用户发消息后，将最后一条用户消息滚动到视口顶部，
+  // 然后让默认 auto-scroll 跟随助理回复的流式输出（用户消息自然上滚出视口）。
+  useAuiEvent("thread.runStart", () => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const userMessages = viewport.querySelectorAll<HTMLElement>('[data-role="user"]');
+    const last = userMessages.item(userMessages.length - 1);
+    if (!last) return;
+    last.scrollIntoView({ block: "start", behavior: "instant" });
+  });
+
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const content = contentRef.current;
@@ -48,8 +59,6 @@ export function SessionChatThread({ threadId }: SessionChatThreadProps) {
       >
         <ThreadPrimitive.Viewport
           ref={viewportRef}
-          turnAnchor="bottom"
-          scrollToBottomOnThreadSwitch={false}
           data-slot="aui_thread-viewport"
           className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-scroll scroll-smooth"
         >

@@ -15,14 +15,18 @@ import {
 
 describe("Desktop Node runtime locator", () => {
   let resourcesPath: string;
+  const savedNodeExecPath = process.env.PI_DESKTOP_NODE_EXEC_PATH;
 
   beforeEach(() => {
     childProcessMock.execFileSync.mockReset();
+    delete process.env.PI_DESKTOP_NODE_EXEC_PATH;
     resourcesPath = mkdtempSync(join(tmpdir(), "desktop-node-runtime-locator-"));
   });
 
   afterEach(() => {
     rmSync(resourcesPath, { recursive: true, force: true });
+    if (savedNodeExecPath === undefined) delete process.env.PI_DESKTOP_NODE_EXEC_PATH;
+    else process.env.PI_DESKTOP_NODE_EXEC_PATH = savedNodeExecPath;
   });
 
   it("rejects executable paths inside app.asar", () => {
@@ -106,7 +110,7 @@ describe("Desktop Node runtime locator", () => {
     mkdirSync(runtimeRoot, { recursive: true });
     const nodePath = writeRuntimeFile(join(runtimeRoot, "node"), "node");
     const npmCliPath = writeRuntimeFile(join(runtimeRoot, "npm-cli.js"), "npm");
-    const roles = ["thread", "metadata"] as const;
+    const roles = ["thread", "metadata", "subagent"] as const;
     const entries = Object.fromEntries(
       roles.map((role) => [role, writeRuntimeFile(join(runtimeRoot, `${role}.js`), role)]),
     ) as NodeRuntimeManifest["entries"];

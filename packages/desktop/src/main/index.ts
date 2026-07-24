@@ -22,6 +22,7 @@ import {
   type NodeRuntimeManifest,
 } from "./sidecar/node-runtime-locator.ts";
 import { SidecarLog } from "./sidecar/sidecar-log.ts";
+import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
 import { ProjectStore } from "./store/project-store.ts";
 import { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
@@ -31,6 +32,7 @@ import { WindowDirtyGuard } from "./window-dirty-guard.ts";
 let sessions: SessionSupervisor | undefined;
 let metadata: MetadataWorkerClient | undefined;
 let sidecarLog: SidecarLog | undefined;
+let subagents: SubagentWorkerRegistry | undefined;
 let terminals: TerminalSupervisor | undefined;
 let stopAutoUpdateChecks: (() => void) | undefined;
 let quitGuardPending = false;
@@ -184,6 +186,11 @@ app.whenReady().then(async () => {
   metadata = new MetadataWorkerClient(runtimeManifest, agentDir, userDataDir, (scope, text) =>
     sidecarLog?.write(scope, text),
   );
+  subagents = new SubagentWorkerRegistry({
+    manifest: runtimeManifest,
+    agentDir,
+    log: (scope, text) => sidecarLog?.write(scope, text),
+  });
   let supervisor: SessionSupervisor;
   const workers = new ThreadWorkerRegistry({
     manifest: runtimeManifest,
@@ -200,6 +207,8 @@ app.whenReady().then(async () => {
     },
     resync: (projectId, threadId, reason) => supervisor.resyncRequired(projectId, threadId, reason),
     log: (scope, text) => sidecarLog?.write(scope, text),
+    handleHostRequest: (request, emit) => subagents!.handleHostRequest(request, emit),
+    hostWorkerFailed: (projectId, threadId) => subagents!.cancelThread(projectId, threadId),
   });
   supervisor = new SessionSupervisor(projects, workers, {
     log: (scope, text) => sidecarLog?.write(scope, text),
@@ -258,22 +267,27 @@ app.on("before-quit", (event) => {
   }
   stopAutoUpdateChecks?.();
   stopAutoUpdateChecks = undefined;
-  if (!sessions && !metadata && !sidecarLog && !terminals) return;
+  if (!sessions && !metadata && !sidecarLog && !subagents && !terminals) return;
   sidecarLog?.write("main", "Desktop shutdown started");
   event.preventDefault();
   const currentSessions = sessions;
   const currentMetadata = metadata;
   const currentSidecarLog = sidecarLog;
+  const currentSubagents = subagents;
   const currentTerminals = terminals;
   sessions = undefined;
   metadata = undefined;
   sidecarLog = undefined;
+  subagents = undefined;
   terminals = undefined;
   currentTerminals?.dispose();
   void (async () => {
     await currentSessions
       ?.dispose()
       .catch((error: unknown) => console.error("Failed to stop Pi thread workers:", error));
+    await currentSubagents
+      ?.dispose()
+      .catch((error: unknown) => console.error("Failed to stop Pi subagent workers:", error));
     await currentMetadata
       ?.dispose()
       .catch((error: unknown) => console.error("Failed to stop Pi metadata worker:", error));

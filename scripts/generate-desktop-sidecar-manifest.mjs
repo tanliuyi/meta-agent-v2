@@ -20,10 +20,14 @@ const developmentNpmPath = hasBundledDevelopmentNode
   : resolve(npmCliPath);
 writeManifest(outputRoot, {
   nodePath: developmentNodePath,
-      npmCliPath: developmentNpmPath,
+  npmCliPath: developmentNpmPath,
   entries: sidecarEntries("sidecar"),
   compatibility: runtimeCompatibility(developmentNodePath),
-  integrity: runtimeIntegrity(developmentNodePath, developmentNpmPath, ""),
+  integrity: runtimeIntegrity(
+    developmentNodePath,
+    developmentNpmPath,
+    "",
+  ),
 });
 
 writeManifest(packagedRoot, {
@@ -31,13 +35,18 @@ writeManifest(packagedRoot, {
   npmCliPath: "",
   entries: sidecarEntries("../app.asar.unpacked/out/sidecar/sidecar"),
   compatibility: runtimeCompatibility(developmentNodePath),
-  integrity: runtimeIntegrity(hasBundledDevelopmentNode ? packagedNodePath : "", "", "../app.asar.unpacked/out/sidecar"),
+  integrity: runtimeIntegrity(
+    hasBundledDevelopmentNode ? packagedNodePath : "",
+    "",
+    "../app.asar.unpacked/out/sidecar",
+  ),
 });
 
 function sidecarEntries(prefix) {
   return {
     thread: `${prefix}/thread-worker-main.js`,
     metadata: `${prefix}/metadata-worker-main.js`,
+    subagent: `${prefix}/subagent-worker-main.js`,
   };
 }
 

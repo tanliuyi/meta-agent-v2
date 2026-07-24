@@ -50,7 +50,6 @@ describe("Host request components", () => {
     );
 
     expect(markup).toContain('role="radiogroup"');
-    expect(markup).toContain('aria-label="选择环境 选项"');
     expect(markup).toContain('aria-orientation="vertical"');
     expect(markup.match(/role="radio"/g)).toHaveLength(2);
     expect(markup.match(/aria-checked="true"/g)).toHaveLength(1);

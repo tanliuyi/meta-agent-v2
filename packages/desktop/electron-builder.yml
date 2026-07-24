@@ -13,6 +13,10 @@ asarUnpack:
 extraResources:
   - from: output/pi-sidecar/runtime-manifest.json
     to: pi-sidecar/runtime-manifest.json
+  - from: src/main/pi/extensions/pi-hermes-memory/LICENSE
+    to: licenses/pi-hermes-memory.LICENSE
+  - from: src/main/pi/extensions/pi-subagents/LICENSE
+    to: licenses/pi-subagents.LICENSE
 afterPack: ../../scripts/validate-desktop-package.mjs
 afterSign: ../../scripts/validate-desktop-signing.mjs
 mac:

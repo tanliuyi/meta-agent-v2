@@ -30,6 +30,7 @@ import {
   extensionServiceDiagnostics,
   sanitizeExtensionMessage,
 } from "./desktop-extension-runtime-policy.ts";
+import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 import { PiCompatibilityAdapter } from "./pi-compatibility-adapter.ts";
 import { PiThreadProjector } from "./pi-thread-projector.ts";
 import { getSessionCommands } from "./session-commands.ts";
@@ -46,6 +47,7 @@ interface RuntimeOptions {
   sessionManager?: SessionManager;
   createInput?: SessionCreateInput;
   extensionSet?: ResolvedExtensionSet;
+  subagentRuntime?: SubagentRuntime;
   push(update: SessionPushPayload): void;
   onSummaryChanged(runtime: SessionRuntime): void;
 }
@@ -72,6 +74,7 @@ export class SessionRuntime {
   private readonly models: ModelRegistry;
   private readonly push: (update: SessionPushPayload) => void;
   private readonly onSummaryChanged: (runtime: SessionRuntime) => void;
+  private readonly subagentRuntime?: SubagentRuntime;
 
   private constructor(
     projectId: string,
@@ -79,6 +82,7 @@ export class SessionRuntime {
     session: AgentSession,
     models: ModelRegistry,
     extensionSet: ResolvedExtensionSet,
+    subagentRuntime: SubagentRuntime | undefined,
     push: (update: SessionPushPayload) => void,
     onSummaryChanged: (runtime: SessionRuntime) => void,
   ) {
@@ -88,6 +92,7 @@ export class SessionRuntime {
     this.models = models;
     this.push = push;
     this.onSummaryChanged = onSummaryChanged;
+    this.subagentRuntime = subagentRuntime;
     this.extensionSet = {
       ...extensionSet,
       entries: extensionSet.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
@@ -116,7 +121,7 @@ export class SessionRuntime {
       agentDir: options.agentDir,
       resourceLoaderOptions: controlledResourceLoaderOptions(
         extensionSet,
-        DesktopBuiltinProviderRegistry.getExtensionFactories(),
+        DesktopBuiltinProviderRegistry.getExtensionFactories({ subagentRuntime: options.subagentRuntime }),
       ),
     });
     const extensionDiagnostics = [
@@ -146,6 +151,7 @@ export class SessionRuntime {
         result.session,
         services.modelRegistry,
         extensionSet,
+        options.subagentRuntime,
         options.push,
         options.onSummaryChanged,
       );
@@ -379,6 +385,7 @@ export class SessionRuntime {
     this.commandExpiryTimers.clear();
     this.commands.clear();
     this.session.dispose();
+    await this.subagentRuntime?.dispose();
   }
 
   private control(): SessionControlState {

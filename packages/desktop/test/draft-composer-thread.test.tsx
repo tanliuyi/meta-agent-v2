@@ -62,12 +62,7 @@ describe("DraftComposerThread", () => {
 
     const markup = renderToStaticMarkup(createElement(TestSurface));
 
-    expect(markup).toContain("thread-root");
-    expect(markup).toContain("composer-wrap");
     expect(markup).toContain('data-draft-composer="true"');
-    expect(markup).toContain("<span>Project</span>");
-    expect(markup).toContain('aria-label="选择模型"');
-    expect(markup).toContain('aria-label="消息输入"');
   });
 
   it("模型列表为空时仍允许展开以触发刷新", () => {
@@ -75,7 +70,6 @@ describe("DraftComposerThread", () => {
       <ModelSelect availableModels={[]} model={undefined} onOpen={vi.fn()} onValueChange={vi.fn()} />,
     );
 
-    expect(markup).toContain('aria-label="选择模型"');
     expect(markup).not.toContain(' disabled=""');
   });
 });

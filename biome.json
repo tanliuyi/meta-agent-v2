@@ -53,6 +53,7 @@
 			"packages/desktop/**/*.json",
 			"packages/coding-agent/examples/**/*.ts",
 			"!packages/desktop/out/**/*",
+			"!packages/desktop/src/main/pi/extensions/pi-subagents/**/*",
 			"!packages/desktop/src/renderer/src/app/route-tree.gen.ts",
 			"!**/node_modules/**/*",
 			"!**/test-sessions.ts",

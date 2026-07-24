@@ -20,13 +20,11 @@ export function AttachmentPreviewDialog({ children }: PropsWithChildren) {
         {children}
       </DialogTrigger>
       <DialogContent
-        className="aui-attachment-preview-dialog-content p-2 sm:max-w-3xl"
-        closeButtonClassName="rounded-full bg-foreground/60 p-1 text-background opacity-100 hover:text-destructive"
+        className="aui-attachment-preview-dialog-content left-0 top-0 block h-dvh w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden border-0 bg-transparent p-0 shadow-none sm:rounded-none"
+        closeButtonClassName="fixed right-4 top-4 z-20 rounded-full bg-background/80 p-2 text-foreground opacity-100 shadow-(--elevation-popover) backdrop-blur-sm hover:text-destructive"
       >
         <DialogTitle className="aui-sr-only sr-only">Image Attachment Preview</DialogTitle>
-        <div className="aui-attachment-preview bg-background relative mx-auto flex max-h-[80dvh] w-full items-center justify-center overflow-hidden">
-          <AttachmentPreview src={src} />
-        </div>
+        <AttachmentPreview src={src} />
       </DialogContent>
     </Dialog>
   );

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   type ParentToSidecarMessage,
   type RuntimeCompatibility,
@@ -19,6 +20,7 @@ import {
   serializeSidecarError,
   toJsonValue,
 } from "../shared/sidecar-wire.ts";
+import type { SubagentHostRequest, SubagentRunEvent } from "../shared/subagent-contracts.ts";
 
 export interface SidecarService {
   command(command: SidecarCommand): Promise<unknown>;
@@ -27,6 +29,8 @@ export interface SidecarService {
 
 export interface SidecarServiceContext {
   emit(event: SidecarEventBody): void;
+  requestHost(request: SubagentHostRequest, onEvent?: (event: SubagentRunEvent) => void): Promise<unknown>;
+  flushEvents(): Promise<void>;
 }
 
 export type SidecarServiceFactory = (
@@ -46,6 +50,8 @@ const REENTRANT_CONTROL_COMMANDS = new Set<SidecarCommand["type"]>([
   "clearQueue",
   "setThinking",
   "respondHostUi",
+  "subagentCancel",
+  "subagentSteer",
 ]);
 
 export function createSidecarCommandScheduler(): (
@@ -90,11 +96,33 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
   const controlSendQueue: Array<{ message: SidecarToParentMessage; bytes: number }> = [];
   const eventSendQueue: Array<{ message: SidecarToParentMessage; bytes: number }> = [];
   const chunkAssembler = new SidecarChunkAssembler();
+  const pendingHostCalls = new Map<
+    string,
+    {
+      resolve(value: unknown): void;
+      reject(error: Error): void;
+      onEvent?: (event: SubagentRunEvent) => void;
+    }
+  >();
+  const eventFlushWaiters = new Set<() => void>();
   let queuedControlBytes = 0;
   let queuedEventBytes = 0;
   let sendInFlight = false;
   let closing = false;
   let initializationStarted = false;
+
+  const resolveEventFlushWaiters = (): void => {
+    if (bufferedEvents.length > 0 || eventSendQueue.length > 0 || outstandingEventCredits.size > 0) return;
+    for (const resolve of eventFlushWaiters) resolve();
+    eventFlushWaiters.clear();
+  };
+
+  const flushEvents = (): Promise<void> => {
+    if (bufferedEvents.length === 0 && eventSendQueue.length === 0 && outstandingEventCredits.size === 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => eventFlushWaiters.add(resolve));
+  };
 
   const pumpSendQueue = (): void => {
     if (sendInFlight || closing || !process.connected || !process.send) return;
@@ -129,6 +157,22 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
       }
     }
     enqueueSend(message);
+  };
+
+  const requestHost = (request: SubagentHostRequest, onEvent?: (event: SubagentRunEvent) => void): Promise<unknown> => {
+    if (!workerInstanceId || closing) return Promise.reject(new Error("Sidecar host bridge is unavailable"));
+    const requestId = randomUUID();
+    const result = new Promise<unknown>((resolve, reject) => {
+      pendingHostCalls.set(requestId, { resolve, reject, onEvent });
+    });
+    send({
+      kind: "host-call",
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
+      workerInstanceId,
+      requestId,
+      request,
+    });
+    return result;
   };
 
   const enqueueSend = (message: SidecarToParentMessage): void => {
@@ -222,6 +266,11 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
     try {
       await service?.dispose();
     } finally {
+      const error = new Error("Sidecar host bridge closed");
+      for (const pending of pendingHostCalls.values()) pending.reject(error);
+      pendingHostCalls.clear();
+      for (const resolve of eventFlushWaiters) resolve();
+      eventFlushWaiters.clear();
       if (process.platform === "win32") {
         const killer = spawn("taskkill", ["/pid", String(process.pid), "/T", "/F"], {
           stdio: "ignore",
@@ -245,7 +294,11 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
     assertRuntimeCompatibility(message.expectedRuntime, runtime);
     workerInstanceId = message.workerInstanceId;
     eventCredit = INITIAL_EVENT_CREDIT;
-    const created = await createService(message.binding, { emit });
+    const created = await createService(message.binding, { emit, requestHost, flushEvents });
+    if (closing) {
+      await created.service.dispose();
+      return;
+    }
     service = created.service;
     send({
       kind: "ready",
@@ -271,6 +324,19 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
         return;
       }
       if (!workerInstanceId || raw.workerInstanceId !== workerInstanceId) return;
+      if (raw.kind === "host-event") {
+        pendingHostCalls.get(raw.requestId)?.onEvent?.(raw.event);
+        return;
+      }
+      if (raw.kind === "host-response") {
+        const pending = pendingHostCalls.get(raw.requestId);
+        if (!pending) return;
+        pendingHostCalls.delete(raw.requestId);
+        if (raw.ok) pending.resolve(raw.result);
+        else
+          pending.reject(Object.assign(new Error(raw.error.message), { name: raw.error.name, code: raw.error.code }));
+        return;
+      }
       if (raw.kind === "event-ack") {
         if (!Number.isSafeInteger(raw.throughSequence) || !Number.isSafeInteger(raw.credit) || raw.credit < 0) {
           throw new Error("Invalid sidecar event acknowledgement");
@@ -290,6 +356,7 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
         lastAcknowledgedEventSequence = raw.throughSequence;
         eventCredit = Math.min(INITIAL_EVENT_CREDIT, eventCredit + acknowledgedCredit);
         drainEvents();
+        resolveEventFlushWaiters();
         return;
       }
       if (raw.kind === "shutdown") {
@@ -339,5 +406,5 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
 }
 
 function isSupportedRole(role: unknown): role is SidecarBinding["role"] {
-  return role === "thread" || role === "metadata";
+  return role === "thread" || role === "metadata" || role === "subagent";
 }

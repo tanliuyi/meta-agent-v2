@@ -114,8 +114,9 @@ export const Sidebar = memo(function Sidebar() {
         <ScrollArea className="sidebar-projects">
           <ProjectList activeProjectId={activeProjectId} newTaskDisabled={draftMaterializing} onNewTask={startDraft} />
         </ScrollArea>
-        <UpdateBanner />
+
         <div className="sidebar-footer">
+          <UpdateBanner />
           <Link to="/settings/personalization" search={settingsSearch} className="sidebar-settings-link">
             <Settings size={15} />
             <span>设置</span>

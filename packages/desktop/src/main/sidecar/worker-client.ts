@@ -20,7 +20,10 @@ import {
   MAX_SIDECAR_MESSAGE_BYTES,
   SidecarChunkAssembler,
   SidecarEventAckTracker,
+  serializeSidecarError,
+  toJsonValue,
 } from "../../shared/sidecar-wire.ts";
+import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
 import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
 
 interface PendingRequest {
@@ -49,6 +52,7 @@ export interface WorkerClientOptions {
   onEvent?(event: SidecarEvent): void;
   onFailure?(error: Error): void;
   onStderr?(text: string): void;
+  onHostRequest?(request: SubagentHostRequest, emit: (event: SubagentRunEvent) => void): Promise<unknown>;
   startupTimeoutMs?: number;
 }
 
@@ -63,6 +67,7 @@ export class SidecarWorkerClient {
   private queuedSendBytes = 0;
   private sendInFlight = false;
   private readonly onFailure?: (error: Error) => void;
+  private readonly onHostRequest?: WorkerClientOptions["onHostRequest"];
   private readonly readyPromise: Promise<SidecarReady>;
   private resolveReady!: (ready: SidecarReady) => void;
   private rejectReady!: (error: Error) => void;
@@ -84,6 +89,7 @@ export class SidecarWorkerClient {
     this.onEvent = options.onEvent;
     this.expectedRuntime = options.manifest.compatibility;
     this.onFailure = options.onFailure;
+    this.onHostRequest = options.onHostRequest;
     const entry = options.manifest.entries[options.binding.role];
     this.readyPromise = new Promise<SidecarReady>((resolve, reject) => {
       this.resolveReady = resolve;
@@ -95,6 +101,7 @@ export class SidecarWorkerClient {
       env: createSidecarEnvironment(
         options.manifest.compatibility.runtimeCompatibilityId,
         options.binding.value.agentDir,
+        options.manifest.nodePath,
       ),
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       serialization: "json",
@@ -204,6 +211,10 @@ export class SidecarWorkerClient {
     });
   }
 
+  fail(error: Error): void {
+    this.terminate(error);
+  }
+
   async shutdown(timeoutMs = 10_000): Promise<void> {
     if (this.closed) return;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
@@ -254,6 +265,10 @@ export class SidecarWorkerClient {
         this.handleResponse(message);
         return;
       }
+      if (message.kind === "host-call") {
+        this.handleHostCall(message.requestId, message.request, this.onHostRequest);
+        return;
+      }
       if (message.event.type === "resync-required" && message.sequence >= this.expectedEventSequence) {
         this.eventAcks.resetThrough(message.sequence - 1);
         this.expectedEventSequence = message.sequence;
@@ -274,6 +289,58 @@ export class SidecarWorkerClient {
     } catch (error) {
       this.terminate(error instanceof Error ? error : new Error(String(error)));
     }
+  }
+
+  private handleHostCall(
+    requestId: string,
+    request: SubagentHostRequest,
+    handler: WorkerClientOptions["onHostRequest"],
+  ): void {
+    if (!handler) {
+      this.send({
+        kind: "host-response",
+        protocolVersion: SIDECAR_PROTOCOL_VERSION,
+        workerInstanceId: this.workerInstanceId,
+        requestId,
+        ok: false,
+        error: serializeSidecarError(new Error(`Unsupported sidecar host request: ${request.type}`)),
+      });
+      return;
+    }
+    const emit = (event: SubagentRunEvent): void => {
+      this.send({
+        kind: "host-event",
+        protocolVersion: SIDECAR_PROTOCOL_VERSION,
+        workerInstanceId: this.workerInstanceId,
+        requestId,
+        event,
+      });
+    };
+    void handler(request, emit)
+      .then(
+        (result) =>
+          this.send({
+            kind: "host-response",
+            protocolVersion: SIDECAR_PROTOCOL_VERSION,
+            workerInstanceId: this.workerInstanceId,
+            requestId,
+            ok: true,
+            result: result === undefined ? undefined : toJsonValue(result),
+          }),
+        (error: unknown) =>
+          this.send({
+            kind: "host-response",
+            protocolVersion: SIDECAR_PROTOCOL_VERSION,
+            workerInstanceId: this.workerInstanceId,
+            requestId,
+            ok: false,
+            error: serializeSidecarError(error),
+          }),
+      )
+      .catch((error: unknown) => {
+        if (this.closed || this.terminating) return;
+        this.terminate(error instanceof Error ? error : new Error(String(error)));
+      });
   }
 
   private handleResponse(message: SidecarResponse): void {
@@ -428,15 +495,28 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
-function createSidecarEnvironment(runtimeCompatibilityId: string, agentDir: string): NodeJS.ProcessEnv {
+export function createSidecarEnvironment(
+  runtimeCompatibilityId: string,
+  agentDir: string,
+  nodeExecPath: string,
+  sourceEnvironment: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
   const allowed = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => isAllowedSidecarEnvironmentVariable(name)),
+    Object.entries(sourceEnvironment).filter(
+      ([name]) => isAllowedSidecarEnvironmentVariable(name) && !isReservedDesktopRuntimeVariable(name),
+    ),
   );
   return {
     ...allowed,
     PI_CODING_AGENT_DIR: agentDir,
     PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: runtimeCompatibilityId,
+    PI_DESKTOP_NODE_EXEC_PATH: nodeExecPath,
   };
+}
+
+function isReservedDesktopRuntimeVariable(name: string): boolean {
+  const normalized = name.toUpperCase();
+  return normalized.startsWith("PI_DESKTOP_") || normalized.startsWith("PI_SUBAGENT_");
 }
 
 function isAllowedSidecarEnvironmentVariable(name: string): boolean {

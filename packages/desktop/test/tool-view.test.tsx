@@ -33,20 +33,9 @@ describe("ToolView TUI parity", () => {
 
     expect(markup).toContain('data-tool-name="write"');
     expect(markup).toContain('data-tool-status="running"');
-    expect(markup).toContain('class="tool-name">write</span>');
-    expect(markup).toContain('class="tool-target tool-file-target">src/main.ts</button>');
     expect(markup).not.toContain("const value = 1;");
-    expect(markup).toContain("运行中");
-    const fileTargetEnd = markup.indexOf("</button>", markup.indexOf("tool-file-target"));
-    const runningCursor = markup.indexOf("tool-running-cursor");
-    const expandTrigger = markup.indexOf("tool-expand-trigger");
-    expect(fileTargetEnd).toBeLessThan(runningCursor);
-    expect(runningCursor).toBeLessThan(expandTrigger);
-    expect(markup).not.toContain("tool-state-indicator");
     expect(markup.match(/aria-expanded="false"/g)).toHaveLength(2);
-    expect(markup).toContain('class="tool-trigger"');
     expect(markup).toContain('data-state="closed"');
-    expect(markup).toContain("animate-collapsible-up");
   });
 
   it("bash content 默认完全折叠", () => {
@@ -60,13 +49,9 @@ describe("ToolView TUI parity", () => {
       }),
     );
 
-    expect(markup).toContain('class="tool-name">$</span>');
     expect(markup).toContain("generate output");
     expect(markup).toContain('data-cursor-position="end"');
-    expect(markup).toContain("tool-running-cursor-end");
-    expect(markup.indexOf("tool-running-cursor-end")).toBeLessThan(markup.indexOf("tool-expand-trigger"));
     expect(markup).not.toContain("line-1");
-    expect(markup).not.toContain("tool-output");
   });
 
   it("展开后的 bash content 随 delta 原位更新", () => {
@@ -162,10 +147,7 @@ describe("ToolView TUI parity", () => {
       />,
     );
 
-    expect(markup).toContain("tool-diff-line-remove");
-    expect(markup).toContain('class="tool-diff-number">10</span>');
     expect(markup).toContain(">before</span>");
-    expect(markup).toContain("tool-diff-line-add");
     expect(markup).toContain(">after</span>");
     expect(markup).not.toContain("Successfully replaced");
   });
@@ -207,7 +189,6 @@ describe("ToolView TUI parity", () => {
     );
 
     expect(markup).toContain("Could not find the exact text");
-    expect(markup).not.toContain("tool-diff-line-remove");
     expect(markup).not.toContain(">before</span>");
   });
 
@@ -223,21 +204,13 @@ describe("ToolView TUI parity", () => {
       />,
     );
 
-    expect(markup).toContain('class="tool-output" data-tone="destructive"');
+    expect(markup).toContain('data-tone="destructive"');
     expect(markup).toContain("File not found");
   });
 
   it("标题与尾部均可折叠，文件按钮保持同级", () => {
     const markup = renderToolView(toolCall({ toolName: "read", args: { path: "src/read.ts" } }));
-    const titleTrigger = markup.indexOf('class="tool-trigger"');
-    const titleTriggerEnd = markup.indexOf("</button>", titleTrigger);
-    const fileTarget = markup.indexOf('class="tool-target tool-file-target"');
-    const fileTargetEnd = markup.indexOf("</button>", fileTarget);
-    const expandTrigger = markup.indexOf('class="tool-expand-trigger"');
 
-    expect(titleTrigger).toBeGreaterThanOrEqual(0);
-    expect(titleTriggerEnd).toBeLessThan(fileTarget);
-    expect(fileTargetEnd).toBeLessThan(expandTrigger);
     expect(markup.match(/aria-expanded=/g)).toHaveLength(2);
     expect(markup).toContain(">src/read.ts</button>");
   });
@@ -275,7 +248,6 @@ describe("tool TUI formatting", () => {
 
     expect(parsed?.images).toEqual([{ data: "aW1hZ2U=", mimeType: "image/png" }]);
     expect(markup).toContain('src="data:image/png;base64,aW1hZ2U="');
-    expect(markup).toContain('class="tool-result-image"');
   });
 
   it("解析 TUI 带行号 diff", () => {

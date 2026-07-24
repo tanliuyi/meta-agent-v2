@@ -10,7 +10,7 @@
     "generate-routes": "tsr generate",
     "predev": "npm run prepare:node-pty && npm run generate-routes",
     "build:pi": "npm --prefix ../tui run build && tsgo -p ../ai/tsconfig.build.json && npm --prefix ../agent run build && npm --prefix ../coding-agent run build && npm run build:sidecar",
-    "build:sidecar": "node ../../scripts/clean-desktop-sidecar-output.mjs && tsgo -p tsconfig.sidecar.json && node ../../scripts/generate-desktop-sidecar-manifest.mjs",
+    "build:sidecar": "node ../../scripts/clean-desktop-sidecar-output.mjs && tsgo -p tsconfig.sidecar.json && node ../../scripts/copy-desktop-sidecar-assets.mjs && node ../../scripts/generate-desktop-sidecar-manifest.mjs",
     "dev": "npm run build:pi && electron-vite dev",
     "prepreview": "npm run prepare:node-pty && npm run generate-routes",
     "preview": "npm run build:pi && electron-vite preview",

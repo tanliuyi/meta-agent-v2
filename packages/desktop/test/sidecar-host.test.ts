@@ -58,6 +58,33 @@ describe("sidecar command scheduling", () => {
     expect(calls).toEqual(["prompt-start", "steer", "set-thinking", "prompt-end"]);
   });
 
+  it("subagent run 期间 cancel 和 steer 立即执行", async () => {
+    const schedule = createSidecarCommandScheduler();
+    let releaseRun!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseRun = resolve;
+    });
+    const calls: string[] = [];
+    const run = schedule("subagentRun", async () => {
+      calls.push("run-start");
+      await blocked;
+      calls.push("run-end");
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["run-start"]));
+
+    await Promise.all([
+      schedule("subagentCancel", async () => {
+        calls.push("cancel");
+      }),
+      schedule("subagentSteer", async () => {
+        calls.push("steer");
+      }),
+    ]);
+    expect(calls).toEqual(["run-start", "cancel", "steer"]);
+    releaseRun();
+    await run;
+  });
+
   it("prompt 运行期间 rename 立即执行，不等待 prompt 结束", async () => {
     const schedule = createSidecarCommandScheduler();
     let releasePrompt!: () => void;

@@ -53,6 +53,12 @@ for (const field of ["nodeVersion", "modulesAbi", "napi", "platform", "arch", "o
 const agentDir = process.env.PI_CODING_AGENT_DIR ?? (await mkdtemp(join(tmpdir(), "desktop-sidecar-agent-")));
 const userDataDir = await mkdtemp(join(tmpdir(), "desktop-sidecar-user-data-"));
 try {
+  await smokeSubagentWorker(
+    nodePath,
+    resolve(root, manifest.entries.subagent),
+    manifest.compatibility,
+    agentDir,
+  );
   await smokeMetadataWorker(nodePath, resolve(root, manifest.entries.metadata), manifest.compatibility, agentDir, userDataDir);
 } finally {
   if (!process.env.PI_CODING_AGENT_DIR) await rm(agentDir, { recursive: true, force: true });
@@ -97,6 +103,78 @@ function assertFile(path, expectedHash, description) {
   if (expectedHash && actualHash !== expectedHash) throw new Error(`${description} integrity mismatch: ${path}`);
 }
 
+async function smokeSubagentWorker(nodePath, entry, compatibility, agentDir) {
+  const worker = fork(entry, [], {
+    execPath: nodePath,
+    env: createDesktopSmokeEnvironment(process.env, nodePath, {
+      PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: compatibility.runtimeCompatibilityId,
+    }),
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
+    serialization: "json",
+  });
+  let stderr = "";
+  worker.stderr?.on("data", (chunk) => {
+    stderr = `${stderr}${chunk}`.slice(-8192);
+  });
+  const workerInstanceId = `subagent-smoke-${process.pid}`;
+  const requestId = `ping-${process.pid}`;
+  const result = new Promise((resolveResult, rejectResult) => {
+    const timer = setTimeout(
+      () => rejectResult(new Error(`subagent sidecar smoke timed out${stderr ? `\n${stderr}` : ""}`)),
+      15_000,
+    );
+    worker.on("message", (message) => {
+      if (message?.workerInstanceId !== workerInstanceId) return;
+      if (message.kind === "ready") {
+        worker.send({
+          kind: "request",
+          protocolVersion: 3,
+          workerInstanceId,
+          requestId,
+          command: { type: "ping" },
+        });
+        return;
+      }
+      if (message.kind !== "response" || message.requestId !== requestId) return;
+      clearTimeout(timer);
+      if (!message.ok || message.result?.pong !== true) {
+        rejectResult(new Error(`subagent sidecar ping failed${stderr ? `\n${stderr}` : ""}`));
+        return;
+      }
+      resolveResult();
+    });
+    worker.once("error", rejectResult);
+    worker.once("exit", (code, signal) =>
+      rejectResult(new Error(`subagent sidecar exited (${code ?? signal ?? "unknown"})${stderr ? `\n${stderr}` : ""}`)),
+    );
+  });
+  worker.once("spawn", () => {
+    worker.send({
+      kind: "initialize",
+      protocolVersion: 3,
+      workerInstanceId,
+      expectedRuntime: compatibility,
+      binding: {
+        role: "subagent",
+        value: {
+          projectId: "smoke-project",
+          parentThreadId: "smoke-thread",
+          runId: "smoke-run",
+          childIndex: 0,
+          agentDir,
+        },
+      },
+    });
+  });
+  try {
+    await result;
+    worker.send({ kind: "shutdown", protocolVersion: 3, workerInstanceId });
+    await waitForExit(worker, 10_000);
+  } finally {
+    if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");
+  }
+}
+
 async function smokeMetadataWorker(nodePath, entry, compatibility, agentDir, userDataDir) {
   const worker = fork(entry, [], {
     execPath: nodePath,
@@ -112,7 +190,7 @@ async function smokeMetadataWorker(nodePath, entry, compatibility, agentDir, use
     stderr = `${stderr}${chunk}`.slice(-8192);
   });
   const workerInstanceId = `smoke-${process.pid}`;
-  const protocolVersion = 1;
+  const protocolVersion = 3;
   const ready = new Promise((resolveReady, rejectReady) => {
     const timer = setTimeout(() => rejectReady(new Error(`metadata sidecar handshake timed out${stderr ? `\n${stderr}` : ""}`)), 15_000);
     worker.on("message", (message) => {
@@ -142,7 +220,9 @@ async function smokeMetadataWorker(nodePath, entry, compatibility, agentDir, use
       resolveReady();
     });
     worker.once("error", rejectReady);
-    worker.once("exit", (code, signal) => rejectReady(new Error(`metadata sidecar exited (${code ?? signal ?? "unknown"})`)));
+    worker.once("exit", (code, signal) =>
+      rejectReady(new Error(`metadata sidecar exited (${code ?? signal ?? "unknown"})${stderr ? `\n${stderr}` : ""}`)),
+    );
   });
   worker.once("spawn", () => {
     worker.send({

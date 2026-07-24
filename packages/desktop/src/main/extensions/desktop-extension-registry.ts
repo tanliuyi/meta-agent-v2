@@ -11,6 +11,42 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
     hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
     capabilities: ["providers.register"],
   },
+  {
+    id: "pi-hermes-memory",
+    displayName: "Hermes Memory",
+    source: "builtin",
+    hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+    capabilities: [
+      "events.subscribe",
+      "tools.register",
+      "commands.register",
+      "messages.enqueue",
+      "session.read",
+      "session.compact",
+      "ui.notify",
+      "ui.dialog",
+    ],
+  },
+  {
+    id: "pi-subagents",
+    displayName: "Subagents",
+    source: "builtin",
+    hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+    capabilities: [
+      "events.subscribe",
+      "tools.register",
+      "commands.register",
+      "messages.enqueue",
+      "messages.custom",
+      "session.read",
+      "session.abort",
+      "session.compact",
+      "session.reload",
+      "ui.notify",
+      "ui.dialog",
+      "ui.status",
+    ],
+  },
 ];
 const curatedExtensions: DesktopExtensionDefinition[] = [];
 

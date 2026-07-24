@@ -11,13 +11,16 @@
  *   4. Extension factories call api.registerProvider() → ModelRegistry
  */
 
-import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { getModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
 import type { AuthProviderInfo } from "../../shared/auth-config-contracts.ts";
 import {
   DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
   type DesktopExtensionDefinition,
 } from "../../shared/desktop-extension-contracts.ts";
+import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
+import subagentsExtension from "./extensions/pi-subagents/index.ts";
+import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 
 interface DesktopProviderDefinition {
   displayName: string;
@@ -26,6 +29,50 @@ interface DesktopProviderDefinition {
 }
 
 const providers = new Map<string, DesktopProviderDefinition>();
+const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory: InlineExtension }> = [
+  {
+    definition: {
+      id: "pi-hermes-memory",
+      displayName: "Hermes Memory",
+      source: "builtin",
+      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+      capabilities: [
+        "events.subscribe",
+        "tools.register",
+        "commands.register",
+        "messages.enqueue",
+        "session.read",
+        "session.compact",
+        "ui.notify",
+        "ui.dialog",
+      ],
+    },
+    factory: { name: "desktop:pi-hermes-memory", factory: hermesMemoryExtension },
+  },
+  {
+    definition: {
+      id: "pi-subagents",
+      displayName: "Subagents",
+      source: "builtin",
+      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+      capabilities: [
+        "events.subscribe",
+        "tools.register",
+        "commands.register",
+        "messages.enqueue",
+        "messages.custom",
+        "session.read",
+        "session.abort",
+        "session.compact",
+        "session.reload",
+        "ui.notify",
+        "ui.dialog",
+        "ui.status",
+      ],
+    },
+    factory: { name: "desktop:pi-subagents", factory: subagentsExtension },
+  },
+];
 const coreProviderIds = new Set(getModelsConfigMetadata().builtInProviders.map((provider) => provider.id));
 
 export const DesktopBuiltinProviderRegistry = {
@@ -35,20 +82,52 @@ export const DesktopBuiltinProviderRegistry = {
     providers.set(id, def);
   },
 
-  /** Generate inline extension factories for ResourceLoader. */
-  getExtensionFactories(): InlineExtension[] {
-    return [...providers.values()].map((provider) => provider.extensionFactory);
+  /** Generate inline extension factories for a Desktop thread runtime. */
+  getExtensionFactories(options: { subagentRuntime?: SubagentRuntime } = {}): InlineExtension[] {
+    return [
+      ...[...providers.values()].map((provider) => provider.extensionFactory),
+      ...builtinExtensions.map(({ definition, factory }) =>
+        definition.id === "pi-subagents" && options.subagentRuntime
+          ? {
+              name: typeof factory === "function" ? `desktop:${definition.id}` : factory.name,
+              factory: (api: ExtensionAPI) => subagentsExtension(api, options.subagentRuntime),
+            }
+          : factory,
+      ),
+    ];
+  },
+
+  /** Generate the controlled built-ins allowed inside a programmatic subagent worker. */
+  getSubagentExtensionFactories(profile: readonly string[]): InlineExtension[] {
+    const enabled = new Set(profile);
+    return [
+      ...(enabled.has("provider") ? [...providers.values()].map((provider) => provider.extensionFactory) : []),
+      ...(enabled.has("memory")
+        ? [
+            {
+              name: "desktop:pi-hermes-memory",
+              factory: (api: ExtensionAPI) => hermesMemoryExtension(api, { programmaticSubagent: true }),
+            },
+          ]
+        : []),
+    ];
   },
 
   /** Generate stable built-in extension metadata without exposing executable factories across IPC. */
   getExtensionDefinitions(): DesktopExtensionDefinition[] {
-    return [...providers].map(([id, provider]) => ({
-      id: `desktop-provider:${id}`,
-      displayName: provider.displayName,
-      source: "builtin",
-      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      capabilities: ["providers.register"],
-    }));
+    return [
+      ...[...providers].map(([id, provider]) => ({
+        id: `desktop-provider:${id}`,
+        displayName: provider.displayName,
+        source: "builtin" as const,
+        hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+        capabilities: ["providers.register" as const],
+      })),
+      ...builtinExtensions.map(({ definition }) => ({
+        ...definition,
+        capabilities: [...definition.capabilities],
+      })),
+    ];
   },
 
   /** Generate known provider info for the auth settings UI. */

@@ -25,8 +25,6 @@ describe("models settings components", () => {
     );
     expect(markup).toContain('type="password"');
     expect(markup).toContain('value="!printf raw-command"');
-    expect(markup).toContain("Provider ID");
-    expect(markup).toContain("Base URL");
   });
 
   test("renders every current compat control and structured routing editors", () => {

@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
 import { SessionRuntime } from "../main/pi/session-runtime.ts";
+import { DesktopSubagentRuntime } from "../main/pi/subagents/desktop-subagent-runtime.ts";
 import type {
   SidecarBinding,
   SidecarCommand,
@@ -34,16 +35,29 @@ export class ThreadWorkerService implements SidecarService {
       const sessionFile = await resolveCanonicalSessionFile(input);
       sessionManager = SessionManager.open(sessionFile, undefined, input.cwd);
     }
-    const runtime = await SessionRuntime.create({
+    const parentThreadId = input.mode === "create" ? input.sessionId : input.threadId;
+    const subagentRuntime = new DesktopSubagentRuntime({
       projectId: input.projectId,
-      cwd: input.cwd,
-      agentDir: input.agentDir,
-      sessionManager,
-      createInput: input.mode === "create" ? input.createInput : undefined,
-      extensionSet,
-      push: (payload) => context.emit({ type: "session-push", payload }),
-      onSummaryChanged: (current) => context.emit({ type: "summary-changed", summary: current.threadSummary(false) }),
+      parentThreadId,
+      requestHost: context.requestHost,
     });
+    let runtime: SessionRuntime;
+    try {
+      runtime = await SessionRuntime.create({
+        projectId: input.projectId,
+        cwd: input.cwd,
+        agentDir: input.agentDir,
+        sessionManager,
+        createInput: input.mode === "create" ? input.createInput : undefined,
+        extensionSet,
+        subagentRuntime,
+        push: (payload) => context.emit({ type: "session-push", payload }),
+        onSummaryChanged: (current) => context.emit({ type: "summary-changed", summary: current.threadSummary(false) }),
+      });
+    } catch (error) {
+      await subagentRuntime.dispose();
+      throw error;
+    }
     if (input.mode === "create") {
       const sessionFile = sessionManager?.getSessionFile();
       if (!sessionFile) {

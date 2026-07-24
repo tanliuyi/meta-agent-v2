@@ -68,7 +68,7 @@ function manifest(): NodeRuntimeManifest {
   return {
     nodePath: process.execPath,
     npmCliPath: process.execPath,
-    entries: { thread: "", metadata: "" },
+    entries: { thread: "", metadata: "", subagent: "" },
     compatibility: {
       nodeVersion: process.version,
       modulesAbi: process.versions.modules,
@@ -81,6 +81,11 @@ function manifest(): NodeRuntimeManifest {
       piVersion: "test",
       runtimeCompatibilityId: "test",
     },
-    integrity: { nodePath: "", npmCliPath: "", entries: { thread: "", metadata: "" }, files: {} },
+    integrity: {
+      nodePath: "",
+      npmCliPath: "",
+      entries: { thread: "", metadata: "", subagent: "" },
+      files: {},
+    },
   };
 }

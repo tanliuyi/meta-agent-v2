@@ -55,12 +55,13 @@ function manifest(): NodeRuntimeManifest {
     entries: {
       thread: "",
       metadata: resolve(import.meta.dirname, "fixtures/overflow-sidecar.mjs"),
+      subagent: "",
     },
     compatibility,
     integrity: {
       nodePath: "",
       npmCliPath: "",
-      entries: { thread: "", metadata: "" },
+      entries: { thread: "", metadata: "", subagent: "" },
       files: {},
     },
   };

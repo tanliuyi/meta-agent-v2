@@ -24,6 +24,7 @@ import type {
   StaleDraftExtensionSetErrorDetails,
 } from "../../shared/desktop-extension-contracts.ts";
 import type { CreationReservation, SidecarEvent, ThreadWorkerBinding } from "../../shared/sidecar-contracts.ts";
+import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
 import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
 import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
@@ -69,6 +70,8 @@ export interface ThreadWorkerRegistryOptions {
   failed(projectId: string, threadId: string, error: Error): void;
   resync(projectId: string, threadId: string, reason: string): void;
   log?(scope: string, text: string): void;
+  handleHostRequest?(request: SubagentHostRequest, emit: (event: SubagentRunEvent) => void): Promise<unknown>;
+  hostWorkerFailed?(projectId: string, threadId: string): Promise<void>;
   createWorkerClient?(options: WorkerClientOptions): ThreadWorkerClient;
   idleTtlMs?: number;
   maxLiveWorkers?: number;
@@ -660,6 +663,12 @@ export class ThreadWorkerRegistry {
       binding: { role: "thread", value: binding },
       onStderr: (text) => this.options.log?.(`thread:${binding.projectId}`, text),
       onEvent: (event) => this.handleEvent(record, event),
+      onHostRequest: this.options.handleHostRequest
+        ? (request, emit) => {
+            assertHostRequestIdentity(request, binding);
+            return this.options.handleHostRequest!(request, emit);
+          }
+        : undefined,
       onFailure: (error) => {
         if (!record) return;
         this.unregisterClient(client);
@@ -676,6 +685,7 @@ export class ThreadWorkerRegistry {
             this.blockedDevelopmentSets.set(record.extensionSet.generation, error.message);
           }
         }
+        void this.options.hostWorkerFailed?.(record.projectId, record.threadId);
         if (!record.failureReported) {
           record.failureReported = true;
           this.options.failed(record.projectId, record.threadId, error);
@@ -744,6 +754,7 @@ export class ThreadWorkerRegistry {
 
   private beginRecordShutdown(record: WorkerRecord): Promise<void> {
     record.shutdownPromise ??= Promise.resolve()
+      .then(() => this.options.hostWorkerFailed?.(record.projectId, record.threadId))
       .then(() => record.client.shutdown())
       .finally(() => this.unregisterClient(record.client));
     return record.shutdownPromise;
@@ -1021,6 +1032,14 @@ function isUnknownOutcome(error: unknown): error is SidecarRequestError {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export function assertHostRequestIdentity(request: SubagentHostRequest, binding: ThreadWorkerBinding): void {
+  const parentThreadId = binding.mode === "create" ? binding.sessionId : binding.threadId;
+  const identity = request.type === "subagent.run" ? request.request : request;
+  if (identity.projectId !== binding.projectId || identity.parentThreadId !== parentThreadId) {
+    throw new Error("Subagent host request identity does not match the thread worker binding");
+  }
 }
 
 function workerKey(projectId: string, threadId: string): string {

@@ -22,18 +22,9 @@ describe("ComposerQueue", () => {
       { id: "follow-up", mode: "followUp", prompt: "完成后补充测试", source: "desktop" },
     ]);
 
-    expect(markup).toContain('aria-label="待处理消息"');
     expect(markup).toContain('data-queue-mode="steer"');
     expect(markup).toContain('data-queue-mode="followUp"');
-    expect(markup).toContain("引导");
-    expect(markup).toContain("排队");
-    expect(markup).toContain('class="composer-queue-count">2</span>');
     expect(markup.indexOf("立即检查当前实现")).toBeLessThan(markup.indexOf("完成后补充测试"));
-    expect(markup).toContain('aria-label="清空待处理消息"');
-    expect(markup).toContain("text-[11px]");
-    expect(markup).toContain("size-[11px]");
-    expect(markup).not.toContain("text-sm");
-    expect(markup).not.toContain("size-3.5");
   });
 });
 

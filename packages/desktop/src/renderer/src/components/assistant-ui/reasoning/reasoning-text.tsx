@@ -14,7 +14,9 @@ export function ReasoningText({ className, children, ...props }: ComponentProps<
     const scrollElement = scrollRef.current;
     const contentElement = contentRef.current;
     if (!scrollElement || !contentElement) return;
-    return followResizingContentToBottom(scrollElement, contentElement);
+    return followResizingContentToBottom(scrollElement, contentElement, {
+      respectUserScroll: true,
+    });
   }, [isPreview]);
 
   return (

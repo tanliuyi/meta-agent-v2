@@ -12,6 +12,10 @@
   align-items: center;
 }
 
+.extensions-section-heading {
+  padding-top: 1rem;
+}
+
 .extensions-page-heading,
 .extensions-section-heading,
 .extensions-row {

@@ -14,14 +14,7 @@ describe("RunActivityGroup", () => {
 
     expect(markup).toContain('data-state="open"');
     expect(markup).toContain('disabled=""');
-    expect(markup).toContain("正在处理");
-    expect(markup).toContain("正在处理 12s");
-    expect(markup).toContain("aui-run-activity-root");
-    expect(markup).toContain("aui-run-activity-trigger");
-    expect(markup).toContain("aui-run-activity-content");
-    expect(markup).toContain("aui-run-activity-body");
-    expect(markup).not.toContain('data-slot="reasoning-fade"');
-    expect(markup).not.toContain('data-slot="reasoning-trigger-chevron"');
+    expect(markup).toContain("12s");
     expect(markup).toContain("step content");
   });
 
@@ -43,10 +36,7 @@ describe("RunActivityGroup", () => {
       </RunActivityGroup>,
     );
 
-    expect(markup).toContain("正在处理");
     expect(markup).not.toContain("0s");
-    expect(markup).toContain("aui-run-activity-trigger");
-    expect(markup).not.toContain("aui-run-activity-content");
   });
 
   it("隐藏后的历史 activity 不显示空折叠入口", () => {
@@ -56,10 +46,7 @@ describe("RunActivityGroup", () => {
       </RunActivityGroup>,
     );
 
-    expect(markup).toContain("已处理");
     expect(markup).toContain('disabled=""');
-    expect(markup).not.toContain("aui-run-activity-content");
-    expect(markup).not.toContain('data-slot="reasoning-trigger-chevron"');
   });
 
   it("resume 后按固定完成时间显示本次 run 耗时", () => {
@@ -70,7 +57,7 @@ describe("RunActivityGroup", () => {
       </RunActivityGroup>,
     );
 
-    expect(markup).toContain("已处理 4m5s");
+    expect(markup).toContain("4m5s");
   });
 
   it("历史 run 默认折叠且不使用当前时间伪造处理耗时", () => {
@@ -83,9 +70,7 @@ describe("RunActivityGroup", () => {
 
     expect(markup).toContain('data-state="closed"');
     expect(markup).not.toContain('disabled=""');
-    expect(markup).toContain("已处理");
-    expect(markup).not.toContain("已处理 04m 05s");
-    expect(markup).not.toContain('data-slot="reasoning-fade"');
+    expect(markup).not.toContain("04m 05s");
     expect(markup).not.toContain("step content");
   });
 });

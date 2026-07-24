@@ -15,10 +15,16 @@ import type {
   Thread,
 } from "./contracts.ts";
 import type { ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
+import type {
+  SubagentHostRequest,
+  SubagentRunEvent,
+  SubagentWorkerBinding,
+  SubagentWorkerCommand,
+} from "./subagent-contracts.ts";
 
-export const SIDECAR_PROTOCOL_VERSION = 2;
+export const SIDECAR_PROTOCOL_VERSION = 3;
 
-export type SidecarRole = "thread" | "metadata";
+export type SidecarRole = "thread" | "metadata" | "subagent";
 
 export interface RuntimeCompatibility {
   nodeVersion: string;
@@ -60,7 +66,8 @@ export interface MetadataWorkerBinding {
 
 export type SidecarBinding =
   | { role: "thread"; value: ThreadWorkerBinding }
-  | { role: "metadata"; value: MetadataWorkerBinding };
+  | { role: "metadata"; value: MetadataWorkerBinding }
+  | { role: "subagent"; value: SubagentWorkerBinding };
 
 export interface SidecarInitialize {
   kind: "initialize";
@@ -150,13 +157,49 @@ export interface SidecarShutdown {
   workerInstanceId: string;
 }
 
+export interface SidecarHostCall {
+  kind: "host-call";
+  protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+  workerInstanceId: string;
+  requestId: string;
+  request: SubagentHostRequest;
+}
+
+export type SidecarHostCallResponse =
+  | {
+      kind: "host-response";
+      protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+      workerInstanceId: string;
+      requestId: string;
+      ok: true;
+      result?: JsonValue;
+    }
+  | {
+      kind: "host-response";
+      protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+      workerInstanceId: string;
+      requestId: string;
+      ok: false;
+      error: SerializedSidecarError;
+    };
+
+export interface SidecarHostCallEvent {
+  kind: "host-event";
+  protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+  workerInstanceId: string;
+  requestId: string;
+  event: SubagentRunEvent;
+}
+
 export type ParentToSidecarMessage =
   | SidecarInitialize
   | SidecarRequest
   | SidecarEventAck
   | SidecarShutdown
+  | SidecarHostCallResponse
+  | SidecarHostCallEvent
   | SidecarChunk;
-export type SidecarToParentMessage = SidecarReady | SidecarResponse | SidecarEvent | SidecarChunk;
+export type SidecarToParentMessage = SidecarReady | SidecarResponse | SidecarEvent | SidecarHostCall | SidecarChunk;
 
 export type SidecarEventBody =
   | { type: "session-push"; payload: SessionPushPayload }
@@ -168,6 +211,7 @@ export type SidecarEventBody =
       sessionFile: string;
     }
   | { type: "runtime-state"; state: "idle" | "busy" | "draining" }
+  | { type: "subagent-event"; event: SubagentRunEvent }
   | { type: "resync-required"; reason: string; lastSafeSequence: number };
 
 export type ThreadSidecarCommand =
@@ -230,7 +274,7 @@ export type MetadataSidecarCommand =
   | { type: "invalidateProject"; projectId: string }
   | { type: "ping" };
 
-export type SidecarCommand = ThreadSidecarCommand | MetadataSidecarCommand;
+export type SidecarCommand = ThreadSidecarCommand | MetadataSidecarCommand | SubagentWorkerCommand;
 
 export type SidecarCommandResult =
   | SessionBootstrap
