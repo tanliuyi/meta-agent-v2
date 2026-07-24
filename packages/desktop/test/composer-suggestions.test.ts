@@ -3,6 +3,7 @@ import {
   commandSuggestions,
   composerCompletionContext,
   composerSuggestionOptionId,
+  fileSuggestions,
   scrollSelectedSuggestion,
 } from "../src/renderer/src/components/chat/composer-suggestion-model.ts";
 import type { SlashCommand } from "../src/shared/contracts.ts";
@@ -44,5 +45,11 @@ describe("ComposerSuggestions", () => {
     expect(composerCompletionContext("/memory")).toEqual({ type: "command", query: "memory", start: 0 });
     expect(composerCompletionContext("查看 @src/main")).toEqual({ type: "file", query: "src/main", start: 3 });
     expect(composerSuggestionOptionId("composer-list", 2)).toBe("composer-list-option-2");
+  });
+
+  it("将选中的文件序列化为 assistant-ui directive", () => {
+    expect(fileSuggestions([{ name: "main.ts", path: "src/main.ts", type: "file" }])).toMatchObject([
+      { text: ":file[src/main.ts] " },
+    ]);
   });
 });

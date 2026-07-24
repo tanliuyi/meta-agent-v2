@@ -182,6 +182,36 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("将 prompt quote 作为 user node metadata 保留到 canonical rekey 后", async () => {
+    const entries: SessionEntry[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const user = userMessage("> 第一行\n> 第二行\n\n解释这段话", 1);
+
+    projector.beginPrompt("request", undefined, false, "解释这段话", {
+      text: "第一行\n第二行",
+      messageId: "assistant",
+    });
+    projector.markPromptPreflight("request", true);
+    projector.handle({ type: "message_start", message: user });
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      kind: "user",
+      content: [{ type: "text", text: "解释这段话" }],
+      quote: { text: "第一行\n第二行", messageId: "assistant" },
+    });
+
+    projector.handle({ type: "message_end", message: user });
+    entries.push(messageEntry("canonical-user", null, user));
+    await Promise.resolve();
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      id: "canonical-user",
+      content: [{ type: "text", text: "解释这段话" }],
+      quote: { text: "第一行\n第二行", messageId: "assistant" },
+    });
+    projector.dispose();
+  });
+
   it("assistant rekey 时保留 live tool part identity", async () => {
     const entries: SessionEntry[] = [];
     const { session } = sessionHarness(entries);

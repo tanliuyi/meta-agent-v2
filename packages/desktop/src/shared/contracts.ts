@@ -132,9 +132,16 @@ export interface PiTimelineNodeBase {
 
 export type PiUserContentPart = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
+/** A snapshot of assistant text selected for the next user message. */
+export interface PiQuote {
+  text: string;
+  messageId: string;
+}
+
 export interface PiUserMessage extends PiTimelineNodeBase {
   kind: "user";
   content: PiUserContentPart[];
+  quote?: PiQuote;
   delivery: { state: "live"; requestId?: string; queueId?: string } | { state: "persisted" };
 }
 
@@ -387,6 +394,7 @@ export interface SessionPromptInput {
   threadId: string;
   text: string;
   images: ImageInput[];
+  quote?: PiQuote;
   desiredMode?: "steer" | "followUp";
 }
 

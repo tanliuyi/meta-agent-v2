@@ -47,6 +47,25 @@ describe("PiCommandCoordinator", () => {
     expect(prompt).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "second", desiredMode: "steer" }));
   });
 
+  it("将 assistant-ui quote metadata 作为结构化 IPC 字段发送", async () => {
+    const coordinator = createCoordinator();
+    coordinator.enqueue(
+      {
+        ...userMessage("请解释这段内容"),
+        metadata: { custom: { quote: { text: "第一行\n第二行", messageId: "assistant-1" } } },
+      },
+      { steer: false },
+    );
+
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    expect(prompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "请解释这段内容",
+        quote: { text: "第一行\n第二行", messageId: "assistant-1" },
+      }),
+    );
+  });
+
   it("void queue callback 自行捕获 preflight rejection 并恢复当前 Composer", async () => {
     const error = new Error("preflight failed");
     prompt.mockRejectedValueOnce(error);

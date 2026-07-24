@@ -194,13 +194,31 @@ describe("PiCompatibilityAdapter", () => {
       desiredMode: "followUp",
     });
 
-    expect(projector.beginPrompt).toHaveBeenCalledWith("request", "followUp", isStreaming);
+    expect(projector.beginPrompt).toHaveBeenCalledWith("request", "followUp", isStreaming, "hello", undefined);
     expect(result).toEqual({ accepted: true, queued: isStreaming });
     expect(projector.hasQueuedRequest).toHaveBeenCalledWith("request");
     const options = prompt.mock.calls[0]?.[1];
     expect(options).toEqual(expect.objectContaining({ expandPromptTemplates: true }));
     if (isStreaming) expect(options).toEqual(expect.objectContaining({ streamingBehavior: "followUp" }));
     else expect(options).not.toHaveProperty("streamingBehavior");
+  });
+
+  it("将结构化 quote 仅在 Pi 模型调用前注入 Markdown 上下文", async () => {
+    const prompt = vi.fn(async (_text: string, options: { preflightResult(success: boolean): void }) => {
+      options.preflightResult(true);
+    });
+    const adapter = new PiCompatibilityAdapter({ session: createSession({ prompt }), projector: createProjector() });
+
+    await adapter.prompt({
+      requestId: "request",
+      projectId: "project",
+      threadId: "thread",
+      text: "解释这段话",
+      images: [],
+      quote: { text: "第一行\n第二行", messageId: "assistant" },
+    });
+
+    expect(prompt).toHaveBeenCalledWith("> 第一行\n> 第二行\n\n解释这段话", expect.any(Object));
   });
 
   it("prompt 在 preflight 成功后立即返回，不等待完整 agent run", async () => {

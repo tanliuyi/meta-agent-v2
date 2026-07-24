@@ -1,5 +1,6 @@
 "use client";
 
+import { useScrollLock } from "@assistant-ui/react";
 import { cn } from "@renderer/shared/lib/cn";
 import { Collapsible } from "@renderer/shared/ui/collapsible";
 import type { VariantProps } from "class-variance-authority";
@@ -30,9 +31,12 @@ export function ReasoningRoot({
   children,
   ...props
 }: ReasoningRootProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const initialOpenRef = useRef(defaultOpen);
   const previousAutoOpenRef = useRef(autoOpen);
+  const previousOpenRef = useRef<boolean | undefined>(undefined);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const lockScroll = useScrollLock(rootRef, REASONING_ANIMATION_DURATION);
 
   useLayoutEffect(() => {
     const previousAutoOpen = previousAutoOpenRef.current;
@@ -44,16 +48,23 @@ export function ReasoningRoot({
   const isOpen = isControlled ? controlledOpen : (userOpen ?? autoOpen ?? streaming ?? initialOpenRef.current);
   const isPreview = streaming === true && isOpen && (isControlled || userOpen === null);
 
+  useLayoutEffect(() => {
+    if (previousOpenRef.current !== undefined && previousOpenRef.current !== isOpen) lockScroll();
+    previousOpenRef.current = isOpen;
+  }, [isOpen, lockScroll]);
+
   const handleOpenChange = useCallback(
     (open: boolean) => {
+      if (open !== isOpen) lockScroll();
       if (!isControlled) setUserOpen(open);
       controlledOnOpenChange?.(open);
     },
-    [isControlled, controlledOnOpenChange],
+    [controlledOnOpenChange, isControlled, isOpen, lockScroll],
   );
 
   return (
     <Collapsible
+      ref={rootRef}
       data-slot="reasoning-root"
       data-variant={variant}
       open={isOpen}

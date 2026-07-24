@@ -5,6 +5,7 @@ import {
   type PiAssistantPart,
   type PiAssistantStatus,
   type PiQueueItem,
+  type PiQuote,
   type PiThreadEvent,
   type PiThreadEventBatch,
   type PiThreadEventEnvelope,
@@ -36,6 +37,8 @@ interface PendingPrompt {
   requestId: string;
   desiredMode?: "steer" | "followUp";
   queueEligible: boolean;
+  text?: string;
+  quote?: PiQuote;
   accepted: boolean;
   createdAt: number;
 }
@@ -96,8 +99,22 @@ export class PiThreadProjector {
     };
   }
 
-  beginPrompt(requestId: string, desiredMode: "steer" | "followUp" | undefined, queueEligible: boolean): void {
-    this.pendingPrompts.push({ requestId, desiredMode, queueEligible, accepted: false, createdAt: Date.now() });
+  beginPrompt(
+    requestId: string,
+    desiredMode: "steer" | "followUp" | undefined,
+    queueEligible: boolean,
+    text?: string,
+    quote?: PiQuote,
+  ): void {
+    this.pendingPrompts.push({
+      requestId,
+      desiredMode,
+      queueEligible,
+      text,
+      quote,
+      accepted: false,
+      createdAt: Date.now(),
+    });
   }
 
   markPromptPreflight(requestId: string, accepted: boolean): void {
@@ -304,7 +321,11 @@ export class PiThreadProjector {
           parentId,
           createdAt: message.timestamp,
           kind: "user",
-          content: userContent(message.content),
+          content:
+            pending?.text === undefined
+              ? userContent(message.content)
+              : userContentWithText(message.content, pending.text),
+          ...(pending?.quote ? { quote: pending.quote } : {}),
           delivery: {
             state: "live",
             ...(pending ? { requestId: pending.requestId } : {}),
@@ -431,7 +452,7 @@ export class PiThreadProjector {
         if (!id) return;
         const current = this.byId.get(id);
         if (!current || current.kind !== "user") return;
-        this.replaceNode({ ...current, content: userContent(message.content) });
+        this.replaceNode({ ...current, content: current.quote ? current.content : userContent(message.content) });
         return;
       }
       case "assistant": {
@@ -1078,7 +1099,8 @@ function mergeCanonicalNode(current: PiTimelineNode, canonical: PiTimelineNode):
       status: current.status,
     };
   }
-  if (current.kind === "user" && canonical.kind === "user") return canonical;
+  if (current.kind === "user" && canonical.kind === "user")
+    return current.quote ? { ...canonical, content: current.content, quote: current.quote } : canonical;
   if (current.kind === "notice" && canonical.kind === "notice") return canonical;
   throw new ProjectionError(`rekey kind 不匹配: ${current.kind}/${canonical.kind}`);
 }
@@ -1124,6 +1146,10 @@ function assistantPartKey(part: PiAssistantPart): string | undefined {
   if (part.type === "tool-call") return `tool:${part.toolCallId}`;
   const contentIndex = part.id.slice(part.id.lastIndexOf(":") + 1);
   return `${part.type}:${contentIndex}`;
+}
+
+function userContentWithText(content: string | readonly unknown[], text: string): PiUserContentPart[] {
+  return [{ type: "text", text }, ...userContent(content).filter((part) => part.type === "image")];
 }
 
 function userContent(content: string | readonly unknown[]): PiUserContentPart[] {

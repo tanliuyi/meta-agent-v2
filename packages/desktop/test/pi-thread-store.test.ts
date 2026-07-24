@@ -156,6 +156,15 @@ describe("PiMessageRepositoryConverter", () => {
     ]);
   });
 
+  it("在 metadata 中保留 user quote", () => {
+    const user = { ...userNode("u", null), quote: { text: "引用内容", messageId: "assistant" } };
+    const repository = new PiMessageRepositoryConverter().build(snapshot([user], "u"));
+
+    expect(repository.messages[0]?.message.metadata.custom).toMatchObject({
+      quote: { text: "引用内容", messageId: "assistant" },
+    });
+  });
+
   it("在 metadata 中保留 Pi canonical status 与完成时间", () => {
     const assistant = {
       ...assistantNode("a", null),

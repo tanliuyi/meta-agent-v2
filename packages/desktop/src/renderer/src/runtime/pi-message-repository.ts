@@ -303,6 +303,7 @@ function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>): ThreadMes
     })),
     metadata: {
       custom: {
+        ...(node.quote ? { quote: node.quote } : {}),
         pi: {
           kind: "user",
           ...(node.sourceEntryId ? { sourceEntryId: node.sourceEntryId } : {}),

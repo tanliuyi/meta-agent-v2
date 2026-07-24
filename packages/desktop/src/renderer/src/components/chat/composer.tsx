@@ -1,4 +1,6 @@
 import { ComposerPrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
+import Quote from "lucide-react/dist/esm/icons/quote.mjs";
+import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type FormEvent, useCallback, useMemo, useState } from "react";
 import type { SessionControlState } from "../../../../shared/contracts.ts";
 import { errorMessage } from "../../shared/lib/error-message.ts";
@@ -122,118 +124,132 @@ export function Composer(props: ComposerProps) {
         />
       ) : null}
 
-      <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
-        <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
-          <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-(--composer-background) p-(--composer-padding) shadow-(--elevation-composer) transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-(--elevation-composer-focus) data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
-            <ComposerWidgets widgets={aboveWidgets} />
-            <ComposerAttachments disabled={attachmentsDisabled} />
-            <ComposerInput
-              projectId={suggestionProjectId}
-              commands={commands}
-              mode={props.mode}
-              isRunning={isRunning}
-              isCancelable={isCancelable}
-              materializing={materializing}
-              onSubmitRunning={submitRunning}
-            />
-            <div className="flex min-h-8 items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-1">
-                <ComposerAddAttachment disabled={attachmentsDisabled} />
-                {props.mode === "draft" ? (
-                  <ProjectSelect
-                    projects={props.projects}
-                    projectId={props.project?.id ?? null}
+      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+        <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
+          <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
+            <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-(--composer-background) p-(--composer-padding) shadow-(--elevation-composer) transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-(--elevation-composer-focus) data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
+              <ComposerPrimitive.Quote className="flex min-w-0 items-center gap-2 rounded-[0.625rem] bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
+                <Quote aria-hidden="true" className="size-3.5 shrink-0" />
+                <ComposerPrimitive.QuoteText className="min-w-0 truncate" />
+                <ComposerPrimitive.QuoteDismiss
+                  type="button"
+                  aria-label="移除引用"
+                  className="ms-auto flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <X aria-hidden="true" className="size-3.5" />
+                </ComposerPrimitive.QuoteDismiss>
+              </ComposerPrimitive.Quote>
+              <ComposerWidgets widgets={aboveWidgets} />
+              <ComposerAttachments disabled={attachmentsDisabled} />
+              <ComposerInput
+                projectId={suggestionProjectId}
+                commands={commands}
+                mode={props.mode}
+                isRunning={isRunning}
+                isCancelable={isCancelable}
+                materializing={materializing}
+                onSubmit={props.mode === "draft" ? () => void submitDraft() : () => aui.composer().send()}
+                onSubmitRunning={submitRunning}
+              />
+              <div className="flex min-h-8 items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <ComposerAddAttachment disabled={attachmentsDisabled} />
+                  {props.mode === "draft" ? (
+                    <ProjectSelect
+                      projects={props.projects}
+                      projectId={props.project?.id ?? null}
+                      disabled={disabled}
+                      onValueChange={(projectId) => {
+                        setError(null);
+                        setSelectingProject(true);
+                        void props.onProjectChange(projectId).then(
+                          () => setSelectingProject(false),
+                          (value: unknown) => {
+                            setSelectingProject(false);
+                            reportError(value);
+                          },
+                        );
+                      }}
+                    />
+                  ) : null}
+                  {isRunning ? (
+                    <div className="mode-control" role="group" aria-label="运行中消息模式">
+                      <button
+                        type="button"
+                        aria-pressed={mode === "steer"}
+                        data-state={mode === "steer" ? "on" : "off"}
+                        onClick={() => setMode("steer")}
+                      >
+                        引导
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={mode === "followUp"}
+                        data-state={mode === "followUp" ? "on" : "off"}
+                        onClick={() => setMode("followUp")}
+                      >
+                        排队
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex min-w-0 items-center gap-1">
+                  {props.mode === "draft" ? (
+                    <>
+                      <ModelSelect
+                        availableModels={props.config?.models ?? EMPTY_MODELS}
+                        model={props.config?.model}
+                        disabled={disabled || configLoading}
+                        onValueChange={props.onModelChange}
+                      />
+                      <ThinkingSelect
+                        value={props.config?.thinkingLevel ?? "off"}
+                        levels={props.config?.thinkingLevels ?? EMPTY_THINKING_LEVELS}
+                        disabled={disabled || configLoading}
+                        onValueChange={props.onThinkingChange}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <ModelSelect
+                        availableModels={props.models}
+                        model={props.model}
+                        disabled={disabled || props.phase !== "idle"}
+                        onOpen={() => {
+                          setError(null);
+                          void props.onRefreshModels().catch(reportError);
+                        }}
+                        onValueChange={(provider, modelId) => {
+                          setError(null);
+                          void props.onSetModel(provider, modelId).catch(reportError);
+                        }}
+                      />
+                      <ThinkingSelect
+                        value={props.thinkingLevel}
+                        levels={props.thinkingLevels}
+                        disabled={disabled || props.phase !== "idle"}
+                        onValueChange={(level) => {
+                          setError(null);
+                          void props.onSetThinking(level).catch(reportError);
+                        }}
+                      />
+                    </>
+                  )}
+                  <ComposerSubmitControl
+                    composer={props}
                     disabled={disabled}
-                    onValueChange={(projectId) => {
-                      setError(null);
-                      setSelectingProject(true);
-                      void props.onProjectChange(projectId).then(
-                        () => setSelectingProject(false),
-                        (value: unknown) => {
-                          setSelectingProject(false);
-                          reportError(value);
-                        },
-                      );
-                    }}
+                    configLoading={configLoading}
+                    sending={sending}
+                    isRunning={isRunning}
+                    loading={props.mode === "draft" && (sending || materializing)}
                   />
-                ) : null}
-                {isRunning ? (
-                  <div className="mode-control" role="group" aria-label="运行中消息模式">
-                    <button
-                      type="button"
-                      aria-pressed={mode === "steer"}
-                      data-state={mode === "steer" ? "on" : "off"}
-                      onClick={() => setMode("steer")}
-                    >
-                      引导
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={mode === "followUp"}
-                      data-state={mode === "followUp" ? "on" : "off"}
-                      onClick={() => setMode("followUp")}
-                    >
-                      排队
-                    </button>
-                  </div>
-                ) : null}
+                </div>
               </div>
-              <div className="flex min-w-0 items-center gap-1">
-                {props.mode === "draft" ? (
-                  <>
-                    <ModelSelect
-                      availableModels={props.config?.models ?? EMPTY_MODELS}
-                      model={props.config?.model}
-                      disabled={disabled || configLoading}
-                      onValueChange={props.onModelChange}
-                    />
-                    <ThinkingSelect
-                      value={props.config?.thinkingLevel ?? "off"}
-                      levels={props.config?.thinkingLevels ?? EMPTY_THINKING_LEVELS}
-                      disabled={disabled || configLoading}
-                      onValueChange={props.onThinkingChange}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <ModelSelect
-                      availableModels={props.models}
-                      model={props.model}
-                      disabled={disabled || props.phase !== "idle"}
-                      onOpen={() => {
-                        setError(null);
-                        void props.onRefreshModels().catch(reportError);
-                      }}
-                      onValueChange={(provider, modelId) => {
-                        setError(null);
-                        void props.onSetModel(provider, modelId).catch(reportError);
-                      }}
-                    />
-                    <ThinkingSelect
-                      value={props.thinkingLevel}
-                      levels={props.thinkingLevels}
-                      disabled={disabled || props.phase !== "idle"}
-                      onValueChange={(level) => {
-                        setError(null);
-                        void props.onSetThinking(level).catch(reportError);
-                      }}
-                    />
-                  </>
-                )}
-                <ComposerSubmitControl
-                  composer={props}
-                  disabled={disabled}
-                  configLoading={configLoading}
-                  sending={sending}
-                  isRunning={isRunning}
-                  loading={props.mode === "draft" && (sending || materializing)}
-                />
-              </div>
+              <ComposerWidgets widgets={belowWidgets} />
             </div>
-            <ComposerWidgets widgets={belowWidgets} />
-          </div>
-        </ComposerPrimitive.AttachmentDropzone>
-      </ComposerPrimitive.Root>
+          </ComposerPrimitive.AttachmentDropzone>
+        </ComposerPrimitive.Root>
+      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
       {error || readinessError ? (
         <p className="composer-error" role="status" aria-live="polite">
           {error ?? readinessError}

@@ -145,11 +145,11 @@ export class PiCompatibilityAdapter {
   private async submit(input: SessionPromptInput, expandPromptTemplates: boolean): Promise<SessionCommandResult> {
     const queueEligible = this.session.isStreaming;
     if (queueEligible && input.text.trim().length === 0) throw new Error("Pi running queue 不接受仅包含图片的输入");
-    this.projector.beginPrompt(input.requestId, input.desiredMode, queueEligible);
+    this.projector.beginPrompt(input.requestId, input.desiredMode, queueEligible, input.text, input.quote);
     return new Promise((resolve, reject) => {
       let preflight: boolean | undefined;
       const prompt = Promise.resolve(
-        this.session.prompt(input.text, {
+        this.session.prompt(withQuoteContext(input.text, input.quote), {
           images: input.images.map(({ data, mimeType }) => ({ type: "image", data, mimeType })),
           expandPromptTemplates,
           source: expandPromptTemplates ? "interactive" : "extension",
@@ -238,6 +238,11 @@ function userInput(content: Extract<AgentSession["messages"][number], { role: "u
       part.type === "image" ? [{ name: `image-${index + 1}`, data: part.data, mimeType: part.mimeType }] : [],
     ),
   };
+}
+
+function withQuoteContext(text: string, quote: SessionPromptInput["quote"]): string {
+  if (!quote) return text;
+  return `> ${quote.text.replace(/\r\n?/gu, "\n").replace(/\n/gu, "\n> ")}\n\n${text}`;
 }
 
 function errorMessage(value: unknown): string {

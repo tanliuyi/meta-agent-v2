@@ -18,6 +18,24 @@ class ResizeObserverStub {
   }
 }
 
+function createViewport() {
+  const listeners = new Map<string, EventListener>();
+  return {
+    clientHeight: 100,
+    scrollHeight: 240,
+    scrollTop: 0,
+    addEventListener(type: string, listener: EventListener) {
+      listeners.set(type, listener);
+    },
+    removeEventListener(type: string) {
+      listeners.delete(type);
+    },
+    dispatchScroll() {
+      listeners.get("scroll")?.(new Event("scroll"));
+    },
+  };
+}
+
 describe("tool detail bottom follow", () => {
   const frames: FrameRequestCallback[] = [];
 
@@ -37,7 +55,7 @@ describe("tool detail bottom follow", () => {
   });
 
   it("pins overflowing details initially and after a streaming delta", () => {
-    const viewport = { clientHeight: 100, scrollHeight: 240, scrollTop: 0 };
+    const viewport = createViewport();
     const content = {} as Element;
     followResizingContentToBottom(viewport, content);
 
@@ -49,6 +67,36 @@ describe("tool detail bottom follow", () => {
     ResizeObserverStub.instances[0]?.resize();
     frames.shift()?.(1);
     expect(viewport.scrollTop).toBe(420);
+  });
+
+  it("keeps following when content growth fires a scroll event before the next pin", () => {
+    const viewport = createViewport();
+    followResizingContentToBottom(viewport, {} as Element, { respectUserScroll: true });
+    frames.shift()?.(0);
+
+    viewport.scrollHeight = 420;
+    ResizeObserverStub.instances[0]?.resize();
+    viewport.dispatchScroll();
+    frames.shift()?.(1);
+
+    expect(viewport.scrollTop).toBe(420);
+  });
+
+  it("stops following after the user scrolls up while content is stable", () => {
+    const viewport = createViewport();
+    followResizingContentToBottom(viewport, {} as Element, { respectUserScroll: true });
+    frames.shift()?.(0);
+
+    viewport.scrollHeight = 420;
+    viewport.scrollTop = 320;
+    viewport.dispatchScroll();
+    viewport.scrollTop = 220;
+    viewport.dispatchScroll();
+    viewport.scrollHeight = 600;
+    ResizeObserverStub.instances[0]?.resize();
+    frames.shift()?.(1);
+
+    expect(viewport.scrollTop).toBe(220);
   });
 
   it("does not scroll non-overflowing details and cleans up pending work", () => {

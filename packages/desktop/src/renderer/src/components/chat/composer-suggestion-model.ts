@@ -1,3 +1,4 @@
+import { unstable_defaultDirectiveFormatter } from "@assistant-ui/react";
 import type { FileNode, SlashCommand } from "../../../../shared/contracts.ts";
 
 export interface ComposerSuggestion {
@@ -37,14 +38,18 @@ export function commandSuggestions(commands: readonly SlashCommand[], query: str
     }));
 }
 
-/** 将 Project 文件结果映射为 Composer 引用建议。 */
+/** 将 Project 文件结果映射为 assistant-ui directive 引用建议。 */
 export function fileSuggestions(files: readonly FileNode[]): ComposerSuggestion[] {
   return files.map((file) => ({
     id: `${file.type}:${file.path}`,
     label: file.path,
     detail: file.type === "directory" ? "目录" : "文件",
     type: file.type,
-    text: `@${file.path} `,
+    text: `${unstable_defaultDirectiveFormatter.serialize({
+      id: file.path,
+      type: "file",
+      label: file.path,
+    })} `,
   }));
 }
 

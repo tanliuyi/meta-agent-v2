@@ -118,7 +118,21 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
     ],
   );
   const runtime = useExternalStoreRuntime<ThreadMessage>(runtimeAdapter);
+  const composer = runtime.thread.composer;
   runtimeRef.current = runtime;
+
+  useEffect(() => {
+    const savedText = stores.composerDraft.getText();
+    if (savedText) composer.setText(savedText);
+
+    const syncDraft = () => {
+      stores.composerDraft.setText(composer.getState().text);
+    };
+    const unsubscribe = composer.subscribe(syncDraft);
+    syncDraft();
+    return unsubscribe;
+  }, [composer, stores.composerDraft]);
+
   const clearQueue = useCallback(() => coordinator.clearQueue(snapshotRef.current.queue), [coordinator]);
   return useMemo(() => ({ runtime, clearQueue }), [clearQueue, runtime]);
 }

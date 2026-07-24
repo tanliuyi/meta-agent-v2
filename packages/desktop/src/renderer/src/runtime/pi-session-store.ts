@@ -8,6 +8,7 @@ import { PiThreadStore } from "./pi-thread-store.ts";
 export interface SessionRecordStores {
   readonly timeline: PiThreadStore;
   readonly control: SessionControlStore;
+  readonly composerDraft: SessionComposerDraftStore;
   readonly workbench: WorkbenchStore;
   readonly summary: SessionSummaryStore;
   readonly runActivity: SessionRunActivityStore;
@@ -25,6 +26,12 @@ export interface WorkbenchStore {
   getSnapshot(): WorkbenchState | null;
   replace(workbench: WorkbenchState): void;
   subscribe(listener: () => void): () => void;
+}
+
+/** Keeps unsent composer text while the session React subtree is unmounted. */
+export interface SessionComposerDraftStore {
+  getText(): string;
+  setText(text: string): void;
 }
 
 export interface SessionSummaryStore {
@@ -101,10 +108,24 @@ export function createSessionRecordStores(): SessionRecordStores {
   return {
     timeline: new PiThreadStore(),
     control: createControlStore(),
+    composerDraft: createComposerDraftStore(),
     workbench: createWorkbenchStore(),
     summary: createSummaryStore(),
     runActivity: createRunActivityStore(),
     connection: createConnectionStore(),
+  };
+}
+
+function createComposerDraftStore(): SessionComposerDraftStore {
+  let text = "";
+
+  return {
+    getText() {
+      return text;
+    },
+    setText(value) {
+      text = value;
+    },
   };
 }
 

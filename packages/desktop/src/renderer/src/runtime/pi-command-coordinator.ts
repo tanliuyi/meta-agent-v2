@@ -1,6 +1,7 @@
 import type { AppendMessage, CreateAttachment } from "@assistant-ui/react";
 import type {
   PiQueueItem,
+  PiQuote,
   PiThreadPhase,
   PiThreadSnapshot,
   SessionCommandResult,
@@ -217,18 +218,35 @@ async function promptInput(
   requestId: string = crypto.randomUUID(),
 ): Promise<SessionPromptInput> {
   if (message.role !== "user") throw new Error(`Pi Composer 只接受 user message: ${message.role}`);
+  const messageQuote = quote(message);
   return {
     requestId,
     projectId: target.projectId,
     threadId: target.threadId,
     text: messageText(message),
     images: await toPiImageInputs(message.attachments ?? []),
+    ...(messageQuote ? { quote: messageQuote } : {}),
     ...(desiredMode ? { desiredMode } : {}),
   };
 }
 
 function messageText(message: AppendMessage): string {
   return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+}
+
+function quote(message: AppendMessage): PiQuote | undefined {
+  const value = message.metadata?.custom?.quote;
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("text" in value) ||
+    typeof value.text !== "string" ||
+    !("messageId" in value) ||
+    typeof value.messageId !== "string"
+  )
+    return undefined;
+  const text = value.text.trim();
+  return text ? { text, messageId: value.messageId } : undefined;
 }
 
 export function resolveReloadUserEntry(snapshot: PiThreadSnapshot, parentId: string | null): string | null {

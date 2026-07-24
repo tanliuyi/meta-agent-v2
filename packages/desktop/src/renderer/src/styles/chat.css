@@ -250,6 +250,41 @@
 .composer-wrap {
   width: 100%;
 }
+.aui-lexical-editor {
+  position: relative;
+}
+.aui-lexical-input {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.aui-lexical-placeholder {
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  left: 10px;
+  pointer-events: none;
+  color: hsl(var(--muted-foreground) / 0.8);
+}
+.aui-lexical-editor .aui-directive-chip {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 2px 6px;
+  border-radius: var(--shape-radius-xs);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  font-size: 13px;
+  line-height: 1.25;
+  vertical-align: baseline;
+}
+.aui-lexical-editor .aui-directive-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .composer-suggestions {
   position: absolute;
   right: 0;
@@ -277,7 +312,8 @@
   font-size: 12px;
   text-align: left;
 }
-.composer-suggestions button[data-state="active"] {
+.composer-suggestions button[data-state="active"],
+.composer-suggestions button[data-highlighted] {
   background: hsl(var(--accent));
 }
 .composer-suggestions strong {
@@ -313,13 +349,13 @@
   display: flex;
   padding: 2px;
   border: 1px solid hsl(var(--border));
-  border-radius: var(--shape-radius-md);
+  border-radius: var(--shape-radius-lg);
 }
 .mode-control button {
   height: 23px;
   padding: 0 7px;
   border: 0;
-  border-radius: var(--shape-radius-xs);
+  border-radius: var(--shape-radius-md);
   background: transparent;
   color: hsl(var(--muted-foreground));
   font-size: 11px;

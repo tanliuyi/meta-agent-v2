@@ -1,3 +1,5 @@
+const BOTTOM_THRESHOLD_PX = 1;
+
 interface BottomFollowViewport {
   clientHeight: number;
   scrollHeight: number;
@@ -10,7 +12,7 @@ interface BottomFollowOptions {
   respectUserScroll?: boolean;
 }
 
-/** Keep a nested scroll viewport pinned as its rendered content grows. */
+/** Keep a nested scroll viewport pinned as its rendered content grows, following assistant-ui's scroll-state rules. */
 export function followResizingContentToBottom(
   viewport: BottomFollowViewport,
   content: Element,
@@ -18,21 +20,31 @@ export function followResizingContentToBottom(
 ): () => void {
   let frame: number | undefined;
   let following = true;
+  let lastScrollTop = viewport.scrollTop;
+  let lastScrollHeight = viewport.scrollHeight;
+
   const handleScroll = () => {
-    following = Math.abs(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight) <= 1;
+    const { clientHeight, scrollHeight, scrollTop } = viewport;
+    const isAtBottom =
+      scrollHeight <= clientHeight || Math.abs(scrollHeight - scrollTop - clientHeight) <= BOTTOM_THRESHOLD_PX;
+    // assistant-ui only treats an upward movement with stable content as user input.
+    const userScrolledUp = scrollTop < lastScrollTop && scrollHeight === lastScrollHeight;
+
+    if (isAtBottom) following = true;
+    else if (userScrolledUp) following = false;
+
+    lastScrollTop = scrollTop;
+    lastScrollHeight = scrollHeight;
   };
+
   const pin = () => {
     if (frame !== undefined) return;
     frame = requestAnimationFrame(() => {
       frame = undefined;
-      if (viewport.scrollHeight <= viewport.clientHeight) return;
-      // Self-recover from false-positive scroll events (elastic bounce, momentum
-      // scroll end, scrollbar drag-release, etc.) that briefly pushed the viewport
-      // off-bottom and flipped `following` to false. If the user is actually still
-      // at the bottom, keep following regardless of the `following` flag.
-      const isAtBottom = Math.abs(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight) <= 1;
-      if (!following && !isAtBottom) return;
+      if (!following || viewport.scrollHeight <= viewport.clientHeight) return;
       viewport.scrollTop = viewport.scrollHeight;
+      lastScrollTop = viewport.scrollTop;
+      lastScrollHeight = viewport.scrollHeight;
     });
   };
 

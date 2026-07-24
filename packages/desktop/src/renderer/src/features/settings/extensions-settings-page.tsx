@@ -63,7 +63,7 @@ export function ExtensionsSettingsPage() {
         </div>
       ) : null}
 
-      <ExtensionSection title="内建" entries={builtin} loading={controller.loading} />
+      {/* <ExtensionSection title="内建" entries={builtin} loading={controller.loading} /> */}
 
       <ExtensionSection
         title="精选"

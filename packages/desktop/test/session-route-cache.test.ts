@@ -64,6 +64,7 @@ describe("CachedSessionRecord", () => {
     expect(record.lastAccessedAt).toBeGreaterThan(0);
     expect(record.stores.timeline).toBeDefined();
     expect(record.stores.control).toBeDefined();
+    expect(record.stores.composerDraft).toBeDefined();
     expect(record.stores.workbench).toBeDefined();
     expect(record.stores.summary).toBeDefined();
     expect(record.stores.runActivity).toBeDefined();
@@ -77,6 +78,17 @@ describe("CachedSessionRecord", () => {
     expect(r1.key).not.toBe(r2.key);
     expect(r1.key).not.toBe(r3.key);
     expect(r2.key).not.toBe(r3.key);
+  });
+
+  it("为每个 cached record 隔离保存未发送的 composer 文本", () => {
+    const first = createSessionRecord({ projectId: "p1", threadId: "t1" });
+    const second = createSessionRecord({ projectId: "p1", threadId: "t2" });
+
+    first.stores.composerDraft.setText("first draft");
+    second.stores.composerDraft.setText("second draft");
+
+    expect(first.stores.composerDraft.getText()).toBe("first draft");
+    expect(second.stores.composerDraft.getText()).toBe("second draft");
   });
 });
 
