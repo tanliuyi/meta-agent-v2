@@ -1,5 +1,5 @@
-import type { ModelOption, SessionControlState } from "../../../../shared/contracts.ts";
-import type { ModelOption as ModelSelectorOption } from "../assistant-ui/model-selector/model-selector-types.ts";
+import type { ModelOption, SessionControlState } from "../../../../../shared/contracts.ts";
+import type { ModelOption as ModelSelectorOption } from "../../assistant-ui/model-selector/model-selector-types.ts";
 
 const THINKING_LEVEL_LABELS: Record<SessionControlState["thinkingLevel"], string> = {
   off: "关",

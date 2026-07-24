@@ -1,6 +1,6 @@
 import { ThreadPrimitive } from "@assistant-ui/react";
 import type { DraftSessionConfig, Project, ThinkingLevel } from "../../../../shared/contracts.ts";
-import { Composer } from "./composer.tsx";
+import { Composer } from "./composer/composer.tsx";
 
 interface DraftComposerThreadProps {
   projects: readonly Project[];

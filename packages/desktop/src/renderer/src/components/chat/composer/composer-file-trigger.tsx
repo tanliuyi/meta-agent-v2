@@ -39,13 +39,17 @@ export function ComposerFileTrigger({ projectId, onOpenChange }: ComposerFileTri
       <ComposerFileTriggerState onOpenChange={onOpenChange} />
       <ComposerPrimitive.Unstable_TriggerPopoverItems>
         {(items) =>
-          items.map((item) => (
-            <ComposerPrimitive.Unstable_TriggerPopoverItem key={item.id} item={item}>
-              {item.type === "directory" ? <Folder size={14} /> : <File size={14} />}
-              <strong>{item.label}</strong>
-              <span>{item.type === "directory" ? "目录" : "文件"}</span>
-            </ComposerPrimitive.Unstable_TriggerPopoverItem>
-          ))
+          items.length > 0 ? (
+            items.map((item) => (
+              <ComposerPrimitive.Unstable_TriggerPopoverItem key={item.id} item={item}>
+                {item.type === "directory" ? <Folder size={14} /> : <File size={14} />}
+                <strong>{item.label}</strong>
+                <span>{item.type === "directory" ? "目录" : "文件"}</span>
+              </ComposerPrimitive.Unstable_TriggerPopoverItem>
+            ))
+          ) : !isLoading ? (
+            <div className="composer-suggestions-empty">无匹配文件</div>
+          ) : null
         }
       </ComposerPrimitive.Unstable_TriggerPopoverItems>
     </ComposerPrimitive.Unstable_TriggerPopover>

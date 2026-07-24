@@ -328,6 +328,14 @@
   white-space: nowrap;
   color: hsl(var(--muted-foreground));
 }
+.composer-suggestions-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
 .composer-widgets {
   display: grid;
   gap: 1px;

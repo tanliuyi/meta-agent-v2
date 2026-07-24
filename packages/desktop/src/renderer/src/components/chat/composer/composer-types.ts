@@ -4,7 +4,7 @@ import type {
   PiThreadPhase,
   Project,
   SessionControlState,
-} from "../../../../shared/contracts.ts";
+} from "../../../../../shared/contracts.ts";
 
 export type ComposerProps =
   | {

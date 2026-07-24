@@ -6,7 +6,7 @@ import {
 } from "@assistant-ui/react";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { useMemo } from "react";
-import type { SlashCommand } from "../../../../shared/contracts.ts";
+import type { SlashCommand } from "../../../../../shared/contracts.ts";
 import { ComposerTriggerState } from "./composer-trigger-state.tsx";
 
 const SLASH_COMMAND_RE = /(^|\s)\/([^\s/]+)/gu;
@@ -73,13 +73,17 @@ export function ComposerCommandTrigger({ commands, onOpenChange }: ComposerComma
       <ComposerTriggerState onOpenChange={onOpenChange} />
       <ComposerPrimitive.Unstable_TriggerPopoverItems>
         {(items) =>
-          items.map((item) => (
-            <ComposerPrimitive.Unstable_TriggerPopoverItem key={item.id} item={item}>
-              <TerminalSquare size={14} />
-              <strong>{item.label}</strong>
-              {item.description ? <span>{item.description}</span> : null}
-            </ComposerPrimitive.Unstable_TriggerPopoverItem>
-          ))
+          items.length > 0 ? (
+            items.map((item) => (
+              <ComposerPrimitive.Unstable_TriggerPopoverItem key={item.id} item={item}>
+                <TerminalSquare size={14} />
+                <strong>{item.label}</strong>
+                {item.description ? <span>{item.description}</span> : null}
+              </ComposerPrimitive.Unstable_TriggerPopoverItem>
+            ))
+          ) : (
+            <div className="composer-suggestions-empty">无匹配命令</div>
+          )
         }
       </ComposerPrimitive.Unstable_TriggerPopoverItems>
     </ComposerPrimitive.Unstable_TriggerPopover>

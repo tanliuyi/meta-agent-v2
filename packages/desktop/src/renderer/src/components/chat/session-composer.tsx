@@ -1,5 +1,5 @@
 import { useSessionControl, useSessionScope, useSessionTimeline } from "../session-context.tsx";
-import { Composer } from "./composer.tsx";
+import { Composer } from "./composer/composer.tsx";
 
 /** Reads Composer control data from the owning cached session record. */
 export function SessionComposer() {

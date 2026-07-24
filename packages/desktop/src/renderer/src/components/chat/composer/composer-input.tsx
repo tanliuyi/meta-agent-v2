@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { SlashCommand } from "../../../../shared/contracts.ts";
+import type { SlashCommand } from "../../../../../shared/contracts.ts";
 import { ComposerCommandTrigger } from "./composer-command-trigger.tsx";
 import { ComposerFileTrigger } from "./composer-file-trigger.tsx";
 

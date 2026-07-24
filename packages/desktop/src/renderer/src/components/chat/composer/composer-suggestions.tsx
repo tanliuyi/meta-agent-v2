@@ -1,7 +1,7 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { SlashCommand } from "../../../../shared/contracts.ts";
+import type { SlashCommand } from "../../../../../shared/contracts.ts";
 import {
   commandSuggestions,
   composerCompletionContext,

@@ -2,7 +2,7 @@ import { ComposerPrimitive, QueueItemPrimitive, useAuiState } from "@assistant-u
 import { TextButton } from "@renderer/shared/ui/text-button";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
 import { useMemo } from "react";
-import type { PiQueueItem } from "../../../../shared/contracts.ts";
+import type { PiQueueItem } from "../../../../../shared/contracts.ts";
 
 interface ComposerQueueProps {
   items: readonly PiQueueItem[];

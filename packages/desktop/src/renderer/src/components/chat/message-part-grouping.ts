@@ -85,7 +85,7 @@ export function summarizeChainOfThought(parts: readonly PartState[], indices: re
 
   if (hasUnknownTool) summaries.add("使用其他工具");
   const values = [...summaries];
-  if (values.length === 0) return "思考过程";
+  if (values.length === 0) return "思考";
   if (values.length <= 3) return values.join("，");
   return `${values.slice(0, 3).join("，")}等操作`;
 }

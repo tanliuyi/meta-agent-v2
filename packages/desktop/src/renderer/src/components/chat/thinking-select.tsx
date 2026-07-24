@@ -1,6 +1,6 @@
 import type { SessionControlState } from "../../../../shared/contracts.ts";
 import { Select } from "../assistant-ui/select/select.tsx";
-import { getThinkingLevelLabel } from "./composer-control-model.ts";
+import { getThinkingLevelLabel } from "./composer/composer-control-model.ts";
 
 interface ThinkingSelectProps {
   value: SessionControlState["thinkingLevel"];

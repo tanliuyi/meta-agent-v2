@@ -2,19 +2,19 @@ import { ComposerPrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-
 import Quote from "lucide-react/dist/esm/icons/quote.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type FormEvent, useCallback, useMemo, useState } from "react";
-import type { SessionControlState } from "../../../../shared/contracts.ts";
-import { errorMessage } from "../../shared/lib/error-message.ts";
-import { ComposerAddAttachment } from "../assistant-ui/attachment/composer-add-attachment.tsx";
-import { ComposerAttachments } from "../assistant-ui/attachment/composer-attachments.tsx";
+import type { SessionControlState } from "../../../../../shared/contracts.ts";
+import { errorMessage } from "../../../shared/lib/error-message.ts";
+import { ComposerAddAttachment } from "../../assistant-ui/attachment/composer-add-attachment.tsx";
+import { ComposerAttachments } from "../../assistant-ui/attachment/composer-attachments.tsx";
+import { ModelSelect } from "../model-select.tsx";
+import { ProjectSelect } from "../project-select.tsx";
+import { ThinkingSelect } from "../thinking-select.tsx";
 import { ComposerExtensionCommand } from "./composer-extension-command.tsx";
 import { ComposerInput } from "./composer-input.tsx";
 import { ComposerQueue } from "./composer-queue.tsx";
 import { ComposerSubmitControl } from "./composer-submit-control.tsx";
 import type { ComposerProps } from "./composer-types.ts";
 import { ComposerWidgets } from "./composer-widgets.tsx";
-import { ModelSelect } from "./model-select.tsx";
-import { ProjectSelect } from "./project-select.tsx";
-import { ThinkingSelect } from "./thinking-select.tsx";
 
 const EMPTY_COMMANDS: SessionControlState["commands"] = [];
 const EMPTY_MODELS: SessionControlState["models"] = [];

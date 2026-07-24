@@ -2,7 +2,7 @@ import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import ArrowUp from "lucide-react/dist/esm/icons/arrow-up.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
-import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
+import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
 import type { ComposerProps } from "./composer-types.ts";
 
 interface ComposerSubmitControlProps {

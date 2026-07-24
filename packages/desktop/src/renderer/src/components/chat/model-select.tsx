@@ -9,7 +9,7 @@ import { ModelSelectorRoot } from "../assistant-ui/model-selector/model-selector
 import { ModelSelectorSearch } from "../assistant-ui/model-selector/model-selector-search.tsx";
 import { ModelSelectorTrigger } from "../assistant-ui/model-selector/model-selector-trigger.tsx";
 import { ModelSelectorValue } from "../assistant-ui/model-selector/model-selector-value.tsx";
-import { composerModelKey, createModelSelectorState } from "./composer-control-model.ts";
+import { composerModelKey, createModelSelectorState } from "./composer/composer-control-model.ts";
 
 interface ModelSelectProps {
   availableModels: readonly ModelOption[];

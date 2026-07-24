@@ -1,5 +1,5 @@
 import { unstable_defaultDirectiveFormatter } from "@assistant-ui/react";
-import type { FileNode, SlashCommand } from "../../../../shared/contracts.ts";
+import type { FileNode, SlashCommand } from "../../../../../shared/contracts.ts";
 
 export interface ComposerSuggestion {
   id: string;

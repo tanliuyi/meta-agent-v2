@@ -1,6 +1,6 @@
 import { useAui } from "@assistant-ui/react";
 import { useEffect } from "react";
-import type { DesktopExtensionHostState } from "../../../../shared/contracts.ts";
+import type { DesktopExtensionHostState } from "../../../../../shared/contracts.ts";
 
 const appliedRevisions = new Map<string, number>();
 

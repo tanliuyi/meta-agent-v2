@@ -1,4 +1,4 @@
-import type { SessionControlState } from "../../../../shared/contracts.ts";
+import type { SessionControlState } from "../../../../../shared/contracts.ts";
 
 interface ComposerWidgetsProps {
   widgets: SessionControlState["extensionHost"]["widgets"];
