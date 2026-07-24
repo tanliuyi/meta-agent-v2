@@ -1101,6 +1101,8 @@ function mergeAssistantContent(canonical: PiAssistantPart[], current: PiAssistan
     return [
       {
         ...replacement,
+        // Renderer 将 part.id 用作 tool DOM identity；assistant node rekey 时必须保持稳定。
+        id: part.id,
         execution: part.execution,
         ...(part.partialResult !== undefined ? { partialResult: part.partialResult } : {}),
         ...(part.result !== undefined ? { result: part.result } : {}),

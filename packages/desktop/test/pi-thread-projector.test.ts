@@ -182,7 +182,7 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
-  it("SessionEntry 使用 message clone 时仍将 live assistant rekey，避免重复 toolCallId", async () => {
+  it("assistant rekey 时保留 live tool part identity", async () => {
     const entries: SessionEntry[] = [];
     const { session } = sessionHarness(entries);
     const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
@@ -190,16 +190,45 @@ describe("PiThreadProjector", () => {
     const finished = structuredClone(started);
 
     projector.handle({ type: "message_start", message: started });
+    projector.handle({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "read",
+      args: { path: "a" },
+    });
+    const liveNode = projector.snapshot().nodes[0];
+    expect(liveNode?.kind).toBe("assistant");
+    if (liveNode?.kind !== "assistant") throw new Error("assistant node missing");
+    const liveTool = liveNode.content[0];
+    expect(liveTool?.type).toBe("tool-call");
+    if (liveTool?.type !== "tool-call") throw new Error("tool part missing");
+    const livePartId = liveTool.id;
+    expect(livePartId).toMatch(/^live:/);
+
     projector.handle({ type: "message_end", message: finished });
     const persisted = structuredClone(finished);
     entries.push(messageEntry("canonical-assistant", null, persisted));
     await Promise.resolve();
+    projector.handle({
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "result" }] },
+      isError: false,
+    });
 
     expect(projector.snapshot().nodes).toEqual([
       expect.objectContaining({
         id: "canonical-assistant",
         sourceEntryId: "canonical-assistant",
-        content: [expect.objectContaining({ type: "tool-call", toolCallId: "call-1" })],
+        content: [
+          expect.objectContaining({
+            id: livePartId,
+            type: "tool-call",
+            toolCallId: "call-1",
+            execution: "complete",
+          }),
+        ],
       }),
     ]);
     projector.dispose();
