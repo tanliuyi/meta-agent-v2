@@ -107,6 +107,12 @@ interface CurrentSource {
   stats?: Stats;
 }
 
+export interface ModelsConfigBackup {
+  snapshot: ModelsConfigSnapshot;
+  exists: boolean;
+  source: string;
+}
+
 interface ModelsConfigServiceOptions {
   log?(message: string): void;
   now?(): number;
@@ -140,6 +146,31 @@ export class ModelsConfigService {
     return (await this.readCurrent()).exists ? this.path : this.agentDir;
   }
 
+  createBackup(): Promise<ModelsConfigBackup> {
+    const operation = this.saveTail.then(async () => {
+      const current = await this.readCurrent();
+      return {
+        snapshot: snapshotFromCurrent(this.path, current),
+        exists: current.exists,
+        source: current.source,
+      };
+    });
+    this.saveTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
+  restoreBackup(backup: ModelsConfigBackup, expectedRevision: string): Promise<ModelsConfigSnapshot> {
+    const operation = this.saveTail.then(() => this.restoreBackupLocked(backup, expectedRevision));
+    this.saveTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   saveConfig(input: SaveModelsConfigInput): Promise<SaveModelsConfigResult> {
     const operation = this.saveTail.then(() => this.saveConfigLocked(input));
     this.saveTail = operation.then(
@@ -147,6 +178,33 @@ export class ModelsConfigService {
       () => undefined,
     );
     return operation;
+  }
+
+  private async restoreBackupLocked(
+    backup: ModelsConfigBackup,
+    expectedRevision: string,
+  ): Promise<ModelsConfigSnapshot> {
+    if (backup.exists ? hashBytes(Buffer.from(backup.source)) !== backup.snapshot.revision : backup.source !== "") {
+      throw new Error("Invalid models.json backup");
+    }
+    await mkdir(this.agentDir, { recursive: true, mode: 0o700 });
+    await chmod(this.agentDir, 0o700);
+    const release = await lockfile.lock(this.path, {
+      realpath: false,
+      stale: 30_000,
+      retries: { retries: 6, factor: 1.6, minTimeout: 50, maxTimeout: 500, randomize: true },
+    });
+    try {
+      const current = await this.readCurrent();
+      if (current.revision !== expectedRevision) {
+        throw new Error("Cannot restore models.json because it changed after the provider save");
+      }
+      if (backup.exists) await this.atomicWrite(backup.source);
+      else await rm(this.path, { force: true });
+      return snapshotFromCurrent(this.path, await this.readCurrent());
+    } finally {
+      await release();
+    }
   }
 
   private async saveConfigLocked(input: SaveModelsConfigInput): Promise<SaveModelsConfigResult> {

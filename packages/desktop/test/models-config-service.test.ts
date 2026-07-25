@@ -232,6 +232,45 @@ describe("ModelsConfigService", () => {
     expect(results.map((result) => result.status)).toEqual(["saved", "conflict"]);
   });
 
+  test("restores an exact backup after structural provider changes", async () => {
+    await mkdir(directory, { recursive: true });
+    await writeFile(configPath, SOURCE, "utf8");
+    const backup = await service.createBackup();
+    const providers = structuredClone(backup.snapshot.providers);
+    providers[0]!.key = "renamed-local";
+    providers[0]!.models.splice(0, 1);
+
+    const saved = await service.saveConfig({ expectedRevision: backup.snapshot.revision, providers });
+    expect(saved.status).toBe("saved");
+    if (saved.status !== "saved") return;
+
+    const restored = await service.restoreBackup(backup, saved.snapshot.revision);
+    expect(restored.revision).toBe(backup.snapshot.revision);
+    expect(await readFile(configPath, "utf8")).toBe(SOURCE);
+  });
+
+  test("restores a missing-file backup after creating models.json", async () => {
+    const backup = await service.createBackup();
+    const saved = await service.saveConfig({
+      expectedRevision: backup.snapshot.revision,
+      providers: [
+        {
+          key: "temporary",
+          config: { api: "openai-responses", baseUrl: "https://example.test" },
+          headers: [],
+          models: [],
+          modelOverrides: [],
+        },
+      ],
+    });
+    expect(saved.status).toBe("saved");
+    if (saved.status !== "saved") return;
+
+    const restored = await service.restoreBackup(backup, saved.snapshot.revision);
+    expect(restored.sourceState).toBe("missing");
+    await expect(lstat(configPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   test("rejects malformed nested IPC drafts before filesystem work", async () => {
     await expect(
       service.saveConfig({

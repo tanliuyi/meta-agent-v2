@@ -43,6 +43,7 @@ describe("extensions IPC", () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       { requestClose: vi.fn(), setDirty: vi.fn(), remove: vi.fn() } as never,
       { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
       undefined,

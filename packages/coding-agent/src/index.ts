@@ -186,6 +186,7 @@ export {
 	formatModelsConfigDiagnostics,
 	getModelsConfigMetadata,
 	type ModelsAnthropicMessagesCompat,
+	type ModelsBuiltInModelMetadata,
 	type ModelsChatTemplateKwarg,
 	type ModelsCompat,
 	type ModelsCompatWithoutFreeMaps,

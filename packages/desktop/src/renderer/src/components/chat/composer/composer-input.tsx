@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import type { SlashCommand } from "../../../../../shared/contracts.ts";
+import { ComposerDirectiveChip } from "../../assistant-ui/composer-directive-chip.tsx";
 import { ComposerCommandTrigger } from "./composer-command-trigger.tsx";
 import { ComposerFileTrigger } from "./composer-file-trigger.tsx";
 
@@ -180,6 +181,7 @@ export function ComposerInput({
         className="caret-primary text-foreground max-h-32 min-h-10 w-full bg-transparent px-2.5 py-1 text-sm leading-relaxed outline-none [&_.aui-lexical-input]:min-h-8 [&_.aui-lexical-input]:outline-none"
         submitMode="none"
         cancelOnEscape={false}
+        directiveChip={ComposerDirectiveChip}
         onKeyDownCapture={handleInputKeyDown}
         onPasteCapture={handleInputPaste}
         placeholder={

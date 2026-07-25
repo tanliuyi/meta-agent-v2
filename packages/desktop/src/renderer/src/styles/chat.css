@@ -156,10 +156,8 @@
 }
 .tool-scroll-area {
   max-height: min(360px, 45vh);
+  overflow-y: auto;
   border-top: 1px solid hsl(var(--foreground) / 0.07);
-}
-.tool-scroll-area [data-radix-scroll-area-viewport] {
-  max-height: min(360px, 45vh);
 }
 .tool-body {
   display: flex;
@@ -271,7 +269,7 @@
 .aui-lexical-editor .aui-directive-chip {
   display: inline-flex;
   align-items: center;
-  margin: 0 2px;
+  margin: 0;
   padding: 2px 6px;
   border-radius: var(--shape-radius-xs);
   background: hsl(var(--primary) / 0.1);

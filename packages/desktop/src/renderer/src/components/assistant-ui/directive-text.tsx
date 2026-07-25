@@ -9,6 +9,11 @@ import { memo } from "react";
 
 const LEGACY_PI_FILE_REFERENCE_RE = /(^|\s)@([^\s@]+)/gu;
 
+export function directiveDisplayLabel(type: string, label: string): string {
+  if (type !== "file") return label;
+  return label.split(/[\\/]/u).filter(Boolean).at(-1) ?? label;
+}
+
 function parseLegacyPiFileReferences(text: string): Unstable_DirectiveSegment[] {
   const segments: Unstable_DirectiveSegment[] = [];
   let lastIndex = 0;
@@ -48,16 +53,17 @@ export const DirectiveText: TextMessagePartComponent = memo(function DirectiveTe
           );
         }
 
+        const displayLabel = directiveDisplayLabel(segment.type, segment.label);
         return (
           <span
             key={index}
             data-slot="directive-text-chip"
             data-directive-type={segment.type}
             data-directive-id={segment.id}
-            aria-label={`${segment.type}: ${segment.label}`}
-            className="aui-directive-chip inline-flex items-baseline gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[13px] leading-none text-primary [&_svg]:size-3 [&_svg]:shrink-0 [&_svg]:self-center"
+            aria-label={`${segment.type}: ${displayLabel}`}
+            className="aui-directive-chip mx-0.5 inline-flex items-baseline gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-[13px] leading-none text-primary [&_svg]:size-3 [&_svg]:shrink-0 [&_svg]:self-center"
           >
-            {segment.label}
+            {displayLabel}
           </span>
         );
       })}

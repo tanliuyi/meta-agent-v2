@@ -123,7 +123,7 @@
 
     --layout-window-header-height: 2.5rem;
     --layout-window-control-width: 2.875rem;
-    --layout-topbar-height: 2.8rem;
+    --layout-topbar-height: 2.3rem;
     --layout-sidebar-width: 17.5rem;
     --layout-sidebar-min-width: 13.75rem;
     --layout-sidebar-max-width: 26.25rem;
@@ -192,6 +192,7 @@
     --composer-queue-shadow: 0 -0.5rem 1.5rem rgb(0 0 0 / 0.035);
     --selection-background: hsl(var(--primary) / 0.14);
     --scrollbar-thumb: hsl(var(--foreground) / 0.18);
+    --scrollbar-thumb-hover: hsl(var(--foreground) / 0.3);
     --elevation-popover: 0 0.625rem 1.875rem hsl(var(--foreground) / 0.12);
     --elevation-workbench: -0.75rem 0 1.875rem hsl(var(--foreground) / 0.08);
     --elevation-composer: 0 0.25rem 1rem -0.5rem rgb(0 0 0 / 0.08), 0 0.0625rem 0.125rem rgb(0 0 0 / 0.04);
@@ -247,6 +248,7 @@
     --composer-queue-shadow: 0 -0.5rem 1.5rem rgb(0 0 0 / 0.035);
     --selection-background: hsl(var(--primary) / 0.18);
     --scrollbar-thumb: hsl(var(--foreground) / 0.24);
+    --scrollbar-thumb-hover: hsl(var(--foreground) / 0.38);
     --elevation-popover: 0 0.75rem 2rem rgb(0 0 0 / 0.42);
     --elevation-workbench: -0.75rem 0 1.875rem rgb(0 0 0 / 0.3);
     --elevation-composer: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.3);

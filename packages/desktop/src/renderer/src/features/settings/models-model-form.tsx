@@ -19,97 +19,100 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
   const updateConfig = (next: ModelsModelDraft["config"]) => onChange({ ...model, config: next });
   return (
     <div className="models-entity-form">
-      <div className="models-form-grid">
-        <label>
-          <span>Model ID</span>
-          <Input
-            value={model.config.id}
-            onChange={(event) => updateConfig({ ...model.config, id: event.target.value })}
-          />
-        </label>
-        <label>
-          <span>显示名称</span>
-          <Input
-            value={model.config.name ?? ""}
-            onChange={(event) => updateConfig(setOptional(model.config, "name", event.target.value))}
-          />
-        </label>
-        <label>
-          <span>API</span>
-          <div className="models-combo-row">
+      <fieldset className="models-fieldset models-model-basics">
+        <legend>基础配置</legend>
+        <div className="models-form-grid">
+          <label>
+            <span>模型 ID</span>
             <Input
-              value={model.config.api ?? ""}
-              onChange={(event) => updateConfig(setOptional(model.config, "api", event.target.value))}
+              value={model.config.id}
+              onChange={(event) => updateConfig({ ...model.config, id: event.target.value })}
             />
+          </label>
+          <label>
+            <span>显示名称</span>
+            <Input
+              value={model.config.name ?? ""}
+              onChange={(event) => updateConfig(setOptional(model.config, "name", event.target.value))}
+            />
+          </label>
+          <label>
+            <span>API 类型</span>
+            <div className="models-combo-row">
+              <Input
+                value={model.config.api ?? ""}
+                onChange={(event) => updateConfig(setOptional(model.config, "api", event.target.value))}
+              />
+              <Select
+                className="models-select models-suggestion-select"
+                value={metadata.knownApis.includes(model.config.api ?? "") ? model.config.api! : "custom"}
+                onValueChange={(nextValue) => {
+                  if (nextValue !== "custom") updateConfig({ ...model.config, api: nextValue });
+                }}
+                options={[
+                  { value: "custom", label: "自定义" },
+                  ...metadata.knownApis.map((api) => ({ value: api, label: api })),
+                ]}
+              />
+            </div>
+          </label>
+          <label>
+            <span>Base URL</span>
+            <Input
+              value={model.config.baseUrl ?? ""}
+              onChange={(event) => updateConfig(setOptional(model.config, "baseUrl", event.target.value))}
+            />
+          </label>
+          <label>
+            <span>上下文窗口</span>
+            <Input
+              type="number"
+              min="1"
+              value={model.config.contextWindow ?? ""}
+              onChange={(event) => updateConfig(setOptionalNumber(model.config, "contextWindow", event.target.value))}
+            />
+          </label>
+          <label>
+            <span>最大输出 tokens</span>
+            <Input
+              type="number"
+              min="1"
+              value={model.config.maxTokens ?? ""}
+              onChange={(event) => updateConfig(setOptionalNumber(model.config, "maxTokens", event.target.value))}
+            />
+          </label>
+          <label>
+            <span>推理能力</span>
             <Select
-              className="models-select models-suggestion-select"
-              value={metadata.knownApis.includes(model.config.api ?? "") ? model.config.api! : "custom"}
-              onValueChange={(nextValue) => {
-                if (nextValue !== "custom") updateConfig({ ...model.config, api: nextValue });
-              }}
+              className="models-select"
+              value={model.config.reasoning === undefined ? "unset" : String(model.config.reasoning)}
+              onValueChange={(nextValue) => updateConfig(setOptionalBoolean(model.config, "reasoning", nextValue))}
               options={[
-                { value: "custom", label: "自定义" },
-                ...metadata.knownApis.map((api) => ({ value: api, label: api })),
+                { value: "unset", label: "继承 / 默认" },
+                { value: "true", label: "true" },
+                { value: "false", label: "false" },
               ]}
             />
-          </div>
-        </label>
-        <label>
-          <span>Base URL</span>
-          <Input
-            value={model.config.baseUrl ?? ""}
-            onChange={(event) => updateConfig(setOptional(model.config, "baseUrl", event.target.value))}
-          />
-        </label>
-        <label>
-          <span>Context window</span>
-          <Input
-            type="number"
-            min="1"
-            value={model.config.contextWindow ?? ""}
-            onChange={(event) => updateConfig(setOptionalNumber(model.config, "contextWindow", event.target.value))}
-          />
-        </label>
-        <label>
-          <span>Max tokens</span>
-          <Input
-            type="number"
-            min="1"
-            value={model.config.maxTokens ?? ""}
-            onChange={(event) => updateConfig(setOptionalNumber(model.config, "maxTokens", event.target.value))}
-          />
-        </label>
-        <label>
-          <span>Reasoning</span>
-          <Select
-            className="models-select"
-            value={model.config.reasoning === undefined ? "unset" : String(model.config.reasoning)}
-            onValueChange={(nextValue) => updateConfig(setOptionalBoolean(model.config, "reasoning", nextValue))}
-            options={[
-              { value: "unset", label: "继承 / 默认" },
-              { value: "true", label: "true" },
-              { value: "false", label: "false" },
-            ]}
-          />
-        </label>
-        <fieldset className="models-inline-fieldset">
-          <legend>输入</legend>
-          {(["text", "image"] as const).map((kind) => (
-            <label className="models-inline-checkbox" key={kind}>
-              <Checkbox
-                checked={model.config.input?.includes(kind) ?? false}
-                onCheckedChange={(checked) => {
-                  const input = new Set(model.config.input ?? []);
-                  if (checked === true) input.add(kind);
-                  else input.delete(kind);
-                  updateConfig({ ...model.config, input: input.size > 0 ? [...input] : undefined });
-                }}
-              />
-              {kind}
-            </label>
-          ))}
-        </fieldset>
-      </div>
+          </label>
+          <fieldset className="models-inline-fieldset">
+            <legend>输入类型</legend>
+            {(["text", "image"] as const).map((kind) => (
+              <label className="models-inline-checkbox" key={kind}>
+                <Checkbox
+                  checked={model.config.input?.includes(kind) ?? false}
+                  onCheckedChange={(checked) => {
+                    const input = new Set(model.config.input ?? []);
+                    if (checked === true) input.add(kind);
+                    else input.delete(kind);
+                    updateConfig({ ...model.config, input: input.size > 0 ? [...input] : undefined });
+                  }}
+                />
+                {kind}
+              </label>
+            ))}
+          </fieldset>
+        </div>
+      </fieldset>
       <ModelsThinkingMapEditor
         value={model.config.thinkingLevelMap as ModelsThinkingMapValue | undefined}
         onChange={(thinkingLevelMap) => updateConfig({ ...model.config, thinkingLevelMap })}
@@ -119,11 +122,7 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
         requireBaseRates
         onChange={(cost) => updateConfig({ ...model.config, cost: cost as ModelsModelDraft["config"]["cost"] })}
       />
-      <ModelsMapEditor
-        label="Model headers"
-        entries={model.headers}
-        onChange={(headers) => onChange({ ...model, headers })}
-      />
+      <ModelsMapEditor label="请求头" entries={model.headers} onChange={(headers) => onChange({ ...model, headers })} />
       <ModelsCompatEditor value={model.compat} onChange={(compat) => onChange({ ...model, compat })} />
     </div>
   );

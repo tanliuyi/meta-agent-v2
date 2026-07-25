@@ -4,6 +4,8 @@ import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promise
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { findEnvKeys } from "@earendil-works/pi-ai/compat";
+import { getOAuthProviders, type OAuthLoginCallbacks } from "@earendil-works/pi-ai/oauth";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { getModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
 import { applyEdits, type FormattingOptions, modify, type ParseError, parse } from "jsonc-parser";
 import lockfile from "proper-lockfile";
@@ -85,6 +87,16 @@ export class AuthConfigService {
       () => undefined,
     );
     return operation;
+  }
+
+  async loginOauth(providerId: string, callbacks: OAuthLoginCallbacks): Promise<AuthConfigSnapshot> {
+    const current = await this.readCurrent();
+    if (current.sourceState === "invalid") {
+      throw new Error("Cannot update OAuth credentials while auth.json is invalid");
+    }
+    const storage = AuthStorage.create(this.path);
+    await storage.login(providerId, callbacks);
+    return this.getConfig();
   }
 
   private async saveConfigLocked(input: SaveAuthConfigInput): Promise<SaveAuthConfigResult> {
@@ -390,12 +402,16 @@ function validateAuthFileData(value: Record<string, unknown>): AuthConfigDiagnos
       continue;
     }
     if (rawEntry.type === "oauth") {
-      if (typeof rawEntry.accessToken !== "string" || typeof rawEntry.expires !== "number") {
+      if (
+        typeof rawEntry.access !== "string" ||
+        typeof rawEntry.refresh !== "string" ||
+        typeof rawEntry.expires !== "number"
+      ) {
         diagnostics.push({
           severity: "error",
           code: "schema.oauth",
           path,
-          message: "OAuth credential 缺少有效的 accessToken 或 expires。",
+          message: "OAuth credential 缺少有效的 access、refresh 或 expires。",
         });
       }
       continue;
@@ -457,18 +473,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function knownProviders(): AuthProviderInfo[] {
   try {
     const metadata = getModelsConfigMetadata();
-    const providers = metadata.builtInProviders.map((provider) => {
+    const oauthProviders = getOAuthProviders();
+    const providers: AuthProviderInfo[] = metadata.builtInProviders.map((provider) => {
       const envKeys = findEnvKeys(provider.id) ?? [];
+      const oauth = oauthProviders.find((candidate) => candidate.id === provider.id);
       return {
         id: provider.id,
         displayName: provider.displayName,
         envKeys,
+        ...(oauth ? { oauth: { name: oauth.name } } : {}),
       };
     });
-    // Append desktop built-in providers
     for (const desktop of DesktopBuiltinProviderRegistry.getKnownProviderInfos()) {
-      if (!providers.some((p) => p.id === desktop.id)) {
-        providers.push(desktop);
+      if (!providers.some((provider) => provider.id === desktop.id)) providers.push(desktop);
+    }
+    for (const oauth of oauthProviders) {
+      if (!providers.some((provider) => provider.id === oauth.id)) {
+        providers.push({ id: oauth.id, displayName: oauth.name, envKeys: [], oauth: { name: oauth.name } });
       }
     }
     return providers;

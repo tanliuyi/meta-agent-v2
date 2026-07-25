@@ -25,7 +25,7 @@ export function ModelsThinkingMapEditor({ value, onChange }: ModelsThinkingMapEd
   if (!value) {
     return (
       <div className="models-optional-editor">
-        <span>Thinking level map</span>
+        <span>思考等级映射</span>
         <Button size="sm" variant="outline" onClick={() => onChange({})}>
           <Plus />
           配置映射
@@ -36,7 +36,7 @@ export function ModelsThinkingMapEditor({ value, onChange }: ModelsThinkingMapEd
 
   return (
     <fieldset className="models-fieldset">
-      <legend>Thinking level map</legend>
+      <legend>思考等级映射</legend>
       <div className="models-thinking-grid">
         {LEVELS.map((level) => {
           const current = value[level];

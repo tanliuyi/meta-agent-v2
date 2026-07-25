@@ -12,12 +12,16 @@
  */
 
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
-import { getModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
+import { getModelsConfigMetadata, type ModelsModelDefinition } from "@earendil-works/pi-coding-agent/models-config";
 import type { AuthProviderInfo } from "../../shared/auth-config-contracts.ts";
 import {
   DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
   type DesktopExtensionDefinition,
 } from "../../shared/desktop-extension-contracts.ts";
+import type {
+  ProviderBuiltInModelMetadata,
+  ProviderConnectionDefaults,
+} from "../../shared/providers-config-contracts.ts";
 import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
 import subagentsExtension from "./extensions/pi-subagents/index.ts";
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
@@ -25,6 +29,8 @@ import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/suba
 interface DesktopProviderDefinition {
   displayName: string;
   envKeys: string[];
+  defaultConfig: ProviderConnectionDefaults;
+  models: ModelsModelDefinition[];
   extensionFactory: InlineExtension;
 }
 
@@ -138,6 +144,27 @@ export const DesktopBuiltinProviderRegistry = {
       envKeys: provider.envKeys,
     }));
   },
+
+  /** Generate serializable provider metadata for the unified settings editor. */
+  getProviderInfos(): Array<
+    AuthProviderInfo & {
+      defaultConfig: ProviderConnectionDefaults;
+      models: ProviderBuiltInModelMetadata[];
+    }
+  > {
+    return [...providers].map(([id, provider]) => ({
+      id,
+      displayName: provider.displayName,
+      envKeys: provider.envKeys,
+      defaultConfig: provider.defaultConfig,
+      models: provider.models.map((model) => ({
+        ...structuredClone(model),
+        name: model.name ?? model.id,
+        api: model.api ?? provider.defaultConfig.api ?? "",
+        baseUrl: model.baseUrl ?? provider.defaultConfig.baseUrl,
+      })),
+    }));
+  },
 };
 
 // =============================================================================
@@ -148,10 +175,102 @@ const META_AGENT_ID = "meta-agent";
 const META_AGENT_DISPLAY_NAME = "Meta Agent Provider";
 const META_AGENT_BASE_URL = "http://[fd7a:115c:a1e0::7c3b:e60b]:8080";
 const META_AGENT_ENV_KEYS = ["META_AGENT_API_KEY"];
+const META_AGENT_MODELS = [
+  {
+    id: "gpt-5.3-codex-spark",
+    name: "GPT-5.3 Codex Spark",
+    api: "openai-responses",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
+    input: ["text"],
+    cost: { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 128000,
+  },
+  {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    api: "openai-responses",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+    compat: { supportsToolSearch: true },
+  },
+  {
+    id: "gpt-5.4-mini",
+    name: "GPT-5.4 mini",
+    api: "openai-responses",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+    compat: { supportsToolSearch: true },
+  },
+  {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    api: "openai-responses",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 272000,
+    maxTokens: 128000,
+    compat: { supportsToolSearch: true },
+  },
+  {
+    id: "gpt-5.6-luna",
+    name: "GPT-5.6 Luna",
+    api: "openai-responses",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 },
+    contextWindow: 372000,
+    maxTokens: 128000,
+    compat: { supportsToolSearch: true },
+  },
+  {
+    id: "gpt-5.6-sol",
+    name: "GPT-5.6 Sol",
+    api: "openai-responses",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+    contextWindow: 372000,
+    maxTokens: 128000,
+    compat: { supportsToolSearch: true },
+  },
+  {
+    id: "gpt-5.6-terra",
+    name: "GPT-5.6 Terra",
+    api: "openai-responses",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
+    contextWindow: 372000,
+    maxTokens: 128000,
+    compat: { supportsToolSearch: true },
+  },
+] satisfies ModelsModelDefinition[];
 
 DesktopBuiltinProviderRegistry.register(META_AGENT_ID, {
   displayName: META_AGENT_DISPLAY_NAME,
   envKeys: META_AGENT_ENV_KEYS,
+  defaultConfig: {
+    name: META_AGENT_DISPLAY_NAME,
+    api: "openai-responses",
+    baseUrl: META_AGENT_BASE_URL,
+    authHeader: true,
+  },
+  models: META_AGENT_MODELS,
   extensionFactory: {
     name: `desktop:${META_AGENT_ID}`,
     factory: (api) => {
@@ -164,91 +283,7 @@ DesktopBuiltinProviderRegistry.register(META_AGENT_ID, {
         // satisfies validation without requiring the env var itself.
         apiKey: `$${META_AGENT_ENV_KEYS[0]}`,
         authHeader: true,
-        models: [
-          {
-            id: "gpt-5.3-codex-spark",
-            name: "GPT-5.3 Codex Spark",
-            api: "openai-responses",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-            input: ["text"],
-            cost: { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 0 },
-            contextWindow: 128000,
-            maxTokens: 128000,
-          },
-          {
-            id: "gpt-5.4",
-            name: "GPT-5.4",
-            api: "openai-responses",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-            input: ["text", "image"],
-            cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 },
-            contextWindow: 272000,
-            maxTokens: 128000,
-            compat: { supportsToolSearch: true },
-          },
-          {
-            id: "gpt-5.4-mini",
-            name: "GPT-5.4 mini",
-            api: "openai-responses",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-            input: ["text", "image"],
-            cost: { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 },
-            contextWindow: 272000,
-            maxTokens: 128000,
-            compat: { supportsToolSearch: true },
-          },
-          {
-            id: "gpt-5.5",
-            name: "GPT-5.5",
-            api: "openai-responses",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-            input: ["text", "image"],
-            cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
-            contextWindow: 272000,
-            maxTokens: 128000,
-            compat: { supportsToolSearch: true },
-          },
-          {
-            id: "gpt-5.6-luna",
-            name: "GPT-5.6 Luna",
-            api: "openai-responses",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
-            input: ["text", "image"],
-            cost: { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 },
-            contextWindow: 372000,
-            maxTokens: 128000,
-            compat: { supportsToolSearch: true },
-          },
-          {
-            id: "gpt-5.6-sol",
-            name: "GPT-5.6 Sol",
-            api: "openai-responses",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
-            input: ["text", "image"],
-            cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
-            contextWindow: 372000,
-            maxTokens: 128000,
-            compat: { supportsToolSearch: true },
-          },
-          {
-            id: "gpt-5.6-terra",
-            name: "GPT-5.6 Terra",
-            api: "openai-responses",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "xhigh", max: "max", minimal: "low" },
-            input: ["text", "image"],
-            cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
-            contextWindow: 372000,
-            maxTokens: 128000,
-            compat: { supportsToolSearch: true },
-          },
-        ],
+        models: META_AGENT_MODELS,
       });
     },
   },

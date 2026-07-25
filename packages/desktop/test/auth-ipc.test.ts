@@ -6,6 +6,7 @@ const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, (...args: unknown[]) => unknown>(),
   openPath: vi.fn(),
+  openExternal: vi.fn(),
   owner: { close: vi.fn() },
 }));
 
@@ -19,7 +20,7 @@ vi.mock("electron", () => ({
     handle: (channel: string, listener: (...args: unknown[]) => unknown) => electron.handles.set(channel, listener),
     on: (channel: string, listener: (...args: unknown[]) => unknown) => electron.listeners.set(channel, listener),
   },
-  shell: { openExternal: vi.fn(), openPath: electron.openPath },
+  shell: { openExternal: electron.openExternal, openPath: electron.openPath },
 }));
 
 describe("auth IPC", () => {
@@ -28,6 +29,7 @@ describe("auth IPC", () => {
     getConfigRevision: vi.fn(),
     saveConfig: vi.fn(),
     getExternalOpenTarget: vi.fn(),
+    loginOauth: vi.fn(),
   };
   const models = {
     getConfig: vi.fn(),
@@ -57,6 +59,7 @@ describe("auth IPC", () => {
       models as never,
       auth as never,
       {} as never,
+      {} as never,
       dirtyGuard as never,
       { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
     );
@@ -82,6 +85,30 @@ describe("auth IPC", () => {
     expect(auth.saveConfig).toHaveBeenCalledWith(input);
     expect(auth.getExternalOpenTarget).toHaveBeenCalledWith();
     expect(electron.openPath).toHaveBeenCalledWith("/agent/auth.json");
+  });
+
+  test("forwards OAuth login events to the requesting renderer", async () => {
+    const snapshot = { revision: "oauth", providers: [], knownProviders: [] };
+    auth.loginOauth.mockImplementation(async (_providerId, callbacks) => {
+      callbacks.onProgress("Waiting");
+      return snapshot;
+    });
+    const sender = {
+      id: 9,
+      once: vi.fn(),
+      isDestroyed: () => false,
+      send: vi.fn(),
+    };
+
+    await expect(
+      electron.handles.get(CHANNELS.authOauthLogin)?.({ sender }, { loginId: "login-1", providerId: "anthropic" }),
+    ).resolves.toBe(snapshot);
+
+    expect(sender.send).toHaveBeenCalledWith(CHANNELS.authOauthEvent, {
+      loginId: "login-1",
+      type: "progress",
+      message: "Waiting",
+    });
   });
 
   test("sets dirty synchronously and clears sender state on destruction", () => {

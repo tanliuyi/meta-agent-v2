@@ -13,6 +13,7 @@ import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, registerIpc } from "./ipc.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
+import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
 import { NodeRuntimeInstaller } from "./sidecar/node-runtime-installer.ts";
@@ -215,6 +216,7 @@ app.whenReady().then(async () => {
   });
   sessions = supervisor;
   terminals = new TerminalSupervisor(projects, broadcastTerminalEvent);
+  const providers = new ProvidersConfigService(models, auth);
   registerIpc(
     projects,
     sessions,
@@ -222,6 +224,7 @@ app.whenReady().then(async () => {
     terminals,
     models,
     auth,
+    providers,
     settings,
     dirtyGuard,
     {

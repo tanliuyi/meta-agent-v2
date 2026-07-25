@@ -1,4 +1,4 @@
-import { type Api, type BuiltinProvider, getModels, getProviders } from "@earendil-works/pi-ai/compat";
+import { type Api, type BuiltinProvider, getModels, getProviders, type Model } from "@earendil-works/pi-ai/compat";
 import { getLocation, type ParseError, parse, printParseErrorCode } from "jsonc-parser";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
@@ -223,12 +223,23 @@ export type ModelsConfigValidationResult =
 
 export type ModelsConfigParseResult = ModelsConfigValidationResult;
 
+export type ModelsBuiltInModelMetadata = ModelsModelDefinition & {
+	id: string;
+	name: string;
+	api: string;
+};
+
 export interface ModelsConfigMetadata {
 	knownApis: string[];
 	builtInProviders: Array<{
 		id: string;
 		displayName: string;
-		models: Array<{ id: string; name: string; api: string }>;
+		defaultConfig?: {
+			name?: string;
+			baseUrl?: string;
+			api?: string;
+		};
+		models: ModelsBuiltInModelMetadata[];
 	}>;
 }
 
@@ -270,21 +281,31 @@ export function validateModelsConfigValue(value: unknown, path = "models.json"):
 }
 
 export function getModelsConfigMetadata(): ModelsConfigMetadata {
-	const builtInProviders = getProviders().map((provider) => ({
-		id: provider,
-		displayName: BUILT_IN_PROVIDER_DISPLAY_NAMES[provider] ?? provider,
-		models: (getModels(provider as BuiltinProvider) as Array<{ id: string; name: string; api: Api }>).map(
-			(model) => ({
-				id: model.id,
-				name: model.name,
-				api: model.api,
-			}),
-		),
-	}));
+	const builtInProviders = getProviders().map((provider) => {
+		const displayName = BUILT_IN_PROVIDER_DISPLAY_NAMES[provider] ?? provider;
+		const models = getModels(provider as BuiltinProvider).map(toBuiltInModelMetadata);
+		const baseUrls = new Set(models.map((model) => model.baseUrl));
+		const apis = new Set(models.map((model) => model.api));
+		return {
+			id: provider,
+			displayName,
+			defaultConfig: {
+				name: displayName,
+				baseUrl: baseUrls.size === 1 ? models[0]?.baseUrl : undefined,
+				api: apis.size === 1 ? models[0]?.api : undefined,
+			},
+			models,
+		};
+	});
 	const knownApis = [
 		...new Set(builtInProviders.flatMap((provider) => provider.models.map((model) => model.api))),
 	].sort();
 	return { knownApis, builtInProviders };
+}
+
+function toBuiltInModelMetadata(model: Model<Api>): ModelsBuiltInModelMetadata {
+	const { provider: _provider, ...definition } = structuredClone(model);
+	return definition;
 }
 
 export function formatModelsConfigDiagnostics(diagnostics: readonly ModelsConfigDiagnostic[]): string {

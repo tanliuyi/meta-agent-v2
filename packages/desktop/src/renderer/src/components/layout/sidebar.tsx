@@ -1,6 +1,5 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import { Button } from "@renderer/shared/ui/button";
-import { ScrollArea } from "@renderer/shared/ui/scroll-area";
 import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Settings from "lucide-react/dist/esm/icons/settings.mjs";
@@ -111,9 +110,9 @@ export const Sidebar = memo(function Sidebar() {
             <Plus />
           </TooltipIconButton>
         </div>
-        <ScrollArea className="sidebar-projects">
+        <div className="sidebar-projects">
           <ProjectList activeProjectId={activeProjectId} newTaskDisabled={draftMaterializing} onNewTask={startDraft} />
-        </ScrollArea>
+        </div>
 
         <div className="sidebar-footer">
           <UpdateBanner />

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { AuthOauthLoginEvent } from "../shared/auth-config-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   SessionAttachInput,
@@ -10,6 +11,7 @@ import type {
   TerminalEvent,
 } from "../shared/contracts.ts";
 import type { DesktopApi, DesktopPlatform, NodeRuntimeProgress } from "../shared/desktop-api.ts";
+import type { SaveProvidersInput, SaveProvidersResult } from "../shared/providers-config-contracts.ts";
 import type { UpdaterState } from "../shared/updater-contracts.ts";
 
 interface ActiveSessionAttachment {
@@ -166,6 +168,21 @@ const desktopApi: DesktopApi = {
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.authSaveConfig, input),
     openConfigExternally: () => ipcRenderer.invoke(CHANNELS.authOpenConfigExternally),
     setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.authSetEditorDirty, dirty) === true,
+    loginOauth: (input) => ipcRenderer.invoke(CHANNELS.authOauthLogin, input),
+    respondToOauth: (response) => ipcRenderer.invoke(CHANNELS.authOauthRespond, response),
+    cancelOauth: (loginId) => ipcRenderer.invoke(CHANNELS.authOauthCancel, loginId),
+    onOauthEvent(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, oauthEvent: AuthOauthLoginEvent) => listener(oauthEvent);
+      ipcRenderer.on(CHANNELS.authOauthEvent, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.authOauthEvent, handler);
+    },
+  },
+  providers: {
+    getConfig: () => ipcRenderer.invoke(CHANNELS.providersGetConfig),
+    saveConfig: (input: SaveProvidersInput) =>
+      ipcRenderer.invoke(CHANNELS.providersSaveConfig, input) as Promise<SaveProvidersResult>,
+    openConfigExternally: () => ipcRenderer.invoke(CHANNELS.providersOpenConfigExternally),
+    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.providersSetEditorDirty, dirty) === true,
   },
   settings: {
     getConfig: () => ipcRenderer.invoke(CHANNELS.settingsGetConfig),

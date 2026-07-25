@@ -4,6 +4,8 @@ import { describe, expect, test, vi } from "vitest";
 import { ModelsCompatEditor } from "../src/renderer/src/features/settings/models-compat-editor.tsx";
 import { ModelsProviderForm } from "../src/renderer/src/features/settings/models-provider-form.tsx";
 import { createProviderDraft } from "../src/renderer/src/features/settings/models-settings-model.ts";
+import { ProviderBuiltInModelDetail } from "../src/renderer/src/features/settings/provider-built-in-model-detail.tsx";
+import { ProviderCredentialsForm } from "../src/renderer/src/features/settings/provider-credentials-form.tsx";
 
 const metadata = {
   knownApis: ["openai-completions", "anthropic-messages"],
@@ -25,6 +27,58 @@ describe("models settings components", () => {
     );
     expect(markup).toContain('type="password"');
     expect(markup).toContain('value="!printf raw-command"');
+  });
+
+  test("offers OAuth login for a supported built-in provider", () => {
+    const markup = renderToStaticMarkup(
+      <ProviderCredentialsForm
+        entryKey="anthropic"
+        knownProvider={{
+          id: "anthropic",
+          displayName: "Anthropic",
+          envKeys: ["ANTHROPIC_API_KEY"],
+          oauth: { name: "Anthropic" },
+        }}
+        oauthDisabled={false}
+        onChange={vi.fn()}
+        onDelete={vi.fn()}
+        onOauthLogin={vi.fn()}
+      />,
+    );
+    expect(markup).toContain("使用 OAuth 登录");
+  });
+
+  test("renders complete built-in model metadata", () => {
+    const markup = renderToStaticMarkup(
+      <ProviderBuiltInModelDetail
+        model={{
+          id: "catalog-model",
+          name: "Catalog Model",
+          api: "openai-responses",
+          baseUrl: "https://models.example.test/v1",
+          reasoning: true,
+          thinkingLevelMap: { high: "high" },
+          input: ["text", "image"],
+          cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
+          contextWindow: 128000,
+          maxTokens: 32000,
+          headers: { "x-catalog": "enabled" },
+          compat: { supportsToolSearch: true },
+        }}
+      />,
+    );
+    for (const value of [
+      "Catalog Model",
+      "catalog-model",
+      "openai-responses",
+      "https://models.example.test/v1",
+      "128,000",
+      "思考等级映射",
+      "x-catalog",
+      "supportsToolSearch",
+    ]) {
+      expect(markup).toContain(value);
+    }
   });
 
   test("renders every current compat control and structured routing editors", () => {

@@ -199,9 +199,6 @@ export function AuthSettingsPage() {
                     <span className="auth-provider-row-name">{displayName || provider.key}</span>
                     <span className="auth-provider-row-meta">
                       {provider.key}
-                      {provider.apiKey?.key ? (
-                        <span className="auth-provider-row-preview">{maskApiKey(provider.apiKey.key)}</span>
-                      ) : null}
                       <span className={`auth-type-badge auth-type-badge--${typeInfo.variant}`}>{typeInfo.label}</span>
                       {source ? <span className="auth-source-badge">{source}</span> : null}
                     </span>
@@ -342,9 +339,7 @@ export function AuthSettingsPage() {
         title="放弃未保存的凭据配置？"
         description="离开此页面会丢失当前修改。"
         confirmLabel="放弃并离开"
-        onOpenChange={(open) => {
-          if (!open) controller.cancelRouteChange();
-        }}
+        onCancel={controller.cancelRouteChange}
         onConfirm={controller.discardAndProceed}
       />
     </div>

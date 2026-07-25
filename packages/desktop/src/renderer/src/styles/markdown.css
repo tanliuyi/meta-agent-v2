@@ -162,7 +162,7 @@
 .markdown-table td {
   padding: 6px 12px;
   text-align: left;
-  border: 1px solid hsl(var(--border));
+  border: none;
 }
 
 .markdown-table th {

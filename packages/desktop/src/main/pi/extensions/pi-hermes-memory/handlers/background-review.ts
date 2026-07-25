@@ -184,7 +184,7 @@ export function setupBackgroundReview(
 
     const notifyIfSaved = (saved: boolean) => {
       if (saved) {
-        ctx.ui.notify("💾 Memory auto-reviewed and updated", "info");
+        ctx.ui.notify("💾 记忆已自动审查并更新", "info");
       }
     };
 

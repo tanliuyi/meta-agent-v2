@@ -52,6 +52,7 @@ describe("updater IPC", () => {
       { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
       {} as never,
       {} as never,
+      {} as never,
       { getConfig: vi.fn(), saveConfig: vi.fn() } as never,
       dirtyGuard as never,
       { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },

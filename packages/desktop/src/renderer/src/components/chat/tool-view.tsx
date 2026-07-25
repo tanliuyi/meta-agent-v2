@@ -3,7 +3,6 @@ import { followResizingContentToBottom } from "@renderer/shared/lib/follow-resiz
 import { Collapsible } from "@renderer/shared/ui/collapsible";
 import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
 import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
-import { ScrollArea } from "@renderer/shared/ui/scroll-area";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import { useEffect, useRef, useState } from "react";
 import { ToolFileTarget } from "./tool-file-target.tsx";
@@ -87,7 +86,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
         </CollapsibleTrigger>
       </div>
       <CollapsibleContent className="data-closed:animate-collapsible-up data-open:animate-collapsible-down overflow-hidden data-closed:pointer-events-none data-closed:fill-mode-forwards motion-reduce:animate-none">
-        <ScrollArea className="tool-scroll-area" viewportRef={viewportRef}>
+        <div className="tool-scroll-area" ref={viewportRef}>
           <div ref={bodyRef} className="tool-body">
             <ToolContent
               name={toolName}
@@ -98,7 +97,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
               argsComplete={execution !== "streaming-args"}
             />
           </div>
-        </ScrollArea>
+        </div>
       </CollapsibleContent>
     </Collapsible>
   );

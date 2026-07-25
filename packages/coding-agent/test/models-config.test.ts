@@ -149,11 +149,22 @@ describe("models config metadata", () => {
 			expect.objectContaining({
 				id: expect.any(String),
 				displayName: expect.any(String),
+				defaultConfig: expect.objectContaining({ name: expect.any(String) }),
 				models: expect.any(Array),
 			}),
 		);
 		expect(first.builtInProviders.flatMap((provider) => provider.models)[0]).toEqual(
-			expect.objectContaining({ id: expect.any(String), name: expect.any(String), api: expect.any(String) }),
+			expect.objectContaining({
+				id: expect.any(String),
+				name: expect.any(String),
+				api: expect.any(String),
+				baseUrl: expect.any(String),
+				reasoning: expect.any(Boolean),
+				input: expect.any(Array),
+				cost: expect.any(Object),
+				contextWindow: expect.any(Number),
+				maxTokens: expect.any(Number),
+			}),
 		);
 	});
 });

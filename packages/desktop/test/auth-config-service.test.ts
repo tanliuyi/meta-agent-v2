@@ -10,8 +10,8 @@ const SOURCE_VALID = JSON.stringify(
     openai: { type: "api_key", key: "$OPENAI_API_KEY", env: { OPENAI_API_KEY: "sk-real-secret" } },
     "github-copilot": {
       type: "oauth",
-      accessToken: "gho_token",
-      refreshToken: "ghr_refresh",
+      access: "gho_token",
+      refresh: "ghr_refresh",
       expires: Date.now() + 86400000,
     },
   },
@@ -86,6 +86,7 @@ describe("AuthConfigService", () => {
     const anthropic = snapshot.knownProviders.find((kp) => kp.id === "anthropic");
     expect(anthropic).toBeDefined();
     expect(anthropic!.displayName).toBeTruthy();
+    expect(anthropic!.oauth?.name).toBeTruthy();
   });
 
   test("saves API key credentials and returns new snapshot", async () => {

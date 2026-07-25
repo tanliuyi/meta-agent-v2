@@ -145,21 +145,25 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
         entries={value.chatTemplateKwargs ?? []}
         onChange={(chatTemplateKwargs) => onChange({ ...value, chatTemplateKwargs })}
       />
-      <ModelsOpenRouterEditor
-        value={value.config.openRouterRouting}
-        onChange={(openRouterRouting) =>
-          updateConfig(setOptionalObject(value.config, "openRouterRouting", openRouterRouting))
-        }
-      />
-      <ModelsVercelRoutingEditor
-        value={value.config.vercelGatewayRouting}
-        onChange={(vercelGatewayRouting) =>
-          updateConfig(setOptionalObject(value.config, "vercelGatewayRouting", vercelGatewayRouting))
-        }
-      />
-      <Button size="sm" variant="ghost" onClick={() => onChange(undefined)}>
-        清除兼容性配置
-      </Button>
+      <div className="models-compat-routing">
+        <ModelsOpenRouterEditor
+          value={value.config.openRouterRouting}
+          onChange={(openRouterRouting) =>
+            updateConfig(setOptionalObject(value.config, "openRouterRouting", openRouterRouting))
+          }
+        />
+        <ModelsVercelRoutingEditor
+          value={value.config.vercelGatewayRouting}
+          onChange={(vercelGatewayRouting) =>
+            updateConfig(setOptionalObject(value.config, "vercelGatewayRouting", vercelGatewayRouting))
+          }
+        />
+      </div>
+      <div className="models-compat-footer">
+        <Button size="sm" variant="ghost" onClick={() => onChange(undefined)}>
+          清除兼容性配置
+        </Button>
+      </div>
     </fieldset>
   );
 }

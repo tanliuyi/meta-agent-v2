@@ -16,8 +16,8 @@ export interface AuthApiKeyCredential {
 // Mirror of @earendil-works/pi-coding-agent's OAuthCredential
 export interface AuthOAuthCredential {
   type: "oauth";
-  accessToken: string;
-  refreshToken?: string;
+  access: string;
+  refresh: string;
   expires?: number;
 }
 
@@ -64,6 +64,52 @@ export interface AuthProviderInfo {
   displayName: string;
   /** Environment variable names that can supply this provider's API key. */
   envKeys: string[];
+  /** OAuth login support registered for this provider. */
+  oauth?: {
+    name: string;
+  };
+}
+
+export interface AuthOauthLoginInput {
+  loginId: string;
+  providerId: string;
+}
+
+export type AuthOauthLoginEvent =
+  | {
+      loginId: string;
+      type: "auth";
+      url: string;
+      instructions?: string;
+    }
+  | {
+      loginId: string;
+      type: "device-code";
+      verificationUri: string;
+      userCode: string;
+      expiresInSeconds?: number;
+    }
+  | {
+      loginId: string;
+      type: "progress";
+      message: string;
+    }
+  | {
+      loginId: string;
+      type: "request";
+      requestId: string;
+      requestType: "prompt" | "manual-code" | "select";
+      message: string;
+      placeholder?: string;
+      allowEmpty?: boolean;
+      options?: Array<{ id: string; label: string }>;
+    };
+
+export interface AuthOauthLoginResponse {
+  loginId: string;
+  requestId: string;
+  value?: string;
+  canceled?: boolean;
 }
 
 export interface AuthConfigSnapshot {

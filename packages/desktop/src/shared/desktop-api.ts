@@ -1,4 +1,11 @@
-import type { AuthConfigSnapshot, SaveAuthConfigInput, SaveAuthConfigResult } from "./auth-config-contracts.ts";
+import type {
+  AuthConfigSnapshot,
+  AuthOauthLoginEvent,
+  AuthOauthLoginInput,
+  AuthOauthLoginResponse,
+  SaveAuthConfigInput,
+  SaveAuthConfigResult,
+} from "./auth-config-contracts.ts";
 import type {
   ClearedQueue,
   DraftSessionConfig,
@@ -33,6 +40,7 @@ import type {
   SaveDesktopExtensionSettingsResult,
 } from "./desktop-extension-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
+import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
 import type {
   SaveSettingsConfigInput,
   SaveSettingsConfigResult,
@@ -85,6 +93,16 @@ export interface DesktopApi {
     getConfig(): Promise<AuthConfigSnapshot>;
     getConfigRevision(): Promise<string>;
     saveConfig(input: SaveAuthConfigInput): Promise<SaveAuthConfigResult>;
+    openConfigExternally(): Promise<void>;
+    setEditorDirty(dirty: boolean): boolean;
+    loginOauth(input: AuthOauthLoginInput): Promise<AuthConfigSnapshot>;
+    respondToOauth(response: AuthOauthLoginResponse): Promise<void>;
+    cancelOauth(loginId: string): Promise<void>;
+    onOauthEvent(listener: (event: AuthOauthLoginEvent) => void): () => void;
+  };
+  providers: {
+    getConfig(): Promise<ProvidersSnapshot>;
+    saveConfig(input: SaveProvidersInput): Promise<SaveProvidersResult>;
     openConfigExternally(): Promise<void>;
     setEditorDirty(dirty: boolean): boolean;
   };

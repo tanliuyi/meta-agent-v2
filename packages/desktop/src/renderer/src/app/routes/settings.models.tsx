@@ -1,6 +1,6 @@
-import { ModelsSettingsPage } from "@renderer/features/settings/models-settings-page";
+import { ProvidersSettingsPage } from "@renderer/features/settings/providers-settings-page";
 import { createFileRoute } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/settings/models")({
-  component: ModelsSettingsPage,
+  component: ProvidersSettingsPage,
 });

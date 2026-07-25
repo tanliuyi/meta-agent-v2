@@ -4,7 +4,6 @@ import { Select } from "@renderer/components/assistant-ui/select/select";
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Input } from "@renderer/shared/ui/input";
-import { ScrollArea } from "@renderer/shared/ui/scroll-area";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useEffect, useState } from "react";
@@ -63,7 +62,7 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
           <Tabs.Trigger value="compat">兼容性</Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="connection" className="models-tab-content">
-          <ScrollArea className="models-tab-scroll">
+          <div className="models-tab-scroll">
             <div className="models-tab-scroll-content">
               <div className="models-form-grid">
                 <label>
@@ -155,7 +154,7 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                 onChange={(headers) => onChange({ ...provider, headers })}
               />
             </div>
-          </ScrollArea>
+          </div>
         </Tabs.Content>
         <Tabs.Content value="models" className="models-tab-content ">
           <div className="min-w-0 h-full flex flex-col p-(--space-6)">
@@ -196,7 +195,7 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                   </button>
                 ))}
               </div>
-              <ScrollArea className="models-entity-scroll">
+              <div className="models-entity-scroll">
                 <div className="models-entity-detail">
                   {provider.models[selectedModel] ? (
                     <>
@@ -220,7 +219,7 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                     <p className="models-empty-detail">添加模型后在此配置。</p>
                   )}
                 </div>
-              </ScrollArea>
+              </div>
             </div>
           </div>
         </Tabs.Content>
@@ -274,7 +273,7 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                   </button>
                 ))}
               </div>
-              <ScrollArea className="models-entity-scroll">
+              <div className="models-entity-scroll">
                 <div className="models-entity-detail">
                   {provider.modelOverrides[selectedOverride] ? (
                     <>
@@ -297,16 +296,16 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                     <p className="models-empty-detail">添加覆盖后在此配置。</p>
                   )}
                 </div>
-              </ScrollArea>
+              </div>
             </div>
           </div>
         </Tabs.Content>
         <Tabs.Content value="compat" className="models-tab-content">
-          <ScrollArea className="models-tab-scroll">
+          <div className="models-tab-scroll">
             <div className="models-tab-scroll-content">
               <ModelsCompatEditor value={provider.compat} onChange={(compat) => onChange({ ...provider, compat })} />
             </div>
-          </ScrollArea>
+          </div>
         </Tabs.Content>
       </Tabs.Root>
 

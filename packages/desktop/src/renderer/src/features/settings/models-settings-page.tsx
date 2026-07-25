@@ -302,9 +302,7 @@ export function ModelsSettingsPage() {
                     <span className="models-provider-row-name">
                       {provider.config.name || builtIn?.displayName || provider.key}
                     </span>
-                    <span className="models-provider-row-meta">
-                      {provider.key} · {provider.config.api || "未指定 API"} · {modelCount} 个模型
-                    </span>
+                    <span className="models-provider-row-meta">{modelCount} 个模型</span>
                     <Settings2 />
                   </button>
                 );
@@ -352,9 +350,7 @@ export function ModelsSettingsPage() {
         title="放弃未保存的模型配置？"
         description="离开此页面会丢失当前修改。"
         confirmLabel="放弃并离开"
-        onOpenChange={(open) => {
-          if (!open) controller.cancelRouteChange();
-        }}
+        onCancel={controller.cancelRouteChange}
         onConfirm={controller.discardAndProceed}
       />
       <ConfirmDialog
@@ -362,9 +358,7 @@ export function ModelsSettingsPage() {
         title="确认 JSONC 更新？"
         description={controller.pendingConfirmation?.message ?? "保存可能移动附属注释。"}
         confirmLabel="继续保存"
-        onOpenChange={(open) => {
-          if (!open) controller.cancelSaveConfirmation();
-        }}
+        onCancel={controller.cancelSaveConfirmation}
         onConfirm={() => void controller.confirmSave()}
       />
     </div>

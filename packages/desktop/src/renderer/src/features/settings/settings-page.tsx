@@ -3,10 +3,9 @@ import { useLayout } from "@renderer/state/layout";
 import { getSidebarMaxWidth, SIDEBAR_MIN_WIDTH } from "@renderer/state/layout-preference";
 import { settingsReturnSession } from "@renderer/state/settings-navigation";
 import { Link, Outlet, useSearch } from "@tanstack/react-router";
+import Antenna from "lucide-react/dist/esm/icons/antenna.mjs";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
-import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
-import Key from "lucide-react/dist/esm/icons/key.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Puzzle from "lucide-react/dist/esm/icons/puzzle.mjs";
 import type { CSSProperties } from "react";
@@ -84,12 +83,8 @@ export function SettingsPage() {
               <span>个性化</span>
             </Link>
             <Link to="/settings/models" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
-              <Boxes />
-              <span>模型</span>
-            </Link>
-            <Link to="/settings/auth" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
-              <Key />
-              <span>凭据</span>
+              <Antenna />
+              <span>Provider</span>
             </Link>
             <Link
               to="/settings/extensions"

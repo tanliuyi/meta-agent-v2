@@ -1,6 +1,6 @@
-import { AuthSettingsPage } from "@renderer/features/settings/auth-settings-page";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 
+/** Merged into the unified providers page. */
 export const Route = createFileRoute("/settings/auth")({
-  component: AuthSettingsPage,
+  component: () => <Navigate to="/settings/models" search={(prev) => prev} replace />,
 });
