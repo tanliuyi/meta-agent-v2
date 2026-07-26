@@ -292,6 +292,210 @@ describe("SubagentWorkerRegistry", () => {
     }
   });
 
+  it("persists child metadata before terminal acknowledgement, owner removal, and resync", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "subagent-metadata-barrier-"));
+    const sessionFile = join(directory, "child.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "durable-child",
+        timestamp: "2026-01-02T03:04:05.000Z",
+        cwd: process.cwd(),
+      })}\n`,
+    );
+    let releaseWorker!: () => void;
+    const workerPending = new Promise<void>((resolve) => {
+      releaseWorker = resolve;
+    });
+    let releaseMetadata!: () => void;
+    const metadataPending = new Promise<void>((resolve) => {
+      releaseMetadata = resolve;
+    });
+    let client: FakeClient | undefined;
+    const persisted: string[] = [];
+    const resyncs: string[] = [];
+    const summaries: string[] = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      catalogChanged: (summary) => summaries.push(summary.title),
+      persistSession: async (_projectId, persistedFile, summary) => {
+        persisted.push(`${persistedFile}:${summary.running ? "running" : "stopped"}`);
+        await metadataPending;
+      },
+      resync: (_projectId, threadId) => resyncs.push(threadId),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = workerPending.then(() => ({ status: "completed" }));
+        client.bootstrapResult = subagentBootstrap("durable-child");
+        return client;
+      },
+    });
+
+    try {
+      const run = registry.handleHostRequest(
+        {
+          type: "subagent.run",
+          request: {
+            ...runRequest(),
+            persistSession: true,
+            sessionFile,
+            task: "[Read from: plan.md]\n\nInspect the durable child",
+          },
+        },
+        () => undefined,
+      );
+      await expect.poll(() => client).toBeDefined();
+      client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1" }));
+      await expect.poll(() => persisted.length).toBe(1);
+      expect(summaries[0]).toBe("Inspect the durable child");
+      expect(client?.acknowledgements).toEqual([1]);
+
+      client?.emitSidecarEvent(event(client.instanceId, 2, { type: "completed", runId: "run-1", sessionFile }));
+      releaseWorker();
+      await Promise.resolve();
+      expect(client?.acknowledgements).toEqual([1]);
+      expect(registry.isActiveThread("project", "durable-child")).toBe(true);
+      expect(resyncs).toEqual([]);
+
+      releaseMetadata();
+      await expect(run).resolves.toEqual({ status: "completed" });
+      expect(persisted).toEqual([`${sessionFile}:running`, `${sessionFile}:stopped`]);
+      expect(client?.acknowledgements).toEqual([1, 2]);
+      expect(registry.isActiveThread("project", "durable-child")).toBe(false);
+      expect(resyncs).toEqual(["durable-child"]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks ordinary handoff when terminal metadata persistence fails", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "subagent-metadata-failure-"));
+    const sessionFile = join(directory, "child.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "blocked-child",
+        timestamp: "2026-01-02T03:04:05.000Z",
+        cwd: process.cwd(),
+      })}\n`,
+    );
+    let releaseWorker!: () => void;
+    const workerPending = new Promise<void>((resolve) => {
+      releaseWorker = resolve;
+    });
+    let client: FakeClient | undefined;
+    let persistenceCount = 0;
+    const resyncs: string[] = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      persistSession: async () => {
+        persistenceCount += 1;
+        if (persistenceCount === 2) throw new Error("metadata unavailable");
+      },
+      resync: (_projectId, threadId) => resyncs.push(threadId),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = workerPending.then(() => ({ status: "completed" }));
+        client.bootstrapResult = subagentBootstrap("blocked-child");
+        return client;
+      },
+    });
+
+    try {
+      const run = registry.handleHostRequest(
+        { type: "subagent.run", request: { ...runRequest(), persistSession: true, sessionFile } },
+        () => undefined,
+      );
+      await expect.poll(() => client).toBeDefined();
+      client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1" }));
+      await expect.poll(() => persistenceCount).toBe(1);
+      client?.emitSidecarEvent(event(client.instanceId, 2, { type: "completed", runId: "run-1", sessionFile }));
+      releaseWorker();
+
+      await expect(run).rejects.toThrow("metadata unavailable");
+      expect(client?.acknowledgements).toEqual([1, 2]);
+      expect(client?.shutdownCount).toBe(1);
+      expect(registry.isActiveThread("project", "blocked-child")).toBe(true);
+      expect(registry.listThreads("project")).toEqual([
+        expect.objectContaining({ id: "blocked-child", running: false }),
+      ]);
+      expect(resyncs).toEqual([]);
+      await expect(registry.attach("project", "blocked-child")).rejects.toThrow("handoff is blocked");
+
+      await registry.cancelThread("project", "thread");
+      expect(registry.isActiveThread("project", "blocked-child")).toBe(true);
+      expect(resyncs).toEqual([]);
+      await registry.dispose();
+      expect(registry.isActiveThread("project", "blocked-child")).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("retries catalog projection after a fresh child session file materializes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "subagent-late-session-file-"));
+    const sessionFile = join(directory, "child.jsonl");
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const summaries: Array<{ id: string; running: boolean; messageCount: number }> = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      catalogChanged: (summary) => summaries.push(summary),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+
+    try {
+      const run = registry.handleHostRequest(
+        { type: "subagent.run", request: { ...runRequest(), persistSession: true } },
+        () => undefined,
+      );
+      await expect.poll(() => client).toBeDefined();
+      client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1", sessionFile }));
+      expect(summaries).toEqual([]);
+
+      writeFileSync(
+        sessionFile,
+        `${JSON.stringify({
+          type: "session",
+          version: 3,
+          id: "late-child",
+          timestamp: "2026-01-02T03:04:05.000Z",
+          cwd: process.cwd(),
+        })}\n`,
+      );
+      client?.emitSidecarEvent(
+        event(client.instanceId, 2, {
+          type: "message-end",
+          message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+        }),
+      );
+      client?.emitSidecarEvent(event(client.instanceId, 3, { type: "completed", runId: "run-1" }));
+
+      expect(summaries).toEqual([
+        expect.objectContaining({ id: "late-child", running: true, messageCount: 1 }),
+        expect.objectContaining({ id: "late-child", running: false, messageCount: 1 }),
+      ]);
+      release();
+      await run;
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("attaches to the active subagent owner and routes live delivery acknowledgements", async () => {
     const directory = mkdtempSync(join(tmpdir(), "subagent-attach-"));
     const sessionFile = join(directory, "child.jsonl");

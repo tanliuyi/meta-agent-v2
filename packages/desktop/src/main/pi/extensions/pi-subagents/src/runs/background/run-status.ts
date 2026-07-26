@@ -23,6 +23,7 @@ interface RunStatusParams {
 	index?: number;
 	view?: "fleet" | "transcript";
 	lines?: number;
+	includeProgress?: boolean;
 }
 
 interface RunStatusDeps {
@@ -385,6 +386,16 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				lines.push(...formatNestedRunStatusLines(step.children, { indent: "  ", commandHints: true, maxLines: 20 }));
 				const stepOutputPath = path.join(asyncDir, `output-${index}.log`);
 				if (stepOutputPath !== outputPath && fs.existsSync(stepOutputPath)) lines.push(`  Output: ${stepOutputPath}`);
+				if (step.currentTool) {
+					lines.push(`  Current tool: ${step.currentTool}${step.currentToolArgs ? ` (${step.currentToolArgs})` : ""}`);
+				}
+				const recentOutput = (step.recentOutput ?? [])
+					.filter((line) => typeof line === "string" && line.trim().length > 0)
+					.slice(params.includeProgress ? -10 : -3);
+				if (recentOutput.length > 0) {
+					lines.push("  Recent output:");
+					for (const line of recentOutput) lines.push(`    ${line.length > 1_000 ? line.slice(-1_000) : line}`);
+				}
 				if (step.status === "running") {
 					lines.push(`  Intercom target: ${resolveSubagentIntercomTarget(status.runId, step.agent, index)} (if registered)`);
 					lines.push(`  Steer: subagent({ action: "steer", id: "${status.runId}", index: ${index}, message: "..." })`);

@@ -282,9 +282,9 @@ async function runParallelChainTasks(input: ParallelChainRunInput): Promise<Sing
 			);
 
 			let taskStr = resolveOutputReferences(taskTemplate, input.outputs);
-			taskStr = taskStr.replace(/\{task\}/g, input.originalTask);
-			taskStr = taskStr.replace(/\{previous\}/g, input.prev);
-			taskStr = taskStr.replace(/\{chain_dir\}/g, input.chainDir);
+			taskStr = taskStr.replace(/\{task\}/g, () => input.originalTask);
+			taskStr = taskStr.replace(/\{previous\}/g, () => input.prev);
+			taskStr = taskStr.replace(/\{chain_dir\}/g, () => input.chainDir);
 			const cleanTask = taskStr;
 			taskStr = prefix + taskStr + suffix;
 
@@ -918,7 +918,7 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 						explicit: step.acceptance,
 						agentName: step.parallel.agent,
 						acceptanceRole: agents.find((agent) => agent.name === step.parallel.agent)?.acceptanceRole,
-						task: (step.parallel.task ?? originalTask ?? "").replace(/\{task\}/g, originalTask ?? ""),
+						task: (step.parallel.task ?? originalTask ?? "").replace(/\{task\}/g, () => originalTask ?? ""),
 						mode: "chain",
 						dynamicGroup: true,
 						agentContract: step.agentContract ?? params.agentContract,
@@ -1109,7 +1109,7 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 				agentName: step.parallel.agent,
 				acceptanceRole: agents.find((agent) => agent.name === step.parallel.agent)?.acceptanceRole,
 				task: materialized.parallel
-					.map((task) => (task.task ?? originalTask ?? "").replace(/\{task\}/g, originalTask ?? ""))
+					.map((task) => (task.task ?? originalTask ?? "").replace(/\{task\}/g, () => originalTask ?? ""))
 					.join("\n"),
 				mode: "chain",
 				dynamicGroup: true,
@@ -1181,9 +1181,9 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 			);
 
 			let stepTask = resolveOutputReferences(stepTemplate, outputs);
-			stepTask = stepTask.replace(/\{task\}/g, originalTask);
-			stepTask = stepTask.replace(/\{previous\}/g, prev);
-			stepTask = stepTask.replace(/\{chain_dir\}/g, chainDir);
+			stepTask = stepTask.replace(/\{task\}/g, () => originalTask);
+			stepTask = stepTask.replace(/\{previous\}/g, () => prev);
+			stepTask = stepTask.replace(/\{chain_dir\}/g, () => chainDir);
 			const cleanTask = stepTask;
 			stepTask = prefix + stepTask + suffix;
 

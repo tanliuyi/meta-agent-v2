@@ -27,6 +27,11 @@ interface SubagentWorkerRecord {
   client: SubagentWorkerClient;
   emit(event: SubagentRunEvent): void;
   catalogThread?: Thread;
+  /** Latest child session file, announced after a fresh session materializes. */
+  liveSessionFile?: string;
+  metadataTail: Promise<void>;
+  metadataFailure?: Error;
+  finalizePromise?: Promise<void>;
   failure?: Error;
 }
 
@@ -36,6 +41,7 @@ export interface SubagentWorkerRegistryOptions {
   log?(scope: string, text: string): void;
   createWorkerClient?(options: WorkerClientOptions): SubagentWorkerClient;
   catalogChanged?(thread: Thread): void;
+  persistSession?(projectId: string, sessionFile: string, thread: Thread): Promise<void>;
   push?(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
   resync?(projectId: string, threadId: string, reason: string): void;
   maxWorkers?: number;
@@ -78,6 +84,9 @@ export class SubagentWorkerRegistry {
   async attach(projectId: string, threadId: string): Promise<SessionBootstrap | undefined> {
     const record = this.recordForThread(projectId, threadId);
     if (!record) return undefined;
+    if (record.metadataFailure) {
+      throw new Error(`Subagent session handoff is blocked: ${record.metadataFailure.message}`);
+    }
     return record.client.request<SessionBootstrap>({ type: "subagentBootstrap" }, 30_000);
   }
 
@@ -92,22 +101,15 @@ export class SubagentWorkerRegistry {
     const records = [...this.records.values()].filter(
       ({ request }) => request.projectId === projectId && request.parentThreadId === parentThreadId,
     );
-    await Promise.allSettled(records.map(({ client }) => client.shutdown(5_000)));
-    for (const record of records) {
-      this.publishStoppedCatalogThread(record);
-      if (this.records.get(record.key) === record) this.records.delete(record.key);
-      if (record.catalogThread) {
-        this.options.resync?.(record.request.projectId, record.catalogThread.id, "parent-thread-unavailable");
-      }
-    }
+    await Promise.allSettled(records.map((record) => this.finalizeRecord(record, "parent-thread-unavailable", 5_000)));
   }
 
   async dispose(): Promise<void> {
     if (this.disposing) return;
     this.disposing = true;
     const records = [...this.records.values()];
+    await Promise.allSettled(records.map((record) => this.finalizeRecord(record)));
     this.records.clear();
-    await Promise.allSettled(records.map(({ client }) => client.shutdown()));
   }
 
   private async run(
@@ -142,21 +144,17 @@ export class SubagentWorkerRegistry {
       onHostRequest: (hostRequest, nestedEmit) => this.handleNestedHostRequest(record, hostRequest, nestedEmit),
     };
     const client = this.options.createWorkerClient?.(clientOptions) ?? new SidecarWorkerClient(clientOptions);
-    record = { key, request, client, emit };
+    record = { key, request, client, emit, metadataTail: Promise.resolve() };
     this.records.set(key, record);
     try {
       await client.ready();
       const result = await client.request<JsonValue>({ type: "subagentRun", request }, null);
       if (record.failure) throw record.failure;
+      if (record.metadataFailure) throw record.metadataFailure;
       return result;
     } finally {
       await this.cancelDescendants(record);
-      this.publishStoppedCatalogThread(record);
-      await client.shutdown().catch(() => undefined);
-      if (this.records.get(key) === record) this.records.delete(key);
-      if (record.catalogThread) {
-        this.options.resync?.(record.request.projectId, record.catalogThread.id, "subagent-writer-completed");
-      }
+      await this.finalizeRecord(record, "subagent-writer-completed");
     }
   }
 
@@ -186,10 +184,9 @@ export class SubagentWorkerRegistry {
     const descendants = [...this.records.values()].filter(
       (record) => record !== parent && isDescendant(parent.request, record.request),
     );
-    for (const descendant of descendants) {
-      if (this.records.get(descendant.key) === descendant) this.records.delete(descendant.key);
-    }
-    await Promise.allSettled(descendants.map(({ client }) => client.shutdown(5_000)));
+    await Promise.allSettled(
+      descendants.map((record) => this.finalizeRecord(record, "parent-subagent-completed", 5_000)),
+    );
   }
 
   private async cancel(projectId: string, parentThreadId: string, runId: string, childIndex: number): Promise<void> {
@@ -227,8 +224,15 @@ export class SubagentWorkerRegistry {
       return;
     }
     if (event.event.type === "subagent-event") {
-      this.projectCatalogEvent(record, event.event.event);
+      const persistence = this.projectCatalogEvent(record, event.event.event);
       record.emit(event.event.event);
+      if (persistence && (event.event.event.type === "completed" || event.event.event.type === "failed")) {
+        void persistence.then(
+          () => record.client.acknowledge(event.sequence),
+          () => record.client.acknowledge(event.sequence),
+        );
+        return;
+      }
     } else if (event.event.type === "resync-required") {
       record.failure = new Error(`Subagent worker requires resync: ${event.event.reason}`);
       record.client.fail(record.failure);
@@ -242,15 +246,16 @@ export class SubagentWorkerRegistry {
     );
   }
 
-  private projectCatalogEvent(record: SubagentWorkerRecord, event: SubagentRunEvent): void {
-    const sessionFile =
-      event.type === "started" || event.type === "completed" || event.type === "failed"
-        ? (event.sessionFile ?? record.request.sessionFile)
-        : record.request.sessionFile;
+  private projectCatalogEvent(record: SubagentWorkerRecord, event: SubagentRunEvent): Promise<void> | undefined {
+    if ((event.type === "started" || event.type === "completed" || event.type === "failed") && event.sessionFile) {
+      record.liveSessionFile = event.sessionFile;
+    }
+    const sessionFile = record.liveSessionFile ?? record.request.sessionFile;
+    const firstProjection = !record.catalogThread;
     const current =
       record.catalogThread ?? (sessionFile ? threadFromSubagentRequest(record.request, sessionFile) : undefined);
-    if (!current) return;
-    if (event.type === "text-delta" || event.type === "tool-update" || event.type === "usage") return;
+    if (!current) return undefined;
+    if (event.type === "text-delta" || event.type === "tool-update" || event.type === "usage") return undefined;
     const terminal = event.type === "completed" || event.type === "failed";
     const next = {
       ...current,
@@ -259,13 +264,55 @@ export class SubagentWorkerRegistry {
       running: !terminal,
     };
     record.catalogThread = next;
+    const persistence =
+      sessionFile && (firstProjection || terminal)
+        ? this.queueMetadataPersistence(record, sessionFile, next)
+        : undefined;
     this.options.catalogChanged?.({ ...next });
+    return persistence;
   }
 
   private publishStoppedCatalogThread(record: SubagentWorkerRecord): void {
     if (!record.catalogThread?.running) return;
     record.catalogThread = { ...record.catalogThread, updatedAt: Date.now(), running: false };
+    const sessionFile = record.liveSessionFile ?? record.request.sessionFile;
+    if (sessionFile) this.queueMetadataPersistence(record, sessionFile, record.catalogThread);
     this.options.catalogChanged?.({ ...record.catalogThread });
+  }
+
+  private queueMetadataPersistence(record: SubagentWorkerRecord, sessionFile: string, thread: Thread): Promise<void> {
+    const persistSession = this.options.persistSession;
+    if (!persistSession) return record.metadataTail;
+    record.metadataTail = record.metadataTail
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await persistSession(record.request.projectId, sessionFile, { ...thread });
+          record.metadataFailure = undefined;
+        } catch (error) {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          record.metadataFailure = failure;
+          this.options.log?.(
+            `subagent:${record.request.runId}:${record.request.childIndex}`,
+            `Failed to persist subagent session metadata: ${failure.message}`,
+          );
+          throw failure;
+        }
+      });
+    return record.metadataTail;
+  }
+
+  private finalizeRecord(record: SubagentWorkerRecord, reason?: string, shutdownTimeout?: number): Promise<void> {
+    record.finalizePromise ??= (async () => {
+      this.publishStoppedCatalogThread(record);
+      await record.client.shutdown(shutdownTimeout).catch(() => undefined);
+      await record.metadataTail;
+      if (this.records.get(record.key) === record) this.records.delete(record.key);
+      if (reason && record.catalogThread) {
+        this.options.resync?.(record.request.projectId, record.catalogThread.id, reason);
+      }
+    })();
+    return record.finalizePromise;
   }
 
   private assertCapacity(projectId: string, parentThreadId: string): void {
@@ -344,7 +391,7 @@ function subagentTitle(task: string): string {
   const firstLine = delegatedTask
     .split("\n")
     .map((line) => line.trim())
-    .find(Boolean);
+    .find((line) => line && !line.startsWith("[Read from:"));
   return (firstLine ?? "子智能体会话").replace(/\s+/g, " ").slice(0, 48);
 }
 

@@ -5,7 +5,12 @@ import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earen
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SidecarEventBody } from "../src/shared/sidecar-contracts.ts";
-import type { SubagentHostRequest, SubagentRunEvent, SubagentRunRequest } from "../src/shared/subagent-contracts.ts";
+import {
+  SUBAGENT_TIMEOUT_CODE,
+  type SubagentHostRequest,
+  type SubagentRunEvent,
+  type SubagentRunRequest,
+} from "../src/shared/subagent-contracts.ts";
 import { SubagentWorkerService } from "../src/sidecar/subagent-worker-service.ts";
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -140,6 +145,73 @@ describe("SubagentWorkerService", () => {
       ),
     ).toBe(true);
   });
+
+  it("emits a structured timeout code from the worker boundary", async () => {
+    const root = join(tmpdir(), `desktop-subagent-timeout-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root, { recursive: true });
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const faux = registerFauxProvider({
+      models: [{ id: "timeout-model", reasoning: false }],
+      tokensPerSecond: 1,
+    });
+    faux.setResponses([fauxAssistantMessage("This response should be interrupted before it completes.")]);
+    cleanups.push(() => faux.unregister());
+    const model = faux.getModel();
+    const events: SidecarEventBody[] = [];
+    const providerFactory = (api: ExtensionAPI): void => {
+      api.registerProvider(model.provider, {
+        baseUrl: model.baseUrl,
+        apiKey: "faux-key",
+        api: faux.api,
+        models: faux.models.map((registeredModel) => ({
+          id: registeredModel.id,
+          name: registeredModel.name,
+          api: registeredModel.api,
+          reasoning: registeredModel.reasoning,
+          input: registeredModel.input,
+          cost: registeredModel.cost,
+          contextWindow: registeredModel.contextWindow,
+          maxTokens: registeredModel.maxTokens,
+        })),
+      });
+    };
+    const created = await SubagentWorkerService.create(
+      {
+        role: "subagent",
+        value: {
+          projectId: "project",
+          parentThreadId: "thread",
+          runId: "run-1",
+          childIndex: 0,
+          agentDir: root,
+        },
+      },
+      {
+        emit: (event) => events.push(event),
+        requestHost: async () => undefined,
+        flushEvents: async () => undefined,
+      },
+      { extensionFactories: [providerFactory] },
+    );
+    cleanups.push(() => created.service.dispose());
+
+    await expect(
+      created.service.command({
+        type: "subagentRun",
+        request: {
+          ...baseRequest(),
+          cwd: root,
+          model: `${model.provider}/${model.id}`,
+          timeoutMs: 5,
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(events.find((event) => event.type === "subagent-event" && event.event.type === "failed")).toMatchObject({
+      type: "subagent-event",
+      event: { type: "failed", code: SUBAGENT_TIMEOUT_CODE },
+    });
+  }, 15_000);
 
   it("routes nested fanout back through a second programmatic worker", async () => {
     const root = join(tmpdir(), `desktop-subagent-nested-${Date.now()}-${Math.random().toString(36).slice(2)}`);

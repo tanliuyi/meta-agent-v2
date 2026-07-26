@@ -122,16 +122,18 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       if (!threads) return state;
       const index = threads.findIndex(({ id }) => id === action.threadId);
       const current = threads[index];
-      if (
-        !current ||
-        (current.title === action.title && current.updatedAt === action.updatedAt && current.running === action.running)
-      ) {
+      if (!current) return state;
+      const title =
+        current.origin === "subagent" && action.title.trimStart().startsWith("[Read from:")
+          ? current.title
+          : action.title;
+      if (current.title === title && current.updatedAt === action.updatedAt && current.running === action.running) {
         return state;
       }
       const next = [...threads];
       next[index] = {
         ...current,
-        title: action.title,
+        title,
         updatedAt: action.updatedAt,
         running: action.running,
       };

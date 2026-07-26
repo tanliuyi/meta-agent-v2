@@ -25,7 +25,12 @@ import { DesktopSubagentRuntime } from "../main/pi/subagents/desktop-subagent-ru
 import { PROTOCOL_VERSION, type SessionBootstrap, type SessionControlState } from "../shared/contracts.ts";
 import type { SidecarBinding, SidecarCommand } from "../shared/sidecar-contracts.ts";
 import { toJsonValue } from "../shared/sidecar-wire.ts";
-import type { SubagentRunRequest, SubagentWorkerBinding, SubagentWorkerCommand } from "../shared/subagent-contracts.ts";
+import {
+  SUBAGENT_TIMEOUT_CODE,
+  type SubagentRunRequest,
+  type SubagentWorkerBinding,
+  type SubagentWorkerCommand,
+} from "../shared/subagent-contracts.ts";
 import type { SidecarService, SidecarServiceContext } from "./sidecar-host.ts";
 
 const CHILD_BOUNDARY_INSTRUCTIONS = [
@@ -241,15 +246,30 @@ export class SubagentWorkerService implements SidecarService {
       extensionSet: { generation: extensionSet.generation, diagnostics: [], reloadRequired: false },
       extensionHost: this.extensionHost.hostState,
     };
-    const liveSessionFile = created.session.sessionFile;
+    let announcedSessionFile = created.session.sessionFile;
     this.context.emit({
       type: "subagent-event",
-      event: { type: "started", runId: request.runId, ...(liveSessionFile ? { sessionFile: liveSessionFile } : {}) },
+      event: {
+        type: "started",
+        runId: request.runId,
+        ...(announcedSessionFile ? { sessionFile: announcedSessionFile } : {}),
+      },
     });
     let assistantTurns = 0;
     let turnBudgetExceeded = false;
     const unsubscribe = created.session.subscribe((event) => {
       this.projectSessionEvent(event);
+      if (!announcedSessionFile) {
+        const materialized = created.session.sessionFile;
+        if (materialized) {
+          // Persisted session files materialize lazily, so announce the path as soon as it exists.
+          announcedSessionFile = materialized;
+          this.context.emit({
+            type: "subagent-event",
+            event: { type: "started", runId: request.runId, sessionFile: materialized },
+          });
+        }
+      }
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         this.context.emit({
           type: "subagent-event",
@@ -336,7 +356,13 @@ export class SubagentWorkerService implements SidecarService {
       const sessionFile = created.session.sessionFile;
       this.context.emit({
         type: "subagent-event",
-        event: { type: "failed", runId: request.runId, error: message, ...(sessionFile ? { sessionFile } : {}) },
+        event: {
+          type: "failed",
+          runId: request.runId,
+          error: message,
+          ...(timedOut ? { code: SUBAGENT_TIMEOUT_CODE } : {}),
+          ...(sessionFile ? { sessionFile } : {}),
+        },
       });
       await this.context.flushEvents();
       throw error;

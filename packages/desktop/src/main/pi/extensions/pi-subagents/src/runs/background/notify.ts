@@ -28,6 +28,16 @@ export interface SubagentNotifyDetails {
 	sessionValue?: string;
 }
 
+export interface CompletionNotificationChild {
+	agent?: string;
+	status?: "completed" | "failed" | "paused" | "stopped";
+	summary?: string;
+	output?: string;
+	error?: string;
+	success?: boolean;
+	state?: string;
+}
+
 export interface CompletionNotification {
 	[key: string]: unknown;
 	id?: string | null;
@@ -48,6 +58,7 @@ export interface CompletionNotification {
 	totalTasks?: number;
 	sessionId?: string | null;
 	triggerTurn?: boolean;
+	results?: CompletionNotificationChild[];
 }
 
 interface NotifyTimerApi {
@@ -164,9 +175,42 @@ function completionBatchKey(result: CompletionNotification): string {
 	return cwd ? `cwd:${cwd}` : "unknown";
 }
 
+function compactCompletionPreview(text: string): string {
+	const trimmed = text.trim();
+	if (trimmed.length <= 6_000) return trimmed;
+	return `${trimmed.slice(0, 3_000)}\n\n... truncated ...\n\n${trimmed.slice(-3_000)}`;
+}
+
+const CHILD_COMPLETION_PREVIEW_TOTAL_CHARS = 8_000;
+
+function childCompletionPreview(children: CompletionNotificationChild[], summary = ""): string {
+	const joined = children
+		.map((child, index) => {
+			const rawBody = (child.summary ?? child.error ?? child.output ?? "").trim();
+			// Skip children whose text is already carried verbatim by the top-level summary.
+			if (rawBody && summary.includes(rawBody)) return undefined;
+			const agent = child.agent?.trim() || `step-${index + 1}`;
+			const status = child.status
+				?? (child.state === "paused" || child.state === "stopped" ? child.state : child.success ? "completed" : "failed");
+			const body = compactCompletionPreview(rawBody || "(no output)");
+			return `${index + 1}. ${agent} [${status}]\n${body}`;
+		})
+		.filter((block): block is string => block !== undefined)
+		.join("\n\n");
+	if (joined.length <= CHILD_COMPLETION_PREVIEW_TOTAL_CHARS) return joined;
+	return `${joined.slice(0, CHILD_COMPLETION_PREVIEW_TOTAL_CHARS)}\n\n... truncated ...`;
+}
+
 export function buildCompletionDetails(result: CompletionNotification): SubagentNotifyDetails {
-	const agent = result.agent ?? "unknown";
-	const summary = typeof result.summary === "string" ? result.summary : "";
+	const children = Array.isArray(result.results) ? result.results : [];
+	const childAgents = children
+		.map((child) => child.agent?.trim())
+		.filter((agent): agent is string => Boolean(agent));
+	const agent = result.agent ?? (childAgents.length > 0 ? childAgents.join("+") : "unknown");
+	const topSummary = typeof result.summary === "string" ? result.summary : "";
+	const summary = !result.success && children.length > 0
+		? [topSummary, childCompletionPreview(children, topSummary)].filter((value) => value.trim().length > 0).join("\n\n")
+		: topSummary;
 	const paused = !result.success && (
 		result.exitCode === 0
 		|| result.state === "paused"

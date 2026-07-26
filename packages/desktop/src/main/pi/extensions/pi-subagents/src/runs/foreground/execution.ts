@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 import * as path from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
-import type { SubagentRunEvent } from "../../../../../../../shared/subagent-contracts.ts";
+import { SUBAGENT_TIMEOUT_CODE, type SubagentRunEvent } from "../../../../../../../shared/subagent-contracts.ts";
 import type { AgentConfig } from "../../agents/agents.ts";
 import {
 	ensureArtifactsDir,
@@ -52,7 +52,7 @@ import { buildSkillInjection, resolveSkillsWithFallback } from "../../agents/ski
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
 import { readStructuredOutput } from "../shared/structured-output.ts";
-import { captureSingleOutputSnapshot, formatSavedOutputReference, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
+import { captureSingleOutputSnapshot, extractChildWrittenOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
 import {
 	buildModelCandidates,
 	formatModelAttemptNote,
@@ -328,6 +328,7 @@ async function runProgrammaticSingleAttempt(
 	let observedMutationAttempt = false;
 	let completedSessionFile: string | undefined;
 	let interrupted = false;
+	let timedOutByCode = false;
 	const emitUpdate = (): void => {
 		if (!options.onUpdate) return;
 		progress.durationMs = Date.now() - startedAt;
@@ -404,20 +405,42 @@ async function runProgrammaticSingleAttempt(
 			return;
 		}
 		if (event.type === "completed") completedSessionFile = event.sessionFile;
-		if (event.type === "failed") result.error = event.error;
+		if (event.type === "failed") {
+			result.error = event.error;
+			if (event.sessionFile) completedSessionFile = event.sessionFile;
+			if (event.code === SUBAGENT_TIMEOUT_CODE) timedOutByCode = true;
+		}
 	};
 
 	const abort = (): void => {
-		void runtime.cancel(options.runId, options.index ?? 0);
+		void runtime.cancel(options.runId, options.index ?? 0).catch(() => undefined);
 	};
 	const interrupt = (): void => {
 		interrupted = true;
-		void runtime.cancel(options.runId, options.index ?? 0);
+		void runtime.cancel(options.runId, options.index ?? 0).catch(() => undefined);
 	};
-	if (options.signal?.aborted) abort();
-	else options.signal?.addEventListener("abort", abort, { once: true });
-	if (options.interruptSignal?.aborted) interrupt();
-	else options.interruptSignal?.addEventListener("abort", interrupt, { once: true });
+	if (options.signal?.aborted || options.interruptSignal?.aborted) {
+		if (activityTimer) clearInterval(activityTimer);
+		if (options.interruptSignal?.aborted) {
+			interrupted = true;
+			result.interrupted = true;
+			result.finalOutput = "Interrupted. Waiting for explicit next action.";
+			progress.status = "completed";
+		} else {
+			result.exitCode = 1;
+			result.error = "Subagent run aborted before start.";
+			result.finalOutput = result.error;
+			progress.status = "failed";
+			progress.error = result.error;
+		}
+		result.progressSummary = { toolCount: 0, tokens: 0, durationMs: 0 };
+		result.outputMode = options.outputMode ?? "inline";
+		result.sessionFile = options.sessionFile;
+		emitUpdate();
+		return result;
+	}
+	options.signal?.addEventListener("abort", abort, { once: true });
+	options.interruptSignal?.addEventListener("abort", interrupt, { once: true });
 	try {
 		for await (const event of runtime.run({
 			parentSessionId: options.parentSessionId,
@@ -464,14 +487,14 @@ async function runProgrammaticSingleAttempt(
 		result.error = undefined;
 		result.finalOutput = "Interrupted. Waiting for explicit next action.";
 	}
-	if (timeout && (timeout.remainingMs === 0 || result.error === timeout.message)) result.timedOut = true;
+	if (timedOutByCode || (timeout && (timeout.remainingMs === 0 || result.error === timeout.message))) result.timedOut = true;
 	if (options.turnBudget && result.error?.includes("exceeded its turn budget")) {
 		result.turnBudgetExceeded = true;
 		result.wrapUpRequested = true;
 		result.turnBudget = turnBudgetState(options.turnBudget, result.usage.turns, true);
 	}
 	result.exitCode = result.error ? 1 : 0;
-	if (result.exitCode === 0 && !getFinalOutput(result.messages).trim() && !options.structuredOutput) {
+	if (result.exitCode === 0 && !result.interrupted && !getFinalOutput(result.messages).trim() && !options.structuredOutput) {
 		result.exitCode = 1;
 		result.error = "Subagent produced no output (possible model cold-start or empty response).";
 	}
@@ -791,7 +814,7 @@ export async function runSync(
 			usage: { ...result.usage },
 		};
 		modelAttempts.push(attempt);
-		if (result.detached || result.timedOut || result.turnBudgetExceeded) {
+		if (result.detached || result.timedOut || result.turnBudgetExceeded || result.interrupted) {
 			break;
 		}
 		if (attemptSucceeded) {

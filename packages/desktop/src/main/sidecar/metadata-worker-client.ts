@@ -73,6 +73,12 @@ export class MetadataWorkerClient {
     return this.enqueue(() => this.safeRequest({ type: "upsertSession", projectId, cwd, sessionFile, thread }));
   }
 
+  registerExternal(projectId: string, cwd: string, sessionFile: string, thread: Thread): Promise<void> {
+    return this.enqueue(() =>
+      this.safeRequest({ type: "registerExternalSession", projectId, cwd, sessionFile, thread }),
+    );
+  }
+
   renameCold(projectId: string, cwd: string, threadId: string, title: string): Promise<void> {
     return this.enqueue(async () => {
       const lease = createColdLease(projectId, threadId, "rename");

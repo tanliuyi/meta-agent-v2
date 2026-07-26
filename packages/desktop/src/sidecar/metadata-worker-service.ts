@@ -42,6 +42,9 @@ export class MetadataWorkerService implements SidecarService {
       case "upsertSession":
         this.index.upsert(command.projectId, command.cwd, command.sessionFile, command.thread);
         return null;
+      case "registerExternalSession":
+        this.index.registerExternalSession(command.projectId, command.cwd, command.sessionFile, command.thread);
+        return null;
       case "renameColdSession": {
         assertColdLease(command.projectId, command.threadId, "rename", command.lease, this.consumedColdLeaseNonces);
         const session = await this.index.resolve(command.projectId, command.cwd, command.threadId);

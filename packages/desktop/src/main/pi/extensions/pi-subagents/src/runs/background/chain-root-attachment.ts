@@ -119,7 +119,7 @@ function outputFromTerminalStatus(root: ImportedAsyncRoot, status: AsyncStatus, 
 	};
 }
 
-function outputFromTimeout(root: ImportedAsyncRoot, status: AsyncStatus | null, message: string): ImportedAsyncRootResult {
+function outputFromTimeout(root: ImportedAsyncRoot, status: AsyncStatus | null, message: string, timedOut = true): ImportedAsyncRootResult {
 	const step = selectedStatusStep(status, root.index);
 	return {
 		agent: step?.agent ?? status?.steps?.[root.index]?.agent ?? "subagent",
@@ -127,7 +127,7 @@ function outputFromTimeout(root: ImportedAsyncRoot, status: AsyncStatus | null, 
 		success: false,
 		exitCode: 1,
 		error: message,
-		timedOut: true,
+		...(timedOut ? { timedOut: true } : {}),
 		...(step?.sessionFile ?? status?.sessionFile ? { sessionFile: step?.sessionFile ?? status?.sessionFile } : {}),
 		...(step?.model ? { model: step.model } : {}),
 		...(step?.attemptedModels ? { attemptedModels: step.attemptedModels } : {}),
@@ -169,7 +169,7 @@ function buildImportedResult(root: ImportedAsyncRoot, status: AsyncStatus | null
 
 export async function waitForImportedAsyncRoot(
 	root: ImportedAsyncRoot,
-	options: { pollIntervalMs?: number; terminalResultGraceMs?: number; now?: () => number; shouldAbort?: () => boolean; timeoutMessage?: string } = {},
+	options: { pollIntervalMs?: number; terminalResultGraceMs?: number; now?: () => number; shouldAbort?: () => boolean; timeoutMessage?: string; abortState?: "timeout" | "cancelled" } = {},
 ): Promise<ImportedAsyncRootResult> {
 	const pollIntervalMs = options.pollIntervalMs ?? 500;
 	const terminalResultGraceMs = options.terminalResultGraceMs ?? 1_000;
@@ -177,7 +177,10 @@ export async function waitForImportedAsyncRoot(
 	let terminalSince: number | undefined;
 	for (;;) {
 		const status = readStatus(root.asyncDir);
-		if (options.shouldAbort?.()) return outputFromTimeout(root, status, options.timeoutMessage ?? "Subagent timed out.");
+		if (options.shouldAbort?.()) {
+			// A user stop/pause is a cancellation, not a timeout: the result must not claim timedOut.
+			return outputFromTimeout(root, status, options.timeoutMessage ?? "Subagent timed out.", (options.abortState ?? "timeout") !== "cancelled");
+		}
 		const result = readResultFile(root.resultPath);
 		if (result) return buildImportedResult(root, status, result);
 		if (isTerminalStatus(status, root.index)) {

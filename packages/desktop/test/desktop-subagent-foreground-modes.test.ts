@@ -10,6 +10,7 @@ import type {
   SubagentRuntime,
   SubagentRuntimeRunRequest,
 } from "../src/main/pi/extensions/pi-subagents/src/runtime/subagent-runtime.ts";
+import { SUBAGENT_TIMEOUT_CODE } from "../src/shared/subagent-contracts.ts";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -22,12 +23,18 @@ class RecordingRuntime implements SubagentRuntime {
   private active = 0;
   private readonly expectedConcurrent: number;
   private readonly beforeComplete?: (request: SubagentRuntimeRunRequest) => void;
+  private readonly outputForRequest?: (request: SubagentRuntimeRunRequest) => string;
   private release?: () => void;
   private readonly gate: Promise<void>;
 
-  constructor(expectedConcurrent = 1, beforeComplete?: (request: SubagentRuntimeRunRequest) => void) {
+  constructor(
+    expectedConcurrent = 1,
+    beforeComplete?: (request: SubagentRuntimeRunRequest) => void,
+    outputForRequest?: (request: SubagentRuntimeRunRequest) => string,
+  ) {
     this.expectedConcurrent = expectedConcurrent;
     this.beforeComplete = beforeComplete;
+    this.outputForRequest = outputForRequest;
     this.gate = new Promise((resolve) => {
       this.release = resolve;
     });
@@ -45,7 +52,7 @@ class RecordingRuntime implements SubagentRuntime {
         type: "message-end" as const,
         message: {
           role: "assistant",
-          content: [{ type: "text", text: `output-${request.childIndex}` }],
+          content: [{ type: "text", text: this.outputForRequest?.(request) ?? `output-${request.childIndex}` }],
           provider: "faux",
           model: "model",
           usage: {
@@ -63,6 +70,51 @@ class RecordingRuntime implements SubagentRuntime {
     } finally {
       this.active -= 1;
     }
+  }
+
+  async cancel() {}
+  async steer() {}
+  resume(request: SubagentRuntimeRunRequest) {
+    return this.run(request);
+  }
+  async dispose() {}
+}
+
+class InterruptingRuntime implements SubagentRuntime {
+  readonly requests: SubagentRuntimeRunRequest[] = [];
+  private readonly interrupt: () => void;
+
+  constructor(interrupt: () => void) {
+    this.interrupt = interrupt;
+  }
+
+  async *run(request: SubagentRuntimeRunRequest) {
+    this.requests.push(request);
+    this.interrupt();
+    yield { type: "failed" as const, runId: request.runId, error: "Subagent cancelled." };
+  }
+
+  async cancel() {
+    throw new Error("cancel delivery failed");
+  }
+  async steer() {}
+  resume(request: SubagentRuntimeRunRequest) {
+    return this.run(request);
+  }
+  async dispose() {}
+}
+
+class TimeoutRuntime implements SubagentRuntime {
+  readonly requests: SubagentRuntimeRunRequest[] = [];
+
+  async *run(request: SubagentRuntimeRunRequest) {
+    this.requests.push(request);
+    yield {
+      type: "failed" as const,
+      runId: request.runId,
+      error: "worker network timeout",
+      code: SUBAGENT_TIMEOUT_CODE,
+    };
   }
 
   async cancel() {}
@@ -139,6 +191,37 @@ describe("Desktop foreground programmatic modes", () => {
     expect(runtime.requests.map(({ childIndex }) => childIndex)).toEqual([0, 1]);
     expect(runtime.requests[1]?.task).toContain("output-0");
     expect(result.details.results).toHaveLength(2);
+  });
+
+  it("substitutes previous output literally when it contains replacement tokens", async () => {
+    const root = mkdtempSync(join(tmpdir(), "desktop-subagent-chain-literal-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const literalOutput = "price $& $` $'";
+    const runtime = new RecordingRuntime(1, undefined, (request) =>
+      request.childIndex === 0 ? literalOutput : "done",
+    );
+
+    const result = await executeChain({
+      chain: [
+        { agent: "first", task: "produce", acceptance: false },
+        { agent: "second", task: "use {previous}", acceptance: false },
+      ],
+      agents,
+      ctx: extensionContext(root),
+      runId: "literal-chain",
+      shareEnabled: false,
+      sessionDirForIndex: () => undefined,
+      sessionFileForIndex: () => undefined,
+      artifactsDir: join(root, "artifacts"),
+      artifactConfig: { enabled: false } as never,
+      controlConfig: { enabled: false } as never,
+      chainDir: join(root, "chains"),
+      maxSubagentDepth: 1,
+      subagentRuntime: runtime,
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(runtime.requests[1]?.task).toContain(`use ${literalOutput}`);
   });
 
   it("runs parallel chain leaves concurrently through the runtime", async () => {
@@ -228,6 +311,80 @@ describe("Desktop foreground programmatic modes", () => {
     expect(runtime.requests[1]?.task).toContain("inspect alpha");
     expect(runtime.requests[2]?.task).toContain("inspect beta");
     expect(result.details.outputs?.inspections?.structured).toHaveLength(2);
+  });
+
+  it("does not launch a worker when the run signal is already aborted", async () => {
+    const runtime = new RecordingRuntime();
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runSync(process.cwd(), agents, "first", "task", {
+      subagentRuntime: runtime,
+      runId: "pre-aborted",
+      signal: controller.signal,
+      acceptance: false,
+    });
+
+    expect(runtime.requests).toEqual([]);
+    expect(result).toMatchObject({ exitCode: 1, error: "Subagent run aborted before start." });
+  });
+
+  it("does not retry another model after an interrupted empty result", async () => {
+    const controller = new AbortController();
+    const runtime = new InterruptingRuntime(() => controller.abort());
+    const retryAgent: AgentConfig = {
+      ...agents[0]!,
+      model: "faux/first",
+      fallbackModels: ["faux/second"],
+    };
+
+    const result = await runSync(process.cwd(), [retryAgent], retryAgent.name, "task", {
+      subagentRuntime: runtime,
+      runId: "interrupted-no-retry",
+      interruptSignal: controller.signal,
+      acceptance: false,
+    });
+
+    expect(runtime.requests).toHaveLength(1);
+    expect(result).toMatchObject({ exitCode: 0, interrupted: true });
+    expect(result.modelAttempts).toHaveLength(1);
+  });
+
+  it("classifies structured worker timeout events without exact message matching", async () => {
+    const runtime = new TimeoutRuntime();
+    const retryAgent: AgentConfig = {
+      ...agents[0]!,
+      model: "faux/first",
+      fallbackModels: ["faux/second"],
+    };
+
+    const result = await runSync(process.cwd(), [retryAgent], retryAgent.name, "task", {
+      subagentRuntime: runtime,
+      runId: "structured-timeout",
+      timeoutMs: 123,
+      acceptance: false,
+    });
+
+    expect(runtime.requests).toHaveLength(1);
+    expect(result).toMatchObject({ exitCode: 1, timedOut: true });
+    expect(result.finalOutput).toContain("Subagent timed out after 123ms.");
+  });
+
+  it("persists configured single output without an undefined helper failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "desktop-subagent-output-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const outputPath = join(root, "result.md");
+    const runtime = new RecordingRuntime();
+
+    const result = await runSync(root, agents, "first", "task", {
+      subagentRuntime: runtime,
+      runId: "single-output",
+      outputPath,
+      acceptance: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(readFileSync(outputPath, "utf8")).toBe("output-0");
   });
 
   it("wires the thread runtime into top-level foreground parallel dispatch", () => {

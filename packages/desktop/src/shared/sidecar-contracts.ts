@@ -255,6 +255,7 @@ export type MetadataSidecarCommand =
   | { type: "getDraftConfig"; projectId: string; cwd: string; extensionSet: ResolvedExtensionSet }
   | { type: "resolveSession"; projectId: string; cwd: string; threadId: string }
   | { type: "upsertSession"; projectId: string; cwd: string; sessionFile: string; thread: Thread }
+  | { type: "registerExternalSession"; projectId: string; cwd: string; sessionFile: string; thread: Thread }
   | {
       type: "renameColdSession";
       projectId: string;

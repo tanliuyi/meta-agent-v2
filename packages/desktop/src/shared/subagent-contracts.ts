@@ -1,6 +1,8 @@
 import type { JsonValue, ThinkingLevel } from "./contracts.ts";
 import type { DesktopExtensionDiagnostic } from "./desktop-extension-contracts.ts";
 
+export const SUBAGENT_TIMEOUT_CODE = "SUBAGENT_TIMEOUT";
+
 export type SubagentExtensionProfile = "provider" | "memory" | "runtime" | "fanout";
 
 export interface SubagentRunAncestor {

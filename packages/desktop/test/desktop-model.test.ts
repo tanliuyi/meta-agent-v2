@@ -97,6 +97,46 @@ describe("desktop catalog reducer", () => {
     expect(state).not.toHaveProperty("controls");
   });
 
+  it("subagent ordinary control 不用 Read from 前缀覆盖任务标题，但接受显式重命名", () => {
+    const subagent: Thread = {
+      ...thread,
+      id: "subagent",
+      title: "检查持久化 child",
+      preview: "检查持久化 child",
+      parentThreadId: thread.id,
+      origin: "subagent",
+    };
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [subagent],
+    });
+
+    state = desktopReducer(state, {
+      type: "thread-summary-updated",
+      projectId: project.id,
+      threadId: subagent.id,
+      title: "[Read from: plan.md]",
+      updatedAt: 2,
+      running: true,
+    });
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({
+      title: "检查持久化 child",
+      updatedAt: 2,
+      running: true,
+    });
+
+    state = desktopReducer(state, {
+      type: "thread-summary-updated",
+      projectId: project.id,
+      threadId: subagent.id,
+      title: "用户重命名",
+      updatedAt: 3,
+      running: false,
+    });
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({ title: "用户重命名", running: false });
+  });
+
   it("实时 upsert 已加载 Project 的 subagent summary，忽略未加载 catalog", () => {
     const subagent: Thread = {
       ...thread,

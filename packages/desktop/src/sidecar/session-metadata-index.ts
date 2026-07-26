@@ -1,21 +1,42 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import {
+  closeSync,
+  createReadStream,
+  type Dirent,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { Thread } from "../shared/contracts.ts";
 
-const INDEX_VERSION = 3;
+const INDEX_VERSION = 4;
 const INDEX_FILE_NAME = "session-metadata-index.json";
 
 interface IndexedSession extends Thread {
   path: string;
 }
 
+interface ExplicitIndexedSession {
+  session: IndexedSession;
+  fileFingerprint: string;
+}
+
 interface IndexedProject {
   cwd: string;
   sessionDirectory: string | null;
   directoryFingerprint: string | null;
+  backfillComplete: boolean;
+  explicitSessions: ExplicitIndexedSession[];
   sessions: IndexedSession[];
 }
 
@@ -52,26 +73,66 @@ export class SessionMetadataIndex {
 
   upsert(projectId: string, cwd: string, sessionFile: string, thread: Thread): void {
     const data = this.load();
-    const project = data.projects[projectId];
-    const sessions = project?.cwd === cwd ? [...project.sessions] : [];
+    const currentProject = data.projects[projectId]?.cwd === cwd ? data.projects[projectId] : undefined;
+    const sessions = currentProject ? [...currentProject.sessions] : [];
     const index = sessions.findIndex(({ id }) => id === thread.id);
     const existing = index === -1 ? undefined : sessions[index];
-    const parentThreadId = thread.parentThreadId ?? existing?.parentThreadId;
-    const origin = thread.origin ?? existing?.origin;
-    const next: IndexedSession = {
-      ...thread,
-      ...(parentThreadId ? { parentThreadId } : {}),
-      ...(origin ? { origin } : {}),
-      running: false,
-      path: sessionFile,
-    };
+    const explicitSessions = [...(currentProject?.explicitSessions ?? [])];
+    const explicitIndex = explicitSessions.findIndex(({ session }) => session.id === thread.id);
+    const explicitSession = explicitIndex === -1 ? undefined : explicitSessions[explicitIndex]?.session;
+    if (explicitSession && resolve(explicitSession.path) !== resolve(sessionFile)) {
+      throw new Error(`Pi session ID ${thread.id} is already registered at another path`);
+    }
+    const summary =
+      explicitIndex !== -1 && existing && hasAutomaticSessionTitle(thread)
+        ? { ...thread, title: existing.title, preview: existing.preview }
+        : thread;
+    const next = indexedSession(summary, sessionFile, existing);
     if (index === -1) sessions.push(next);
     else sessions[index] = next;
     sessions.sort((left, right) => right.updatedAt - left.updatedAt);
+    if (explicitIndex !== -1) {
+      explicitSessions[explicitIndex] = {
+        session: next,
+        fileFingerprint: requireExplicitSessionFingerprint(sessionFile, thread.id),
+      };
+    }
     data.projects[projectId] = {
       cwd,
-      sessionDirectory: dirname(sessionFile),
-      directoryFingerprint: null,
+      sessionDirectory: currentProject?.sessionDirectory ?? (explicitIndex === -1 ? dirname(sessionFile) : null),
+      directoryFingerprint: explicitIndex === -1 ? null : (currentProject?.directoryFingerprint ?? null),
+      backfillComplete: currentProject?.backfillComplete ?? false,
+      explicitSessions,
+      sessions,
+    };
+    this.persist();
+  }
+
+  registerExternalSession(projectId: string, cwd: string, sessionFile: string, thread: Thread): void {
+    const fileFingerprint = requireExplicitSessionFingerprint(sessionFile, thread.id);
+    const data = this.load();
+    const currentProject = data.projects[projectId]?.cwd === cwd ? data.projects[projectId] : undefined;
+    const sessions = [...(currentProject?.sessions ?? [])];
+    const index = sessions.findIndex(({ id }) => id === thread.id);
+    const existing = index === -1 ? undefined : sessions[index];
+    if (existing && resolve(existing.path) !== resolve(sessionFile)) {
+      throw new Error(`Pi session ID ${thread.id} is already registered at another path`);
+    }
+    const next = indexedSession(thread, sessionFile, existing);
+    if (index === -1) sessions.push(next);
+    else sessions[index] = next;
+    sessions.sort((left, right) => right.updatedAt - left.updatedAt);
+    const explicitSessions = [...(currentProject?.explicitSessions ?? [])];
+    const explicitIndex = explicitSessions.findIndex(({ session }) => session.id === thread.id);
+    const explicit = { session: next, fileFingerprint };
+    if (explicitIndex === -1) explicitSessions.push(explicit);
+    else explicitSessions[explicitIndex] = explicit;
+    data.projects[projectId] = {
+      cwd,
+      sessionDirectory: currentProject?.sessionDirectory ?? null,
+      directoryFingerprint: currentProject?.directoryFingerprint ?? null,
+      backfillComplete: currentProject?.backfillComplete ?? false,
+      explicitSessions,
       sessions,
     };
     this.persist();
@@ -85,7 +146,13 @@ export class SessionMetadataIndex {
     if (!session) throw new Error(`Pi session does not exist: ${threadId}`);
     session.title = title;
     session.updatedAt = Date.now();
-    project.directoryFingerprint = null;
+    const explicit = project.explicitSessions.find(({ session: candidate }) => candidate.id === threadId);
+    if (explicit) {
+      explicit.session = { ...session };
+      explicit.fileFingerprint = requireExplicitSessionFingerprint(session.path, session.id);
+    } else {
+      project.directoryFingerprint = null;
+    }
     this.persist();
   }
 
@@ -93,8 +160,10 @@ export class SessionMetadataIndex {
     const data = this.load();
     const project = data.projects[projectId];
     if (!project) return;
+    const explicit = project.explicitSessions.some(({ session }) => session.id === threadId);
     project.sessions = project.sessions.filter(({ id }) => id !== threadId);
-    project.directoryFingerprint = null;
+    project.explicitSessions = project.explicitSessions.filter(({ session }) => session.id !== threadId);
+    if (!explicit) project.directoryFingerprint = null;
     this.persist();
   }
 
@@ -107,17 +176,42 @@ export class SessionMetadataIndex {
 
   async rebuild(projectId: string, cwd: string): Promise<IndexedProject> {
     const data = this.load();
-    const current = data.projects[projectId];
-    const knownDirectory = current?.cwd === cwd ? current.sessionDirectory : null;
+    const currentProject = data.projects[projectId]?.cwd === cwd ? data.projects[projectId] : undefined;
+    const knownDirectory = currentProject?.sessionDirectory ?? null;
     const fingerprintBeforeScan = fingerprintSessionDirectory(knownDirectory);
-    const listedSessions = await SessionManager.list(cwd);
-    const threadIdByPath = new Map(listedSessions.map((session) => [resolve(session.path), session.id]));
-    const sessions = await Promise.all(
-      listedSessions.map(async (session): Promise<IndexedSession> => {
+    const rootSessions = await SessionManager.list(cwd);
+    const sessionDirectory = knownDirectory ?? (rootSessions[0] ? dirname(rootSessions[0].path) : null);
+    const backfill = currentProject?.backfillComplete
+      ? { sessions: [], complete: true }
+      : sessionDirectory
+        ? await listNestedSessionInfos(cwd, sessionDirectory)
+        : { sessions: [], complete: false };
+    const validExplicitSessions = (
+      await Promise.all(
+        (currentProject?.explicitSessions ?? []).map(async (explicit) => {
+          const fileFingerprint = explicitSessionFingerprint(explicit.session.path, explicit.session.id);
+          if (!fileFingerprint) return undefined;
+          return refreshExplicitSession(cwd, projectId, explicit, fileFingerprint);
+        }),
+      )
+    ).filter((explicit): explicit is ExplicitIndexedSession => explicit !== undefined);
+    const candidates: Array<{ session: SessionInfo; originHint?: ForkDescriptor["origin"] }> = [
+      ...rootSessions.map((session) => ({ session })),
+      ...backfill.sessions.map((session) => ({ session, originHint: "subagent" })),
+    ];
+    const sessionPathById = new Map<string, string>();
+    for (const { session } of validExplicitSessions) {
+      registerSessionIdentity(sessionPathById, session.id, session.path);
+    }
+    for (const { session } of candidates) registerSessionIdentity(sessionPathById, session.id, session.path);
+    const threadIdByPath = new Map(validExplicitSessions.map(({ session }) => [resolve(session.path), session.id]));
+    for (const { session } of candidates) threadIdByPath.set(resolve(session.path), session.id);
+    const rebuiltSessions = await Promise.all(
+      candidates.map(async ({ session, originHint }): Promise<IndexedSession> => {
         const parentThreadId = session.parentSessionPath
           ? threadIdByPath.get(resolve(session.parentSessionPath))
           : undefined;
-        const fork = parentThreadId ? await readForkDescriptor(session) : undefined;
+        const fork = parentThreadId || originHint ? await readForkDescriptor(session, originHint) : undefined;
         return {
           id: session.id,
           projectId,
@@ -134,12 +228,29 @@ export class SessionMetadataIndex {
         };
       }),
     );
-    sessions.sort((left, right) => right.updatedAt - left.updatedAt);
-    const sessionDirectory = knownDirectory ?? (sessions[0] ? dirname(sessions[0].path) : null);
+    const rootIds = new Set(rootSessions.map(({ id }) => id));
+    const explicitById = new Map(
+      validExplicitSessions
+        .filter(({ session }) => !rootIds.has(session.id))
+        .map((explicit): [string, ExplicitIndexedSession] => [explicit.session.id, explicit]),
+    );
+    for (const session of rebuiltSessions.slice(rootSessions.length)) {
+      if (rootIds.has(session.id) || explicitById.has(session.id)) continue;
+      const fileFingerprint = explicitSessionFingerprint(session.path, session.id);
+      if (fileFingerprint) explicitById.set(session.id, { session, fileFingerprint });
+    }
+    const explicitSessions = [...explicitById.values()];
+    const sessionsById = new Map(
+      rebuiltSessions.slice(0, rootSessions.length).map((session): [string, IndexedSession] => [session.id, session]),
+    );
+    for (const { session } of explicitSessions) sessionsById.set(session.id, session);
+    const sessions = [...sessionsById.values()].sort((left, right) => right.updatedAt - left.updatedAt);
     const project = {
       cwd,
       sessionDirectory,
       directoryFingerprint: fingerprintBeforeScan,
+      backfillComplete: backfill.complete,
+      explicitSessions,
       sessions,
     };
     data.projects[projectId] = project;
@@ -156,8 +267,12 @@ export class SessionMetadataIndex {
   private isProjectFresh(project: IndexedProject | undefined, cwd: string): project is IndexedProject {
     return (
       project?.cwd === cwd &&
+      project.backfillComplete &&
       project.directoryFingerprint !== null &&
-      fingerprintSessionDirectory(project.sessionDirectory) === project.directoryFingerprint
+      fingerprintSessionDirectory(project.sessionDirectory) === project.directoryFingerprint &&
+      project.explicitSessions.every(
+        ({ session, fileFingerprint }) => explicitSessionFingerprint(session.path, session.id) === fileFingerprint,
+      )
     );
   }
 
@@ -193,6 +308,9 @@ function isStoredIndex(value: unknown): value is StoredIndex {
       typeof project.cwd === "string" &&
       (typeof project.sessionDirectory === "string" || project.sessionDirectory === null) &&
       (typeof project.directoryFingerprint === "string" || project.directoryFingerprint === null) &&
+      typeof project.backfillComplete === "boolean" &&
+      Array.isArray(project.explicitSessions) &&
+      project.explicitSessions.every(isExplicitIndexedSession) &&
       Array.isArray(project.sessions) &&
       project.sessions.every(isIndexedSession),
   );
@@ -216,8 +334,77 @@ function isIndexedSession(value: unknown): value is IndexedSession {
   );
 }
 
+function isExplicitIndexedSession(value: unknown): value is ExplicitIndexedSession {
+  return isRecord(value) && isIndexedSession(value.session) && typeof value.fileFingerprint === "string";
+}
+
+function hasAutomaticSessionTitle(thread: Thread): boolean {
+  const firstPreviewLine = thread.preview
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  return (
+    thread.title === "新会话" ||
+    thread.title === truncateTitle(thread.preview) ||
+    (firstPreviewLine !== undefined && thread.title === truncateTitle(firstPreviewLine))
+  );
+}
+
+function indexedSession(thread: Thread, sessionFile: string, existing?: IndexedSession): IndexedSession {
+  const parentThreadId = thread.parentThreadId ?? existing?.parentThreadId;
+  const origin = thread.origin ?? existing?.origin;
+  return {
+    ...thread,
+    ...(parentThreadId ? { parentThreadId } : {}),
+    ...(origin ? { origin } : {}),
+    running: false,
+    path: sessionFile,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function registerSessionIdentity(paths: Map<string, string>, sessionId: string, sessionFile: string): void {
+  const path = resolve(sessionFile);
+  const existing = paths.get(sessionId);
+  if (existing && existing !== path) {
+    throw new Error(`Pi session ID ${sessionId} is already registered at another path`);
+  }
+  paths.set(sessionId, path);
+}
+
+async function refreshExplicitSession(
+  cwd: string,
+  projectId: string,
+  explicit: ExplicitIndexedSession,
+  fileFingerprint: string,
+): Promise<ExplicitIndexedSession> {
+  if (fileFingerprint === explicit.fileFingerprint) {
+    return { session: { ...explicit.session, running: false }, fileFingerprint };
+  }
+  const listed = await SessionManager.list(cwd, dirname(explicit.session.path));
+  const session = listed.find(
+    ({ id, path }) => id === explicit.session.id && resolve(path) === resolve(explicit.session.path),
+  );
+  if (!session) throw new Error(`Unable to refresh external Pi session: ${explicit.session.path}`);
+  const fork = explicit.session.origin ? await readForkDescriptor(session, explicit.session.origin) : undefined;
+  return {
+    session: {
+      ...explicit.session,
+      id: session.id,
+      projectId,
+      title: fork?.title || session.name || session.firstMessage || "新会话",
+      createdAt: session.created.getTime(),
+      updatedAt: session.modified.getTime(),
+      messageCount: session.messageCount,
+      preview: fork?.title || session.firstMessage,
+      running: false,
+      path: session.path,
+    },
+    fileFingerprint,
+  };
 }
 
 interface ForkDescriptor {
@@ -226,11 +413,16 @@ interface ForkDescriptor {
   origin: "branch" | "subagent";
 }
 
-async function readForkDescriptor(session: SessionInfo): Promise<ForkDescriptor> {
+async function readForkDescriptor(
+  session: SessionInfo,
+  originHint?: ForkDescriptor["origin"],
+): Promise<ForkDescriptor> {
   const activity = await readForkActivity(session.path, session.created.getTime());
-  const origin = activity.prompt?.includes("You are a delegated subagent running from a fork of the parent session.")
-    ? "subagent"
-    : "branch";
+  const origin =
+    originHint ??
+    (activity.prompt?.includes("You are a delegated subagent running from a fork of the parent session.")
+      ? "subagent"
+      : "branch");
   return {
     origin,
     title: activity.name || (activity.prompt ? forkTitle(activity.prompt, origin) : "分支会话"),
@@ -282,7 +474,7 @@ function forkTitle(prompt: string, origin: ForkDescriptor["origin"]): string {
     const taskLine = task
       ?.split("\n")
       .map((line) => line.trim())
-      .find(Boolean);
+      .find((line) => line && !line.startsWith("[Read from:"));
     if (taskLine) return truncateTitle(taskLine);
   }
   const firstLine = prompt
@@ -295,6 +487,118 @@ function forkTitle(prompt: string, origin: ForkDescriptor["origin"]): string {
 function truncateTitle(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.slice(0, 48) || "分支会话";
+}
+
+async function listNestedSessionInfos(
+  cwd: string,
+  sessionDirectory: string,
+): Promise<{ sessions: SessionInfo[]; complete: boolean }> {
+  const directories: string[] = [];
+  let complete = true;
+  let parentEntries: Dirent[];
+  try {
+    parentEntries = readdirSync(sessionDirectory, { withFileTypes: true });
+  } catch {
+    return { sessions: [], complete: false };
+  }
+  for (const parentEntry of parentEntries) {
+    if (!parentEntry.isDirectory()) continue;
+    const parentSessionFile = join(sessionDirectory, `${parentEntry.name}.jsonl`);
+    if (!existsSync(parentSessionFile)) continue;
+    const parentDirectory = join(sessionDirectory, parentEntry.name);
+    let runGroupEntries: Dirent[];
+    try {
+      runGroupEntries = readdirSync(parentDirectory, { withFileTypes: true });
+    } catch {
+      complete = false;
+      continue;
+    }
+    for (const runGroupEntry of runGroupEntries) {
+      if (!runGroupEntry.isDirectory() || !/^[a-f0-9]{8}$/i.test(runGroupEntry.name)) continue;
+      const runGroupDirectory = join(parentDirectory, runGroupEntry.name);
+      let runEntries: Dirent[];
+      try {
+        runEntries = readdirSync(runGroupDirectory, { withFileTypes: true });
+      } catch {
+        complete = false;
+        continue;
+      }
+      for (const runEntry of runEntries) {
+        if (!runEntry.isDirectory() || !/^run-\d+$/.test(runEntry.name)) continue;
+        const runDirectory = join(runGroupDirectory, runEntry.name);
+        if (existsSync(join(runDirectory, "session.jsonl"))) directories.push(runDirectory);
+      }
+    }
+  }
+
+  const sessions: SessionInfo[] = [];
+  for (let index = 0; index < directories.length; index += 10) {
+    const batchDirectories = directories.slice(index, index + 10);
+    const batch = await Promise.all(batchDirectories.map((directory) => SessionManager.list(cwd, directory)));
+    batch.forEach((listed, batchIndex) => {
+      const directory = batchDirectories[batchIndex];
+      if (listed.length === 0 && directory && existsSync(join(directory, "session.jsonl"))) complete = false;
+      for (const session of listed) {
+        if (session.parentSessionPath) sessions.push(session);
+        else {
+          const parentSessionPath = inferNestedParentSessionPath(sessionDirectory, session.path);
+          sessions.push(parentSessionPath ? { ...session, parentSessionPath } : session);
+        }
+      }
+    });
+  }
+  return { sessions, complete };
+}
+
+function inferNestedParentSessionPath(sessionDirectory: string, sessionFile: string): string | undefined {
+  const parts = relative(sessionDirectory, sessionFile).split(sep);
+  if (
+    parts.length !== 4 ||
+    !parts[0] ||
+    !/^[a-f0-9]{8}$/i.test(parts[1] ?? "") ||
+    !/^run-\d+$/.test(parts[2] ?? "") ||
+    parts[3] !== "session.jsonl"
+  ) {
+    return undefined;
+  }
+  const parentSessionPath = join(sessionDirectory, `${parts[0]}.jsonl`);
+  return existsSync(parentSessionPath) ? parentSessionPath : undefined;
+}
+
+function requireExplicitSessionFingerprint(sessionFile: string, expectedId: string): string {
+  const fingerprint = explicitSessionFingerprint(sessionFile, expectedId);
+  if (!fingerprint) throw new Error(`Invalid external Pi session: ${sessionFile}`);
+  return fingerprint;
+}
+
+function explicitSessionFingerprint(sessionFile: string, expectedId: string): string | null {
+  let descriptor: number | undefined;
+  try {
+    const stats = lstatSync(sessionFile, { bigint: true });
+    if (!stats.isFile()) return null;
+    descriptor = openSync(sessionFile, "r");
+    const buffer = Buffer.alloc(8 * 1024);
+    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+    const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
+    if (!firstLine) return null;
+    const header: unknown = JSON.parse(firstLine);
+    if (!isRecord(header) || header.type !== "session" || header.id !== expectedId) return null;
+    const hash = createHash("sha256");
+    hash.update(stats.dev.toString());
+    hash.update("\0");
+    hash.update(stats.ino.toString());
+    hash.update("\0");
+    hash.update(stats.size.toString());
+    hash.update("\0");
+    hash.update(stats.mtimeNs.toString());
+    hash.update("\0");
+    hash.update(stats.ctimeNs.toString());
+    return hash.digest("hex");
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 function fingerprintSessionDirectory(directory: string | null): string | null {

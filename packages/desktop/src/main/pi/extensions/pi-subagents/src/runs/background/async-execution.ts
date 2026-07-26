@@ -7,10 +7,10 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentConfig } from "../../agents/agents.ts";
 import { writeAtomicJson, writePrivateAtomicJson } from "../../shared/atomic-json.ts";
-import { applyThinkingSuffix } from "../../shared/model-info.ts";
+import { applyThinkingSuffix, splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import { injectOutputPathSystemPrompt, injectSingleOutputInstruction, normalizeSingleOutputOverride, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { buildChainInstructions, isDynamicParallelStep, isParallelStep, resolveStepBehavior, suppressProgressForReadOnlyTask, writeInitialProgressFile, type ChainStep, type ResolvedStepBehavior, type SequentialStep, type StepOverrides } from "../../shared/settings.ts";
-import { isParallelGroup, isDynamicRunnerGroup, type RunnerStep, type RunnerSubagentStep } from "../shared/parallel-utils.ts";
+import { isParallelGroup, isDynamicRunnerGroup, mapConcurrent, MAX_PARALLEL_CONCURRENCY, type RunnerStep, type RunnerSubagentStep } from "../shared/parallel-utils.ts";
 import type { ContextMode } from "../shared/context-mode.ts";
 import { buildSkillInjection
 , normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
@@ -19,15 +19,17 @@ import { resolveChildCwd } from "../../shared/utils.ts";
 import { buildModelCandidates, resolveEffectiveSubagentModel, resolveModelCandidate, resolveSubagentModelOverride, type AvailableModelInfo, type ParentModel } from "../shared/model-fallback.ts";
 import type { ModelScopeConfig } from "../shared/model-scope.ts";
 import { resolveEffectiveThinking } from "../../shared/model-info.ts";
+import { resolveCurrentPath } from "../shared/long-running-guard.ts";
 import { resolveExpectedWorktreeAgentCwd } from "../shared/worktree.ts";
 import { buildWorkflowGraphSnapshot } from "../shared/workflow-graph.ts";
-import { ChainOutputValidationError, validateChainOutputBindings } from "../shared/chain-outputs.ts";
+import { ChainOutputValidationError, outputEntryFromAsyncResult, resolveOutputReferences, validateChainOutputBindings } from "../shared/chain-outputs.ts";
 import { createStructuredOutputRuntime } from "../shared/structured-output.ts";
 import { resolveEffectiveAcceptance } from "../shared/acceptance.ts";
 import {
 	type AcceptanceInput,
 	type AgentContract,
 	type ArtifactConfig,
+	type ChainOutputMap,
 	type Details,
 	type JsonSchemaObject,
 	type MaxOutputConfig,
@@ -48,12 +50,16 @@ import {
 import { nestedResultsPath, resolveInheritedNestedRouteFromEnv, resolveNestedParentAddressFromEnv, writeNestedEvent } from "../shared/nested-events.ts";
 import { initialTurnBudgetState } from "../shared/turn-budget.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
-import type { ImportedAsyncRoot } from "./chain-root-attachment.ts";
+import { waitForImportedAsyncRoot, type ImportedAsyncRoot } from "./chain-root-attachment.ts";
 import type { SessionLeaseRequest } from "../shared/session-lease.ts";
 import { appendJsonl } from "../../shared/artifacts.ts";
 import type { SubagentRuntime, SubagentRuntimeRunRequest } from "../../runtime/subagent-runtime.ts";
-import type { SubagentExtensionProfile, SubagentRunEvent } from "../../../../../../../shared/subagent-contracts.ts";
-import { readStatus, resolveWatchPath } from "../../shared/utils.ts";
+import {
+	SUBAGENT_TIMEOUT_CODE,
+	type SubagentExtensionProfile,
+	type SubagentRunEvent,
+} from "../../../../../../../shared/subagent-contracts.ts";
+import { extractToolArgsPreview, readStatus, resolveWatchPath } from "../../shared/utils.ts";
 import {
 	closeSteerInbox,
 	consumeInterruptRequest,
@@ -281,7 +287,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		: undefined);
 	try {
 		if (params.validateOutputBindings !== false) {
-			validateChainOutputBindings(chain, { maxItems: params.dynamicFanoutMaxItems });
+			validateChainOutputBindings(graphChain, { maxItems: params.dynamicFanoutMaxItems });
 		}
 	} catch (error) {
 		if (error instanceof ChainOutputValidationError) return { error: error.message };
@@ -367,8 +373,8 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		const validationError = validateFileOnlyOutputMode(behavior.outputMode, outputPath, `Async step (${s.agent})`);
 		if (validationError) throw new AsyncStartValidationError(validationError);
 		let taskTemplate = s.task ?? "{previous}";
-		taskTemplate = taskTemplate.replace(/\{task\}/g, originalTask ?? "");
-		taskTemplate = taskTemplate.replace(/\{chain_dir\}/g, runnerCwd);
+		taskTemplate = taskTemplate.replace(/\{task\}/g, () => originalTask ?? "");
+		taskTemplate = taskTemplate.replace(/\{chain_dir\}/g, () => runnerCwd);
 		const taskText = `${readInstructions.prefix}${taskTemplate}${progressInstructions.suffix}`;
 		const task = namespaceOutputPath ? taskText : injectSingleOutputInstruction(taskText, outputPath, a);
 
@@ -683,6 +689,7 @@ export function executeAsyncChain(
 			eventsPath,
 			runnerCwd,
 			sessionId: ctx.currentSessionId,
+			globalConcurrencyLimit: params.globalConcurrencyLimit,
 		}).catch((error) => {
 			const errMsg = error instanceof Error ? error.message : String(error);
 			const latestStatus = readStatus(asyncDir) ?? { runId: id, mode: resultMode, state: "running" as const, startedAt: now, lastUpdate: now };
@@ -961,7 +968,9 @@ export function executeAsyncSingle(
 			currentStep: 0,
 			steps: [{ index: 0, agent, status: "running" as const, startedAt: now }],
 		});
-		// Build the programmatic run request
+		// Programmatic workers receive thinking separately from the base model ID.
+		const programmaticModel = model ? splitKnownThinkingSuffix(model).baseModel : undefined;
+		const programmaticThinking = resolveEffectiveThinking(model, effectiveThinking);
 		const request: SubagentRuntimeRunRequest = {
 			runId: id,
 			rootRunId: id,
@@ -969,15 +978,18 @@ export function executeAsyncSingle(
 			depth: 1,
 			maxDepth: Math.max(1, resolveChildMaxSubagentDepth(maxSubagentDepth, agentConfig.maxSubagentDepth)),
 			lineage: [],
+			...(ctx.parentSessionId ?? ctx.currentSessionId
+				? { parentSessionId: ctx.parentSessionId ?? ctx.currentSessionId }
+				: {}),
 			agent,
 			task: taskWithOutputInstruction,
 			cwd: runnerCwd,
 			...(sessionFile ? { sessionFile } : {}),
 			...(writerSessionDir ? { sessionDir: writerSessionDir } : {}),
 			persistSession: Boolean(writerSessionDir || sessionFile || shareEnabled),
-			...(model ? { model } : {}),
+			...(programmaticModel ? { model: programmaticModel } : {}),
 			...(ctx.currentModelProvider ? { preferredProvider: ctx.currentModelProvider } : {}),
-			...(effectiveThinking ? { thinking: resolveEffectiveThinking(model, effectiveThinking) as SubagentRuntimeRunRequest["thinking"] } : {}),
+			...(programmaticThinking ? { thinking: programmaticThinking as SubagentRuntimeRunRequest["thinking"] } : {}),
 			...(agentConfig.tools ? { tools: agentConfig.tools } : {}),
 			...(systemPrompt ? { systemPrompt } : {}),
 			systemPromptMode: agentConfig.systemPromptMode,
@@ -987,6 +999,9 @@ export function executeAsyncSingle(
 			...(timeoutMs !== undefined ? { timeoutMs } : {}),
 			...(params.turnBudget ? { turnBudget: params.turnBudget } : {}),
 			...(resolvedToolBudget.budget ? { toolBudget: resolvedToolBudget.budget } : {}),
+			...(structuredOutput
+				? { structuredOutput: { schema: structuredOutput.schema as never, outputPath: structuredOutput.outputPath } }
+				: {}),
 		};
 		// Fire-and-forget consumer writes events + final result to filesystem
 		consumeAsyncSingleRun(params.subagentRuntime, request, {
@@ -1083,18 +1098,20 @@ async function consumeAsyncSingleRun(
 	options: ConsumeAsyncChainOptions,
 ): Promise<void> {
 	const { asyncDir, resultPath, eventsPath, runnerCwd, sessionId } = options;
-	const statusPath = path.join(asyncDir, "status.json");
 	const startedAt = Date.now();
 	let output = "";
+	let streamedText = "";
 	let sessionFile = request.sessionFile;
+	const projector = createProgrammaticStepProjector(asyncDir, request.childIndex);
 	let terminalSeen = false;
 	let stopRequested = false;
 	let interrupted = false;
+	let timedOut = false;
 	const pollController = new AbortController();
 	const cancel = (state: "stopped" | "paused"): void => {
 		stopRequested ||= state === "stopped";
 		interrupted ||= state === "paused";
-		void runtime.cancel(request.runId, request.childIndex);
+		void runtime.cancel(request.runId, request.childIndex).catch(() => undefined);
 		pollController.abort();
 	};
 	const pollPromise = runControlPollLoop(asyncDir, pollController.signal, {
@@ -1106,8 +1123,17 @@ async function consumeAsyncSingleRun(
 	try {
 		for await (const event of runtime.run(request)) {
 			appendJsonl(eventsPath, JSON.stringify(event));
+			if (event.type === "text-delta") {
+				streamedText = appendProgrammaticStreamText(streamedText, event.text);
+				projector.project(event, streamedText);
+			} else {
+				projector.project(event);
+			}
 			const text = assistantOutput(event);
-			if (text) output = text;
+			if (text) {
+				output = text;
+				streamedText = "";
+			}
 			if (event.type === "completed") {
 				terminalSeen = true;
 				sessionFile = event.sessionFile ?? sessionFile;
@@ -1115,18 +1141,33 @@ async function consumeAsyncSingleRun(
 			}
 			if (event.type === "failed") {
 				terminalSeen = true;
+				timedOut = event.code === SUBAGENT_TIMEOUT_CODE;
 				sessionFile = event.sessionFile ?? sessionFile;
 				throw new Error(event.error);
 			}
 		}
+		projector.flush();
 		if (!terminalSeen) throw new Error("Subagent event stream ended without a terminal event.");
+		const structuredOutput = readProgrammaticStructuredOutput(request);
 		const endedAt = Date.now();
+		projectProgrammaticStepResult(
+			asyncDir,
+			{
+				agent: request.agent,
+				index: request.childIndex,
+				output,
+				success: true,
+				...(structuredOutput !== undefined ? { structuredOutput } : {}),
+				...(sessionFile ? { sessionFile } : {}),
+			},
+			"completed",
+			endedAt,
+		);
 		writeProgrammaticStatus(asyncDir, {
 			state: "complete",
 			endedAt,
 			lastUpdate: endedAt,
 			currentStep: 1,
-			steps: [{ index: 0, agent: request.agent, status: "completed", startedAt, endedAt, sessionFile }],
 		});
 		writeAtomicJson(resultPath, {
 			lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
@@ -1138,7 +1179,17 @@ async function consumeAsyncSingleRun(
 			success: true,
 			state: "complete",
 			summary: output || `Async run ${request.runId} completed.`,
-			results: [{ agent: request.agent, output, success: true, sessionFile }],
+			results: [
+				{
+					agent: request.agent,
+					output,
+					success: true,
+					...(structuredOutput !== undefined ? { structuredOutput } : {}),
+					sessionFile,
+				},
+			],
+			...(structuredOutput !== undefined ? { structuredOutput } : {}),
+			...(request.structuredOutput ? { structuredOutputPath: request.structuredOutput.outputPath } : {}),
 			sessionFile,
 			cwd: runnerCwd,
 			asyncDir,
@@ -1146,21 +1197,38 @@ async function consumeAsyncSingleRun(
 			endedAt,
 		});
 	} catch (error) {
+		// Pending throttled projections must land before the terminal step projection below.
+		projector.flush();
 		const endedAt = Date.now();
 		const state = stopRequested ? "stopped" : interrupted ? "paused" : "failed";
 		const message = stopRequested
-			? "Async run stopped by user."
+			? "Async run stopped."
 			: interrupted
 				? "Async run interrupted."
 				: error instanceof Error
 					? error.message
 					: String(error);
+		projectProgrammaticStepResult(
+			asyncDir,
+			{
+				agent: request.agent,
+				index: request.childIndex,
+				output,
+				success: false,
+				error: message,
+				...(stopRequested || interrupted ? { cancelled: true } : {}),
+				...(timedOut ? { timedOut: true } : {}),
+				...(sessionFile ? { sessionFile } : {}),
+			},
+			state,
+			endedAt,
+		);
 		writeProgrammaticStatus(asyncDir, {
 			state,
 			error: message,
+			...(timedOut ? { timedOut: true } : {}),
 			endedAt,
 			lastUpdate: endedAt,
-			steps: [{ index: 0, agent: request.agent, status: state, startedAt, endedAt, error: message, sessionFile }],
 		});
 		writeAtomicJson(resultPath, {
 			lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
@@ -1172,8 +1240,19 @@ async function consumeAsyncSingleRun(
 			success: false,
 			state,
 			error: message,
+			...(timedOut ? { timedOut: true } : {}),
 			summary: output || message,
-			results: [{ agent: request.agent, output, success: false, error: message, state, sessionFile }],
+			results: [
+				{
+					agent: request.agent,
+					output,
+					success: false,
+					error: message,
+					state,
+					...(timedOut ? { timedOut: true } : {}),
+					sessionFile,
+				},
+			],
 			sessionFile,
 			cwd: runnerCwd,
 			asyncDir,
@@ -1198,7 +1277,13 @@ interface ConsumeAsyncChainOptions {
 	eventsPath: string;
 	runnerCwd: string;
 	sessionId: string;
+	globalConcurrencyLimit?: number;
 }
+
+const PROGRAMMATIC_TEXT_PROJECTION_INTERVAL_MS = 1_000;
+const PROGRAMMATIC_STREAM_PREVIEW_CHARS = 4_000;
+const PROGRAMMATIC_RECENT_OUTPUT_LINES = 10;
+const PROGRAMMATIC_RECENT_TOOLS = 20;
 
 interface ProgrammaticLeafResult {
 	agent: string;
@@ -1207,6 +1292,10 @@ interface ProgrammaticLeafResult {
 	success: boolean;
 	error?: string;
 	cancelled?: boolean;
+	skipped?: boolean;
+	timedOut?: boolean;
+	stopped?: boolean;
+	structuredOutput?: unknown;
 	sessionFile?: string;
 }
 
@@ -1216,6 +1305,7 @@ function runnerStepToRequest(
 	childIndex: number,
 	cwd: string,
 ): SubagentRuntimeRunRequest {
+	const programmaticModel = step.model ? splitKnownThinkingSuffix(step.model).baseModel : undefined;
 	return {
 		runId,
 		rootRunId: runId,
@@ -1223,18 +1313,27 @@ function runnerStepToRequest(
 		depth: 1,
 		maxDepth: Math.max(1, step.maxSubagentDepth ?? 1),
 		lineage: [],
+		...(step.parentSessionId ? { parentSessionId: step.parentSessionId } : {}),
 		agent: step.agent,
 		task: step.task,
 		cwd: step.cwd ?? cwd,
-		...(step.model ? { model: step.model } : {}),
+		...(programmaticModel ? { model: programmaticModel } : {}),
 		...(step.thinking ? { thinking: step.thinking as SubagentRuntimeRunRequest["thinking"] } : {}),
 		...(step.tools && step.tools.length > 0 ? { tools: step.tools } : {}),
 		...(step.systemPrompt ? { systemPrompt: step.systemPrompt } : {}),
 		systemPromptMode: step.systemPromptMode ?? "append",
 		inheritProjectContext: step.inheritProjectContext,
 		inheritSkills: step.inheritSkills,
-		...(step.sessionFile ? { sessionFile: step.sessionFile } : {}),
+		...(step.sessionFile ? { sessionFile: step.sessionFile, sessionDir: path.dirname(step.sessionFile) } : {}),
 		persistSession: Boolean(step.sessionFile),
+		...(step.structuredOutput
+			? {
+				structuredOutput: {
+					schema: step.structuredOutput.schema as never,
+					outputPath: step.structuredOutput.outputPath,
+				},
+			}
+			: {}),
 		extensionProfile: step.tools?.includes("subagent")
 			? ["provider", "runtime", "fanout"]
 			: ["provider", "runtime"],
@@ -1245,13 +1344,16 @@ function runnerStepToRequest(
 async function consumeLeafRun(
 	runtime: SubagentRuntime,
 	request: SubagentRuntimeRunRequest,
+	asyncDir: string,
 	eventsPath: string,
 	signal: AbortSignal,
 ): Promise<ProgrammaticLeafResult> {
 	let output = "";
+	let streamedText = "";
 	let sessionFile = request.sessionFile;
+	const projector = createProgrammaticStepProjector(asyncDir, request.childIndex);
 	const cancel = (): void => {
-		void runtime.cancel(request.runId, request.childIndex);
+		void runtime.cancel(request.runId, request.childIndex).catch(() => undefined);
 	};
 	if (signal.aborted) {
 		return {
@@ -1267,8 +1369,17 @@ async function consumeLeafRun(
 	try {
 		for await (const event of runtime.run(request)) {
 			appendJsonl(eventsPath, JSON.stringify(event));
+			if (event.type === "text-delta") {
+				streamedText = appendProgrammaticStreamText(streamedText, event.text);
+				projector.project(event, streamedText);
+			} else {
+				projector.project(event);
+			}
 			const text = assistantOutput(event);
-			if (text) output = text;
+			if (text) {
+				output = text;
+				streamedText = "";
+			}
 			if (event.type === "failed") {
 				sessionFile = event.sessionFile ?? sessionFile;
 				return {
@@ -1278,12 +1389,32 @@ async function consumeLeafRun(
 					success: false,
 					error: event.error,
 					cancelled: signal.aborted,
-					sessionFile,
+					...(event.code === SUBAGENT_TIMEOUT_CODE ? { timedOut: true } : {}),
+					...(sessionFile ? { sessionFile } : {}),
 				};
 			}
 			if (event.type === "completed") {
 				sessionFile = event.sessionFile ?? sessionFile;
-				return { agent: request.agent, index: request.childIndex, output, success: true, sessionFile };
+				try {
+					const structuredOutput = readProgrammaticStructuredOutput(request);
+					return {
+						agent: request.agent,
+						index: request.childIndex,
+						output,
+						success: true,
+						...(structuredOutput !== undefined ? { structuredOutput } : {}),
+						...(sessionFile ? { sessionFile } : {}),
+					};
+				} catch (error) {
+					return {
+						agent: request.agent,
+						index: request.childIndex,
+						output,
+						success: false,
+						error: error instanceof Error ? error.message : String(error),
+						...(sessionFile ? { sessionFile } : {}),
+					};
+				}
 			}
 		}
 		return {
@@ -1302,9 +1433,10 @@ async function consumeLeafRun(
 			success: false,
 			error: message,
 			cancelled: signal.aborted || /abort|cancel|disposed/i.test(message),
-			sessionFile,
+			...(sessionFile ? { sessionFile } : {}),
 		};
 	} finally {
+		projector.flush();
 		signal.removeEventListener("abort", cancel);
 	}
 }
@@ -1324,10 +1456,21 @@ async function consumeAsyncChainRun(
 	let interrupted = false;
 	let previousOutput = "";
 	let nextFlatIndex = 0;
+	const outputs: ChainOutputMap = {};
+	const substituteTask = (template: string): string =>
+		resolveOutputReferences(template, outputs).replace(/\{previous\}/g, () => previousOutput);
 	const cancel = (state: "stopped" | "paused"): void => {
 		stopRequested ||= state === "stopped";
 		interrupted ||= state === "paused";
 		control.abort();
+	};
+	const projectResult = (result: ProgrammaticLeafResult): ProgrammaticLeafResult => {
+		projectProgrammaticStepResult(
+			asyncDir,
+			result,
+			result.success ? "completed" : result.cancelled ? (stopRequested ? "stopped" : "paused") : "failed",
+		);
+		return result;
 	};
 	const controlHandlers: ControlPollHandlers = {
 		onSteer: (request) => routeProgrammaticSteer(runtime, asyncDir, request, [...active.values()]),
@@ -1348,68 +1491,111 @@ async function consumeAsyncChainRun(
 			if (isParallelGroup(step)) {
 				const baseIndex = nextFlatIndex;
 				nextFlatIndex += step.parallel.length;
-				const requests = step.parallel.map((task, taskIndex) => {
-					const index = baseIndex + taskIndex;
-					const request = runnerStepToRequest(
-						{ ...task, task: task.task.replace(/\{previous\}/g, previousOutput) },
+				const requests = step.parallel.map((task, taskIndex) =>
+					runnerStepToRequest(
+						{ ...task, task: substituteTask(task.task) },
 						`${id}-${logicalIndex}-${taskIndex}`,
-						index,
+						baseIndex + taskIndex,
 						task.cwd ?? runnerCwd,
-					);
-					active.set(index, request);
-					markProgrammaticStep(asyncDir, index, { status: "running", startedAt: Date.now() });
-					return request;
-				});
-				stepResults = await Promise.all(
-					requests.map(async (request) => {
-						try {
-							return await consumeLeafRun(runtime, request, eventsPath, control.signal);
-						} finally {
-							active.delete(request.childIndex);
-						}
-					}),
+					),
 				);
+				let groupFailed = false;
+				const concurrency = Math.min(
+					step.concurrency ?? MAX_PARALLEL_CONCURRENCY,
+					options.globalConcurrencyLimit ?? Number.POSITIVE_INFINITY,
+				);
+				stepResults = await mapConcurrent(requests, concurrency, async (request) => {
+					if (step.failFast && groupFailed) {
+						return projectResult({
+							agent: request.agent,
+							index: request.childIndex,
+							output: "",
+							success: false,
+							error: "Skipped due to fail-fast.",
+							skipped: true,
+						});
+					}
+					active.set(request.childIndex, request);
+					markProgrammaticStep(asyncDir, request.childIndex, { status: "running", startedAt: Date.now() });
+					try {
+						const result = await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal);
+						if (!result.success && step.failFast) groupFailed = true;
+						return projectResult(result);
+					} finally {
+						active.delete(request.childIndex);
+					}
+				});
+				step.parallel.forEach((task, taskIndex) => {
+					const leaf = stepResults[taskIndex];
+					if (task.outputName && leaf) outputs[task.outputName] = outputEntryFromAsyncResult(leaf, logicalIndex);
+				});
 				previousOutput = aggregateProgrammaticOutputs(stepResults);
 			} else {
 				const index = nextFlatIndex++;
 				const sequential = step as RunnerSubagentStep;
-				const request = runnerStepToRequest(
-					{ ...sequential, task: sequential.task.replace(/\{previous\}/g, previousOutput) },
-					`${id}-${logicalIndex}`,
-					index,
-					sequential.cwd ?? runnerCwd,
-				);
-				active.set(index, request);
-				markProgrammaticStep(asyncDir, index, { status: "running", startedAt: Date.now() });
-				try {
-					stepResults = [await consumeLeafRun(runtime, request, eventsPath, control.signal)];
-				} finally {
-					active.delete(index);
+				if (sequential.importAsyncRoot) {
+					markProgrammaticStep(asyncDir, index, { status: "running", startedAt: Date.now() });
+					const imported = await waitForImportedAsyncRoot(sequential.importAsyncRoot, {
+						shouldAbort: () => control.signal.aborted,
+						timeoutMessage: "Attached async root wait aborted.",
+						abortState: "cancelled",
+					});
+					stepResults = [
+						projectResult({
+							agent: imported.agent,
+							index,
+							output: imported.output,
+							success: imported.success,
+							...(imported.error ? { error: imported.error } : {}),
+							...(control.signal.aborted ? { cancelled: true } : {}),
+							...(imported.timedOut ? { timedOut: true } : {}),
+							...(imported.stopped ? { stopped: true } : {}),
+							...(imported.structuredOutput !== undefined
+								? { structuredOutput: imported.structuredOutput }
+								: {}),
+							...(imported.sessionFile ? { sessionFile: imported.sessionFile } : {}),
+						}),
+					];
+				} else {
+					const request = runnerStepToRequest(
+						{ ...sequential, task: substituteTask(sequential.task) },
+						`${id}-${logicalIndex}`,
+						index,
+						sequential.cwd ?? runnerCwd,
+					);
+					active.set(index, request);
+					markProgrammaticStep(asyncDir, index, { status: "running", startedAt: Date.now() });
+					try {
+						stepResults = [projectResult(await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal))];
+					} finally {
+						active.delete(index);
+					}
 				}
-				previousOutput = stepResults[0]?.output ?? "";
+				const leaf = stepResults[0];
+				if (sequential.outputName && leaf) outputs[sequential.outputName] = outputEntryFromAsyncResult(leaf, logicalIndex);
+				previousOutput = leaf?.output ?? "";
 			}
 			results.push(...stepResults);
-			for (const result of stepResults) {
-				markProgrammaticStep(asyncDir, result.index, {
-					status: result.success ? "completed" : result.cancelled ? (stopRequested ? "stopped" : "paused") : "failed",
-					endedAt: Date.now(),
-					error: result.error,
-					sessionFile: result.sessionFile,
-				});
-			}
 			writeProgrammaticStatus(asyncDir, { currentStep: results.length, lastUpdate: Date.now() });
 			if (stepResults.some((result) => !result.success)) break;
 		}
 
 		const endedAt = Date.now();
 		const allSucceeded = results.length > 0 && results.every((result) => result.success);
+		const timedOut = results.some((result) => result.timedOut);
 		const state = stopRequested ? "stopped" : interrupted ? "paused" : allSucceeded ? "complete" : "failed";
 		const error = stopRequested
-			? "Async run stopped by user."
+			? "Async run stopped."
 			: interrupted
 				? "Async run interrupted."
 				: results.find((result) => !result.success)?.error;
-		writeProgrammaticStatus(asyncDir, { state, error, endedAt, lastUpdate: endedAt });
+		writeProgrammaticStatus(asyncDir, {
+			state,
+			error,
+			...(timedOut ? { timedOut: true } : {}),
+			endedAt,
+			lastUpdate: endedAt,
+		});
 		writeAtomicJson(resultPath, {
 			lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
 			id,
@@ -1420,14 +1606,20 @@ async function consumeAsyncChainRun(
 			state,
 			summary: allSucceeded ? previousOutput || `Async ${resultMode} ${id} completed.` : error,
 			error,
+			...(timedOut ? { timedOut: true } : {}),
 			results: results.map((result) => ({
 				agent: result.agent,
 				output: result.output,
 				success: result.success,
 				error: result.error,
+				skipped: result.skipped,
+				timedOut: result.timedOut,
+				stopped: result.stopped,
+				structuredOutput: result.structuredOutput,
 				sessionFile: result.sessionFile,
 				state: result.cancelled ? state : undefined,
 			})),
+			outputs,
 			cwd: runnerCwd,
 			asyncDir,
 			startedAt,
@@ -1492,7 +1684,12 @@ function writeProgrammaticStatus(asyncDir: string, updates: Record<string, unkno
 	});
 }
 
-function markProgrammaticStep(asyncDir: string, index: number, updates: Record<string, unknown>): void {
+function updateProgrammaticStep(
+	asyncDir: string,
+	index: number,
+	mutate: (step: Record<string, unknown>, now: number) => void,
+	now = Date.now(),
+): void {
 	const current = readStatus(asyncDir);
 	if (!current) return;
 	const record = current as unknown as Record<string, unknown>;
@@ -1501,8 +1698,223 @@ function markProgrammaticStep(asyncDir: string, index: number, updates: Record<s
 		: [];
 	const step = steps[index];
 	if (!step) return;
-	steps[index] = { ...step, ...updates };
-	writeAtomicJson(path.join(asyncDir, "status.json"), { ...record, steps, lastUpdate: Date.now() });
+	mutate(step, now);
+	steps[index] = step;
+
+	const activeTool = steps
+		.filter((candidate) => candidate.status === "running" && typeof candidate.currentTool === "string")
+		.sort((left, right) => Number(right.currentToolStartedAt ?? 0) - Number(left.currentToolStartedAt ?? 0))[0];
+	const turnCount = steps.reduce((total, candidate) => total + Number(candidate.turnCount ?? 0), 0);
+	const toolCount = steps.reduce((total, candidate) => total + Number(candidate.toolCount ?? 0), 0);
+	const tokenInput = steps.reduce(
+		(total, candidate) => total + Number((candidate.tokens as Record<string, unknown> | undefined)?.input ?? 0),
+		0,
+	);
+	const tokenOutput = steps.reduce(
+		(total, candidate) => total + Number((candidate.tokens as Record<string, unknown> | undefined)?.output ?? 0),
+		0,
+	);
+	writeAtomicJson(path.join(asyncDir, "status.json"), {
+		...record,
+		steps,
+		currentStep: index,
+		lastActivityAt: now,
+		currentTool: activeTool?.currentTool,
+		currentToolStartedAt: activeTool?.currentToolStartedAt,
+		currentPath: activeTool?.currentPath,
+		turnCount,
+		toolCount,
+		...(tokenInput || tokenOutput
+			? { totalTokens: { input: tokenInput, output: tokenOutput, total: tokenInput + tokenOutput } }
+			: {}),
+		lastUpdate: now,
+	});
+}
+
+function markProgrammaticStep(asyncDir: string, index: number, updates: Record<string, unknown>): void {
+	updateProgrammaticStep(asyncDir, index, (step) => Object.assign(step, updates));
+}
+
+function appendProgrammaticStreamText(current: string, delta: string): string {
+	const next = `${current}${delta}`;
+	return next.length > PROGRAMMATIC_STREAM_PREVIEW_CHARS
+		? next.slice(-PROGRAMMATIC_STREAM_PREVIEW_CHARS)
+		: next;
+}
+
+function programmaticRecentOutput(text: string): string[] {
+	const lines = text
+		.slice(-PROGRAMMATIC_STREAM_PREVIEW_CHARS)
+		.split(/\r?\n/)
+		.map((line) => line.trimEnd())
+		.filter((line) => line.trim().length > 0)
+		.slice(-PROGRAMMATIC_RECENT_OUTPUT_LINES);
+	return lines.map((line) => (line.length > 1_000 ? line.slice(-1_000) : line));
+}
+
+function programmaticMessageUsage(event: SubagentRunEvent): { input: number; output: number } | undefined {
+	if (event.type !== "message-end" || !event.message || typeof event.message !== "object" || Array.isArray(event.message)) {
+		return undefined;
+	}
+	const usage = (event.message as Record<string, unknown>).usage;
+	if (!usage || typeof usage !== "object" || Array.isArray(usage)) return undefined;
+	const record = usage as Record<string, unknown>;
+	const input = Number(record.input ?? record.inputTokens ?? 0);
+	const output = Number(record.output ?? record.outputTokens ?? 0);
+	return Number.isFinite(input) && Number.isFinite(output) ? { input, output } : undefined;
+}
+
+interface PendingProgrammaticStepEvent {
+	event: SubagentRunEvent;
+	streamedText?: string;
+}
+
+function projectProgrammaticStepEvents(
+	asyncDir: string,
+	index: number,
+	events: PendingProgrammaticStepEvent[],
+	now = Date.now(),
+): void {
+	if (events.length === 0) return;
+	updateProgrammaticStep(asyncDir, index, (step) => {
+		for (const pending of events) applyProgrammaticStepEvent(step, pending.event, pending.streamedText, now);
+	}, now);
+}
+
+interface ProgrammaticStepProjector {
+	/** Queue an event for projection; lifecycle events (started/completed/failed) flush immediately. */
+	project(event: SubagentRunEvent, streamedText?: string): void;
+	/** Project any queued events now and cancel the pending flush timer. */
+	flush(): void;
+}
+
+/**
+ * Throttles status.json projections for one step: events are batched into a
+ * single read+rewrite per {@link PROGRAMMATIC_TEXT_PROJECTION_INTERVAL_MS}
+ * window, with an immediate flush on lifecycle transitions so terminal state
+ * is never delayed.
+ */
+function createProgrammaticStepProjector(asyncDir: string, index: number): ProgrammaticStepProjector {
+	let pendingEvents: PendingProgrammaticStepEvent[] = [];
+	let flushTimer: ReturnType<typeof setTimeout> | undefined;
+	let lastProjectionAt = 0;
+	const flush = (now = Date.now()): void => {
+		if (flushTimer !== undefined) {
+			clearTimeout(flushTimer);
+			flushTimer = undefined;
+		}
+		if (pendingEvents.length === 0) return;
+		const batch = pendingEvents;
+		pendingEvents = [];
+		projectProgrammaticStepEvents(asyncDir, index, batch, now);
+		lastProjectionAt = now;
+	};
+	const project = (event: SubagentRunEvent, streamedText?: string): void => {
+		const last = pendingEvents[pendingEvents.length - 1];
+		if (event.type === "text-delta" && last?.event.type === "text-delta") {
+			// Only the cumulative streamed text matters; coalesce consecutive deltas.
+			pendingEvents[pendingEvents.length - 1] = { event, ...(streamedText !== undefined ? { streamedText } : {}) };
+		} else {
+			pendingEvents.push({ event, ...(streamedText !== undefined ? { streamedText } : {}) });
+		}
+		const now = Date.now();
+		const lifecycle = event.type === "started" || event.type === "completed" || event.type === "failed";
+		if (lifecycle || now - lastProjectionAt >= PROGRAMMATIC_TEXT_PROJECTION_INTERVAL_MS) {
+			flush(now);
+			return;
+		}
+		if (flushTimer === undefined) {
+			flushTimer = setTimeout(() => {
+				flushTimer = undefined;
+				flush();
+			}, Math.max(0, PROGRAMMATIC_TEXT_PROJECTION_INTERVAL_MS - (now - lastProjectionAt)));
+			flushTimer.unref?.();
+		}
+	};
+	return { project, flush: () => flush() };
+}
+
+function applyProgrammaticStepEvent(
+	step: Record<string, unknown>,
+	event: SubagentRunEvent,
+	streamedText: string | undefined,
+	now: number,
+): void {
+	if (event.type === "started") {
+		step.status = "running";
+		step.startedAt ??= now;
+		if (event.sessionFile) step.sessionFile = event.sessionFile;
+	} else if (event.type === "text-delta") {
+		if (streamedText) step.recentOutput = programmaticRecentOutput(streamedText);
+	} else if (event.type === "tool-start") {
+		const args = event.args && typeof event.args === "object" && !Array.isArray(event.args)
+			? event.args as Record<string, unknown>
+			: {};
+		step.toolCount = Number(step.toolCount ?? 0) + 1;
+		step.currentTool = event.toolName;
+		step.currentToolArgs = extractToolArgsPreview(args);
+		step.currentToolStartedAt = now;
+		step.currentPath = resolveCurrentPath(event.toolName, args);
+	} else if (event.type === "tool-end") {
+		const recentTools = Array.isArray(step.recentTools) ? [...step.recentTools] : [];
+		recentTools.push({
+			tool: typeof step.currentTool === "string" ? step.currentTool : event.toolName,
+			args: typeof step.currentToolArgs === "string" ? step.currentToolArgs : "",
+			endMs: now,
+		});
+		step.recentTools = recentTools.slice(-PROGRAMMATIC_RECENT_TOOLS);
+		step.currentTool = undefined;
+		step.currentToolArgs = undefined;
+		step.currentToolStartedAt = undefined;
+		step.currentPath = undefined;
+	} else if (event.type === "message-end") {
+		const text = assistantOutput(event);
+		if (text) step.recentOutput = programmaticRecentOutput(text);
+		const message = event.message && typeof event.message === "object" && !Array.isArray(event.message)
+			? event.message as Record<string, unknown>
+			: undefined;
+		if (message?.role === "assistant") {
+			step.turnCount = Number(step.turnCount ?? 0) + 1;
+			const usage = programmaticMessageUsage(event);
+			if (usage) {
+				const previous = step.tokens && typeof step.tokens === "object"
+					? step.tokens as Record<string, unknown>
+					: {};
+				const input = Number(previous.input ?? 0) + usage.input;
+				const output = Number(previous.output ?? 0) + usage.output;
+				step.tokens = { input, output, total: input + output };
+			}
+		}
+	} else if (event.type === "usage") {
+		step.tokens = { input: event.input, output: event.output, total: event.input + event.output };
+	} else if ((event.type === "completed" || event.type === "failed") && event.sessionFile) {
+		step.sessionFile = event.sessionFile;
+	}
+	step.lastActivityAt = now;
+}
+
+function projectProgrammaticStepResult(
+	asyncDir: string,
+	result: ProgrammaticLeafResult,
+	status: "completed" | "failed" | "paused" | "stopped",
+	now = Date.now(),
+): void {
+	updateProgrammaticStep(asyncDir, result.index, (step) => {
+		step.status = status;
+		step.endedAt = now;
+		step.durationMs = Math.max(0, now - Number(step.startedAt ?? now));
+		step.exitCode = result.success ? 0 : 1;
+		step.error = result.error;
+		step.timedOut = result.timedOut;
+		step.stopped = status === "stopped" || result.stopped ? true : undefined;
+		step.currentTool = undefined;
+		step.currentToolArgs = undefined;
+		step.currentToolStartedAt = undefined;
+		step.currentPath = undefined;
+		if (result.output) step.recentOutput = programmaticRecentOutput(result.output);
+		if (result.sessionFile) step.sessionFile = result.sessionFile;
+		if (result.structuredOutput !== undefined) step.structuredOutput = result.structuredOutput;
+	}, now);
 }
 
 function assistantOutput(event: SubagentRunEvent): string {
@@ -1519,6 +1931,18 @@ function assistantOutput(event: SubagentRunEvent): string {
 		})
 		.join("\n")
 		.trim();
+}
+
+function readProgrammaticStructuredOutput(request: SubagentRuntimeRunRequest): unknown {
+	const structuredOutput = request.structuredOutput;
+	if (!structuredOutput) return undefined;
+	try {
+		return JSON.parse(fs.readFileSync(structuredOutput.outputPath, "utf8"));
+	} catch (error) {
+		throw new Error(
+			`Structured output was not produced at ${structuredOutput.outputPath}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 function aggregateProgrammaticOutputs(results: ProgrammaticLeafResult[]): string {

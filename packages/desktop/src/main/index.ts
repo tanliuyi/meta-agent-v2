@@ -325,6 +325,8 @@ app.whenReady().then(async () => {
     agentDir,
     log: (scope, text) => sidecarLog?.write(scope, text),
     catalogChanged: broadcastThreadCatalogUpdate,
+    persistSession: (projectId, sessionFile, thread) =>
+      metadata!.registerExternal(projectId, projects.getCwd(projectId), sessionFile, thread),
     push: (payload, workerInstanceId, sidecarSequence) => {
       if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
       else subagents?.acknowledge(workerInstanceId, sidecarSequence);
