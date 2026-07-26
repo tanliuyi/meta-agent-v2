@@ -1,13 +1,14 @@
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
+import { memo } from "react";
 import type { ProviderEntry } from "../../../../shared/providers-config-contracts.ts";
 
 interface ProviderCardProps {
   entry: ProviderEntry;
-  onEdit(): void;
+  onEdit(key: string): void;
 }
 
 /** A single provider row in the unified provider list. */
-export function ProviderCard({ entry, onEdit }: ProviderCardProps) {
+export const ProviderCard = memo(function ProviderCard({ entry, onEdit }: ProviderCardProps) {
   const sourceLabel =
     entry.source === "ai-builtin" ? "内置" : entry.source === "desktop-builtin" ? "内置(desktop)" : "自定义";
   const credLabel =
@@ -20,7 +21,7 @@ export function ProviderCard({ entry, onEdit }: ProviderCardProps) {
     entry.builtInModelCount > 0 ? `${entry.builtInModelCount}+ 内置模型` : `${entry.models.length} 个自定义模型`;
 
   return (
-    <button type="button" className="providers-row" onClick={onEdit}>
+    <button type="button" className="providers-row" onClick={() => onEdit(entry.key)}>
       <div className="providers-row-avatar">{entry.displayName.charAt(0).toUpperCase()}</div>
       <div className="providers-row-body">
         <div className="providers-row-heading">
@@ -38,4 +39,4 @@ export function ProviderCard({ entry, onEdit }: ProviderCardProps) {
       <Settings2 className="providers-row-action" />
     </button>
   );
-}
+});

@@ -5,7 +5,7 @@ import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AuthOauthLoginEvent,
   AuthProviderDraft,
@@ -13,10 +13,14 @@ import type {
 } from "../../../../shared/auth-config-contracts.ts";
 import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import type { ProviderEntry, ProvidersConfigMetadata } from "../../../../shared/providers-config-contracts.ts";
-import { ModelsCompatEditor } from "./models-compat-editor.tsx";
-import { createProviderDraft } from "./models-settings-model.ts";
+import { ProviderCompatTab } from "./provider-compat-tab.tsx";
 import { ProviderConnectionForm } from "./provider-connection-form.tsx";
 import { ProviderCredentialsForm } from "./provider-credentials-form.tsx";
+import {
+  commitProviderEditorDrafts,
+  normalizeProviderModelsDraft,
+  providerEditorDraftsChanged,
+} from "./provider-edit-model.ts";
 import { ProviderModelsTab } from "./provider-models-tab.tsx";
 import { ProviderOauthLoginDialog, type ProviderOauthLoginState } from "./provider-oauth-login-dialog.tsx";
 import { ProviderOverridesTab } from "./provider-overrides-tab.tsx";
@@ -44,10 +48,19 @@ export function ProviderEditDialog({
 }: ProviderEditDialogProps) {
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [oauthLogin, setOauthLogin] = useState<ProviderOauthLoginState>();
-  const modelsProvider = modelsDraft.find((p) => p.key === entry.key);
-  const authProvider = authDraft.find((p) => p.key === entry.key);
+  const [activeTab, setActiveTab] = useState("connection");
+  const sourceModelsProvider = modelsDraft.find((provider) => provider.key === entry.key);
+  const sourceAuthProvider = authDraft.find((provider) => provider.key === entry.key);
+  const modelsProviderRef = useRef<ModelsProviderDraft | undefined>(
+    sourceModelsProvider ? structuredClone(sourceModelsProvider) : undefined,
+  );
+  const authProviderRef = useRef<AuthProviderDraft | undefined>(
+    sourceAuthProvider ? structuredClone(sourceAuthProvider) : undefined,
+  );
+  const localDirty = useRef(false);
+  const skipCommit = useRef(false);
   const knownProvider = knownProviders.find((provider) => provider.id === entry.key);
-  const builtIn = metadata.builtInProviders.find((bp) => bp.id === entry.key);
+  const builtIn = metadata.builtInProviders.find((provider) => provider.id === entry.key);
 
   useEffect(
     () =>
@@ -59,8 +72,16 @@ export function ProviderEditDialog({
     [],
   );
 
+  useEffect(() => {
+    if (localDirty.current) return;
+    const nextModelsProvider = sourceModelsProvider ? structuredClone(sourceModelsProvider) : undefined;
+    const nextAuthProvider = sourceAuthProvider ? structuredClone(sourceAuthProvider) : undefined;
+    modelsProviderRef.current = nextModelsProvider;
+    authProviderRef.current = nextAuthProvider;
+  }, [sourceAuthProvider, sourceModelsProvider]);
+
   function startOauthLogin(): void {
-    if (!knownProvider?.oauth || controller.dirty) return;
+    if (!knownProvider?.oauth || controller.dirty || localDirty.current) return;
     const loginId = crypto.randomUUID();
     setOauthLogin({ loginId, providerName: knownProvider.oauth.name, active: true, events: [] });
     void window.desktop.auth.loginOauth({ loginId, providerId: entry.key }).then(
@@ -79,48 +100,65 @@ export function ProviderEditDialog({
     );
   }
 
-  function updateModelsProvider(updated: ModelsProviderDraft): void {
-    controller.mutate((drafts: ProviderDrafts) => {
-      const idx = drafts.modelsProviders.findIndex(
-        (provider) =>
-          provider.key === entry.key ||
-          (modelsProvider?.origin !== undefined && provider.origin?.providerKey === modelsProvider.origin.providerKey),
-      );
-      if (idx >= 0) drafts.modelsProviders[idx] = updated;
-      else drafts.modelsProviders.push(updated);
-
-      if (updated.key !== entry.key) {
-        const authIndex = drafts.authProviders.findIndex((provider) => provider.key === entry.key);
-        if (authIndex >= 0) {
-          const current = drafts.authProviders[authIndex]!;
-          drafts.authProviders[authIndex] = { ...current, key: updated.key, origin: current.origin ?? entry.key };
-        }
-      }
-    });
-    if (updated.key !== entry.key) controller.selectProvider(updated.key);
+  function markLocalDirty(): void {
+    if (localDirty.current) return;
+    localDirty.current = true;
+    void window.desktop.providers.setEditorDirty(true);
   }
 
-  function updateAuthProvider(updated: AuthProviderDraft): void {
-    controller.mutate((drafts: ProviderDrafts) => {
-      const idx = drafts.authProviders.findIndex((p) => p.key === entry.key);
-      if (idx >= 0) drafts.authProviders[idx] = updated;
-      else drafts.authProviders.push(updated);
-    });
+  function updateModelsProvider(updated: ModelsProviderDraft): void {
+    markLocalDirty();
+    modelsProviderRef.current = updated;
+    if (updated.key !== entry.key && authProviderRef.current) {
+      const current = authProviderRef.current;
+      const renamed = { ...current, key: updated.key, origin: current.origin ?? entry.key };
+      authProviderRef.current = renamed;
+    }
+  }
+
+  function updateAuthProvider(updated: AuthProviderDraft | undefined): void {
+    markLocalDirty();
+    authProviderRef.current = updated;
+  }
+
+  function commitAndClose(): void {
+    if (!skipCommit.current && localDirty.current) {
+      const nextModelsProvider = normalizeProviderModelsDraft(modelsProviderRef.current, entry.defaultConfig);
+      const nextAuthProvider = authProviderRef.current;
+      if (providerEditorDraftsChanged(sourceModelsProvider, sourceAuthProvider, nextModelsProvider, nextAuthProvider)) {
+        controller.mutate((drafts: ProviderDrafts) => {
+          commitProviderEditorDrafts(drafts, {
+            entryKey: entry.key,
+            sourceModelsOriginProviderKey: sourceModelsProvider?.origin?.providerKey,
+            modelsProvider: nextModelsProvider,
+            authProvider: nextAuthProvider,
+          });
+        });
+      } else {
+        void window.desktop.providers.setEditorDirty(controller.dirty);
+      }
+      localDirty.current = false;
+    }
+    onClose();
   }
 
   function deleteProvider(): void {
+    skipCommit.current = true;
     controller.mutate((drafts: ProviderDrafts) => {
-      drafts.modelsProviders = drafts.modelsProviders.filter((p) => p.key !== entry.key);
-      drafts.authProviders = drafts.authProviders.filter((p) => p.key !== entry.key);
+      drafts.modelsProviders = drafts.modelsProviders.filter((provider) => provider.key !== entry.key);
+      drafts.authProviders = drafts.authProviders.filter((provider) => provider.key !== entry.key);
     });
     onClose();
   }
+
+  const modelsProvider = modelsProviderRef.current;
+  const authProvider = authProviderRef.current;
 
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) commitAndClose();
       }}
     >
       <DialogContent
@@ -134,7 +172,7 @@ export function ProviderEditDialog({
           </div>
         </div>
 
-        <Tabs.Root className="settings-tabs" defaultValue="connection">
+        <Tabs.Root className="settings-tabs" value={activeTab} onValueChange={setActiveTab}>
           <Tabs.List className="settings-tab-list" aria-label="Provider 配置">
             <Tabs.Trigger value="connection">连接</Tabs.Trigger>
             <Tabs.Trigger value="credentials">凭据</Tabs.Trigger>
@@ -164,14 +202,10 @@ export function ProviderEditDialog({
                   provider={authProvider}
                   knownProvider={knownProvider}
                   entryKey={entry.key}
-                  oauthDisabled={controller.dirty}
+                  oauthDisabled={controller.dirty || localDirty.current}
                   onChange={updateAuthProvider}
                   onOauthLogin={startOauthLogin}
-                  onDelete={() => {
-                    controller.mutate((drafts: ProviderDrafts) => {
-                      drafts.authProviders = drafts.authProviders.filter((p) => p.key !== entry.key);
-                    });
-                  }}
+                  onDelete={() => updateAuthProvider(undefined)}
                 />
               </div>
             </div>
@@ -214,12 +248,7 @@ export function ProviderEditDialog({
           <Tabs.Content value="compat" className="settings-tab-content">
             <div className="settings-tab-scroll">
               <div className="settings-tab-scroll-content">
-                <ModelsCompatEditor
-                  value={modelsProvider?.compat}
-                  onChange={(compat) =>
-                    updateModelsProvider({ ...(modelsProvider ?? createProviderDraft(entry.key)), compat })
-                  }
-                />
+                <ProviderCompatTab provider={modelsProvider} entryKey={entry.key} onChange={updateModelsProvider} />
               </div>
             </div>
           </Tabs.Content>
@@ -230,7 +259,7 @@ export function ProviderEditDialog({
             <Trash2 />
             删除
           </Button>
-          <Button onClick={onClose}>完成</Button>
+          <Button onClick={commitAndClose}>完成</Button>
         </DialogFooter>
       </DialogContent>
 

@@ -5,6 +5,7 @@ import { settingsReturnSession } from "@renderer/state/settings-navigation";
 import { Link, Outlet, useSearch } from "@tanstack/react-router";
 import Antenna from "lucide-react/dist/esm/icons/antenna.mjs";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
+import GitFork from "lucide-react/dist/esm/icons/git-fork.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Puzzle from "lucide-react/dist/esm/icons/puzzle.mjs";
@@ -94,6 +95,15 @@ export function SettingsPage() {
             >
               <Puzzle />
               <span>扩展</span>
+            </Link>
+            <Link
+              to="/settings/subagents"
+              search={search}
+              className="settings-menu-item"
+              activeOptions={{ exact: true }}
+            >
+              <GitFork />
+              <span>子智能体</span>
             </Link>
             <Link to="/settings/about" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
               <Info />

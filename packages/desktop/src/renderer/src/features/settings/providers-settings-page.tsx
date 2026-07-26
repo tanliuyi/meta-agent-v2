@@ -7,7 +7,7 @@ import FilterIcon from "lucide-react/dist/esm/icons/filter.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import SearchIcon from "lucide-react/dist/esm/icons/search.mjs";
 import XIcon from "lucide-react/dist/esm/icons/x.mjs";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import type { ProviderEntry } from "../../../../shared/providers-config-contracts.ts";
 import { AddProviderDialog } from "./add-provider-dialog.tsx";
 import { createProviderDraft } from "./models-settings-model.ts";
@@ -15,6 +15,20 @@ import { ProviderCard } from "./provider-card.tsx";
 import { ProviderEditDialog } from "./provider-edit-dialog.tsx";
 import type { ProviderDrafts, ProvidersSettingsController } from "./use-providers-controller.ts";
 import { useProvidersSettingsController } from "./use-providers-controller.ts";
+
+const SOURCE_OPTIONS: SelectOption[] = [
+  { value: "all", label: "全部来源" },
+  { value: "ai-builtin", label: "内置" },
+  { value: "desktop-builtin", label: "内置(desktop)" },
+  { value: "custom", label: "自定义" },
+];
+
+const CREDENTIAL_OPTIONS: SelectOption[] = [
+  { value: "all", label: "全部凭据" },
+  { value: "configured", label: "已配置" },
+  { value: "missing", label: "未配置" },
+  { value: "env-available", label: "环境变量" },
+];
 
 /** Unified providers settings page — replaces both models and auth pages. */
 export function ProvidersSettingsPage() {
@@ -26,6 +40,7 @@ export function ProvidersSettingsPage() {
   const [filterCredentialStatus, setFilterCredentialStatus] = useState<ProviderEntry["credentialStatus"] | "all">(
     "all",
   );
+  const deferredFilterText = useDeferredValue(filterText);
 
   const selected = controller.selectedProviderKey
     ? controller.providers.find((p) => p.key === controller.selectedProviderKey)
@@ -33,8 +48,8 @@ export function ProvidersSettingsPage() {
 
   const filteredProviders = useMemo(() => {
     let list = controller.providers;
-    if (filterText) {
-      const lower = filterText.toLowerCase();
+    if (deferredFilterText) {
+      const lower = deferredFilterText.toLowerCase();
       list = list.filter((p) => p.displayName.toLowerCase().includes(lower) || p.key.toLowerCase().includes(lower));
     }
     if (filterSource !== "all") {
@@ -44,23 +59,9 @@ export function ProvidersSettingsPage() {
       list = list.filter((p) => p.credentialStatus === filterCredentialStatus);
     }
     return list;
-  }, [controller.providers, filterText, filterSource, filterCredentialStatus]);
+  }, [controller.providers, deferredFilterText, filterSource, filterCredentialStatus]);
 
   const hasActiveFilter = filterText !== "" || filterSource !== "all" || filterCredentialStatus !== "all";
-
-  const sourceOptions: SelectOption[] = [
-    { value: "all", label: "全部来源" },
-    { value: "ai-builtin", label: "内置" },
-    { value: "desktop-builtin", label: "内置(desktop)" },
-    { value: "custom", label: "自定义" },
-  ];
-
-  const credentialOptions: SelectOption[] = [
-    { value: "all", label: "全部凭据" },
-    { value: "configured", label: "已配置" },
-    { value: "missing", label: "未配置" },
-    { value: "env-available", label: "环境变量" },
-  ];
 
   return (
     <div className="settings-content providers-settings">
@@ -160,14 +161,14 @@ export function ProvidersSettingsPage() {
             </div>
             <div className="providers-filter-dropdowns">
               <Select
-                options={sourceOptions}
+                options={SOURCE_OPTIONS}
                 value={filterSource}
                 onValueChange={(v) => setFilterSource(v as ProviderEntry["source"] | "all")}
                 placeholder="全部来源"
                 className="border border-input bg-background"
               />
               <Select
-                options={credentialOptions}
+                options={CREDENTIAL_OPTIONS}
                 value={filterCredentialStatus}
                 onValueChange={(v) => setFilterCredentialStatus(v as ProviderEntry["credentialStatus"] | "all")}
                 placeholder="全部凭据"
@@ -196,7 +197,7 @@ export function ProvidersSettingsPage() {
               inert={controller.status === "saving" ? true : undefined}
             >
               {filteredProviders.map((entry) => (
-                <ProviderCard key={entry.key} entry={entry} onEdit={() => controller.selectProvider(entry.key)} />
+                <ProviderCard key={entry.key} entry={entry} onEdit={controller.selectProvider} />
               ))}
               {filteredProviders.length === 0 ? (
                 <div className="providers-empty">

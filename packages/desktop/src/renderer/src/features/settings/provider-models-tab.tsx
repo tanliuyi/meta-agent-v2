@@ -3,7 +3,7 @@ import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ModelsModelDraft, ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import type {
   ProviderBuiltInModelMetadata,
@@ -22,6 +22,8 @@ interface ProviderModelsTabProps {
 
 /** Models tab for the unified provider editor dialog. */
 export function ProviderModelsTab({ provider, metadata, builtInModels, onChange }: ProviderModelsTabProps) {
+  const providerRef = useRef(provider ? structuredClone(provider) : undefined);
+  const [, rerenderProvider] = useState(0);
   const [newModelId, setNewModelId] = useState("");
   const [selectedModelIndex, setSelectedModelIndex] = useState<number | undefined>(() =>
     provider?.models.length ? 0 : undefined,
@@ -30,7 +32,8 @@ export function ProviderModelsTab({ provider, metadata, builtInModels, onChange 
     provider?.models.length ? undefined : builtInModels?.[0]?.id,
   );
   const [modelPendingDeletion, setModelPendingDeletion] = useState<number>();
-  const customModels = provider?.models ?? [];
+  const currentProvider = providerRef.current;
+  const customModels = currentProvider?.models ?? [];
   const builtInCount = builtInModels?.length ?? 0;
   const trimmedModelId = newModelId.trim();
   const duplicateModelId = trimmedModelId !== "" && customModels.some((model) => model.config.id === trimmedModelId);
@@ -48,18 +51,25 @@ export function ProviderModelsTab({ provider, metadata, builtInModels, onChange 
 
   function addModel(): void {
     const id = trimmedModelId;
-    if (!id || !provider || duplicateModelId) return;
-    const next = [...provider.models, createModelDraft(id)];
-    onChange({ ...provider, models: next });
+    if (!id || !currentProvider || duplicateModelId) return;
+    const next = [...currentProvider.models, createModelDraft(id)];
+    const updated = { ...currentProvider, models: next };
+    providerRef.current = updated;
+    onChange(updated);
+    rerenderProvider((revision) => revision + 1);
     setNewModelId("");
     setSelectedBuiltInModelId(undefined);
     setSelectedModelIndex(next.length - 1);
   }
 
   function removeModel(index: number): void {
-    if (!provider) return;
-    const next = provider.models.filter((_, i) => i !== index);
-    onChange({ ...provider, models: next });
+    const current = providerRef.current;
+    if (!current) return;
+    const next = current.models.filter((_, i) => i !== index);
+    const updated = { ...current, models: next };
+    providerRef.current = updated;
+    onChange(updated);
+    rerenderProvider((revision) => revision + 1);
     setSelectedModelIndex((current) => {
       if (next.length === 0) {
         setSelectedBuiltInModelId(builtInModels?.[0]?.id);
@@ -73,10 +83,13 @@ export function ProviderModelsTab({ provider, metadata, builtInModels, onChange 
   }
 
   function updateModel(index: number, updated: ModelsModelDraft): void {
-    if (!provider) return;
-    const next = [...provider.models];
+    const current = providerRef.current;
+    if (!current) return;
+    const next = [...current.models];
     next[index] = updated;
-    onChange({ ...provider, models: next });
+    const nextProvider = { ...current, models: next };
+    providerRef.current = nextProvider;
+    onChange(nextProvider);
   }
 
   return (
@@ -113,7 +126,7 @@ export function ProviderModelsTab({ provider, metadata, builtInModels, onChange 
             <p className="providers-model-section-title">
               <strong>自定义模型</strong>
             </p>
-            {provider ? (
+            {currentProvider ? (
               <div className="providers-add-model-row">
                 <Input
                   value={newModelId}
@@ -154,7 +167,6 @@ export function ProviderModelsTab({ provider, metadata, builtInModels, onChange 
                     >
                       <span className="providers-custom-model-info">
                         <span className="providers-model-name">{m.config.name || m.config.id}</span>
-                        <span className="providers-model-meta">{m.config.id}</span>
                       </span>
                     </button>
                     <Button
@@ -182,6 +194,7 @@ export function ProviderModelsTab({ provider, metadata, builtInModels, onChange 
           <ProviderBuiltInModelDetail model={selectedBuiltInModel} />
         ) : selectedModel ? (
           <ModelsModelForm
+            key={selectedModelIndex}
             model={selectedModel}
             metadata={metadata}
             onChange={(updated) => updateModel(selectedModelIndex!, updated)}

@@ -1,0 +1,75 @@
+import { Button } from "@renderer/shared/ui/button";
+import { Switch } from "@renderer/shared/ui/switch";
+import GitFork from "lucide-react/dist/esm/icons/git-fork.mjs";
+import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
+import type { AgentSummary } from "../../../../shared/subagent-contracts.ts";
+
+interface SubagentAgentSectionProps {
+  title: string;
+  agents: AgentSummary[];
+  mutating: boolean;
+  builtin?: boolean;
+  readOnly?: boolean;
+  onEdit?(agent: AgentSummary): void;
+  onToggle?(agent: AgentSummary, disabled: boolean): Promise<boolean>;
+  onEject?(agent: AgentSummary): Promise<boolean>;
+}
+
+export function SubagentAgentSection({
+  title,
+  agents,
+  mutating,
+  builtin = false,
+  readOnly = false,
+  onEdit,
+  onToggle,
+  onEject,
+}: SubagentAgentSectionProps) {
+  const headingId = `subagent-${title.replace(/\s+/g, "-").toLowerCase()}`;
+  return (
+    <section className="settings-section subagent-section" aria-labelledby={headingId}>
+      <div className="settings-section-heading">
+        <h3 id={headingId}>{title}</h3>
+      </div>
+      {agents.length ? (
+        agents.map((agent) => (
+          <div className="settings-row subagent-row" key={`${agent.source}:${agent.filePath}`}>
+            <div className="subagent-identity">
+              <div className="subagent-title-line">
+                <strong>{agent.name}</strong>
+                <span className="subagent-scope-badge">{agent.source}</span>
+                {agent.overridden ? <span className="subagent-scope-badge">{agent.overrideScope} override</span> : null}
+              </div>
+              <p>{agent.description}</p>
+              <span className="subagent-model-label">{agent.model || "继承当前会话模型"}</span>
+            </div>
+            <div className="subagent-row-actions">
+              {builtin ? (
+                <Switch
+                  aria-label={`${agent.name} 启用状态`}
+                  checked={!agent.disabled}
+                  disabled={mutating}
+                  onCheckedChange={(checked) => void onToggle?.(agent, !checked)}
+                />
+              ) : null}
+              {!readOnly ? (
+                <Button variant="ghost" size="sm" disabled={mutating} onClick={() => onEdit?.(agent)}>
+                  <Pencil />
+                  编辑
+                </Button>
+              ) : null}
+              {builtin ? (
+                <Button variant="ghost" size="sm" disabled={mutating} onClick={() => void onEject?.(agent)}>
+                  <GitFork />
+                  弹出到用户级
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ))
+      ) : (
+        <div className="settings-row subagent-empty-row">没有匹配的 Agent</div>
+      )}
+    </section>
+  );
+}

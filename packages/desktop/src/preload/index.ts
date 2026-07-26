@@ -194,6 +194,10 @@ const desktopApi: DesktopApi = {
     chooseDevelopmentEntry: (input) => ipcRenderer.invoke(CHANNELS.extensionsChooseDevelopmentEntry, input),
     apply: (input) => ipcRenderer.invoke(CHANNELS.extensionsApply, input),
   },
+  subagents: {
+    getSnapshot: (input) => ipcRenderer.invoke(CHANNELS.subagentsGetSnapshot, input),
+    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.subagentsSaveConfig, input),
+  },
   updater: {
     getState: () => ipcRenderer.invoke(CHANNELS.updaterGetState),
     check: () => ipcRenderer.invoke(CHANNELS.updaterCheck),

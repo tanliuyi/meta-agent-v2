@@ -1,6 +1,7 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
+import { useRef, useState } from "react";
 import type { ModelsCompatDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsOptionSelect } from "./models-option-select.tsx";
 import { ModelsPercentileEditor } from "./models-percentile-editor.tsx";
@@ -18,29 +19,41 @@ const TRI_STATE_OPTIONS = [
   { value: "false", label: "false" },
 ] as const;
 
+const BOOLEAN_FIELDS = ["allow_fallbacks", "require_parameters", "zdr", "enforce_distillable_text"] as const;
+const LIST_FIELDS = ["order", "only", "ignore", "quantizations"] as const;
+const MAX_PRICE_FIELDS = ["prompt", "completion", "image", "audio", "request"] as const;
+
 /** Structured editor for every current OpenRouter routing field. */
 export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEditorProps) {
-  if (!value) {
+  const valueRef = useRef<OpenRouterRouting | undefined>(value ? structuredClone(value) : undefined);
+  const [draft, setDraft] = useState(valueRef.current);
+
+  const emit = (next: OpenRouterRouting | undefined, render = false): void => {
+    valueRef.current = next;
+    if (render) setDraft(next);
+    onChange(next);
+  };
+
+  if (!draft) {
     return (
-      <Button size="sm" variant="outline" onClick={() => onChange({})}>
+      <Button size="sm" variant="outline" onClick={() => emit({}, true)}>
         <Plus />
         配置 OpenRouter routing
       </Button>
     );
   }
-  const booleanFields = ["allow_fallbacks", "require_parameters", "zdr", "enforce_distillable_text"] as const;
-  const listFields = ["order", "only", "ignore", "quantizations"] as const;
-  const sortObject = value.sort && typeof value.sort === "object" ? value.sort : undefined;
+
+  const sortObject = draft.sort && typeof draft.sort === "object" ? draft.sort : undefined;
   return (
     <fieldset className="models-fieldset models-nested-fieldset">
       <legend>OpenRouter routing</legend>
       <div className="models-compat-grid">
-        {booleanFields.map((field) => (
+        {BOOLEAN_FIELDS.map((field) => (
           <label key={field}>
             <span>{field}</span>
             <ModelsOptionSelect
-              value={value[field] === undefined ? "unset" : String(value[field])}
-              onValueChange={(nextValue) => onChange(setOptionalBoolean(value, field, nextValue))}
+              value={draft[field] === undefined ? "unset" : String(draft[field])}
+              onValueChange={(nextValue) => emit(setOptionalBoolean(valueRef.current!, field, nextValue), true)}
               options={TRI_STATE_OPTIONS}
             />
           </label>
@@ -48,9 +61,12 @@ export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEdit
         <label>
           <span>data_collection</span>
           <ModelsOptionSelect
-            value={value.data_collection ?? "unset"}
+            value={draft.data_collection ?? "unset"}
             onValueChange={(nextValue) =>
-              onChange(setOptionalString(value, "data_collection", nextValue === "unset" ? "" : nextValue))
+              emit(
+                setOptionalString(valueRef.current!, "data_collection", nextValue === "unset" ? "" : nextValue),
+                true,
+              )
             }
             options={[
               { value: "unset", label: "未设置" },
@@ -59,12 +75,12 @@ export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEdit
             ]}
           />
         </label>
-        {listFields.map((field) => (
+        {LIST_FIELDS.map((field) => (
           <label key={field}>
             <span>{field}</span>
             <Input
-              value={value[field]?.join(", ") ?? ""}
-              onChange={(event) => onChange(setStringList(value, field, event.target.value))}
+              defaultValue={draft[field]?.join(", ") ?? ""}
+              onChange={(event) => emit(setStringList(valueRef.current!, field, event.target.value))}
               placeholder="逗号分隔"
             />
           </label>
@@ -72,12 +88,13 @@ export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEdit
         <div className="models-field">
           <span>sort</span>
           <ModelsOptionSelect
-            value={value.sort === undefined ? "unset" : typeof value.sort === "string" ? "string" : "object"}
+            value={draft.sort === undefined ? "unset" : typeof draft.sort === "string" ? "string" : "object"}
             onValueChange={(sortMode) => {
-              if (sortMode === "unset") onChange({ ...value, sort: undefined });
+              const current = valueRef.current!;
+              if (sortMode === "unset") emit({ ...current, sort: undefined }, true);
               else if (sortMode === "string")
-                onChange({ ...value, sort: typeof value.sort === "string" ? value.sort : "" });
-              else onChange({ ...value, sort: typeof value.sort === "object" ? value.sort : {} });
+                emit({ ...current, sort: typeof current.sort === "string" ? current.sort : "" }, true);
+              else emit({ ...current, sort: typeof current.sort === "object" ? current.sort : {} }, true);
             }}
             options={[
               { value: "unset", label: "未设置" },
@@ -85,29 +102,33 @@ export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEdit
               { value: "object", label: "对象" },
             ]}
           />
-          {typeof value.sort === "string" ? (
+          {typeof draft.sort === "string" ? (
             <Input
-              value={value.sort}
-              onChange={(event) => onChange({ ...value, sort: event.target.value })}
+              defaultValue={draft.sort}
+              onChange={(event) => emit({ ...valueRef.current!, sort: event.target.value })}
               placeholder="排序名称"
             />
           ) : sortObject ? (
             <div className="models-sort-object">
               <Input
-                value={sortObject.by ?? ""}
-                onChange={(event) =>
-                  onChange({ ...value, sort: { ...sortObject, by: event.target.value || undefined } })
-                }
+                defaultValue={sortObject.by ?? ""}
+                onChange={(event) => {
+                  const currentSort = valueRef.current!.sort;
+                  if (!currentSort || typeof currentSort !== "object") return;
+                  emit({ ...valueRef.current!, sort: { ...currentSort, by: event.target.value || undefined } });
+                }}
                 placeholder="by"
               />
               <ModelsOptionSelect
                 value={sortObject.partition === undefined ? "unset" : sortObject.partition === null ? "null" : "value"}
                 onValueChange={(partitionMode) => {
-                  const sort = { ...sortObject };
+                  const currentSort = valueRef.current!.sort;
+                  if (!currentSort || typeof currentSort !== "object") return;
+                  const sort = { ...currentSort };
                   if (partitionMode === "unset") delete sort.partition;
                   else if (partitionMode === "null") sort.partition = null;
-                  else sort.partition = typeof sortObject.partition === "string" ? sortObject.partition : "";
-                  onChange({ ...value, sort });
+                  else sort.partition = typeof currentSort.partition === "string" ? currentSort.partition : "";
+                  emit({ ...valueRef.current!, sort }, true);
                 }}
                 options={[
                   { value: "unset", label: "partition 未设置" },
@@ -117,8 +138,12 @@ export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEdit
               />
               {typeof sortObject.partition === "string" ? (
                 <Input
-                  value={sortObject.partition}
-                  onChange={(event) => onChange({ ...value, sort: { ...sortObject, partition: event.target.value } })}
+                  defaultValue={sortObject.partition}
+                  onChange={(event) => {
+                    const currentSort = valueRef.current!.sort;
+                    if (!currentSort || typeof currentSort !== "object") return;
+                    emit({ ...valueRef.current!, sort: { ...currentSort, partition: event.target.value } });
+                  }}
                   placeholder="partition"
                 />
               ) : null}
@@ -127,16 +152,17 @@ export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEdit
         </div>
       </div>
       <div className="models-rate-grid">
-        {(["prompt", "completion", "image", "audio", "request"] as const).map((field) => (
+        {MAX_PRICE_FIELDS.map((field) => (
           <label key={field}>
             <span>max_price.{field}</span>
             <Input
-              value={value.max_price?.[field] ?? ""}
+              defaultValue={draft.max_price?.[field] ?? ""}
               onChange={(event) => {
-                const maxPrice = { ...value.max_price };
+                const current = valueRef.current!;
+                const maxPrice = { ...current.max_price };
                 if (!event.target.value) delete maxPrice[field];
                 else maxPrice[field] = numericOrString(event.target.value);
-                onChange({ ...value, max_price: Object.keys(maxPrice).length ? maxPrice : undefined });
+                emit({ ...current, max_price: Object.keys(maxPrice).length ? maxPrice : undefined });
               }}
             />
           </label>
@@ -144,15 +170,15 @@ export function ModelsOpenRouterEditor({ value, onChange }: ModelsOpenRouterEdit
       </div>
       <ModelsPercentileEditor
         label="preferred_min_throughput"
-        value={value.preferred_min_throughput}
-        onChange={(next) => onChange({ ...value, preferred_min_throughput: next })}
+        value={draft.preferred_min_throughput}
+        onChange={(next) => emit({ ...valueRef.current!, preferred_min_throughput: next })}
       />
       <ModelsPercentileEditor
         label="preferred_max_latency"
-        value={value.preferred_max_latency}
-        onChange={(next) => onChange({ ...value, preferred_max_latency: next })}
+        value={draft.preferred_max_latency}
+        onChange={(next) => emit({ ...valueRef.current!, preferred_max_latency: next })}
       />
-      <Button size="sm" variant="ghost" onClick={() => onChange(undefined)}>
+      <Button size="sm" variant="ghost" onClick={() => emit(undefined, true)}>
         清除 OpenRouter routing
       </Button>
     </fieldset>

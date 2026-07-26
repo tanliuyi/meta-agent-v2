@@ -70,6 +70,8 @@ export const CHANNELS = {
   extensionsSaveConfig: "desktop:extensions:save-config",
   extensionsChooseDevelopmentEntry: "desktop:extensions:choose-development-entry",
   extensionsApply: "desktop:extensions:apply",
+  subagentsGetSnapshot: "desktop:subagents:get-snapshot",
+  subagentsSaveConfig: "desktop:subagents:save-config",
   updaterGetState: "desktop:updater:get-state",
   updaterCheck: "desktop:updater:check",
   updaterDownload: "desktop:updater:download",

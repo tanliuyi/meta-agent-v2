@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { app, BrowserWindow, Menu } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
@@ -26,6 +27,7 @@ import { SidecarLog } from "./sidecar/sidecar-log.ts";
 import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
 import { ProjectStore } from "./store/project-store.ts";
+import { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
 import { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
 import { AutoUpdateService, scheduleAutoUpdateChecks } from "./updater.ts";
 import { WindowDirtyGuard } from "./window-dirty-guard.ts";
@@ -217,6 +219,15 @@ app.whenReady().then(async () => {
   sessions = supervisor;
   terminals = new TerminalSupervisor(projects, broadcastTerminalEvent);
   const providers = new ProvidersConfigService(models, auth);
+  const subagentSettings = new SubagentSettingsConfigService({
+    agentDir,
+    modelRegistry: ModelRegistry.create(AuthStorage.create(join(agentDir, "auth.json")), join(agentDir, "models.json")),
+    getProjectCwd: (projectId) => projects.getCwd(projectId),
+    getActiveProject: async () => {
+      const project = await projects.getActive();
+      return project ? { id: project.id, cwd: project.cwd } : null;
+    },
+  });
   registerIpc(
     projects,
     sessions,
@@ -242,6 +253,7 @@ app.whenReady().then(async () => {
     },
     updater,
     extensionSettings,
+    subagentSettings,
   );
   await installReactDevTools();
   createWindow();

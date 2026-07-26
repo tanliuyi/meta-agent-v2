@@ -72,6 +72,8 @@ export function useProvidersSettingsController(): ProvidersSettingsController {
   const [modelsDraft, setModelsDraft] = useState<ModelsProviderDraft[]>([]);
   const [authDraft, setAuthDraft] = useState<AuthProviderDraft[]>([]);
   const [serverDiagnostics, setServerDiagnostics] = useState<ProviderDiagnostic[]>([]);
+  const [localDiagnostics, setLocalDiagnostics] = useState<ProviderDiagnostic[]>([]);
+  const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState<ProvidersSettingsStatus>("loading");
   const [error, setError] = useState<string>();
   const [externallyChanged, setExternallyChanged] = useState(false);
@@ -93,13 +95,9 @@ export function useProvidersSettingsController(): ProvidersSettingsController {
   }, [snapshot, modelsDraft, authDraft]);
 
   const diagnostics: ProviderDiagnostic[] = useMemo(
-    () => [...serverDiagnostics, ...getLocalDiagnostics(modelsDraft, authDraft)],
-    [authDraft, modelsDraft, serverDiagnostics],
+    () => [...serverDiagnostics, ...localDiagnostics],
+    [localDiagnostics, serverDiagnostics],
   );
-
-  const dirty = snapshot
-    ? !draftsEqual(modelsDraft, authDraft, snapshot.modelsProviders, snapshot.authProviders)
-    : false;
 
   const routeBlocker = useBlocker({
     shouldBlockFn: () => dirty,
@@ -124,6 +122,8 @@ export function useProvidersSettingsController(): ProvidersSettingsController {
     setModelsDraft(nextModels);
     setAuthDraft(nextAuth);
     setServerDiagnostics(next.diagnostics);
+    setLocalDiagnostics(getLocalDiagnostics(nextModels, nextAuth));
+    setDirty(false);
     setExternallyChanged(false);
     setError(undefined);
     setStatus(
@@ -248,12 +248,14 @@ export function useProvidersSettingsController(): ProvidersSettingsController {
       void window.desktop.providers.setEditorDirty(nextDirty);
       dirtyRef.current = nextDirty;
     }
-    const localDiagnostics = getLocalDiagnostics(nextModels, nextAuth);
+    const nextDiagnostics = getLocalDiagnostics(nextModels, nextAuth);
     setServerDiagnostics([]);
+    setLocalDiagnostics(nextDiagnostics);
+    setDirty(nextDirty);
     setExternallyChanged(false);
     setModelsDraft(nextModels);
     setAuthDraft(nextAuth);
-    setStatus(nextDirty ? (localDiagnostics.length > 0 ? "ready-dirty-invalid" : "ready-dirty-valid") : "ready-clean");
+    setStatus(nextDirty ? (nextDiagnostics.length > 0 ? "ready-dirty-invalid" : "ready-dirty-valid") : "ready-clean");
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -411,15 +413,6 @@ function authDraftsEqual(left: AuthProviderDraft[], right: AuthProviderDraft[]):
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function draftsEqual(
-  leftModels: ModelsProviderDraft[],
-  leftAuth: AuthProviderDraft[],
-  rightModels: ModelsProviderDraft[],
-  rightAuth: AuthProviderDraft[],
-): boolean {
-  return modelsDraftsEqual(leftModels, rightModels) && authDraftsEqual(leftAuth, rightAuth);
-}
-
 function getLocalDiagnostics(
   modelsProviders: ModelsProviderDraft[],
   authProviders: AuthProviderDraft[],
@@ -438,6 +431,11 @@ function rebuildProviderEntries(
 ): ProviderEntry[] {
   const allKeys = new Set<string>();
   const entries: ProviderEntry[] = [];
+  const baselineByKey = new Map(snapshot.providers.map((entry) => [entry.key, entry]));
+  const modelsByKey = new Map(modelsDraft.map((provider) => [provider.key, provider]));
+  const authByKey = new Map(authDraft.map((provider) => [provider.key, provider]));
+  const builtInById = new Map(snapshot.metadata.builtInProviders.map((provider) => [provider.id, provider]));
+  const knownById = new Map(snapshot.knownProviders.map((provider) => [provider.id, provider]));
 
   function addIfNew(key: string, entry: ProviderEntry): void {
     if (allKeys.has(key)) return;
@@ -447,10 +445,10 @@ function rebuildProviderEntries(
 
   // 1. AI built-in
   for (const bp of snapshot.metadata.builtInProviders) {
-    const baseline = snapshot.providers.find((entry) => entry.key === bp.id);
+    const baseline = baselineByKey.get(bp.id);
     if (baseline?.source !== "ai-builtin") continue;
-    const modelsCfg = modelsDraft.find((p) => p.key === bp.id);
-    const authCfg = authDraft.find((p) => p.key === bp.id);
+    const modelsCfg = modelsByKey.get(bp.id);
+    const authCfg = authByKey.get(bp.id);
     addIfNew(
       bp.id,
       makeEntryFromDraft(
@@ -468,10 +466,10 @@ function rebuildProviderEntries(
 
   // 2. Desktop built-in
   for (const dp of snapshot.knownProviders) {
-    const baseline = snapshot.providers.find((entry) => entry.key === dp.id);
-    const builtIn = snapshot.metadata.builtInProviders.find((provider) => provider.id === dp.id);
-    const modelsCfg = modelsDraft.find((p) => p.key === dp.id);
-    const authCfg = authDraft.find((p) => p.key === dp.id);
+    const baseline = baselineByKey.get(dp.id);
+    const builtIn = builtInById.get(dp.id);
+    const modelsCfg = modelsByKey.get(dp.id);
+    const authCfg = authByKey.get(dp.id);
     addIfNew(
       dp.id,
       makeEntryFromDraft(
@@ -489,7 +487,7 @@ function rebuildProviderEntries(
 
   // 3. Custom providers from either models.json or auth.json.
   for (const mp of modelsDraft) {
-    const baseline = snapshot.providers.find((entry) => entry.key === mp.key);
+    const baseline = baselineByKey.get(mp.key);
     addIfNew(
       mp.key,
       makeEntryFromDraft(
@@ -498,15 +496,15 @@ function rebuildProviderEntries(
         "custom",
         0,
         mp,
-        authDraft.find((p) => p.key === mp.key),
+        authByKey.get(mp.key),
         undefined,
         baseline?.credentialStatus,
       ),
     );
   }
   for (const ap of authDraft) {
-    const baseline = snapshot.providers.find((entry) => entry.key === ap.key);
-    const known = snapshot.knownProviders.find((provider) => provider.id === ap.key);
+    const baseline = baselineByKey.get(ap.key);
+    const known = knownById.get(ap.key);
     addIfNew(
       ap.key,
       makeEntryFromDraft(

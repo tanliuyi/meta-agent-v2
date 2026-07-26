@@ -1,0 +1,330 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { SubagentSettingsConfigService } from "../src/main/subagents/subagent-settings-config-service.ts";
+
+let root = "";
+let agentDir = "";
+let projectDir = "";
+let previousAgentDir: string | undefined;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "desktop-subagent-settings-"));
+  agentDir = join(root, "agent");
+  projectDir = join(root, "project");
+  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(projectDir, ".pi"), { recursive: true })]);
+  previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+});
+
+afterEach(async () => {
+  if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  await rm(root, { recursive: true, force: true });
+});
+
+function createService(): SubagentSettingsConfigService {
+  return new SubagentSettingsConfigService({
+    agentDir,
+    modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
+    getProjectCwd: () => projectDir,
+    getActiveProject: async () => ({ id: "project", cwd: projectDir }),
+  });
+}
+
+describe("SubagentSettingsConfigService", () => {
+  test("discovers bundled agents and exposes extension defaults", async () => {
+    const snapshot = await createService().getSnapshot({ projectId: "project" });
+
+    expect(snapshot.builtinAgents.map((agent) => agent.name)).toEqual(
+      expect.arrayContaining([
+        "reviewer",
+        "worker",
+        "planner",
+        "oracle",
+        "researcher",
+        "scout",
+        "context-builder",
+        "advisor",
+        "delegate",
+      ]),
+    );
+    expect(snapshot.extensionConfig).toMatchObject({
+      asyncByDefault: false,
+      asyncWidget: true,
+      maxSubagentDepth: 1,
+      maxSubagentSpawnsPerSession: 0,
+      globalConcurrencyLimit: 20,
+      toolDescriptionMode: "full",
+      artifactDir: "project",
+      scheduledRuns: { enabled: false },
+    });
+    expect(snapshot.projectScopeAvailable).toBe(true);
+  });
+
+  test("creates, updates, and deletes user agents and chains", async () => {
+    const service = createService();
+    let snapshot = await service.getSnapshot({ projectId: "project" });
+
+    let result = await service.saveConfig({
+      requestId: "create-agent",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "create-agent",
+        scope: "user",
+        config: {
+          name: "desktop-helper",
+          description: "Desktop helper",
+          model: false,
+          systemPrompt: "Help with Desktop tasks.",
+          tools: ["read", "mcp:files.search"],
+        },
+      },
+    });
+    expect(result.status).toBe("saved");
+    if (result.status !== "saved") return;
+    snapshot = result.snapshot;
+    expect(snapshot.userAgents).toContainEqual(
+      expect.objectContaining({
+        name: "desktop-helper",
+        description: "Desktop helper",
+        tools: ["read"],
+        mcpDirectTools: ["files.search"],
+      }),
+    );
+
+    result = await service.saveConfig({
+      requestId: "create-chain",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "create-chain",
+        scope: "user",
+        config: {
+          name: "desktop-flow",
+          description: "Desktop workflow",
+          steps: [{ agent: "desktop-helper", task: "Inspect the current task", progress: true }],
+        },
+      },
+    });
+    expect(result.status).toBe("saved");
+    if (result.status !== "saved") return;
+    snapshot = result.snapshot;
+    expect(snapshot.chains).toContainEqual(
+      expect.objectContaining({ name: "desktop-flow", source: "user", stepCount: 1, editable: true }),
+    );
+
+    result = await service.saveConfig({
+      requestId: "update-agent",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "update-agent",
+        target: "custom",
+        agent: "desktop-helper",
+        scope: "user",
+        config: { description: "Updated Desktop helper", thinking: "high" },
+      },
+    });
+    expect(result.status).toBe("saved");
+    if (result.status !== "saved") return;
+    snapshot = result.snapshot;
+    expect(snapshot.userAgents.find((agent) => agent.name === "desktop-helper")).toMatchObject({
+      description: "Updated Desktop helper",
+      thinking: "high",
+    });
+
+    result = await service.saveConfig({
+      requestId: "delete-chain",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: { type: "delete-chain", chain: "desktop-flow", scope: "user" },
+    });
+    expect(result.status).toBe("saved");
+    if (result.status !== "saved") return;
+    expect(result.snapshot.chains.some((chain) => chain.name === "desktop-flow")).toBe(false);
+  });
+
+  test("persists builtin overrides and extension config", async () => {
+    const service = createService();
+    let snapshot = await service.getSnapshot({ projectId: "project" });
+
+    let result = await service.saveConfig({
+      requestId: "override-reviewer",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "update-agent",
+        target: "builtin",
+        agent: "reviewer",
+        scope: "user",
+        config: { model: "openai/test-reviewer", thinking: "high" },
+      },
+    });
+    expect(result.status).toBe("saved");
+    if (result.status !== "saved") return;
+    snapshot = result.snapshot;
+    expect(snapshot.builtinAgents.find((agent) => agent.name === "reviewer")).toMatchObject({
+      model: "openai/test-reviewer",
+      thinking: "high",
+      overridden: true,
+      overrideScope: "user",
+    });
+
+    result = await service.saveConfig({
+      requestId: "extension-config",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "update-extension-config",
+        config: { maxSubagentDepth: 3, globalConcurrencyLimit: 8, scheduledRuns: { enabled: true } },
+      },
+    });
+    expect(result.status).toBe("saved");
+    const stored = JSON.parse(await readFile(join(agentDir, "extensions", "subagent", "config.json"), "utf8"));
+    expect(stored).toMatchObject({
+      maxSubagentDepth: 3,
+      globalConcurrencyLimit: 8,
+      scheduledRuns: { enabled: true },
+    });
+  });
+
+  test("marks chains with unsupported steps or fields as read-only", async () => {
+    const chainDir = join(agentDir, "chains");
+    await mkdir(chainDir, { recursive: true });
+    await writeFile(
+      join(chainDir, "advanced.chain.json"),
+      `${JSON.stringify(
+        {
+          name: "advanced",
+          description: "Advanced workflow",
+          chain: [{ parallel: [{ agent: "reviewer" }, { agent: "worker" }] }],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const snapshot = await createService().getSnapshot({ projectId: "project" });
+
+    expect(snapshot.chains.find((chain) => chain.name === "advanced")).toMatchObject({
+      editable: false,
+      stepCount: 1,
+      steps: [],
+    });
+  });
+
+  test("reports malformed extension config and refuses to overwrite it", async () => {
+    const configPath = join(agentDir, "extensions", "subagent", "config.json");
+    await mkdir(join(agentDir, "extensions", "subagent"), { recursive: true });
+    await writeFile(configPath, "{ malformed\n", "utf8");
+    const service = createService();
+    const snapshot = await service.getSnapshot({ projectId: "project" });
+
+    expect(snapshot.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "SUBAGENT_CONFIG_INVALID", phase: "resolve" }),
+    );
+    await expect(
+      service.saveConfig({
+        requestId: "malformed-config",
+        projectId: "project",
+        expectedSnapshotRevision: snapshot.revision,
+        mutation: { type: "update-extension-config", config: { globalConcurrencyLimit: 4 } },
+      }),
+    ).rejects.toThrow();
+    await expect(readFile(configPath, "utf8")).resolves.toBe("{ malformed\n");
+  });
+
+  test("updates and toggles a builtin override in project scope", async () => {
+    const service = createService();
+    let snapshot = await service.getSnapshot({ projectId: "project" });
+    const projectResult = await service.saveConfig({
+      requestId: "project-override",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "update-agent",
+        target: "builtin",
+        agent: "reviewer",
+        scope: "project",
+        config: { model: "openai/project-reviewer" },
+      },
+    });
+    if (projectResult.status !== "saved") return;
+    snapshot = projectResult.snapshot;
+
+    const disabledResult = await service.saveConfig({
+      requestId: "disable-project-override",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "set-agent-enabled",
+        agent: "reviewer",
+        scope: "project",
+        disabled: true,
+      },
+    });
+
+    expect(disabledResult.status).toBe("saved");
+    if (disabledResult.status !== "saved") return;
+    expect(disabledResult.snapshot.builtinAgents.find((agent) => agent.name === "reviewer")).toMatchObject({
+      model: "openai/project-reviewer",
+      overrideScope: "project",
+      disabled: true,
+    });
+    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi", "settings.json"), "utf8"));
+    expect(projectSettings.subagents.agentOverrides.reviewer).toMatchObject({
+      model: "openai/project-reviewer",
+      disabled: true,
+    });
+  });
+
+  test("returns a conflict after an external source change", async () => {
+    const service = createService();
+    const snapshot = await service.getSnapshot({ projectId: "project" });
+    await writeFile(join(agentDir, "settings.json"), '{"subagents":{"defaultModel":"external/model"}}\n', "utf8");
+
+    await expect(
+      service.saveConfig({
+        requestId: "stale",
+        projectId: "project",
+        expectedSnapshotRevision: snapshot.revision,
+        mutation: { type: "set-agent-enabled", agent: "reviewer", disabled: true },
+      }),
+    ).resolves.toMatchObject({ status: "conflict" });
+  });
+
+  test("rejects duplicate names in the same scope", async () => {
+    const service = createService();
+    let snapshot = await service.getSnapshot({ projectId: "project" });
+    const first = await service.saveConfig({
+      requestId: "first",
+      projectId: "project",
+      expectedSnapshotRevision: snapshot.revision,
+      mutation: {
+        type: "create-agent",
+        scope: "user",
+        config: { name: "duplicate", description: "First" },
+      },
+    });
+    if (first.status !== "saved") return;
+    snapshot = first.snapshot;
+
+    await expect(
+      service.saveConfig({
+        requestId: "second",
+        projectId: "project",
+        expectedSnapshotRevision: snapshot.revision,
+        mutation: {
+          type: "create-agent",
+          scope: "user",
+          config: { name: "duplicate", description: "Second" },
+        },
+      }),
+    ).rejects.toThrow("already exists in user scope");
+  });
+});

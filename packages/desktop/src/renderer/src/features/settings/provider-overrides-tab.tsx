@@ -4,7 +4,7 @@ import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import type { ProviderBuiltInModelMetadata } from "../../../../shared/providers-config-contracts.ts";
 import { ModelsOverrideForm } from "./models-override-form.tsx";
@@ -19,10 +19,11 @@ interface ProviderOverridesTabProps {
 
 /** Full editor for per-model overrides in models.json. */
 export function ProviderOverridesTab({ provider, entryKey, builtInModels, onChange }: ProviderOverridesTabProps) {
+  const providerRef = useRef(provider ? structuredClone(provider) : createProviderDraft(entryKey));
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [newOverrideId, setNewOverrideId] = useState("");
   const [pendingDeletion, setPendingDeletion] = useState<number>();
-  const actual = provider ?? createProviderDraft(entryKey);
+  const actual = providerRef.current;
   const trimmedId = newOverrideId.trim();
   const duplicateId = trimmedId !== "" && actual.modelOverrides.some((override) => override.modelId === trimmedId);
   const selected = actual.modelOverrides[selectedIndex];
@@ -33,8 +34,10 @@ export function ProviderOverridesTab({ provider, entryKey, builtInModels, onChan
 
   function addOverride(): void {
     if (!trimmedId || duplicateId) return;
-    const modelOverrides = [...actual.modelOverrides, createModelOverrideDraft(trimmedId)];
-    onChange({ ...actual, modelOverrides });
+    const modelOverrides = [...providerRef.current.modelOverrides, createModelOverrideDraft(trimmedId)];
+    const updated = { ...providerRef.current, modelOverrides };
+    providerRef.current = updated;
+    onChange(updated);
     setSelectedIndex(modelOverrides.length - 1);
     setNewOverrideId("");
   }
@@ -95,11 +98,14 @@ export function ProviderOverridesTab({ provider, entryKey, builtInModels, onChan
                 </Button>
               </div>
               <ModelsOverrideForm
+                key={selectedIndex}
                 override={selected}
                 onChange={(override) => {
-                  const modelOverrides = [...actual.modelOverrides];
+                  const modelOverrides = [...providerRef.current.modelOverrides];
                   modelOverrides[selectedIndex] = override;
-                  onChange({ ...actual, modelOverrides });
+                  const updated = { ...providerRef.current, modelOverrides };
+                  providerRef.current = updated;
+                  onChange(updated);
                 }}
               />
             </>
@@ -119,10 +125,12 @@ export function ProviderOverridesTab({ provider, entryKey, builtInModels, onChan
         }}
         onConfirm={() => {
           if (pendingDeletion === undefined) return;
-          onChange({
-            ...actual,
-            modelOverrides: actual.modelOverrides.filter((_, index) => index !== pendingDeletion),
-          });
+          const updated = {
+            ...providerRef.current,
+            modelOverrides: providerRef.current.modelOverrides.filter((_, index) => index !== pendingDeletion),
+          };
+          providerRef.current = updated;
+          onChange(updated);
           setPendingDeletion(undefined);
         }}
       />

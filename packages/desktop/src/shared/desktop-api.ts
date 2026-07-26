@@ -46,6 +46,12 @@ import type {
   SaveSettingsConfigResult,
   SettingsConfigSnapshot,
 } from "./settings-config-contracts.ts";
+import type {
+  GetSubagentSettingsInput,
+  SaveSubagentSettingsInput,
+  SaveSubagentSettingsResult,
+  SubagentSettingsSnapshot,
+} from "./subagent-contracts.ts";
 import type { UpdaterApi } from "./updater-contracts.ts";
 
 export type DesktopPlatform = "win32" | "darwin" | "linux";
@@ -115,6 +121,10 @@ export interface DesktopApi {
     saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult>;
     chooseDevelopmentEntry(input: ApproveDevelopmentExtensionInput): Promise<SaveDesktopExtensionSettingsResult>;
     apply(input: ApplyDesktopExtensionSetInput): Promise<ApplyDesktopExtensionSetResult>;
+  };
+  subagents: {
+    getSnapshot(input?: GetSubagentSettingsInput): Promise<SubagentSettingsSnapshot>;
+    saveConfig(input: SaveSubagentSettingsInput): Promise<SaveSubagentSettingsResult>;
   };
   updater: UpdaterApi;
   windowControls: {

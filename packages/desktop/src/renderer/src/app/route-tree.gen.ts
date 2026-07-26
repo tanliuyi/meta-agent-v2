@@ -19,6 +19,7 @@ import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
+import { Route as SettingsSubagentsRouteImport } from './routes/settings.subagents'
 import { Route as ChatProjectsProjectIdSessionThreadIdRouteImport } from './routes/_chat.projects.$projectId.session.$threadId'
 
 const ChatRoute = ChatRouteImport.update({
@@ -70,6 +71,11 @@ const SettingsPersonalizationRoute = SettingsPersonalizationRouteImport.update({
   path: '/personalization',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsSubagentsRoute = SettingsSubagentsRouteImport.update({
+  id: '/subagents',
+  path: '/subagents',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const ChatProjectsProjectIdSessionThreadIdRoute =
   ChatProjectsProjectIdSessionThreadIdRouteImport.update({
     id: '/projects/$projectId/session/$threadId',
@@ -86,6 +92,7 @@ export interface FileRoutesByFullPath {
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
+  '/settings/subagents': typeof SettingsSubagentsRoute
   '/settings/': typeof SettingsIndexRoute
   '/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
+  '/settings/subagents': typeof SettingsSubagentsRoute
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
+  '/settings/subagents': typeof SettingsSubagentsRoute
   '/_chat/': typeof ChatIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/_chat/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
+    | '/settings/subagents'
     | '/settings/'
     | '/projects/$projectId/session/$threadId'
   fileRoutesByTo: FileRoutesByTo
@@ -135,6 +145,7 @@ export interface FileRouteTypes {
     | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
+    | '/settings/subagents'
     | '/'
     | '/settings'
     | '/projects/$projectId/session/$threadId'
@@ -148,6 +159,7 @@ export interface FileRouteTypes {
     | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
+    | '/settings/subagents'
     | '/_chat/'
     | '/settings/'
     | '/_chat/projects/$projectId/session/$threadId'
@@ -230,6 +242,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsPersonalizationRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/subagents': {
+      id: '/settings/subagents'
+      path: '/subagents'
+      fullPath: '/settings/subagents'
+      preLoaderRoute: typeof SettingsSubagentsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/_chat/projects/$projectId/session/$threadId': {
       id: '/_chat/projects/$projectId/session/$threadId'
       path: '/projects/$projectId/session/$threadId'
@@ -261,6 +280,7 @@ interface SettingsRouteChildren {
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
+  SettingsSubagentsRoute: typeof SettingsSubagentsRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
 
@@ -270,6 +290,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,
+  SettingsSubagentsRoute: SettingsSubagentsRoute,
   SettingsIndexRoute: SettingsIndexRoute,
 }
 

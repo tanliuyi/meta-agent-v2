@@ -29,6 +29,7 @@ import type {
 } from "../shared/desktop-extension-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
+import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
 import { OauthLoginCoordinator } from "./auth/oauth-login-coordinator.ts";
 import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
@@ -38,6 +39,7 @@ import type { SessionSupervisor } from "./pi/session-supervisor.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
 import type { ProjectStore } from "./store/project-store.ts";
+import type { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
 import type { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
 import type { AutoUpdateService } from "./updater.ts";
 import type { WindowDirtyGuard } from "./window-dirty-guard.ts";
@@ -63,6 +65,7 @@ export function registerIpc(
   },
   updater?: AutoUpdateService,
   extensions?: DesktopExtensionSettingsService,
+  subagents?: SubagentSettingsConfigService,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -121,6 +124,14 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.providersOpenConfigExternally, async () => openPath(await providers.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
   ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
+  if (subagents) {
+    ipcMain.handle(CHANNELS.subagentsGetSnapshot, (_event, input?: GetSubagentSettingsInput) =>
+      subagents.getSnapshot(input),
+    );
+    ipcMain.handle(CHANNELS.subagentsSaveConfig, (_event, input: SaveSubagentSettingsInput) =>
+      subagents.saveConfig(input),
+    );
+  }
   if (extensions) {
     ipcMain.handle(CHANNELS.extensionsGetConfig, async (_event, projectId?: string, threadId?: string) => {
       const snapshot = await extensions.getConfig();

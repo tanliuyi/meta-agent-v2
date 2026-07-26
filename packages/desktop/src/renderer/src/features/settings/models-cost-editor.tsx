@@ -2,6 +2,7 @@ import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import { useRef, useState } from "react";
 
 export interface ModelsCostValue {
   input?: number;
@@ -27,14 +28,24 @@ const RATE_FIELDS = ["input", "output", "cacheRead", "cacheWrite"] as const;
 
 /** Edits base token rates and ordered high-volume pricing tiers. */
 export function ModelsCostEditor({ value, requireBaseRates = false, onChange }: ModelsCostEditorProps) {
-  if (!value) {
+  const valueRef = useRef<ModelsCostValue | undefined>(value ? structuredClone(value) : undefined);
+  const tierIdsRef = useRef(value?.tiers?.map(() => crypto.randomUUID()) ?? []);
+  const [draft, setDraft] = useState(valueRef.current);
+
+  const emit = (next: ModelsCostValue | undefined, render = false): void => {
+    valueRef.current = next;
+    if (render) setDraft(next);
+    onChange(next);
+  };
+
+  if (!draft) {
     return (
       <div className="models-optional-editor">
         <span>费用</span>
         <Button
           size="sm"
           variant="outline"
-          onClick={() => onChange(requireBaseRates ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } : {})}
+          onClick={() => emit(requireBaseRates ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } : {}, true)}
         >
           <Plus />
           配置费用
@@ -54,31 +65,31 @@ export function ModelsCostEditor({ value, requireBaseRates = false, onChange }: 
               type="number"
               min="0"
               step="any"
-              value={value[field] ?? ""}
+              defaultValue={draft[field] ?? ""}
               required={requireBaseRates}
               onChange={(event) => {
-                const next = structuredClone(value);
+                const next = { ...valueRef.current! };
                 const parsed = optionalNumber(event.target.value);
                 if (parsed === undefined) delete next[field];
                 else next[field] = parsed;
-                onChange(next);
+                emit(next);
               }}
             />
           </label>
         ))}
       </div>
       <div className="models-tier-list">
-        {value.tiers?.map((tier, index) => (
-          <div className="models-tier-row" key={`${tier.inputTokensAbove}-${index}`}>
+        {draft.tiers?.map((tier, index) => (
+          <div className="models-tier-row" key={tierIdsRef.current[index]}>
             <Input
               type="number"
               min="0"
               aria-label={`Tier ${index + 1} token threshold`}
-              value={tier.inputTokensAbove}
+              defaultValue={tier.inputTokensAbove}
               onChange={(event) => {
-                const next = structuredClone(value);
+                const next = structuredClone(valueRef.current!);
                 next.tiers![index]!.inputTokensAbove = Number(event.target.value);
-                onChange(next);
+                emit(next);
               }}
             />
             {RATE_FIELDS.map((field) => (
@@ -88,11 +99,11 @@ export function ModelsCostEditor({ value, requireBaseRates = false, onChange }: 
                 min="0"
                 step="any"
                 aria-label={`Tier ${index + 1} ${rateLabel(field)}`}
-                value={tier[field]}
+                defaultValue={tier[field]}
                 onChange={(event) => {
-                  const next = structuredClone(value);
+                  const next = structuredClone(valueRef.current!);
                   next.tiers![index]![field] = Number(event.target.value);
-                  onChange(next);
+                  emit(next);
                 }}
               />
             ))}
@@ -102,10 +113,11 @@ export function ModelsCostEditor({ value, requireBaseRates = false, onChange }: 
               title={`删除 Tier ${index + 1}`}
               aria-label={`删除 Tier ${index + 1}`}
               onClick={() => {
-                const next = structuredClone(value);
+                const next = structuredClone(valueRef.current!);
                 next.tiers = next.tiers?.filter((_, tierIndex) => tierIndex !== index);
+                tierIdsRef.current = tierIdsRef.current.filter((_, tierIndex) => tierIndex !== index);
                 if (next.tiers?.length === 0) delete next.tiers;
-                onChange(next);
+                emit(next, true);
               }}
             >
               <Trash2 />
@@ -117,20 +129,24 @@ export function ModelsCostEditor({ value, requireBaseRates = false, onChange }: 
         <Button
           size="sm"
           variant="outline"
-          onClick={() =>
-            onChange({
-              ...value,
-              tiers: [
-                ...(value.tiers ?? []),
-                { inputTokensAbove: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-              ],
-            })
-          }
+          onClick={() => {
+            tierIdsRef.current = [...tierIdsRef.current, crypto.randomUUID()];
+            emit(
+              {
+                ...valueRef.current!,
+                tiers: [
+                  ...(valueRef.current!.tiers ?? []),
+                  { inputTokensAbove: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                ],
+              },
+              true,
+            );
+          }}
         >
           <Plus />
           添加 Tier
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => onChange(undefined)}>
+        <Button size="sm" variant="ghost" onClick={() => emit(undefined, true)}>
           清除费用
         </Button>
       </div>

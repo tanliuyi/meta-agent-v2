@@ -1,5 +1,6 @@
 import { Button } from "@renderer/shared/ui/button";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import { useRef, useState } from "react";
 import type { AuthProviderDraft, AuthProviderInfo } from "../../../../shared/auth-config-contracts.ts";
 import { AuthApiKeyForm } from "./auth-api-key-form.tsx";
 
@@ -23,24 +24,35 @@ export function ProviderCredentialsForm({
   onDelete,
   onOauthLogin,
 }: ProviderCredentialsFormProps) {
+  const providerRef = useRef(provider ? structuredClone(provider) : undefined);
+  const [, rerenderProvider] = useState(0);
+  const current = providerRef.current;
+
+  const updateProvider = (next: AuthProviderDraft | undefined, render = false): void => {
+    providerRef.current = next;
+    if (render) rerenderProvider((revision) => revision + 1);
+    if (next) onChange(next);
+    else onDelete();
+  };
+
   const oauthButton = knownProvider?.oauth ? (
     <div>
       <Button variant="outline" disabled={oauthDisabled} onClick={onOauthLogin}>
-        {provider?.oauth ? "重新登录 OAuth" : "使用 OAuth 登录"}
+        {current?.oauth ? "重新登录 OAuth" : "使用 OAuth 登录"}
       </Button>
       {oauthDisabled ? <p className="providers-editor-hint">请先保存或放弃当前修改。</p> : null}
     </div>
   ) : null;
 
-  if (provider?.oauth) {
+  if (current?.oauth) {
     return (
       <div className="providers-form-grid">
         <p>OAuth 已配置</p>
-        <p>Provider: {provider.oauth.providerName}</p>
-        <p>过期: {provider.oauth.expired ? "已过期" : provider.oauth.expires}</p>
+        <p>Provider: {current.oauth.providerName}</p>
+        <p>过期: {current.oauth.expired ? "已过期" : current.oauth.expires}</p>
         {oauthButton}
         <div className="providers-editor-delete-cred">
-          <Button variant="destructive" size="sm" onClick={onDelete}>
+          <Button variant="destructive" size="sm" onClick={() => updateProvider(undefined, true)}>
             <Trash2 />
             删除凭据
           </Button>
@@ -49,11 +61,11 @@ export function ProviderCredentialsForm({
     );
   }
 
-  if (provider?.apiKey) {
+  if (current?.apiKey) {
     return (
       <div className="providers-form-grid">
         <AuthApiKeyForm
-          provider={provider}
+          provider={current}
           knownProviders={
             knownProvider
               ? [
@@ -65,11 +77,11 @@ export function ProviderCredentialsForm({
                 ]
               : []
           }
-          onChange={onChange}
+          onChange={(next) => updateProvider(next)}
         />
         {oauthButton}
         <div className="providers-editor-delete-cred">
-          <Button variant="destructive" size="sm" onClick={onDelete}>
+          <Button variant="destructive" size="sm" onClick={() => updateProvider(undefined, true)}>
             <Trash2 />
             删除凭据
           </Button>
@@ -87,10 +99,13 @@ export function ProviderCredentialsForm({
       <div className="flex flex-wrap gap-2">
         <Button
           onClick={() =>
-            onChange({
-              key: entryKey,
-              apiKey: { key: "", env: [] },
-            })
+            updateProvider(
+              {
+                key: entryKey,
+                apiKey: { key: "", env: [] },
+              },
+              true,
+            )
           }
         >
           添加 API Key

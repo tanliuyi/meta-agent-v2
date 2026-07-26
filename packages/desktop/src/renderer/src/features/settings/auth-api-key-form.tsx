@@ -2,7 +2,7 @@ import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
 import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import EyeOff from "lucide-react/dist/esm/icons/eye-off.mjs";
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
 import type { AuthProviderDraft, AuthProviderInfo } from "../../../../shared/auth-config-contracts.ts";
 import { validateAuthKeySyntax } from "./auth-settings-model.ts";
 
@@ -14,14 +14,14 @@ interface AuthApiKeyFormProps {
 
 /** API key credential editing form. */
 export function AuthApiKeyForm({ provider, knownProviders, onChange }: AuthApiKeyFormProps) {
+  const providerRef = useRef(structuredClone(provider));
   const [showKey, setShowKey] = useState(false);
-  const knownProvider = knownProviders.find((kp) => kp.id === provider.key);
-  const keySyntaxError = useMemo(
-    () => (provider.apiKey?.key ? validateAuthKeySyntax(provider.apiKey.key) : undefined),
-    [provider.apiKey?.key],
+  const [keySyntaxError, setKeySyntaxError] = useState(() =>
+    provider.apiKey?.key ? validateAuthKeySyntax(provider.apiKey.key) : undefined,
   );
+  const knownProvider = knownProviders.find((known) => known.id === providerRef.current.key);
 
-  if (!provider.apiKey) return null;
+  if (!providerRef.current.apiKey) return null;
 
   return (
     <div className="auth-api-key-form">
@@ -30,13 +30,17 @@ export function AuthApiKeyForm({ provider, knownProviders, onChange }: AuthApiKe
         <div className="auth-key-input-group">
           <Input
             type={showKey ? "text" : "password"}
-            value={provider.apiKey.key}
+            defaultValue={providerRef.current.apiKey.key}
             placeholder="sk-ant-..., $ENV_VAR, !command"
             onChange={(event) => {
-              onChange({
-                ...provider,
-                apiKey: { ...provider.apiKey!, key: event.target.value },
-              });
+              const current = providerRef.current;
+              const next = {
+                ...current,
+                apiKey: { ...current.apiKey!, key: event.target.value },
+              };
+              providerRef.current = next;
+              setKeySyntaxError(event.target.value ? validateAuthKeySyntax(event.target.value) : undefined);
+              onChange(next);
             }}
             className={keySyntaxError ? "auth-input-error" : ""}
           />

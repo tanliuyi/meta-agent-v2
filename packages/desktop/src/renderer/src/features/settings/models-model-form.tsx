@@ -2,6 +2,7 @@ import type { ModelsConfigMetadata } from "@earendil-works/pi-coding-agent/model
 import { Select } from "@renderer/components/assistant-ui/select/select";
 import { Checkbox } from "@renderer/shared/ui/checkbox";
 import { Input } from "@renderer/shared/ui/input";
+import { useRef, useState } from "react";
 import type { ModelsModelDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsCompatEditor } from "./models-compat-editor.tsx";
 import { ModelsCostEditor, type ModelsCostValue } from "./models-cost-editor.tsx";
@@ -16,7 +17,17 @@ interface ModelsModelFormProps {
 
 /** Structured editor for one custom model definition. */
 export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormProps) {
-  const updateConfig = (next: ModelsModelDraft["config"]) => onChange({ ...model, config: next });
+  const modelRef = useRef(structuredClone(model));
+  const [, rerenderDraft] = useState(0);
+  const current = modelRef.current;
+  const emit = (next: ModelsModelDraft): void => {
+    modelRef.current = next;
+    onChange(next);
+  };
+  const updateConfig = (next: ModelsModelDraft["config"], render = false): void => {
+    emit({ ...modelRef.current, config: next });
+    if (render) rerenderDraft((revision) => revision + 1);
+  };
   return (
     <div className="models-entity-form">
       <fieldset className="models-fieldset models-model-basics">
@@ -25,29 +36,30 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
           <label>
             <span>模型 ID</span>
             <Input
-              value={model.config.id}
-              onChange={(event) => updateConfig({ ...model.config, id: event.target.value })}
+              defaultValue={current.config.id}
+              onChange={(event) => updateConfig({ ...modelRef.current.config, id: event.target.value })}
             />
           </label>
           <label>
             <span>显示名称</span>
             <Input
-              value={model.config.name ?? ""}
-              onChange={(event) => updateConfig(setOptional(model.config, "name", event.target.value))}
+              defaultValue={current.config.name ?? ""}
+              onChange={(event) => updateConfig(setOptional(modelRef.current.config, "name", event.target.value))}
             />
           </label>
           <label>
             <span>API 类型</span>
             <div className="models-combo-row">
               <Input
-                value={model.config.api ?? ""}
-                onChange={(event) => updateConfig(setOptional(model.config, "api", event.target.value))}
+                key={current.config.api ?? ""}
+                defaultValue={current.config.api ?? ""}
+                onChange={(event) => updateConfig(setOptional(modelRef.current.config, "api", event.target.value))}
               />
               <Select
                 className="models-select models-suggestion-select"
-                value={metadata.knownApis.includes(model.config.api ?? "") ? model.config.api! : "custom"}
+                value={metadata.knownApis.includes(current.config.api ?? "") ? current.config.api! : "custom"}
                 onValueChange={(nextValue) => {
-                  if (nextValue !== "custom") updateConfig({ ...model.config, api: nextValue });
+                  if (nextValue !== "custom") updateConfig({ ...modelRef.current.config, api: nextValue }, true);
                 }}
                 options={[
                   { value: "custom", label: "自定义" },
@@ -59,8 +71,8 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
           <label>
             <span>Base URL</span>
             <Input
-              value={model.config.baseUrl ?? ""}
-              onChange={(event) => updateConfig(setOptional(model.config, "baseUrl", event.target.value))}
+              defaultValue={current.config.baseUrl ?? ""}
+              onChange={(event) => updateConfig(setOptional(modelRef.current.config, "baseUrl", event.target.value))}
             />
           </label>
           <label>
@@ -68,8 +80,10 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
             <Input
               type="number"
               min="1"
-              value={model.config.contextWindow ?? ""}
-              onChange={(event) => updateConfig(setOptionalNumber(model.config, "contextWindow", event.target.value))}
+              defaultValue={current.config.contextWindow ?? ""}
+              onChange={(event) =>
+                updateConfig(setOptionalNumber(modelRef.current.config, "contextWindow", event.target.value))
+              }
             />
           </label>
           <label>
@@ -77,16 +91,20 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
             <Input
               type="number"
               min="1"
-              value={model.config.maxTokens ?? ""}
-              onChange={(event) => updateConfig(setOptionalNumber(model.config, "maxTokens", event.target.value))}
+              defaultValue={current.config.maxTokens ?? ""}
+              onChange={(event) =>
+                updateConfig(setOptionalNumber(modelRef.current.config, "maxTokens", event.target.value))
+              }
             />
           </label>
           <label>
             <span>推理能力</span>
             <Select
               className="models-select"
-              value={model.config.reasoning === undefined ? "unset" : String(model.config.reasoning)}
-              onValueChange={(nextValue) => updateConfig(setOptionalBoolean(model.config, "reasoning", nextValue))}
+              value={current.config.reasoning === undefined ? "unset" : String(current.config.reasoning)}
+              onValueChange={(nextValue) =>
+                updateConfig(setOptionalBoolean(modelRef.current.config, "reasoning", nextValue), true)
+              }
               options={[
                 { value: "unset", label: "继承 / 默认" },
                 { value: "true", label: "true" },
@@ -99,12 +117,12 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
             {(["text", "image"] as const).map((kind) => (
               <label className="models-inline-checkbox" key={kind}>
                 <Checkbox
-                  checked={model.config.input?.includes(kind) ?? false}
+                  defaultChecked={current.config.input?.includes(kind) ?? false}
                   onCheckedChange={(checked) => {
-                    const input = new Set(model.config.input ?? []);
+                    const input = new Set(modelRef.current.config.input ?? []);
                     if (checked === true) input.add(kind);
                     else input.delete(kind);
-                    updateConfig({ ...model.config, input: input.size > 0 ? [...input] : undefined });
+                    updateConfig({ ...modelRef.current.config, input: input.size > 0 ? [...input] : undefined });
                   }}
                 />
                 {kind}
@@ -114,16 +132,22 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
         </div>
       </fieldset>
       <ModelsThinkingMapEditor
-        value={model.config.thinkingLevelMap as ModelsThinkingMapValue | undefined}
-        onChange={(thinkingLevelMap) => updateConfig({ ...model.config, thinkingLevelMap })}
+        value={current.config.thinkingLevelMap as ModelsThinkingMapValue | undefined}
+        onChange={(thinkingLevelMap) => updateConfig({ ...modelRef.current.config, thinkingLevelMap })}
       />
       <ModelsCostEditor
-        value={model.config.cost as ModelsCostValue | undefined}
+        value={current.config.cost as ModelsCostValue | undefined}
         requireBaseRates
-        onChange={(cost) => updateConfig({ ...model.config, cost: cost as ModelsModelDraft["config"]["cost"] })}
+        onChange={(cost) =>
+          updateConfig({ ...modelRef.current.config, cost: cost as ModelsModelDraft["config"]["cost"] })
+        }
       />
-      <ModelsMapEditor label="请求头" entries={model.headers} onChange={(headers) => onChange({ ...model, headers })} />
-      <ModelsCompatEditor value={model.compat} onChange={(compat) => onChange({ ...model, compat })} />
+      <ModelsMapEditor
+        label="请求头"
+        entries={current.headers}
+        onChange={(headers) => emit({ ...modelRef.current, headers })}
+      />
+      <ModelsCompatEditor value={current.compat} onChange={(compat) => emit({ ...modelRef.current, compat })} />
     </div>
   );
 }
