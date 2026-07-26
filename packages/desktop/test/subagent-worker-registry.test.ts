@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
 import { type SubagentWorkerClient, SubagentWorkerRegistry } from "../src/main/sidecar/subagent-worker-registry.ts";
 import { assertHostRequestIdentity } from "../src/main/sidecar/thread-worker-registry.ts";
 import type { WorkerClientOptions } from "../src/main/sidecar/worker-client.ts";
+import { PROTOCOL_VERSION, type SessionBootstrap, type SessionPushPayload } from "../src/shared/contracts.ts";
 import type { RuntimeCompatibility, SidecarEvent } from "../src/shared/sidecar-contracts.ts";
 import type { SubagentRunRequest } from "../src/shared/subagent-contracts.ts";
 
@@ -40,6 +44,44 @@ function runRequest(runId = "run-1", childIndex = 0): SubagentRunRequest {
   };
 }
 
+function subagentBootstrap(threadId: string): SessionBootstrap {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    projectId: "project",
+    threadId,
+    timeline: {
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: "project",
+      threadId,
+      cursor: 0,
+      headId: null,
+      nodes: [],
+      queue: [],
+      phase: "running",
+    },
+    control: {
+      protocolVersion: PROTOCOL_VERSION,
+      revision: 0,
+      projectId: "project",
+      threadId,
+      title: "Inspect",
+      updatedAt: 1,
+      cwd: process.cwd(),
+      running: true,
+      interaction: "read-only",
+      queueModes: { steering: "all", followUp: "all" },
+      models: [],
+      commands: [],
+      thinkingLevel: "off",
+      thinkingLevels: ["off"],
+      readiness: { state: "ready" },
+      hostRequests: [],
+      extensionSet: { generation: "subagent", diagnostics: [], reloadRequired: false },
+      extensionHost: { statuses: {}, widgets: [] },
+    },
+  };
+}
+
 function manifest(): NodeRuntimeManifest {
   return {
     nodePath: process.execPath,
@@ -63,6 +105,7 @@ class FakeClient implements SubagentWorkerClient {
   shutdownCount = 0;
   failure?: Error;
   run?: Promise<unknown>;
+  bootstrapResult?: SessionBootstrap;
 
   constructor(options: WorkerClientOptions) {
     this.options = options;
@@ -86,6 +129,7 @@ class FakeClient implements SubagentWorkerClient {
       this.options.onEvent?.(event(this.instanceId, 2, { type: "completed", runId: command.request.runId }));
       return { status: "completed" } as T;
     }
+    if (command.type === "subagentBootstrap") return this.bootstrapResult as T;
     return null as T;
   }
 
@@ -191,6 +235,134 @@ describe("SubagentWorkerRegistry", () => {
     expect(events).toEqual(["started", "completed"]);
     expect(client?.acknowledgements).toEqual([1, 2]);
     expect(client?.shutdownCount).toBe(1);
+  });
+
+  it("projects persisted fork events into live thread catalog summaries", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "subagent-catalog-"));
+    const parentSessionFile = join(directory, "parent.jsonl");
+    const sessionFile = join(directory, "child.jsonl");
+    writeFileSync(
+      parentSessionFile,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "direct-parent-thread",
+        timestamp: "2026-01-02T03:04:00.000Z",
+        cwd: process.cwd(),
+      })}\n`,
+    );
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "child-thread",
+        timestamp: "2026-01-02T03:04:05.000Z",
+        cwd: process.cwd(),
+        parentSession: parentSessionFile,
+      })}\n`,
+    );
+    const summaries: Array<{ id: string; title: string; running: boolean; parentThreadId?: string }> = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      catalogChanged: (summary) => summaries.push(summary),
+      createWorkerClient: (options) => new FakeClient(options),
+    });
+
+    try {
+      await registry.handleHostRequest(
+        {
+          type: "subagent.run",
+          request: { ...runRequest(), persistSession: true, sessionFile, task: "Inspect the renderer tree" },
+        },
+        () => undefined,
+      );
+
+      expect(summaries[0]).toMatchObject({
+        id: "child-thread",
+        title: "Inspect the renderer tree",
+        running: true,
+        parentThreadId: "direct-parent-thread",
+      });
+      expect(summaries.at(-1)).toMatchObject({ id: "child-thread", running: false });
+      expect(registry.listThreads("project")).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("attaches to the active subagent owner and routes live delivery acknowledgements", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "subagent-attach-"));
+    const sessionFile = join(directory, "child.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "live-child",
+        timestamp: "2026-01-02T03:04:05.000Z",
+        cwd: process.cwd(),
+      })}\n`,
+    );
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const pushed: SessionPushPayload[] = [];
+    const resyncs: string[] = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      push: (payload) => pushed.push(payload),
+      resync: (_projectId, threadId) => resyncs.push(threadId),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        client.bootstrapResult = subagentBootstrap("live-child");
+        return client;
+      },
+    });
+
+    try {
+      const run = registry.handleHostRequest(
+        { type: "subagent.run", request: { ...runRequest(), persistSession: true, sessionFile } },
+        () => undefined,
+      );
+      await expect.poll(() => client).toBeDefined();
+      client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1" }));
+
+      await expect(registry.attach("project", "live-child")).resolves.toMatchObject({
+        threadId: "live-child",
+        control: { interaction: "read-only" },
+      });
+      expect(registry.isActiveThread("project", "live-child")).toBe(true);
+
+      const payload = subagentBootstrap("live-child").control;
+      client?.emitSidecarEvent({
+        kind: "event",
+        protocolVersion: 3,
+        workerInstanceId: client.instanceId,
+        sequence: 2,
+        creditCost: 1,
+        event: {
+          type: "session-push",
+          payload: { type: "control", projectId: "project", threadId: "live-child", control: payload },
+        },
+      });
+      expect(pushed).toHaveLength(1);
+      expect(client?.acknowledgements).toEqual([1]);
+      expect(registry.acknowledge(client!.instanceId, 2)).toBe(true);
+      expect(client?.acknowledgements).toEqual([1, 2]);
+
+      release();
+      await run;
+      expect(registry.isActiveThread("project", "live-child")).toBe(false);
+      expect(resyncs).toContain("live-child");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("cancels Main-owned children when their parent thread fails", async () => {

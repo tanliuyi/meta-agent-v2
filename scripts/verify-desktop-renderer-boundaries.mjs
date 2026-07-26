@@ -20,6 +20,7 @@ const LOCAL_STYLE_IMPORTS = new Map([
 	["models-settings.css", '@import "./models-settings.css" layer(components);'],
 	["auth-settings.css", '@import "./auth-settings.css" layer(components);'],
 	["extensions-settings.css", '@import "./extensions-settings.css" layer(components);'],
+	["plugin-marketplace.css", '@import "./plugin-marketplace.css" layer(components);'],
 	["subagent-settings.css", '@import "./subagent-settings.css" layer(components);'],
 	["providers-settings.css", '@import "./providers-settings.css" layer(components);'],
 	["chat.css", '@import "./chat.css" layer(components);'],

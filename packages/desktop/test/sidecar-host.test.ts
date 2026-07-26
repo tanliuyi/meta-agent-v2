@@ -58,7 +58,7 @@ describe("sidecar command scheduling", () => {
     expect(calls).toEqual(["prompt-start", "steer", "set-thinking", "prompt-end"]);
   });
 
-  it("subagent run 期间 cancel 和 steer 立即执行", async () => {
+  it("subagent run 期间 bootstrap、cancel 和 steer 立即执行", async () => {
     const schedule = createSidecarCommandScheduler();
     let releaseRun!: () => void;
     const blocked = new Promise<void>((resolve) => {
@@ -73,6 +73,9 @@ describe("sidecar command scheduling", () => {
     await vi.waitFor(() => expect(calls).toEqual(["run-start"]));
 
     await Promise.all([
+      schedule("subagentBootstrap", async () => {
+        calls.push("bootstrap");
+      }),
       schedule("subagentCancel", async () => {
         calls.push("cancel");
       }),
@@ -80,7 +83,7 @@ describe("sidecar command scheduling", () => {
         calls.push("steer");
       }),
     ]);
-    expect(calls).toEqual(["run-start", "cancel", "steer"]);
+    expect(calls).toEqual(["run-start", "bootstrap", "cancel", "steer"]);
     releaseRun();
     await run;
   });

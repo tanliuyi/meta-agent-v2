@@ -26,6 +26,11 @@ import type {
 import type { CreationReservation, SidecarEvent, ThreadWorkerBinding } from "../../shared/sidecar-contracts.ts";
 import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
 import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
+import type {
+  MarketplaceExtensionApplyJournal,
+  MarketplaceExtensionApplyRecord,
+} from "../plugins/marketplace-extension-apply-journal.ts";
+import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
 import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
 import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
@@ -33,6 +38,7 @@ import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } fr
 export interface ThreadWorkerClient {
   readonly instanceId: string;
   readonly available?: boolean;
+  readonly pid?: number;
   ready(): ReturnType<SidecarWorkerClient["ready"]>;
   request<T>(command: Parameters<SidecarWorkerClient["request"]>[0], timeoutMs?: number | null): Promise<T>;
   acknowledge(sequence: number): void;
@@ -65,6 +71,18 @@ export interface ThreadWorkerRegistryOptions {
   userDataDir: string;
   agentDir: string;
   extensionSourcePolicy: DesktopExtensionSourcePolicy;
+  generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
+  extensionApplyJournal?: Pick<
+    MarketplaceExtensionApplyJournal,
+    | "prepare"
+    | "replacementStarted"
+    | "validated"
+    | "beginRollback"
+    | "rollbackValidated"
+    | "getRollbackOverride"
+    | "startupRollbackStarted"
+    | "completeStartupRollback"
+  >;
   getCwd(projectId: string): string;
   push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
   failed(projectId: string, threadId: string, error: Error): void;
@@ -72,6 +90,10 @@ export interface ThreadWorkerRegistryOptions {
   log?(scope: string, text: string): void;
   handleHostRequest?(request: SubagentHostRequest, emit: (event: SubagentRunEvent) => void): Promise<unknown>;
   hostWorkerFailed?(projectId: string, threadId: string): Promise<void>;
+  listSubagentThreads?(projectId: string): readonly Thread[];
+  isActiveSubagentThread?(projectId: string, threadId: string): boolean;
+  attachSubagent?(projectId: string, threadId: string): Promise<SessionBootstrap | undefined>;
+  acknowledgeSubagent?(workerInstanceId: string, sidecarSequence: number): boolean;
   createWorkerClient?(options: WorkerClientOptions): ThreadWorkerClient;
   idleTtlMs?: number;
   maxLiveWorkers?: number;
@@ -97,12 +119,33 @@ export class StaleExtensionSetApplyError extends Error {
   }
 }
 
+export class ColdExtensionSetApplyStartupError extends Error {
+  readonly code = "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED";
+
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error));
+    this.name = "ColdExtensionSetApplyStartupError";
+    this.cause = error;
+  }
+}
+
+class WorkerSpawnObservationError extends Error {
+  readonly code = "WORKER_SPAWN_OBSERVATION_FAILED";
+
+  constructor(error: unknown) {
+    super(`Failed to persist spawned worker identity: ${error instanceof Error ? error.message : String(error)}`);
+    this.name = "WorkerSpawnObservationError";
+    this.cause = error;
+  }
+}
+
 export class ThreadWorkerRegistry {
   private readonly options: ThreadWorkerRegistryOptions;
   private readonly records = new Map<string, WorkerRecord>();
   private readonly liveClients = new Map<string, ThreadWorkerClient>();
   private readonly pending = new Map<string, Promise<WorkerRecord>>();
   private readonly pendingCreations = new Map<string, Promise<SessionBootstrap>>();
+  private readonly subagentAttachments = new Map<string, number>();
   private readonly operationTails = new Map<string, Promise<void>>();
   private readonly drainingThreads = new Set<string>();
   private readonly blockedDevelopmentSets = new Map<string, string>();
@@ -127,14 +170,26 @@ export class ThreadWorkerRegistry {
     const catalog = new Map((await this.options.metadata.list(projectId, cwd)).map((thread) => [thread.id, thread]));
     for (const record of this.records.values()) {
       if (record.projectId !== projectId || record.retired || !record.summary) continue;
-      catalog.set(record.threadId, record.summary);
+      const indexed = catalog.get(record.threadId);
+      catalog.set(record.threadId, {
+        ...record.summary,
+        ...(indexed?.parentThreadId ? { parentThreadId: indexed.parentThreadId } : {}),
+        ...(indexed?.origin ? { origin: indexed.origin } : {}),
+        ...(indexed?.parentThreadId ? { title: indexed.title, preview: indexed.preview } : {}),
+      });
+    }
+    for (const thread of this.options.listSubagentThreads?.(projectId) ?? []) {
+      const indexed = catalog.get(thread.id);
+      catalog.set(thread.id, { ...indexed, ...thread, archived: indexed?.archived ?? thread.archived });
     }
     await this.reconcileCreationReservations(projectId);
     return [...catalog.values()].sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
   acknowledge(workerInstanceId: string, sidecarSequence: number): void {
-    this.liveClients.get(workerInstanceId)?.acknowledge(sidecarSequence);
+    const client = this.liveClients.get(workerInstanceId);
+    if (client) client.acknowledge(sidecarSequence);
+    else this.options.acknowledgeSubagent?.(workerInstanceId, sidecarSequence);
   }
 
   async getDraftConfig(projectId: string): Promise<DraftSessionConfig> {
@@ -246,6 +301,23 @@ export class ThreadWorkerRegistry {
   }
 
   async attach(projectId: string, threadId: string): Promise<SessionBootstrap> {
+    let subagentBootstrap: SessionBootstrap | undefined;
+    try {
+      subagentBootstrap = await this.options.attachSubagent?.(projectId, threadId);
+    } catch (error) {
+      // 只有当 subagent 已经不再活跃（运行在 bootstrap 期间结束）时才回退到普通 thread worker，
+      // 避免在写入者仍存活时打开第二个写入者。
+      if (this.options.isActiveSubagentThread?.(projectId, threadId)) throw error;
+      this.options.log?.(
+        `thread:${projectId}`,
+        `Subagent attach fell back to a thread worker: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (subagentBootstrap) {
+      const key = workerKey(projectId, threadId);
+      this.subagentAttachments.set(key, (this.subagentAttachments.get(key) ?? 0) + 1);
+      return subagentBootstrap;
+    }
     const bootstrap = await this.use(projectId, threadId, async (record) => {
       const result = await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
       record.attachments += 1;
@@ -256,11 +328,24 @@ export class ThreadWorkerRegistry {
 
   /** 仅确保 thread worker 已冷启并驻留在 records 中，不建立 attachment 或返回 bootstrap。 */
   prewarm(projectId: string, threadId: string): Promise<void> {
+    if (this.options.isActiveSubagentThread?.(projectId, threadId)) return Promise.resolve();
     return this.use(projectId, threadId, async () => undefined);
   }
 
   detach(projectId: string, threadId: string): void {
-    const record = this.records.get(workerKey(projectId, threadId));
+    const key = workerKey(projectId, threadId);
+    const subagentAttachmentCount = this.subagentAttachments.get(key) ?? 0;
+    const record = this.records.get(key);
+    // 活跃 subagent 线程只存在 subagent lease；完成后优先扣减 thread worker lease，
+    // 两类 lease 短暂并存时计数在全部释放后收敛，不会残留。
+    const useSubagentLease =
+      subagentAttachmentCount > 0 &&
+      (this.options.isActiveSubagentThread?.(projectId, threadId) === true || !record || record.attachments === 0);
+    if (useSubagentLease) {
+      if (subagentAttachmentCount === 1) this.subagentAttachments.delete(key);
+      else this.subagentAttachments.set(key, subagentAttachmentCount - 1);
+      return;
+    }
     if (record && record.attachments > 0) record.attachments -= 1;
   }
 
@@ -316,14 +401,24 @@ export class ThreadWorkerRegistry {
     threadId: string,
     expectedDesiredGeneration: string,
     abortRunning = false,
+    mutationOperationId?: string,
   ): Promise<ApplyDesktopExtensionSetResult> {
+    this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
     if (this.drainingThreads.has(key))
       throw new Error(`Extension set apply is already running for ${projectId}/${threadId}`);
     this.drainingThreads.add(key);
     try {
       return await this.withThreadLock(key, async () => {
-        const current = await this.requireUnlocked(projectId, threadId);
+        const existing = this.records.get(key);
+        const requiresInitialStartup = !existing || existing.retired || existing.client.available === false;
+        let current: WorkerRecord;
+        try {
+          current = await this.requireUnlocked(projectId, threadId);
+        } catch (error) {
+          if (requiresInitialStartup && mutationOperationId) throw new ColdExtensionSetApplyStartupError(error);
+          throw error;
+        }
         const desired = await this.options.extensionSourcePolicy.resolve(projectId);
         if (desired.generation !== expectedDesiredGeneration) {
           throw new StaleExtensionSetApplyError(expectedDesiredGeneration, desired.generation);
@@ -343,6 +438,18 @@ export class ThreadWorkerRegistry {
         const previousSet = cloneExtensionSet(current.extensionSet);
         const attachments = current.attachments;
         const sessionFile = current.sessionFile;
+        let applyRecord: MarketplaceExtensionApplyRecord | undefined;
+        if (this.options.extensionApplyJournal) {
+          applyRecord = await this.options.extensionApplyJournal.prepare({
+            projectId,
+            threadId,
+            beforeSet: previousSet,
+            afterGeneration: desired.generation,
+            previousWorkerInstanceId: current.client.instanceId,
+            ...(current.client.pid === undefined ? {} : { previousWorkerPid: current.client.pid }),
+            ...(mutationOperationId === undefined ? {} : { mutationOperationId }),
+          });
+        }
         this.options.resync(projectId, threadId, "extension-set-applying");
         current.retired = true;
         await this.awaitRecordShutdown(current);
@@ -350,23 +457,35 @@ export class ThreadWorkerRegistry {
         let replacement: WorkerRecord | undefined;
         let latestDesired = desired;
         try {
-          replacement = await this.spawn({
-            mode: "open",
-            projectId,
-            cwd: this.options.getCwd(projectId),
-            agentDir: this.options.agentDir,
-            threadId,
-            sessionFile,
-            extensionSet: desired,
-          });
+          replacement = await this.spawn(
+            {
+              mode: "open",
+              projectId,
+              cwd: this.options.getCwd(projectId),
+              agentDir: this.options.agentDir,
+              threadId,
+              sessionFile,
+              extensionSet: desired,
+            },
+            applyRecord && this.options.extensionApplyJournal
+              ? async (client) => {
+                  if (!applyRecord || !this.options.extensionApplyJournal) return;
+                  applyRecord = await this.options.extensionApplyJournal.replacementStarted(
+                    applyRecord,
+                    client.instanceId,
+                    client.pid,
+                  );
+                }
+              : undefined,
+          );
           latestDesired = await this.options.extensionSourcePolicy.resolve(projectId);
           if (latestDesired.generation !== expectedDesiredGeneration) {
             throw new StaleExtensionSetApplyError(expectedDesiredGeneration, latestDesired.generation);
           }
-          activateAppliedRecord(replacement, attachments);
-          this.options.resync(projectId, threadId, "extension-set-applied");
-          return { status: "applied", generation: desired.generation };
         } catch (error) {
+          if (applyRecord && this.options.extensionApplyJournal) {
+            applyRecord = await this.options.extensionApplyJournal.beginRollback(applyRecord);
+          }
           try {
             latestDesired = await this.options.extensionSourcePolicy.resolve(projectId);
           } catch {
@@ -377,16 +496,38 @@ export class ThreadWorkerRegistry {
             await this.awaitRecordShutdown(replacement);
             if (this.records.get(key) === replacement) this.records.delete(key);
           }
-          const rollback = await this.spawn({
-            mode: "open",
-            projectId,
-            cwd: this.options.getCwd(projectId),
-            agentDir: this.options.agentDir,
-            threadId,
-            sessionFile,
-            extensionSet: previousSet,
-          });
+          const rollback = await this.spawn(
+            {
+              mode: "open",
+              projectId,
+              cwd: this.options.getCwd(projectId),
+              agentDir: this.options.agentDir,
+              threadId,
+              sessionFile,
+              extensionSet: previousSet,
+            },
+            applyRecord && this.options.extensionApplyJournal
+              ? async (client) => {
+                  if (!applyRecord || !this.options.extensionApplyJournal) return;
+                  applyRecord = await this.options.extensionApplyJournal.replacementStarted(
+                    applyRecord,
+                    client.instanceId,
+                    client.pid,
+                  );
+                }
+              : undefined,
+          );
           activateAppliedRecord(rollback, attachments);
+          if (applyRecord && this.options.extensionApplyJournal) {
+            await this.options.extensionApplyJournal
+              .rollbackValidated(applyRecord)
+              .catch((journalError: unknown) =>
+                this.options.log?.(
+                  `thread:${projectId}`,
+                  `Failed to complete extension apply rollback journal: ${journalError instanceof Error ? journalError.message : String(journalError)}`,
+                ),
+              );
+          }
           rollback.desiredExtensionGeneration = latestDesired.generation;
           rollback.desiredExtensionDiagnostics = [
             ...latestDesired.diagnostics.map((diagnostic) => ({ ...diagnostic })),
@@ -408,6 +549,13 @@ export class ThreadWorkerRegistry {
             error: error instanceof Error ? error.message : String(error),
           };
         }
+        if (!replacement) throw new Error("Replacement worker is unavailable after successful startup");
+        activateAppliedRecord(replacement, attachments);
+        this.options.resync(projectId, threadId, "extension-set-applied");
+        if (applyRecord && this.options.extensionApplyJournal) {
+          await this.options.extensionApplyJournal.validated(applyRecord);
+        }
+        return { status: "applied", generation: desired.generation };
       });
     } finally {
       this.drainingThreads.delete(key);
@@ -439,6 +587,7 @@ export class ThreadWorkerRegistry {
   }
 
   async rename(projectId: string, threadId: string, title: string): Promise<void> {
+    this.assertNotActiveSubagent(projectId, threadId);
     await this.withThreadLock(workerKey(projectId, threadId), async () => {
       this.assertProjectAvailable(projectId);
       const current = this.records.get(workerKey(projectId, threadId));
@@ -465,6 +614,7 @@ export class ThreadWorkerRegistry {
   }
 
   async remove(projectId: string, threadId: string): Promise<void> {
+    this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
     await this.withThreadLock(key, async () => {
       this.assertProjectAvailable(projectId);
@@ -503,6 +653,9 @@ export class ThreadWorkerRegistry {
     for (const [key, record] of records) {
       if (this.records.get(key) === record) this.records.delete(key);
     }
+    for (const key of this.subagentAttachments.keys()) {
+      if (key.startsWith(`${projectId}\0`)) this.subagentAttachments.delete(key);
+    }
     await this.options.metadata.invalidateProject(projectId);
   }
 
@@ -517,6 +670,7 @@ export class ThreadWorkerRegistry {
     const failure = shutdowns.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") throw failure.reason;
     this.records.clear();
+    this.subagentAttachments.clear();
   }
 
   private async use<T>(
@@ -524,6 +678,7 @@ export class ThreadWorkerRegistry {
     threadId: string,
     operation: (record: WorkerRecord) => Promise<T>,
   ): Promise<T> {
+    this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
     if (this.drainingThreads.has(key)) throw new Error(`Thread ${projectId}/${threadId} is applying extensions`);
     let record!: WorkerRecord;
@@ -589,19 +744,44 @@ export class ThreadWorkerRegistry {
   private async open(projectId: string, threadId: string): Promise<WorkerRecord> {
     const cwd = this.options.getCwd(projectId);
     const session = await this.options.metadata.resolve(projectId, cwd, threadId);
-    const extensionSet = await this.options.extensionSourcePolicy.resolve(projectId);
-    return this.spawn({
-      mode: "open",
-      projectId,
-      cwd,
-      agentDir: this.options.agentDir,
-      threadId,
-      sessionFile: session.path,
-      extensionSet,
-    });
+    const applyJournal = this.options.extensionApplyJournal;
+    const rollbackOverride = applyJournal?.getRollbackOverride(projectId, threadId);
+    const extensionSet =
+      rollbackOverride?.extensionSet ?? (await this.options.extensionSourcePolicy.resolve(projectId));
+    const record = await this.spawn(
+      {
+        mode: "open",
+        projectId,
+        cwd,
+        agentDir: this.options.agentDir,
+        threadId,
+        sessionFile: session.path,
+        extensionSet,
+      },
+      rollbackOverride && applyJournal
+        ? (client) => applyJournal.startupRollbackStarted(rollbackOverride.operationId, client.instanceId, client.pid)
+        : undefined,
+    );
+    if (rollbackOverride && applyJournal) {
+      const desired = await this.options.extensionSourcePolicy.resolve(projectId).catch(() => extensionSet);
+      record.desiredExtensionGeneration = desired.generation;
+      record.desiredExtensionDiagnostics = desired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
+      await applyJournal
+        .completeStartupRollback(rollbackOverride.operationId)
+        .catch((error: unknown) =>
+          this.options.log?.(
+            `thread:${projectId}`,
+            `Failed to complete startup extension rollback journal: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        );
+    }
+    return record;
   }
 
-  private async spawn(binding: ThreadWorkerBinding): Promise<WorkerRecord> {
+  private async spawn(
+    binding: ThreadWorkerBinding,
+    observeStarted?: (client: ThreadWorkerClient) => Promise<void>,
+  ): Promise<WorkerRecord> {
     const blockedReason = this.blockedDevelopmentSets.get(binding.extensionSet.generation);
     if (blockedReason) {
       throw new Error(`Development extension set is blocked after repeated failures: ${blockedReason}`);
@@ -613,7 +793,7 @@ export class ThreadWorkerRegistry {
       for (const delayMs of delays) {
         if (delayMs > 0) await delay(delayMs);
         try {
-          const record = await this.spawnAttempt(binding);
+          const record = await this.spawnAttempt(binding, observeStarted);
           if (record.retired || record.client.available === false) {
             await this.awaitRecordShutdown(record);
             throw new Error(`Thread worker generation exited before registration: ${binding.projectId}`);
@@ -655,7 +835,10 @@ export class ThreadWorkerRegistry {
     }
   }
 
-  private async spawnAttempt(binding: ThreadWorkerBinding): Promise<WorkerRecord> {
+  private async spawnAttempt(
+    binding: ThreadWorkerBinding,
+    observeStarted?: (client: ThreadWorkerClient) => Promise<void>,
+  ): Promise<WorkerRecord> {
     let record: WorkerRecord;
     let client: ThreadWorkerClient;
     const clientOptions: WorkerClientOptions = {
@@ -694,6 +877,13 @@ export class ThreadWorkerRegistry {
     };
     client = this.options.createWorkerClient?.(clientOptions) ?? new SidecarWorkerClient(clientOptions);
     this.liveClients.set(client.instanceId, client);
+    try {
+      this.options.generationReferences?.retain(`thread:${client.instanceId}`, binding.extensionSet);
+    } catch (error) {
+      this.liveClients.delete(client.instanceId);
+      await client.shutdown().catch(() => undefined);
+      throw error;
+    }
     record = {
       client,
       projectId: binding.projectId,
@@ -710,6 +900,11 @@ export class ThreadWorkerRegistry {
       retired: false,
     };
     try {
+      try {
+        await observeStarted?.(client);
+      } catch (error) {
+        throw new WorkerSpawnObservationError(error);
+      }
       const ready = await client.ready();
       if (record.retired || client.available === false) {
         throw new Error(`Thread worker exited during startup: ${binding.projectId}`);
@@ -762,6 +957,7 @@ export class ThreadWorkerRegistry {
 
   private unregisterClient(client: ThreadWorkerClient): void {
     if (this.liveClients.get(client.instanceId) === client) this.liveClients.delete(client.instanceId);
+    this.options.generationReferences?.release(`thread:${client.instanceId}`);
   }
 
   private handleEvent(record: WorkerRecord, event: SidecarEvent): void {
@@ -814,6 +1010,12 @@ export class ThreadWorkerRegistry {
       record.client.acknowledge(event.sequence);
     } else {
       record.client.acknowledge(event.sequence);
+    }
+  }
+
+  private assertNotActiveSubagent(projectId: string, threadId: string): void {
+    if (this.options.isActiveSubagentThread?.(projectId, threadId)) {
+      throw new Error("Active subagent sessions are read-only in Desktop");
     }
   }
 
@@ -1021,6 +1223,7 @@ export class ThreadWorkerRegistry {
 
 function isNonRetryableStartupError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+  if (error instanceof WorkerSpawnObservationError) return true;
   return /Sidecar (?:runtime|protocol) mismatch|runtime compatibility|projection is missing|did not exit|fenc/i.test(
     error.message,
   );

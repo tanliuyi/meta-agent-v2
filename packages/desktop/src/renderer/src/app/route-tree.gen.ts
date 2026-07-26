@@ -13,6 +13,7 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
+import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
@@ -39,6 +40,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
 const ChatNewRoute = ChatNewRouteImport.update({
   id: '/new',
   path: '/new',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatPluginsRoute = ChatPluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
   getParentRoute: () => ChatRoute,
 } as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsRouteWithChildren
   '/new': typeof ChatNewRoute
+  '/plugins': typeof ChatPluginsRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
@@ -98,6 +105,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/new': typeof ChatNewRoute
+  '/plugins': typeof ChatPluginsRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
@@ -113,6 +121,7 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/new': typeof ChatNewRoute
+  '/_chat/plugins': typeof ChatPluginsRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
@@ -129,6 +138,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/new'
+    | '/plugins'
     | '/settings/about'
     | '/settings/auth'
     | '/settings/extensions'
@@ -140,6 +150,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/new'
+    | '/plugins'
     | '/settings/about'
     | '/settings/auth'
     | '/settings/extensions'
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
     | '/_chat'
     | '/settings'
     | '/_chat/new'
+    | '/_chat/plugins'
     | '/settings/about'
     | '/settings/auth'
     | '/settings/extensions'
@@ -198,6 +210,13 @@ declare module '@tanstack/react-router' {
       path: '/new'
       fullPath: '/new'
       preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/plugins': {
+      id: '/_chat/plugins'
+      path: '/plugins'
+      fullPath: '/plugins'
+      preLoaderRoute: typeof ChatPluginsRouteImport
       parentRoute: typeof ChatRoute
     }
     '/settings/': {
@@ -261,12 +280,14 @@ declare module '@tanstack/react-router' {
 
 interface ChatRouteChildren {
   ChatNewRoute: typeof ChatNewRoute
+  ChatPluginsRoute: typeof ChatPluginsRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatProjectsProjectIdSessionThreadIdRoute: typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatNewRoute: ChatNewRoute,
+  ChatPluginsRoute: ChatPluginsRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatProjectsProjectIdSessionThreadIdRoute:
     ChatProjectsProjectIdSessionThreadIdRoute,

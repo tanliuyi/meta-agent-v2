@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { createReadStream, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { Thread } from "../shared/contracts.ts";
 
-const INDEX_VERSION = 2;
+const INDEX_VERSION = 3;
 const INDEX_FILE_NAME = "session-metadata-index.json";
 
 interface IndexedSession extends Thread {
@@ -53,8 +54,17 @@ export class SessionMetadataIndex {
     const data = this.load();
     const project = data.projects[projectId];
     const sessions = project?.cwd === cwd ? [...project.sessions] : [];
-    const next: IndexedSession = { ...thread, running: false, path: sessionFile };
     const index = sessions.findIndex(({ id }) => id === thread.id);
+    const existing = index === -1 ? undefined : sessions[index];
+    const parentThreadId = thread.parentThreadId ?? existing?.parentThreadId;
+    const origin = thread.origin ?? existing?.origin;
+    const next: IndexedSession = {
+      ...thread,
+      ...(parentThreadId ? { parentThreadId } : {}),
+      ...(origin ? { origin } : {}),
+      running: false,
+      path: sessionFile,
+    };
     if (index === -1) sessions.push(next);
     else sessions[index] = next;
     sessions.sort((left, right) => right.updatedAt - left.updatedAt);
@@ -100,18 +110,28 @@ export class SessionMetadataIndex {
     const current = data.projects[projectId];
     const knownDirectory = current?.cwd === cwd ? current.sessionDirectory : null;
     const fingerprintBeforeScan = fingerprintSessionDirectory(knownDirectory);
-    const sessions = (await SessionManager.list(cwd)).map(
-      (session): IndexedSession => ({
-        id: session.id,
-        projectId,
-        title: session.name || session.firstMessage || "新会话",
-        createdAt: session.created.getTime(),
-        updatedAt: session.modified.getTime(),
-        messageCount: session.messageCount,
-        preview: session.firstMessage,
-        archived: false,
-        running: false,
-        path: session.path,
+    const listedSessions = await SessionManager.list(cwd);
+    const threadIdByPath = new Map(listedSessions.map((session) => [resolve(session.path), session.id]));
+    const sessions = await Promise.all(
+      listedSessions.map(async (session): Promise<IndexedSession> => {
+        const parentThreadId = session.parentSessionPath
+          ? threadIdByPath.get(resolve(session.parentSessionPath))
+          : undefined;
+        const fork = parentThreadId ? await readForkDescriptor(session) : undefined;
+        return {
+          id: session.id,
+          projectId,
+          title: fork?.title || session.name || session.firstMessage || "新会话",
+          createdAt: session.created.getTime(),
+          updatedAt: session.modified.getTime(),
+          messageCount: session.messageCount,
+          preview: fork?.title || session.firstMessage,
+          archived: false,
+          running: false,
+          ...(parentThreadId ? { parentThreadId } : {}),
+          ...(fork?.origin ? { origin: fork.origin } : {}),
+          path: session.path,
+        };
       }),
     );
     sessions.sort((left, right) => right.updatedAt - left.updatedAt);
@@ -190,12 +210,91 @@ function isIndexedSession(value: unknown): value is IndexedSession {
     typeof value.preview === "string" &&
     typeof value.archived === "boolean" &&
     typeof value.running === "boolean" &&
+    (value.parentThreadId === undefined || typeof value.parentThreadId === "string") &&
+    (value.origin === undefined || value.origin === "branch" || value.origin === "subagent") &&
     typeof value.path === "string"
   );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface ForkDescriptor {
+  title: string;
+  prompt?: string;
+  origin: "branch" | "subagent";
+}
+
+async function readForkDescriptor(session: SessionInfo): Promise<ForkDescriptor> {
+  const activity = await readForkActivity(session.path, session.created.getTime());
+  const origin = activity.prompt?.includes("You are a delegated subagent running from a fork of the parent session.")
+    ? "subagent"
+    : "branch";
+  return {
+    origin,
+    title: activity.name || (activity.prompt ? forkTitle(activity.prompt, origin) : "分支会话"),
+    ...(activity.prompt ? { prompt: activity.prompt } : {}),
+  };
+}
+
+async function readForkActivity(
+  sessionFile: string,
+  createdAt: number,
+): Promise<{ prompt?: string; name?: string | null }> {
+  const lines = createInterface({ input: createReadStream(sessionFile, { encoding: "utf8" }), crlfDelay: Infinity });
+  let prompt: string | undefined;
+  let name: string | null | undefined;
+  for await (const line of lines) {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(value)) continue;
+    const entryTime = typeof value.timestamp === "string" ? new Date(value.timestamp).getTime() : Number.NaN;
+    if (!Number.isFinite(entryTime) || entryTime < createdAt) continue;
+    if (value.type === "session_info") {
+      name = typeof value.name === "string" ? value.name.trim() || null : null;
+      continue;
+    }
+    if (prompt || value.type !== "message" || !isRecord(value.message) || value.message.role !== "user") continue;
+    const messageTime = typeof value.message.timestamp === "number" ? value.message.timestamp : entryTime;
+    if (messageTime < createdAt) continue;
+    const text = messageText(value.message.content).trim();
+    if (text) prompt = text;
+  }
+  return { ...(prompt ? { prompt } : {}), ...(name !== undefined ? { name } : {}) };
+}
+
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((part) => (isRecord(part) && part.type === "text" && typeof part.text === "string" ? [part.text] : []))
+    .join(" ");
+}
+
+function forkTitle(prompt: string, origin: ForkDescriptor["origin"]): string {
+  if (origin === "subagent") {
+    const task = /(?:^|\n)Task:\n([\s\S]*?)(?:\n\n## Acceptance Contract|\n\n## |$)/.exec(prompt)?.[1];
+    const taskLine = task
+      ?.split("\n")
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (taskLine) return truncateTitle(taskLine);
+  }
+  const firstLine = prompt
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith("[Read from:"));
+  return truncateTitle(firstLine ?? "分支会话");
+}
+
+function truncateTitle(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.slice(0, 48) || "分支会话";
 }
 
 function fingerprintSessionDirectory(directory: string | null): string | null {

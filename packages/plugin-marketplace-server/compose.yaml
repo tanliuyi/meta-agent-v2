@@ -1,0 +1,26 @@
+services:
+  plugin-marketplace:
+    image: ${MARKETPLACE_IMAGE:-meta-agent-plugin-marketplace:local}
+    build:
+      context: ../..
+      dockerfile: packages/plugin-marketplace-server/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      MARKETPLACE_HOST: 0.0.0.0
+      MARKETPLACE_PORT: "4317"
+    ports:
+      - "100.91.230.10:4317:4317"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

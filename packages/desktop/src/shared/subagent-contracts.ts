@@ -47,7 +47,7 @@ export interface SubagentResumeRequest extends SubagentRunRequest {
 }
 
 export type SubagentRunEvent =
-  | { type: "started"; runId: string; workerInstanceId?: string }
+  | { type: "started"; runId: string; workerInstanceId?: string; sessionFile?: string }
   | { type: "text-delta"; text: string }
   | { type: "message-end"; message: JsonValue }
   | { type: "tool-start"; toolCallId: string; toolName: string; args: JsonValue }
@@ -67,6 +67,7 @@ export type SubagentWorkerBinding = {
 
 export type SubagentWorkerCommand =
   | { type: "subagentRun"; request: SubagentRunRequest }
+  | { type: "subagentBootstrap" }
   | { type: "subagentCancel"; runId: string }
   | { type: "subagentSteer"; runId: string; message: string }
   | { type: "ping" };

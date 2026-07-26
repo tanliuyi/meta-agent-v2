@@ -22,6 +22,7 @@ export type DesktopAction =
   | { type: "project-activated"; projectId: string }
   | { type: "project-threads-loaded"; projectId: string; threads: Thread[] }
   | { type: "thread-catalog-added"; bootstrap: SessionBootstrap }
+  | { type: "thread-catalog-upserted"; thread: Thread }
   | { type: "project-removed"; projectId: string }
   | { type: "thread-renamed"; projectId: string; threadId: string; title: string }
   | { type: "thread-archived"; projectId: string; threadId: string; archived: boolean }
@@ -74,6 +75,20 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
           ...state.threadCatalogs,
           [thread.projectId]: [thread, ...current.filter(({ id }) => id !== thread.id)],
         },
+      };
+    }
+    case "thread-catalog-upserted": {
+      const current = state.threadCatalogs[action.thread.projectId];
+      if (!current) return state;
+      const index = current.findIndex(({ id }) => id === action.thread.id);
+      if (index !== -1 && equalThread(current[index]!, action.thread)) return state;
+      const next = [...current];
+      if (index === -1) next.push(action.thread);
+      else next[index] = action.thread;
+      next.sort((left, right) => right.updatedAt - left.updatedAt);
+      return {
+        ...state,
+        threadCatalogs: { ...state.threadCatalogs, [action.thread.projectId]: next },
       };
     }
     case "project-removed": {
@@ -181,6 +196,8 @@ function equalThread(left: Thread, right: Thread | undefined): boolean {
     left.messageCount === right.messageCount &&
     left.preview === right.preview &&
     left.archived === right.archived &&
-    left.running === right.running
+    left.running === right.running &&
+    left.parentThreadId === right.parentThreadId &&
+    left.origin === right.origin
   );
 }

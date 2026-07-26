@@ -1,7 +1,8 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import { Button } from "@renderer/shared/ui/button";
-import { Link, useMatchRoute, useNavigate } from "@tanstack/react-router";
+import { Link, useMatchRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
+import Puzzle from "lucide-react/dist/esm/icons/puzzle.mjs";
 import Settings from "lucide-react/dist/esm/icons/settings.mjs";
 import { type CSSProperties, memo, useCallback } from "react";
 import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
@@ -10,6 +11,7 @@ import { useLayout } from "../../state/layout.tsx";
 import { getSidebarMaxWidth, SIDEBAR_MIN_WIDTH } from "../../state/layout-preference.ts";
 import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
 import { draftSearch } from "../../state/session-navigation.ts";
+import { settingsReturnSession, validateSettingsSearch } from "../../state/settings-navigation.ts";
 import { runControlledThreadAction } from "../../state/thread-list-commands.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { ProjectList } from "./project-list.tsx";
@@ -23,17 +25,24 @@ export const Sidebar = memo(function Sidebar() {
   const { sidebarWidth, setSidebarWidth } = useLayout();
   const matchRoute = useMatchRoute();
   const navigate = useNavigate();
+  const routeSearch = useSearch({ strict: false });
+  const returnSession = settingsReturnSession(validateSettingsSearch(routeSearch));
   const sessionRoute = matchRoute({
     to: "/projects/$projectId/session/$threadId",
     fuzzy: false,
   });
-  const activeProjectId = sessionRoute ? sessionRoute.projectId : null;
+  const activeProjectId = sessionRoute ? sessionRoute.projectId : (returnSession?.projectId ?? null);
   const settingsSearch = sessionRoute
     ? {
         returnProjectId: sessionRoute.projectId,
         returnThreadId: sessionRoute.threadId,
       }
-    : {};
+    : returnSession
+      ? {
+          returnProjectId: returnSession.projectId,
+          returnThreadId: returnSession.threadId,
+        }
+      : {};
   const resize = useResizableRegion<HTMLElement>({
     value: sidebarWidth,
     min: SIDEBAR_MIN_WIDTH,
@@ -116,6 +125,10 @@ export const Sidebar = memo(function Sidebar() {
 
         <div className="sidebar-footer">
           <UpdateBanner />
+          <Link to="/plugins" search={settingsSearch} className="sidebar-settings-link">
+            <Puzzle size={15} />
+            <span>插件中心</span>
+          </Link>
           <Link to="/settings/personalization" search={settingsSearch} className="sidebar-settings-link">
             <Settings size={15} />
             <span>设置</span>

@@ -176,7 +176,8 @@
 .sidebar-actions button:hover {
   background: hsl(var(--muted));
 }
-.sidebar-settings-link:hover {
+.sidebar-settings-link:hover,
+.sidebar-settings-link[aria-current="page"] {
   background: hsl(var(--accent));
 }
 .sidebar-actions button:disabled {

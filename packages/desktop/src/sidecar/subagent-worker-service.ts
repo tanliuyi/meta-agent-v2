@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
   type AgentSession,
+  type AgentSessionEvent,
   createAgentSessionFromServices,
   createAgentSessionServices,
   type ExtensionAPI,
@@ -19,7 +20,9 @@ import {
   toolBudgetBlockedMessage,
   toolBudgetSoftNudge,
 } from "../main/pi/extensions/pi-subagents/src/runs/shared/tool-budget.ts";
+import { PiThreadProjector } from "../main/pi/pi-thread-projector.ts";
 import { DesktopSubagentRuntime } from "../main/pi/subagents/desktop-subagent-runtime.ts";
+import { PROTOCOL_VERSION, type SessionBootstrap, type SessionControlState } from "../shared/contracts.ts";
 import type { SidecarBinding, SidecarCommand } from "../shared/sidecar-contracts.ts";
 import { toJsonValue } from "../shared/sidecar-wire.ts";
 import type { SubagentRunRequest, SubagentWorkerBinding, SubagentWorkerCommand } from "../shared/subagent-contracts.ts";
@@ -41,6 +44,8 @@ export class SubagentWorkerService implements SidecarService {
   private readonly dependencies: SubagentWorkerServiceDependencies;
   private session?: AgentSession;
   private extensionHost?: DesktopExtensionHost;
+  private projector?: PiThreadProjector;
+  private controlState?: SessionControlState;
   private runStarted = false;
   private cancelled = false;
   private disposed = false;
@@ -72,6 +77,8 @@ export class SubagentWorkerService implements SidecarService {
     switch (subagentCommand.type) {
       case "subagentRun":
         return this.run(subagentCommand.request);
+      case "subagentBootstrap":
+        return this.bootstrap();
       case "subagentCancel":
         this.assertRunId(subagentCommand.runId);
         this.cancelled = true;
@@ -101,6 +108,8 @@ export class SubagentWorkerService implements SidecarService {
     if (this.session?.extensionRunner.hasHandlers("session_shutdown")) {
       await this.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }).catch(() => undefined);
     }
+    this.projector?.dispose();
+    this.projector = undefined;
     this.extensionHost?.dispose();
     this.session?.dispose();
     this.session = undefined;
@@ -111,7 +120,6 @@ export class SubagentWorkerService implements SidecarService {
     if (this.runStarted) throw new Error("Subagent worker accepts exactly one run");
     this.runStarted = true;
     this.validateRequest(request);
-    this.context.emit({ type: "subagent-event", event: { type: "started", runId: request.runId } });
 
     process.env.PI_SUBAGENT_DEPTH = String(request.depth);
     process.env.PI_SUBAGENT_MAX_DEPTH = String(request.maxDepth);
@@ -169,7 +177,7 @@ export class SubagentWorkerService implements SidecarService {
       throw new Error(this.disposed ? "Subagent worker is disposed" : "Subagent cancelled.");
     }
     this.extensionHost = new DesktopExtensionHost(
-      () => undefined,
+      () => this.publishControl(),
       () => [...created.session.state.pendingToolCalls],
     );
     await created.session.bindExtensions({
@@ -185,9 +193,63 @@ export class SubagentWorkerService implements SidecarService {
       this.session = undefined;
       throw new Error(this.disposed ? "Subagent worker is disposed" : "Subagent cancelled.");
     }
+    this.projector = new PiThreadProjector({
+      projectId: request.projectId,
+      session: created.session,
+      publish: (batch) =>
+        this.context.emit({
+          type: "session-push",
+          payload: { type: "timeline", projectId: request.projectId, threadId: created.session.sessionId, batch },
+        }),
+    });
+    const availableModels = services.modelRegistry.getAvailable();
+    const contextUsage = created.session.getContextUsage();
+    const activeModel = created.session.model;
+    this.controlState = {
+      protocolVersion: PROTOCOL_VERSION,
+      revision: 0,
+      projectId: request.projectId,
+      threadId: created.session.sessionId,
+      title: subagentSessionTitle(request.task),
+      updatedAt: Date.now(),
+      cwd: request.cwd,
+      running: false,
+      interaction: "read-only",
+      queueModes: { steering: created.session.steeringMode, followUp: created.session.followUpMode },
+      ...(activeModel ? { model: { provider: activeModel.provider, id: activeModel.id, name: activeModel.name } } : {}),
+      models: availableModels.map((item) => ({
+        provider: item.provider,
+        id: item.id,
+        name: item.name,
+        contextWindow: item.contextWindow,
+        thinking: item.reasoning,
+      })),
+      commands: [],
+      thinkingLevel: created.session.thinkingLevel,
+      thinkingLevels: created.session.getAvailableThinkingLevels(),
+      ...(contextUsage
+        ? {
+            context: {
+              tokens: contextUsage.tokens,
+              contextWindow: contextUsage.contextWindow,
+              percent: contextUsage.percent,
+            },
+          }
+        : {}),
+      readiness: { state: "ready" },
+      hostRequests: [],
+      extensionSet: { generation: extensionSet.generation, diagnostics: [], reloadRequired: false },
+      extensionHost: this.extensionHost.hostState,
+    };
+    const liveSessionFile = created.session.sessionFile;
+    this.context.emit({
+      type: "subagent-event",
+      event: { type: "started", runId: request.runId, ...(liveSessionFile ? { sessionFile: liveSessionFile } : {}) },
+    });
     let assistantTurns = 0;
     let turnBudgetExceeded = false;
     const unsubscribe = created.session.subscribe((event) => {
+      this.projectSessionEvent(event);
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         this.context.emit({
           type: "subagent-event",
@@ -284,6 +346,78 @@ export class SubagentWorkerService implements SidecarService {
     }
   }
 
+  private bootstrap(): SessionBootstrap {
+    if (!this.projector || !this.controlState) throw new Error("Subagent session is not ready");
+    this.projector.checkpoint();
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: this.controlState.projectId,
+      threadId: this.controlState.threadId,
+      timeline: this.projector.snapshot(),
+      control: this.control(),
+    };
+  }
+
+  private projectSessionEvent(event: AgentSessionEvent): void {
+    if (!this.projector) return;
+    try {
+      this.projector.handle(event);
+    } catch {
+      this.projector.resync();
+    }
+    if (
+      event.type === "agent_start" ||
+      event.type === "agent_settled" ||
+      event.type === "message_end" ||
+      event.type === "auto_retry_start" ||
+      event.type === "auto_retry_end" ||
+      event.type === "compaction_start" ||
+      event.type === "compaction_end"
+    ) {
+      this.publishControl();
+    }
+  }
+
+  private control(): SessionControlState {
+    if (!this.controlState || !this.projector || !this.session || !this.extensionHost) {
+      throw new Error("Subagent session is not ready");
+    }
+    const contextUsage = this.session.getContextUsage();
+    return {
+      ...this.controlState,
+      updatedAt: Date.now(),
+      running: this.projector.snapshot().phase !== "idle",
+      thinkingLevel: this.session.thinkingLevel,
+      thinkingLevels: this.session.getAvailableThinkingLevels(),
+      ...(contextUsage
+        ? {
+            context: {
+              tokens: contextUsage.tokens,
+              contextWindow: contextUsage.contextWindow,
+              percent: contextUsage.percent,
+            },
+          }
+        : {}),
+      hostRequests: this.extensionHost.requests,
+      extensionHost: this.extensionHost.hostState,
+    };
+  }
+
+  private publishControl(): void {
+    if (!this.controlState || !this.projector || !this.session || !this.extensionHost) return;
+    this.controlState = { ...this.controlState, revision: this.controlState.revision + 1 };
+    const control = this.control();
+    this.context.emit({
+      type: "session-push",
+      payload: {
+        type: "control",
+        projectId: control.projectId,
+        threadId: control.threadId,
+        control,
+      },
+    });
+  }
+
   private validateRequest(request: SubagentRunRequest): void {
     if (
       request.projectId !== this.binding.projectId ||
@@ -308,9 +442,18 @@ export class SubagentWorkerService implements SidecarService {
   }
 }
 
+function subagentSessionTitle(task: string): string {
+  const delegatedTask = /(?:^|\n)Task:\n([\s\S]*?)(?:\n\n##|$)/.exec(task)?.[1] ?? task;
+  const firstLine = delegatedTask
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  return (firstLine ?? "子智能体会话").replace(/\s+/g, " ").slice(0, 48);
+}
+
 function createSessionManager(request: SubagentRunRequest): SessionManager {
   if (!request.persistSession) return SessionManager.inMemory(request.cwd);
-  if (request.sessionFile) return SessionManager.open(request.sessionFile, request.sessionDir, request.cwd);
+  if (request.sessionFile) return SessionManager.open(request.sessionFile, dirname(request.sessionFile), request.cwd);
   return SessionManager.create(request.cwd, request.sessionDir);
 }
 

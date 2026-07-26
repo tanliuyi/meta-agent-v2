@@ -1,5 +1,6 @@
+import { closeSync, openSync, readSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { JsonValue } from "../../shared/contracts.ts";
+import type { JsonValue, SessionBootstrap, SessionPushPayload, Thread } from "../../shared/contracts.ts";
 import type { SidecarEvent } from "../../shared/sidecar-contracts.ts";
 import type {
   SubagentHostRequest,
@@ -25,6 +26,7 @@ interface SubagentWorkerRecord {
   request: SubagentRunRequest;
   client: SubagentWorkerClient;
   emit(event: SubagentRunEvent): void;
+  catalogThread?: Thread;
   failure?: Error;
 }
 
@@ -33,6 +35,9 @@ export interface SubagentWorkerRegistryOptions {
   agentDir: string;
   log?(scope: string, text: string): void;
   createWorkerClient?(options: WorkerClientOptions): SubagentWorkerClient;
+  catalogChanged?(thread: Thread): void;
+  push?(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
+  resync?(projectId: string, threadId: string, reason: string): void;
   maxWorkers?: number;
   maxWorkersPerThread?: number;
 }
@@ -60,14 +65,41 @@ export class SubagentWorkerRegistry {
     }
   }
 
+  listThreads(projectId: string): Thread[] {
+    return [...this.records.values()].flatMap((record) =>
+      record.request.projectId === projectId && record.catalogThread ? [{ ...record.catalogThread }] : [],
+    );
+  }
+
+  isActiveThread(projectId: string, threadId: string): boolean {
+    return this.recordForThread(projectId, threadId) !== undefined;
+  }
+
+  async attach(projectId: string, threadId: string): Promise<SessionBootstrap | undefined> {
+    const record = this.recordForThread(projectId, threadId);
+    if (!record) return undefined;
+    return record.client.request<SessionBootstrap>({ type: "subagentBootstrap" }, 30_000);
+  }
+
+  acknowledge(workerInstanceId: string, sequence: number): boolean {
+    const record = [...this.records.values()].find(({ client }) => client.instanceId === workerInstanceId);
+    if (!record) return false;
+    record.client.acknowledge(sequence);
+    return true;
+  }
+
   async cancelThread(projectId: string, parentThreadId: string): Promise<void> {
     const records = [...this.records.values()].filter(
       ({ request }) => request.projectId === projectId && request.parentThreadId === parentThreadId,
     );
-    for (const record of records) {
-      if (this.records.get(record.key) === record) this.records.delete(record.key);
-    }
     await Promise.allSettled(records.map(({ client }) => client.shutdown(5_000)));
+    for (const record of records) {
+      this.publishStoppedCatalogThread(record);
+      if (this.records.get(record.key) === record) this.records.delete(record.key);
+      if (record.catalogThread) {
+        this.options.resync?.(record.request.projectId, record.catalogThread.id, "parent-thread-unavailable");
+      }
+    }
   }
 
   async dispose(): Promise<void> {
@@ -119,8 +151,12 @@ export class SubagentWorkerRegistry {
       return result;
     } finally {
       await this.cancelDescendants(record);
-      if (this.records.get(key) === record) this.records.delete(key);
+      this.publishStoppedCatalogThread(record);
       await client.shutdown().catch(() => undefined);
+      if (this.records.get(key) === record) this.records.delete(key);
+      if (record.catalogThread) {
+        this.options.resync?.(record.request.projectId, record.catalogThread.id, "subagent-writer-completed");
+      }
     }
   }
 
@@ -185,12 +221,51 @@ export class SubagentWorkerRegistry {
 
   private handleEvent(record: SubagentWorkerRecord, event: SidecarEvent): void {
     if (!record || this.records.get(record.key) !== record) return;
-    if (event.event.type === "subagent-event") record.emit(event.event.event);
-    else if (event.event.type === "resync-required") {
+    if (event.event.type === "session-push") {
+      this.options.push?.(event.event.payload, event.workerInstanceId, event.sequence);
+      if (!this.options.push) record.client.acknowledge(event.sequence);
+      return;
+    }
+    if (event.event.type === "subagent-event") {
+      this.projectCatalogEvent(record, event.event.event);
+      record.emit(event.event.event);
+    } else if (event.event.type === "resync-required") {
       record.failure = new Error(`Subagent worker requires resync: ${event.event.reason}`);
       record.client.fail(record.failure);
     }
     record.client.acknowledge(event.sequence);
+  }
+
+  private recordForThread(projectId: string, threadId: string): SubagentWorkerRecord | undefined {
+    return [...this.records.values()].find(
+      (record) => record.request.projectId === projectId && record.catalogThread?.id === threadId,
+    );
+  }
+
+  private projectCatalogEvent(record: SubagentWorkerRecord, event: SubagentRunEvent): void {
+    const sessionFile =
+      event.type === "started" || event.type === "completed" || event.type === "failed"
+        ? (event.sessionFile ?? record.request.sessionFile)
+        : record.request.sessionFile;
+    const current =
+      record.catalogThread ?? (sessionFile ? threadFromSubagentRequest(record.request, sessionFile) : undefined);
+    if (!current) return;
+    if (event.type === "text-delta" || event.type === "tool-update" || event.type === "usage") return;
+    const terminal = event.type === "completed" || event.type === "failed";
+    const next = {
+      ...current,
+      updatedAt: Date.now(),
+      messageCount: current.messageCount + (event.type === "message-end" ? 1 : 0),
+      running: !terminal,
+    };
+    record.catalogThread = next;
+    this.options.catalogChanged?.({ ...next });
+  }
+
+  private publishStoppedCatalogThread(record: SubagentWorkerRecord): void {
+    if (!record.catalogThread?.running) return;
+    record.catalogThread = { ...record.catalogThread, updatedAt: Date.now(), running: false };
+    this.options.catalogChanged?.({ ...record.catalogThread });
   }
 
   private assertCapacity(projectId: string, parentThreadId: string): void {
@@ -204,6 +279,73 @@ export class SubagentWorkerRegistry {
       throw new Error(`Desktop subagent worker limit reached for this thread (${threadMaximum})`);
     }
   }
+}
+
+function threadFromSubagentRequest(request: SubagentRunRequest, sessionFile: string): Thread | undefined {
+  const header = readSessionHeader(sessionFile);
+  if (!header) return undefined;
+  const title = subagentTitle(request.task);
+  const parentThreadId = header.parentSessionPath
+    ? (readSessionHeader(header.parentSessionPath)?.id ?? request.parentThreadId)
+    : request.parentThreadId;
+  return {
+    id: header.id,
+    projectId: request.projectId,
+    title,
+    createdAt: header.createdAt,
+    updatedAt: Date.now(),
+    messageCount: 0,
+    preview: title,
+    archived: false,
+    running: true,
+    parentThreadId,
+    origin: "subagent",
+  };
+}
+
+function readSessionHeader(
+  sessionFile: string,
+): { id: string; createdAt: number; parentSessionPath?: string } | undefined {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(sessionFile, "r");
+    const buffer = Buffer.alloc(8 * 1024);
+    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+    const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
+    if (!firstLine) return undefined;
+    const value: unknown = JSON.parse(firstLine);
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !("type" in value) ||
+      value.type !== "session" ||
+      !("id" in value) ||
+      typeof value.id !== "string"
+    ) {
+      return undefined;
+    }
+    const timestamp = "timestamp" in value && typeof value.timestamp === "string" ? Date.parse(value.timestamp) : NaN;
+    const parentSessionPath =
+      "parentSession" in value && typeof value.parentSession === "string" ? value.parentSession : undefined;
+    return {
+      id: value.id,
+      createdAt: Number.isFinite(timestamp) ? timestamp : Date.now(),
+      ...(parentSessionPath ? { parentSessionPath } : {}),
+    };
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function subagentTitle(task: string): string {
+  const delegatedTask = /(?:^|\n)Task:\n([\s\S]*?)(?:\n\n##|$)/.exec(task)?.[1] ?? task;
+  const firstLine = delegatedTask
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  return (firstLine ?? "子智能体会话").replace(/\s+/g, " ").slice(0, 48);
 }
 
 function validateRunRequest(request: SubagentRunRequest): void {

@@ -40,6 +40,22 @@ import type {
   SaveDesktopExtensionSettingsResult,
 } from "./desktop-extension-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
+import type {
+  InstalledMarketplacePluginsSnapshot,
+  InstallMarketplacePluginInput,
+  InstallMarketplacePluginResult,
+  ListMarketplacePluginsInput,
+  MarketplaceEndpointSettingsSnapshot,
+  MarketplacePluginPage,
+  SaveMarketplaceEndpointInput,
+  SaveMarketplaceEndpointResult,
+  TestMarketplaceEndpointInput,
+  TestMarketplaceEndpointResult,
+  UninstallMarketplacePluginInput,
+  UninstallMarketplacePluginResult,
+  UpdateMarketplacePluginInput,
+  UpdateMarketplacePluginResult,
+} from "./plugin-marketplace-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
 import type {
   SaveSettingsConfigInput,
@@ -122,6 +138,16 @@ export interface DesktopApi {
     chooseDevelopmentEntry(input: ApproveDevelopmentExtensionInput): Promise<SaveDesktopExtensionSettingsResult>;
     apply(input: ApplyDesktopExtensionSetInput): Promise<ApplyDesktopExtensionSetResult>;
   };
+  marketplace: {
+    getEndpointSettings(): Promise<MarketplaceEndpointSettingsSnapshot>;
+    testEndpoint(input: TestMarketplaceEndpointInput): Promise<TestMarketplaceEndpointResult>;
+    saveEndpoint(input: SaveMarketplaceEndpointInput): Promise<SaveMarketplaceEndpointResult>;
+    listPlugins(input?: ListMarketplacePluginsInput): Promise<MarketplacePluginPage>;
+    getInstalled(): Promise<InstalledMarketplacePluginsSnapshot>;
+    installPlugin(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult>;
+    updatePlugin(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult>;
+    uninstallPlugin(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult>;
+  };
   subagents: {
     getSnapshot(input?: GetSubagentSettingsInput): Promise<SubagentSettingsSnapshot>;
     saveConfig(input: SaveSubagentSettingsInput): Promise<SaveSubagentSettingsResult>;
@@ -142,6 +168,7 @@ export interface DesktopApi {
   };
   sessions: {
     list(projectId: string, includeArchived?: boolean): Promise<Thread[]>;
+    onCatalogChanged(listener: (thread: Thread) => void): () => void;
     getDraftConfig(projectId: string): Promise<DraftSessionConfig>;
     create(input: SessionCreateInput): Promise<SessionBootstrap>;
     attach(input: SessionAttachInput, listener: (update: SessionPushPayload) => void): Promise<SessionAttachment>;

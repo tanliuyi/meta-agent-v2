@@ -13,6 +13,20 @@ export interface PreventableThreadActionEvent {
 export const COLLAPSED_THREAD_COUNT = 5;
 export const THREAD_EXPANSION_COUNT = 10;
 
+export interface ThreadTreeNode {
+  thread: Thread;
+  children: ThreadTreeNode[];
+}
+
+export interface VisibleThreadTreeItem {
+  thread: Thread;
+  depth: number;
+  childCount: number;
+  expanded: boolean;
+  ancestorContinuations: boolean[];
+  isLastChild: boolean;
+}
+
 export function nextThreadVisibleLimit(currentLimit: number, threadCount: number): number {
   return Math.min(threadCount, Math.max(currentLimit, COLLAPSED_THREAD_COUNT) + THREAD_EXPANSION_COUNT);
 }
@@ -27,6 +41,74 @@ export function visibleThreadsByArchiveState(
   limit: number,
 ): readonly Thread[] {
   return threads.filter((thread) => thread.archived === archived).slice(0, limit);
+}
+
+export function threadTreeByArchiveState(
+  threads: readonly Thread[],
+  archived: boolean,
+  rootLimit: number,
+): ThreadTreeNode[] {
+  const nodes = new Map<string, ThreadTreeNode>(
+    threads.filter((thread) => thread.archived === archived).map((thread) => [thread.id, { thread, children: [] }]),
+  );
+  const roots: ThreadTreeNode[] = [];
+  for (const node of nodes.values()) {
+    const parent = node.thread.parentThreadId ? nodes.get(node.thread.parentThreadId) : undefined;
+    if (parent && !wouldCreateThreadCycle(node.thread.id, parent, nodes)) parent.children.push(node);
+    else roots.push(node);
+  }
+  for (const node of nodes.values()) node.children.sort(compareChildThreads);
+  return roots.slice(0, rootLimit);
+}
+
+export function flattenVisibleThreadTree(
+  roots: readonly ThreadTreeNode[],
+  expandedThreadIds: ReadonlySet<string>,
+): VisibleThreadTreeItem[] {
+  const visible: VisibleThreadTreeItem[] = [];
+  const appendSiblings = (
+    siblings: readonly ThreadTreeNode[],
+    depth: number,
+    ancestorContinuations: boolean[],
+  ): void => {
+    siblings.forEach((node, index) => {
+      const isLastChild = index === siblings.length - 1;
+      const expanded = node.children.length > 0 && expandedThreadIds.has(node.thread.id);
+      visible.push({
+        thread: node.thread,
+        depth,
+        childCount: node.children.length,
+        expanded,
+        ancestorContinuations,
+        isLastChild,
+      });
+      if (expanded) {
+        appendSiblings(node.children, depth + 1, depth === 0 ? [] : [...ancestorContinuations, !isLastChild]);
+      }
+    });
+  };
+  appendSiblings(roots, 0, []);
+  return visible;
+}
+
+function compareChildThreads(left: ThreadTreeNode, right: ThreadTreeNode): number {
+  if (left.thread.running !== right.thread.running) return left.thread.running ? -1 : 1;
+  return right.thread.updatedAt - left.thread.updatedAt;
+}
+
+function wouldCreateThreadCycle(
+  childId: string,
+  parent: ThreadTreeNode,
+  nodes: ReadonlyMap<string, ThreadTreeNode>,
+): boolean {
+  let current: ThreadTreeNode | undefined = parent;
+  const visited = new Set<string>();
+  while (current) {
+    if (current.thread.id === childId || visited.has(current.thread.id)) return true;
+    visited.add(current.thread.id);
+    current = current.thread.parentThreadId ? nodes.get(current.thread.parentThreadId) : undefined;
+  }
+  return false;
 }
 
 /** 在 React bubble handler 与 primitive 内部 action 组合前阻止默认提交。 */

@@ -112,12 +112,24 @@ export class SessionSupervisor {
       }
     }
 
+    const attachmentId = randomUUID();
+    const subscription: RendererSubscription = {
+      attachmentId,
+      projectId,
+      threadId,
+      send,
+      pendingEvents: 0,
+      pendingBytes: 0,
+      resyncing: false,
+    };
     pending.set(requestId, { projectId, threadId });
+    this.subscriptionsFor(ownerId).set(attachmentId, subscription);
+    let workerAttached = false;
     try {
       const bootstrap = await this.workers.attach(projectId, threadId);
+      workerAttached = true;
       const currentPending = this.pendingAttachments.get(ownerId)?.get(requestId);
       if (!currentPending || currentPending.projectId !== projectId || currentPending.threadId !== threadId) {
-        this.workers.detach(projectId, threadId);
         throw new DOMException("Session attach superseded", "AbortError");
       }
       this.pendingAttachments.get(ownerId)?.delete(requestId);
@@ -125,28 +137,21 @@ export class SessionSupervisor {
       if (replaceAttachmentId) {
         const replacement = this.subscriptionFor(ownerId, replaceAttachmentId);
         if (!replacement || replacement.projectId !== projectId || replacement.threadId !== threadId) {
-          this.workers.detach(projectId, threadId);
           throw new DOMException("Session attachment replacement superseded", "AbortError");
         }
         this.detachSubscription(ownerId, replaceAttachmentId);
-      } else if (this.findSubscription(ownerId, projectId, threadId)) {
-        this.workers.detach(projectId, threadId);
-        throw new Error(`Session already attached: ${projectId}/${threadId}`);
       }
 
-      const attachmentId = randomUUID();
-      this.subscriptionsFor(ownerId).set(attachmentId, {
-        attachmentId,
-        projectId,
-        threadId,
-        send,
-        pendingEvents: 0,
-        pendingBytes: 0,
-        resyncing: false,
-      });
       return { protocolVersion: bootstrap.protocolVersion, attachmentId, bootstrap };
     } catch (error) {
       this.pendingAttachments.get(ownerId)?.delete(requestId);
+      const subscriptions = this.subscriptions.get(ownerId);
+      if (subscriptions?.get(attachmentId) === subscription) {
+        subscriptions.delete(attachmentId);
+        if (subscriptions.size === 0) this.subscriptions.delete(ownerId);
+        this.releaseAttachmentAcks(ownerId, attachmentId);
+      }
+      if (workerAttached) this.workers.detach(projectId, threadId);
       throw error;
     }
   }
@@ -191,8 +196,20 @@ export class SessionSupervisor {
     return this.workers.setThinking(projectId, threadId, level);
   }
 
-  applyExtensionSet(projectId: string, threadId: string, expectedDesiredGeneration: string, abortRunning = false) {
-    return this.workers.applyExtensionSet(projectId, threadId, expectedDesiredGeneration, abortRunning);
+  applyExtensionSet(
+    projectId: string,
+    threadId: string,
+    expectedDesiredGeneration: string,
+    abortRunning = false,
+    mutationOperationId?: string,
+  ) {
+    return this.workers.applyExtensionSet(
+      projectId,
+      threadId,
+      expectedDesiredGeneration,
+      abortRunning,
+      mutationOperationId,
+    );
   }
 
   rename(projectId: string, threadId: string, title: string): Promise<void> {

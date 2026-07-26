@@ -458,6 +458,7 @@ function isMutationCommand(commandType: SidecarCommand["type"]): boolean {
   return ![
     "ping",
     "bootstrap",
+    "subagentBootstrap",
     "getSummary",
     "listSessions",
     "resolveSession",

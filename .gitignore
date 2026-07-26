@@ -14,6 +14,7 @@ packages/desktop/output/
 
 # Environment
 .env
+.env.production
 
 # Editor files
 .vscode/

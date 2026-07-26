@@ -84,6 +84,7 @@ describe("SubagentWorkerService", () => {
       task: "Return the result",
       cwd: root,
       sessionFile: join(root, "child", "session.jsonl"),
+      sessionDir: join(root, "async-run"),
       persistSession: true,
       model: `${model.provider}/${model.id}`,
       inheritProjectContext: false,
@@ -95,6 +96,23 @@ describe("SubagentWorkerService", () => {
     await expect
       .poll(() => events.some((event) => event.type === "subagent-event" && event.event.type === "completed"))
       .toBe(true);
+    const liveBootstrap = await created.service.command({ type: "subagentBootstrap" });
+    expect(liveBootstrap).toMatchObject({
+      projectId: "project",
+      control: { interaction: "read-only" },
+      timeline: { phase: "idle" },
+    });
+    expect(JSON.stringify(liveBootstrap)).toContain("worker complete");
+    expect(
+      events.some(
+        (event) =>
+          event.type === "session-push" &&
+          event.payload.type === "timeline" &&
+          event.payload.batch.events.some(
+            (item) => item.event.type === "phase-changed" && item.event.phase === "running",
+          ),
+      ),
+    ).toBe(true);
     let settled = false;
     void run.finally(() => {
       settled = true;
@@ -112,6 +130,9 @@ describe("SubagentWorkerService", () => {
     expect(subagentEvents.map(({ type }) => type)).toEqual(
       expect.arrayContaining(["started", "text-delta", "message-end", "completed"]),
     );
+    expect(subagentEvents.find((event) => event.type === "started")).toMatchObject({
+      sessionFile: join(root, "child", "session.jsonl"),
+    });
     expect(existsSync(markerPath)).toBe(false);
     expect(
       subagentEvents.some(

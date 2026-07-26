@@ -24,13 +24,17 @@ describe("ThreadActivityIndicator", () => {
     expect(markup).not.toContain("provider unavailable");
   });
 
-  it("phase 已恢复运行时忽略滞留的 retry 和错误元数据", () => {
+  it("显示运行状态并忽略滞留的 retry 和错误元数据", () => {
     const markup = renderIndicator("running", {
       retry: { attempt: 1, maxAttempts: 3, message: "stale retry" },
       lastError: "stale error",
     });
 
-    expect(markup).toBe("");
+    expect(markup).toContain("运行中");
+    expect(markup).toContain('data-slot="dot-matrix"');
+    expect(markup).toContain('data-state="loading"');
+    expect(markup).toContain('class="shimmer ');
+    expect(markup).toContain('aria-live="polite"');
     expect(markup).not.toContain("stale retry");
     expect(markup).not.toContain("stale error");
   });

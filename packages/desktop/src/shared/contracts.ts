@@ -34,6 +34,8 @@ export interface Thread {
   preview: string;
   archived: boolean;
   running: boolean;
+  parentThreadId?: string;
+  origin?: "branch" | "subagent";
 }
 
 /** 可供当前会话选择的模型。 */
@@ -299,6 +301,8 @@ export interface SessionControlState {
   cwd: string;
   /** 仅供 thread catalog 展示；active runtime 必须读取 PiThreadSnapshot.phase。 */
   running: boolean;
+  /** 活跃 subagent session 由其唯一 writer 投影，Desktop 仅允许只读观察。 */
+  interaction?: "read-write" | "read-only";
   retry?: { attempt: number; maxAttempts: number; message: string };
   queueModes: { steering: "all" | "one-at-a-time"; followUp: "all" | "one-at-a-time" };
   model?: { provider: string; id: string; name: string };

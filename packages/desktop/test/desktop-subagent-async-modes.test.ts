@@ -1,4 +1,6 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
@@ -183,6 +185,7 @@ describe("Desktop programmatic async modes", () => {
     const id = `desktop-async-single-${Date.now()}`;
     const { resultPath } = paths(id);
     const runtime = new CompletingRuntime();
+    const sessionFile = join(tmpdir(), `desktop-programmatic-${id}`, "run-0", "session.jsonl");
 
     const started = executeAsyncSingle(id, {
       agent: agent.name,
@@ -190,6 +193,8 @@ describe("Desktop programmatic async modes", () => {
       agentConfig: agent,
       ctx: context(),
       subagentRuntime: runtime,
+      sessionFile,
+      sessionDir: join(tmpdir(), `desktop-programmatic-${id}`, `async-${id}`),
       artifactConfig: { enabled: false } as never,
       shareEnabled: false,
       maxSubagentDepth: 1,
@@ -198,7 +203,13 @@ describe("Desktop programmatic async modes", () => {
 
     expect(started.isError).not.toBe(true);
     const result = await readResult(resultPath);
-    expect(runtime.requests[0]).toMatchObject({ depth: 1, maxDepth: 1, lineage: [] });
+    expect(runtime.requests[0]).toMatchObject({
+      depth: 1,
+      maxDepth: 1,
+      lineage: [],
+      sessionFile,
+      sessionDir: dirname(sessionFile),
+    });
     expect(result).toMatchObject({
       sessionId: "parent-session",
       state: "complete",

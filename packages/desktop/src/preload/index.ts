@@ -9,6 +9,7 @@ import type {
   SessionPush,
   SessionPushPayload,
   TerminalEvent,
+  Thread,
 } from "../shared/contracts.ts";
 import type { DesktopApi, DesktopPlatform, NodeRuntimeProgress } from "../shared/desktop-api.ts";
 import type { SaveProvidersInput, SaveProvidersResult } from "../shared/providers-config-contracts.ts";
@@ -194,6 +195,16 @@ const desktopApi: DesktopApi = {
     chooseDevelopmentEntry: (input) => ipcRenderer.invoke(CHANNELS.extensionsChooseDevelopmentEntry, input),
     apply: (input) => ipcRenderer.invoke(CHANNELS.extensionsApply, input),
   },
+  marketplace: {
+    getEndpointSettings: () => ipcRenderer.invoke(CHANNELS.marketplaceGetEndpointSettings),
+    testEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceTestEndpoint, input),
+    saveEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSaveEndpoint, input),
+    listPlugins: (input = {}) => ipcRenderer.invoke(CHANNELS.marketplaceListPlugins, input),
+    getInstalled: () => ipcRenderer.invoke(CHANNELS.marketplaceGetInstalled),
+    installPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceInstallPlugin, input),
+    updatePlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUpdatePlugin, input),
+    uninstallPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUninstallPlugin, input),
+  },
   subagents: {
     getSnapshot: (input) => ipcRenderer.invoke(CHANNELS.subagentsGetSnapshot, input),
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.subagentsSaveConfig, input),
@@ -237,6 +248,11 @@ const desktopApi: DesktopApi = {
   },
   sessions: {
     list: (projectId, includeArchived) => ipcRenderer.invoke(CHANNELS.sessionsList, projectId, includeArchived),
+    onCatalogChanged(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, thread: Thread) => listener(thread);
+      ipcRenderer.on(CHANNELS.sessionsCatalogChanged, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.sessionsCatalogChanged, handler);
+    },
     getDraftConfig: (projectId) => ipcRenderer.invoke(CHANNELS.sessionsDraftConfig, projectId),
     create: async (input) => {
       const result = (await ipcRenderer.invoke(CHANNELS.sessionsCreate, input)) as SessionCreateIpcResult;

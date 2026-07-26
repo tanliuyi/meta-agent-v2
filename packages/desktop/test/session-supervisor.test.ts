@@ -37,6 +37,33 @@ describe("SessionSupervisor attachment leases", () => {
     await supervisor.dispose();
   });
 
+  it("registers the lease before bootstrap so concurrent worker events are not lost", async () => {
+    let resolveBootstrap!: (value: SessionBootstrap) => void;
+    workers.attach.mockImplementation(
+      (_projectId: string, threadId: string) =>
+        new Promise<SessionBootstrap>((resolve) => {
+          resolveBootstrap = resolve;
+          expect(threadId).toBe("thread");
+        }),
+    );
+    const supervisor = new SessionSupervisor(projectStore(), workers.value);
+    const send = vi.fn<(update: SessionPush) => void>();
+    const attaching = supervisor.attach(1, input("thread", "request"), send);
+    await vi.waitFor(() => expect(workers.attach).toHaveBeenCalled());
+
+    supervisor.receive(timelinePush("thread"), "subagent-worker", 4);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: "thread", workerInstanceId: "subagent-worker", sidecarSequence: 4 }),
+    );
+
+    resolveBootstrap(bootstrap("thread"));
+    const attachment = await attaching;
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: attachment.attachmentId }));
+    supervisor.acknowledge(1, attachment.attachmentId, "subagent-worker", 4);
+    expect(workers.acknowledge).toHaveBeenCalledWith("subagent-worker", 4);
+    await supervisor.dispose();
+  });
+
   it("rejects a duplicate first attach for one owner/session", async () => {
     const supervisor = new SessionSupervisor(projectStore(), workers.value);
     await supervisor.attach(1, input("thread", "first"), vi.fn());

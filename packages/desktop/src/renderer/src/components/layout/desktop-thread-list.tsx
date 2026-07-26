@@ -13,11 +13,12 @@ import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
 import {
   COLLAPSED_THREAD_COUNT,
+  flattenVisibleThreadTree,
   isThreadListExpanded,
   nextThreadVisibleLimit,
   normalizeThreadTitle,
   runPendingThreadAction,
-  visibleThreadsByArchiveState,
+  threadTreeByArchiveState,
 } from "../../state/thread-list-commands.ts";
 import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
 
@@ -43,10 +44,13 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
   const [renaming, setRenaming] = useState<RenameState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
-  const regularThreadCount = useMemo(() => threads.filter(({ archived }) => !archived).length, [threads]);
+  const threadTree = useMemo(() => threadTreeByArchiveState(threads, false, Number.MAX_SAFE_INTEGER), [threads]);
+  const [expandedThreadIds, setExpandedThreadIds] = useState<ReadonlySet<string>>(() => new Set());
+  const regularThreadCount = threadTree.length;
+  const visibleThreadTree = useMemo(() => threadTree.slice(0, visibleLimit), [threadTree, visibleLimit]);
   const visibleThreads = useMemo(
-    () => visibleThreadsByArchiveState(threads, false, visibleLimit),
-    [threads, visibleLimit],
+    () => flattenVisibleThreadTree(visibleThreadTree, expandedThreadIds),
+    [expandedThreadIds, visibleThreadTree],
   );
   const hasMoreThreads = regularThreadCount > visibleLimit;
   const isExpanded = isThreadListExpanded(visibleLimit, regularThreadCount);
@@ -90,6 +94,15 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
     [actions, project.id],
   );
 
+  const toggleThread = useCallback((threadId: string) => {
+    setExpandedThreadIds((current) => {
+      const next = new Set(current);
+      if (next.has(threadId)) next.delete(threadId);
+      else next.add(threadId);
+      return next;
+    });
+  }, []);
+
   const startRename = useCallback((thread: Thread) => {
     setRenaming({ threadId: thread.id, title: thread.title });
   }, []);
@@ -102,8 +115,8 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
   );
 
   return (
-    <div className="thread-list">
-      {visibleThreads.map((thread) => (
+    <div className="thread-list" role="tree" aria-label={`${project.name} 会话`}>
+      {visibleThreads.map(({ thread, depth, childCount, expanded, ancestorContinuations, isLastChild }) => (
         <DesktopThreadListItem
           key={thread.id}
           thread={thread}
@@ -112,6 +125,12 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
           isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
           isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
           isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
+          depth={depth}
+          childCount={childCount}
+          expanded={expanded}
+          ancestorContinuations={ancestorContinuations}
+          isLastChild={isLastChild}
+          onToggle={toggleThread}
           onRenameStart={startRename}
           onOpen={openThread}
           onArchive={archiveThread}

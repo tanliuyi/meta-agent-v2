@@ -26,7 +26,7 @@ export type DesktopExtensionCapability =
   | "ui.tui.editor"
   | "ui.terminal.input";
 
-export type DesktopExtensionSource = "builtin" | "curated" | "development";
+export type DesktopExtensionSource = "builtin" | "curated" | "marketplace" | "development";
 
 export interface DesktopExtensionDiagnostic {
   extensionId: string;

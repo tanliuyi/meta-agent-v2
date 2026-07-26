@@ -9,6 +9,7 @@ import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useState } from "react";
 import { ExtensionRow } from "./extension-row.tsx";
 import { ExtensionSection } from "./extension-section.tsx";
+import { MarketplaceEndpointSettings } from "./marketplace-endpoint-settings.tsx";
 import { useExtensionsSettingsController } from "./use-extensions-settings-controller.ts";
 
 export function ExtensionsSettingsPage() {
@@ -62,6 +63,8 @@ export function ExtensionsSettingsPage() {
           更改将在下次启动会话时生效。
         </div>
       ) : null}
+
+      <MarketplaceEndpointSettings />
 
       {/* <ExtensionSection title="内建" entries={builtin} loading={controller.loading} /> */}
 

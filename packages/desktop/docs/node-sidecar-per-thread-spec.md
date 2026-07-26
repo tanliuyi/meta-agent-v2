@@ -1,7 +1,9 @@
 # Desktop Node Sidecar 规范
 
-状态：Accepted
-最后更新：2026-07-18
+状态：Accepted（extension 分发与安装部分已被后续规范取代）
+最后更新：2026-07-26
+
+[`plugin-marketplace-product-spec.md`](./plugin-marketplace-product-spec.md) 已接受并取代本文中 extension source 仅限 builtin/curated/Developer Mode、Desktop 不复制/安装 extension dependency、不加载 native addon、缺依赖不得由应用内制品解决，以及不建设 extension 安装生命周期的相关条款。Marketplace 成为第四类 main-approved entry。普通 Node sidecar、runtime compatibility、`noExtensions: true`、main-owned entry set 和 worker 生命周期要求继续有效。
 
 ## 1. 目标
 

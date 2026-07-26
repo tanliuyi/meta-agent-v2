@@ -19,15 +19,28 @@ import type {
   SessionPromptInput,
   SessionReloadInput,
   TerminalEvent,
+  Thread,
   WorkbenchState,
 } from "../shared/contracts.ts";
 import type { NodeRuntimeProgress, NodeRuntimeStatus } from "../shared/desktop-api.ts";
 import type {
   ApplyDesktopExtensionSetInput,
+  ApplyDesktopExtensionSetResult,
   ApproveDevelopmentExtensionInput,
   SaveDesktopExtensionSettingsInput,
 } from "../shared/desktop-extension-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
+import type {
+  InstallMarketplacePluginInput,
+  InstallMarketplacePluginResult,
+  ListMarketplacePluginsInput,
+  SaveMarketplaceEndpointInput,
+  TestMarketplaceEndpointInput,
+  UninstallMarketplacePluginInput,
+  UninstallMarketplacePluginResult,
+  UpdateMarketplacePluginInput,
+  UpdateMarketplacePluginResult,
+} from "../shared/plugin-marketplace-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
@@ -36,6 +49,13 @@ import type { DesktopExtensionSettingsService } from "./extensions/desktop-exten
 import type { FileService } from "./files/file-service.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
+import type { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
+import type { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
+import type { MarketplaceExtensionApplyJournal } from "./plugins/marketplace-extension-apply-journal.ts";
+import type { MarketplaceMutationApplyCoordinator } from "./plugins/marketplace-mutation-apply-coordinator.ts";
+import type { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
+import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
+import type { MarketplaceRevocationService } from "./plugins/marketplace-revocation-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
 import type { ProjectStore } from "./store/project-store.ts";
@@ -66,6 +86,13 @@ export function registerIpc(
   updater?: AutoUpdateService,
   extensions?: DesktopExtensionSettingsService,
   subagents?: SubagentSettingsConfigService,
+  marketplaceEndpoints?: MarketplaceEndpointSettingsService,
+  marketplaceCatalog?: MarketplaceCatalogService,
+  marketplaceRegistry?: MarketplacePluginRegistry,
+  marketplaceInstaller?: MarketplacePluginInstaller,
+  marketplaceMutationApply?: MarketplaceMutationApplyCoordinator,
+  marketplaceApplyJournal?: MarketplaceExtensionApplyJournal,
+  marketplaceRevocations?: MarketplaceRevocationService,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -131,6 +158,127 @@ export function registerIpc(
     ipcMain.handle(CHANNELS.subagentsSaveConfig, (_event, input: SaveSubagentSettingsInput) =>
       subagents.saveConfig(input),
     );
+  }
+  if (marketplaceEndpoints && marketplaceCatalog) {
+    ipcMain.handle(CHANNELS.marketplaceGetEndpointSettings, () => marketplaceEndpoints.getSettings());
+    ipcMain.handle(CHANNELS.marketplaceTestEndpoint, (_event, input: TestMarketplaceEndpointInput) =>
+      marketplaceEndpoints.testEndpoint(input),
+    );
+    ipcMain.handle(CHANNELS.marketplaceSaveEndpoint, (_event, input: SaveMarketplaceEndpointInput) =>
+      marketplaceEndpoints.saveEndpoint(input),
+    );
+    ipcMain.handle(CHANNELS.marketplaceListPlugins, (_event, input: ListMarketplacePluginsInput = {}) =>
+      marketplaceCatalog.list(input),
+    );
+    if (marketplaceRegistry && marketplaceInstaller) {
+      ipcMain.handle(CHANNELS.marketplaceGetInstalled, async () => {
+        const snapshot = await marketplaceRegistry.getSnapshot();
+        return marketplaceRevocations ? marketplaceRevocations.decorateSnapshot(snapshot) : snapshot;
+      });
+      ipcMain.handle(CHANNELS.marketplaceInstallPlugin, async (_event, input: InstallMarketplacePluginInput) => {
+        assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
+        const result = await marketplaceInstaller.install(input);
+        if (result.status !== "installed") {
+          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        }
+        await sessions.extensionSettingsChanged();
+        if (!input.applyToCurrentSession || result.recoveryPending || !marketplaceMutationApply) {
+          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        }
+        const transaction = await marketplaceInstaller.getPendingApplyTransaction(input.requestId);
+        if (!transaction) return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        let application: ApplyDesktopExtensionSetResult;
+        try {
+          application = await applyMarketplaceMutation(
+            sessions,
+            marketplaceMutationApply,
+            marketplaceApplyJournal,
+            input.applyToCurrentSession,
+            transaction.operationId,
+          );
+        } catch (error) {
+          // 安装已提交；应用失败不能让 renderer 把整个 mutation 当作失败。
+          return decorateMarketplaceMutationResult(
+            { ...result, applicationError: error instanceof Error ? error.message : String(error) },
+            marketplaceRevocations,
+          );
+        }
+        if (application.status === "rolled-back") {
+          marketplaceInstaller.clearCompletedMutation(input.requestId);
+          const snapshot = await marketplaceRegistry.getSnapshot();
+          return decorateMarketplaceMutationResult({ ...result, snapshot, application }, marketplaceRevocations);
+        }
+        return decorateMarketplaceMutationResult({ ...result, application }, marketplaceRevocations);
+      });
+      ipcMain.handle(CHANNELS.marketplaceUpdatePlugin, async (_event, input: UpdateMarketplacePluginInput) => {
+        assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
+        const result = await marketplaceInstaller.update(input);
+        if (result.status !== "updated") {
+          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        }
+        await sessions.extensionSettingsChanged();
+        if (!input.applyToCurrentSession || result.recoveryPending || !marketplaceMutationApply) {
+          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        }
+        const transaction = await marketplaceInstaller.getPendingApplyTransaction(input.requestId);
+        if (!transaction) return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        let application: ApplyDesktopExtensionSetResult;
+        try {
+          application = await applyMarketplaceMutation(
+            sessions,
+            marketplaceMutationApply,
+            marketplaceApplyJournal,
+            input.applyToCurrentSession,
+            transaction.operationId,
+          );
+        } catch (error) {
+          return decorateMarketplaceMutationResult(
+            { ...result, applicationError: error instanceof Error ? error.message : String(error) },
+            marketplaceRevocations,
+          );
+        }
+        if (application.status === "rolled-back") {
+          marketplaceInstaller.clearCompletedMutation(input.requestId);
+          const snapshot = await marketplaceRegistry.getSnapshot();
+          return decorateMarketplaceMutationResult({ ...result, snapshot, application }, marketplaceRevocations);
+        }
+        return decorateMarketplaceMutationResult({ ...result, application }, marketplaceRevocations);
+      });
+      ipcMain.handle(CHANNELS.marketplaceUninstallPlugin, async (_event, input: UninstallMarketplacePluginInput) => {
+        assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
+        const result = await marketplaceInstaller.uninstall(input);
+        if (result.status !== "uninstalled") {
+          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        }
+        await sessions.extensionSettingsChanged();
+        if (!input.applyToCurrentSession || result.recoveryPending || !marketplaceMutationApply) {
+          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        }
+        const transaction = await marketplaceInstaller.getPendingApplyTransaction(input.requestId);
+        if (!transaction) return decorateMarketplaceMutationResult(result, marketplaceRevocations);
+        let application: ApplyDesktopExtensionSetResult;
+        try {
+          application = await applyMarketplaceMutation(
+            sessions,
+            marketplaceMutationApply,
+            marketplaceApplyJournal,
+            input.applyToCurrentSession,
+            transaction.operationId,
+          );
+        } catch (error) {
+          return decorateMarketplaceMutationResult(
+            { ...result, applicationError: error instanceof Error ? error.message : String(error) },
+            marketplaceRevocations,
+          );
+        }
+        if (application.status === "rolled-back") {
+          marketplaceInstaller.clearCompletedMutation(input.requestId);
+          const snapshot = await marketplaceRegistry.getSnapshot();
+          return decorateMarketplaceMutationResult({ ...result, snapshot, application }, marketplaceRevocations);
+        }
+        return decorateMarketplaceMutationResult({ ...result, application }, marketplaceRevocations);
+      });
+    }
   }
   if (extensions) {
     ipcMain.handle(CHANNELS.extensionsGetConfig, async (_event, projectId?: string, threadId?: string) => {
@@ -384,6 +532,90 @@ export function registerIpc(
   });
 }
 
+function decorateMarketplaceMutationResult(
+  result: InstallMarketplacePluginResult,
+  revocations: MarketplaceRevocationService | undefined,
+): Promise<InstallMarketplacePluginResult>;
+function decorateMarketplaceMutationResult(
+  result: UpdateMarketplacePluginResult,
+  revocations: MarketplaceRevocationService | undefined,
+): Promise<UpdateMarketplacePluginResult>;
+function decorateMarketplaceMutationResult(
+  result: UninstallMarketplacePluginResult,
+  revocations: MarketplaceRevocationService | undefined,
+): Promise<UninstallMarketplacePluginResult>;
+async function decorateMarketplaceMutationResult(
+  result: InstallMarketplacePluginResult | UpdateMarketplacePluginResult | UninstallMarketplacePluginResult,
+  revocations: MarketplaceRevocationService | undefined,
+): Promise<InstallMarketplacePluginResult | UpdateMarketplacePluginResult | UninstallMarketplacePluginResult> {
+  if (!revocations) return result;
+  if ("current" in result) {
+    return { ...result, current: await revocations.decorateSnapshot(result.current) };
+  }
+  return { ...result, snapshot: await revocations.decorateSnapshot(result.snapshot) };
+}
+
+function assertMarketplaceApplyAvailable(
+  target: { projectId: string; threadId: string } | undefined,
+  mutationApply: MarketplaceMutationApplyCoordinator | undefined,
+  applyJournal: MarketplaceExtensionApplyJournal | undefined,
+): void {
+  if (target && (!mutationApply || !applyJournal)) {
+    throw new Error("Marketplace extension apply recovery is unavailable");
+  }
+}
+
+async function applyMarketplaceMutation(
+  sessions: SessionSupervisor,
+  mutationApply: MarketplaceMutationApplyCoordinator,
+  applyJournal: MarketplaceExtensionApplyJournal | undefined,
+  target: { projectId: string; threadId: string; abortRunning?: boolean },
+  operationId: string,
+): Promise<ApplyDesktopExtensionSetResult> {
+  try {
+    if (await applyJournal?.hasMutationOperation(operationId)) {
+      throw new Error("Marketplace extension apply recovery is pending; restart Desktop before retrying");
+    }
+    const state = await sessions.getExtensionState(target.projectId, target.threadId);
+    const application = await sessions.applyExtensionSet(
+      target.projectId,
+      target.threadId,
+      state.desiredGeneration,
+      target.abortRunning,
+      operationId,
+    );
+    if (application.status === "unchanged") await mutationApply.complete(operationId);
+    return publicMarketplaceApplication(application);
+  } catch (error) {
+    if (await applyJournal?.hasMutationOperation(operationId)) throw error;
+    if (isColdExtensionSetApplyStartupError(error)) {
+      await mutationApply.rollback(operationId);
+      await mutationApply.complete(operationId);
+      await sessions.extensionSettingsChanged();
+      const restored = await sessions.getExtensionState(target.projectId, target.threadId);
+      return publicMarketplaceApplication({
+        status: "rolled-back",
+        generation: restored.desiredGeneration,
+        error: error.message,
+      });
+    }
+    await mutationApply.complete(operationId);
+    throw error;
+  }
+}
+
+function isColdExtensionSetApplyStartupError(
+  error: unknown,
+): error is Error & { code: "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED" } {
+  return error instanceof Error && "code" in error && error.code === "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED";
+}
+
+function publicMarketplaceApplication(application: ApplyDesktopExtensionSetResult): ApplyDesktopExtensionSetResult {
+  return application.status === "rolled-back"
+    ? { ...application, error: "插件 worker 启动失败，当前会话已恢复之前的扩展集合" }
+    : application;
+}
+
 async function openLink(projectId: string, target: string, projects: ProjectStore): Promise<void> {
   const value = target.trim();
   if (!value) throw new Error("Cannot open an empty link");
@@ -446,6 +678,13 @@ function isStaleDraftExtensionSetError(error: unknown): error is Error & {
     typeof error.details === "object" &&
     error.details !== null
   );
+}
+
+/** 向所有 renderer 广播低频 thread catalog 更新。 */
+export function broadcastThreadCatalogUpdate(thread: Thread): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.sessionsCatalogChanged, thread);
+  }
 }
 
 /** 向所有 renderer 广播 PTY 增量事件。 */

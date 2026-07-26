@@ -20,10 +20,21 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
     record.stores.connection.getSnapshot,
     record.stores.connection.getSnapshot,
   );
-  const commandsReady = active && connection === "ready" && transport.hasCommittedLease(record);
+  const control = useSyncExternalStore(
+    record.stores.control.subscribe,
+    record.stores.control.getSnapshot,
+    record.stores.control.getSnapshot,
+  );
+  const commandsReady =
+    active && connection === "ready" && control?.interaction !== "read-only" && transport.hasCommittedLease(record);
   const { runtime, clearQueue: clearRuntimeQueue } = usePiSessionRuntime({ record, active, transport });
   const requireCommandsReady = useCallback(() => {
-    if (!active || record.stores.connection.getSnapshot() !== "ready" || !transport.hasCommittedLease(record)) {
+    if (
+      !active ||
+      record.stores.connection.getSnapshot() !== "ready" ||
+      record.stores.control.getSnapshot()?.interaction === "read-only" ||
+      !transport.hasCommittedLease(record)
+    ) {
       throw new Error("Session is not ready for commands");
     }
   }, [active, record, transport]);

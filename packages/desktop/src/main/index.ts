@@ -11,9 +11,20 @@ import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extensi
 import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
-import { broadcastTerminalEvent, registerIpc } from "./ipc.ts";
+import { broadcastTerminalEvent, broadcastThreadCatalogUpdate, registerIpc } from "./ipc.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
+import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
+import { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
+import { MarketplaceExtensionApplyJournal } from "./plugins/marketplace-extension-apply-journal.ts";
+import { MarketplaceGenerationReferenceTracker } from "./plugins/marketplace-generation-reference-tracker.ts";
+import { MarketplaceMutationApplyCoordinator } from "./plugins/marketplace-mutation-apply-coordinator.ts";
+import { MarketplacePluginGarbageCollector } from "./plugins/marketplace-plugin-garbage-collector.ts";
+import { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
+import { MarketplacePluginReconciler } from "./plugins/marketplace-plugin-reconciler.ts";
+import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
+import { MarketplacePluginTransactionStore } from "./plugins/marketplace-plugin-transaction-store.ts";
+import { MarketplaceRevocationService } from "./plugins/marketplace-revocation-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
@@ -38,6 +49,8 @@ let sidecarLog: SidecarLog | undefined;
 let subagents: SubagentWorkerRegistry | undefined;
 let terminals: TerminalSupervisor | undefined;
 let stopAutoUpdateChecks: (() => void) | undefined;
+let stopMarketplaceRevocationChecks: (() => void) | undefined;
+let stopMarketplaceGarbageCollection: (() => void) | undefined;
 let quitGuardPending = false;
 const dirtyGuard = new WindowDirtyGuard({
   beforeReload: (window) => sessions?.detachAll(window.webContents.id),
@@ -135,6 +148,68 @@ function createWindow(): void {
   else void window.loadFile(join(appDir, "../renderer/index.html"));
 }
 
+function scheduleMarketplaceGarbageCollection(
+  collector: MarketplacePluginGarbageCollector,
+  log: (text: string) => void,
+): () => void {
+  const collect = async () => {
+    try {
+      const result = await collector.run();
+      if (result.removedVersions.length > 0 || result.removedRoots.length > 0) {
+        log(`Plugin GC removed ${result.removedVersions.length} version(s) and ${result.removedRoots.length} root(s)`);
+      }
+    } catch (error) {
+      log(`Plugin GC failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const initial = setTimeout(() => void collect(), 30_000);
+  const interval = setInterval(() => void collect(), 60 * 60_000);
+  return () => {
+    clearTimeout(initial);
+    clearInterval(interval);
+  };
+}
+
+function scheduleMarketplaceRevocationChecks(
+  registry: MarketplacePluginRegistry,
+  revocations: MarketplaceRevocationService,
+  changed: () => Promise<unknown>,
+  log: (text: string) => void,
+): () => void {
+  let running = false;
+  let stopped = false;
+  const refresh = async () => {
+    if (running || stopped) return;
+    running = true;
+    let refreshed = false;
+    try {
+      const marketplaceIds = [
+        ...new Set((await registry.getInternalSnapshot()).plugins.map((plugin) => plugin.marketplaceId)),
+      ];
+      for (const marketplaceId of marketplaceIds) {
+        try {
+          await revocations.refresh(marketplaceId);
+          refreshed = true;
+        } catch (error) {
+          log(
+            `Revocation refresh failed for ${marketplaceId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      if (refreshed) await changed();
+    } finally {
+      running = false;
+    }
+  };
+  const initial = setTimeout(() => void refresh(), 10_000);
+  const interval = setInterval(() => void refresh(), 60 * 60_000);
+  return () => {
+    stopped = true;
+    clearTimeout(initial);
+    clearInterval(interval);
+  };
+}
+
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   Menu.setApplicationMenu(null);
@@ -157,10 +232,41 @@ app.whenReady().then(async () => {
     builtinDefinitions: builtinExtensions,
     curatedDefinitions: curatedExtensions,
   });
+  const marketplaceEndpoints = new MarketplaceEndpointSettingsService(userDataDir);
+  const marketplaceRegistry = new MarketplacePluginRegistry(userDataDir);
+  const marketplaceTransactions = new MarketplacePluginTransactionStore(userDataDir);
+  const marketplaceGenerationReferences = new MarketplaceGenerationReferenceTracker();
+  const marketplaceReconciler = new MarketplacePluginReconciler(
+    marketplaceRegistry,
+    marketplaceTransactions,
+    agentDir,
+    { log: (text) => sidecarLog?.write("marketplace", text) },
+  );
+  const marketplaceMutationApply = new MarketplaceMutationApplyCoordinator(
+    marketplaceRegistry,
+    marketplaceTransactions,
+    marketplaceReconciler,
+    agentDir,
+  );
+  const marketplaceApplyJournal = new MarketplaceExtensionApplyJournal(userDataDir, marketplaceGenerationReferences, {
+    mutationLifecycle: marketplaceMutationApply,
+  });
+  const marketplaceGarbageCollector = new MarketplacePluginGarbageCollector(
+    marketplaceRegistry,
+    marketplaceTransactions,
+    marketplaceGenerationReferences,
+    agentDir,
+  );
+  const marketplaceRevocations = new MarketplaceRevocationService(marketplaceEndpoints, userDataDir);
+  await marketplaceApplyJournal.reconcileStartup();
+  await marketplaceReconciler.reconcile();
   const extensionSourcePolicy = new DesktopExtensionSourcePolicy({
     settings: extensionSettings,
     getBuiltinDefinitions: () => builtinExtensions,
     getCuratedDefinitions: () => curatedExtensions,
+    getMarketplaceExtensions: () => marketplaceRegistry.getInternalSnapshot(),
+    getMarketplaceRevocation: (plugin) => marketplaceRevocations.getCachedPluginRevocation(plugin),
+    marketplaceRoot: join(agentDir, "extensions"),
     curatedRoot: app.isPackaged ? join(process.resourcesPath, "extensions") : join(appDir, "../extensions"),
   });
   const updater = new AutoUpdateService({ app });
@@ -186,37 +292,77 @@ app.whenReady().then(async () => {
       allowUnavailable: true,
     });
   }
-  metadata = new MetadataWorkerClient(runtimeManifest, agentDir, userDataDir, (scope, text) =>
-    sidecarLog?.write(scope, text),
+  const marketplaceCatalog = new MarketplaceCatalogService(marketplaceEndpoints, {
+    desktopVersion: app.getVersion(),
+    runtimeCompatibility: runtimeManifest.compatibility,
+  });
+  const marketplacePluginInstaller = new MarketplacePluginInstaller(
+    marketplaceEndpoints,
+    marketplaceRegistry,
+    marketplaceTransactions,
+    agentDir,
+    app.getVersion(),
+    runtimeManifest.compatibility,
+    {
+      reservedExtensionIds: new Set([
+        ...builtinExtensions.map((extension) => extension.id),
+        ...curatedExtensions.map((extension) => extension.id),
+      ]),
+      revocations: marketplaceRevocations,
+    },
   );
+  metadata = new MetadataWorkerClient(
+    runtimeManifest,
+    agentDir,
+    userDataDir,
+    (scope, text) => sidecarLog?.write(scope, text),
+    marketplaceGenerationReferences,
+  );
+  // supervisor 在两个 registry 之后才能构造（循环依赖）；回调必须容忍赋值前被触发，避免 TDZ 崩溃或 ack 饿死。
+  let supervisor: SessionSupervisor | undefined;
   subagents = new SubagentWorkerRegistry({
     manifest: runtimeManifest,
     agentDir,
     log: (scope, text) => sidecarLog?.write(scope, text),
+    catalogChanged: broadcastThreadCatalogUpdate,
+    push: (payload, workerInstanceId, sidecarSequence) => {
+      if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
+      else subagents?.acknowledge(workerInstanceId, sidecarSequence);
+    },
+    resync: (projectId, threadId, reason) => supervisor?.resyncRequired(projectId, threadId, reason),
   });
-  let supervisor: SessionSupervisor;
   const workers = new ThreadWorkerRegistry({
     manifest: runtimeManifest,
     metadata,
     userDataDir,
     agentDir,
     extensionSourcePolicy,
+    generationReferences: marketplaceGenerationReferences,
+    extensionApplyJournal: marketplaceApplyJournal,
     getCwd: (projectId) => projects.getCwd(projectId),
-    push: (payload, workerInstanceId, sidecarSequence) =>
-      supervisor.receive(payload, workerInstanceId, sidecarSequence),
+    push: (payload, workerInstanceId, sidecarSequence) => {
+      if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
+      else workers.acknowledge(workerInstanceId, sidecarSequence);
+    },
     failed: (projectId, threadId, error) => {
       console.error(`Pi sidecar failed for ${projectId}/${threadId}:`, error);
-      supervisor.workerFailed(projectId, threadId, error);
+      supervisor?.workerFailed(projectId, threadId, error);
     },
-    resync: (projectId, threadId, reason) => supervisor.resyncRequired(projectId, threadId, reason),
+    resync: (projectId, threadId, reason) => supervisor?.resyncRequired(projectId, threadId, reason),
     log: (scope, text) => sidecarLog?.write(scope, text),
     handleHostRequest: (request, emit) => subagents!.handleHostRequest(request, emit),
     hostWorkerFailed: (projectId, threadId) => subagents!.cancelThread(projectId, threadId),
+    listSubagentThreads: (projectId) => subagents!.listThreads(projectId),
+    isActiveSubagentThread: (projectId, threadId) => subagents!.isActiveThread(projectId, threadId),
+    attachSubagent: (projectId, threadId) => subagents!.attach(projectId, threadId),
+    acknowledgeSubagent: (workerInstanceId, sidecarSequence) =>
+      subagents!.acknowledge(workerInstanceId, sidecarSequence),
   });
-  supervisor = new SessionSupervisor(projects, workers, {
+  const startedSupervisor = new SessionSupervisor(projects, workers, {
     log: (scope, text) => sidecarLog?.write(scope, text),
   });
-  sessions = supervisor;
+  supervisor = startedSupervisor;
+  sessions = startedSupervisor;
   terminals = new TerminalSupervisor(projects, broadcastTerminalEvent);
   const providers = new ProvidersConfigService(models, auth);
   const subagentSettings = new SubagentSettingsConfigService({
@@ -254,10 +400,26 @@ app.whenReady().then(async () => {
     updater,
     extensionSettings,
     subagentSettings,
+    marketplaceEndpoints,
+    marketplaceCatalog,
+    marketplaceRegistry,
+    marketplacePluginInstaller,
+    marketplaceMutationApply,
+    marketplaceApplyJournal,
+    marketplaceRevocations,
   );
   await installReactDevTools();
   createWindow();
   stopAutoUpdateChecks = scheduleAutoUpdateChecks(updater);
+  stopMarketplaceGarbageCollection = scheduleMarketplaceGarbageCollection(marketplaceGarbageCollector, (text) =>
+    sidecarLog?.write("marketplace", text),
+  );
+  stopMarketplaceRevocationChecks = scheduleMarketplaceRevocationChecks(
+    marketplaceRegistry,
+    marketplaceRevocations,
+    async () => sessions?.extensionSettingsChanged(),
+    (text) => sidecarLog?.write("marketplace", text),
+  );
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -282,6 +444,10 @@ app.on("before-quit", (event) => {
   }
   stopAutoUpdateChecks?.();
   stopAutoUpdateChecks = undefined;
+  stopMarketplaceRevocationChecks?.();
+  stopMarketplaceRevocationChecks = undefined;
+  stopMarketplaceGarbageCollection?.();
+  stopMarketplaceGarbageCollection = undefined;
   if (!sessions && !metadata && !sidecarLog && !subagents && !terminals) return;
   sidecarLog?.write("main", "Desktop shutdown started");
   event.preventDefault();

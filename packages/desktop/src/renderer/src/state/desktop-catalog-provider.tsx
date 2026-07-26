@@ -32,6 +32,14 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
     [store],
   );
 
+  useEffect(
+    () =>
+      window.desktop.sessions.onCatalogChanged((thread) => {
+        dispatchDesktop(store, { type: "thread-catalog-upserted", thread });
+      }),
+    [store],
+  );
+
   const invalidateProjectThreads = useCallback((projectId: string) => {
     catalogGenerations.current.set(projectId, (catalogGenerations.current.get(projectId) ?? 0) + 1);
     catalogRequests.current.delete(projectId);

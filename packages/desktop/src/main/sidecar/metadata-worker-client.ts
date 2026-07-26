@@ -6,6 +6,7 @@ import type {
   CreationReservation,
   MetadataSidecarCommand,
 } from "../../shared/sidecar-contracts.ts";
+import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
 import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
 import { SidecarWorkerClient } from "./worker-client.ts";
 
@@ -14,6 +15,7 @@ export class MetadataWorkerClient {
   private readonly agentDir: string;
   private readonly userDataDir: string;
   private readonly log?: (scope: string, text: string) => void;
+  private readonly generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
   private client?: SidecarWorkerClient;
   private operationTail: Promise<void> = Promise.resolve();
   private draftExtensionGeneration?: string;
@@ -26,11 +28,13 @@ export class MetadataWorkerClient {
     agentDir: string,
     userDataDir: string,
     log?: (scope: string, text: string) => void,
+    generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">,
   ) {
     this.manifest = manifest;
     this.agentDir = agentDir;
     this.userDataDir = userDataDir;
     this.log = log;
+    this.generationReferences = generationReferences;
     this.client = undefined;
   }
 
@@ -46,6 +50,7 @@ export class MetadataWorkerClient {
         await previous?.shutdown();
       }
       this.draftExtensionGeneration = extensionSet.generation;
+      this.generationReferences?.retain("metadata:draft", extensionSet);
       return this.safeRequest<DraftSessionConfig>({ type: "getDraftConfig", projectId, cwd, extensionSet });
     });
   }
@@ -102,6 +107,7 @@ export class MetadataWorkerClient {
     const current = this.client;
     this.client = undefined;
     await current?.shutdown();
+    this.generationReferences?.release("metadata:draft");
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {

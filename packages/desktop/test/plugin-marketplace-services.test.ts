@@ -1,0 +1,300 @@
+import { generateKeyPairSync, sign } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { targetMatchesRuntime } from "../src/main/plugins/marketplace-artifact-verifier.ts";
+import { MarketplaceCatalogService } from "../src/main/plugins/marketplace-catalog-service.ts";
+import {
+  MarketplaceEndpointSettingsService,
+  MISSING_MARKETPLACE_ENDPOINT_REVISION,
+} from "../src/main/plugins/marketplace-endpoint-settings-service.ts";
+import { readBoundedJsonResponse } from "../src/main/plugins/marketplace-http.ts";
+
+const directories: string[] = [];
+const signingKeyPair = generateKeyPairSync("ed25519");
+const publicKey = signingKeyPair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+
+function wellKnown(baseUrl = "https://market.example/") {
+  const data = {
+    protocolVersion: 1,
+    marketplaceId: "example.market",
+    apiRoot: `${baseUrl}v1/`,
+    artifactOrigins: ["https://artifacts.example/"],
+    signing: { algorithm: "ed25519", keyId: "key-1", publicKey },
+  };
+  return {
+    data,
+    signature: {
+      algorithm: "ed25519",
+      keyId: "key-1",
+      value: sign(null, Buffer.from(canonicalJson(data), "utf8"), signingKeyPair.privateKey).toString("base64"),
+    },
+  };
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalValue(value));
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) result[key] = canonicalValue(record[key]);
+  return result;
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
+
+describe("marketplace runtime compatibility", () => {
+  const runtime = {
+    nodeVersion: "v24.0.0",
+    modulesAbi: "137",
+    napi: "10",
+    platform: "linux",
+    arch: "x64",
+    osRelease: "linux",
+    libc: "glibc",
+    toolchain: "gcc",
+    piVersion: "0.80.7",
+    runtimeCompatibilityId: "fixture",
+  };
+
+  it("fails invalid minimum N-API levels closed", () => {
+    expect(targetMatchesRuntime({ platform: "linux", arch: "x64", minimumNapi: "10" }, runtime)).toBe(true);
+    expect(targetMatchesRuntime({ platform: "linux", arch: "x64", minimumNapi: "invalid" }, runtime)).toBe(false);
+    expect(targetMatchesRuntime({ platform: "linux", arch: "x64", minimumNapi: "0" }, runtime)).toBe(false);
+    expect(targetMatchesRuntime({ platform: "linux", arch: "x64", minimumNapi: "9007199254740992" }, runtime)).toBe(
+      false,
+    );
+  });
+});
+
+describe("marketplace HTTP bounds", () => {
+  it("rejects a streamed response as soon as decoded bytes exceed the limit", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Buffer.from('{"a":'));
+        controller.enqueue(Buffer.from('"oversized"}'));
+        controller.close();
+      },
+    });
+    await expect(readBoundedJsonResponse(new Response(body), 8, "Marketplace fixture")).rejects.toThrow(
+      "Marketplace fixture is too large",
+    );
+  });
+});
+
+describe("MarketplaceEndpointSettingsService", () => {
+  it("tests, confirms, and atomically saves a normalized endpoint", async () => {
+    const directory = join(tmpdir(), `marketplace-endpoint-${Date.now()}-${Math.random()}`);
+    directories.push(directory);
+    const fetch = vi.fn(async () => jsonResponse(wellKnown()));
+    let nextId = 0;
+    const service = new MarketplaceEndpointSettingsService(directory, {
+      fetch,
+      createId: () => `id-${++nextId}`,
+    });
+    const initial = await service.getSettings();
+    expect(initial).toEqual({ revision: MISSING_MARKETPLACE_ENDPOINT_REVISION, endpoints: [] });
+
+    const tested = await service.testEndpoint({ baseUrl: "https://market.example" });
+    expect(tested).toMatchObject({
+      status: "ready",
+      confirmationRequired: true,
+      endpoint: { marketplaceId: "example.market", baseUrl: "https://market.example/" },
+    });
+    if (tested.status !== "ready") throw new Error("endpoint test failed");
+
+    const saved = await service.saveEndpoint({
+      requestId: "save",
+      expectedRevision: initial.revision,
+      baseUrl: "https://market.example",
+      confirmationToken: tested.confirmationToken,
+    });
+    expect(saved).toMatchObject({
+      status: "saved",
+      snapshot: { activeMarketplaceId: "example.market", endpoints: [{ active: true }] },
+    });
+    expect(JSON.stringify(saved)).not.toContain("publicKey");
+    const source = JSON.parse(await readFile(join(directory, "plugins", "marketplace-endpoints.json"), "utf8"));
+    expect(source.endpoints[0]).not.toHaveProperty("privateKey");
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("https://market.example/.well-known/meta-agent-marketplace.json"),
+      expect.objectContaining({ redirect: "error" }),
+    );
+    await expect(service.testEndpoint({ baseUrl: "https://mirror.example" })).resolves.toMatchObject({
+      status: "ready",
+      confirmationRequired: true,
+    });
+  });
+
+  it("requires a fresh fingerprint confirmation and revision", async () => {
+    const directory = join(tmpdir(), `marketplace-confirm-${Date.now()}-${Math.random()}`);
+    directories.push(directory);
+    const service = new MarketplaceEndpointSettingsService(directory, {
+      fetch: async () => jsonResponse(wellKnown()),
+      createId: () => "confirmation",
+    });
+    const initial = await service.getSettings();
+
+    await expect(
+      service.saveEndpoint({
+        requestId: "without-confirmation",
+        expectedRevision: initial.revision,
+        baseUrl: "https://market.example",
+      }),
+    ).resolves.toMatchObject({ status: "confirmation-required" });
+
+    await mkdir(join(directory, "plugins"), { recursive: true });
+    await writeFile(
+      join(directory, "plugins", "marketplace-endpoints.json"),
+      `${JSON.stringify({ version: 1, endpoints: [] })}\n`,
+      "utf8",
+    );
+    await expect(
+      service.saveEndpoint({
+        requestId: "stale",
+        expectedRevision: initial.revision,
+        baseUrl: "https://market.example",
+      }),
+    ).resolves.toMatchObject({ status: "conflict" });
+  });
+
+  it("rejects discovery metadata that does not match its self-signature", async () => {
+    const directory = join(tmpdir(), `marketplace-signature-${Date.now()}-${Math.random()}`);
+    directories.push(directory);
+    const envelope = wellKnown();
+    envelope.data.apiRoot = "https://attacker.example/v1/";
+    const service = new MarketplaceEndpointSettingsService(directory, {
+      fetch: async () => jsonResponse(envelope),
+    });
+
+    await expect(service.testEndpoint({ baseUrl: "https://market.example" })).resolves.toMatchObject({
+      status: "invalid",
+      code: "MARKETPLACE_ENDPOINT_UNTRUSTED",
+    });
+  });
+
+  it("accepts HTTP and HTTPS while rejecting structurally unsafe endpoint URLs", async () => {
+    const directory = join(tmpdir(), `marketplace-http-${Date.now()}-${Math.random()}`);
+    directories.push(directory);
+    const service = new MarketplaceEndpointSettingsService(directory, {
+      fetch: async (input) => {
+        const origin = new URL(input instanceof Request ? input.url : String(input)).origin;
+        return jsonResponse(wellKnown(`${origin}/`));
+      },
+    });
+    await expect(service.testEndpoint({ baseUrl: "http://localhost:4100" })).resolves.toMatchObject({
+      status: "ready",
+    });
+    await expect(service.testEndpoint({ baseUrl: "http://market.example" })).resolves.toMatchObject({
+      status: "ready",
+    });
+    for (const baseUrl of [
+      "ftp://market.example",
+      "http://user:password@market.example",
+      "http://market.example/path?token=secret",
+      "http://market.example/path#fragment",
+      "http://market.example/a/%2e%2e/b",
+    ]) {
+      await expect(service.testEndpoint({ baseUrl })).resolves.toMatchObject({
+        status: "invalid",
+        code: "MARKETPLACE_ENDPOINT_INVALID",
+      });
+    }
+  });
+});
+
+describe("MarketplaceCatalogService", () => {
+  it("fetches a bounded validated page and falls back to stale memory cache", async () => {
+    const endpoint = {
+      marketplaceId: "example.market",
+      baseUrl: "https://market.example/",
+      apiRoot: "https://market.example/v1/",
+      artifactOrigins: ["https://artifacts.example"],
+      signing: { algorithm: "ed25519" as const, keyId: "key", publicKey, fingerprint: "sha256:key" },
+      active: true,
+    };
+    const endpoints = {
+      getSettings: vi.fn(async () => ({
+        revision: "one",
+        activeMarketplaceId: endpoint.marketplaceId,
+        endpoints: [endpoint],
+      })),
+    };
+    const page = {
+      plugins: [
+        {
+          id: "plugin.one",
+          name: "Plugin One",
+          description: "First plugin",
+          publisher: { id: "publisher", displayName: "Publisher", verified: true },
+          categories: ["tools"],
+          latestVersion: "1.0.0",
+          compatibleVersion: "1.0.0",
+          containsNativeCode: false,
+          status: "available",
+          publishedAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    };
+    const fetch = vi.fn().mockResolvedValueOnce(jsonResponse(page)).mockRejectedValueOnce(new Error("offline"));
+    const service = new MarketplaceCatalogService(endpoints as never, {
+      fetch,
+      now: () => 10,
+      desktopVersion: "1.2.3",
+      runtimeCompatibility: {
+        nodeVersion: "v24.0.0",
+        modulesAbi: "137",
+        napi: "10",
+        platform: "darwin",
+        arch: "arm64",
+        osRelease: "darwin-24",
+        libc: "none",
+        toolchain: "apple-clang",
+        piVersion: "0.80.7",
+        runtimeCompatibilityId: "fixture",
+      },
+    });
+
+    await expect(service.list({ query: "one", limit: 10 })).resolves.toMatchObject({
+      marketplaceId: "example.market",
+      source: "network",
+      stale: false,
+      plugins: [{ id: "plugin.one" }],
+    });
+    await expect(service.list({ query: "one", limit: 10 })).resolves.toMatchObject({
+      source: "cache",
+      stale: true,
+    });
+    const requestedUrl = String(fetch.mock.calls[0]?.[0]);
+    expect(requestedUrl).toContain("query=one");
+    expect(requestedUrl).toContain("desktopVersion=1.2.3");
+    expect(requestedUrl).toContain("platform=darwin");
+    expect(requestedUrl).toContain("modulesAbi=137");
+  });
+
+  it("does not fetch without a saved active endpoint", async () => {
+    const fetch = vi.fn();
+    const service = new MarketplaceCatalogService(
+      { getSettings: async () => ({ revision: "missing", endpoints: [] }) } as never,
+      { fetch },
+    );
+    await expect(service.list()).rejects.toMatchObject({ code: "MARKETPLACE_ENDPOINT_NOT_CONFIGURED" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

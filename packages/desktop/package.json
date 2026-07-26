@@ -33,9 +33,11 @@
     "electron-devtools-installer": "4.0.0",
     "electron-updater": "6.8.9",
     "electron-window-state": "5.0.3",
+    "fflate": "0.8.2",
     "jsonc-parser": "3.3.1",
     "node-pty": "1.1.0",
-    "proper-lockfile": "4.1.2"
+    "proper-lockfile": "4.1.2",
+    "semver": "7.8.0"
   },
   "devDependencies": {
     "@assistant-ui/react": "0.14.26",
@@ -68,6 +70,7 @@
     "@types/proper-lockfile": "4.1.4",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "@types/semver": "7.7.1",
     "@vitejs/plugin-react": "5.2.0",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",

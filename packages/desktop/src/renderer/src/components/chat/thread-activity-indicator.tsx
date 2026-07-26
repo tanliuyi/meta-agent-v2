@@ -1,3 +1,4 @@
+import { DotMatrix } from "@renderer/components/assistant-ui/dot-matrix";
 import { Collapsible } from "@renderer/shared/ui/collapsible";
 import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
 import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
@@ -9,7 +10,7 @@ import type { ReactNode } from "react";
 import type { PiThreadPhase, SessionControlState } from "../../../../shared/contracts.ts";
 
 type Activity = {
-  kind: "compacting" | "retrying" | "error";
+  kind: "running" | "compacting" | "retrying" | "error";
   label: string;
   detail?: string;
   icon: ReactNode;
@@ -36,7 +37,15 @@ export function ThreadActivityIndicator(props: ThreadActivityIndicatorProps) {
       <div className={className} aria-live="polite">
         <div className="flex min-h-8 items-center gap-2 py-1.5">
           {activity.icon}
-          <span>{activity.label}</span>
+          <span
+            className={
+              activity.kind === "running"
+                ? "shimmer text-foreground/50 [--shimmer-angle:12deg] [--shimmer-color:hsl(var(--foreground))] [--shimmer-repeat-delay:240] [--shimmer-speed:145] [--shimmer-spread:56px] motion-reduce:animate-none"
+                : undefined
+            }
+          >
+            {activity.label}
+          </span>
         </div>
       </div>
     );
@@ -67,6 +76,13 @@ export function ThreadActivityIndicator(props: ThreadActivityIndicatorProps) {
 }
 
 function getActivity(control: ThreadActivityIndicatorProps): Activity | null {
+  if (control.phase === "running") {
+    return {
+      kind: "running",
+      label: "运行中",
+      icon: <DotMatrix state="loading" aria-hidden="true" />,
+    };
+  }
   if (control.phase === "retrying") {
     return {
       kind: "retrying",

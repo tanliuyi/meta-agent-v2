@@ -1,3 +1,4 @@
+import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import { useSessionControl, useSessionScope, useSessionTimeline } from "../session-context.tsx";
 import { Composer } from "./composer/composer.tsx";
 
@@ -7,6 +8,18 @@ export function SessionComposer() {
   const control = useSessionControl();
   const timeline = useSessionTimeline();
   if (!control) return null;
+  if (control.interaction === "read-only") {
+    return (
+      <div
+        className="border-border/60 flex h-10 items-center justify-center gap-2 rounded-md border bg-background/95 text-xs text-muted-foreground shadow-sm"
+        role="status"
+        aria-live="polite"
+      >
+        <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+        <span>{timeline.phase === "idle" ? "正在同步子智能体会话" : "子智能体运行中，此会话暂时只读"}</span>
+      </div>
+    );
+  }
   return (
     <Composer
       mode="session"

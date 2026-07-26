@@ -97,6 +97,40 @@ describe("desktop catalog reducer", () => {
     expect(state).not.toHaveProperty("controls");
   });
 
+  it("实时 upsert 已加载 Project 的 subagent summary，忽略未加载 catalog", () => {
+    const subagent: Thread = {
+      ...thread,
+      id: "subagent",
+      title: "检查改动",
+      updatedAt: 5,
+      running: true,
+      parentThreadId: thread.id,
+      origin: "subagent",
+    };
+
+    expect(desktopReducer(INITIAL_STATE, { type: "thread-catalog-upserted", thread: subagent })).toBe(INITIAL_STATE);
+
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [thread],
+    });
+    state = desktopReducer(state, { type: "thread-catalog-upserted", thread: subagent });
+    state = desktopReducer(state, {
+      type: "thread-catalog-upserted",
+      thread: { ...subagent, updatedAt: 6, running: false },
+    });
+
+    expect(state.threadCatalogs[project.id]).toHaveLength(2);
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({
+      id: "subagent",
+      parentThreadId: thread.id,
+      origin: "subagent",
+      updatedAt: 6,
+      running: false,
+    });
+  });
+
   it("materialized session 按 bootstrap 添加并去重", () => {
     let state = desktopReducer(INITIAL_STATE, { type: "thread-catalog-added", bootstrap: createBootstrap() });
     state = desktopReducer(state, { type: "thread-catalog-added", bootstrap: createBootstrap() });

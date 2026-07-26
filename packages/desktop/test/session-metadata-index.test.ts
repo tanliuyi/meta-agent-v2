@@ -174,6 +174,83 @@ describe("SessionMetadataIndex", () => {
     expect(mocks.listSessions).toHaveBeenCalledTimes(1);
   });
 
+  it("indexes forked subagent sessions under their parent with the delegated task title", async () => {
+    const parentFile = join(userDataDir, "parent.jsonl");
+    const childFile = join(userDataDir, "child.jsonl");
+    writeFileSync(parentFile, '{"type":"session"}\n');
+    writeFileSync(
+      childFile,
+      `${[
+        '{"type":"session"}',
+        '{"type":"message","timestamp":"1970-01-01T00:00:00.010Z","message":{"role":"user","content":[{"type":"text","text":"你好"}],"timestamp":10}}',
+        JSON.stringify({
+          type: "message",
+          timestamp: "1970-01-01T00:00:00.110Z",
+          message: {
+            role: "user",
+            timestamp: 110,
+            content: [
+              {
+                type: "text",
+                text: [
+                  "You are a delegated subagent running from a fork of the parent session.",
+                  "",
+                  "Task:",
+                  "Implement the Desktop session tree without widening scope.",
+                  "",
+                  "## Acceptance Contract",
+                ].join("\n"),
+              },
+            ],
+          },
+        }),
+      ].join("\n")}\n`,
+    );
+    mocks.listSessions.mockResolvedValue([
+      sessionInfo("child", childFile, "", 120, {
+        created: 100,
+        parentSessionPath: parentFile,
+        firstMessage: "你好",
+      }),
+      sessionInfo("parent", parentFile, "你好", 90),
+    ]);
+
+    await expect(new SessionMetadataIndex(userDataDir).list("project", cwd)).resolves.toEqual([
+      {
+        ...thread("child", "Implement the Desktop session tree without widen"),
+        createdAt: 100,
+        updatedAt: 120,
+        preview: "Implement the Desktop session tree without widen",
+        parentThreadId: "parent",
+        origin: "subagent",
+      },
+      { ...thread("parent", "你好"), updatedAt: 90 },
+    ]);
+  });
+
+  it("does not reuse an inherited parent title before a fork receives its own prompt", async () => {
+    const parentFile = join(userDataDir, "parent.jsonl");
+    const childFile = join(userDataDir, "child.jsonl");
+    writeFileSync(parentFile, '{"type":"session"}\n');
+    writeFileSync(childFile, '{"type":"session"}\n');
+    mocks.listSessions.mockResolvedValue([
+      sessionInfo("child", childFile, "父会话名称", 20, { created: 10, parentSessionPath: parentFile }),
+      sessionInfo("parent", parentFile, "父会话名称", 5),
+    ]);
+
+    await expect(new SessionMetadataIndex(userDataDir).list("project", cwd)).resolves.toEqual([
+      {
+        ...thread("child", "分支会话"),
+        createdAt: 10,
+        updatedAt: 20,
+        preview: "分支会话",
+        parentThreadId: "parent",
+        origin: "branch",
+      },
+      { ...thread("parent", "父会话名称"), updatedAt: 5 },
+    ]);
+  });
+
   it("recovers a corrupt index and persists incremental mutations", async () => {
     writeFileSync(join(userDataDir, "session-metadata-index.json"), "not-json");
     const index = new SessionMetadataIndex(userDataDir);
@@ -215,14 +292,21 @@ function thread(id: string, title: string): Thread {
   };
 }
 
-function sessionInfo(id: string, path: string, name: string, modified: number) {
+function sessionInfo(
+  id: string,
+  path: string,
+  name: string,
+  modified: number,
+  options: { created?: number; parentSessionPath?: string; firstMessage?: string } = {},
+) {
   return {
     id,
     path,
     name,
-    firstMessage: "",
-    created: new Date(1),
+    firstMessage: options.firstMessage ?? "",
+    created: new Date(options.created ?? 1),
     modified: new Date(modified),
     messageCount: 0,
+    ...(options.parentSessionPath ? { parentSessionPath: options.parentSessionPath } : {}),
   };
 }

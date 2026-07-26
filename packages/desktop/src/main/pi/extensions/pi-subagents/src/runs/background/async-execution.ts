@@ -884,6 +884,7 @@ export function executeAsyncSingle(
 	if (timeoutMs !== undefined && timeoutMs <= 0) return formatAsyncStartError("single", "The source run's absolute deadline expired before recovery could launch.");
 	const initialTurnBudget = params.turnBudget ? initialTurnBudgetState(params.turnBudget) : undefined;
 	const resolvedSessionDir = params.sessionDir ?? (sessionRoot ? path.join(sessionRoot, `async-${id}`) : undefined);
+	const writerSessionDir = sessionFile ? path.dirname(sessionFile) : resolvedSessionDir;
 	const structuredOutput = params.structuredOutputSchema
 		? createStructuredOutputRuntime(params.structuredOutputSchema, path.join(asyncDir, "structured-output"))
 		: undefined;
@@ -930,7 +931,7 @@ export function executeAsyncSingle(
 		maxSubagentDepth: resolveChildMaxSubagentDepth(maxSubagentDepth, agentConfig.maxSubagentDepth),
 		...(maxOutput ? { maxOutput } : {}),
 		share: shareEnabled,
-		...(resolvedSessionDir ? { sessionDir: resolvedSessionDir } : {}),
+		...(writerSessionDir ? { sessionDir: writerSessionDir } : {}),
 		...(artifactsDir ? { artifactsDir } : {}),
 		artifactConfig,
 	};
@@ -972,8 +973,8 @@ export function executeAsyncSingle(
 			task: taskWithOutputInstruction,
 			cwd: runnerCwd,
 			...(sessionFile ? { sessionFile } : {}),
-			...(resolvedSessionDir ? { sessionDir: resolvedSessionDir } : {}),
-			persistSession: Boolean(resolvedSessionDir || sessionFile || shareEnabled),
+			...(writerSessionDir ? { sessionDir: writerSessionDir } : {}),
+			persistSession: Boolean(writerSessionDir || sessionFile || shareEnabled),
 			...(model ? { model } : {}),
 			...(ctx.currentModelProvider ? { preferredProvider: ctx.currentModelProvider } : {}),
 			...(effectiveThinking ? { thinking: resolveEffectiveThinking(model, effectiveThinking) as SubagentRuntimeRunRequest["thinking"] } : {}),

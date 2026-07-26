@@ -45,6 +45,21 @@ describe("MetadataWorkerClient extension generation", () => {
     mocks.clients.length = 0;
   });
 
+  it("tracks the metadata draft generation until disposal", async () => {
+    const retain = vi.fn();
+    const release = vi.fn();
+    const client = new MetadataWorkerClient(manifest(), "/agent", "/user-data", undefined, { retain, release });
+    const first = extensionSet("one");
+    const second = extensionSet("two");
+
+    await client.getDraftConfig("project", "/workspace", first);
+    await client.getDraftConfig("project", "/workspace", second);
+
+    expect(retain).toHaveBeenLastCalledWith("metadata:draft", second);
+    await client.dispose();
+    expect(release).toHaveBeenCalledWith("metadata:draft");
+  });
+
   it("reuses one process for an unchanged set and restarts before loading a changed set", async () => {
     const client = new MetadataWorkerClient(manifest(), "/agent", "/user-data");
 

@@ -8,12 +8,21 @@ import type {
   ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
+import type { MarketplacePluginRevocation } from "../../shared/plugin-marketplace-contracts.ts";
+import {
+  validateInstalledMarketplacePlugin,
+  validateMarketplaceOwnershipAndProjection,
+} from "../plugins/marketplace-installed-plugin.ts";
+import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
 import type { DesktopExtensionSettingsService } from "./desktop-extension-settings-service.ts";
 
 interface DesktopExtensionSourcePolicyOptions {
   settings: DesktopExtensionSettingsService;
   getBuiltinDefinitions(): DesktopExtensionDefinition[];
   getCuratedDefinitions(): DesktopExtensionDefinition[];
+  getMarketplaceExtensions?(): Promise<{ revision: string; plugins: InstalledMarketplacePluginRecord[] }>;
+  getMarketplaceRevocation?(plugin: InstalledMarketplacePluginRecord): Promise<MarketplacePluginRevocation | undefined>;
+  marketplaceRoot?: string;
   curatedRoot?: string;
   createGeneration?(): string;
 }
@@ -47,6 +56,50 @@ export class DesktopExtensionSourcePolicy {
       const contentHash = await hashFile(entryPath);
       fingerprintParts.push(`${definition.id}:${entryPath}:${contentHash}`);
       pathEntries.push({ ...definition, entryPath, contentHash, capabilities: [...definition.capabilities] });
+    }
+    if (this.options.getMarketplaceExtensions) {
+      const marketplace = await this.options.getMarketplaceExtensions();
+      fingerprintParts.push(marketplace.revision);
+      for (const plugin of marketplace.plugins) {
+        if (!plugin.enabled || plugin.state !== "installed") continue;
+        try {
+          const revocation = await this.options.getMarketplaceRevocation?.(plugin);
+          if (revocation?.status === "blocked") {
+            fingerprintParts.push(`${plugin.id}:blocked:${revocation.reasonCode}:${revocation.checkedAt}`);
+            diagnostics.push({
+              extensionId: plugin.id,
+              source: "marketplace",
+              phase: "resolve",
+              code: "DESKTOP_EXTENSION_BLOCKED",
+              message: `Marketplace extension is blocked: ${plugin.displayName} (${revocation.reasonCode})`,
+            });
+            continue;
+          }
+          if (!this.options.marketplaceRoot) throw new Error(`Marketplace extension root is unavailable: ${plugin.id}`);
+          const entryPath = await validateInstalledMarketplacePlugin(plugin, this.options.marketplaceRoot);
+          await validateMarketplaceOwnershipAndProjection(plugin);
+          const contentHash = await hashFile(entryPath);
+          fingerprintParts.push(`${plugin.id}:${plugin.artifactHash}:${contentHash}`);
+          pathEntries.push({
+            id: plugin.id,
+            displayName: plugin.displayName,
+            source: "marketplace",
+            entryPath,
+            contentHash,
+            hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+            capabilities: [...plugin.capabilities],
+          });
+        } catch {
+          fingerprintParts.push(`${plugin.id}:broken`);
+          diagnostics.push({
+            extensionId: plugin.id,
+            source: "marketplace",
+            phase: "resolve",
+            code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
+            message: `Marketplace extension entry is unavailable: ${plugin.displayName}`,
+          });
+        }
+      }
     }
     if (settings.developerMode) {
       for (const entry of settings.developmentEntries) {

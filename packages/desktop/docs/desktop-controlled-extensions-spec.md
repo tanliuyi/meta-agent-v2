@@ -1,10 +1,12 @@
 # Meta Agent Desktop 受控扩展规范
 
-> 状态：Draft
+> 状态：Draft（联网市场相关条款已部分废止）
 >
 > 适用范围：`packages/desktop` 与 Pi extension runtime 集成
 >
 > 目标版本：Desktop Extension Host Profile v1
+>
+> 部分废止说明：[`plugin-marketplace-product-spec.md`](./plugin-marketplace-product-spec.md) 已接受并取代本文中“不建设在线 packages center”、不提供下载/签名/更新/撤销、source 仅限 `builtin/curated/development`、marketplace provider 不受支持，以及不复制预构建依赖/native artifact 的相关条款。Pi runner、受控 entry set、Host Profile、immutable worker generation、single-writer replacement 和 Developer Mode 边界继续有效。
 
 ## 1. 摘要
 

@@ -56,6 +56,133 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("routes active subagent sessions without opening a second thread worker", async () => {
+    const harness = createHarness(userDataDir);
+    const acknowledgeSubagent = vi.fn(() => true);
+    harness.options.isActiveSubagentThread = (_projectId, threadId) => threadId === "subagent";
+    harness.options.attachSubagent = async (_projectId, threadId) =>
+      threadId === "subagent"
+        ? { ...bootstrap(threadId), control: { ...bootstrap(threadId).control, interaction: "read-only" } }
+        : undefined;
+    harness.options.acknowledgeSubagent = acknowledgeSubagent;
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(registry.attach("project", "subagent")).resolves.toMatchObject({
+      threadId: "subagent",
+      control: { interaction: "read-only" },
+    });
+    await expect(registry.prewarm("project", "subagent")).resolves.toBeUndefined();
+    await expect(registry.cancel("project", "subagent")).rejects.toThrow("read-only");
+    registry.acknowledge("subagent-worker", 7);
+
+    expect(harness.clients).toHaveLength(0);
+    expect(acknowledgeSubagent).toHaveBeenCalledWith("subagent-worker", 7);
+    await registry.dispose();
+  });
+
+  it("falls back to a thread worker when the subagent completed during its bootstrap", async () => {
+    const harness = createHarness(userDataDir);
+    harness.options.isActiveSubagentThread = () => false;
+    harness.options.attachSubagent = async () => {
+      throw new Error("Subagent run completed during bootstrap");
+    };
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(registry.attach("project", "thread")).resolves.toMatchObject({ threadId: "thread" });
+
+    expect(harness.clients).toHaveLength(1);
+    registry.detach("project", "thread");
+    await registry.dispose();
+  });
+
+  it("rethrows a subagent bootstrap failure while the subagent writer is still active", async () => {
+    const harness = createHarness(userDataDir);
+    harness.options.isActiveSubagentThread = () => true;
+    harness.options.attachSubagent = async () => {
+      throw new Error("Subagent bootstrap timed out");
+    };
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(registry.attach("project", "thread")).rejects.toThrow("Subagent bootstrap timed out");
+
+    expect(harness.clients).toHaveLength(0);
+    await registry.dispose();
+  });
+
+  it("releases the thread worker lease first when subagent and thread leases briefly coexist", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const harness = createHarness(userDataDir, { idleTtlMs: 1 });
+    let subagentActive = true;
+    harness.options.isActiveSubagentThread = (_projectId, threadId) => subagentActive && threadId === "thread";
+    harness.options.attachSubagent = async (_projectId, threadId) =>
+      subagentActive && threadId === "thread"
+        ? { ...bootstrap(threadId), control: { ...bootstrap(threadId).control, interaction: "read-only" } }
+        : undefined;
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    subagentActive = false;
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+
+    registry.detach("project", "thread");
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(client.shutdownCount).toBe(1);
+    registry.detach("project", "thread");
+    await registry.dispose();
+  });
+
+  it("retains a generation reference for each live worker and releases it after shutdown", async () => {
+    const retain = vi.fn();
+    const release = vi.fn();
+    const harness = createHarness(userDataDir, { generationReferences: { retain, release } });
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await registry.attach("project", "thread");
+    const client = harness.clients[0]!;
+    expect(retain).toHaveBeenCalledWith(
+      `thread:${client.instanceId}`,
+      expect.objectContaining({ projectId: "project" }),
+    );
+
+    await registry.dispose();
+    expect(release).toHaveBeenCalledWith(`thread:${client.instanceId}`);
+  });
+
+  it("observes a startup rollback override before its worker bootstrap", async () => {
+    let harness!: Harness;
+    let rollbackWasReady: boolean | undefined;
+    const extensionApplyJournal = {
+      prepare: vi.fn(),
+      validated: vi.fn(),
+      rollbackValidated: vi.fn(),
+      getRollbackOverride: vi.fn(() => ({
+        operationId: "apply-recovery",
+        extensionSet: extensionSet("project", "extensions-before-crash"),
+      })),
+      startupRollbackStarted: vi.fn(async () => {
+        rollbackWasReady = harness.clients.at(-1)?.readyStarted;
+      }),
+      completeStartupRollback: vi.fn(async () => {}),
+    } as unknown as NonNullable<ThreadWorkerRegistryOptions["extensionApplyJournal"]>;
+    harness = createHarness(userDataDir, { extensionApplyJournal });
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    const bootstrap = await registry.attach("project", "thread");
+
+    expect(harness.clients[0]?.bindingGeneration).toBe("extensions-before-crash");
+    expect(extensionApplyJournal.startupRollbackStarted).toHaveBeenCalledWith(
+      "apply-recovery",
+      harness.clients[0]?.instanceId,
+      harness.clients[0]?.pid,
+    );
+    expect(rollbackWasReady).toBe(false);
+    expect(bootstrap.control.extensionSet.reloadRequired).toBe(true);
+    expect(extensionApplyJournal.completeStartupRollback).toHaveBeenCalledWith("apply-recovery");
+    await registry.dispose();
+  });
+
   it("loads draft configuration through the metadata worker", async () => {
     const harness = createHarness(userDataDir);
     const registry = new ThreadWorkerRegistry(harness.options);
@@ -222,6 +349,95 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("persists replacement worker identity before replacement bootstrap", async () => {
+    const applyRecord = { operationId: "apply-one" };
+    let harness!: Harness;
+    let replacementWasReady: boolean | undefined;
+    const extensionApplyJournal = {
+      prepare: vi.fn(async () => applyRecord),
+      replacementStarted: vi.fn(async () => {
+        replacementWasReady = harness.clients.at(-1)?.readyStarted;
+        return applyRecord;
+      }),
+      validated: vi.fn(async () => {}),
+      rollbackValidated: vi.fn(async () => {}),
+      getRollbackOverride: vi.fn(() => undefined),
+      completeStartupRollback: vi.fn(async () => {}),
+    } as unknown as NonNullable<ThreadWorkerRegistryOptions["extensionApplyJournal"]>;
+    harness = createHarness(userDataDir, { extensionApplyJournal });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-next"));
+
+    await registry.applyExtensionSet("project", "thread", "extensions-next");
+
+    expect(extensionApplyJournal.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "project",
+        threadId: "thread",
+        beforeSet: expect.objectContaining({ generation: "extensions-generation" }),
+        afterGeneration: "extensions-next",
+      }),
+    );
+    expect(extensionApplyJournal.replacementStarted).toHaveBeenCalledWith(
+      applyRecord,
+      expect.stringMatching(/^worker-/),
+      expect.any(Number),
+    );
+    expect(replacementWasReady).toBe(false);
+    expect(extensionApplyJournal.validated).toHaveBeenCalledWith(applyRecord);
+    await registry.dispose();
+  });
+
+  it("keeps the healthy replacement active when journal finalization fails", async () => {
+    const applyRecord = { operationId: "apply-finalization-failure" };
+    const beginRollback = vi.fn(async () => applyRecord);
+    const extensionApplyJournal = {
+      prepare: vi.fn(async () => applyRecord),
+      replacementStarted: vi.fn(async () => applyRecord),
+      validated: vi.fn(async () => {
+        throw new Error("journal finalization failed");
+      }),
+      beginRollback,
+      rollbackValidated: vi.fn(async () => {}),
+      getRollbackOverride: vi.fn(() => undefined),
+      completeStartupRollback: vi.fn(async () => {}),
+    } as unknown as NonNullable<ThreadWorkerRegistryOptions["extensionApplyJournal"]>;
+    const harness = createHarness(userDataDir, { extensionApplyJournal });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-next"));
+
+    await expect(registry.applyExtensionSet("project", "thread", "extensions-next")).rejects.toThrow(
+      "journal finalization failed",
+    );
+
+    expect(beginRollback).not.toHaveBeenCalled();
+    expect(harness.clients.map((client) => client.bindingGeneration)).toEqual([
+      "extensions-generation",
+      "extensions-next",
+    ]);
+    expect(harness.clients[1]?.shutdownCount).toBe(0);
+    expect(harness.resync).toHaveBeenLastCalledWith("project", "thread", "extension-set-applied");
+    await expect(registry.getExtensionState("project", "thread")).resolves.toMatchObject({
+      appliedGeneration: "extensions-next",
+      desiredGeneration: "extensions-next",
+      reloadRequired: false,
+    });
+    await registry.dispose();
+  });
+
+  it("classifies linked apply failures during cold startup for transaction rollback", async () => {
+    const harness = createHarness(userDataDir, { failGeneration: "extensions-generation" });
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(
+      registry.applyExtensionSet("project", "cold-thread", "extensions-generation", false, "marketplace-mutation"),
+    ).rejects.toMatchObject({ code: "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED" });
+
+    await registry.dispose();
+  });
+
   it("rejects new commands while the old worker is draining for replacement", async () => {
     const shutdownGate = deferred<void>();
     const harness = createHarness(userDataDir, { shutdownGate });
@@ -274,6 +490,53 @@ describe("ThreadWorkerRegistry", () => {
     expect(result).toMatchObject({ status: "rolled-back", generation: "extensions-generation" });
     expect(harness.clients.at(-1)?.bindingGeneration).toBe("extensions-generation");
     expect(harness.resync).toHaveBeenLastCalledWith("project", "thread", "extension-set-rollback");
+    await registry.dispose();
+  });
+
+  it("observes the immediate rollback worker before bootstrap", async () => {
+    const applyRecord = { operationId: "apply-one", phase: "apply-pending" };
+    let harness!: Harness;
+    const observedStarts: Array<{ generation?: string; readyStarted?: boolean }> = [];
+    const replacementStarted = vi.fn(
+      async (record: { operationId: string; phase: string }, _workerInstanceId: string, _workerPid?: number) => {
+        const client = harness.clients.at(-1);
+        observedStarts.push({ generation: client?.bindingGeneration, readyStarted: client?.readyStarted });
+        return record;
+      },
+    );
+    const extensionApplyJournal = {
+      prepare: vi.fn(async () => applyRecord),
+      replacementStarted,
+      validated: vi.fn(async () => {}),
+      beginRollback: vi.fn(async () => ({ ...applyRecord, phase: "rollback-pending" })),
+      rollbackValidated: vi.fn(async () => {}),
+      getRollbackOverride: vi.fn(() => undefined),
+      completeStartupRollback: vi.fn(async () => {}),
+    } as unknown as NonNullable<ThreadWorkerRegistryOptions["extensionApplyJournal"]>;
+    harness = createHarness(userDataDir, {
+      failGeneration: "extensions-broken",
+      extensionApplyJournal,
+    });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-broken"));
+
+    const result = await registry.applyExtensionSet("project", "thread", "extensions-broken", false, "mutation-one");
+
+    expect(result.status).toBe("rolled-back");
+    expect(extensionApplyJournal.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ mutationOperationId: "mutation-one" }),
+    );
+    expect(extensionApplyJournal.beginRollback).toHaveBeenCalledWith(applyRecord);
+    expect(replacementStarted).toHaveBeenLastCalledWith(
+      expect.objectContaining({ phase: "rollback-pending" }),
+      expect.stringMatching(/^worker-/),
+      expect.any(Number),
+    );
+    expect(observedStarts.at(-1)).toEqual({ generation: "extensions-generation", readyStarted: false });
+    expect(extensionApplyJournal.rollbackValidated).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: "rollback-pending" }),
+    );
     await registry.dispose();
   });
 
@@ -403,6 +666,8 @@ function createHarness(
     maxLiveWorkers?: number;
     failGeneration?: string;
     shutdownGate?: ReturnType<typeof deferred<void>>;
+    generationReferences?: ThreadWorkerRegistryOptions["generationReferences"];
+    extensionApplyJournal?: ThreadWorkerRegistryOptions["extensionApplyJournal"];
   },
 ): Harness {
   const clients: FakeWorkerClient[] = [];
@@ -441,6 +706,8 @@ function createHarness(
     userDataDir,
     agentDir: join(userDataDir, "agent"),
     extensionSourcePolicy,
+    generationReferences: overrides?.generationReferences,
+    extensionApplyJournal: overrides?.extensionApplyJournal,
     getCwd: () => "/workspace",
     push,
     failed,
@@ -463,9 +730,11 @@ function createHarness(
 
 class FakeWorkerClient implements ThreadWorkerClient {
   readonly instanceId: string;
+  readonly pid: number;
   readonly requests: SidecarCommand["type"][] = [];
   readonly acknowledgements: number[] = [];
   readonly bindingGeneration: string;
+  readyStarted = false;
   shutdownCount = 0;
   private readonly options: WorkerClientOptions;
   private readonly bootstrap: SessionBootstrap;
@@ -483,7 +752,9 @@ class FakeWorkerClient implements ThreadWorkerClient {
     this.readyGate = readyGate;
     this.failGeneration = failGeneration;
     this.shutdownGate = shutdownGate;
-    this.instanceId = `worker-${fakeWorkerSequence++}`;
+    const sequence = fakeWorkerSequence++;
+    this.instanceId = `worker-${sequence}`;
+    this.pid = 10_000 + sequence;
     if (options.binding.role !== "thread") throw new Error(`Unexpected fake worker role: ${options.binding.role}`);
     const threadId =
       options.binding.value.mode === "open" ? options.binding.value.threadId : options.binding.value.sessionId;
@@ -492,6 +763,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   }
 
   async ready(): Promise<SidecarReady> {
+    this.readyStarted = true;
     await this.readyGate?.promise;
     if (this.bindingGeneration === this.failGeneration) throw new Error("extension startup failed");
     return {

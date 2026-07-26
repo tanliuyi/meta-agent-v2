@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "dev.meta-agent.example-tools",
+      "name": "Example Tools",
+      "description": "Reference Pi extension published through the Meta Agent marketplace protocol.",
+      "publisher": {
+        "id": "meta-agent",
+        "displayName": "Meta Agent",
+        "verified": true
+      },
+      "categories": ["productivity", "developer-tools"],
+      "publishedAt": 1767225600000,
+      "updatedAt": 1769904000000,
+      "versions": [
+        {
+          "version": "1.0.0",
+          "status": "available",
+          "changelog": "Initial reference release.",
+          "publishedAt": 1767225600000,
+          "desktop": {
+            "hostProfileVersion": 1,
+            "minVersion": "0.0.31"
+          },
+          "capabilities": ["tools.register", "commands.register"],
+          "artifacts": [
+            {
+              "id": "example-tools-1.0.0-universal",
+              "target": {
+                "platform": "universal",
+                "arch": "universal",
+                "piVersion": "0.80.7"
+              },
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size": 1024,
+              "downloadPath": "/dev.meta-agent.example-tools/1.0.0/example-tools.meta-plugin",
+              "containsNativeCode": false,
+              "preferred": true
+            }
+          ]
+        },
+        {
+          "version": "1.1.0",
+          "status": "available",
+          "changelog": "Add update lifecycle reference metadata.",
+          "publishedAt": 1769904000000,
+          "desktop": {
+            "hostProfileVersion": 1,
+            "minVersion": "0.0.31"
+          },
+          "capabilities": ["tools.register", "commands.register"],
+          "artifacts": [
+            {
+              "id": "example-tools-1.1.0-universal",
+              "target": {
+                "platform": "universal",
+                "arch": "universal",
+                "piVersion": "0.80.7"
+              },
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size": 1024,
+              "downloadPath": "/dev.meta-agent.example-tools/1.1.0/example-tools.meta-plugin",
+              "containsNativeCode": false,
+              "preferred": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "revocations": []
+}

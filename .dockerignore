@@ -1,0 +1,15 @@
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!packages/
+packages/*
+!packages/plugin-marketplace-server/
+packages/plugin-marketplace-server/*
+!packages/plugin-marketplace-server/package.json
+!packages/plugin-marketplace-server/tsconfig.build.json
+!packages/plugin-marketplace-server/Dockerfile
+!packages/plugin-marketplace-server/src/
+!packages/plugin-marketplace-server/src/*
+!packages/plugin-marketplace-server/catalog/
+!packages/plugin-marketplace-server/catalog/*
