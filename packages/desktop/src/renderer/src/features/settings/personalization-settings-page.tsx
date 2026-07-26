@@ -1,3 +1,5 @@
+import { FONT_FAMILY_LABEL_ID, FontFamilyControl } from "./font-family-control.tsx";
+import { FONT_SIZE_LABEL_ID, FontSizeControl } from "./font-size-control.tsx";
 import { ThemePreferenceControl } from "./theme-preference-control.tsx";
 import { THINKING_VISIBILITY_LABEL_ID, ThinkingVisibilityControl } from "./thinking-visibility-control.tsx";
 
@@ -13,8 +15,25 @@ export function PersonalizationSettingsPage() {
           <h3 id="appearance-heading">外观</h3>
         </div>
         <div className="settings-row">
-          <span>主题</span>
+          <div className="settings-row-text">
+            <span>主题</span>
+            <p className="settings-row-description">跟随系统，或固定使用浅色 / 深色外观</p>
+          </div>
           <ThemePreferenceControl />
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <span id={FONT_FAMILY_LABEL_ID}>界面字体</span>
+            <p className="settings-row-description">输入自定义字体族，回车确认；清空恢复系统默认字体</p>
+          </div>
+          <FontFamilyControl />
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <span id={FONT_SIZE_LABEL_ID}>界面字号</span>
+            <p className="settings-row-description">整体缩放界面文字与控件大小</p>
+          </div>
+          <FontSizeControl />
         </div>
       </section>
       <section className="settings-section mt-4" aria-labelledby="chat-heading">
@@ -22,7 +41,10 @@ export function PersonalizationSettingsPage() {
           <h3 id="chat-heading">聊天</h3>
         </div>
         <div className="settings-row">
-          <span id={THINKING_VISIBILITY_LABEL_ID}>显示 Thinking</span>
+          <div className="settings-row-text">
+            <span id={THINKING_VISIBILITY_LABEL_ID}>显示 Thinking</span>
+            <p className="settings-row-description">在对话中展示模型的思考过程</p>
+          </div>
           <ThinkingVisibilityControl />
         </div>
       </section>

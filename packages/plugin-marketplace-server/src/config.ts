@@ -9,6 +9,11 @@ export interface MarketplaceServerConfig {
 	artifactOrigins: string[];
 	signingPrivateKey: KeyObject;
 	ephemeralSigningKey: boolean;
+	dataDir?: string;
+	adminToken?: string;
+	maxArtifactBytes: number;
+	allowRegistration: boolean;
+	maxLoginFailures: number;
 }
 
 export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env): MarketplaceServerConfig {
@@ -44,6 +49,21 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 	assertPublicBasePath(publicBaseUrl, basePath);
 	const marketplaceId = normalizeMarketplaceId(env.MARKETPLACE_ID?.trim() || "meta-agent-development");
 	const artifactOrigins = parseArtifactOrigins(env.MARKETPLACE_ARTIFACT_ORIGINS, publicBaseUrl);
+	const dataDir = env.MARKETPLACE_DATA_DIR?.trim() || undefined;
+	if (dataDir && ephemeralSigningKey) {
+		throw new Error("MARKETPLACE_DATA_DIR requires a pinned MARKETPLACE_SIGNING_PRIVATE_KEY");
+	}
+	const adminToken = env.MARKETPLACE_ADMIN_TOKEN?.trim() || undefined;
+	if (adminToken !== undefined && adminToken.length < 16) {
+		throw new Error("MARKETPLACE_ADMIN_TOKEN must be at least 16 characters");
+	}
+	const maxArtifactBytes = parseMaxArtifactBytes(env.MARKETPLACE_MAX_ARTIFACT_BYTES);
+	const allowRegistration = parseBooleanEnv(
+		env.MARKETPLACE_ALLOW_REGISTRATION,
+		"MARKETPLACE_ALLOW_REGISTRATION",
+		true,
+	);
+	const maxLoginFailures = parseMaxLoginFailures(env.MARKETPLACE_MAX_LOGIN_FAILURES);
 
 	return {
 		host,
@@ -54,7 +74,37 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 		artifactOrigins,
 		signingPrivateKey,
 		ephemeralSigningKey,
+		...(dataDir ? { dataDir } : {}),
+		...(adminToken ? { adminToken } : {}),
+		maxArtifactBytes,
+		allowRegistration,
+		maxLoginFailures,
 	};
+}
+
+function parseMaxArtifactBytes(value: string | undefined): number {
+	if (value === undefined || value.trim() === "") return 32 * 1024 * 1024;
+	const bytes = Number(value);
+	if (!Number.isSafeInteger(bytes) || bytes < 1024 || bytes > 1024 * 1024 * 1024) {
+		throw new Error("MARKETPLACE_MAX_ARTIFACT_BYTES must be an integer between 1024 and 1073741824");
+	}
+	return bytes;
+}
+
+function parseMaxLoginFailures(value: string | undefined): number {
+	if (value === undefined || value.trim() === "") return 10;
+	const failures = Number(value);
+	if (!Number.isSafeInteger(failures) || failures < 0 || failures > 10_000) {
+		throw new Error("MARKETPLACE_MAX_LOGIN_FAILURES must be an integer between 0 and 10000");
+	}
+	return failures;
+}
+
+function parseBooleanEnv(value: string | undefined, label: string, fallback: boolean): boolean {
+	if (value === undefined || value.trim() === "") return fallback;
+	if (value === "true") return true;
+	if (value === "false") return false;
+	throw new Error(`${label} must be true or false`);
 }
 
 function parsePort(value: string | undefined): number {

@@ -69,6 +69,12 @@ const TOOL_SUMMARIES: Readonly<Record<string, string>> = {
   grep: "搜索一些内容",
   find: "查找一些文件",
   ls: "查看一些目录",
+  subagent: "调度子智能体",
+  subagent_wait: "等待子智能体",
+  memory: "整理记忆",
+  memory_search: "检索记忆",
+  session_search: "检索历史会话",
+  skill_manage: "整理技能",
 };
 
 export function summarizeChainOfThought(parts: readonly PartState[], indices: readonly number[]): string {

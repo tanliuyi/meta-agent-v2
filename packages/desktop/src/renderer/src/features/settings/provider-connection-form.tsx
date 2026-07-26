@@ -136,7 +136,7 @@ export function ProviderConnectionForm({
           />
         </label>
         <label>
-          <span>Auth Header</span>
+          <span>Authorization 头</span>
           <Select
             className="providers-select"
             value={authHeaderValue}
@@ -147,14 +147,14 @@ export function ProviderConnectionForm({
             }}
             options={[
               { value: "", label: "未设置" },
-              { value: "true", label: "true" },
-              { value: "false", label: "false" },
+              { value: "true", label: "发送" },
+              { value: "false", label: "不发送" },
             ]}
           />
         </label>
       </div>
       <ModelsMapEditor
-        label="Provider headers"
+        label="全局请求头"
         entries={draft.headers}
         onChange={(headers) => emit({ ...draftRef.current, headers })}
       />

@@ -105,16 +105,19 @@ React、组件 CSS 和第三方适配代码不得重新声明 light/dark 颜色�
 
 ### 5.2 字体和密度
 
-- `--font-family-sans`：工作台 UI；
+- `--font-family-sans`：工作台 UI，定义为 `var(--ui-font-family, var(--font-family-sans-default))`；
+- `--font-family-sans-default`：默认 UI 字体栈的唯一定义位置；
+- `--ui-font-family`：用户自定义 UI 字体的注入点，仅由字体偏好层写入根节点 inline custom property，未设置时回退默认字体栈；
 - `--font-family-mono`：终端、代码、路径和命令；
-- `--type-size-caption` 至 `--type-size-title`：以 `rem` 表达的既有密度刻度；
-- `--control-size-xs` 至 `--control-size-lg`：以 `rem` 表达的控件高度。
+- `--type-size-caption` 至 `--type-size-title`：以 `rem` 表达的文本密度刻度，随 UI 字号偏好缩放；
+- `--control-size-xs` 至 `--control-size-lg`：以 `px` 表达的控件高度，不随字号缩放。
 
-根字号使用浏览器基准的 `100%`。后续 UI 字号偏好只调整根字号，字体、控件和布局 token 随之缩放；组件不得用固定 `px` 锁定字号或控件尺寸。最小字号约束通过 `--type-size-*` token 表达，caption 仅用于非交互辅助文本。
+**文本缩放与布局锁定是本系统的单位分界**：用户字号偏好只经由 `--ui-font-size` 注入，其语义是**正文字号**（`--type-size-body = 0.875rem` 一档的目标像素，默认 14、范围 10–20），根字号在 `base.css` 按 `calc(var(--ui-font-size, 14px) / 0.875)` 反推；文本类声明（`font-size`、`--type-size-*`、Tailwind `text-*`）必须使用 `rem` 或相对单位以跟随缩放，结构类尺寸（空间、控件、布局、圆角、阴影）一律使用 `px`，保证字号变化不改变布局骨架。随文本缩放的组件内距使用 `em`。最小字号约束通过 `--type-size-*` token 表达，caption 仅用于非交互辅助文本。
 
 ### 5.3 空间、形状和阴影
 
-- `--space-1` 至 `--space-9` 是以 `rem` 表达的有限空间刻度；
+- `--space-1` 至 `--space-9` 是以 `px` 表达的有限空间刻度，不随字号缩放；
+- Tailwind spacing 基准在 `@theme` 中钉为 `--spacing: 4px`，`p-*`、`gap-*`、`w-*`、`h-*` 等工具类同样不随字号缩放；
 - `--shape-radius-*` 表达组件形状，组件内不继续散布固定像素圆角；
 - `--elevation-popover`、`--elevation-workbench`、`--elevation-composer*` 表达表面关系，不按页面复制阴影值。
 
@@ -127,7 +130,7 @@ React、组件 CSS 和第三方适配代码不得重新声明 light/dark 颜色�
 
 ### 5.5 布局
 
-侧栏、标题栏、Topbar、Workbench 和 Terminal 的稳定尺寸统一使用 `--layout-*`。CSS media query 目前不能可靠使用自定义属性作为断点，因此断点使用与默认视觉宽度等值的 `rem` 字面值，并在根字号变化时同步缩放。
+侧栏、标题栏、Topbar、Workbench 和 Terminal 的稳定尺寸统一使用以 `px` 表达的 `--layout-*`。CSS media query 目前不能可靠使用自定义属性作为断点，断点继续使用 `rem` 字面值；media query 中的 `rem` 按规范相对浏览器初始字号解析，不受 `--ui-font-size` 影响，断点因此保持稳定。
 
 可缩放 Panel 内部适配应使用 container query，不应继续按 BrowserWindow 宽度推断组件可用宽度。
 
@@ -162,7 +165,8 @@ components/panel/workbench-panel/
 
 - `useResizableRegion`：pointer capture、边界计算、每帧一次 CSS 变量写入、ARIA 同步和 pointerup 持久化；
 - `readCssColorToken`：把 CSS 颜色 token 解析为第三方库可接受的颜色字符串；
-- `applyThemePreference`：只更新主题属性，不维护第二份颜色表。
+- `applyThemePreference`：只更新主题属性，不维护第二份颜色表；
+- `applyUiFontPreferences`：只写 `--ui-font-family` 与 `--ui-font-size` 两个变量，默认字体栈和 100% 根字号基准由 CSS token 唯一拥有。
 
 `useResizableRegion` 的中文 JSDoc 必须说明：拖拽期间不得用 React state 驱动整个 Panel 子树重渲染；只允许更新区域根节点的尺寸变量和 separator 的 `aria-valuenow`，结束后再提交持久状态。
 

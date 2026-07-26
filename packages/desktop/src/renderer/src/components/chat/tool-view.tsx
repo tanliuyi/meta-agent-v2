@@ -6,6 +6,8 @@ import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import { useEffect, useRef, useState } from "react";
 import { ToolFileTarget } from "./tool-file-target.tsx";
+import { MEMORY_SCOPE_LABELS } from "./tools/memory-content.tsx";
+import { firstLineSummary, parseSubagentCall, summarizeAgents } from "./tools/subagent-format.ts";
 import { ToolContent } from "./tools/tool-content.tsx";
 import { readToolStringArgument } from "./tools/tool-format.ts";
 
@@ -31,7 +33,8 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
   const toolState: ToolState = error ? "error" : running ? "running" : "complete";
   const displayedResult = result ?? artifactState?.partialResult;
   const header = toolHeader(toolName, args);
-  const cursorFollowsArgs = running;
+  const cursorFollowsArgs = running && execution === "streaming-args";
+  const cursorAtEnd = running && execution !== "streaming-args";
   const stateLabel = toolState === "running" ? "运行中" : toolState === "error" ? "失败" : "已完成";
 
   useEffect(() => {
@@ -50,7 +53,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
       open={expanded}
       onOpenChange={setExpanded}
     >
-      <div className="tool-trigger-row">
+      <div className="tool-trigger-row" data-cursor-position={cursorAtEnd ? "end" : undefined}>
         <CollapsibleTrigger asChild>
           <button
             className="tool-trigger"
@@ -75,6 +78,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
         {cursorFollowsArgs && header.target?.type === "file" ? (
           <span className="tool-running-cursor" aria-hidden="true" />
         ) : null}
+        {cursorAtEnd ? <span className="tool-running-cursor tool-running-cursor-end" aria-hidden="true" /> : null}
         <span className="sr-only" aria-live="polite">
           {stateLabel}
         </span>
@@ -144,7 +148,83 @@ function toolHeader(name: string, args: Readonly<Record<string, unknown>>): Tool
       context: numberSuffix(args.limit, "limit", true).trimStart(),
     };
   }
+  if (name === "subagent" || name === "subagent_wait") {
+    return subagentToolHeader(name, args);
+  }
+  if (name === "memory") {
+    const actionLabel = MEMORY_ACTION_LABELS[readToolStringArgument(args, "action")];
+    const scopeLabel = MEMORY_SCOPE_LABELS[readToolStringArgument(args, "target")];
+    return {
+      label: "memory",
+      target: textTarget(firstLineSummary(readToolStringArgument(args, "content", "old_text")) || "…"),
+      context: [actionLabel, scopeLabel].filter(Boolean).join(" · "),
+    };
+  }
+  if (name === "memory_search") {
+    return { label: "memory", target: textTarget(readToolStringArgument(args, "query") || "…"), context: "搜索记忆" };
+  }
+  if (name === "session_search") {
+    const query = readToolStringArgument(args, "query") || firstLineSummary(readToolStringArgument(args, "markdown"));
+    return { label: "recall", target: textTarget(query || "…"), context: "搜索历史会话" };
+  }
+  if (name === "skill_manage") {
+    return {
+      label: "skill",
+      target: textTarget(readToolStringArgument(args, "name", "skill_id") || "…"),
+      context: SKILL_ACTION_LABELS[readToolStringArgument(args, "action")] ?? "",
+    };
+  }
   return { label: name, target: textTarget(toolFallbackTarget(args)) };
+}
+
+const MEMORY_ACTION_LABELS: Readonly<Record<string, string>> = {
+  add: "新增",
+  replace: "更新",
+  remove: "移除",
+};
+
+const SKILL_ACTION_LABELS: Readonly<Record<string, string>> = {
+  create: "创建技能",
+  view: "查看技能",
+  patch: "更新技能",
+  update: "更新技能",
+  edit: "更新技能",
+  delete: "删除技能",
+};
+
+function subagentToolHeader(name: string, args: Readonly<Record<string, unknown>>): ToolHeader {
+  const call = parseSubagentCall(name, args);
+  const asyncSuffix = call.async ? " · 后台" : "";
+  if (call.mode === "wait") {
+    return {
+      label: "subagent",
+      target: textTarget("wait"),
+      context: call.waitId ? `等待 ${call.waitId}` : call.waitAll ? "等待全部后台任务" : "等待后台任务",
+    };
+  }
+  if (call.mode === "management") {
+    return { label: "subagent", target: textTarget(call.action ?? "…"), context: call.actionTarget ?? "" };
+  }
+  if (call.mode === "chain") {
+    return {
+      label: "subagent",
+      target: textTarget(`chain ×${call.taskCount}`),
+      context: `${summarizeAgents(call.specs, " → ")}${asyncSuffix}`,
+    };
+  }
+  if (call.mode === "parallel") {
+    return {
+      label: "subagent",
+      target: textTarget(`parallel ×${call.taskCount}`),
+      context: `${summarizeAgents(call.specs, ", ")}${asyncSuffix}`,
+    };
+  }
+  const spec = call.specs[0];
+  return {
+    label: "subagent",
+    target: textTarget(spec?.agent ?? "…"),
+    context: `${firstLineSummary(spec?.task ?? "")}${asyncSuffix}`,
+  };
 }
 
 function fileTarget(value: string): ToolTarget | undefined {

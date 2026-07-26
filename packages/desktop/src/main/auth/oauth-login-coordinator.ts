@@ -30,7 +30,7 @@ export class OauthLoginCoordinator {
 
   constructor(dependencies: OauthLoginCoordinatorDependencies) {
     this.login = dependencies.login;
-    this.createId = dependencies.createId ?? crypto.randomUUID;
+    this.createId = dependencies.createId ?? (() => crypto.randomUUID());
   }
 
   async start(

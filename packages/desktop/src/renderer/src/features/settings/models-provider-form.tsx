@@ -142,14 +142,14 @@ export function ModelsProviderForm({ provider, metadata, onChange, onDelete }: M
                     }
                     options={[
                       { value: "unset", label: "未设置" },
-                      { value: "true", label: "true" },
-                      { value: "false", label: "false" },
+                      { value: "true", label: "发送" },
+                      { value: "false", label: "不发送" },
                     ]}
                   />
                 </label>
               </div>
               <ModelsMapEditor
-                label="Provider headers"
+                label="全局请求头"
                 entries={provider.headers}
                 onChange={(headers) => onChange({ ...provider, headers })}
               />

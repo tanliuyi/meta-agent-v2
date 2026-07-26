@@ -210,6 +210,21 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 提取结构化结果：优先 details，缺失时回退解析 JSON 文本（memory/skill 工具的错误路径只有 JSON 文本）。 */
+export function parseToolResultRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  const parsed = parseToolResult(value);
+  if (!parsed) return undefined;
+  if (parsed.details && Object.keys(parsed.details).length > 0) return parsed.details;
+  const text = parsed.text.trim();
+  if (!text.startsWith("{")) return undefined;
+  try {
+    const record: unknown = JSON.parse(text);
+    return isRecord(record) ? record : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function stripAnsi(value: string): string {
   return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
 }

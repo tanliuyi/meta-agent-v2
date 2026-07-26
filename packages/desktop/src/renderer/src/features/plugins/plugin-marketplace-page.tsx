@@ -6,18 +6,28 @@ import { Link } from "@tanstack/react-router";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import { useState } from "react";
-import type {
-  InstalledMarketplacePluginSummary,
-  MarketplacePluginSummary,
-} from "../../../../shared/plugin-marketplace-contracts.ts";
-import { canInstallMarketplacePlugin, usePluginMarketplace } from "./use-plugin-marketplace.ts";
+import type { MarketplacePluginSummary } from "../../../../shared/plugin-marketplace-contracts.ts";
+import { PluginDetailDialog } from "./plugin-detail-dialog.tsx";
+import { MarketplacePluginCard } from "./plugin-marketplace-card.tsx";
+import { updateAvailable } from "./plugin-marketplace-utils.ts";
+import { usePluginMarketplace } from "./use-plugin-marketplace.ts";
 
 export function PluginMarketplacePage({ returnSession }: { returnSession?: { projectId: string; threadId: string } }) {
   const controller = usePluginMarketplace(returnSession);
+  const [selectedPluginId, setSelectedPluginId] = useState<string>();
   const [pendingInstall, setPendingInstall] = useState<MarketplacePluginSummary>();
   const [pendingUpdate, setPendingUpdate] = useState<MarketplacePluginSummary>();
   const [pendingUninstall, setPendingUninstall] = useState<{ id: string; name: string }>();
   const [applyToCurrentSession, setApplyToCurrentSession] = useState(returnSession !== undefined);
+  const selectedPlugin = controller.page?.plugins.find((plugin) => plugin.id === selectedPluginId);
+  const selectedInstalled = controller.installed?.plugins.find((plugin) => plugin.id === selectedPluginId);
+  const orphanedInstalled = controller.installed?.plugins.filter(
+    (installed) => !controller.page?.plugins.some((plugin) => plugin.id === installed.id),
+  );
+  const mutationPending =
+    controller.installingId !== undefined ||
+    controller.updatingId !== undefined ||
+    controller.uninstallingId !== undefined;
 
   return (
     <>
@@ -103,99 +113,45 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
             </div>
           ) : null}
 
-          {controller.installed?.plugins.some(
-            (installed) => !controller.page?.plugins.some((plugin) => plugin.id === installed.id),
-          ) ? (
-            <section className="plugin-marketplace-list" aria-label="已安装插件">
-              {controller.installed.plugins
-                .filter((installed) => !controller.page?.plugins.some((plugin) => plugin.id === installed.id))
-                .map((installed) => (
-                  <article key={installed.id} className="plugin-marketplace-row">
-                    <div className="plugin-marketplace-row-main">
-                      <div className="plugin-marketplace-row-title">
-                        <strong>{installed.displayName}</strong>
-                        <span>{installed.marketplaceId}</span>
-                      </div>
-                      <div className="plugin-marketplace-row-meta">
-                        <span>{installed.version}</span>
-                        {installed.containsNativeCode ? <span>Native</span> : null}
-                        <span>
-                          {installed.revocation?.status === "blocked"
-                            ? "已阻止"
-                            : installed.revocation?.status === "withdrawn"
-                              ? "已撤回"
-                              : installed.state === "broken"
-                                ? "已损坏"
-                                : "已安装"}
-                        </span>
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      disabled={
-                        controller.installingId !== undefined ||
-                        controller.updatingId !== undefined ||
-                        controller.uninstallingId !== undefined
-                      }
-                      onClick={() => setPendingUninstall({ id: installed.id, name: installed.displayName })}
-                    >
-                      {controller.uninstallingId === installed.id ? "卸载中" : "卸载"}
-                    </Button>
-                  </article>
+          {orphanedInstalled && orphanedInstalled.length > 0 ? (
+            <section className="plugin-marketplace-section" aria-labelledby="installed-plugin-heading">
+              <div className="plugin-marketplace-section-heading">
+                <h3 id="installed-plugin-heading">已安装</h3>
+                <span>当前目录中不可用的本地插件</span>
+              </div>
+              <div className="plugin-marketplace-grid">
+                {orphanedInstalled.map((installed) => (
+                  <MarketplacePluginCard
+                    key={installed.id}
+                    installed={installed}
+                    onOpen={() => setSelectedPluginId(installed.id)}
+                  />
                 ))}
+              </div>
             </section>
           ) : null}
 
-          <section className="plugin-marketplace-list" aria-label="插件目录" aria-busy={controller.loading}>
-            {controller.page?.plugins.map((plugin) => (
-              <article key={plugin.id} className="plugin-marketplace-row" data-status={plugin.status}>
-                <div className="plugin-marketplace-row-main">
-                  <div className="plugin-marketplace-row-title">
-                    <strong>{plugin.name}</strong>
-                    <span>{plugin.publisher.displayName}</span>
-                  </div>
-                  <p>{plugin.description}</p>
-                  <div className="plugin-marketplace-row-meta">
-                    <span>{plugin.compatibleVersion ?? plugin.latestVersion ?? "无兼容版本"}</span>
-                    {plugin.containsNativeCode ? <span>Native</span> : null}
-                    <span>{statusLabel(plugin.status)}</span>
-                    {installedRevocation(plugin.id, controller.installed?.plugins) ? (
-                      <span>
-                        {revocationLabel(installedRevocation(plugin.id, controller.installed?.plugins)!.status)}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  disabled={
-                    controller.installingId !== undefined ||
-                    controller.updatingId !== undefined ||
-                    controller.uninstallingId !== undefined ||
-                    (!controller.installed?.plugins.some((installed) => installed.id === plugin.id) &&
-                      !canInstallMarketplacePlugin(plugin))
-                  }
-                  onClick={() => {
-                    if (updateAvailable(plugin, controller.installed?.plugins)) setPendingUpdate(plugin);
-                    else if (controller.installed?.plugins.some((installed) => installed.id === plugin.id)) {
-                      setPendingUninstall({ id: plugin.id, name: plugin.name });
-                    } else setPendingInstall(plugin);
-                  }}
-                >
-                  {controller.updatingId === plugin.id
-                    ? "更新中"
-                    : controller.uninstallingId === plugin.id
-                      ? "卸载中"
-                      : updateAvailable(plugin, controller.installed?.plugins)
-                        ? "更新"
-                        : controller.installed?.plugins.some((installed) => installed.id === plugin.id)
-                          ? "卸载"
-                          : controller.installingId === plugin.id
-                            ? "安装中"
-                            : "安装"}
-                </Button>
-              </article>
-            ))}
+          <section
+            className="plugin-marketplace-section"
+            aria-labelledby="plugin-catalog-heading"
+            aria-busy={controller.loading}
+          >
+            <div className="plugin-marketplace-section-heading">
+              <h3 id="plugin-catalog-heading">插件目录</h3>
+              {controller.page ? <span>{controller.page.plugins.length} 个插件</span> : null}
+            </div>
+            {controller.page?.plugins.length ? (
+              <div className="plugin-marketplace-grid">
+                {controller.page.plugins.map((plugin) => (
+                  <MarketplacePluginCard
+                    key={plugin.id}
+                    plugin={plugin}
+                    installed={controller.installed?.plugins.find((installed) => installed.id === plugin.id)}
+                    onOpen={() => setSelectedPluginId(plugin.id)}
+                  />
+                ))}
+              </div>
+            ) : null}
             {!controller.loading && !controller.error && controller.page?.plugins.length === 0 ? (
               <div className="plugin-marketplace-empty">没有匹配的插件</div>
             ) : null}
@@ -207,6 +163,29 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
           </section>
         </main>
       </div>
+      <PluginDetailDialog
+        plugin={selectedPlugin}
+        installed={selectedInstalled}
+        marketplaceId={controller.page?.marketplaceId}
+        open={selectedPluginId !== undefined && (selectedPlugin !== undefined || selectedInstalled !== undefined)}
+        mutationPending={mutationPending}
+        installing={controller.installingId === selectedPluginId}
+        updating={controller.updatingId === selectedPluginId}
+        uninstalling={controller.uninstallingId === selectedPluginId}
+        onClose={() => setSelectedPluginId(undefined)}
+        onInstall={(plugin) => {
+          setSelectedPluginId(undefined);
+          setPendingInstall(plugin);
+        }}
+        onUpdate={(plugin) => {
+          setSelectedPluginId(undefined);
+          setPendingUpdate(plugin);
+        }}
+        onUninstall={(id, name) => {
+          setSelectedPluginId(undefined);
+          setPendingUninstall({ id, name });
+        }}
+      />
       <ConfirmDialog
         open={pendingInstall !== undefined}
         title={`安装 ${pendingInstall?.name ?? "插件"}？`}
@@ -251,24 +230,6 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
   );
 }
 
-function installedRevocation(pluginId: string, installed: InstalledMarketplacePluginSummary[] | undefined) {
-  return installed?.find((entry) => entry.id === pluginId)?.revocation;
-}
-
-function revocationLabel(status: "withdrawn" | "blocked"): string {
-  return status === "blocked" ? "当前版本已阻止" : "当前版本已撤回";
-}
-
-function updateAvailable(
-  plugin: MarketplacePluginSummary,
-  installed: InstalledMarketplacePluginSummary[] | undefined,
-): boolean {
-  const current = installed?.find((entry) => entry.id === plugin.id);
-  return (
-    current !== undefined && plugin.compatibleVersion !== undefined && current.version !== plugin.compatibleVersion
-  );
-}
-
 function trustWarning(plugin: MarketplacePluginSummary | undefined): string {
   if (!plugin) return "";
   const nativeWarning = plugin.containsNativeCode ? "该版本包含原生模块或平台二进制。" : "";
@@ -283,11 +244,4 @@ function applyWarning(
   return applyToCurrentSession && returnSession
     ? " 确认后会重新启动当前会话的扩展 worker；如果当前会话正在运行，将先中止当前运行。"
     : "";
-}
-
-function statusLabel(status: "available" | "deprecated" | "withdrawn" | "blocked"): string {
-  if (status === "available") return "可用";
-  if (status === "deprecated") return "已弃用";
-  if (status === "withdrawn") return "已撤回";
-  return "已阻止";
 }

@@ -31,6 +31,8 @@ interface MarketplaceEndpointFileData {
 interface CurrentEndpointSource {
   revision: string;
   data: MarketplaceEndpointFileData;
+  /** Set when the compiled-in default endpoint was injected in memory rather than loaded from disk. */
+  injectedMarketplaceId?: string;
 }
 
 interface MarketplaceSignedEnvelope {
@@ -67,6 +69,7 @@ interface MarketplaceEndpointSettingsServiceOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
   maxResponseBytes?: number;
+  defaultEndpoint?: TrustedMarketplaceEndpoint;
 }
 
 const CONFIRMATION_TTL_MS = 5 * 60_000;
@@ -82,6 +85,7 @@ export class MarketplaceEndpointSettingsService {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
+  private readonly defaultEndpoint?: TrustedMarketplaceEndpoint;
   private readonly confirmations = new Map<string, ConfirmationRecord>();
   private readonly requestResults = new Map<string, SaveMarketplaceEndpointResult>();
 
@@ -92,6 +96,13 @@ export class MarketplaceEndpointSettingsService {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    if (options.defaultEndpoint) {
+      assertEndpointRecord(options.defaultEndpoint);
+      assertTrustedEndpointKey(options.defaultEndpoint);
+      assertTrustedEndpointUrls(options.defaultEndpoint);
+      if (!options.defaultEndpoint.active) throw new Error("Default marketplace endpoint must be active");
+      this.defaultEndpoint = cloneEndpoint(options.defaultEndpoint);
+    }
   }
 
   async getSettings(): Promise<MarketplaceEndpointSettingsSnapshot> {
@@ -125,7 +136,7 @@ export class MarketplaceEndpointSettingsService {
   async testEndpoint(input: TestMarketplaceEndpointInput): Promise<TestMarketplaceEndpointResult> {
     assertTestInput(input);
     try {
-      const baseUrl = await this.normalizeBaseUrl(input.baseUrl);
+      const baseUrl = normalizeBaseUrl(input.baseUrl);
       const endpoint = await this.discover(baseUrl);
       const current = await this.readCurrent();
       const trusted = current.data.endpoints?.find((entry) => sameEndpointIdentity(entry, endpoint));
@@ -164,7 +175,7 @@ export class MarketplaceEndpointSettingsService {
 
   private async saveEndpointLocked(input: SaveMarketplaceEndpointInput): Promise<SaveMarketplaceEndpointResult> {
     assertSaveInput(input);
-    const baseUrl = await this.normalizeBaseUrl(input.baseUrl);
+    const baseUrl = normalizeBaseUrl(input.baseUrl);
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const release = await lockfile.lock(this.path, {
       realpath: false,
@@ -202,7 +213,10 @@ export class MarketplaceEndpointSettingsService {
         this.confirmations.delete(input.confirmationToken!);
       }
       const endpoints = (current.data.endpoints ?? [])
-        .filter((entry) => entry.marketplaceId !== endpoint.marketplaceId)
+        .filter(
+          (entry) =>
+            entry.marketplaceId !== endpoint.marketplaceId && entry.marketplaceId !== current.injectedMarketplaceId,
+        )
         .map((entry) => ({ ...entry, active: false }));
       endpoints.push({ ...endpoint, active: true });
       await this.atomicWrite({
@@ -220,24 +234,6 @@ export class MarketplaceEndpointSettingsService {
     } finally {
       await release();
     }
-  }
-
-  private async normalizeBaseUrl(input: string): Promise<string> {
-    const source = input.trim();
-    let url: URL;
-    try {
-      url = new URL(source);
-    } catch {
-      throw new Error("Marketplace API URL is invalid");
-    }
-    if (url.username || url.password) throw new Error("Marketplace API URL must not contain credentials");
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new Error("Marketplace API URL must use HTTP or HTTPS");
-    }
-    if (url.search || url.hash) throw new Error("Marketplace API URL must not contain a query or fragment");
-    assertSafeUrlPath(source, url.pathname, "Marketplace API URL");
-    if (!url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
-    return url.href;
   }
 
   private async discover(baseUrl: string): Promise<StoredMarketplaceEndpointRecord> {
@@ -267,10 +263,8 @@ export class MarketplaceEndpointSettingsService {
     ) {
       throw new Error("Marketplace well-known signature is invalid");
     }
-    const apiRoot = await this.normalizeDiscoveredUrl(document.apiRoot, baseUrl, false);
-    const artifactOrigins = await Promise.all(
-      document.artifactOrigins.map((origin) => this.normalizeDiscoveredUrl(origin, baseUrl, true)),
-    );
+    const apiRoot = normalizeDiscoveredUrl(document.apiRoot, baseUrl, false);
+    const artifactOrigins = document.artifactOrigins.map((origin) => normalizeDiscoveredUrl(origin, baseUrl, true));
     return {
       marketplaceId: document.marketplaceId,
       baseUrl,
@@ -284,20 +278,6 @@ export class MarketplaceEndpointSettingsService {
       },
       active: true,
     };
-  }
-
-  private async normalizeDiscoveredUrl(value: string, baseUrl: string, originOnly: boolean): Promise<string> {
-    const url = new URL(value, baseUrl);
-    if (url.username || url.password || url.search || url.hash) {
-      throw new Error("Marketplace metadata contains an unsafe URL");
-    }
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new Error("Marketplace metadata URL must use HTTP or HTTPS");
-    }
-    assertSafeUrlPath(value, url.pathname, "Marketplace metadata URL");
-    if (originOnly && url.pathname !== "/") throw new Error("Marketplace artifact origin must not contain a path");
-    if (!originOnly && !url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
-    return originOnly ? url.origin : url.href;
   }
 
   private async fetchJson(url: URL, maxBytes: number): Promise<unknown> {
@@ -323,7 +303,10 @@ export class MarketplaceEndpointSettingsService {
       if (!info.isFile()) throw new Error(`marketplace-endpoints.json is not a regular file: ${this.path}`);
     } catch (error) {
       if (isNodeError(error, "ENOENT")) {
-        return { revision: MISSING_MARKETPLACE_ENDPOINT_REVISION, data: {} };
+        return {
+          revision: MISSING_MARKETPLACE_ENDPOINT_REVISION,
+          ...withDefaultEndpoint({}, this.defaultEndpoint),
+        };
       }
       throw error;
     }
@@ -335,7 +318,7 @@ export class MarketplaceEndpointSettingsService {
       throw new Error("marketplace-endpoints.json JSON syntax invalid");
     }
     assertEndpointFile(value);
-    return { revision: hashBytes(bytes), data: value };
+    return { revision: hashBytes(bytes), ...withDefaultEndpoint(value, this.defaultEndpoint) };
   }
 
   private async atomicWrite(data: MarketplaceEndpointFileData): Promise<void> {
@@ -363,6 +346,107 @@ export class MarketplaceEndpointSettingsService {
     } finally {
       await handle?.close().catch(() => undefined);
       await rm(tempPath, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+function withDefaultEndpoint(
+  data: MarketplaceEndpointFileData,
+  defaultEndpoint: TrustedMarketplaceEndpoint | undefined,
+): { data: MarketplaceEndpointFileData; injectedMarketplaceId?: string } {
+  if (!defaultEndpoint) return { data };
+  const active = data.endpoints?.find(
+    (endpoint) => endpoint.active && endpoint.marketplaceId === data.activeMarketplaceId,
+  );
+  if (active) {
+    if (data.endpoints?.some((endpoint) => endpoint.marketplaceId === defaultEndpoint.marketplaceId)) return { data };
+    return {
+      data: { ...data, endpoints: [...(data.endpoints ?? []), { ...cloneEndpoint(defaultEndpoint), active: false }] },
+      injectedMarketplaceId: defaultEndpoint.marketplaceId,
+    };
+  }
+  const endpoints = (data.endpoints ?? [])
+    .filter((endpoint) => endpoint.marketplaceId !== defaultEndpoint.marketplaceId)
+    .map((endpoint) => ({ ...cloneEndpoint(endpoint), active: false }));
+  endpoints.push(cloneEndpoint(defaultEndpoint));
+  return {
+    data: {
+      ...data,
+      version: data.version ?? 1,
+      activeMarketplaceId: defaultEndpoint.marketplaceId,
+      endpoints,
+    },
+    injectedMarketplaceId: defaultEndpoint.marketplaceId,
+  };
+}
+
+function cloneEndpoint(endpoint: TrustedMarketplaceEndpoint): TrustedMarketplaceEndpoint {
+  return {
+    ...endpoint,
+    artifactOrigins: [...endpoint.artifactOrigins],
+    signing: { ...endpoint.signing },
+  };
+}
+
+function normalizeBaseUrl(input: string): string {
+  const source = input.trim();
+  let url: URL;
+  try {
+    url = new URL(source);
+  } catch {
+    throw new Error("Marketplace API URL is invalid");
+  }
+  if (url.username || url.password) throw new Error("Marketplace API URL must not contain credentials");
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Marketplace API URL must use HTTP or HTTPS");
+  }
+  if (url.search || url.hash) throw new Error("Marketplace API URL must not contain a query or fragment");
+  assertSafeUrlPath(source, url.pathname, "Marketplace API URL");
+  if (!url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
+  return url.href;
+}
+
+function normalizeDiscoveredUrl(value: string, baseUrl: string, originOnly: boolean): string {
+  const url = new URL(value, baseUrl);
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("Marketplace metadata contains an unsafe URL");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Marketplace metadata URL must use HTTP or HTTPS");
+  }
+  assertSafeUrlPath(value, url.pathname, "Marketplace metadata URL");
+  if (originOnly && url.pathname !== "/") throw new Error("Marketplace artifact origin must not contain a path");
+  if (!originOnly && !url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
+  return originOnly ? url.origin : url.href;
+}
+
+function assertTrustedEndpointKey(endpoint: TrustedMarketplaceEndpoint): void {
+  let publicKey: ReturnType<typeof createPublicKey>;
+  try {
+    publicKey = createPublicKey({ key: decodeBase64(endpoint.signing.publicKey), format: "der", type: "spki" });
+  } catch {
+    throw new Error("Default marketplace signing public key is not valid Ed25519 SPKI");
+  }
+  if (publicKey.asymmetricKeyType !== "ed25519") {
+    throw new Error("Default marketplace signing public key must use Ed25519");
+  }
+  const bytes = publicKey.export({ type: "spki", format: "der" });
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  if (endpoint.signing.fingerprint !== `sha256:${hash}` || endpoint.signing.keyId !== `ed25519:${hash.slice(0, 16)}`) {
+    throw new Error("Default marketplace signing identity does not match its public key");
+  }
+}
+
+function assertTrustedEndpointUrls(endpoint: TrustedMarketplaceEndpoint): void {
+  if (normalizeBaseUrl(endpoint.baseUrl) !== endpoint.baseUrl) {
+    throw new Error("Default marketplace base URL is not normalized");
+  }
+  if (normalizeDiscoveredUrl(endpoint.apiRoot, endpoint.baseUrl, false) !== endpoint.apiRoot) {
+    throw new Error("Default marketplace API root is not normalized");
+  }
+  for (const origin of endpoint.artifactOrigins) {
+    if (normalizeDiscoveredUrl(origin, endpoint.baseUrl, true) !== origin) {
+      throw new Error("Default marketplace artifact origin is not normalized");
     }
   }
 }

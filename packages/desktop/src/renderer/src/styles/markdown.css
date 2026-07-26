@@ -37,7 +37,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-family-mono);
-  font-size: 11px;
+  font-size: var(--type-size-meta);
   font-weight: 600;
   text-transform: lowercase;
 }
@@ -71,7 +71,7 @@
   min-width: 100%;
   padding: 8px 0;
   font-family: var(--font-family-mono);
-  font-size: 12px;
+  font-size: var(--type-size-control);
   line-height: 1.65;
   tab-size: 2;
 }
@@ -134,7 +134,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-family-sans);
-  font-size: 11px;
+  font-size: var(--type-size-meta);
   font-weight: 600;
 }
 
@@ -153,7 +153,7 @@
 
 .markdown-table {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--type-size-ui);
   line-height: 1.5;
   border: none;
 }
@@ -181,12 +181,12 @@
 
 .markdown-table-fullscreen-scroll {
   width: 100%;
-  max-height: calc(90dvh - 4rem);
+  max-height: calc(90dvh - 64px);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
 
 .markdown-table-fullscreen {
-  font-size: 14px;
+  font-size: var(--type-size-body);
 }

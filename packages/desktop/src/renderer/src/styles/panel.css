@@ -81,7 +81,7 @@
   border-radius: var(--shape-radius-md);
   background: transparent;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--type-size-control);
   cursor: pointer;
 }
 .panel-tab:hover,
@@ -128,7 +128,7 @@
   padding: 0 10px;
   border-bottom: 1px solid hsl(var(--border));
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--type-size-meta);
 }
 .file-preview > header span {
   min-width: 0;
@@ -144,7 +144,7 @@
   white-space: pre;
   tab-size: 4;
   font-family: var(--font-family-mono);
-  font-size: 12px;
+  font-size: var(--type-size-control);
   line-height: 1.6;
 }
 .file-empty {
@@ -157,11 +157,11 @@
 .file-empty strong {
   margin-top: 12px;
   color: hsl(var(--foreground));
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 .file-empty span {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--type-size-control);
 }
 .file-tree-panel {
   min-width: 0;
@@ -186,7 +186,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--type-size-control);
 }
 .file-tree {
   height: calc(100% - 44px);
@@ -196,7 +196,7 @@
 .file-tree-status {
   margin: 10px;
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--type-size-meta);
 }
 .file-row {
   display: flex;
@@ -209,7 +209,7 @@
   border: 0;
   border-radius: var(--shape-radius-sm);
   background: transparent;
-  font-size: 12px;
+  font-size: var(--type-size-control);
   text-align: left;
   cursor: pointer;
 }
@@ -230,7 +230,7 @@
 .panel-error {
   margin: 8px;
   color: hsl(var(--destructive));
-  font-size: 11px;
+  font-size: var(--type-size-meta);
 }
 
 .task-panel {
@@ -240,7 +240,7 @@
 .task-panel h3 {
   margin: 0 0 10px;
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--type-size-meta);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -254,7 +254,7 @@
   justify-content: space-between;
   min-height: 31px;
   border-bottom: 1px solid hsl(var(--border));
-  font-size: 12px;
+  font-size: var(--type-size-control);
 }
 .task-panel dt,
 .task-panel li span {
@@ -279,7 +279,7 @@
   grid-template-rows: 34px minmax(0, 1fr);
   height: 100%;
   font-family: var(--font-family-mono);
-  font-size: 12px;
+  font-size: var(--type-size-control);
 }
 .terminal-title {
   display: flex;
@@ -310,7 +310,7 @@
   border-radius: var(--shape-radius-xs);
   background: hsl(var(--terminal-error-background));
   color: hsl(var(--terminal-error-foreground));
-  font-size: 10px;
+  font-size: var(--type-size-caption);
 }
 
 .bottom-terminal {
@@ -335,7 +335,7 @@
   padding: 0 9px;
   border-radius: var(--shape-radius-sm);
   color: hsl(var(--terminal-muted));
-  font-size: 11px;
+  font-size: var(--type-size-meta);
 }
 .terminal-tab[data-active] {
   background: hsl(var(--terminal-active));

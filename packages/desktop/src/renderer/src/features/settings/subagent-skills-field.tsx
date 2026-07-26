@@ -15,7 +15,7 @@ export function SubagentSkillsField({
   initialValue,
   skills,
   label = "技能",
-  placeholder = "skill-a, skill-b",
+  placeholder = "输入或选择技能，多个技能用英文逗号分隔",
   onValueChange,
 }: SubagentSkillsFieldProps) {
   const [value, setValue] = useState(initialValue);

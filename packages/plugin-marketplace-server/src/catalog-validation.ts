@@ -10,8 +10,8 @@ import type {
 	PublisherRecord,
 } from "./contracts.ts";
 
-const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
-const ARTIFACT_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+export const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
+export const ARTIFACT_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const STATUSES = new Set<PluginStatus>(["available", "deprecated", "withdrawn", "blocked"]);
 
@@ -132,7 +132,7 @@ function parseArtifact(value: unknown, path: string): CatalogArtifact {
 	};
 }
 
-function parseTarget(value: unknown, path: string): ArtifactTarget {
+export function parseTarget(value: unknown, path: string): ArtifactTarget {
 	const record = objectValue(value, path);
 	return {
 		platform: stringValue(record.platform, `${path}.platform`),

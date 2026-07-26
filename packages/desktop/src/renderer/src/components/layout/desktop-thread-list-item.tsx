@@ -10,7 +10,7 @@ import { memo, useEffect, useState } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
 
 const TREE_GUIDE_START = 14;
-const TREE_LEVEL_INDENT = 12;
+const TREE_LEVEL_INDENT = 14;
 const TREE_TOGGLE_SIZE = 16;
 
 function formatElapsedTime(updatedAt: number, now: number): string {

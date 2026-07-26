@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   readCssColorToken,
+  readCssFontSizePx,
   readCssToken,
   resolveTerminalTheme,
   TERMINAL_COLOR_TOKENS,
+  TERMINAL_FONT_SIZE_TOKEN,
   TERMINAL_FONT_TOKEN,
 } from "../src/renderer/src/shared/lib/terminal-theme.ts";
 
@@ -25,6 +27,30 @@ describe("terminal theme", () => {
     expect(readCssToken(createStyle({ [TERMINAL_FONT_TOKEN]: ` ${value} ` }), TERMINAL_FONT_TOKEN)).toBe(value);
   });
 
+  it("xterm 字号按根字号解析 rem token 并取整", () => {
+    expect(
+      readCssFontSizePx(createStyle({ [TERMINAL_FONT_SIZE_TOKEN]: "0.75rem" }, "16px"), TERMINAL_FONT_SIZE_TOKEN),
+    ).toBe(12);
+    expect(
+      readCssFontSizePx(createStyle({ [TERMINAL_FONT_SIZE_TOKEN]: "0.75rem" }, "18.29px"), TERMINAL_FONT_SIZE_TOKEN),
+    ).toBe(14);
+    expect(
+      readCssFontSizePx(createStyle({ [TERMINAL_FONT_SIZE_TOKEN]: "13px" }, "16px"), TERMINAL_FONT_SIZE_TOKEN),
+    ).toBe(13);
+  });
+
+  it("无效字号 token 明确失败", () => {
+    expect(() =>
+      readCssFontSizePx(createStyle({ [TERMINAL_FONT_SIZE_TOKEN]: "0.75em" }, "16px"), TERMINAL_FONT_SIZE_TOKEN),
+    ).toThrow("Unsupported CSS font size unit");
+    expect(() =>
+      readCssFontSizePx(createStyle({ [TERMINAL_FONT_SIZE_TOKEN]: "0.75rem" }, ""), TERMINAL_FONT_SIZE_TOKEN),
+    ).toThrow("Cannot resolve rem font size");
+    expect(() =>
+      readCssFontSizePx(createStyle({ [TERMINAL_FONT_SIZE_TOKEN]: "abc" }, "16px"), TERMINAL_FONT_SIZE_TOKEN),
+    ).toThrow("Invalid CSS font size token");
+  });
+
   it("从同一份 computed style 解析完整 xterm 主题", () => {
     const style = createStyle({
       [TERMINAL_COLOR_TOKENS.background]: "225 17% 7%",
@@ -42,8 +68,9 @@ describe("terminal theme", () => {
   });
 });
 
-function createStyle(tokens: Readonly<Record<string, string>>) {
+function createStyle(tokens: Readonly<Record<string, string>>, fontSize = "16px") {
   return {
+    fontSize,
     getPropertyValue(property: string): string {
       return tokens[property] ?? "";
     },

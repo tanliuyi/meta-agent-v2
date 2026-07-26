@@ -82,9 +82,11 @@ export function ModelsThinkingMapEditor({ value, onChange }: ModelsThinkingMapEd
           );
         })}
       </div>
-      <Button size="sm" variant="ghost" onClick={() => emit(undefined, true)}>
-        清除映射
-      </Button>
+      <div className="models-inline-actions">
+        <Button size="sm" variant="ghost" onClick={() => emit(undefined, true)}>
+          清除映射
+        </Button>
+      </div>
     </fieldset>
   );
 }

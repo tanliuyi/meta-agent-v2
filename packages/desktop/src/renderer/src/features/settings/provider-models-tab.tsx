@@ -167,10 +167,13 @@ export function ProviderModelsTab({ provider, metadata, builtInModels, onChange 
                     >
                       <span className="providers-custom-model-info">
                         <span className="providers-model-name">{m.config.name || m.config.id}</span>
+                        {m.config.name && m.config.name !== m.config.id ? (
+                          <small className="providers-model-id">{m.config.id}</small>
+                        ) : null}
                       </span>
                     </button>
                     <Button
-                      className="providers-custom-model-delete"
+                      className="providers-custom-model-delete text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       size="icon"
                       variant="ghost"
                       aria-label={`删除 ${m.config.id}`}

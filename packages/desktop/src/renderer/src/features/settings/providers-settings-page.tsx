@@ -67,7 +67,7 @@ export function ProvidersSettingsPage() {
     <div className="settings-content providers-settings">
       <header className="settings-page-heading providers-page-heading">
         <div>
-          <h2>Provider</h2>
+          <h2>模型服务商</h2>
           <span className="providers-subtitle">{statusText(controller.status)}</span>
         </div>
         <div className="providers-actions">
@@ -90,10 +90,20 @@ export function ProvidersSettingsPage() {
           >
             重新载入
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void controller.openModelsExternally()}>
+          <Button
+            size="sm"
+            variant="ghost"
+            title="在外部编辑器打开 models.json"
+            onClick={() => void controller.openModelsExternally()}
+          >
             models.json
           </Button>
-          <Button size="sm" variant="outline" onClick={() => void controller.openAuthExternally()}>
+          <Button
+            size="sm"
+            variant="ghost"
+            title="在外部编辑器打开 auth.json"
+            onClick={() => void controller.openAuthExternally()}
+          >
             auth.json
           </Button>
         </div>

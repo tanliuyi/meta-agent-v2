@@ -5,8 +5,14 @@ export const TERMINAL_COLOR_TOKENS = {
   selectionBackground: "--terminal-selection",
 } as const;
 export const TERMINAL_FONT_TOKEN = "--font-family-mono";
+export const TERMINAL_FONT_SIZE_TOKEN = "--terminal-font-size";
 
 interface CssColorTokens {
+  getPropertyValue(property: string): string;
+}
+
+interface CssFontSizeSource {
+  fontSize: string;
   getPropertyValue(property: string): string;
 }
 
@@ -31,6 +37,26 @@ export function readCssToken(style: CssColorTokens, property: string): string {
   const value = style.getPropertyValue(property).trim();
   if (!value) throw new Error(`Missing CSS token: ${property}`);
   return value;
+}
+
+/**
+ * 把字号 token 解析为 xterm 需要的像素数值。custom property 的 computed value
+ * 不换算相对单位，rem 需按根节点 computed font-size 解析，因此终端字号随
+ * UI 字号偏好缩放；取整避免 canvas 渲染发虚。
+ */
+export function readCssFontSizePx(style: CssFontSizeSource, property: string): number {
+  const value = readCssToken(style, property);
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`Invalid CSS font size token: ${property}=${value}`);
+  if (value.endsWith("rem")) {
+    const rootFontSize = Number.parseFloat(style.fontSize);
+    if (!Number.isFinite(rootFontSize) || rootFontSize <= 0) {
+      throw new Error(`Cannot resolve rem font size without root font-size: ${property}=${value}`);
+    }
+    return Math.round(parsed * rootFontSize);
+  }
+  if (value.endsWith("px")) return Math.round(parsed);
+  throw new Error(`Unsupported CSS font size unit: ${property}=${value}`);
 }
 
 /**

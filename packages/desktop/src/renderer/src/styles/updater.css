@@ -3,7 +3,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.375rem 0.5rem;
+  gap: 6px 8px;
   padding: 0 10px;
   height: 32px;
   border: 1px solid hsl(var(--border));
@@ -20,7 +20,7 @@
   display: block;
   overflow: hidden;
   color: hsl(var(--foreground));
-  font-size: 0.75rem;
+  font-size: var(--type-size-control);
   font-weight: 600;
   letter-spacing: 0;
   text-overflow: ellipsis;
@@ -29,39 +29,39 @@
 
 .update-banner-progress {
   width: 100%;
-  height: 0.25rem;
+  height: 4px;
   grid-column: 1 / -1;
   accent-color: hsl(var(--primary));
 }
 
 .update-banner > button {
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 28px;
+  height: 28px;
 }
 
 .about-settings {
   display: grid;
-  gap: 1.5rem;
+  gap: 24px;
 }
 
 .about-product {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding-bottom: 1.5rem;
-  border-bottom: 0.0625rem solid hsl(var(--border) / 0.8);
+  gap: 16px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
 }
 
 .about-product-mark {
   display: grid;
-  width: 3rem;
-  height: 3rem;
-  flex: 0 0 3rem;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
   place-items: center;
   border-radius: var(--shape-radius-lg);
   background: hsl(var(--foreground));
   color: hsl(var(--background));
-  font-size: 0.875rem;
+  font-size: var(--type-size-body);
   font-weight: 700;
   letter-spacing: 0;
 }
@@ -73,30 +73,30 @@
 }
 
 .about-product h2 {
-  font-size: 1.25rem;
+  font-size: var(--type-size-title);
   font-weight: 650;
   letter-spacing: 0;
 }
 
 .about-product p,
 .about-update-heading p {
-  margin-top: 0.25rem;
+  margin-top: 4px;
   color: hsl(var(--muted-foreground));
-  font-size: 0.75rem;
+  font-size: var(--type-size-control);
 }
 
 .about-update-heading {
-  min-height: 3.5rem;
-  gap: 1rem;
+  min-height: 56px;
+  gap: 16px;
 }
 
 .about-update-status {
   display: grid;
-  gap: 0.625rem;
-  padding: 0.75rem 1rem;
-  border-top: 0.0625rem solid hsl(var(--border) / 0.8);
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid hsl(var(--border) / 0.8);
   color: hsl(var(--muted-foreground));
-  font-size: 0.8125rem;
+  font-size: var(--type-size-ui);
 }
 
 .about-update-status[data-error="true"] {
@@ -106,7 +106,7 @@
 .about-update-status > div {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -116,28 +116,28 @@
 
 .about-update-status progress {
   width: 100%;
-  height: 0.25rem;
+  height: 4px;
   accent-color: hsl(var(--primary));
 }
 
 .about-release-notes {
-  max-height: 10rem;
+  max-height: 160px;
   margin: 0;
-  padding: 0.75rem 1rem;
+  padding: 12px 16px;
   overflow: auto;
-  border-top: 0.0625rem solid hsl(var(--border) / 0.8);
+  border-top: 1px solid hsl(var(--border) / 0.8);
   color: hsl(var(--muted-foreground));
   font-family: inherit;
-  font-size: 0.75rem;
+  font-size: var(--type-size-control);
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .about-footer {
   display: flex;
-  gap: 1rem;
+  gap: 16px;
   color: hsl(var(--muted-foreground));
-  font-size: 0.6875rem;
+  font-size: var(--type-size-meta);
 }
 
 .update-spin {

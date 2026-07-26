@@ -66,8 +66,8 @@ export function ModelsChatTemplateEditor({ entries, onChange }: ModelsChatTempla
                 value={String(entry.value)}
                 onValueChange={(nextValue) => updateValue(index, nextValue === "true", true)}
                 options={[
-                  { value: "true", label: "true" },
-                  { value: "false", label: "false" },
+                  { value: "true", label: "是 (true)" },
+                  { value: "false", label: "否 (false)" },
                 ]}
               />
             ) : kind === "null" || kind.startsWith("thinking.") ? (

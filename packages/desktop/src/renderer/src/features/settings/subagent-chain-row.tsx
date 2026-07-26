@@ -35,7 +35,14 @@ export function SubagentChainRow({ chain, disabled, onEdit, onDelete }: Subagent
           <Pencil />
           编辑
         </Button>
-        <Button variant="ghost" size="icon" title="删除 Chain" disabled={disabled} onClick={onDelete}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          title="删除流程"
+          disabled={disabled}
+          onClick={onDelete}
+        >
           <Trash2 />
         </Button>
       </div>

@@ -5,7 +5,12 @@
     font-family: var(--font-family-sans);
     font-synthesis: none;
     text-rendering: optimizeLegibility;
-    font-size: 100%;
+    /*
+     * --ui-font-size 表达正文字号（--type-size-body = 0.875rem 一档的目标像素），
+     * 根字号按该比例反推，默认 14px 正文即 16px 根字号；文本类 rem 值随之缩放，
+     * 结构尺寸一律 px，不受影响。0.875 必须与 --type-size-body 保持同步。
+     */
+    font-size: calc(var(--ui-font-size, 14px) / 0.875);
   }
 
   * {

@@ -36,7 +36,7 @@ export function ModelSelectorItem({ model, className, children, onSelect, ...pro
           <span className="flex min-w-0 flex-col leading-tight">
             <span className="truncate font-medium">{model.name}</span>
             {model.description ? (
-              <span className="truncate text-[11px] text-muted-foreground">{model.description}</span>
+              <span className="truncate text-(length:--type-size-meta) text-muted-foreground">{model.description}</span>
             ) : null}
           </span>
         </>

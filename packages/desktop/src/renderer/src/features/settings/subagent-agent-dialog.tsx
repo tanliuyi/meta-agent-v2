@@ -124,10 +124,7 @@ export function SubagentAgentDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className="subagent-editor-dialog"
-        style={{ width: "min(65rem, calc(100vw - 2rem))", maxWidth: "none", padding: 0, gap: 0 }}
-      >
+      <DialogContent className="subagent-editor-dialog w-[min(65rem,calc(100vw-32px))] max-w-none gap-0 p-0">
         <div className="subagent-editor-header">
           <div className="subagent-editor-header-text">
             <h2>{title}</h2>
@@ -141,6 +138,7 @@ export function SubagentAgentDialog({
                 required
                 disabled={builtin || Boolean(agent)}
                 defaultValue={draft.current.name}
+                placeholder="例如：code-reviewer，可用字母、数字和连字符"
                 onChange={(event) => updateDraft({ name: event.target.value })}
               />
             </SubagentFormField>
@@ -169,6 +167,7 @@ export function SubagentAgentDialog({
               disabled={builtin}
               defaultValue={draft.current.description}
               className="min-h-[4.5rem]"
+              placeholder="说明该智能体擅长什么、何时应被调用"
               onChange={(event) => updateDraft({ description: event.target.value })}
             />
           </SubagentFormField>
@@ -183,7 +182,7 @@ export function SubagentAgentDialog({
             <SubagentFormField label="备用模型">
               <Input
                 defaultValue={draft.current.fallbackModels}
-                placeholder="provider/model, provider/model"
+                placeholder="多个模型用英文逗号分隔，如 openai/gpt-4.1"
                 onChange={(event) => updateDraft({ fallbackModels: event.target.value })}
               />
             </SubagentFormField>
@@ -222,6 +221,7 @@ export function SubagentAgentDialog({
             <Textarea
               defaultValue={draft.current.systemPrompt}
               className="min-h-[13rem] font-mono text-xs"
+              placeholder="自定义系统提示词；留空使用默认提示词"
               onChange={(event) => updateDraft({ systemPrompt: event.target.value })}
             />
           </SubagentFormField>
@@ -291,7 +291,7 @@ export function SubagentAgentDialog({
           <SubagentFormField label="工具">
             <Input
               defaultValue={draft.current.tools}
-              placeholder="read, bash, mcp:server.tool"
+              placeholder="多个工具用英文逗号分隔，如 read, bash"
               onChange={(event) => updateDraft({ tools: event.target.value })}
             />
           </SubagentFormField>
@@ -408,7 +408,7 @@ export function SubagentAgentDialog({
             <SubagentFormField label="阻断工具">
               <Input
                 defaultValue={draft.current.toolBlock}
-                placeholder="* 或 read, grep"
+                placeholder="输入 * 阻断全部，或用英文逗号分隔工具名"
                 onChange={(event) => updateDraft({ toolBlock: event.target.value })}
               />
             </SubagentFormField>

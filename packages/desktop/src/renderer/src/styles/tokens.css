@@ -27,13 +27,16 @@
   --color-ring: hsl(var(--ring));
   --font-sans: var(--font-family-sans);
   --font-mono: var(--font-family-mono);
-  --radius-sm: calc(var(--radius) - 0.125rem);
+  --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 0.125rem);
-  --radius-xl: calc(var(--radius) + 0.3125rem);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 5px);
 }
 
 @theme {
+  /* 钉住 Tailwind spacing 基准：p-*、gap-*、w-*、h-* 等工具类不随 UI 字号缩放。 */
+  --spacing: 4px;
+
   --animate-collapsible-down: collapsible-down var(--animation-duration, var(--motion-duration-standard))
     var(--motion-ease-standard);
   --animate-collapsible-up: collapsible-up var(--animation-duration, var(--motion-duration-standard))
@@ -60,8 +63,11 @@
 
 @layer theme {
   :root {
-    --font-family-sans: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-family-sans-default: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-family-sans: var(--ui-font-family, var(--font-family-sans-default));
     --font-family-mono: "Cascadia Mono", Consolas, monospace;
+    /* xterm 通过 readCssFontSizePx 解析此 token，rem 值随 UI 字号偏好缩放。 */
+    --terminal-font-size: var(--type-size-control);
 
     --type-size-caption: 0.625rem;
     --type-size-meta: 0.6875rem;
@@ -73,34 +79,34 @@
     --type-line-normal: 1.5;
     --type-line-relaxed: 1.6;
 
-    --space-1: 0.125rem;
-    --space-2: 0.25rem;
-    --space-3: 0.375rem;
-    --space-4: 0.5rem;
-    --space-5: 0.625rem;
-    --space-6: 0.75rem;
-    --space-7: 1rem;
-    --space-8: 1.5rem;
-    --space-9: 2rem;
+    --space-1: 2px;
+    --space-2: 4px;
+    --space-3: 6px;
+    --space-4: 8px;
+    --space-5: 10px;
+    --space-6: 12px;
+    --space-7: 16px;
+    --space-8: 24px;
+    --space-9: 32px;
 
-    --control-size-xs: 1.5rem;
-    --control-size-sm: 1.75rem;
-    --control-size-md: 1.9rem;
-    --control-size-lg: 2.25rem;
-    --control-height-input: 1.875rem;
-    --control-height-select: 1.875rem;
+    --control-size-xs: 24px;
+    --control-size-sm: 28px;
+    --control-size-md: 30.4px;
+    --control-size-lg: 36px;
+    --control-height-input: 30px;
+    --control-height-select: 30px;
     --control-height-button: var(--control-size-md);
     --control-height-button-sm: var(--control-size-md);
-    --control-height-button-lg: 2.5rem;
+    --control-height-button-lg: 40px;
     --control-height-button-icon: var(--control-size-xs);
 
-    --radius: 0.4375rem;
-    --shape-radius-xs: 0.25rem;
-    --shape-radius-sm: 0.3125rem;
-    --shape-radius-md: 0.4375rem;
-    --shape-radius-lg: 0.5625rem;
-    --shape-radius-xl: 0.75rem;
-    --shape-radius-round: 62.4375rem;
+    --radius: 7px;
+    --shape-radius-xs: 4px;
+    --shape-radius-sm: 5px;
+    --shape-radius-md: 7px;
+    --shape-radius-lg: 9px;
+    --shape-radius-xl: 12px;
+    --shape-radius-round: 999px;
 
     --motion-duration-fast: 120ms;
     --motion-duration-standard: 200ms;
@@ -121,25 +127,25 @@
     --stack-blocker: 90;
     --stack-notification: 100;
 
-    --layout-window-header-height: 2.5rem;
-    --layout-window-control-width: 2.875rem;
-    --layout-topbar-height: 2.3rem;
-    --layout-sidebar-width: 17.5rem;
-    --layout-sidebar-min-width: 13.75rem;
-    --layout-sidebar-max-width: 26.25rem;
-    --layout-thread-max-width: 44rem;
-    --composer-radius: 1.5rem;
+    --layout-window-header-height: 40px;
+    --layout-window-control-width: 46px;
+    --layout-topbar-height: 36.8px;
+    --layout-sidebar-width: 280px;
+    --layout-sidebar-min-width: 220px;
+    --layout-sidebar-max-width: 420px;
+    --layout-thread-max-width: 704px;
+    --composer-radius: 24px;
     --composer-padding: var(--space-4);
     --composer-background: color-mix(in oklab, hsl(var(--muted)) 30%, hsl(var(--background)));
-    --layout-workbench-min-width: 22.5rem;
-    --layout-workbench-max-width: 47.5rem;
-    --layout-workbench-default-width: 22.5rem;
-    --layout-terminal-min-height: 10rem;
+    --layout-workbench-min-width: 360px;
+    --layout-workbench-max-width: 760px;
+    --layout-workbench-default-width: 360px;
+    --layout-terminal-min-height: 160px;
     --layout-terminal-max-height: 58vh;
-    --layout-terminal-default-height: 17.5rem;
+    --layout-terminal-default-height: 280px;
 
-    --focus-ring-width: 0.125rem;
-    --focus-ring-offset: 0.0625rem;
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 1px;
   }
 
   html[data-theme="light"],
@@ -186,17 +192,17 @@
     --focus-ring-color: hsl(var(--ring) / 0.35);
     --settings-accent: 211 100% 43%;
     --settings-accent-foreground: 0 0% 100%;
-    --settings-group-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.04);
-    --settings-control-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.06);
-    --workspace-edge-shadow: -0.125rem 0 0.375rem rgb(0 0 0 / 0.04);
-    --composer-queue-shadow: 0 -0.5rem 1.5rem rgb(0 0 0 / 0.035);
+    --settings-group-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    --settings-control-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+    --workspace-edge-shadow: -2px 0 6px rgb(0 0 0 / 0.04);
+    --composer-queue-shadow: 0 -8px 24px rgb(0 0 0 / 0.035);
     --selection-background: hsl(var(--primary) / 0.14);
     --scrollbar-thumb: hsl(var(--foreground) / 0.18);
     --scrollbar-thumb-hover: hsl(var(--foreground) / 0.3);
-    --elevation-popover: 0 0.625rem 1.875rem hsl(var(--foreground) / 0.12);
-    --elevation-workbench: -0.75rem 0 1.875rem hsl(var(--foreground) / 0.08);
-    --elevation-composer: 0 0.25rem 1rem -0.5rem rgb(0 0 0 / 0.08), 0 0.0625rem 0.125rem rgb(0 0 0 / 0.04);
-    --elevation-composer-focus: 0 0.375rem 1.5rem -0.5rem rgb(0 0 0 / 0.12), 0 0.0625rem 0.125rem rgb(0 0 0 / 0.05);
+    --elevation-popover: 0 10px 30px hsl(var(--foreground) / 0.12);
+    --elevation-workbench: -12px 0 30px hsl(var(--foreground) / 0.08);
+    --elevation-composer: 0 4px 16px -8px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+    --elevation-composer-focus: 0 6px 24px -8px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.05);
   }
 
   html[data-theme="dark"] {
@@ -242,17 +248,17 @@
     --focus-ring-color: hsl(var(--ring) / 0.5);
     --settings-accent: 211 100% 62%;
     --settings-accent-foreground: 220 30% 10%;
-    --settings-group-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.28);
-    --settings-control-shadow: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.3);
-    --workspace-edge-shadow: -0.125rem 0 0.375rem rgb(0 0 0 / 0.3);
-    --composer-queue-shadow: 0 -0.5rem 1.5rem rgb(0 0 0 / 0.035);
+    --settings-group-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
+    --settings-control-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+    --workspace-edge-shadow: -2px 0 6px rgb(0 0 0 / 0.3);
+    --composer-queue-shadow: 0 -8px 24px rgb(0 0 0 / 0.035);
     --selection-background: hsl(var(--primary) / 0.18);
     --scrollbar-thumb: hsl(var(--foreground) / 0.24);
     --scrollbar-thumb-hover: hsl(var(--foreground) / 0.38);
-    --elevation-popover: 0 0.75rem 2rem rgb(0 0 0 / 0.42);
-    --elevation-workbench: -0.75rem 0 1.875rem rgb(0 0 0 / 0.3);
-    --elevation-composer: 0 0.0625rem 0.125rem rgb(0 0 0 / 0.3);
-    --elevation-composer-focus: 0 0.125rem 0.625rem rgb(0 0 0 / 0.35);
+    --elevation-popover: 0 12px 32px rgb(0 0 0 / 0.42);
+    --elevation-workbench: -12px 0 30px rgb(0 0 0 / 0.3);
+    --elevation-composer: 0 1px 2px rgb(0 0 0 / 0.3);
+    --elevation-composer-focus: 0 2px 10px rgb(0 0 0 / 0.35);
   }
 }
 

@@ -38,6 +38,9 @@ const config: MarketplaceServerConfig = {
 	artifactOrigins: ["https://artifacts.example.com"],
 	signingPrivateKey: privateKey,
 	ephemeralSigningKey: false,
+	maxArtifactBytes: 32 * 1024 * 1024,
+	allowRegistration: true,
+	maxLoginFailures: 10,
 };
 
 let app: INestApplication;

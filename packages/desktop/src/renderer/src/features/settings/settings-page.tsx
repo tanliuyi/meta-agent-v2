@@ -1,12 +1,12 @@
 import { DesktopSectionShell } from "@renderer/components/layout/desktop-section-shell";
 import { settingsReturnSession } from "@renderer/state/settings-navigation";
 import { Link, Outlet, useSearch } from "@tanstack/react-router";
-import Antenna from "lucide-react/dist/esm/icons/antenna.mjs";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
-import GitFork from "lucide-react/dist/esm/icons/git-fork.mjs";
+import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Puzzle from "lucide-react/dist/esm/icons/puzzle.mjs";
+import Server from "lucide-react/dist/esm/icons/server.mjs";
 
 /** 提供不依赖 Desktop session runtime 的设置页布局。 */
 export function SettingsPage() {
@@ -39,23 +39,23 @@ export function SettingsPage() {
         className="settings-menu-item"
         activeOptions={{ exact: true }}
       >
-        <Palette />
+        <Palette aria-hidden="true" />
         <span>个性化</span>
       </Link>
       <Link to="/settings/models" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
-        <Antenna />
-        <span>Provider</span>
+        <Server aria-hidden="true" />
+        <span>模型服务商</span>
       </Link>
       <Link to="/settings/extensions" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
-        <Puzzle />
+        <Puzzle aria-hidden="true" />
         <span>扩展</span>
       </Link>
       <Link to="/settings/subagents" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
-        <GitFork />
+        <Bot aria-hidden="true" />
         <span>子智能体</span>
       </Link>
       <Link to="/settings/about" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
-        <Info />
+        <Info aria-hidden="true" />
         <span>关于</span>
       </Link>
     </>

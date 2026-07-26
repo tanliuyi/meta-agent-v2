@@ -229,6 +229,322 @@ describe("ToolView TUI parity", () => {
   });
 });
 
+describe("subagent 工具详情", () => {
+  it("single 模式标题展示 agent 与任务摘要", () => {
+    const markup = renderToolView(
+      toolCall({
+        toolName: "subagent",
+        args: { agent: "researcher", task: "调研竞品\n输出报告" },
+      }),
+    );
+
+    expect(markup).toContain(">researcher</span>");
+    expect(markup).toContain("调研竞品");
+    expect(markup).not.toContain("输出报告");
+    expect(markup).not.toContain("&quot;");
+  });
+
+  it("parallel 模式标题按 count 展开任务数", () => {
+    const markup = renderToolView(
+      toolCall({
+        toolName: "subagent",
+        args: {
+          tasks: [
+            { agent: "researcher", task: "a", count: 2 },
+            { agent: "writer", task: "b" },
+          ],
+        },
+      }),
+    );
+
+    expect(markup).toContain("parallel ×3");
+    expect(markup).toContain("researcher, writer");
+  });
+
+  it("chain 模式标题展示步骤数与 agent 顺序", () => {
+    const markup = renderToolView(
+      toolCall({
+        toolName: "subagent",
+        args: {
+          chain: [
+            { agent: "scout", task: "a" },
+            { agent: "planner", task: "b" },
+          ],
+        },
+      }),
+    );
+
+    expect(markup).toContain("chain ×2");
+    expect(markup).toContain("scout → planner");
+  });
+
+  it.each([
+    ["缺少 details", toolResult("兼容模式最终输出")],
+    ["只有空 results", toolResult("兼容模式最终输出", { mode: "single", results: [] })],
+  ])("成功结果%s时回退展示普通文本", (_scenario, result) => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{ agent: "legacy-agent", task: "兼容调用" }}
+        result={result}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("兼容模式最终输出");
+  });
+
+  it("运行中的 partial details 渲染逐 agent 进度行", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{ agent: "researcher", task: "调研" }}
+        result={toolResult("progress", {
+          mode: "single",
+          results: [],
+          progress: [
+            {
+              index: 0,
+              agent: "researcher",
+              status: "running",
+              task: "调研",
+              currentTool: "grep",
+              currentToolArgs: "pattern",
+              recentTools: [],
+              recentOutput: [],
+              toolCount: 4,
+              tokens: 1234,
+              durationMs: 65_000,
+            },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("运行中");
+    expect(markup).toContain("grep pattern");
+    expect(markup).toContain("4 次工具");
+    expect(markup).toContain("1.2k tok");
+    expect(markup).toContain("1m5s");
+    expect(markup).not.toContain("&quot;status&quot;");
+  });
+
+  it("完成后的 details 渲染结果状态、输出与汇总，不落 JSON", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{
+          tasks: [
+            { agent: "researcher", task: "调研" },
+            { agent: "writer", task: "撰写" },
+          ],
+        }}
+        result={toolResult("done", {
+          mode: "parallel",
+          results: [
+            {
+              agent: "researcher",
+              task: "调研",
+              exitCode: 0,
+              usage: { input: 1000, output: 2000, cacheRead: 0, cacheWrite: 0, cost: 0.12, turns: 5 },
+              model: "claude-sonnet-5",
+              finalOutput: "调研结论第一行",
+            },
+            {
+              agent: "writer",
+              task: "撰写",
+              exitCode: 1,
+              error: "工具超出预算",
+              usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 },
+            },
+          ],
+          totalChildUsage: { input: 1010, output: 2020, cacheRead: 0, cacheWrite: 0, cost: 0.12, turns: 6 },
+          totalCost: { inputTokens: 1010, outputTokens: 2020, costUsd: 0.12 },
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("完成");
+    expect(markup).toContain("claude-sonnet-5");
+    expect(markup).toContain("调研结论第一行");
+    expect(markup).toContain("失败");
+    expect(markup).toContain("工具超出预算");
+    expect(markup).toContain("共 2 个子任务");
+    expect(markup).toContain("$0.12");
+    expect(markup).not.toContain("&quot;exitCode&quot;");
+  });
+
+  it("完成输出按 Markdown 渲染", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{ agent: "writer", task: "撰写结论" }}
+        result={toolResult("done", {
+          mode: "single",
+          results: [
+            {
+              agent: "writer",
+              exitCode: 0,
+              finalOutput: "**结论**\n\n- 第一项\n- 第二项",
+            },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain('data-streamdown="strong"');
+    expect(markup).toContain('data-streamdown="unordered-list"');
+    expect(markup).toContain('data-streamdown="list-item"');
+    expect(markup).not.toContain('<pre class="tool-result"');
+  });
+
+  it("subagent_wait 展示等待说明并复用结果行", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent_wait"
+        args={{ all: true }}
+        result={toolResult("done", {
+          mode: "single",
+          results: [
+            {
+              agent: "bg-runner",
+              task: "后台任务",
+              exitCode: 0,
+              usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 },
+              finalOutput: "后台完成",
+            },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("等待全部后台任务完成");
+    expect(markup).toContain("bg-runner");
+    expect(markup).toContain("后台完成");
+  });
+
+  it("异步提交只展示后台启动提示", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{ agent: "researcher", task: "调研", async: true }}
+        result={toolResult("submitted", { mode: "single", results: [], asyncId: "abc123" })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("已在后台启动（ID: abc123）");
+    expect(markup).toContain("异步执行");
+  });
+});
+
+describe("memory 工具详情", () => {
+  it("add 以 diff 风格展示内容并给出人话结果", () => {
+    const details = { success: true, target: "project", usage: "120/5000", entry_count: 3 };
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="memory"
+        args={{ action: "add", target: "project", content: "用户偏好中文回复" }}
+        result={toolResult(JSON.stringify(details), details)}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("用户偏好中文回复");
+    expect(markup).toContain("tool-diff-line-add");
+    expect(markup).toContain("已记住 · 项目记忆");
+    expect(markup).toContain("容量 120/5000");
+    expect(markup).not.toContain("&quot;success&quot;");
+  });
+
+  it("replace 同时展示旧值与新值", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="memory"
+        args={{ action: "replace", target: "memory", old_text: "旧偏好", content: "新偏好" }}
+        result={undefined}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("tool-diff-line-remove");
+    expect(markup).toContain("旧偏好");
+    expect(markup).toContain("tool-diff-line-add");
+    expect(markup).toContain("新偏好");
+  });
+
+  it("错误路径从 JSON 文本兜底解析错误信息", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="memory"
+        args={{ action: "add", target: "memory" }}
+        result={toolResult(JSON.stringify({ success: false, error: "Content is required for 'add' action." }), {})}
+        error
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("Content is required");
+    expect(markup).toContain('data-tone="destructive"');
+    expect(markup).not.toContain("&quot;success&quot;");
+  });
+
+  it("memory_search 只展示可读结果文本，不展示参数 JSON", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="memory_search"
+        args={{ query: "auth 配置", limit: 5 }}
+        result={toolResult('Found 1 memories matching "auth 配置":')}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("Found 1 memories");
+    expect(markup).not.toContain("&quot;query&quot;");
+  });
+
+  it("skill_manage create 展示描述与成功提示", () => {
+    const details = { success: true, skillId: "global:demo", message: "Skill 'demo' created." };
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="skill_manage"
+        args={{ action: "create", name: "demo", scope: "global", description: "演示技能" }}
+        result={toolResult(JSON.stringify(details), details)}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("演示技能");
+    expect(markup).toContain("Skill &#x27;demo&#x27; created.");
+    expect(markup).not.toContain("&quot;skillId&quot;");
+  });
+});
+
 describe("tool TUI formatting", () => {
   it("解包 Pi toolResult 并去除 ANSI 控制符", () => {
     expect(parseToolResult(toolResult("\u001b[31mfailed\u001b[0m", { source: "test" }))).toEqual({

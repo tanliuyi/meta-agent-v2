@@ -109,10 +109,7 @@ export function SubagentChainDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className="subagent-editor-dialog subagent-chain-dialog"
-        style={{ width: "min(65rem, calc(100vw - 2rem))", maxWidth: "none", padding: 0, gap: 0 }}
-      >
+      <DialogContent className="subagent-editor-dialog subagent-chain-dialog w-[min(65rem,calc(100vw-32px))] max-w-none gap-0 p-0">
         <div className="subagent-editor-header">
           <div className="subagent-editor-header-text">
             <h2>{chain ? `编辑 ${chain.name}` : "新建流程"}</h2>
@@ -123,7 +120,12 @@ export function SubagentChainDialog({
           <div className="subagent-form-grid">
             <label className="subagent-field">
               <span>名称</span>
-              <Input required defaultValue={name.current} onChange={(event) => (name.current = event.target.value)} />
+              <Input
+                required
+                defaultValue={name.current}
+                placeholder="例如：review-flow，可用字母、数字和连字符"
+                onChange={(event) => (name.current = event.target.value)}
+              />
             </label>
             <label className="subagent-field">
               <span>作用域</span>
@@ -150,6 +152,7 @@ export function SubagentChainDialog({
               required
               defaultValue={description.current}
               className="min-h-[4.5rem]"
+              placeholder="说明这个流程会完成什么任务、适合何时使用"
               onChange={(event) => (description.current = event.target.value)}
             />
           </label>
@@ -222,7 +225,7 @@ export function SubagentChainDialog({
                       onValueChange={(value) => updateStep(index, { model: value })}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue />
+                        <SelectValue placeholder="使用智能体模型" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="">使用智能体模型</SelectItem>
@@ -240,6 +243,7 @@ export function SubagentChainDialog({
                   <Textarea
                     className="min-h-[4.5rem]"
                     defaultValue={step.task}
+                    placeholder="说明这一步要智能体完成什么"
                     onChange={(event) => updateStep(index, { task: event.target.value })}
                   />
                 </label>
@@ -248,6 +252,7 @@ export function SubagentChainDialog({
                     <span>阶段</span>
                     <Input
                       defaultValue={step.phase}
+                      placeholder="用于归类进度，如：代码检查"
                       onChange={(event) => updateStep(index, { phase: event.target.value })}
                     />
                   </label>
@@ -255,6 +260,7 @@ export function SubagentChainDialog({
                     <span>标签</span>
                     <Input
                       defaultValue={step.label}
+                      placeholder="运行时显示的名称，如：检查改动"
                       onChange={(event) => updateStep(index, { label: event.target.value })}
                     />
                   </label>
@@ -277,14 +283,14 @@ export function SubagentChainDialog({
                     <span>读取路径</span>
                     <Input
                       defaultValue={step.reads}
-                      placeholder="路径1, 路径2"
+                      placeholder="多个路径用英文逗号分隔，如 reports/a.md, reports/b.md"
                       onChange={(event) => updateStep(index, { reads: event.target.value })}
                     />
                   </label>
                   <SubagentSkillsField
                     initialValue={step.skills}
                     skills={skills}
-                    placeholder="技能1, 技能2"
+                    placeholder="输入或选择技能，多个技能用英文逗号分隔"
                     onValueChange={(value) => updateStep(index, { skills: value })}
                   />
                   <label className="subagent-toggle-field subagent-chain-progress">
@@ -302,6 +308,7 @@ export function SubagentChainDialog({
           <Button
             type="button"
             variant="outline"
+            className="w-full border-dashed"
             onClick={() => {
               steps.current = [...steps.current, emptyStep(agents[0]?.name)];
               rerenderSteps((revision) => revision + 1);

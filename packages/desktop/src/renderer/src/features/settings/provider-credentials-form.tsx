@@ -1,5 +1,7 @@
 import { Button } from "@renderer/shared/ui/button";
+import ShieldCheck from "lucide-react/dist/esm/icons/shield-check.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import TriangleAlert from "lucide-react/dist/esm/icons/triangle-alert.mjs";
 import { useRef, useState } from "react";
 import type { AuthProviderDraft, AuthProviderInfo } from "../../../../shared/auth-config-contracts.ts";
 import { AuthApiKeyForm } from "./auth-api-key-form.tsx";
@@ -45,11 +47,17 @@ export function ProviderCredentialsForm({
   ) : null;
 
   if (current?.oauth) {
+    const expired = current.oauth.expired;
     return (
       <div className="providers-form-grid">
-        <p>OAuth 已配置</p>
-        <p>Provider: {current.oauth.providerName}</p>
-        <p>过期: {current.oauth.expired ? "已过期" : current.oauth.expires}</p>
+        <div className="providers-cred-card" data-tone={expired ? "warning" : "success"}>
+          {expired ? <TriangleAlert aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />}
+          <div className="providers-cred-card-body">
+            <strong>{expired ? "OAuth 凭据已过期" : "OAuth 已配置"}</strong>
+            <span>Provider：{current.oauth.providerName}</span>
+            <span>{expired ? "请重新登录以刷新凭据。" : `过期时间：${current.oauth.expires}`}</span>
+          </div>
+        </div>
         {oauthButton}
         <div className="providers-editor-delete-cred">
           <Button variant="destructive" size="sm" onClick={() => updateProvider(undefined, true)}>

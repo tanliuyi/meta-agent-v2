@@ -61,6 +61,12 @@ if ! remote "test -f '$ENV_PATH'"; then
       process.stdout.write(Buffer.from(pem).toString("base64"));
     '
   })"
+  ADMIN_TOKEN="$({
+    node --input-type=module -e '
+      import { randomBytes } from "node:crypto";
+      process.stdout.write(randomBytes(32).toString("base64url"));
+    '
+  })"
   {
     printf 'MARKETPLACE_HOST=0.0.0.0\n'
     printf 'MARKETPLACE_PORT=4317\n'
@@ -70,8 +76,10 @@ if ! remote "test -f '$ENV_PATH'"; then
     printf 'MARKETPLACE_ARTIFACT_ORIGINS=\n'
     printf 'MARKETPLACE_SIGNING_PRIVATE_KEY=%s\n' "$SIGNING_KEY"
     printf 'MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY=false\n'
+    printf 'MARKETPLACE_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
   } | remote "umask 077; cat > '$ENV_PATH'"
   unset SIGNING_KEY
+  unset ADMIN_TOKEN
 fi
 
 remote "set -eu; chmod 600 '$ENV_PATH'; cd '$COMPOSE_DIR'; current=\$(docker compose ps -q plugin-marketplace); if [ -n \"\$current\" ]; then docker inspect --format='{{.Config.Image}}' \"\$current\" > .previous-image; fi; MARKETPLACE_IMAGE='$IMAGE' docker compose up -d --build --remove-orphans"

@@ -48,6 +48,46 @@ describe("OauthLoginCoordinator", () => {
     expect(events.map((event) => event.type)).toEqual(["auth", "request"]);
   });
 
+  test("generates distinct request ids with the built-in generator when createId is not injected", async () => {
+    const requests: Extract<AuthOauthLoginEvent, { type: "request" }>[] = [];
+    const coordinator = new OauthLoginCoordinator({
+      login: async (_providerId, callbacks) => {
+        expect(await callbacks.onPrompt({ message: "Paste code" })).toBe("prompt-value");
+        expect(
+          await callbacks.onSelect({
+            message: "Pick an account",
+            options: [
+              { id: "personal", label: "Personal" },
+              { id: "work", label: "Work" },
+            ],
+          }),
+        ).toBe("work");
+        return snapshot;
+      },
+    });
+
+    const result = coordinator.start(
+      3,
+      { loginId: "login-default-ids", providerId: "anthropic" },
+      (event) => {
+        if (event.type !== "request") return;
+        requests.push(event);
+        coordinator.respond(3, {
+          loginId: event.loginId,
+          requestId: event.requestId,
+          value: event.requestType === "prompt" ? "prompt-value" : "work",
+        });
+      },
+      vi.fn(),
+    );
+
+    await expect(result).resolves.toBe(snapshot);
+    const requestIds = requests.map((event) => event.requestId);
+    expect(requestIds).toHaveLength(2);
+    expect(new Set(requestIds).size).toBe(2);
+    for (const requestId of requestIds) expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   test("rejects responses from another renderer", async () => {
     let request: Extract<AuthOauthLoginEvent, { type: "request" }> | undefined;
     const coordinator = new OauthLoginCoordinator({

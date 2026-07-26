@@ -1,11 +1,12 @@
 import "reflect-metadata";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { MarketplaceArtifactService } from "./artifact-service.ts";
-import { CatalogRepository } from "./catalog-repository.ts";
 import type { MarketplaceServerConfig } from "./config.ts";
 import { createMarketplaceHttpModule } from "./http-module.ts";
 import { MarketplaceSigningService } from "./signing-service.ts";
+import { MarketplaceStore } from "./store.ts";
 
 export interface CreateMarketplaceAppOptions {
 	config: MarketplaceServerConfig;
@@ -15,20 +16,35 @@ export interface CreateMarketplaceAppOptions {
 }
 
 export async function createMarketplaceApp(options: CreateMarketplaceAppOptions): Promise<INestApplication> {
-	const repository = await CatalogRepository.load(options.catalogPath);
+	const clock = options.clock ?? Date.now;
 	const signing = new MarketplaceSigningService(options.config.signingPrivateKey);
-	const artifacts = new MarketplaceArtifactService(repository, signing, options.config.marketplaceId);
-	const module = createMarketplaceHttpModule({
-		config: options.config,
-		repository,
+	let databasePath: string | undefined;
+	if (options.config.dataDir) {
+		mkdirSync(options.config.dataDir, { recursive: true });
+		databasePath = join(options.config.dataDir, "marketplace.db");
+	}
+	const store = await MarketplaceStore.open({
+		...(databasePath ? { databasePath } : {}),
+		...(options.catalogPath ? { catalogPath: options.catalogPath } : {}),
 		signing,
-		artifacts,
-		clock: options.clock ?? Date.now,
+		marketplaceId: options.config.marketplaceId,
+		clock,
 	});
-	const app = await NestFactory.create(module, {
-		logger: options.logger ?? ["error", "warn", "log"],
-	});
-	if (options.config.basePath) app.setGlobalPrefix(options.config.basePath.slice(1));
-	app.enableShutdownHooks();
-	return app;
+	try {
+		const module = createMarketplaceHttpModule({
+			config: options.config,
+			store,
+			signing,
+			clock,
+		});
+		const app = await NestFactory.create(module, {
+			logger: options.logger ?? ["error", "warn", "log"],
+		});
+		if (options.config.basePath) app.setGlobalPrefix(options.config.basePath.slice(1));
+		app.enableShutdownHooks();
+		return app;
+	} catch (error) {
+		store.close();
+		throw error;
+	}
 }

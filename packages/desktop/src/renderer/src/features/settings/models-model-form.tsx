@@ -107,8 +107,8 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
               }
               options={[
                 { value: "unset", label: "继承 / 默认" },
-                { value: "true", label: "true" },
-                { value: "false", label: "false" },
+                { value: "true", label: "支持" },
+                { value: "false", label: "不支持" },
               ]}
             />
           </label>
@@ -125,7 +125,7 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
                     updateConfig({ ...modelRef.current.config, input: input.size > 0 ? [...input] : undefined });
                   }}
                 />
-                {kind}
+                {kind === "text" ? "文本" : "图片"}
               </label>
             ))}
           </fieldset>

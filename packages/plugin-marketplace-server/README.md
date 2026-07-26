@@ -16,6 +16,8 @@ The server reads the process environment directly; it does not load `.env` files
 
 ## Endpoints
 
+Public read API:
+
 - `GET /.well-known/meta-agent-marketplace.json`
 - `GET /health`
 - `GET /v1/plugins`
@@ -24,14 +26,62 @@ The server reads the process environment directly; it does not load `.env` files
 - `GET /v1/plugins/:pluginId/versions/:version`
 - `GET /v1/plugins/:pluginId/versions/:version/artifacts`
 - `GET /v1/plugins/:pluginId/versions/:version/artifacts/:artifactId/download`
+- `GET /v1/plugins/:pluginId/ratings`
+- `GET /v1/plugins/:pluginId/stats`
 - `GET /v1/artifacts/:pluginId/:version/:artifactId`
 - `GET /v1/revocations`
 
+Accounts (`Authorization: Bearer <token>` where noted):
+
+- `POST /v1/auth/register` — `{ username, password }`, disabled when `MARKETPLACE_ALLOW_REGISTRATION=false`
+- `POST /v1/auth/login`
+- `POST /v1/auth/logout` (auth)
+- `GET /v1/auth/me` (auth)
+
+Ratings (user account token):
+
+- `PUT /v1/plugins/:pluginId/rating` — `{ stars: 1..5, review? }`, one rating per user, upsert
+- `DELETE /v1/plugins/:pluginId/rating`
+
+Publishing (publisher member or admin token):
+
+- `GET /v1/publish/plugins/:pluginId` — publisher view including drafts
+- `PUT /v1/publish/plugins/:pluginId` — create or update plugin metadata
+- `POST /v1/publish/plugins/:pluginId/versions` — declare a draft version and its artifacts
+- `PUT /v1/publish/plugins/:pluginId/versions/:version/artifacts/:artifactId` — upload a payload zip (`application/zip` or `application/octet-stream` raw body)
+- `POST /v1/publish/plugins/:pluginId/versions/:version/publish`
+- `POST /v1/publish/plugins/:pluginId/versions/:version/deprecate`
+- `DELETE /v1/publish/plugins/:pluginId/versions/:version` — drafts only
+
+Administration (`MARKETPLACE_ADMIN_TOKEN` bearer token):
+
+- `GET /v1/admin/publishers`
+- `PUT /v1/admin/publishers/:publisherId` — `{ displayName, verified }`
+- `PUT /v1/admin/publishers/:publisherId/members/:username`
+- `DELETE /v1/admin/publishers/:publisherId/members/:username`
+- `POST /v1/admin/revocations` — `{ pluginId, version, status: withdrawn|blocked, reasonCode, message, artifactIds?, replacementVersion? }`
+
 `MARKETPLACE_BASE_PATH` prefixes every endpoint for reverse-proxy deployments. `MARKETPLACE_PUBLIC_BASE_URL` is the externally visible HTTP or HTTPS base URL returned in discovery metadata. `MARKETPLACE_ARTIFACT_ORIGINS` is a comma-separated HTTP(S) allowlist added to the server's own public origin. HTTP is supported for internal deployments regardless of signing-key policy; operators remain responsible for the confidentiality and integrity properties of their transport network.
 
-The catalog in `catalog/plugins.json` is deterministic seed data. The server generates and caches a signed `.meta-plugin` reference artifact for each catalog artifact identity, reports its actual SHA-256 and size, and serves it from the fixed `/v1/artifacts/...` route. It never serves a catalog-supplied local path.
+## Storage and accounts
 
-Each archive contains canonical `market-manifest.json`, detached `signature.json`, and declared files beneath `payload/`. The Ed25519 signature covers the exact canonical manifest bytes; the download metadata covers the complete archive SHA-256 and byte size. Artifact URLs are short-lived transport metadata and are not plugin identity. Replace the seed repository and generated reference artifacts through their service boundaries when persistent storage is introduced.
+State lives in SQLite through the Node built-in `node:sqlite` module (no native dependencies). When `MARKETPLACE_DATA_DIR` is unset the store is in-memory and reseeded from `catalog/plugins.json` on every start, which preserves the previous stateless development behavior. When `MARKETPLACE_DATA_DIR` is set, `marketplace.db` is created there, the catalog seeds only an empty database, and a pinned `MARKETPLACE_SIGNING_PRIVATE_KEY` is required so stored artifact signatures stay verifiable across restarts.
+
+Accounts are username/password (scrypt-hashed) with 30-day bearer session tokens. The admin surface uses the static `MARKETPLACE_ADMIN_TOKEN` instead of a user account; admins create publishers and grant publish rights by adding usernames as publisher members. Failed logins are throttled per client IP: after `MARKETPLACE_MAX_LOGIN_FAILURES` failures (default 10) within a 15-minute window, further login attempts return `429 AUTH_RATE_LIMITED` until the window expires. A successful login resets the counter; `0` disables throttling.
+
+## Publishing workflow
+
+1. Admin: `PUT /v1/admin/publishers/acme` then `PUT /v1/admin/publishers/acme/members/alice`.
+2. Publisher: `PUT /v1/publish/plugins/com.acme.tools` with name, description, categories, and `publisherId`.
+3. Declare a draft version with changelog, Desktop compatibility, capabilities, and artifact metadata including each artifact's `entry` (payload-relative) and target.
+4. Upload each artifact as a zip of payload files. The server validates the archive (path safety, duplicate case-normalized paths, file-count and size limits), builds the canonical `market-manifest.json`, signs it with the marketplace key, and repacks a deterministic `.meta-plugin` archive containing `market-manifest.json`, `signature.json`, and `payload/**`.
+5. `POST .../publish` makes the version publicly listed; drafts are invisible to the read API. Publishers can deprecate published versions; withdrawing or blocking goes through `POST /v1/admin/revocations`, which also feeds the signed `/v1/revocations` list.
+
+Uploads are capped by `MARKETPLACE_MAX_ARTIFACT_BYTES` (default 32 MiB). The download metadata always reports the final signed archive SHA-256 and byte size, and `/v1/artifacts/...` serves the stored bytes; catalog-supplied local paths are never served.
+
+## Ratings and download statistics
+
+Authenticated users can rate each plugin once (1..5 stars plus optional review); ratings aggregate into `rating: { count, average }` on plugin summaries and details, with a histogram and recent entries on `/v1/plugins/:pluginId/ratings`. Artifact byte downloads increment per-version counters exposed as `downloadCount` on summaries/details and as totals on `/v1/plugins/:pluginId/stats`. These marketplace-level fields are additive; Desktop clients that only validate the core catalog contract ignore them.
 
 ## Docker deployment
 
@@ -55,7 +105,9 @@ Defaults:
 - Host binding: `100.91.230.10:4317`
 - Marketplace ID: `meta-agent-development`
 
-On the first deployment, the script generates an Ed25519 key locally and writes only its base64 PKCS#8 value to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file so the marketplace fingerprint remains stable. Back up `.env.production` separately; deleting it creates a new marketplace identity that Desktop clients must confirm again.
+On the first deployment, the script generates an Ed25519 key and an admin token locally and writes them to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file so the marketplace fingerprint remains stable. Back up `.env.production` separately; deleting it creates a new marketplace identity that Desktop clients must confirm again. Deployments that predate the admin API keep working with admin endpoints disabled until `MARKETPLACE_ADMIN_TOKEN` is added to `.env.production`.
+
+The container persists SQLite state in the `marketplace-data` named volume mounted at `/data` (`MARKETPLACE_DATA_DIR=/data` is set by Compose). Back up the volume alongside `.env.production`; removing it discards accounts, published plugins, ratings, and download counters, after which the catalog seed repopulates an empty database.
 
 Override the SSH destination or remote root without editing tracked files:
 

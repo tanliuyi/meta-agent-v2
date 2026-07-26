@@ -4,7 +4,12 @@ import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
+import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
+import Globe from "lucide-react/dist/esm/icons/globe.mjs";
+import KeyRound from "lucide-react/dist/esm/icons/key-round.mjs";
+import SlidersHorizontal from "lucide-react/dist/esm/icons/sliders-horizontal.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import Wrench from "lucide-react/dist/esm/icons/wrench.mjs";
 import { useEffect, useRef, useState } from "react";
 import type {
   AuthOauthLoginEvent,
@@ -161,10 +166,7 @@ export function ProviderEditDialog({
         if (!open) commitAndClose();
       }}
     >
-      <DialogContent
-        className="providers-editor-dialog"
-        style={{ width: "min(65rem, calc(100vw - 2rem))", maxWidth: "none", padding: 0, gap: 0 }}
-      >
+      <DialogContent className="providers-editor-dialog w-[min(65rem,calc(100vw-32px))] max-w-none gap-0 p-0">
         <div className="providers-editor-header">
           <div>
             <h2 className="providers-editor-title">{entry.displayName}</h2>
@@ -174,11 +176,26 @@ export function ProviderEditDialog({
 
         <Tabs.Root className="settings-tabs" value={activeTab} onValueChange={setActiveTab}>
           <Tabs.List className="settings-tab-list" aria-label="Provider 配置">
-            <Tabs.Trigger value="connection">连接</Tabs.Trigger>
-            <Tabs.Trigger value="credentials">凭据</Tabs.Trigger>
-            <Tabs.Trigger value="models">模型</Tabs.Trigger>
-            <Tabs.Trigger value="overrides">覆盖</Tabs.Trigger>
-            <Tabs.Trigger value="compat">兼容性</Tabs.Trigger>
+            <Tabs.Trigger value="connection">
+              <Globe aria-hidden="true" />
+              连接
+            </Tabs.Trigger>
+            <Tabs.Trigger value="credentials">
+              <KeyRound aria-hidden="true" />
+              凭据
+            </Tabs.Trigger>
+            <Tabs.Trigger value="models">
+              <Boxes aria-hidden="true" />
+              模型
+            </Tabs.Trigger>
+            <Tabs.Trigger value="overrides">
+              <SlidersHorizontal aria-hidden="true" />
+              覆盖
+            </Tabs.Trigger>
+            <Tabs.Trigger value="compat">
+              <Wrench aria-hidden="true" />
+              兼容性
+            </Tabs.Trigger>
           </Tabs.List>
 
           <Tabs.Content value="connection" className="settings-tab-content">
@@ -254,8 +271,8 @@ export function ProviderEditDialog({
           </Tabs.Content>
         </Tabs.Root>
 
-        <DialogFooter className="providers-editor-footer">
-          <Button variant="ghost" onClick={() => setDeleteConfirmationOpen(true)}>
+        <DialogFooter className="providers-editor-footer flex-row justify-between sm:justify-between">
+          <Button variant="ghost" className="providers-editor-delete" onClick={() => setDeleteConfirmationOpen(true)}>
             <Trash2 />
             删除
           </Button>

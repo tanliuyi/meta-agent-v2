@@ -1,9 +1,16 @@
-import { readCssToken, resolveTerminalTheme, TERMINAL_FONT_TOKEN } from "@renderer/shared/lib/terminal-theme";
+import {
+  readCssFontSizePx,
+  readCssToken,
+  resolveTerminalTheme,
+  TERMINAL_FONT_SIZE_TOKEN,
+  TERMINAL_FONT_TOKEN,
+} from "@renderer/shared/lib/terminal-theme";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TerminalEvent } from "../../../../shared/contracts.ts";
 import { errorMessage } from "../../shared/lib/error-message.ts";
+import { useFont } from "../../state/font.tsx";
 import { useTheme } from "../../state/theme.tsx";
 import { useSessionScope } from "../session-context.tsx";
 
@@ -19,8 +26,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
   const { record } = useSessionScope();
   const { projectId, threadId } = record.identity;
   const { resolvedTheme } = useTheme();
+  const { fontSize: uiFontSize } = useFont();
   const container = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const syncSizeRef = useRef<(() => void) | null>(null);
   const revision = useRef(0);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -53,7 +62,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     const terminal = new Terminal({
       cursorBlink: true,
       fontFamily: readCssToken(rootStyle, TERMINAL_FONT_TOKEN),
-      fontSize: 12,
+      fontSize: readCssFontSizePx(rootStyle, TERMINAL_FONT_SIZE_TOKEN),
       lineHeight: 1.25,
       letterSpacing: 0,
       scrollback: 5000,
@@ -102,6 +111,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     };
     const resize = new ResizeObserver(syncSize);
     resize.observe(container.current);
+    syncSizeRef.current = syncSize;
     fit.fit();
     lastGrid = { columns: terminal.cols, rows: terminal.rows };
 
@@ -123,6 +133,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     return () => {
       active = false;
       terminalRef.current = null;
+      syncSizeRef.current = null;
       resize.disconnect();
       if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
       input.dispose();
@@ -137,6 +148,15 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
       terminalRef.current.options.theme = resolveTerminalTheme(getComputedStyle(document.documentElement));
     }
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const next = readCssFontSizePx(getComputedStyle(document.documentElement), TERMINAL_FONT_SIZE_TOKEN);
+    if (terminal.options.fontSize === next) return;
+    terminal.options.fontSize = next;
+    syncSizeRef.current?.();
+  }, [uiFontSize]);
 
   return (
     <div className="terminal-view">

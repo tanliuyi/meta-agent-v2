@@ -1,49 +1,35 @@
-import {
-	BadRequestException,
-	Controller,
-	type DynamicModule,
-	Get,
-	GoneException,
-	Module,
-	NotFoundException,
-	Param,
-	Req,
-	Res,
-	type Type,
-} from "@nestjs/common";
-import { rcompare } from "semver";
-import type { GeneratedMarketplaceArtifact, MarketplaceArtifactService } from "./artifact-service.ts";
-import type { CatalogRepository } from "./catalog-repository.ts";
-import type { MarketplaceServerConfig } from "./config.ts";
+import { type DynamicModule, GoneException, Module, Param, Req, Res, type Type } from "@nestjs/common";
 import type {
-	CatalogArtifact,
-	CatalogPlugin,
-	CatalogPluginVersion,
 	MarketplaceArtifactMetadata,
-	MarketplaceErrorBody,
 	MarketplacePluginDetail,
 	MarketplacePluginVersionDetail,
 	MarketplaceRevocationData,
 	MarketplaceRuntimeQuery,
+	StoredPlugin,
+	StoredPluginVersion,
 	WellKnownMarketplaceData,
 } from "./contracts.ts";
-import type { MarketplaceSigningService } from "./signing-service.ts";
+import { createAdminControllers } from "./http-admin.ts";
+import { createAuthControllers } from "./http-auth.ts";
+import { createCommunityControllers } from "./http-community.ts";
+import { applyController, applyParameter, applyRoute } from "./http-decorators.ts";
+import { artifactMetadata, artifactUrl, pluginDetail, versionDetail } from "./http-mapping.ts";
+import { createPublishControllers } from "./http-publish.ts";
+import { badRequest, errorBody, type MarketplaceHttpRuntime, notFound } from "./http-util.ts";
+
+export type { MarketplaceHttpRuntime } from "./http-util.ts";
 
 interface RequestLike {
 	query: Record<string, unknown>;
 }
 
+interface DownloadRequestLike {
+	method: string;
+}
+
 interface ResponseLike {
 	setHeader(name: string, value: string | number): void;
 	send(body: Uint8Array): unknown;
-}
-
-export interface MarketplaceHttpRuntime {
-	config: MarketplaceServerConfig;
-	repository: CatalogRepository;
-	signing: MarketplaceSigningService;
-	artifacts: MarketplaceArtifactService;
-	clock(): number;
 }
 
 export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): DynamicModule {
@@ -63,7 +49,7 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 				protocolVersion: 1,
 				marketplaceId: runtime.config.marketplaceId,
 				apiRoot: `${runtime.config.publicBaseUrl}/v1`,
-				artifactOrigins: effectiveArtifactOrigins(runtime.config),
+				artifactOrigins: effectiveArtifactOrigins(runtime),
 				signing: {
 					algorithm: "ed25519",
 					keyId: runtime.signing.keyId,
@@ -81,7 +67,7 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			const limit = parseLimit(query.limit);
 			const runtimeQuery = parseRuntimeQuery(query);
 			try {
-				return runtime.repository.list({
+				return runtime.store.list({
 					...(optionalQueryString(query.query, "query")
 						? { query: optionalQueryString(query.query, "query") }
 						: {}),
@@ -104,37 +90,37 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 
 		detail(pluginId: string): MarketplacePluginDetail {
 			return pluginDetail(
-				requirePlugin(runtime.repository, pluginId),
+				requirePlugin(runtime, pluginId),
 				runtime.config.publicBaseUrl,
-				runtime.artifacts,
+				runtime.store.pluginAggregates(pluginId),
 			);
 		}
 
 		versions(pluginId: string): MarketplacePluginVersionDetail[] {
-			return requirePlugin(runtime.repository, pluginId).versions.map((version) =>
-				versionDetail(pluginId, version, runtime.config.publicBaseUrl, runtime.artifacts),
+			return requirePlugin(runtime, pluginId).versions.map((version) =>
+				versionDetail(pluginId, version, runtime.config.publicBaseUrl),
 			);
 		}
 
 		version(pluginId: string, version: string): MarketplacePluginVersionDetail {
-			const found = runtime.repository.getVersion(pluginId, version);
+			const found = runtime.store.getPublicVersion(pluginId, version);
 			if (!found) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
-			return versionDetail(pluginId, found, runtime.config.publicBaseUrl, runtime.artifacts);
+			return versionDetail(pluginId, found, runtime.config.publicBaseUrl);
 		}
 
 		artifacts(pluginId: string, version: string): { artifacts: MarketplaceArtifactMetadata[] } {
-			const found = requireArtifactVersion(runtime.repository, pluginId, version);
+			const found = requireAvailableVersion(runtime, pluginId, version);
 			return {
 				artifacts: found.artifacts.map((artifact) =>
-					artifactMetadata(pluginId, version, artifact, runtime.config.publicBaseUrl, runtime.artifacts),
+					artifactMetadata(pluginId, version, artifact, runtime.config.publicBaseUrl),
 				),
 			};
 		}
 
 		download(pluginId: string, version: string, artifactId: string) {
-			requireArtifactVersion(runtime.repository, pluginId, version);
-			const artifact = runtime.artifacts.get(pluginId, version, artifactId);
-			if (!artifact) {
+			const found = requireAvailableVersion(runtime, pluginId, version);
+			const artifact = found.artifacts.find(({ id }) => id === artifactId);
+			if (!artifact || artifact.sha256 === null || artifact.size === null) {
 				throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
 			}
 			const url = artifactUrl(runtime.config.publicBaseUrl, pluginId, version, artifactId);
@@ -150,11 +136,21 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	}
 
 	class ArtifactsController {
-		bytes(pluginId: string, version: string, artifactId: string, response: ResponseLike): unknown {
-			requireArtifactVersion(runtime.repository, pluginId, version);
-			const artifact = runtime.artifacts.get(pluginId, version, artifactId);
+		bytes(
+			pluginId: string,
+			version: string,
+			artifactId: string,
+			request: DownloadRequestLike,
+			response: ResponseLike,
+		): unknown {
+			requireAvailableVersion(runtime, pluginId, version);
+			const artifact = runtime.store.getArtifactContent(pluginId, version, artifactId);
 			if (!artifact) {
 				throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
+			}
+			// Express routes HEAD to this GET handler; only count downloads that transfer bytes.
+			if (request.method === "GET") {
+				runtime.store.incrementDownload(pluginId, version, artifactId);
 			}
 			response.setHeader("content-type", "application/vnd.meta-agent.plugin+zip");
 			response.setHeader("content-length", artifact.size);
@@ -178,47 +174,57 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 				issuedAt,
 				nextUpdateAt: issuedAt + 4 * 60 * 60 * 1000,
 				revokedKeys: [],
-				pluginVersions: runtime.repository.getRevocations(),
+				pluginVersions: runtime.store.getRevocations(),
 			};
 			return runtime.signing.envelope(data);
 		}
 	}
 
 	applyController(HealthController, "");
-	applyGet(HealthController.prototype, "health", "health");
+	applyRoute(HealthController.prototype, "health", "get", "health");
 
 	applyController(DiscoveryController, "");
-	applyGet(DiscoveryController.prototype, "discovery", ".well-known/meta-agent-marketplace.json");
+	applyRoute(DiscoveryController.prototype, "discovery", "get", ".well-known/meta-agent-marketplace.json");
 
 	applyController(PluginsController, "v1/plugins");
-	applyGet(PluginsController.prototype, "list", "");
+	applyRoute(PluginsController.prototype, "list", "get", "");
 	applyParameter(PluginsController.prototype, "list", 0, Req());
-	applyGet(PluginsController.prototype, "detail", ":pluginId");
+	applyRoute(PluginsController.prototype, "detail", "get", ":pluginId");
 	applyParameter(PluginsController.prototype, "detail", 0, Param("pluginId"));
-	applyGet(PluginsController.prototype, "versions", ":pluginId/versions");
+	applyRoute(PluginsController.prototype, "versions", "get", ":pluginId/versions");
 	applyParameter(PluginsController.prototype, "versions", 0, Param("pluginId"));
-	applyGet(PluginsController.prototype, "version", ":pluginId/versions/:version");
+	applyRoute(PluginsController.prototype, "version", "get", ":pluginId/versions/:version");
 	applyParameter(PluginsController.prototype, "version", 0, Param("pluginId"));
 	applyParameter(PluginsController.prototype, "version", 1, Param("version"));
-	applyGet(PluginsController.prototype, "artifacts", ":pluginId/versions/:version/artifacts");
+	applyRoute(PluginsController.prototype, "artifacts", "get", ":pluginId/versions/:version/artifacts");
 	applyParameter(PluginsController.prototype, "artifacts", 0, Param("pluginId"));
 	applyParameter(PluginsController.prototype, "artifacts", 1, Param("version"));
-	applyGet(PluginsController.prototype, "download", ":pluginId/versions/:version/artifacts/:artifactId/download");
+	applyRoute(
+		PluginsController.prototype,
+		"download",
+		"get",
+		":pluginId/versions/:version/artifacts/:artifactId/download",
+	);
 	applyParameter(PluginsController.prototype, "download", 0, Param("pluginId"));
 	applyParameter(PluginsController.prototype, "download", 1, Param("version"));
 	applyParameter(PluginsController.prototype, "download", 2, Param("artifactId"));
 
 	applyController(ArtifactsController, "v1/artifacts");
-	applyGet(ArtifactsController.prototype, "bytes", ":pluginId/:version/:artifactId");
+	applyRoute(ArtifactsController.prototype, "bytes", "get", ":pluginId/:version/:artifactId");
 	applyParameter(ArtifactsController.prototype, "bytes", 0, Param("pluginId"));
 	applyParameter(ArtifactsController.prototype, "bytes", 1, Param("version"));
 	applyParameter(ArtifactsController.prototype, "bytes", 2, Param("artifactId"));
-	applyParameter(ArtifactsController.prototype, "bytes", 3, Res());
+	applyParameter(ArtifactsController.prototype, "bytes", 3, Req());
+	applyParameter(ArtifactsController.prototype, "bytes", 4, Res());
 
 	applyController(RevocationsController, "v1");
-	applyGet(RevocationsController.prototype, "revocations", "revocations");
+	applyRoute(RevocationsController.prototype, "revocations", "get", "revocations");
 
-	class MarketplaceModule {}
+	class MarketplaceModule {
+		onApplicationShutdown(): void {
+			runtime.store.close();
+		}
+	}
 	Module({
 		controllers: [
 			HealthController,
@@ -226,89 +232,39 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			PluginsController,
 			ArtifactsController,
 			RevocationsController,
+			...createAuthControllers(runtime),
+			...createAdminControllers(runtime),
+			...createPublishControllers(runtime),
+			...createCommunityControllers(runtime),
 		],
 	})(MarketplaceModule);
 
 	return { module: MarketplaceModule as Type<unknown> };
 }
 
-function pluginDetail(
-	plugin: CatalogPlugin,
-	publicBaseUrl: string,
-	artifacts: MarketplaceArtifactService,
-): MarketplacePluginDetail {
-	const latestVersion = [...plugin.versions].sort((left, right) => rcompare(left.version, right.version))[0]?.version;
-	return {
-		id: plugin.id,
-		name: plugin.name,
-		description: plugin.description,
-		publisher: { ...plugin.publisher },
-		categories: [...plugin.categories],
-		...(plugin.iconAssetId ? { iconAssetId: plugin.iconAssetId } : {}),
-		publishedAt: plugin.publishedAt,
-		updatedAt: plugin.updatedAt,
-		...(latestVersion ? { latestVersion } : {}),
-		versions: plugin.versions.map((version) => versionDetail(plugin.id, version, publicBaseUrl, artifacts)),
-	};
+function requirePlugin(runtime: MarketplaceHttpRuntime, pluginId: string): StoredPlugin {
+	const plugin = runtime.store.getPublicPlugin(pluginId);
+	if (!plugin) throw notFound("PLUGIN_NOT_FOUND", `Plugin not found: ${pluginId}`);
+	return plugin;
 }
 
-function versionDetail(
-	pluginId: string,
-	version: CatalogPluginVersion,
-	publicBaseUrl: string,
-	artifacts: MarketplaceArtifactService,
-): MarketplacePluginVersionDetail {
-	return {
-		version: version.version,
-		status: version.status,
-		changelog: version.changelog,
-		publishedAt: version.publishedAt,
-		desktop: { ...version.desktop },
-		capabilities: [...version.capabilities],
-		artifacts: version.artifacts.map((artifact) =>
-			artifactMetadata(pluginId, version.version, artifact, publicBaseUrl, artifacts),
-		),
-	};
-}
-
-function artifactMetadata(
+function requireAvailableVersion(
+	runtime: MarketplaceHttpRuntime,
 	pluginId: string,
 	version: string,
-	artifact: CatalogArtifact,
-	publicBaseUrl: string,
-	artifacts: MarketplaceArtifactService,
-): MarketplaceArtifactMetadata {
-	const generated = requireGeneratedArtifact(artifacts, pluginId, version, artifact.id);
-	return {
-		id: artifact.id,
-		target: { ...artifact.target },
-		sha256: generated.sha256,
-		size: generated.size,
-		containsNativeCode: artifact.containsNativeCode,
-		preferred: artifact.preferred,
-		downloadEndpoint: `${publicBaseUrl}/v1/plugins/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}/artifacts/${encodeURIComponent(artifact.id)}/download`,
-	};
+): StoredPluginVersion {
+	const found = runtime.store.getPublicVersion(pluginId, version);
+	if (!found) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
+	if (found.status === "withdrawn" || found.status === "blocked") {
+		throw new GoneException(
+			errorBody("PLUGIN_VERSION_UNAVAILABLE", `Plugin version is ${found.status}: ${pluginId}@${version}`),
+		);
+	}
+	return found;
 }
 
-function requireGeneratedArtifact(
-	artifacts: MarketplaceArtifactService,
-	pluginId: string,
-	version: string,
-	artifactId: string,
-): GeneratedMarketplaceArtifact {
-	const generated = artifacts.get(pluginId, version, artifactId);
-	if (!generated) throw new Error(`Catalog artifact generation failed: ${pluginId}@${version}/${artifactId}`);
-	return generated;
-}
-
-function artifactUrl(publicBaseUrl: string, pluginId: string, version: string, artifactId: string): URL {
-	return new URL(
-		`${publicBaseUrl}/v1/artifacts/${encodeURIComponent(pluginId)}/${encodeURIComponent(version)}/${encodeURIComponent(artifactId)}`,
-	);
-}
-
-function effectiveArtifactOrigins(config: MarketplaceServerConfig): string[] {
-	return [...new Set([new URL(config.publicBaseUrl).origin, ...config.artifactOrigins])];
+function effectiveArtifactOrigins(runtime: MarketplaceHttpRuntime): string[] {
+	return [...new Set([new URL(runtime.config.publicBaseUrl).origin, ...runtime.config.artifactOrigins])];
 }
 
 function parseRuntimeQuery(query: Record<string, unknown>): MarketplaceRuntimeQuery {
@@ -372,51 +328,4 @@ function queryString(value: unknown, name: string): string {
 		throw badRequest("QUERY_INVALID", `${name} must be a non-empty string of at most 256 characters`);
 	}
 	return value;
-}
-
-function requirePlugin(repository: CatalogRepository, pluginId: string): CatalogPlugin {
-	const plugin = repository.getPlugin(pluginId);
-	if (!plugin) throw notFound("PLUGIN_NOT_FOUND", `Plugin not found: ${pluginId}`);
-	return plugin;
-}
-
-function requireArtifactVersion(
-	repository: CatalogRepository,
-	pluginId: string,
-	version: string,
-): CatalogPluginVersion {
-	const found = repository.getVersion(pluginId, version);
-	if (!found) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
-	if (found.status === "withdrawn" || found.status === "blocked") {
-		throw new GoneException(
-			errorBody("PLUGIN_VERSION_UNAVAILABLE", `Plugin version is ${found.status}: ${pluginId}@${version}`),
-		);
-	}
-	return found;
-}
-
-function badRequest(code: string, message: string): BadRequestException {
-	return new BadRequestException(errorBody(code, message));
-}
-
-function notFound(code: string, message: string): NotFoundException {
-	return new NotFoundException(errorBody(code, message));
-}
-
-function errorBody(code: string, message: string): MarketplaceErrorBody {
-	return { error: { code, message } };
-}
-
-function applyController(target: Type<unknown>, path: string): void {
-	Controller(path)(target);
-}
-
-function applyGet(target: object, key: string, path: string): void {
-	const descriptor = Object.getOwnPropertyDescriptor(target, key);
-	if (!descriptor) throw new Error(`Missing route method: ${key}`);
-	Get(path)(target, key, descriptor);
-}
-
-function applyParameter(target: object, key: string, index: number, decorator: ParameterDecorator): void {
-	decorator(target, key, index);
 }

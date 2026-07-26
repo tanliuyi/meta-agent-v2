@@ -1,6 +1,7 @@
 import { TooltipProvider } from "@renderer/shared/ui/tooltip-provider";
 import { DesktopCacheProviders } from "@renderer/state/desktop-cache-providers";
 import { DesktopStoreProvider } from "@renderer/state/desktop-store-context";
+import { FontProvider } from "@renderer/state/font";
 import { LayoutProvider } from "@renderer/state/layout";
 import { ThemeProvider } from "@renderer/state/theme";
 import { ThinkingVisibilityProvider } from "@renderer/state/thinking-visibility";
@@ -16,13 +17,15 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <DesktopStoreProvider>
       <ThemeProvider>
-        <ThinkingVisibilityProvider>
-          <LayoutProvider>
-            <TooltipProvider delayDuration={300} skipDelayDuration={100}>
-              <DesktopCacheProviders>{children}</DesktopCacheProviders>
-            </TooltipProvider>
-          </LayoutProvider>
-        </ThinkingVisibilityProvider>
+        <FontProvider>
+          <ThinkingVisibilityProvider>
+            <LayoutProvider>
+              <TooltipProvider delayDuration={300} skipDelayDuration={100}>
+                <DesktopCacheProviders>{children}</DesktopCacheProviders>
+              </TooltipProvider>
+            </LayoutProvider>
+          </ThinkingVisibilityProvider>
+        </FontProvider>
       </ThemeProvider>
     </DesktopStoreProvider>
   );

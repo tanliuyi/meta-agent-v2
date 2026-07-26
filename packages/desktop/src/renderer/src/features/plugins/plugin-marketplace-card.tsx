@@ -1,0 +1,56 @@
+import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
+import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
+import type {
+  InstalledMarketplacePluginSummary,
+  MarketplacePluginSummary,
+} from "../../../../shared/plugin-marketplace-contracts.ts";
+import { cardState } from "./plugin-marketplace-utils.ts";
+
+interface MarketplacePluginCardProps {
+  plugin?: MarketplacePluginSummary;
+  installed?: InstalledMarketplacePluginSummary;
+  onOpen(): void;
+}
+
+export function MarketplacePluginCard({ plugin, installed, onOpen }: MarketplacePluginCardProps) {
+  if (!plugin && !installed) return null;
+  const name = plugin?.name ?? installed!.displayName;
+  const publisher = plugin?.publisher.displayName ?? installed!.marketplaceId;
+  const description = plugin?.description ?? "该插件已安装，但当前市场目录中没有对应条目。";
+  const version = installed?.version ?? plugin?.compatibleVersion ?? plugin?.latestVersion;
+  const state = cardState(plugin, installed);
+
+  return (
+    <button
+      type="button"
+      className="plugin-marketplace-card"
+      data-status={plugin?.status}
+      aria-label={`查看 ${name} 详情`}
+      onClick={onOpen}
+    >
+      <span className="plugin-marketplace-card-header">
+        <span className="plugin-marketplace-card-icon" aria-hidden="true">
+          <Blocks />
+        </span>
+        <span className="plugin-marketplace-card-title">
+          <strong>{name}</strong>
+          <span>
+            {publisher}
+            {plugin?.publisher.verified ? <BadgeCheck aria-label="已验证发布者" /> : null}
+          </span>
+        </span>
+        <span className="plugin-marketplace-badge" data-tone={state.tone}>
+          {state.label}
+        </span>
+      </span>
+      <span className="plugin-marketplace-card-description">{description}</span>
+      <span className="plugin-marketplace-card-footer">
+        <span>{version ? `v${version}` : "无兼容版本"}</span>
+        {plugin?.categories[0] ? <span>{plugin.categories[0]}</span> : null}
+        {plugin?.containsNativeCode || installed?.containsNativeCode ? (
+          <span className="plugin-marketplace-native-badge">Native</span>
+        ) : null}
+      </span>
+    </button>
+  );
+}

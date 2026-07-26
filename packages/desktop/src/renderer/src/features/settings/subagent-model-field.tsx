@@ -29,7 +29,7 @@ export function SubagentModelField({ initialModel, models, onValueChange }: Suba
         <Input
           type="search"
           value={search}
-          placeholder="provider / model"
+          placeholder="输入模型名称或 ID 搜索"
           onChange={(event) => setSearch(event.target.value)}
         />
       </SubagentFormField>
@@ -42,7 +42,7 @@ export function SubagentModelField({ initialModel, models, onValueChange }: Suba
           }}
         >
           <SelectTrigger className="w-full">
-            <SelectValue />
+            <SelectValue placeholder="继承当前会话模型" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="">继承当前会话模型</SelectItem>

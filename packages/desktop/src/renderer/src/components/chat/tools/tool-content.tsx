@@ -1,7 +1,10 @@
 import { CommandContent } from "./command-content.tsx";
 import { EditContent } from "./edit-content.tsx";
+import { MemoryContent } from "./memory-content.tsx";
 import { ReadContent } from "./read-content.tsx";
 import { SearchContent } from "./search-content.tsx";
+import { SkillManageContent } from "./skill-manage-content.tsx";
+import { SubagentContent } from "./subagent-content.tsx";
 import { ToolCode } from "./tool-code.tsx";
 import type { ToolContentProps } from "./tool-content-types.ts";
 import { formatToolValue } from "./tool-format.ts";
@@ -22,6 +25,29 @@ export function ToolContent({ name, args, result, error, expanded, argsComplete 
   }
   if (name === "grep" || name === "find" || name === "ls") {
     return <SearchContent result={result} error={error} expanded={expanded} previewLines={name === "grep" ? 15 : 20} />;
+  }
+  if (name === "subagent" || name === "subagent_wait") {
+    return (
+      <SubagentContent
+        name={name}
+        args={args}
+        result={result}
+        error={error}
+        expanded={expanded}
+        argsComplete={argsComplete}
+      />
+    );
+  }
+  if (name === "memory") {
+    return <MemoryContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />;
+  }
+  if (name === "memory_search" || name === "session_search") {
+    return <ToolResult result={result} error={error} expanded={expanded} previewLines={15} />;
+  }
+  if (name === "skill_manage") {
+    return (
+      <SkillManageContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />
+    );
   }
   return (
     <>

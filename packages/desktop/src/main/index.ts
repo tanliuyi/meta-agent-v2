@@ -14,6 +14,7 @@ import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, broadcastThreadCatalogUpdate, registerIpc } from "./ipc.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
+import { DEFAULT_PLUGIN_MARKETPLACE } from "./plugins/default-plugin-marketplace.ts";
 import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
 import { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
 import { MarketplaceExtensionApplyJournal } from "./plugins/marketplace-extension-apply-journal.ts";
@@ -232,7 +233,9 @@ app.whenReady().then(async () => {
     builtinDefinitions: builtinExtensions,
     curatedDefinitions: curatedExtensions,
   });
-  const marketplaceEndpoints = new MarketplaceEndpointSettingsService(userDataDir);
+  const marketplaceEndpoints = new MarketplaceEndpointSettingsService(userDataDir, {
+    defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
+  });
   const marketplaceRegistry = new MarketplacePluginRegistry(userDataDir);
   const marketplaceTransactions = new MarketplacePluginTransactionStore(userDataDir);
   const marketplaceGenerationReferences = new MarketplaceGenerationReferenceTracker();

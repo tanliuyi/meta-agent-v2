@@ -2,11 +2,14 @@ import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CatalogRepository, versionCompatible } from "../src/catalog-repository.ts";
+import { versionCompatible } from "../src/catalog-query.ts";
 import { loadMarketplaceServerConfig } from "../src/config.ts";
-import type { CatalogPluginVersion, PluginStatus } from "../src/contracts.ts";
+import type { PluginStatus, StoredPluginVersion } from "../src/contracts.ts";
+import { MarketplaceSigningService } from "../src/signing-service.ts";
+import { MarketplaceStore } from "../src/store.ts";
 
 const directories: string[] = [];
 
@@ -38,6 +41,31 @@ describe("marketplace server config", () => {
 			artifactOrigins: ["https://market.example.com", "https://one.example.com", "https://two.example.com"],
 			ephemeralSigningKey: false,
 		});
+	});
+
+	it("applies defaults and validates persistence, admin, and upload limits", () => {
+		const base = { MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY: "true" };
+		expect(loadMarketplaceServerConfig(base)).toMatchObject({
+			maxArtifactBytes: 32 * 1024 * 1024,
+			allowRegistration: true,
+			maxLoginFailures: 10,
+		});
+		expect(() => loadMarketplaceServerConfig({ ...base, MARKETPLACE_DATA_DIR: "/tmp/data" })).toThrow(
+			"MARKETPLACE_DATA_DIR requires a pinned MARKETPLACE_SIGNING_PRIVATE_KEY",
+		);
+		expect(() => loadMarketplaceServerConfig({ ...base, MARKETPLACE_ADMIN_TOKEN: "short" })).toThrow(
+			"MARKETPLACE_ADMIN_TOKEN must be at least 16 characters",
+		);
+		expect(() => loadMarketplaceServerConfig({ ...base, MARKETPLACE_MAX_ARTIFACT_BYTES: "12" })).toThrow(
+			"MARKETPLACE_MAX_ARTIFACT_BYTES must be an integer between 1024 and 1073741824",
+		);
+		expect(loadMarketplaceServerConfig({ ...base, MARKETPLACE_ALLOW_REGISTRATION: "false" }).allowRegistration).toBe(
+			false,
+		);
+		expect(() => loadMarketplaceServerConfig({ ...base, MARKETPLACE_MAX_LOGIN_FAILURES: "-1" })).toThrow(
+			"MARKETPLACE_MAX_LOGIN_FAILURES must be an integer between 0 and 10000",
+		);
+		expect(loadMarketplaceServerConfig({ ...base, MARKETPLACE_MAX_LOGIN_FAILURES: "0" }).maxLoginFailures).toBe(0);
 	});
 
 	it("rejects mismatched public paths and invalid marketplace identities", () => {
@@ -104,7 +132,7 @@ describe("marketplace server config", () => {
 
 describe("catalog startup validation", () => {
 	it("fails compatibility closed when required runtime metadata is missing or mismatched", async () => {
-		const repository = await CatalogRepository.load();
+		const repository = await openStore();
 		expect(repository.list({ limit: 20, runtime: { includeIncompatible: false } }).plugins).toEqual([]);
 		expect(
 			repository.list({
@@ -142,6 +170,7 @@ describe("catalog startup validation", () => {
 				},
 			}).plugins,
 		).toEqual([]);
+		repository.close();
 	});
 
 	it("fails artifact compatibility closed for unavailable versions and malformed N-API levels", () => {
@@ -157,6 +186,36 @@ describe("catalog startup validation", () => {
 		expect(versionCompatible(catalogVersion("available", "not-a-number"), runtime)).toBe(false);
 		expect(versionCompatible(catalogVersion("available", "10"), { ...runtime, napi: "unknown" })).toBe(false);
 		expect(versionCompatible(catalogVersion("available", "9007199254740992"), runtime)).toBe(false);
+	});
+
+	it("purges expired session rows when a new session is created", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "marketplace-sessions-"));
+		directories.push(directory);
+		const databasePath = join(directory, "marketplace.db");
+		let now = 1_800_000_000_000;
+		const store = await MarketplaceStore.open({
+			databasePath,
+			signing: new MarketplaceSigningService(generateKeyPairSync("ed25519").privateKey),
+			marketplaceId: "test-marketplace",
+			clock: () => now,
+		});
+		try {
+			const user = store.createUser("session-user", "password-hash");
+			store.createSession("expired-token-hash", user.id, now + 1_000);
+			now += 2_000;
+			store.createSession("fresh-token-hash", user.id, now + 60_000);
+		} finally {
+			store.close();
+		}
+		const db = new DatabaseSync(databasePath);
+		try {
+			const rows = db.prepare("SELECT token_hash FROM sessions ORDER BY token_hash").all() as unknown as Array<{
+				token_hash: string;
+			}>;
+			expect(rows.map((row) => row.token_hash)).toEqual(["fresh-token-hash"]);
+		} finally {
+			db.close();
+		}
 	});
 
 	it("rejects unsafe download paths before serving requests", async () => {
@@ -204,16 +263,24 @@ describe("catalog startup validation", () => {
 			"utf8",
 		);
 
-		await expect(CatalogRepository.load(pathToFileURL(path))).rejects.toThrow(
-			"downloadPath must be a safe absolute URL path",
-		);
+		await expect(openStore(pathToFileURL(path))).rejects.toThrow("downloadPath must be a safe absolute URL path");
 	});
 });
 
-function catalogVersion(status: PluginStatus, minimumNapi: string): CatalogPluginVersion {
+async function openStore(catalogPath?: URL): Promise<MarketplaceStore> {
+	return MarketplaceStore.open({
+		...(catalogPath ? { catalogPath } : {}),
+		signing: new MarketplaceSigningService(generateKeyPairSync("ed25519").privateKey),
+		marketplaceId: "test-marketplace",
+		clock: () => 1_800_000_000_000,
+	});
+}
+
+function catalogVersion(status: PluginStatus, minimumNapi: string): StoredPluginVersion {
 	return {
 		version: "1.0.0",
 		status,
+		draft: false,
 		changelog: "fixture",
 		publishedAt: 1,
 		desktop: { hostProfileVersion: 1 },
@@ -222,11 +289,11 @@ function catalogVersion(status: PluginStatus, minimumNapi: string): CatalogPlugi
 			{
 				id: "artifact",
 				target: { platform: "linux", arch: "x64", minimumNapi },
-				sha256: "0".repeat(64),
-				size: 1,
-				downloadPath: "/artifact",
 				containsNativeCode: true,
 				preferred: true,
+				entry: "index.ts",
+				sha256: "0".repeat(64),
+				size: 1,
 			},
 		],
 	};

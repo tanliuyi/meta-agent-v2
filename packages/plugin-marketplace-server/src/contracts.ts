@@ -132,6 +132,11 @@ export interface MarketplaceRuntimeQuery {
 	includeIncompatible: boolean;
 }
 
+export interface PluginRatingAggregate {
+	count: number;
+	average: number | null;
+}
+
 export interface MarketplacePluginSummary {
 	id: string;
 	name: string;
@@ -146,6 +151,8 @@ export interface MarketplacePluginSummary {
 	status: PluginStatus;
 	publishedAt: number;
 	updatedAt: number;
+	rating: PluginRatingAggregate;
+	downloadCount: number;
 }
 
 export interface MarketplacePluginPage {
@@ -176,6 +183,127 @@ export interface MarketplacePluginVersionDetail {
 export interface MarketplacePluginDetail extends Omit<CatalogPlugin, "versions"> {
 	latestVersion?: string;
 	versions: MarketplacePluginVersionDetail[];
+	rating: PluginRatingAggregate;
+	downloadCount: number;
+}
+
+export interface StoredArtifact {
+	id: string;
+	target: ArtifactTarget;
+	containsNativeCode: boolean;
+	preferred: boolean;
+	entry: string;
+	sha256: string | null;
+	size: number | null;
+}
+
+export interface StoredPluginVersion {
+	version: string;
+	status: PluginStatus;
+	draft: boolean;
+	changelog: string;
+	publishedAt: number;
+	desktop: CatalogPluginVersion["desktop"];
+	capabilities: string[];
+	artifacts: StoredArtifact[];
+}
+
+export interface StoredPlugin {
+	id: string;
+	name: string;
+	description: string;
+	publisher: PublisherRecord;
+	categories: string[];
+	iconAssetId?: string;
+	publishedAt: number;
+	updatedAt: number;
+	versions: StoredPluginVersion[];
+}
+
+export interface AuthUserSummary {
+	username: string;
+	createdAt: number;
+}
+
+export interface AuthSessionResponse {
+	token: string;
+	expiresAt: number;
+	user: AuthUserSummary;
+}
+
+export interface AuthMeResponse {
+	admin: boolean;
+	user?: AuthUserSummary;
+	publisherIds: string[];
+}
+
+export interface PublisherAdminView extends PublisherRecord {
+	members: string[];
+}
+
+export interface PublishPluginRequest {
+	name: string;
+	description: string;
+	publisherId: string;
+	categories: string[];
+	iconAssetId?: string;
+}
+
+export interface PublishVersionArtifactRequest {
+	id: string;
+	target: ArtifactTarget;
+	entry: string;
+	containsNativeCode: boolean;
+	preferred: boolean;
+}
+
+export interface PublishVersionRequest {
+	version: string;
+	changelog: string;
+	desktop: CatalogPluginVersion["desktop"];
+	capabilities: string[];
+	artifacts: PublishVersionArtifactRequest[];
+}
+
+export interface PublishArtifactState {
+	id: string;
+	uploaded: boolean;
+}
+
+export interface PublishVersionState {
+	version: string;
+	status: PluginStatus;
+	draft: boolean;
+	artifacts: PublishArtifactState[];
+}
+
+export interface PublishPluginState {
+	id: string;
+	name: string;
+	description: string;
+	publisherId: string;
+	categories: string[];
+	iconAssetId?: string;
+	versions: PublishVersionState[];
+}
+
+export interface PluginRatingEntry {
+	username: string;
+	stars: number;
+	review?: string;
+	updatedAt: number;
+}
+
+export interface PluginRatingsResponse {
+	rating: PluginRatingAggregate;
+	histogram: [number, number, number, number, number];
+	ratings: PluginRatingEntry[];
+}
+
+export interface PluginStatsResponse {
+	downloadCount: number;
+	downloadsByVersion: Record<string, number>;
+	rating: PluginRatingAggregate;
 }
 
 export interface SignedEnvelope<T> {

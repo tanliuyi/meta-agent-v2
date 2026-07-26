@@ -44,6 +44,9 @@ export function ProviderOverridesTab({ provider, entryKey, builtInModels, onChan
 
   return (
     <div className="models-entity-form">
+      <p className="providers-editor-hint">
+        按模型 ID 覆盖模型的部分配置（如显示名称、上下文窗口、费用、兼容性），只有填写的字段会生效。
+      </p>
       <div className="models-entity-toolbar">
         <Input
           value={newOverrideId}
@@ -72,48 +75,54 @@ export function ProviderOverridesTab({ provider, entryKey, builtInModels, onChan
       </div>
       {duplicateId ? <p className="providers-model-id-error">已存在同名模型覆盖。</p> : null}
 
-      <div className="models-entity-workbench">
-        <div className="models-entity-list" role="listbox" aria-label="模型覆盖">
-          {actual.modelOverrides.map((override, index) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected={index === selectedIndex}
-              data-active={index === selectedIndex || undefined}
-              key={`${override.origin?.modelId ?? "new"}-${index}`}
-              onClick={() => setSelectedIndex(index)}
-            >
-              <span>{override.config.name || override.modelId}</span>
-              <small>{override.modelId}</small>
-            </button>
-          ))}
+      {actual.modelOverrides.length === 0 ? (
+        <div className="models-optional-editor">
+          <span>暂无模型覆盖。输入模型 ID 或从内置模型中选择，添加后在此配置。</span>
         </div>
-        <div className="models-entity-detail">
-          {selected ? (
-            <>
-              <div className="models-inline-actions models-entity-delete">
-                <Button size="sm" variant="ghost" onClick={() => setPendingDeletion(selectedIndex)}>
-                  <Trash2 />
-                  删除覆盖
-                </Button>
-              </div>
-              <ModelsOverrideForm
-                key={selectedIndex}
-                override={selected}
-                onChange={(override) => {
-                  const modelOverrides = [...providerRef.current.modelOverrides];
-                  modelOverrides[selectedIndex] = override;
-                  const updated = { ...providerRef.current, modelOverrides };
-                  providerRef.current = updated;
-                  onChange(updated);
-                }}
-              />
-            </>
-          ) : (
-            <p className="providers-editor-empty">添加覆盖后在此配置。</p>
-          )}
+      ) : (
+        <div className="models-entity-workbench">
+          <div className="models-entity-list" role="listbox" aria-label="模型覆盖">
+            {actual.modelOverrides.map((override, index) => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === selectedIndex}
+                data-active={index === selectedIndex || undefined}
+                key={`${override.origin?.modelId ?? "new"}-${index}`}
+                onClick={() => setSelectedIndex(index)}
+              >
+                <span>{override.config.name || override.modelId}</span>
+                <small>{override.modelId}</small>
+              </button>
+            ))}
+          </div>
+          <div className="models-entity-detail">
+            {selected ? (
+              <>
+                <div className="models-inline-actions models-entity-delete">
+                  <Button size="sm" variant="ghost" onClick={() => setPendingDeletion(selectedIndex)}>
+                    <Trash2 />
+                    删除覆盖
+                  </Button>
+                </div>
+                <ModelsOverrideForm
+                  key={selectedIndex}
+                  override={selected}
+                  onChange={(override) => {
+                    const modelOverrides = [...providerRef.current.modelOverrides];
+                    modelOverrides[selectedIndex] = override;
+                    const updated = { ...providerRef.current, modelOverrides };
+                    providerRef.current = updated;
+                    onChange(updated);
+                  }}
+                />
+              </>
+            ) : (
+              <p className="providers-editor-empty">添加覆盖后在此配置。</p>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <ConfirmDialog
         open={pendingDeletion !== undefined}

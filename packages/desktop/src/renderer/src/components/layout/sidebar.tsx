@@ -1,8 +1,8 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import { Button } from "@renderer/shared/ui/button";
 import { Link, useMatchRoute, useNavigate, useSearch } from "@tanstack/react-router";
+import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
-import Puzzle from "lucide-react/dist/esm/icons/puzzle.mjs";
 import Settings from "lucide-react/dist/esm/icons/settings.mjs";
 import { type CSSProperties, memo, useCallback } from "react";
 import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
@@ -16,6 +16,10 @@ import { runControlledThreadAction } from "../../state/thread-list-commands.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { ProjectList } from "./project-list.tsx";
 import { UpdateBanner } from "./update-banner.tsx";
+
+/** 侧边栏行统一样式:新建任务、插件中心、设置共用,保证字号与高亮一致。 */
+const sidebarRowClass =
+  "hover:bg-muted data-active:bg-muted aria-[current=page]:bg-muted h-8 w-full justify-start gap-2 rounded-md px-2.5 text-sm font-normal";
 
 /** Codex Desktop 风格的 Project 与 session 主导航。 */
 export const Sidebar = memo(function Sidebar() {
@@ -94,7 +98,7 @@ export const Sidebar = memo(function Sidebar() {
           <Button
             variant="ghost"
             disabled={!canStartDraft || draftMaterializing}
-            className="hover:bg-muted data-active:bg-muted h-8 w-full justify-start gap-2 rounded-md px-2.5 text-sm font-normal"
+            className={sidebarRowClass}
             onClick={(event) =>
               runControlledThreadAction(event, () => {
                 startDraft();
@@ -103,6 +107,12 @@ export const Sidebar = memo(function Sidebar() {
           >
             <Plus size={16} />
             <span className="whitespace-nowrap">新建任务</span>
+          </Button>
+          <Button asChild variant="ghost" className={sidebarRowClass}>
+            <Link to="/plugins" search={settingsSearch}>
+              <Blocks size={16} />
+              <span className="whitespace-nowrap">插件中心</span>
+            </Link>
           </Button>
         </nav>
 
@@ -125,14 +135,12 @@ export const Sidebar = memo(function Sidebar() {
 
         <div className="sidebar-footer">
           <UpdateBanner />
-          <Link to="/plugins" search={settingsSearch} className="sidebar-settings-link">
-            <Puzzle size={15} />
-            <span>插件中心</span>
-          </Link>
-          <Link to="/settings/personalization" search={settingsSearch} className="sidebar-settings-link">
-            <Settings size={15} />
-            <span>设置</span>
-          </Link>
+          <Button asChild variant="ghost" className={sidebarRowClass}>
+            <Link to="/settings/personalization" search={settingsSearch}>
+              <Settings size={16} />
+              <span className="whitespace-nowrap">设置</span>
+            </Link>
+          </Button>
         </div>
       </div>
     </aside>

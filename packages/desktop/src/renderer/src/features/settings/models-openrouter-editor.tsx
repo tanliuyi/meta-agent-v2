@@ -15,8 +15,8 @@ interface ModelsOpenRouterEditorProps {
 
 const TRI_STATE_OPTIONS = [
   { value: "unset", label: "未设置" },
-  { value: "true", label: "true" },
-  { value: "false", label: "false" },
+  { value: "true", label: "是" },
+  { value: "false", label: "否" },
 ] as const;
 
 const BOOLEAN_FIELDS = ["allow_fallbacks", "require_parameters", "zdr", "enforce_distillable_text"] as const;

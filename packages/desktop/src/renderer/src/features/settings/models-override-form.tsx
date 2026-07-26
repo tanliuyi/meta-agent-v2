@@ -30,7 +30,7 @@ export function ModelsOverrideForm({ override, onChange }: ModelsOverrideFormPro
     <div className="models-entity-form">
       <div className="models-form-grid">
         <label>
-          <span>Model ID</span>
+          <span>模型 ID</span>
           <Input
             defaultValue={current.modelId}
             onChange={(event) => emit({ ...overrideRef.current, modelId: event.target.value })}
@@ -44,7 +44,7 @@ export function ModelsOverrideForm({ override, onChange }: ModelsOverrideFormPro
           />
         </label>
         <label>
-          <span>Context window</span>
+          <span>上下文窗口</span>
           <Input
             type="number"
             min="1"
@@ -55,7 +55,7 @@ export function ModelsOverrideForm({ override, onChange }: ModelsOverrideFormPro
           />
         </label>
         <label>
-          <span>Max tokens</span>
+          <span>最大输出 tokens</span>
           <Input
             type="number"
             min="1"
@@ -66,7 +66,7 @@ export function ModelsOverrideForm({ override, onChange }: ModelsOverrideFormPro
           />
         </label>
         <label>
-          <span>Reasoning</span>
+          <span>推理能力</span>
           <Select
             className="models-select"
             value={current.config.reasoning === undefined ? "unset" : String(current.config.reasoning)}
@@ -75,13 +75,13 @@ export function ModelsOverrideForm({ override, onChange }: ModelsOverrideFormPro
             }
             options={[
               { value: "unset", label: "未设置" },
-              { value: "true", label: "true" },
-              { value: "false", label: "false" },
+              { value: "true", label: "支持" },
+              { value: "false", label: "不支持" },
             ]}
           />
         </label>
         <fieldset className="models-inline-fieldset">
-          <legend>输入</legend>
+          <legend>输入类型</legend>
           {(["text", "image"] as const).map((kind) => (
             <label className="models-inline-checkbox" key={kind}>
               <Checkbox
@@ -93,7 +93,7 @@ export function ModelsOverrideForm({ override, onChange }: ModelsOverrideFormPro
                   updateConfig({ ...overrideRef.current.config, input: input.size > 0 ? [...input] : undefined });
                 }}
               />
-              {kind}
+              {kind === "text" ? "文本" : "图片"}
             </label>
           ))}
         </fieldset>
@@ -112,7 +112,7 @@ export function ModelsOverrideForm({ override, onChange }: ModelsOverrideFormPro
         }
       />
       <ModelsMapEditor
-        label="Override headers"
+        label="覆盖请求头"
         entries={current.headers}
         onChange={(headers) => emit({ ...overrideRef.current, headers })}
       />

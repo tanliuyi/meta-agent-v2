@@ -190,7 +190,7 @@ Desktop Host Profile
 - 本地 development entry approval；
 - 市场插件的高级启用状态和应用状态。
 
-首期只支持一个活动市场 endpoint。未配置 endpoint 时插件中心显示配置入口，已安装插件管理仍可使用。发行构建可以提供可覆盖的初始建议 URL，但业务逻辑、API client、artifact validator 和 trust model 不得依赖固定域名。增加多个并行市场属于后续能力。
+首期只支持一个活动市场 endpoint。在未捆绑 distribution 默认市场的构建中，未配置 endpoint 时插件中心显示配置入口，已安装插件管理仍可使用；捆绑默认市场的构建始终存在可用 endpoint，不会出现该状态。发行构建可以提供可覆盖的 distribution default URL 和 pinned public trust root；当前 Desktop distribution 默认使用 Tailscale 市场 `http://100.91.230.10:4317`。该默认值只在没有有效 active endpoint 时生效，已有用户配置优先，用户仍可在 Settings 更换 endpoint。业务逻辑、API client、artifact validator 和 trust model 不得仅依赖固定域名；默认 endpoint 仍必须满足 marketplace ID、key ID、fingerprint、Ed25519 signature、artifact 和 revocation 全部验证。增加多个并行市场属于后续能力。
 
 插件中心负责发现、详情、安装、更新和卸载。两个页面使用同一个 main-owned snapshot，不建立两个配置源。
 
