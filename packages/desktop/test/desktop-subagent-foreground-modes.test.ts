@@ -228,18 +228,23 @@ describe("Desktop foreground programmatic modes", () => {
 
   it("keeps live progress bounded without truncating the child result", async () => {
     const largeOutput = "x".repeat(2 * 1024 * 1024);
-    const updateSizes: number[] = [];
+    const updates: string[] = [];
 
     const result = await runSync(process.cwd(), agents, "first", "produce a large result", {
       subagentRuntime: new RecordingRuntime(1, undefined, () => largeOutput),
       runId: "large-live-progress",
       acceptance: false,
-      onUpdate: (update) => updateSizes.push(JSON.stringify(update).length),
+      onUpdate: (update) => updates.push(JSON.stringify(update)),
     });
 
     expect(result.finalOutput).toBe(largeOutput);
-    expect(updateSizes.length).toBeGreaterThan(0);
-    expect(Math.max(...updateSizes)).toBeLessThan(128 * 1024);
+    expect(result).toMatchObject({ provider: "faux", model: "model" });
+    expect(updates.length).toBeGreaterThan(0);
+    expect(Math.max(...updates.map((update) => update.length))).toBeLessThan(128 * 1024);
+    expect(updates.some((update) => update.includes('"provider":"faux"') && update.includes('"model":"model"'))).toBe(
+      true,
+    );
+    expect(updates.every((update) => !update.includes('"undefined"'))).toBe(true);
   });
 
   it("keeps large live errors bounded without truncating the child error", async () => {

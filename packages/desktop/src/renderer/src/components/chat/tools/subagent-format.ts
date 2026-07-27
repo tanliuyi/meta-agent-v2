@@ -68,12 +68,22 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 function readString(record: Readonly<Record<string, unknown>>, key: string): string | undefined {
   const value = record[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "undefined" || normalized === "null" ? undefined : value;
 }
 
 function readNumber(record: Readonly<Record<string, unknown>>, key: string): number | undefined {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function modelDetail(record: Readonly<Record<string, unknown>> | undefined): string | undefined {
+  if (!record) return undefined;
+  const provider = readString(record, "provider");
+  const model = readString(record, "model");
+  if (provider && model) return model.startsWith(`${provider}/`) ? model : `${provider}/${model}`;
+  return model ?? provider;
 }
 
 /** 取首行并压缩空白，用于折叠标题里的任务摘要。 */
@@ -191,7 +201,11 @@ const PROGRESS_STATUS_LABELS: Readonly<Record<string, { status: SubagentRowStatu
   detached: { status: "detached", label: "后台运行" },
 };
 
-function progressRow(record: Readonly<Record<string, unknown>>, index: number): SubagentAgentRow {
+function progressRow(
+  record: Readonly<Record<string, unknown>>,
+  index: number,
+  resultRecord?: Readonly<Record<string, unknown>>,
+): SubagentAgentRow {
   const mapped = PROGRESS_STATUS_LABELS[readString(record, "status") ?? ""] ?? PROGRESS_STATUS_LABELS.running;
   const meta: string[] = [];
   const toolCount = readNumber(record, "toolCount");
@@ -206,7 +220,7 @@ function progressRow(record: Readonly<Record<string, unknown>>, index: number): 
   const detail =
     mapped.status === "running" && currentTool
       ? `${currentTool}${currentToolArgs ? ` ${firstLineSummary(currentToolArgs)}` : ""}`
-      : undefined;
+      : modelDetail(resultRecord);
   const errorText = readString(record, "error");
 
   return {
@@ -256,7 +270,7 @@ function resultRow(record: Readonly<Record<string, unknown>>, index: number): Su
     agent: readString(record, "agent") ?? "?",
     status,
     statusLabel: label,
-    ...(readString(record, "model") ? { detail: readString(record, "model") } : {}),
+    ...(modelDetail(record) ? { detail: modelDetail(record) } : {}),
     meta,
     ...(output ? { output } : {}),
     ...(errorText ? { error: errorText } : {}),
@@ -286,7 +300,7 @@ export function parseSubagentDetails(
     if (resultRecord && !isLiveProgressStatus(progressRecord)) {
       rows.push(resultRow(resultRecord, index));
     } else if (progressRecord) {
-      rows.push(progressRow(progressRecord, index));
+      rows.push(progressRow(progressRecord, index, resultRecord));
     } else if (resultRecord) {
       rows.push(resultRow(resultRecord, index));
     }

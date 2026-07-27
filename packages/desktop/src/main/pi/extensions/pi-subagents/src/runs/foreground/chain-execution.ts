@@ -33,7 +33,7 @@ import {
 } from "../../shared/settings.ts";
 import { discoverAvailableSkills, normalizeSkillInput } from "../../agents/skills.ts";
 import { INTERCOM_BRIDGE_MARKER } from "../../intercom/intercom-bridge.ts";
-import { runSync, snapshotLiveProgress } from "./execution.ts";
+import { runSync, snapshotLiveProgress, snapshotLiveResult } from "./execution.ts";
 import { buildChainSummary } from "../../shared/formatters.ts";
 import { compactForegroundDetails, getSingleResultOutput, mapConcurrent, resolveChildCwd, sumResultsCost, sumResultsUsage } from "../../shared/utils.ts";
 import { DEFAULT_GLOBAL_CONCURRENCY_LIMIT, Semaphore } from "../shared/parallel-utils.ts";
@@ -384,7 +384,7 @@ async function runParallelChainTasks(input: ParallelChainRunInput): Promise<Sing
 							...progressUpdate,
 							details: {
 								mode: "chain",
-								results: [],
+								results: input.results.concat(stepResults).map((result) => snapshotLiveResult(result)),
 								progress: input.allProgress.concat(stepProgress).map(snapshotLiveProgress),
 								controlEvents: progressUpdate.details?.controlEvents,
 								chainAgents: input.chainAgents,
@@ -1306,7 +1306,7 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 							...p,
 							details: {
 								mode: "chain",
-								results: [],
+								results: results.concat(stepResults).map((result) => snapshotLiveResult(result)),
 								progress: allProgress.concat(stepProgress).map(snapshotLiveProgress),
 								controlEvents: p.details?.controlEvents,
 								chainAgents,

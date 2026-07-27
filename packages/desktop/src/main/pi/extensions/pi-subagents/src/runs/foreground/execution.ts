@@ -142,12 +142,20 @@ const MAX_LIVE_RECENT_TOOLS = 5;
 const MAX_RECENT_OUTPUT_LINE_CHARS = 2_000;
 const MAX_PROGRESS_TASK_CHARS = 4_000;
 const MAX_PROGRESS_FIELD_CHARS = 2_000;
+const MAX_LIVE_RESULT_OUTPUT_CHARS = 4_000;
 
 function compactLiveText(value: string, maxChars: number, marker = "[...truncated] "): string {
 	if (value.length <= maxChars) return value;
 	const available = maxChars - marker.length;
 	const headChars = Math.ceil(available / 2);
 	return `${value.slice(0, headChars)}${marker}${value.slice(-(available - headChars))}`;
+}
+
+function compactOptionalLiveText(value: unknown, maxChars: number): string | undefined {
+	if (typeof value !== "string" || value.length === 0) return undefined;
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "undefined" || normalized === "null") return undefined;
+	return compactLiveText(value, maxChars);
 }
 
 function compactRecentOutputLine(line: string): string {
@@ -178,40 +186,65 @@ function stripAcceptanceReportsFromMessages(messages: Message[] | undefined): vo
 }
 
 export function snapshotLiveProgress(progress: AgentProgress): AgentProgress {
+	const status = ["pending", "running", "completed", "failed", "detached"].includes(progress.status)
+		? progress.status
+		: "running";
 	return {
 		...progress,
-		agent: compactLiveText(progress.agent, MAX_PROGRESS_FIELD_CHARS),
-		task: compactProgressTask(progress.task),
+		status,
+		agent: compactOptionalLiveText(progress.agent, MAX_PROGRESS_FIELD_CHARS) ?? "subagent",
+		task: compactProgressTask(compactOptionalLiveText(progress.task, MAX_PROGRESS_TASK_CHARS) ?? ""),
 		skills: progress.skills
-			?.slice(0, 20)
-			.map((skill) => compactLiveText(skill, MAX_PROGRESS_FIELD_CHARS)),
-		currentTool: progress.currentTool
-			? compactLiveText(progress.currentTool, MAX_PROGRESS_FIELD_CHARS)
-			: undefined,
-		currentToolArgs: progress.currentToolArgs
-			? compactLiveText(progress.currentToolArgs, MAX_PROGRESS_FIELD_CHARS)
-			: undefined,
-		currentPath: progress.currentPath
-			? compactLiveText(progress.currentPath, MAX_PROGRESS_FIELD_CHARS)
-			: undefined,
-		recentTools: progress.recentTools.slice(-MAX_LIVE_RECENT_TOOLS).map((tool) => ({
-			...tool,
-			tool: compactLiveText(tool.tool, MAX_PROGRESS_FIELD_CHARS),
-			args: compactLiveText(tool.args, MAX_PROGRESS_FIELD_CHARS),
-		})),
-		recentOutput: progress.recentOutput.slice(-MAX_LIVE_RECENT_OUTPUT_LINES).map(compactRecentOutputLine),
-		error: progress.error ? compactLiveText(progress.error, MAX_PROGRESS_FIELD_CHARS) : undefined,
-		failedTool: progress.failedTool
-			? compactLiveText(progress.failedTool, MAX_PROGRESS_FIELD_CHARS)
-			: undefined,
+			?.map((skill) => compactOptionalLiveText(skill, MAX_PROGRESS_FIELD_CHARS))
+			.filter((skill): skill is string => skill !== undefined)
+			.slice(0, 20),
+		currentTool: compactOptionalLiveText(progress.currentTool, MAX_PROGRESS_FIELD_CHARS),
+		currentToolArgs: compactOptionalLiveText(progress.currentToolArgs, MAX_PROGRESS_FIELD_CHARS),
+		currentPath: compactOptionalLiveText(progress.currentPath, MAX_PROGRESS_FIELD_CHARS),
+		recentTools: progress.recentTools
+			.slice(-MAX_LIVE_RECENT_TOOLS)
+			.map((tool) => ({
+				...tool,
+				tool: compactOptionalLiveText(tool.tool, MAX_PROGRESS_FIELD_CHARS),
+				args: compactOptionalLiveText(tool.args, MAX_PROGRESS_FIELD_CHARS) ?? "",
+			}))
+			.filter((tool): tool is { tool: string; args: string; endMs: number } => tool.tool !== undefined),
+		recentOutput: progress.recentOutput
+			.map((line) => compactOptionalLiveText(line, MAX_RECENT_OUTPUT_LINE_CHARS))
+			.filter((line): line is string => line !== undefined)
+			.slice(-MAX_LIVE_RECENT_OUTPUT_LINES),
+		error: compactOptionalLiveText(progress.error, MAX_PROGRESS_FIELD_CHARS),
+		failedTool: compactOptionalLiveText(progress.failedTool, MAX_PROGRESS_FIELD_CHARS),
 		watchdog: progress.watchdog
 			? {
 				...progress.watchdog,
-				reason: progress.watchdog.reason
-					? compactLiveText(progress.watchdog.reason, MAX_PROGRESS_FIELD_CHARS)
-					: undefined,
+				reason: compactOptionalLiveText(progress.watchdog.reason, MAX_PROGRESS_FIELD_CHARS),
 			}
 			: undefined,
+	};
+}
+
+export function snapshotLiveResult(result: SingleResult, progress = result.progress): SingleResult {
+	const progressSnapshot = progress ? snapshotLiveProgress(progress) : undefined;
+	const running = progressSnapshot?.status === "pending" || progressSnapshot?.status === "running";
+	return {
+		agent: compactOptionalLiveText(result.agent, MAX_PROGRESS_FIELD_CHARS) ?? progressSnapshot?.agent ?? "subagent",
+		task: compactProgressTask(compactOptionalLiveText(result.task, MAX_PROGRESS_TASK_CHARS) ?? progressSnapshot?.task ?? ""),
+		...(result.context ? { context: result.context } : {}),
+		exitCode: running ? 0 : result.exitCode,
+		usage: { ...result.usage },
+		provider: compactOptionalLiveText(result.provider, MAX_PROGRESS_FIELD_CHARS),
+		model: compactOptionalLiveText(result.model, MAX_PROGRESS_FIELD_CHARS),
+		progress: progressSnapshot,
+		progressSummary: result.progressSummary ? { ...result.progressSummary } : undefined,
+		detached: result.detached,
+		interrupted: result.interrupted,
+		timedOut: result.timedOut,
+		stopped: result.stopped,
+		error: running ? undefined : compactOptionalLiveText(result.error, MAX_PROGRESS_FIELD_CHARS),
+		finalOutput: running
+			? undefined
+			: compactOptionalLiveText(result.finalOutput, MAX_LIVE_RESULT_OUTPUT_CHARS),
 	};
 }
 
@@ -265,6 +298,7 @@ async function runProgrammaticSingleAttempt(
 			exitCode: 0,
 			messages: [],
 			usage: emptyUsage(),
+			provider: model?.includes("/") ? model.slice(0, model.indexOf("/")) : undefined,
 			model,
 			artifactPaths: shared.artifactPaths,
 			transcriptPath: shared.transcriptWriter ? shared.artifactPaths?.transcriptPath : undefined,
@@ -368,7 +402,11 @@ async function runProgrammaticSingleAttempt(
 		const progressSnapshot = snapshotLiveProgress(progress);
 		options.onUpdate({
 			content: [{ type: "text", text: progressSnapshot.error || "(running...)" }],
-			details: { mode: "single", results: [], progress: [progressSnapshot] },
+			details: {
+				mode: "single",
+				results: [snapshotLiveResult(result, progressSnapshot)],
+				progress: [progressSnapshot],
+			},
 		});
 	};
 	const applyEvent = (event: SubagentRunEvent): void => {
@@ -397,6 +435,7 @@ async function runProgrammaticSingleAttempt(
 					result.usage.cost += usage.cost?.total || 0;
 					progress.tokens = result.usage.input + result.usage.output;
 				}
+				if (!result.provider && message.provider) result.provider = message.provider;
 				if (!result.model && message.model) result.model = message.model;
 				appendRecentOutput(progress, extractTextFromContent(message.content).split("\n").slice(-10));
 			}

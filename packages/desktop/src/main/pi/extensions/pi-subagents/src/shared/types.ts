@@ -641,6 +641,7 @@ export interface SingleResult {
 	toolBudgetBlocked?: boolean;
 	messages?: Message[];
 	usage: Usage;
+	provider?: string;
 	model?: string;
 	attemptedModels?: string[];
 	modelAttempts?: ModelAttempt[];

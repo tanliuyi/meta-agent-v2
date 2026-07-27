@@ -351,6 +351,65 @@ describe("subagent 工具详情", () => {
     expect(markup).not.toContain("&quot;status&quot;");
   });
 
+  it("运行中的 result 展示 provider/model 并忽略字面量 undefined", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{ agent: "reviewer", task: "检查改动" }}
+        result={toolResult("progress", {
+          mode: "single",
+          results: [
+            {
+              agent: "reviewer",
+              task: "检查改动",
+              exitCode: 0,
+              provider: "meta-agent",
+              model: "gpt-5.6-sol",
+              usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1 },
+              progress: {
+                index: 0,
+                agent: "reviewer",
+                status: "running",
+                task: "检查改动",
+                currentTool: "undefined",
+                currentToolArgs: "undefined",
+                error: "undefined",
+                recentTools: [],
+                recentOutput: [],
+                toolCount: 1,
+                tokens: 1200,
+                durationMs: 7000,
+              },
+            },
+          ],
+          progress: [
+            {
+              index: 0,
+              agent: "reviewer",
+              status: "running",
+              task: "检查改动",
+              currentTool: "undefined",
+              currentToolArgs: "undefined",
+              error: "undefined",
+              recentTools: [],
+              recentOutput: [],
+              toolCount: 1,
+              tokens: 1200,
+              durationMs: 7000,
+            },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("meta-agent/gpt-5.6-sol");
+    expect(markup).toContain("运行中");
+    expect(markup).not.toContain("undefined");
+  });
+
   it("完成后的 details 渲染结果状态、输出与汇总，不落 JSON", () => {
     const markup = renderToStaticMarkup(
       <ToolContent
