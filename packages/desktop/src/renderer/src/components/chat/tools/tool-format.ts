@@ -47,6 +47,42 @@ export function readToolStringArgument(args: Readonly<Record<string, unknown>>, 
   return "";
 }
 
+/** 将工具路径解析为项目相对路径；解析后位于项目外时保留完整绝对路径。 */
+export function projectDisplayToolPath(path: string, cwd: string): string {
+  if (!path) return path;
+  const normalizedCwd = normalizeAbsoluteToolPath(cwd);
+  const normalizedPath = path.replaceAll("\\", "/");
+  const absolutePath = isAbsoluteToolPath(normalizedPath)
+    ? normalizeAbsoluteToolPath(normalizedPath)
+    : normalizeAbsoluteToolPath(`${normalizedCwd}/${normalizedPath}`);
+  const caseInsensitive = /^[A-Za-z]:/.test(normalizedCwd);
+  const comparablePath = caseInsensitive ? absolutePath.toLowerCase() : absolutePath;
+  const comparableCwd = caseInsensitive ? normalizedCwd.toLowerCase() : normalizedCwd;
+  if (comparablePath === comparableCwd) return ".";
+  const prefix = comparableCwd.endsWith("/") ? comparableCwd : `${comparableCwd}/`;
+  return comparablePath.startsWith(prefix) ? absolutePath.slice(prefix.length) : absolutePath;
+}
+
+function isAbsoluteToolPath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:\//.test(path);
+}
+
+function normalizeAbsoluteToolPath(path: string): string {
+  const normalized = path.replaceAll("\\", "/");
+  const drive = normalized.match(/^([A-Za-z]:)\//)?.[1];
+  const parts = normalized.slice(drive ? drive.length + 1 : 1).split("/");
+  const resolved: string[] = [];
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      resolved.pop();
+      continue;
+    }
+    resolved.push(part);
+  }
+  return `${drive ?? ""}/${resolved.join("/")}`;
+}
+
 /** 将 Pi toolResult 协议解包为 TUI renderer 使用的文本与 details。 */
 export function parseToolResult(value: unknown): ParsedToolResult | undefined {
   if (value === undefined) return undefined;

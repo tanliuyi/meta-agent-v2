@@ -190,11 +190,17 @@ export interface PiToolCallPart {
   isError?: boolean;
 }
 
+export interface PiExtensionNotification {
+  customType: string;
+  details?: JsonValue;
+}
+
 export interface PiAssistantNotificationPart {
   id: string;
   type: "notification";
   notificationType: "info" | "warning" | "error";
   text: string;
+  extensionNotification?: PiExtensionNotification;
   createdAt: number;
 }
 
@@ -232,6 +238,7 @@ export interface PiNoticeMessage extends PiTimelineNodeBase {
   kind: "notice";
   noticeType: "bash" | "custom" | "compaction" | "branch-summary" | "notification";
   notificationType?: "info" | "warning" | "error";
+  extensionNotification?: PiExtensionNotification;
   title: string;
   content: PiNoticeContent;
   metadata?: JsonValue;

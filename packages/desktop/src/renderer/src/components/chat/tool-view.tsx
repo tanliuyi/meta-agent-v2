@@ -3,13 +3,14 @@ import { followResizingContentToBottom } from "@renderer/shared/lib/follow-resiz
 import { Collapsible } from "@renderer/shared/ui/collapsible";
 import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
 import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
+import { useDesktopSelector } from "@renderer/state/desktop-context";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import { useEffect, useRef, useState } from "react";
 import { ToolFileTarget } from "./tool-file-target.tsx";
 import { MEMORY_SCOPE_LABELS } from "./tools/memory-content.tsx";
 import { firstLineSummary, parseSubagentCall, summarizeAgents } from "./tools/subagent-format.ts";
 import { ToolContent } from "./tools/tool-content.tsx";
-import { readToolStringArgument } from "./tools/tool-format.ts";
+import { projectDisplayToolPath, readToolStringArgument } from "./tools/tool-format.ts";
 
 type ToolState = "running" | "complete" | "error";
 type ToolTarget = { type: "file"; value: string } | { type: "text"; value: string };
@@ -32,7 +33,10 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
   const error = isError === true || execution === "error" || status.type === "incomplete";
   const toolState: ToolState = error ? "error" : running ? "running" : "complete";
   const displayedResult = result ?? artifactState?.partialResult;
-  const header = toolHeader(toolName, args);
+  const projectCwd = useDesktopSelector(
+    (state) => state.projects.find((project) => project.id === state.activeProjectId)?.cwd,
+  );
+  const header = toolHeader(toolName, args, projectCwd);
   const cursorFollowsArgs = running;
   const stateLabel = toolState === "running" ? "运行中" : toolState === "error" ? "失败" : "已完成";
 
@@ -117,8 +121,9 @@ function toolArtifact(value: unknown): { execution?: string; partialResult?: unk
   return { execution, partialResult };
 }
 
-function toolHeader(name: string, args: Readonly<Record<string, unknown>>): ToolHeader {
-  const path = readToolStringArgument(args, "path", "file_path");
+function toolHeader(name: string, args: Readonly<Record<string, unknown>>, projectCwd?: string): ToolHeader {
+  const rawPath = readToolStringArgument(args, "path", "file_path");
+  const path = projectCwd ? projectDisplayToolPath(rawPath, projectCwd) : rawPath;
   if (name === "bash") {
     return { label: "$", target: textTarget(readToolStringArgument(args, "command") || "…") };
   }

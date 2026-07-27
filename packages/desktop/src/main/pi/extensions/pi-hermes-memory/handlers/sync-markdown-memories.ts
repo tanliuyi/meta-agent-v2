@@ -234,7 +234,10 @@ export function registerSyncMarkdownMemoriesCommand(
   pi.registerCommand("memory-sync-markdown", {
     description: "Reconcile the SQLite search mirror with Markdown memories",
     handler: async (_args, ctx: ExtensionCommandContext) => {
-      ctx.ui.notify("🔄 Reconciling the SQLite search mirror with Markdown memories...", "info");
+      ctx.ui.notify("🔄 Reconciling the SQLite search mirror with Markdown memories...", "info", {
+        customType: "hermes-memory.markdown-sync",
+        details: { phase: "syncing" },
+      });
 
       try {
         const counters = await syncMarkdownMemoriesToSqlite(dbManager, globalDir, projectsMemoryDir, agentRoot);
@@ -262,9 +265,25 @@ export function registerSyncMarkdownMemoriesCommand(
         }
 
         output += `\n💡 Re-running this command is safe — existing SQLite rows are de-duplicated.`;
-        ctx.ui.notify(output, "info");
+        ctx.ui.notify(output, "info", {
+          customType: "hermes-memory.markdown-sync",
+          details: {
+            phase: "complete",
+            filesScanned: counters.filesScanned,
+            entriesScanned: counters.entriesScanned,
+            imported: counters.imported,
+            skipped: counters.skipped,
+            removed: counters.removed,
+            projectCount: counters.projectCount,
+            warnings: counters.warnings,
+          },
+        });
       } catch (err) {
-        ctx.ui.notify(`❌ Markdown sync failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`❌ Markdown sync failed: ${message}`, "error", {
+          customType: "hermes-memory.error",
+          details: { operation: "markdown-sync", message },
+        });
       }
     },
   });

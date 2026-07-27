@@ -42,7 +42,10 @@ export function registerPreviewContextCommand(
           lines.push("");
           lines.push("  Blocks shown: 0");
         }
-        ctx.ui.notify(lines.join("\n"), "info");
+        ctx.ui.notify(lines.join("\n"), "info", {
+          customType: "hermes-memory.context-preview",
+          details: { mode: "policy-only", policyStyle: config.memoryPolicyStyle ?? "full" },
+        });
         return;
       }
 
@@ -82,7 +85,10 @@ export function registerPreviewContextCommand(
       }
 
       lines.push(`  Blocks shown: ${blockCount}`);
-      ctx.ui.notify(lines.join("\n"), "info");
+      ctx.ui.notify(lines.join("\n"), "info", {
+        customType: "hermes-memory.context-preview",
+        details: { mode: "legacy-inject", blockCount },
+      });
     },
   });
 }

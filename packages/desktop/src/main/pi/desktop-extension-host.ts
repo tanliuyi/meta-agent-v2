@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   ExtensionUIContext,
   ExtensionUIDialogOptions,
+  ExtensionUINotificationOptions,
   ExtensionWidgetOptions,
 } from "@earendil-works/pi-coding-agent";
 import type { DesktopExtensionHostState, HostRequest, HostResponse } from "../../shared/contracts.ts";
@@ -46,12 +47,20 @@ export class DesktopExtensionHost {
   private disposed = false;
   private readonly changed: () => void;
   private readonly activeToolIds: () => string[];
-  private readonly publishNotification: (message: string, type: "info" | "warning" | "error") => void;
+  private readonly publishNotification: (
+    message: string,
+    type: "info" | "warning" | "error",
+    options?: ExtensionUINotificationOptions,
+  ) => void;
 
   constructor(
     changed: () => void,
     activeToolIds: () => string[],
-    publishNotification: (message: string, type: "info" | "warning" | "error") => void = () => undefined,
+    publishNotification: (
+      message: string,
+      type: "info" | "warning" | "error",
+      options?: ExtensionUINotificationOptions,
+    ) => void = () => undefined,
   ) {
     this.changed = changed;
     this.activeToolIds = activeToolIds;
@@ -77,7 +86,8 @@ export class DesktopExtensionHost {
         this.ask("input", title, { placeholder }, opts, (response) => response.value),
       editor: (title: string, prefill?: string) =>
         this.ask("editor", title, { message: prefill }, undefined, (response) => response.value),
-      notify: (message: string, type?: "info" | "warning" | "error") => this.notify(message, type),
+      notify: (message: string, type?: "info" | "warning" | "error", options?: ExtensionUINotificationOptions) =>
+        this.notify(message, type, options),
       onTerminalInput: () => this.unavailable("ui.terminal.input"),
       setStatus: (key: string, text: string | undefined) => this.setStatus(key, text),
       setWorkingMessage: () => this.unavailable("ui.working"),
@@ -163,9 +173,10 @@ export class DesktopExtensionHost {
     });
   }
 
-  private notify(message: string, type?: "info" | "warning" | "error"): void {
+  private notify(message: string, type?: "info" | "warning" | "error", options?: ExtensionUINotificationOptions): void {
     this.assertActive("ui.notify");
-    this.publishNotification(message, type ?? "info");
+    if (options) this.publishNotification(message, type ?? "info", options);
+    else this.publishNotification(message, type ?? "info");
   }
 
   private cancel(id: string): void {

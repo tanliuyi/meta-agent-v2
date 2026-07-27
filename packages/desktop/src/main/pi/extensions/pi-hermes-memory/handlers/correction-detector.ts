@@ -227,7 +227,10 @@ export function setupCorrectionDetector(
       }
 
       if (savedViaLlm) {
-        ctx.ui.notify("🔧 Correction detected — memory updated", "info");
+        ctx.ui.notify("🔧 Correction detected — memory updated", "info", {
+          customType: "hermes-memory.updated",
+          details: { source: "correction" },
+        });
       }
 
       // Also save as a failure memory for learning

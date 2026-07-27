@@ -159,6 +159,7 @@ function sendCompletion(pi: Pick<ExtensionAPI, "sendMessage">, items: PendingCom
 				customType: "subagent-notify",
 				content,
 				display: true,
+				details: details.length === 1 ? details[0] : { items: details },
 			},
 			{ triggerTurn: items.some((item) => item.triggerTurn) },
 		);

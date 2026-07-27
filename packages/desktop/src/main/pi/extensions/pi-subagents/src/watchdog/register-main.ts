@@ -362,7 +362,7 @@ async function handleWatchdogCommand(
 	const test = parseTestCommand(input);
 	if (test) {
 		if (!test.text) {
-			ctx.ui.notify("Usage: /subagents-watchdog test concern|blocker <text>", "error");
+			ctx.ui.notify("Usage: /subagents-watchdog test concern|blocker <text>", "error", { customType: "subagents.error" });
 			return;
 		}
 		const warning = createTestWarning(test.severity, test.text);
@@ -370,7 +370,7 @@ async function handleWatchdogCommand(
 		pi.sendMessage(createWatchdogWarningMessage(details, { display: true, details }));
 		return;
 	}
-	ctx.ui.notify(`Usage: /subagents-watchdog [status|on|off|session on|session off|recommend-model|model recommended|model <provider/model[:thinking]>|model inherit|thinking ${THINKING_LEVELS.join("|")}|thinking inherit|session model recommended|check|test concern <text>|test blocker <text>]`, "error");
+	ctx.ui.notify(`Usage: /subagents-watchdog [status|on|off|session on|session off|recommend-model|model recommended|model <provider/model[:thinking]>|model inherit|thinking ${THINKING_LEVELS.join("|")}|thinking inherit|session model recommended|check|test concern <text>|test blocker <text>]`, "error", { customType: "subagents.error" });
 }
 
 export function registerMainWatchdog(pi: ExtensionAPI, options: RegisterMainWatchdogOptions = {}): MainWatchdogRuntime {

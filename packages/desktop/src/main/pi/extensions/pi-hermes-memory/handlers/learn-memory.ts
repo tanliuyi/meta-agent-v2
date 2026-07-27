@@ -183,7 +183,10 @@ export function registerLearnMemoryCommand(pi: ExtensionAPI): void {
       }
 
       if (lines.length > 0) {
-        ctx.ui.notify(lines.join("\n"), "info");
+        ctx.ui.notify(lines.join("\n"), "info", {
+          customType: "hermes-memory.guide",
+          details: { section },
+        });
       }
     },
   });

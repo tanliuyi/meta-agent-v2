@@ -1,4 +1,9 @@
-import type { AgentSession, AgentSessionEvent, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentSession,
+  AgentSessionEvent,
+  ExtensionUINotificationOptions,
+  SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 import {
   type JsonValue,
   type PiAssistantMessage,
@@ -146,8 +151,19 @@ export class PiThreadProjector {
     this.synchronizePersistedBranch();
   }
 
-  notify(message: string, notificationType: "info" | "warning" | "error"): void {
+  notify(
+    message: string,
+    notificationType: "info" | "warning" | "error",
+    options?: ExtensionUINotificationOptions,
+  ): void {
     const createdAt = Date.now();
+    const customType = options?.customType.trim();
+    const extensionNotification = customType
+      ? {
+          customType,
+          ...(options?.details !== undefined ? { details: toJson(options.details) } : {}),
+        }
+      : undefined;
     const active = this.activeAssistantId ? this.byId.get(this.activeAssistantId) : undefined;
     if (active?.kind === "assistant") {
       this.ensurePart(active.id, {
@@ -155,6 +171,7 @@ export class PiThreadProjector {
         type: "notification",
         notificationType,
         text: message,
+        ...(extensionNotification ? { extensionNotification } : {}),
         createdAt,
       });
       return;
@@ -167,6 +184,7 @@ export class PiThreadProjector {
       kind: "notice",
       noticeType: "notification",
       notificationType,
+      ...(extensionNotification ? { extensionNotification } : {}),
       title: message,
       content: { type: "text", text: message },
     } satisfies PiTimelineNode;

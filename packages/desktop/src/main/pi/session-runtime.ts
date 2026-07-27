@@ -107,7 +107,7 @@ export class SessionRuntime {
     this.extensionHost = new DesktopExtensionHost(
       () => this.publishControl(),
       () => [...this.session.state.pendingToolCalls],
-      (message, type) => this.projector.notify(message, type),
+      (message, type, options) => this.projector.notify(message, type, options),
     );
     this.compatibility = new PiCompatibilityAdapter({ session, projector: this.projector });
     this.summaryState = createSummary(session);

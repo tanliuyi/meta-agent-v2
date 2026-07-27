@@ -15,6 +15,7 @@ const viewState = vi.hoisted(() => ({
   parts: [] as TestPart[],
   toolUIs: {} as Record<string, TestToolUI[]>,
   completedAt: undefined as number | undefined,
+  autoExpandRunning: true,
 }));
 
 vi.mock("@assistant-ui/react", () => ({
@@ -87,7 +88,7 @@ vi.mock("@assistant-ui/react", () => ({
 }));
 
 vi.mock("../src/renderer/src/state/thinking-visibility.tsx", () => ({
-  useThinkingVisibility: () => ({ showThinking: false }),
+  useThinkingVisibility: () => ({ showThinking: false, autoExpandRunning: viewState.autoExpandRunning }),
 }));
 
 vi.mock("../src/renderer/src/components/assistant-ui/streamdown/streamdown-text.tsx", () => ({
@@ -95,7 +96,11 @@ vi.mock("../src/renderer/src/components/assistant-ui/streamdown/streamdown-text.
 }));
 
 vi.mock("../src/renderer/src/components/chat/message/chain-of-thought-group.tsx", () => ({
-  ChainOfThoughtGroup: ({ children }: { children: ReactNode }) => <div data-testid="chain-group">{children}</div>,
+  ChainOfThoughtGroup: ({ children, autoExpandRunning }: { children: ReactNode; autoExpandRunning: boolean }) => (
+    <div data-testid="chain-group" data-auto-expand-running={autoExpandRunning}>
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock("../src/renderer/src/components/chat/message/run-activity-group.tsx", () => ({
@@ -136,6 +141,7 @@ describe("AssistantMessageContent thinking visibility", () => {
     viewState.parts = [];
     viewState.toolUIs = {};
     viewState.completedAt = undefined;
+    viewState.autoExpandRunning = true;
   });
 
   it("关闭 Thinking 时不渲染纯 reasoning group", () => {
@@ -163,6 +169,16 @@ describe("AssistantMessageContent thinking visibility", () => {
     expect(markup).toContain('data-testid="chain-group"');
     expect(markup).toContain('data-testid="tool"');
     expect(markup).not.toContain('data-testid="thinking-text"');
+  });
+
+  it("仅将 running 自动展开配置传给 Thinking 工具组", () => {
+    viewState.parts = [{ type: "reasoning" }, { type: "tool-call" }];
+    viewState.autoExpandRunning = false;
+
+    const markup = renderToStaticMarkup(<AssistantMessageContent isRunActivityRunning isMessageRunning />);
+
+    expect(markup).toContain('data-testid="run-activity"');
+    expect(markup).toContain('data-auto-expand-running="false"');
   });
 
   it("将 repository 中的完成时间传给历史 activity", () => {

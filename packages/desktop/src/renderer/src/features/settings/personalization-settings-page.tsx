@@ -1,5 +1,6 @@
 import { FONT_FAMILY_LABEL_ID, FontFamilyControl } from "./font-family-control.tsx";
 import { FONT_SIZE_LABEL_ID, FontSizeControl } from "./font-size-control.tsx";
+import { RUNNING_AUTO_EXPAND_LABEL_ID, RunningAutoExpandControl } from "./running-auto-expand-control.tsx";
 import { ThemePreferenceControl } from "./theme-preference-control.tsx";
 import { THINKING_VISIBILITY_LABEL_ID, ThinkingVisibilityControl } from "./thinking-visibility-control.tsx";
 
@@ -36,9 +37,9 @@ export function PersonalizationSettingsPage() {
           <FontSizeControl />
         </div>
       </section>
-      <section className="settings-section mt-4" aria-labelledby="chat-heading">
+      <section className="settings-section mt-4" aria-labelledby="message-heading">
         <div className="settings-section-heading">
-          <h3 id="chat-heading">聊天</h3>
+          <h3 id="message-heading">消息</h3>
         </div>
         <div className="settings-row">
           <div className="settings-row-text">
@@ -46,6 +47,13 @@ export function PersonalizationSettingsPage() {
             <p className="settings-row-description">在对话中展示模型的思考过程</p>
           </div>
           <ThinkingVisibilityControl />
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <span id={RUNNING_AUTO_EXPAND_LABEL_ID}>运行时自动展开</span>
+            <p className="settings-row-description">消息生成期间自动展开 Thinking 与工具调用分组</p>
+          </div>
+          <RunningAutoExpandControl />
         </div>
       </section>
     </div>

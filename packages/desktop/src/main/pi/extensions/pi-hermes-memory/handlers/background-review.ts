@@ -184,7 +184,10 @@ export function setupBackgroundReview(
 
     const notifyIfSaved = (saved: boolean) => {
       if (saved) {
-        ctx.ui.notify("💾 记忆已自动审查并更新", "info");
+        ctx.ui.notify("💾 记忆已自动审查并更新", "info", {
+          customType: "hermes-memory.updated",
+          details: { source: "background-review" },
+        });
       }
     };
 

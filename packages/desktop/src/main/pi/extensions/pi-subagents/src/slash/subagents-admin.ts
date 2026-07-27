@@ -73,7 +73,9 @@ function liveAvailableModels(ctx: ExtensionContext) {
 		ctx.modelRegistry.refresh?.();
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		ctx.ui.notify(`Could not refresh the model registry; using the last loaded choices. ${message}`, "warning");
+		ctx.ui.notify(`Could not refresh the model registry; using the last loaded choices. ${message}`, "warning", {
+			customType: "subagents.warning",
+		});
 	}
 	return ctx.modelRegistry.getAvailable();
 }
@@ -380,19 +382,19 @@ export async function openSubagentsAdmin(pi: ExtensionAPI, ctx: ExtensionContext
 			if (selectedModel === null) return;
 			const message = await saveAgentModel(ctx, agent, selectedModel);
 			if (message === null) return;
-			ctx.ui.notify(message, "info");
+			ctx.ui.notify(message, "info", { customType: "subagents.info" });
 			sendAdminMessage(pi, message);
 		} else if (action === "Change thinking level") {
 			const selectedThinking = await chooseThinking(ctx, agent);
 			if (selectedThinking === null) return;
 			const message = await saveAgentThinking(ctx, agent, selectedThinking);
 			if (message === null) return;
-			ctx.ui.notify(message, "info");
+			ctx.ui.notify(message, "info", { customType: "subagents.info" });
 			sendAdminMessage(pi, message);
 		} else if (action === "Edit system prompt") {
 			const message = await editSystemPrompt(ctx, agent);
 			if (message === null) return;
-			ctx.ui.notify(message, "info");
+			ctx.ui.notify(message, "info", { customType: "subagents.info" });
 			sendAdminMessage(pi, message);
 		} else if (action === "Show details") {
 			// Full metadata is now opt-in (previously always posted to the thread).
@@ -400,7 +402,7 @@ export async function openSubagentsAdmin(pi: ExtensionAPI, ctx: ExtensionContext
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		ctx.ui.notify(message, "error");
+		ctx.ui.notify(message, "error", { customType: "subagents.error" });
 		sendAdminMessage(pi, `Failed to update '${agent.name}': ${message}`);
 	}
 }

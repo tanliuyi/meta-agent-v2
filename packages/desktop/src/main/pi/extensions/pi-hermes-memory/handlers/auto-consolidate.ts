@@ -236,6 +236,10 @@ export function registerConsolidateCommand(
         ctx.ui.notify(
           `🔄 Starting memory consolidation for ${targets.length} target${targets.length === 1 ? "" : "s"}...`,
           "info",
+          {
+            customType: "hermes-memory.consolidation",
+            details: { phase: "starting", targetCount: targets.length },
+          },
         );
       } catch {
         // Best-effort only. If the command context is already stale, continue
@@ -251,7 +255,10 @@ export function registerConsolidateCommand(
         }
 
         try {
-          ctx.ui.notify(`⏳ Consolidating ${item.label}...`, "info");
+          ctx.ui.notify(`⏳ Consolidating ${item.label}...`, "info", {
+            customType: "hermes-memory.consolidation",
+            details: { phase: "progress", target: item.label },
+          });
         } catch {
           // Best-effort progress feedback only.
         }
@@ -281,7 +288,10 @@ export function registerConsolidateCommand(
       const summary = `\n  🔄 Memory Consolidation\n  ${"─".repeat(30)}\n${results.map((r) => `  ${r}`).join("\n")}`;
 
       try {
-        ctx.ui.notify(summary, "info");
+        ctx.ui.notify(summary, "info", {
+          customType: "hermes-memory.consolidation",
+          details: { phase: "complete", results },
+        });
       } catch {
         // Child consolidation can indirectly trigger a runtime reload/session
         // replacement. If that happens, the original command ctx is stale by

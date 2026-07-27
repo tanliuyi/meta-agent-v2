@@ -23,6 +23,7 @@ export function registerInterviewCommand(pi: ExtensionAPI, store: MemoryStore): 
             userEntries.map((e) => `     • ${e.slice(0, 80)}${e.length > 80 ? "..." : ""}`).join("\n") +
             "\n\n  Starting the interview will add to or update these.\n",
           "info",
+          { customType: "hermes-memory.profile", details: { entryCount: userEntries.length } },
         );
       }
 

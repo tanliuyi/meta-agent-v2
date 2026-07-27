@@ -51,7 +51,10 @@ describe("PiThreadProjector", () => {
     const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
 
     projector.notify("普通消息", "info");
-    projector.notify("需要注意", "warning");
+    projector.notify("需要注意", "warning", {
+      customType: "subagents.warning",
+      details: { runId: "run-1" },
+    });
     projector.notify("执行失败", "error");
 
     expect(projector.snapshot().nodes).toEqual([
@@ -67,6 +70,7 @@ describe("PiThreadProjector", () => {
         kind: "notice",
         noticeType: "notification",
         notificationType: "warning",
+        extensionNotification: { customType: "subagents.warning", details: { runId: "run-1" } },
         content: { type: "text", text: "需要注意" },
       }),
       expect.objectContaining({
@@ -93,7 +97,10 @@ describe("PiThreadProjector", () => {
     projector.handle({ type: "agent_start" });
     projector.handle({ type: "turn_start" });
     projector.handle({ type: "message_start", message: started });
-    projector.notify("处理中", "info");
+    projector.notify("处理中", "info", {
+      customType: "hermes-memory.session-index",
+      details: { phase: "indexing", totalFiles: 12 },
+    });
     projector.handle({ type: "message_end", message: finished });
     projector.handle({ type: "turn_end", message: finished, toolResults: [] });
     entries.push(messageEntry("canonical-assistant", null, finished));
@@ -105,7 +112,15 @@ describe("PiThreadProjector", () => {
       kind: "assistant",
       content: [
         expect.objectContaining({ type: "reasoning", text: "分析" }),
-        expect.objectContaining({ type: "notification", notificationType: "info", text: "处理中" }),
+        expect.objectContaining({
+          type: "notification",
+          notificationType: "info",
+          text: "处理中",
+          extensionNotification: {
+            customType: "hermes-memory.session-index",
+            details: { phase: "indexing", totalFiles: 12 },
+          },
+        }),
         expect.objectContaining({ type: "text", text: "最终回复" }),
       ],
       status: { type: "complete", reason: "stop" },

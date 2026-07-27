@@ -473,14 +473,10 @@
   text-align: center;
 }
 
-.plugin-marketplace-detail-dialog.plugin-marketplace-detail-dialog {
+.plugin-marketplace-detail-dialog {
   display: grid;
-  width: min(960px, calc(100vw - 48px));
-  max-width: none;
   max-height: calc(100dvh - 32px);
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 0;
-  padding: 0;
   overflow: hidden;
   text-align: left;
 }
@@ -829,11 +825,6 @@
 }
 
 @media (max-width: 480px) {
-  .plugin-marketplace-detail-dialog.plugin-marketplace-detail-dialog {
-    width: calc(100vw - 16px);
-    max-height: calc(100dvh - 16px);
-  }
-
   .plugin-marketplace-detail-header {
     padding: var(--space-7) 48px var(--space-7) var(--space-7);
   }

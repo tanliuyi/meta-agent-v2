@@ -280,6 +280,7 @@ describe("PiMessageRepositoryConverter", () => {
           type: "notification",
           notificationType: "warning",
           text: "需要注意",
+          extensionNotification: { customType: "subagents.warning", details: { runId: "run-1" } },
           createdAt: 2,
         },
         { id: "a:text:2", type: "text", text: "最终回复" },
@@ -299,6 +300,7 @@ describe("PiMessageRepositoryConverter", () => {
         data: expect.objectContaining({
           noticeType: "notification",
           notificationType: "warning",
+          extensionNotification: { customType: "subagents.warning", details: { runId: "run-1" } },
           content: { type: "text", text: "需要注意" },
         }),
       }),

@@ -69,10 +69,19 @@ describe("DesktopExtensionHost", () => {
 
     ui.notify("info");
     ui.notify("warning", "warning");
+    ui.notify("structured", "info", {
+      customType: "hermes-memory.markdown-sync",
+      details: { phase: "complete", imported: 3 },
+    });
 
     expect(publish.mock.calls).toEqual([
       ["info", "info"],
       ["warning", "warning"],
+      [
+        "structured",
+        "info",
+        { customType: "hermes-memory.markdown-sync", details: { phase: "complete", imported: 3 } },
+      ],
     ]);
     expect(host.requests).toEqual([]);
   });

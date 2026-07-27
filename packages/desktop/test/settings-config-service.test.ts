@@ -24,14 +24,14 @@ describe("SettingsConfigService", () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  test("缺失配置不会创建文件，且默认显示 thinking", async () => {
+  test("缺失配置不会创建文件，且默认显示 thinking 并自动展开 running", async () => {
     const snapshot = await service.getConfig();
 
     expect(snapshot).toEqual({
       path: configPath,
       exists: false,
       revision: MISSING_SETTINGS_CONFIG_REVISION,
-      settings: { showThinking: true },
+      settings: { showThinking: true, autoExpandRunning: true },
     });
     await expect(lstat(configPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -41,11 +41,18 @@ describe("SettingsConfigService", () => {
 
     const result = await service.saveConfig({
       expectedRevision: snapshot.revision,
-      settings: { showThinking: false },
+      settings: { showThinking: false, autoExpandRunning: false },
     });
 
-    expect(result).toMatchObject({ status: "saved", snapshot: { exists: true, settings: { showThinking: false } } });
-    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ version: 1, showThinking: false });
+    expect(result).toMatchObject({
+      status: "saved",
+      snapshot: { exists: true, settings: { showThinking: false, autoExpandRunning: false } },
+    });
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      version: 1,
+      showThinking: false,
+      autoExpandRunning: false,
+    });
   });
 
   test("原子保存 Desktop 设置并保留未知键", async () => {
@@ -55,7 +62,7 @@ describe("SettingsConfigService", () => {
 
     const result = await service.saveConfig({
       expectedRevision: snapshot.revision,
-      settings: { showThinking: true },
+      settings: { showThinking: true, autoExpandRunning: false },
     });
 
     expect(result.status).toBe("saved");
@@ -63,6 +70,7 @@ describe("SettingsConfigService", () => {
       version: 1,
       showThinking: true,
       futureSetting: { enabled: true },
+      autoExpandRunning: false,
     });
     if (process.platform !== "win32") {
       expect((await lstat(configPath)).mode & 0o777).toBe(0o600);
@@ -77,10 +85,13 @@ describe("SettingsConfigService", () => {
 
     const result = await service.saveConfig({
       expectedRevision: snapshot.revision,
-      settings: { showThinking: false },
+      settings: { showThinking: false, autoExpandRunning: false },
     });
 
-    expect(result).toMatchObject({ status: "conflict", current: { settings: { showThinking: true } } });
+    expect(result).toMatchObject({
+      status: "conflict",
+      current: { settings: { showThinking: true, autoExpandRunning: true } },
+    });
     expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ version: 1, showThinking: true });
   });
 
@@ -88,7 +99,7 @@ describe("SettingsConfigService", () => {
     await expect(
       service.saveConfig({
         expectedRevision: MISSING_SETTINGS_CONFIG_REVISION,
-        settings: { showThinking: "false" },
+        settings: { showThinking: "false", autoExpandRunning: true },
       } as never),
     ).rejects.toThrow("Invalid settings save input");
     await expect(lstat(directory)).rejects.toMatchObject({ code: "ENOENT" });

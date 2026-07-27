@@ -279,7 +279,7 @@ export function registerPromptWorkflowCommands(input: {
 			}
 			const workflow = findWorkflow(workflows, name);
 			if (!workflow) {
-				ctx.ui.notify(`Unknown prompt workflow: ${name}`, "error");
+				ctx.ui.notify(`Unknown prompt workflow: ${name}`, "error", { customType: "subagents.error" });
 				return;
 			}
 			const runtime = parseRuntimeOptions(words);
@@ -296,7 +296,9 @@ export function registerPromptWorkflowCommands(input: {
 				}
 				await run(workflowParams(workflow, runtime.args, runtime), ctx);
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error", {
+					customType: "subagents.error",
+				});
 			}
 		},
 	});
@@ -313,7 +315,9 @@ export function registerPromptWorkflowCommands(input: {
 			const runtime = parseRuntimeOptions(shellWords(argsText));
 			const names = splitPromptChain(declaration);
 			if (names.length === 0) {
-				ctx.ui.notify("Usage: /chain-prompts prompt-a -> prompt-b -- args", "error");
+				ctx.ui.notify("Usage: /chain-prompts prompt-a -> prompt-b -- args", "error", {
+					customType: "subagents.error",
+				});
 				return;
 			}
 			try {
@@ -324,7 +328,9 @@ export function registerPromptWorkflowCommands(input: {
 				});
 				await run({ chain, task: runtime.args.join(" "), clarify: false, agentScope: "both", ...(runtime.bg ? { async: true } : {}) }, ctx);
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error", {
+					customType: "subagents.error",
+				});
 			}
 		},
 	});

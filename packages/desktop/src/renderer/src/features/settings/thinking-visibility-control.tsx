@@ -5,13 +5,13 @@ export const THINKING_VISIBILITY_LABEL_ID = "thinking-visibility-label";
 
 /** 控制 assistant 消息中的 thinking 内容是否可见。 */
 export function ThinkingVisibilityControl() {
-  const { showThinking, canUpdateThinkingVisibility, setShowThinking } = useThinkingVisibility();
+  const { showThinking, canUpdateMessageSettings, setShowThinking } = useThinkingVisibility();
 
   return (
     <Switch
       aria-labelledby={THINKING_VISIBILITY_LABEL_ID}
       checked={showThinking}
-      disabled={!canUpdateThinkingVisibility}
+      disabled={!canUpdateMessageSettings}
       onCheckedChange={(checked) => void setShowThinking(checked)}
     />
   );

@@ -50,6 +50,15 @@ import {
 	type Usage,
 } from "../shared/types.ts";
 
+function notifySubagents(
+	ctx: Pick<ExtensionContext, "ui">,
+	message: string,
+	type: "info" | "warning" | "error",
+	customType = type === "error" ? "subagents.error" : type === "warning" ? "subagents.warning" : "subagents.info",
+): void {
+	ctx.ui.notify(message, type, { customType });
+}
+
 interface InlineConfig {
 	output?: string | false;
 	outputMode?: "inline" | "file-only";
@@ -715,7 +724,7 @@ async function runSlashSubagent(
 			ctx.ui.setStatus("subagent-slash", undefined);
 		}
 		if (response.isError && ctx.hasUI) {
-			ctx.ui.notify(response.errorText || "Subagent failed", "error");
+			notifySubagents(ctx, response.errorText || "Subagent failed", "error");
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -731,10 +740,10 @@ async function runSlashSubagent(
 			ctx.ui.setStatus("subagent-slash", undefined);
 		}
 		if (message === "Cancelled") {
-			if (ctx.hasUI) ctx.ui.notify("Cancelled", "warning");
+			if (ctx.hasUI) notifySubagents(ctx, "Cancelled", "warning", "subagents.cancelled");
 			return;
 		}
-		if (ctx.hasUI) ctx.ui.notify(message, "error");
+		if (ctx.hasUI) notifySubagents(ctx, message, "error");
 	}
 }
 
@@ -940,39 +949,39 @@ const parseAgentArgs = (
 	} else {
 		const delimiterIndex = input.indexOf(" -- ");
 		if (delimiterIndex === -1) {
-			ctx.ui.notify(usage, "error");
+			notifySubagents(ctx, usage, "error");
 			return null;
 		}
 		const agentsPart = input.slice(0, delimiterIndex).trim();
 		sharedTask = input.slice(delimiterIndex + 4).trim();
 		if (!agentsPart || !sharedTask) {
-			ctx.ui.notify(usage, "error");
+			notifySubagents(ctx, usage, "error");
 			return null;
 		}
 		steps = agentsPart.split(/\s+/).filter(Boolean).map((t) => parseSingleTaskToken(t));
 	}
 
 	if (steps.length === 0) {
-		ctx.ui.notify(usage, "error");
+		notifySubagents(ctx, usage, "error");
 		return null;
 	}
 	if (!state.baseCwd) {
-		ctx.ui.notify("Subagent session cwd is not initialized yet", "error");
+		notifySubagents(ctx, "Subagent session cwd is not initialized yet", "error");
 		return null;
 	}
 	const agents = discoverAgents(state.baseCwd, "both").agents;
 	for (const step of steps) {
 		if (!agents.find((a) => a.name === step.name)) {
-			ctx.ui.notify(`Unknown agent: ${step.name}`, "error");
+			notifySubagents(ctx, `Unknown agent: ${step.name}`, "error");
 			return null;
 		}
 	}
 	if (command === "chain" && !steps[0]?.task && (perStep || !sharedTask)) {
-		ctx.ui.notify(`First step must have a task: /chain agent "task" -> agent2`, "error");
+		notifySubagents(ctx, `First step must have a task: /chain agent "task" -> agent2`, "error");
 		return null;
 	}
 	if (command === "parallel" && !steps.some((s) => s.task) && !sharedTask) {
-		ctx.ui.notify("At least one step must have a task", "error");
+		notifySubagents(ctx, "At least one step must have a task", "error");
 		return null;
 	}
 	return { steps, task: sharedTask };
@@ -1055,7 +1064,7 @@ export function buildChainExpressionSteps(
 	input: string,
 	ctx: ExtensionContext,
 ): { chain: ChainStep[]; task: string } | null {
-	const notify = (message: string) => ctx.ui.notify(message, "error");
+	const notify = (message: string) => notifySubagents(ctx, message, "error");
 	if (!hasGroupSyntax(input)) {
 		const parsed = parseAgentArgs(state, input, "chain", ctx);
 		if (!parsed) return null;
@@ -1146,7 +1155,7 @@ export function registerSlashCommands(
 			return;
 		}
 		if (fleetOpen) {
-			ctx.ui.notify("Subagent fleet inspector is already open.", "info");
+			notifySubagents(ctx, "Subagent fleet inspector is already open.", "info");
 			return;
 		}
 		fleetOpen = true;
@@ -1171,13 +1180,13 @@ export function registerSlashCommands(
 			const { args: cleanedArgs, bg, fork } = extractExecutionFlags(args);
 			const input = cleanedArgs.trim();
 			const firstSpace = input.indexOf(" ");
-			if (!input) { ctx.ui.notify("Usage: /run <agent> [task] [--bg] [--fork]", "error"); return; }
+			if (!input) { notifySubagents(ctx, "Usage: /run <agent> [task] [--bg] [--fork]", "error"); return; }
 			const { name: agentName, config: inline } = parseAgentToken(firstSpace === -1 ? input : input.slice(0, firstSpace));
 			const task = firstSpace === -1 ? "" : input.slice(firstSpace + 1).trim();
 
-			if (!state.baseCwd) { ctx.ui.notify("Subagent session cwd is not initialized yet", "error"); return; }
+			if (!state.baseCwd) { notifySubagents(ctx, "Subagent session cwd is not initialized yet", "error"); return; }
 			const agents = discoverAgents(state.baseCwd, "both").agents;
-			if (!agents.find((a) => a.name === agentName)) { ctx.ui.notify(`Unknown agent: ${agentName}`, "error"); return; }
+			if (!agents.find((a) => a.name === agentName)) { notifySubagents(ctx, `Unknown agent: ${agentName}`, "error"); return; }
 
 			let finalTask = task;
 			if (inline.reads && Array.isArray(inline.reads) && inline.reads.length > 0) {
@@ -1216,19 +1225,19 @@ export function registerSlashCommands(
 			const delimiterIndex = cleanedArgs.indexOf(" -- ");
 			const usage = "Usage: /run-chain <chainName> -- <task> [--bg] [--fork]";
 			if (delimiterIndex === -1) {
-				ctx.ui.notify(usage, "error");
+				notifySubagents(ctx, usage, "error");
 				return;
 			}
 			const chainName = cleanedArgs.slice(0, delimiterIndex).trim();
 			const task = cleanedArgs.slice(delimiterIndex + 4).trim();
 			if (!chainName || !task) {
-				ctx.ui.notify(usage, "error");
+				notifySubagents(ctx, usage, "error");
 				return;
 			}
-			if (!state.baseCwd) { ctx.ui.notify("Subagent session cwd is not initialized yet", "error"); return; }
+			if (!state.baseCwd) { notifySubagents(ctx, "Subagent session cwd is not initialized yet", "error"); return; }
 			const chain = discoverSavedChains(state.baseCwd).find((candidate) => candidate.name === chainName);
 			if (!chain) {
-				ctx.ui.notify(`Unknown chain: ${chainName}`, "error");
+				notifySubagents(ctx, `Unknown chain: ${chainName}`, "error");
 				return;
 			}
 			const params: SubagentParamsLike = { chain: mapSavedChainSteps(chain), task, clarify: false, agentScope: "both" };
@@ -1305,7 +1314,7 @@ export function registerSlashCommands(
 				targets = discoverStopTargets(ctx, state);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				ctx.ui.notify(message, "error");
+				notifySubagents(ctx, message, "error");
 				return;
 			}
 			if (ctx.mode !== "tui") {
@@ -1313,7 +1322,7 @@ export function registerSlashCommands(
 				return;
 			}
 			if (targets.length === 0) {
-				ctx.ui.notify("No active current-session async runs or scheduled subagent runs to stop.", "info");
+				notifySubagents(ctx, "No active current-session async runs or scheduled subagent runs to stop.", "info");
 				return;
 			}
 
@@ -1346,12 +1355,12 @@ export function registerSlashCommands(
 			}
 			const parts = trimmed.split(/\s+/).filter(Boolean);
 			if (parts.length !== 1) {
-				ctx.ui.notify("Usage: /subagents-models [builtin-agent-name]", "error");
+				notifySubagents(ctx, "Usage: /subagents-models [builtin-agent-name]", "error");
 				return;
 			}
 			const agent = parts[0]!;
 			if (!(BUILTIN_AGENT_NAMES as readonly string[]).includes(agent)) {
-				ctx.ui.notify(`Unknown builtin agent: ${agent}`, "error");
+				notifySubagents(ctx, `Unknown builtin agent: ${agent}`, "error");
 				return;
 			}
 			await runSlashSubagent(pi, ctx, { action: "models", agent });
@@ -1381,7 +1390,7 @@ export function registerSlashCommands(
 		handler: async (args, ctx) => {
 			const parsed = parseSingleRequiredArg(args, "Usage: /subagents-load-profile <name>");
 			if (!parsed.ok) {
-				ctx.ui.notify(parsed.message, "error");
+				notifySubagents(ctx, parsed.message, "error");
 				return;
 			}
 			try {
@@ -1418,7 +1427,7 @@ export function registerSlashCommands(
 					sendSlashText(pi, lines.join("\n"));
 				});
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				notifySubagents(ctx, error instanceof Error ? error.message : String(error), "error");
 			}
 		},
 	});
@@ -1432,7 +1441,7 @@ export function registerSlashCommands(
 			const withoutForce = trimmed.replace(/(?:^|\s)(?:--force|force)$/, "").trim();
 			const parsed = parseSingleRequiredArg(withoutForce, "Usage: /subagents-refresh-provider-models <provider> [--force]");
 			if (!parsed.ok) {
-				ctx.ui.notify(parsed.message, "error");
+				notifySubagents(ctx, parsed.message, "error");
 				return;
 			}
 			try {
@@ -1452,7 +1461,7 @@ export function registerSlashCommands(
 					sendSlashText(pi, lines.join("\n"));
 				});
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				notifySubagents(ctx, error instanceof Error ? error.message : String(error), "error");
 			}
 		},
 	});
@@ -1463,7 +1472,7 @@ export function registerSlashCommands(
 		handler: async (args, ctx) => {
 			const parsed = parseSingleRequiredArg(args, "Usage: /subagents-generate-profiles <provider>");
 			if (!parsed.ok) {
-				ctx.ui.notify(parsed.message, "error");
+				notifySubagents(ctx, parsed.message, "error");
 				return;
 			}
 			try {
@@ -1490,7 +1499,7 @@ export function registerSlashCommands(
 					sendSlashText(pi, lines.join("\n"));
 				});
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				notifySubagents(ctx, error instanceof Error ? error.message : String(error), "error");
 			}
 		},
 	});
@@ -1506,7 +1515,7 @@ export function registerSlashCommands(
 		handler: async (args, ctx) => {
 			const parsed = parseSingleRequiredArg(args, "Usage: /subagents-check-profile <name>");
 			if (!parsed.ok) {
-				ctx.ui.notify(parsed.message, "error");
+				notifySubagents(ctx, parsed.message, "error");
 				return;
 			}
 			try {
@@ -1522,7 +1531,7 @@ export function registerSlashCommands(
 					sendSlashText(pi, lines.join("\n"));
 				});
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				notifySubagents(ctx, error instanceof Error ? error.message : String(error), "error");
 			}
 		},
 	});

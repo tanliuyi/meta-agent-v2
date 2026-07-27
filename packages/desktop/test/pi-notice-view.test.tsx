@@ -49,6 +49,137 @@ describe("PiNoticeView", () => {
     expect(markup).not.toContain('data-slot="reasoning-root"');
   });
 
+  it("结构化 Hermes Memory 通知使用 Desktop 统计卡片", () => {
+    const markup = renderToStaticMarkup(
+      <PiNoticeView
+        data={{
+          id: "memory-sync",
+          kind: "notice",
+          noticeType: "notification",
+          notificationType: "info",
+          extensionNotification: {
+            customType: "hermes-memory.markdown-sync",
+            details: {
+              phase: "complete",
+              filesScanned: 7,
+              entriesScanned: 82,
+              imported: 4,
+              skipped: 78,
+              removed: 0,
+              projectCount: 3,
+            },
+          },
+          title: "legacy TUI text",
+          content: { type: "text", text: "legacy TUI text" },
+        }}
+      />,
+    );
+
+    expect(markup).toContain('class="builtin-notification-card"');
+    expect(markup).toContain("Markdown 记忆同步完成");
+    expect(markup).toContain("扫描文件");
+    expect(markup).toContain(">7<");
+    expect(markup).not.toContain("legacy TUI text");
+  });
+
+  it("Hermes Memory 扫描阶段不显示伪造的零统计", () => {
+    const markup = renderToStaticMarkup(
+      <PiNoticeView
+        data={{
+          id: "memory-scan",
+          kind: "notice",
+          noticeType: "notification",
+          notificationType: "info",
+          extensionNotification: {
+            customType: "hermes-memory.session-index",
+            details: { phase: "scan", totalFiles: 0, projectCount: 0 },
+          },
+          title: "Scanning",
+          content: { type: "text", text: "Scanning" },
+        }}
+      />,
+    );
+
+    expect(markup).toContain("正在扫描会话目录");
+    expect(markup).toContain("正在统计可索引的历史会话");
+    expect(markup).not.toContain("会话文件");
+  });
+
+  it("结构化统计无效时回退到原始通知文本", () => {
+    const markup = renderToStaticMarkup(
+      <PiNoticeView
+        data={{
+          id: "memory-invalid",
+          kind: "notice",
+          noticeType: "notification",
+          notificationType: "info",
+          extensionNotification: {
+            customType: "hermes-memory.markdown-sync",
+            details: { phase: "complete" },
+          },
+          title: "同步结果不可用",
+          content: { type: "text", text: "同步结果不可用" },
+        }}
+      />,
+    );
+
+    expect(markup).toContain("同步结果不可用");
+    expect(markup).not.toContain("扫描文件");
+  });
+
+  it("watchdog blocker 使用错误卡片和 assertive alert 语义", () => {
+    const markup = renderToStaticMarkup(
+      <PiNoticeView
+        data={{
+          id: "watchdog",
+          kind: "notice",
+          noticeType: "custom",
+          title: "subagent_watchdog_warning",
+          content: {
+            type: "custom",
+            customType: "subagent_watchdog_warning",
+            content: [{ type: "text", text: "fallback" }],
+            details: {
+              severity: "blocker",
+              summary: "发现阻断问题",
+              evidence: "类型检查失败",
+              recommendedAction: "修复后重试",
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(markup).toContain('data-tone="error"');
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain('aria-live="assertive"');
+    expect(markup).toContain("发现阻断问题");
+  });
+
+  it("Subagents 自定义消息使用专用卡片", () => {
+    const markup = renderToStaticMarkup(
+      <PiNoticeView
+        data={{
+          id: "subagent-result",
+          kind: "notice",
+          noticeType: "custom",
+          title: "subagent-slash-result",
+          content: {
+            type: "custom",
+            customType: "subagent-slash-result",
+            content: [{ type: "text", text: "reviewer completed" }],
+            details: { mode: "single" },
+          },
+        }}
+      />,
+    );
+
+    expect(markup).toContain('class="builtin-notification-card"');
+    expect(markup).toContain("子代理运行");
+    expect(markup).toContain("reviewer completed");
+    expect(markup).not.toContain('data-slot="reasoning-root"');
+  });
+
   it("其他 notice 使用默认折叠的 reasoning group", () => {
     const markup = renderToStaticMarkup(
       <PiNoticeView

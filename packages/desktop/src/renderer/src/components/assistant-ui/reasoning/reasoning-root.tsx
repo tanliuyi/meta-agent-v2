@@ -16,6 +16,8 @@ export type ReasoningRootProps = Omit<ComponentProps<typeof Collapsible>, "open"
     defaultOpen?: boolean;
     /** 自动展开，但不启用流式预览。 */
     autoOpen?: boolean;
+    /** 是否采用 autoOpen/streaming 推导自动展开状态。 */
+    autoExpand?: boolean;
     /** 流式阶段自动展开并锁定底部；用户首次切换后改由用户控制。 */
     streaming?: boolean;
   };
@@ -27,6 +29,7 @@ export function ReasoningRoot({
   onOpenChange: controlledOnOpenChange,
   defaultOpen = false,
   autoOpen,
+  autoExpand = true,
   streaming,
   children,
   ...props
@@ -45,7 +48,8 @@ export function ReasoningRoot({
   }, [autoOpen]);
 
   const isControlled = controlledOpen !== undefined;
-  const isOpen = isControlled ? controlledOpen : (userOpen ?? autoOpen ?? streaming ?? initialOpenRef.current);
+  const automaticOpen = autoExpand ? (autoOpen ?? streaming) : undefined;
+  const isOpen = isControlled ? controlledOpen : (userOpen ?? automaticOpen ?? initialOpenRef.current);
   const isPreview = streaming === true && isOpen && (isControlled || userOpen === null);
 
   useLayoutEffect(() => {

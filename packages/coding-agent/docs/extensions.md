@@ -2398,6 +2398,13 @@ const text = await ctx.ui.editor("Edit:", "prefilled text");
 
 // Notification (non-blocking)
 ctx.ui.notify("Done!", "info");  // "info" | "warning" | "error"
+
+// Optional structured metadata for hosts with custom notification renderers.
+// Hosts that do not support custom rendering continue to show the text fallback.
+ctx.ui.notify("Indexed 17 sessions", "info", {
+  customType: "my-extension.index-result",
+  details: { indexed: 17 },
+});
 ```
 
 #### Timed Dialogs with Countdown

@@ -104,6 +104,12 @@ export interface ExtensionWidgetOptions {
 	placement?: WidgetPlacement;
 }
 
+/** Optional structured metadata for hosts with custom notification renderers. */
+export interface ExtensionUINotificationOptions {
+	customType: string;
+	details?: unknown;
+}
+
 /** Raw terminal input listener for extensions. */
 export type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
 
@@ -133,8 +139,8 @@ export interface ExtensionUIContext {
 	/** Show a text input dialog. */
 	input(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions): Promise<string | undefined>;
 
-	/** Show a notification to the user. */
-	notify(message: string, type?: "info" | "warning" | "error"): void;
+	/** Show a notification to the user. Structured metadata is optional and host-specific. */
+	notify(message: string, type?: "info" | "warning" | "error", options?: ExtensionUINotificationOptions): void;
 
 	/** Listen to raw terminal input (interactive mode only). Returns an unsubscribe function. */
 	onTerminalInput(handler: TerminalInputHandler): () => void;

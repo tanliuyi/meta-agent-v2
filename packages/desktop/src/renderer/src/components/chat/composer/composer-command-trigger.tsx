@@ -11,7 +11,11 @@ import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { useMemo, useRef } from "react";
 import type { SlashCommand } from "../../../../../shared/contracts.ts";
 import { ComposerCommandScrollSync } from "./composer-command-scroll-sync.tsx";
-import { searchSlashCommands, slashCommandDisplayName } from "./composer-suggestion-model.ts";
+import {
+  searchSlashCommands,
+  slashCommandDisplayDescription,
+  slashCommandDisplayName,
+} from "./composer-suggestion-model.ts";
 import { ComposerTriggerState } from "./composer-trigger-state.tsx";
 
 const SLASH_COMMAND_RE = /(^|\s)\/([^\s/]+)/gu;
@@ -69,7 +73,7 @@ export function ComposerCommandTrigger({ commands, onOpenChange }: ComposerComma
           id: command.name,
           type: command.source,
           label: slashCommandDisplayName(command),
-          description: command.description,
+          description: slashCommandDisplayDescription(command),
         }));
       },
     }),

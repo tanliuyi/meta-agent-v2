@@ -1,5 +1,6 @@
 export interface DesktopSettings {
   showThinking: boolean;
+  autoExpandRunning: boolean;
 }
 
 export interface SettingsConfigSnapshot {

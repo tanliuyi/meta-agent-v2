@@ -15,7 +15,7 @@ export function AssistantMessageContent({
   isRunActivityRunning: boolean;
   isMessageRunning: boolean;
 }) {
-  const { showThinking } = useThinkingVisibility();
+  const { showThinking, autoExpandRunning } = useThinkingVisibility();
   const messageParts = useAuiState((state) => state.message.parts);
   const toolUIs = useAuiState((state) => state.tools.toolUIs);
   const runStartedAt = useAuiState((state) => state.message.createdAt.getTime());
@@ -60,6 +60,7 @@ export function AssistantMessageContent({
                   indices={part.indices}
                   running={running}
                   hasFollowingText={hasTextAfterGroup(messageParts, part.indices)}
+                  autoExpandRunning={autoExpandRunning}
                 >
                   {children}
                 </ChainOfThoughtGroup>

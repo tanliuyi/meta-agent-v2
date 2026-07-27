@@ -1,18 +1,20 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { SettingsConfigSnapshot } from "../../../shared/settings-config-contracts.ts";
+import type { DesktopSettings, SettingsConfigSnapshot } from "../../../shared/settings-config-contracts.ts";
 
 interface ThinkingVisibilityContextValue {
   showThinking: boolean;
-  canUpdateThinkingVisibility: boolean;
+  autoExpandRunning: boolean;
+  canUpdateMessageSettings: boolean;
   setShowThinking(showThinking: boolean): Promise<void>;
+  setAutoExpandRunning(autoExpandRunning: boolean): Promise<void>;
 }
 
 const ThinkingVisibilityContext = createContext<ThinkingVisibilityContextValue | undefined>(undefined);
 
-/** 为 renderer 提供由 Desktop settings.json 保存的 thinking 显示偏好。 */
+/** 为 renderer 提供由 Desktop settings.json 保存的消息展示偏好。 */
 export function ThinkingVisibilityProvider({ children }: { children: ReactNode }) {
-  const [showThinking, setShowThinkingState] = useState(true);
-  const [canUpdateThinkingVisibility, setCanUpdateThinkingVisibility] = useState(false);
+  const [settings, setSettings] = useState<DesktopSettings>({ showThinking: true, autoExpandRunning: true });
+  const [canUpdateMessageSettings, setCanUpdateMessageSettings] = useState(false);
   const snapshotRef = useRef<SettingsConfigSnapshot | undefined>(undefined);
   const saving = useRef(false);
 
@@ -23,47 +25,57 @@ export function ThinkingVisibilityProvider({ children }: { children: ReactNode }
       .then((snapshot) => {
         if (disposed) return;
         snapshotRef.current = snapshot;
-        setShowThinkingState(snapshot.settings.showThinking);
-        setCanUpdateThinkingVisibility(true);
+        setSettings(snapshot.settings);
+        setCanUpdateMessageSettings(true);
       })
       .catch(() => {
-        if (!disposed) setCanUpdateThinkingVisibility(false);
+        if (!disposed) setCanUpdateMessageSettings(false);
       });
     return () => {
       disposed = true;
     };
   }, []);
 
-  const setShowThinking = useCallback(async (nextShowThinking: boolean) => {
+  const updateSettings = useCallback(async (nextSettings: DesktopSettings) => {
     const current = snapshotRef.current;
     if (!current || saving.current) return;
-    const previousShowThinking = current.settings.showThinking;
     saving.current = true;
-    setCanUpdateThinkingVisibility(false);
-    setShowThinkingState(nextShowThinking);
+    setCanUpdateMessageSettings(false);
+    setSettings(nextSettings);
     try {
       const result = await window.desktop.settings.saveConfig({
         expectedRevision: current.revision,
-        settings: { ...current.settings, showThinking: nextShowThinking },
+        settings: nextSettings,
       });
-      if (result.status === "saved") {
-        snapshotRef.current = result.snapshot;
-        setShowThinkingState(result.snapshot.settings.showThinking);
-      } else {
-        snapshotRef.current = result.current;
-        setShowThinkingState(result.current.settings.showThinking);
-      }
+      const snapshot = result.status === "saved" ? result.snapshot : result.current;
+      snapshotRef.current = snapshot;
+      setSettings(snapshot.settings);
     } catch {
-      setShowThinkingState(previousShowThinking);
+      setSettings(current.settings);
     } finally {
       saving.current = false;
-      setCanUpdateThinkingVisibility(true);
+      setCanUpdateMessageSettings(true);
     }
   }, []);
 
+  const setShowThinking = useCallback(
+    async (showThinking: boolean) => updateSettings({ ...settings, showThinking }),
+    [settings, updateSettings],
+  );
+  const setAutoExpandRunning = useCallback(
+    async (autoExpandRunning: boolean) => updateSettings({ ...settings, autoExpandRunning }),
+    [settings, updateSettings],
+  );
+
   const value = useMemo(
-    () => ({ showThinking, canUpdateThinkingVisibility, setShowThinking }),
-    [showThinking, canUpdateThinkingVisibility, setShowThinking],
+    () => ({
+      showThinking: settings.showThinking,
+      autoExpandRunning: settings.autoExpandRunning,
+      canUpdateMessageSettings,
+      setShowThinking,
+      setAutoExpandRunning,
+    }),
+    [settings, canUpdateMessageSettings, setShowThinking, setAutoExpandRunning],
   );
 
   return <ThinkingVisibilityContext.Provider value={value}>{children}</ThinkingVisibilityContext.Provider>;

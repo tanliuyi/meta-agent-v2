@@ -11,11 +11,13 @@ export function ChainOfThoughtGroup({
   indices,
   running,
   hasFollowingText,
+  autoExpandRunning,
   children,
 }: {
   indices: readonly number[];
   running: boolean;
   hasFollowingText: boolean;
+  autoExpandRunning: boolean;
   children: ReactNode;
 }) {
   const label = useAuiState((state) => summarizeChainOfThought(state.message.parts, indices));
@@ -26,7 +28,12 @@ export function ChainOfThoughtGroup({
   }, [running]);
 
   return (
-    <ReasoningRoot variant="ghost" autoOpen={wasRunning && !hasFollowingText} streaming={running}>
+    <ReasoningRoot
+      variant="ghost"
+      autoOpen={wasRunning && !hasFollowingText}
+      autoExpand={autoExpandRunning}
+      streaming={running}
+    >
       <ReasoningTrigger label={label} active={running} />
       <ReasoningContent className="text-foreground" aria-busy={running}>
         <ReasoningText>{children}</ReasoningText>

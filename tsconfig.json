@@ -23,5 +23,10 @@
 		}
 	},
 	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
-	"exclude": ["**/dist/**", "packages/desktop/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+	"exclude": [
+		"**/dist/**",
+		"packages/desktop/**",
+		"packages/plugin-marketplace-web/**",
+		"packages/coding-agent/examples/extensions/gondolin/**"
+	]
 }

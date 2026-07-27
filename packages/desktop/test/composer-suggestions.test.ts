@@ -6,6 +6,7 @@ import {
   fileSuggestions,
   scrollSelectedSuggestion,
   searchSlashCommands,
+  slashCommandDisplayDescription,
   slashCommandDisplayName,
 } from "../src/renderer/src/components/chat/composer/composer-suggestion-model.ts";
 import type { SlashCommand } from "../src/shared/contracts.ts";
@@ -13,14 +14,14 @@ import type { SlashCommand } from "../src/shared/contracts.ts";
 describe("ComposerSuggestions", () => {
   it("不截断排在十条之后的 extension 命令", () => {
     const commands: SlashCommand[] = Array.from({ length: 12 }, (_, index) => ({
-      name: index === 11 ? "memory-insights" : `command-${index + 1}`,
+      name: `command-${index + 1}`,
       source: "extension",
     }));
 
     const suggestions = commandSuggestions(commands, "");
 
     expect(suggestions).toHaveLength(12);
-    expect(suggestions.at(-1)).toMatchObject({ label: "/memory-insights", text: "/memory-insights " });
+    expect(suggestions.at(-1)).toMatchObject({ label: "/command-12", text: "/command-12 " });
   });
 
   it("键盘选择变化时将活动项滚动到可视区域", () => {
@@ -52,22 +53,65 @@ describe("ComposerSuggestions", () => {
     ]);
   });
 
-  it("仅在 UI 展示名称中移除命令协议前缀", () => {
+  it("仅本地化内置扩展命令，技能与提示词保持原样", () => {
     expect(slashCommandDisplayName({ name: "reload", source: "builtin" })).toBe("reload");
     expect(slashCommandDisplayName({ name: "skill:add-llm-provider", source: "skill" })).toBe("add-llm-provider");
+    expect(slashCommandDisplayName({ name: "memory-insights", source: "extension" })).toBe("记忆概览");
+    expect(
+      slashCommandDisplayDescription({
+        name: "parallel-review",
+        description: "Parallel subagents review",
+        source: "prompt",
+      }),
+    ).toBe("Parallel subagents review");
   });
 
   it("支持多关键词、来源名称和说明检索", () => {
     const commands: SlashCommand[] = [
-      { name: "memory-insights", description: "List managed and loaded procedural skills", source: "extension" },
+      { name: "memory-consolidate", description: "Manually trigger memory cleanup", source: "extension" },
       { name: "skill:add-llm-provider", description: "Checklist for adding a provider", source: "skill" },
       { name: "parallel", source: "extension" },
     ];
 
-    expect(commandSuggestions(commands, "managed skills").map(({ label }) => label)).toEqual(["/memory-insights"]);
+    expect(commandSuggestions(commands, "trigger cleanup").map(({ label }) => label)).toEqual(["/整理记忆"]);
     expect(commandSuggestions(commands, "技能 provider").map(({ label }) => label)).toEqual([
       "/skill:add-llm-provider",
     ]);
+  });
+
+  it("使用中文名称和描述检索与展示，但插入原始命令", () => {
+    const commands: SlashCommand[] = [
+      {
+        name: "memory-interview",
+        description: "Answer questions to pre-fill your user profile",
+        source: "extension",
+      },
+    ];
+
+    expect(commandSuggestions(commands, "用户资料")).toEqual([
+      {
+        id: "extension:memory-interview",
+        label: "/记忆访谈",
+        detail: "回答问题并预先填写用户资料，以便跨会话记住你",
+        type: "command",
+        text: "/memory-interview ",
+      },
+    ]);
+    expect(searchSlashCommands(commands, "memory interview")).toEqual(commands);
+  });
+
+  it("隐藏仅展示只读 UI 内容的 Hermes Memory 命令", () => {
+    const commands: SlashCommand[] = [
+      "memory-insights",
+      "memory-skills",
+      "memory-preview-context",
+      "memory-switch-project",
+      "learn-memory-tool",
+      "memory-interview",
+    ].map((name) => ({ name, source: "extension" }));
+
+    expect(commandSuggestions(commands, "").map(({ text }) => text)).toEqual(["/memory-interview "]);
+    expect(searchSlashCommands(commands, "memory-insights")).toEqual([]);
   });
 
   it("为 combobox 解析补全上下文并生成稳定 option id", () => {

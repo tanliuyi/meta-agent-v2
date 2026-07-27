@@ -30,7 +30,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["packages/desktop/**"],
+			"includes": ["packages/desktop/**", "packages/plugin-marketplace-web/**"],
 			"formatter": {
 				"indentStyle": "space",
 				"indentWidth": 2
@@ -47,6 +47,9 @@
 		"includes": [
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
+			"packages/plugin-marketplace-web/**/*.tsx",
+			"packages/plugin-marketplace-web/**/*.css",
+			"packages/plugin-marketplace-web/**/*.json",
 			"packages/desktop/*.ts",
 			"packages/desktop/**/*.tsx",
 			"packages/desktop/**/*.css",

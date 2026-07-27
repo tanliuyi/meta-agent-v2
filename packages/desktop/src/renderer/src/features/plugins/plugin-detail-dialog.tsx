@@ -81,7 +81,7 @@ export function PluginDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
-      <DialogContent className="plugin-marketplace-detail-dialog w-[min(60rem,calc(100vw-48px))] max-w-none sm:max-w-none">
+      <DialogContent className="plugin-marketplace-detail-dialog w-[min(60rem,calc(100vw-48px))] max-w-none gap-0 p-0 sm:max-w-none max-[480px]:w-[calc(100vw-16px)] max-[480px]:max-h-[calc(100dvh-16px)]">
         <DialogHeader className="plugin-marketplace-detail-header">
           <div className="plugin-marketplace-detail-identity">
             <div className="plugin-marketplace-detail-icon" aria-hidden="true">

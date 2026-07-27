@@ -45,8 +45,8 @@ describe("settings IPC", () => {
   });
 
   test("映射 settings 配置读写处理器", async () => {
-    const snapshot = { revision: "one", settings: { showThinking: true } };
-    const input = { expectedRevision: "one", settings: { showThinking: false } };
+    const snapshot = { revision: "one", settings: { showThinking: true, autoExpandRunning: true } };
+    const input = { expectedRevision: "one", settings: { showThinking: false, autoExpandRunning: false } };
     settings.getConfig.mockResolvedValue(snapshot);
     settings.saveConfig.mockResolvedValue({ status: "saved", snapshot });
 

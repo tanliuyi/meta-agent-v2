@@ -71,6 +71,7 @@ export function registerSkillsCommand(pi: ExtensionAPI, store: SkillStore): void
           ? sections.join("\n")
           : "No skills found. Use the skill_manage tool to create a reusable procedure.",
         "info",
+        { customType: "hermes-memory.skills", details: { managedCount: managed.length } },
       );
     },
   });

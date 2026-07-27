@@ -346,6 +346,7 @@ function notificationNotice(part: PiAssistantNotificationPart): PiNoticeMessage 
     kind: "notice",
     noticeType: "notification",
     notificationType: part.notificationType,
+    ...(part.extensionNotification ? { extensionNotification: part.extensionNotification } : {}),
     title: part.text,
     content: { type: "text", text: part.text },
   };

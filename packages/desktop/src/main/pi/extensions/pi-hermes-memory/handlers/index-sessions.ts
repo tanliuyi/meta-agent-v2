@@ -16,7 +16,10 @@ export function registerIndexSessionsCommand(pi: ExtensionAPI): void {
     description: "Import past Pi sessions into the search database",
     handler: async (_args, ctx: ExtensionCommandContext) => {
       // Show initial progress
-      ctx.ui.notify("🔍 Scanning session directories...", "info");
+      ctx.ui.notify("🔍 Scanning session directories...", "info", {
+        customType: "hermes-memory.session-index",
+        details: { phase: "scan", totalFiles: 0, projectCount: 0 },
+      });
 
       try {
         // Count sessions first for progress display
@@ -35,6 +38,10 @@ export function registerIndexSessionsCommand(pi: ExtensionAPI): void {
         ctx.ui.notify(
           `📁 Found ${totalFiles} session files across ${projectDirs.length} projects\n⏳ Indexing...`,
           "info",
+          {
+            customType: "hermes-memory.session-index",
+            details: { phase: "indexing", totalFiles, projectCount: projectDirs.length },
+          },
         );
 
         const memoryDir = path.join(AGENT_ROOT, "pi-hermes-memory");
@@ -76,12 +83,31 @@ export function registerIndexSessionsCommand(pi: ExtensionAPI): void {
 
           output += `\n💡 Use the session_search tool to search across indexed sessions.`;
 
-          ctx.ui.notify(output, "info");
+          ctx.ui.notify(output, "info", {
+            customType: "hermes-memory.session-index",
+            details: {
+              phase: "complete",
+              sessionsProcessed: result.sessionsProcessed,
+              sessionsIndexed: result.sessionsIndexed,
+              sessionsSkipped: result.sessionsSkipped,
+              messagesIndexed: result.messagesIndexed,
+              projects: stats.projects.map(
+                (project) => `${project.project}：${project.sessions} 个会话，${project.messages} 条消息`,
+              ),
+              totalSessions: stats.totalSessions,
+              totalMessages: stats.totalMessages,
+              errors: result.errors,
+            },
+          });
         } finally {
           dbManager.close();
         }
       } catch (err) {
-        ctx.ui.notify(`❌ Session indexing failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`❌ Session indexing failed: ${message}`, "error", {
+          customType: "hermes-memory.error",
+          details: { operation: "session-index", message },
+        });
       }
     },
   });

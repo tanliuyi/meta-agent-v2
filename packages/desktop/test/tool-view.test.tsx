@@ -4,6 +4,12 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("../src/renderer/src/state/desktop-context.tsx", () => ({
+  useDesktopSelector: (
+    selector: (state: { activeProjectId: string; projects: Array<{ id: string; cwd: string }> }) => unknown,
+  ) => selector({ activeProjectId: "project", projects: [{ id: "project", cwd: "/Users/test/project" }] }),
+}));
+
 vi.mock("../src/renderer/src/components/chat/tool-file-target.tsx", () => ({
   ToolFileTarget: ({ path }: { path: string }) => (
     <button type="button" className="tool-target tool-file-target">
@@ -18,6 +24,7 @@ import {
   diffToolEdit,
   parseRenderedToolDiff,
   parseToolResult,
+  projectDisplayToolPath,
 } from "../src/renderer/src/components/chat/tools/tool-format.ts";
 
 describe("ToolView TUI parity", () => {
@@ -215,6 +222,38 @@ describe("ToolView TUI parity", () => {
 
     expect(markup.match(/aria-expanded=/g)).toHaveLength(2);
     expect(markup).toContain(">src/read.ts</button>");
+  });
+
+  it.each(["read", "write", "edit"])("%s 标题展示项目相对路径", (toolName) => {
+    const absolutePath = "/Users/test/project/packages/desktop/src/renderer/src/components/chat/tool-view.tsx";
+    const markup = renderToolView(toolCall({ toolName, args: { path: absolutePath } }));
+
+    expect(markup).toContain(">packages/desktop/src/renderer/src/components/chat/tool-view.tsx</button>");
+    expect(markup).not.toContain(absolutePath);
+  });
+
+  it("项目外文件标题保留完整绝对路径", () => {
+    const absolutePath = "/Users/test/other/read.ts";
+    const markup = renderToolView(toolCall({ toolName: "read", args: { path: absolutePath } }));
+
+    expect(markup).toContain(`>${absolutePath}</button>`);
+  });
+
+  it("ls、find 与 grep 使用项目相对路径", () => {
+    const lsMarkup = renderToolView(
+      toolCall({ toolName: "ls", args: { path: "/Users/test/project/packages/desktop" } }),
+    );
+    const findMarkup = renderToolView(
+      toolCall({ toolName: "find", args: { pattern: "*.tsx", path: "/Users/test/project/packages/desktop" } }),
+    );
+    const grepMarkup = renderToolView(
+      toolCall({ toolName: "grep", args: { pattern: "ToolView", path: "/Users/test/project/packages/desktop" } }),
+    );
+
+    expect(lsMarkup).toContain(">packages/desktop</span>");
+    expect(findMarkup).toContain("in packages/desktop");
+    expect(grepMarkup).toContain("in packages/desktop");
+    expect(`${lsMarkup}${findMarkup}${grepMarkup}`).not.toContain("/Users/test/project");
   });
 
   it("展示 read 行范围与 grep 查询上下文", () => {
@@ -622,6 +661,16 @@ describe("memory 工具详情", () => {
 });
 
 describe("tool TUI formatting", () => {
+  it.each([
+    ["/Users/test/project/src/main.ts", "/Users/test/project", "src/main.ts"],
+    ["src/../main.ts", "/Users/test/project", "main.ts"],
+    ["../other/main.ts", "/Users/test/project", "/Users/test/other/main.ts"],
+    ["C:\\Workspace\\Project\\src\\main.ts", "c:\\workspace\\project", "src/main.ts"],
+    ["/Users/test/other/main.ts", "/Users/test/project", "/Users/test/other/main.ts"],
+  ])("按项目 cwd 格式化工具路径 %#", (path, cwd, expected) => {
+    expect(projectDisplayToolPath(path, cwd)).toBe(expected);
+  });
+
   it("解包 Pi toolResult 并去除 ANSI 控制符", () => {
     expect(parseToolResult(toolResult("\u001b[31mfailed\u001b[0m", { source: "test" }))).toEqual({
       text: "failed",

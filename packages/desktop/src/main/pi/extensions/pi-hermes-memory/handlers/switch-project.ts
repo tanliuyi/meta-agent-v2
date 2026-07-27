@@ -42,6 +42,7 @@ export function registerSwitchProjectCommand(pi: ExtensionAPI, config?: MemoryCo
         ctx.ui.notify(
           "\n  📁 No project memories found.\n\n  Project memory is automatically created when you use the memory tool with\n  target 'project' while working in a project directory.\n",
           "info",
+          { customType: "hermes-memory.project-list", details: { projects: [] } },
         );
         return;
       }
@@ -73,7 +74,10 @@ export function registerSwitchProjectCommand(pi: ExtensionAPI, config?: MemoryCo
       lines.push("  project-scoped memory. Project is auto-detected from");
       lines.push(`  your current directory: ${process.cwd()}`);
 
-      ctx.ui.notify(lines.join("\n"), "info");
+      ctx.ui.notify(lines.join("\n"), "info", {
+        customType: "hermes-memory.project-list",
+        details: { projects: projects.sort() },
+      });
     },
   });
 }

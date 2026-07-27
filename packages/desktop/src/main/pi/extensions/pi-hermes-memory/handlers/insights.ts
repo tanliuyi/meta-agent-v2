@@ -67,7 +67,15 @@ export function registerInsightsCommand(
         lines.push("");
       }
 
-      ctx.ui.notify(lines.join("\n"), "info");
+      ctx.ui.notify(lines.join("\n"), "info", {
+        customType: "hermes-memory.insights",
+        details: {
+          memoryCount: memoryEntries.length,
+          userCount: userEntries.length,
+          projectName,
+          projectCount: projectEntries?.length ?? 0,
+        },
+      });
     },
   });
 }

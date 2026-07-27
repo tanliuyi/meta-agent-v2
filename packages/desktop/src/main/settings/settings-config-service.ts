@@ -13,6 +13,7 @@ export const MISSING_SETTINGS_CONFIG_REVISION = "missing:settings-config-v1";
 interface SettingsFileData {
   version?: number;
   showThinking?: boolean;
+  autoExpandRunning?: boolean;
   [key: string]: unknown;
 }
 
@@ -96,6 +97,9 @@ export class SettingsConfigService {
     if (value.showThinking !== undefined && typeof value.showThinking !== "boolean") {
       throw new Error("settings.json showThinking must be a boolean");
     }
+    if (value.autoExpandRunning !== undefined && typeof value.autoExpandRunning !== "boolean") {
+      throw new Error("settings.json autoExpandRunning must be a boolean");
+    }
     return { exists: true, revision: hashBytes(bytes), data: value as SettingsFileData };
   }
 
@@ -132,7 +136,10 @@ function snapshotFromCurrent(path: string, current: CurrentSettingsSource): Sett
     path,
     exists: current.exists,
     revision: current.revision,
-    settings: { showThinking: current.data.showThinking ?? true },
+    settings: {
+      showThinking: current.data.showThinking ?? true,
+      autoExpandRunning: current.data.autoExpandRunning ?? true,
+    },
   };
 }
 
@@ -142,7 +149,8 @@ function assertSaveInputShape(input: SaveSettingsConfigInput): void {
     typeof input !== "object" ||
     typeof input.expectedRevision !== "string" ||
     !isPlainObject(input.settings) ||
-    typeof input.settings.showThinking !== "boolean"
+    typeof input.settings.showThinking !== "boolean" ||
+    typeof input.settings.autoExpandRunning !== "boolean"
   ) {
     throw new TypeError("Invalid settings save input");
   }

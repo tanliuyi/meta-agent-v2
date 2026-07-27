@@ -100,7 +100,7 @@
   background: var(--markdown-code-token-background, transparent);
 }
 
-.dark .markdown-code-token {
+html[data-theme="dark"] .markdown-code-token {
   color: var(--shiki-dark, var(--markdown-code-token-color, inherit));
   background: var(--shiki-dark-bg, var(--markdown-code-token-background, transparent));
 }
