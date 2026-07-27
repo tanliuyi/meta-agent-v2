@@ -352,6 +352,8 @@ export interface AgentToolResult<T> {
 	content: (TextContent | ImageContent)[];
 	/** Arbitrary structured details for logs or UI rendering. */
 	details: T;
+	/** Whether the final result represents a handled tool failure. Ignored for partial updates. */
+	isError?: boolean;
 	/** Names of tools introduced by this result and available from this transcript point onward. */
 	addedToolNames?: string[];
 	/**
@@ -378,7 +380,7 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 	 * Must return an object that matches `TParameters`.
 	 */
 	prepareArguments?: (args: unknown) => Static<TParameters>;
-	/** Execute the tool call. Throw on failure instead of encoding errors in `content`. */
+	/** Execute the tool call. Throw on unexpected failure, or return `isError: true` for a handled failure. */
 	execute: (
 		toolCallId: string,
 		params: Static<TParameters>,

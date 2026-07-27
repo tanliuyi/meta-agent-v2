@@ -526,6 +526,8 @@ function isAllowedSidecarEnvironmentVariable(name: string): boolean {
       "HOME",
       "USERPROFILE",
       "PATH",
+      "ProgramFiles",
+      "ProgramFiles(x86)",
       "SystemRoot",
       "TMPDIR",
       "TMP",

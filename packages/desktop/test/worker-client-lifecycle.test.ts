@@ -7,15 +7,21 @@ describe("SidecarWorkerClient lifecycle", () => {
   it("removes inherited subagent lineage variables from worker environments", () => {
     const environment = createSidecarEnvironment("runtime", "/agent", process.execPath, {
       PATH: process.env.PATH,
+      ProgramFiles: "C:\\Program Files",
+      "ProgramFiles(x86)": "C:\\Program Files (x86)",
       PI_SUBAGENT_DEPTH: "4",
       pi_subagent_max_depth: "7",
       PI_CUSTOM_PROVIDER_SETTING: "kept",
+      PI_CODING_AGENT_MANAGED_BASH_PATH: "C:\\managed-shell\\bin\\bash.exe",
       ANTHROPIC_API_KEY: "secret",
     });
 
+    expect(environment.ProgramFiles).toBe("C:\\Program Files");
+    expect(environment["ProgramFiles(x86)"]).toBe("C:\\Program Files (x86)");
     expect(environment.PI_SUBAGENT_DEPTH).toBeUndefined();
     expect(environment.pi_subagent_max_depth).toBeUndefined();
     expect(environment.PI_CUSTOM_PROVIDER_SETTING).toBe("kept");
+    expect(environment.PI_CODING_AGENT_MANAGED_BASH_PATH).toBe("C:\\managed-shell\\bin\\bash.exe");
     expect(environment.ANTHROPIC_API_KEY).toBe("secret");
     expect(environment.PI_DESKTOP_RUNTIME_COMPATIBILITY_ID).toBe("runtime");
   });

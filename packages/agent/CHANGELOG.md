@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed handled tool failures returned with `AgentToolResult.isError` to propagate through tool events, hooks, and persisted tool-result messages without discarding structured result details.
+
 ## [0.80.7] - 2026-07-14
 
 ### Added

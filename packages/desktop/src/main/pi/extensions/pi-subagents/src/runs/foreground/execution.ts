@@ -136,11 +136,33 @@ function buildPendingAcceptanceLedger(acceptance: ResolvedAcceptanceConfig): Acc
 	};
 }
 
+const MAX_RECENT_OUTPUT_LINES = 50;
+const MAX_LIVE_RECENT_OUTPUT_LINES = 5;
+const MAX_LIVE_RECENT_TOOLS = 5;
+const MAX_RECENT_OUTPUT_LINE_CHARS = 2_000;
+const MAX_PROGRESS_TASK_CHARS = 4_000;
+const MAX_PROGRESS_FIELD_CHARS = 2_000;
+
+function compactLiveText(value: string, maxChars: number, marker = "[...truncated] "): string {
+	if (value.length <= maxChars) return value;
+	const available = maxChars - marker.length;
+	const headChars = Math.ceil(available / 2);
+	return `${value.slice(0, headChars)}${marker}${value.slice(-(available - headChars))}`;
+}
+
+function compactRecentOutputLine(line: string): string {
+	return compactLiveText(line, MAX_RECENT_OUTPUT_LINE_CHARS);
+}
+
+function compactProgressTask(task: string): string {
+	return compactLiveText(task, MAX_PROGRESS_TASK_CHARS, "\n[...task context omitted from live progress...]\n");
+}
+
 function appendRecentOutput(progress: AgentProgress, lines: string[]): void {
 	if (lines.length === 0) return;
-	progress.recentOutput.push(...lines.filter((line) => line.trim()));
-	if (progress.recentOutput.length > 50) {
-		progress.recentOutput.splice(0, progress.recentOutput.length - 50);
+	progress.recentOutput.push(...lines.filter((line) => line.trim()).map(compactRecentOutputLine));
+	if (progress.recentOutput.length > MAX_RECENT_OUTPUT_LINES) {
+		progress.recentOutput.splice(0, progress.recentOutput.length - MAX_RECENT_OUTPUT_LINES);
 	}
 }
 
@@ -155,34 +177,41 @@ function stripAcceptanceReportsFromMessages(messages: Message[] | undefined): vo
 	}
 }
 
-function snapshotProgress(progress: AgentProgress): AgentProgress {
+export function snapshotLiveProgress(progress: AgentProgress): AgentProgress {
 	return {
 		...progress,
-		skills: progress.skills ? [...progress.skills] : undefined,
-		recentTools: progress.recentTools.map((tool) => ({ ...tool })),
-		recentOutput: [...progress.recentOutput],
-	};
-}
-
-function snapshotResult(result: SingleResult, progress: AgentProgress): SingleResult {
-	return {
-		...result,
-		messages: result.outputMode === "file-only" && result.savedOutputPath ? undefined : result.messages ? [...result.messages] : undefined,
-		usage: { ...result.usage },
-		skills: result.skills ? [...result.skills] : undefined,
-		attemptedModels: result.attemptedModels ? [...result.attemptedModels] : undefined,
-		modelAttempts: result.modelAttempts
-			? result.modelAttempts.map((attempt) => ({
-				...attempt,
-				usage: attempt.usage ? { ...attempt.usage } : undefined,
-			}))
+		agent: compactLiveText(progress.agent, MAX_PROGRESS_FIELD_CHARS),
+		task: compactProgressTask(progress.task),
+		skills: progress.skills
+			?.slice(0, 20)
+			.map((skill) => compactLiveText(skill, MAX_PROGRESS_FIELD_CHARS)),
+		currentTool: progress.currentTool
+			? compactLiveText(progress.currentTool, MAX_PROGRESS_FIELD_CHARS)
 			: undefined,
-		controlEvents: result.controlEvents ? result.controlEvents.map((event) => ({ ...event })) : undefined,
-		progress,
-		progressSummary: result.progressSummary ? { ...result.progressSummary } : undefined,
-		artifactPaths: result.artifactPaths ? { ...result.artifactPaths } : undefined,
-		truncation: result.truncation ? { ...result.truncation } : undefined,
-		outputReference: result.outputReference ? { ...result.outputReference } : undefined,
+		currentToolArgs: progress.currentToolArgs
+			? compactLiveText(progress.currentToolArgs, MAX_PROGRESS_FIELD_CHARS)
+			: undefined,
+		currentPath: progress.currentPath
+			? compactLiveText(progress.currentPath, MAX_PROGRESS_FIELD_CHARS)
+			: undefined,
+		recentTools: progress.recentTools.slice(-MAX_LIVE_RECENT_TOOLS).map((tool) => ({
+			...tool,
+			tool: compactLiveText(tool.tool, MAX_PROGRESS_FIELD_CHARS),
+			args: compactLiveText(tool.args, MAX_PROGRESS_FIELD_CHARS),
+		})),
+		recentOutput: progress.recentOutput.slice(-MAX_LIVE_RECENT_OUTPUT_LINES).map(compactRecentOutputLine),
+		error: progress.error ? compactLiveText(progress.error, MAX_PROGRESS_FIELD_CHARS) : undefined,
+		failedTool: progress.failedTool
+			? compactLiveText(progress.failedTool, MAX_PROGRESS_FIELD_CHARS)
+			: undefined,
+		watchdog: progress.watchdog
+			? {
+				...progress.watchdog,
+				reason: progress.watchdog.reason
+					? compactLiveText(progress.watchdog.reason, MAX_PROGRESS_FIELD_CHARS)
+					: undefined,
+			}
+			: undefined,
 	};
 }
 
@@ -336,11 +365,10 @@ async function runProgrammaticSingleAttempt(
 	const emitUpdate = (): void => {
 		if (!options.onUpdate) return;
 		progress.durationMs = Date.now() - startedAt;
-		const text = getFinalOutput(result.messages) || result.error || "(running...)";
-		const progressSnapshot = snapshotProgress(progress);
+		const progressSnapshot = snapshotLiveProgress(progress);
 		options.onUpdate({
-			content: [{ type: "text", text }],
-			details: { mode: "single", results: [snapshotResult(result, progressSnapshot)], progress: [progressSnapshot] },
+			content: [{ type: "text", text: progressSnapshot.error || "(running...)" }],
+			details: { mode: "single", results: [], progress: [progressSnapshot] },
 		});
 	};
 	const applyEvent = (event: SubagentRunEvent): void => {

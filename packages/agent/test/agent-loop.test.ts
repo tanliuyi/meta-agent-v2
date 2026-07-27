@@ -307,6 +307,104 @@ describe("agentLoop with AgentMessage", () => {
 		}
 	});
 
+	it("should preserve handled tool errors returned with structured details", async () => {
+		const toolSchema = Type.Object({});
+		const details = { mode: "single", results: [] as unknown[] };
+		const tool: AgentTool<typeof toolSchema, typeof details> = {
+			name: "subagent",
+			label: "Subagent",
+			description: "Subagent tool",
+			parameters: toolSchema,
+			async execute() {
+				return {
+					content: [{ type: "text", text: "acceptance cannot be requested explicitly" }],
+					details,
+					isError: true,
+				};
+			},
+		};
+		const context: AgentContext = {
+			systemPrompt: "",
+			messages: [],
+			tools: [tool],
+		};
+		let hookInput: { isError: boolean; details: unknown } | undefined;
+		let errorOverride: boolean | undefined;
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			afterToolCall: async ({ result, isError }) => {
+				hookInput = { isError, details: result.details };
+				return errorOverride === undefined ? undefined : { isError: errorOverride };
+			},
+		};
+
+		let callIndex = 0;
+		const streamFn = () => {
+			const mockStream = new MockAssistantStream();
+			queueMicrotask(() => {
+				if (callIndex === 0) {
+					mockStream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantMessage(
+							[{ type: "toolCall", id: "tool-1", name: "subagent", arguments: {} }],
+							"toolUse",
+						),
+					});
+				} else {
+					mockStream.push({
+						type: "done",
+						reason: "stop",
+						message: createAssistantMessage([{ type: "text", text: "done" }]),
+					});
+				}
+				callIndex++;
+			});
+			return mockStream;
+		};
+
+		const events: AgentEvent[] = [];
+		for await (const event of agentLoop([createUserMessage("review")], context, config, undefined, streamFn)) {
+			events.push(event);
+		}
+
+		expect(hookInput).toEqual({ isError: true, details });
+		expect(events.find((event) => event.type === "tool_execution_end")).toMatchObject({
+			type: "tool_execution_end",
+			toolCallId: "tool-1",
+			isError: true,
+			result: { details },
+		});
+		expect(events.find((event) => event.type === "message_end" && event.message.role === "toolResult")).toMatchObject(
+			{
+				type: "message_end",
+				message: {
+					role: "toolResult",
+					toolCallId: "tool-1",
+					isError: true,
+					details,
+					content: [{ type: "text", text: "acceptance cannot be requested explicitly" }],
+				},
+			},
+		);
+
+		errorOverride = false;
+		callIndex = 0;
+		const overriddenEvents: AgentEvent[] = [];
+		for await (const event of agentLoop([createUserMessage("review")], context, config, undefined, streamFn)) {
+			overriddenEvents.push(event);
+		}
+		expect(overriddenEvents.find((event) => event.type === "tool_execution_end")).toMatchObject({
+			type: "tool_execution_end",
+			isError: false,
+			result: { isError: false, details },
+		});
+		expect(
+			overriddenEvents.find((event) => event.type === "message_end" && event.message.role === "toolResult"),
+		).toMatchObject({ type: "message_end", message: { role: "toolResult", isError: false } });
+	});
+
 	it("should not execute tool calls from a length-truncated assistant message", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executed: string[] = [];

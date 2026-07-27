@@ -170,6 +170,25 @@ class TimeoutRuntime implements SubagentRuntime {
   async dispose() {}
 }
 
+class LargeFailureRuntime implements SubagentRuntime {
+  private readonly error: string;
+
+  constructor(error: string) {
+    this.error = error;
+  }
+
+  async *run(request: SubagentRuntimeRunRequest) {
+    yield { type: "failed" as const, runId: request.runId, error: this.error };
+  }
+
+  async cancel() {}
+  async steer() {}
+  resume(request: SubagentRuntimeRunRequest) {
+    return this.run(request);
+  }
+  async dispose() {}
+}
+
 const agents: AgentConfig[] = ["first", "second"].map((name) => ({
   name,
   description: name,
@@ -205,6 +224,38 @@ describe("Desktop foreground programmatic modes", () => {
       { exitCode: 0, finalOutput: "output-0" },
       { exitCode: 0, finalOutput: "output-1" },
     ]);
+  });
+
+  it("keeps live progress bounded without truncating the child result", async () => {
+    const largeOutput = "x".repeat(2 * 1024 * 1024);
+    const updateSizes: number[] = [];
+
+    const result = await runSync(process.cwd(), agents, "first", "produce a large result", {
+      subagentRuntime: new RecordingRuntime(1, undefined, () => largeOutput),
+      runId: "large-live-progress",
+      acceptance: false,
+      onUpdate: (update) => updateSizes.push(JSON.stringify(update).length),
+    });
+
+    expect(result.finalOutput).toBe(largeOutput);
+    expect(updateSizes.length).toBeGreaterThan(0);
+    expect(Math.max(...updateSizes)).toBeLessThan(128 * 1024);
+  });
+
+  it("keeps large live errors bounded without truncating the child error", async () => {
+    const largeError = "failure:".concat("x".repeat(2 * 1024 * 1024));
+    const updateSizes: number[] = [];
+
+    const result = await runSync(process.cwd(), agents, "first", "fail with a large error", {
+      subagentRuntime: new LargeFailureRuntime(largeError),
+      runId: "large-live-error",
+      acceptance: false,
+      onUpdate: (update) => updateSizes.push(JSON.stringify(update).length),
+    });
+
+    expect(result.error).toBe(largeError);
+    expect(updateSizes.length).toBeGreaterThan(0);
+    expect(Math.max(...updateSizes)).toBeLessThan(128 * 1024);
   });
 
   it("persists canonical programmatic events in the upstream child transcript", async () => {
@@ -293,6 +344,39 @@ describe("Desktop foreground programmatic modes", () => {
 
     expect(result.isError).not.toBe(true);
     expect(runtime.requests[1]?.task).toContain(`use ${literalOutput}`);
+  });
+
+  it("keeps chain live progress bounded while passing the full previous output", async () => {
+    const root = mkdtempSync(join(tmpdir(), "desktop-subagent-chain-large-output-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const largeOutput = "x".repeat(2 * 1024 * 1024);
+    const runtime = new RecordingRuntime(1, undefined, (request) => (request.childIndex === 0 ? largeOutput : "done"));
+    const updateSizes: number[] = [];
+
+    const result = await executeChain({
+      chain: [
+        { agent: "first", task: "produce", acceptance: false },
+        { agent: "second", task: "use {previous}", acceptance: false },
+      ],
+      agents,
+      ctx: extensionContext(root),
+      runId: "large-output-chain",
+      shareEnabled: false,
+      sessionDirForIndex: () => undefined,
+      sessionFileForIndex: () => undefined,
+      artifactsDir: join(root, "artifacts"),
+      artifactConfig: { enabled: false } as never,
+      controlConfig: { enabled: false } as never,
+      chainDir: join(root, "chains"),
+      maxSubagentDepth: 1,
+      subagentRuntime: runtime,
+      onUpdate: (update) => updateSizes.push(JSON.stringify(update).length),
+    });
+
+    expect(runtime.requests[1]?.task).toBe(`use ${largeOutput}`);
+    expect(result.details.results[0]?.finalOutput).toBe(largeOutput);
+    expect(updateSizes.length).toBeGreaterThan(0);
+    expect(Math.max(...updateSizes)).toBeLessThan(128 * 1024);
   });
 
   it("runs parallel chain leaves concurrently through the runtime", async () => {

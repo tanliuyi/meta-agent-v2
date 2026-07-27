@@ -15,6 +15,7 @@ interface KeyState {
   record: CachedSessionRecord;
   pending: Promise<SessionAttachment> | null;
   committed: CommittedAttachment | null;
+  resyncAfterPending: boolean;
   tombstoned: boolean;
 }
 
@@ -29,7 +30,7 @@ export class SessionTransportManager {
     const key = record.key;
     let state = this.keyStates.get(key);
     if (!state) {
-      state = { record, pending: null, committed: null, tombstoned: false };
+      state = { record, pending: null, committed: null, resyncAfterPending: false, tombstoned: false };
       this.keyStates.set(key, state);
     }
     if (state.record !== record || state.tombstoned) throw new Error(`Session record ${key} is retired`);
@@ -44,9 +45,24 @@ export class SessionTransportManager {
     const state = this.keyStates.get(record.key);
     if (!state || state.record !== record || state.tombstoned)
       throw new Error(`Session record ${record.key} is retired`);
-    if (state.pending) return state.pending;
     record.stores.connection.setState("recovering");
     record.stores.summary.set({ connectionState: "recovering" });
+    if (state.pending) {
+      state.resyncAfterPending = true;
+      const pending = state.pending;
+      try {
+        await pending;
+      } catch (error) {
+        state.resyncAfterPending = false;
+        throw error;
+      }
+      if (this.keyStates.get(record.key) !== state || state.record !== record || state.tombstoned) {
+        throw new Error(`Session record ${record.key} is retired`);
+      }
+      if (!state.resyncAfterPending) return this.ensure(record);
+      state.resyncAfterPending = false;
+      if (state.pending) return state.pending;
+    }
     return this.startAttach(state, state.committed?.attachmentId);
   }
 
@@ -54,6 +70,7 @@ export class SessionTransportManager {
     const state = this.keyStates.get(key);
     if (!state) return;
     state.tombstoned = true;
+    state.resyncAfterPending = false;
     state.record.generation += 1;
     state.record.stores.connection.setState("error");
     state.record.stores.summary.set({ connectionState: "error" });

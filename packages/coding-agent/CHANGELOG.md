@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added support for an application-managed Bash runtime on Windows after system Git Bash resolution.
+
 ## [0.80.7] - 2026-07-14
 
 ### Breaking Changes

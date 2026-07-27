@@ -695,7 +695,7 @@ async function executePreparedToolCall(
 		);
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
-		return { result, isError: false };
+		return { result, isError: result.isError === true };
 	} catch (error) {
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
@@ -738,6 +738,7 @@ async function finalizeExecutedToolCall(
 					content: afterResult.content ?? result.content,
 					details: afterResult.details ?? result.details,
 					terminate: afterResult.terminate ?? result.terminate,
+					...(afterResult.isError === undefined ? {} : { isError: afterResult.isError }),
 				};
 				isError = afterResult.isError ?? isError;
 			}
@@ -758,6 +759,7 @@ function createErrorToolResult(message: string): AgentToolResult<any> {
 	return {
 		content: [{ type: "text", text: message }],
 		details: {},
+		isError: true,
 	};
 }
 

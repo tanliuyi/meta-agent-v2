@@ -28,6 +28,7 @@ import { MarketplacePluginTransactionStore } from "./plugins/marketplace-plugin-
 import { MarketplaceRevocationService } from "./plugins/marketplace-revocation-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
+import { locateManagedBash } from "./sidecar/managed-shell-locator.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
 import { NodeRuntimeInstaller } from "./sidecar/node-runtime-installer.ts";
 import {
@@ -216,6 +217,13 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   const userDataDir = app.getPath("userData");
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+  const managedBashPath = locateManagedBash({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir,
+  });
+  if (managedBashPath) process.env.PI_CODING_AGENT_MANAGED_BASH_PATH = managedBashPath;
+  else delete process.env.PI_CODING_AGENT_MANAGED_BASH_PATH;
   const projects = new ProjectStore(join(userDataDir, "desktop-state.json"), join(agentDir, "projects.json"));
   await projects.load();
   sidecarLog = new SidecarLog(userDataDir);

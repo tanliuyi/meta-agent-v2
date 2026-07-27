@@ -33,7 +33,7 @@ import {
 } from "../../shared/settings.ts";
 import { discoverAvailableSkills, normalizeSkillInput } from "../../agents/skills.ts";
 import { INTERCOM_BRIDGE_MARKER } from "../../intercom/intercom-bridge.ts";
-import { runSync } from "./execution.ts";
+import { runSync, snapshotLiveProgress } from "./execution.ts";
 import { buildChainSummary } from "../../shared/formatters.ts";
 import { compactForegroundDetails, getSingleResultOutput, mapConcurrent, resolveChildCwd, sumResultsCost, sumResultsUsage } from "../../shared/utils.ts";
 import { DEFAULT_GLOBAL_CONCURRENCY_LIMIT, Semaphore } from "../shared/parallel-utils.ts";
@@ -384,13 +384,12 @@ async function runParallelChainTasks(input: ParallelChainRunInput): Promise<Sing
 							...progressUpdate,
 							details: {
 								mode: "chain",
-								results: input.results.concat(stepResults),
-								progress: input.allProgress.concat(stepProgress),
+								results: [],
+								progress: input.allProgress.concat(stepProgress).map(snapshotLiveProgress),
 								controlEvents: progressUpdate.details?.controlEvents,
 								chainAgents: input.chainAgents,
 								totalSteps: input.totalSteps,
 								currentStepIndex: input.stepIndex,
-								outputs: input.outputs,
 								workflowGraph: buildWorkflowGraphSnapshot({
 									runId: input.runId,
 									mode: "chain",
@@ -1307,13 +1306,12 @@ export async function executeChain(params: ChainExecutionParams): Promise<ChainE
 							...p,
 							details: {
 								mode: "chain",
-								results: results.concat(stepResults),
-								progress: allProgress.concat(stepProgress),
+								results: [],
+								progress: allProgress.concat(stepProgress).map(snapshotLiveProgress),
 								controlEvents: p.details?.controlEvents,
 								chainAgents,
 								totalSteps,
 								currentStepIndex: stepIndex,
-								outputs,
 								workflowGraph: buildWorkflowGraphSnapshot({
 									runId,
 									mode: "chain",

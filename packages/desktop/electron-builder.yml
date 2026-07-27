@@ -32,6 +32,9 @@ mac:
     - zip
 win:
   icon: build/icon.ico
+  extraResources:
+    - from: output/managed-shell
+      to: managed-shell
   target:
     - nsis
 nsis:

@@ -247,6 +247,34 @@ describe("SessionTransportManager", () => {
     expect(manager.getConnectionState(record.key)).toBe("ready");
   });
 
+  it("attach flush 请求 recovery 时会在 pending attach 完成后执行 replacement attach", async () => {
+    const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
+    const attach = vi
+      .fn()
+      .mockResolvedValueOnce(attachmentFor(record, "initial"))
+      .mockResolvedValueOnce(attachmentFor(record, "replacement"));
+    const flush = vi
+      .fn()
+      .mockReturnValueOnce({ state: "recovering", reason: "renderer-delivery-queue-overflow" })
+      .mockReturnValue({ state: "flushed" });
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: { attach, flush, detach: vi.fn() },
+        workbench: { get: vi.fn(async () => workbenchState()) },
+      },
+    });
+    const manager = new SessionTransportManager();
+
+    await manager.ensure(record);
+    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(2));
+    await manager.ensure(record);
+
+    expect(attach.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ replaceAttachmentId: "initial" }));
+    expect(flush).toHaveBeenCalledTimes(2);
+    expect(manager.getCommittedAttachmentId(record)).toBe("replacement");
+    expect(manager.getConnectionState(record.key)).toBe("ready");
+  });
+
   it("replacement attach 后读取 Workbench 失败会释放新旧 lease 并允许 fresh retry", async () => {
     const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
     const attach = vi

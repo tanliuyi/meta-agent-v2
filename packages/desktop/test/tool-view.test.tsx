@@ -246,6 +246,21 @@ describe("subagent 工具详情", () => {
     expect(markup).not.toContain("&quot;");
   });
 
+  it("预检失败在标题中明确标记为调用失败", () => {
+    const markup = renderToolView(
+      toolCall({
+        toolName: "subagent",
+        args: { agent: "reviewer", task: "检查改动", acceptance: "reviewed" },
+        result: toolResult("acceptance cannot be requested explicitly", { mode: "single", results: [] }),
+        isError: true,
+      }),
+    );
+
+    expect(markup).toContain('data-tool-status="error"');
+    expect(markup).toContain('class="tool-error-label"');
+    expect(markup).toContain("调用失败");
+  });
+
   it("parallel 模式标题按 count 展开任务数", () => {
     const markup = renderToolView(
       toolCall({

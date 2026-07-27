@@ -77,6 +77,11 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
         {cursorFollowsArgs && header.target?.type === "file" ? (
           <span className="tool-running-cursor" aria-hidden="true" />
         ) : null}
+        {error ? (
+          <span className="tool-error-label" aria-hidden="true">
+            {toolName === "subagent" ? "调用失败" : "失败"}
+          </span>
+        ) : null}
         <span className="sr-only" aria-live="polite">
           {stateLabel}
         </span>

@@ -79,6 +79,7 @@ export default async function validateDesktopPackage(context) {
     execFileSync("otool", ["-L", nodePath], { stdio: "inherit" });
   } else if (context.electronPlatformName === "win32") {
     if (!usesSystemNode) throw new Error("Windows bundled Node is no longer supported; use the configured system Node");
+    validateManagedShell(resources);
   } else if (context.electronPlatformName === "linux") {
     const libraries = execFileSync("ldd", [nodePath], { encoding: "utf8" });
     if (libraries.includes("not found")) throw new Error(`Packaged Node has unresolved libraries:\n${libraries}`);
@@ -103,6 +104,25 @@ export default async function validateDesktopPackage(context) {
  * assembled; otherwise a cross-target build can produce a seemingly valid
  * artifact containing a host-platform Node executable.
  */
+export function validateManagedShell(resources) {
+  const root = join(resources, "managed-shell");
+  const shellPath = join(root, "bin", "bash.exe");
+  const manifestPath = join(root, "META_AGENT_MANAGED_SHELL.json");
+  if (!existsSync(shellPath) || !statSync(shellPath).isFile()) {
+    throw new Error(`Managed Bash is missing from package: ${shellPath}`);
+  }
+  if (!existsSync(manifestPath) || !statSync(manifestPath).isFile()) {
+    throw new Error(`Managed Bash manifest is missing from package: ${manifestPath}`);
+  }
+  if (/[\\/]app\.asar(?:[\\/]|$)/i.test(shellPath)) {
+    throw new Error(`Managed Bash is inside app.asar: ${shellPath}`);
+  }
+  const output = execFileSync(shellPath, ["--noprofile", "--norc", "-c", "printf managed-shell-ok"], {
+    encoding: "utf8",
+  });
+  if (output !== "managed-shell-ok") throw new Error(`Managed Bash smoke test returned unexpected output: ${output}`);
+}
+
 export function assertTargetRuntime(context, manifest) {
   const platform = {
     darwin: "darwin",
