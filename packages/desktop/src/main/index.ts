@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, getShellConfig, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { app, BrowserWindow, Menu } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
@@ -36,6 +36,12 @@ import {
   loadNodeRuntimeManifest,
   type NodeRuntimeManifest,
 } from "./sidecar/node-runtime-locator.ts";
+import { parseRuntimeSetupSelection, runRuntimeSetup } from "./sidecar/runtime-setup.ts";
+import {
+  SHELL_RUNTIME_VERSION,
+  ShellRuntimeInstaller,
+  shellRuntimeInstallUrl,
+} from "./sidecar/shell-runtime-installer.ts";
 import { SidecarLog } from "./sidecar/sidecar-log.ts";
 import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
@@ -58,10 +64,11 @@ const dirtyGuard = new WindowDirtyGuard({
   beforeReload: (window) => sessions?.detachAll(window.webContents.id),
 });
 const appDir = dirname(fileURLToPath(import.meta.url));
+const runtimeSetupSelection = parseRuntimeSetupSelection(process.argv);
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minimumWindowBounds = { width: 1024, height: 680 };
 // 开发实例允许并行启动；发布版保持单实例，避免多个主进程同时管理同一份状态。
-const hasSingleInstanceLock = app.isPackaged ? app.requestSingleInstanceLock() : true;
+const hasSingleInstanceLock = runtimeSetupSelection || !app.isPackaged ? true : app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) app.quit();
 
@@ -216,12 +223,25 @@ app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   Menu.setApplicationMenu(null);
   const userDataDir = app.getPath("userData");
+  if (runtimeSetupSelection) {
+    try {
+      await runRuntimeSetup(userDataDir, runtimeSetupSelection);
+      app.exit(0);
+    } catch (error) {
+      console.error("Runtime setup failed:", error);
+      app.exit(1);
+    }
+    return;
+  }
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
-  const managedBashPath = locateManagedBash({
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    appDir,
-  });
+  const shellInstaller = new ShellRuntimeInstaller(userDataDir, () => undefined);
+  const managedBashPath =
+    shellInstaller.activeBashPath() ??
+    locateManagedBash({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appDir,
+    });
   if (managedBashPath) process.env.PI_CODING_AGENT_MANAGED_BASH_PATH = managedBashPath;
   else delete process.env.PI_CODING_AGENT_MANAGED_BASH_PATH;
   const projects = new ProjectStore(join(userDataDir, "desktop-state.json"), join(agentDir, "projects.json"));
@@ -402,13 +422,33 @@ app.whenReady().then(async () => {
         const system = detectNodeRuntime();
         return system.state === "ready" ? system : detectNodeRuntime(installer.activeNodePath());
       },
-      install: async () => {
-        const status = await installer.install();
-        app.relaunch();
-        app.exit(0);
-        return status;
-      },
+      install: () => installer.install(),
       onProgress: (listener) => installer.onProgress(listener),
+      shell: {
+        getStatus: async () => {
+          const activeProject = await projects.getActive();
+          const cwd = activeProject?.cwd ?? process.cwd();
+          const configuredShellPath = SettingsManager.create(cwd, agentDir).getShellPath();
+          try {
+            const shell = getShellConfig(configuredShellPath).shell;
+            return {
+              state: "ready" as const,
+              path: shell,
+              ...(shell === shellInstaller.activeBashPath() ? { version: SHELL_RUNTIME_VERSION } : {}),
+              message: `已找到 Git Bash: ${shell}`,
+              installUrl: shellRuntimeInstallUrl(),
+            };
+          } catch (error) {
+            return {
+              state: configuredShellPath ? ("invalid" as const) : ("missing" as const),
+              message: error instanceof Error ? error.message : String(error),
+              installUrl: shellRuntimeInstallUrl(),
+            };
+          }
+        },
+        install: () => shellInstaller.install(),
+        onProgress: (listener) => shellInstaller.onProgress(listener),
+      },
     },
     updater,
     extensionSettings,

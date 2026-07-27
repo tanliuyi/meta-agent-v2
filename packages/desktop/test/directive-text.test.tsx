@@ -7,9 +7,9 @@ import { DirectiveText, directiveDisplayLabel } from "../src/renderer/src/compon
 const RenderDirectiveText = DirectiveText as unknown as FC<{ text: string }>;
 
 describe("DirectiveText", () => {
-  it("leaves plain text unchanged", () => {
-    expect(renderToStaticMarkup(createElement(RenderDirectiveText, { text: "Inspect the current workspace." }))).toBe(
-      "Inspect the current workspace.",
+  it("preserves whitespace in plain user text", () => {
+    expect(renderToStaticMarkup(createElement(RenderDirectiveText, { text: "Inspect the current\nworkspace." }))).toBe(
+      '<span class="whitespace-pre-wrap">Inspect the current\nworkspace.</span>',
     );
   });
 

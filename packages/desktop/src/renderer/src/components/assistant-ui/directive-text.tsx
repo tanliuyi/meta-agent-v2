@@ -40,7 +40,9 @@ function parseDirectiveText(text: string): Unstable_DirectiveSegment[] {
 /** Renders assistant-ui directives and legacy Pi composer file references as inline chips. */
 export const DirectiveText: TextMessagePartComponent = memo(function DirectiveText({ text }) {
   const segments = parseDirectiveText(text);
-  if (segments.length === 1 && segments[0]?.kind === "text") return <>{text}</>;
+  if (segments.length === 1 && segments[0]?.kind === "text") {
+    return <span className="whitespace-pre-wrap">{text}</span>;
+  }
 
   return (
     <>

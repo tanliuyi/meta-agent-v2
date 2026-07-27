@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import type {
   AuthOauthLoginInput,
   AuthOauthLoginResponse,
@@ -22,7 +22,12 @@ import type {
   Thread,
   WorkbenchState,
 } from "../shared/contracts.ts";
-import type { NodeRuntimeProgress, NodeRuntimeStatus } from "../shared/desktop-api.ts";
+import type {
+  NodeRuntimeProgress,
+  NodeRuntimeStatus,
+  ShellRuntimeProgress,
+  ShellRuntimeStatus,
+} from "../shared/desktop-api.ts";
 import type {
   ApplyDesktopExtensionSetInput,
   ApplyDesktopExtensionSetResult,
@@ -82,6 +87,11 @@ export function registerIpc(
     getStatus(): NodeRuntimeStatus;
     install(): Promise<NodeRuntimeStatus>;
     onProgress(listener: (progress: NodeRuntimeProgress) => void): () => void;
+    shell?: {
+      getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
+      install(): Promise<ShellRuntimeStatus>;
+      onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
+    };
   },
   updater?: AutoUpdateService,
   extensions?: DesktopExtensionSettingsService,
@@ -106,6 +116,10 @@ export function registerIpc(
     if (!owner) return;
     if (owner.isMaximized()) owner.unmaximize();
     else owner.maximize();
+  });
+  ipcMain.on(CHANNELS.runtimeRestart, () => {
+    app.relaunch();
+    app.exit(0);
   });
   ipcMain.on(CHANNELS.windowClose, (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
@@ -509,6 +523,10 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.workbenchUpdate, (_event, state: WorkbenchState) => projects.setWorkbench(state));
   ipcMain.handle(CHANNELS.nodeRuntimeStatus, () => nodeRuntime.getStatus());
   ipcMain.handle(CHANNELS.nodeRuntimeInstall, () => nodeRuntime.install());
+  if (nodeRuntime.shell) {
+    ipcMain.handle(CHANNELS.shellRuntimeStatus, () => nodeRuntime.shell?.getStatus());
+    ipcMain.handle(CHANNELS.shellRuntimeInstall, () => nodeRuntime.shell?.install());
+  }
   if (updater) {
     ipcMain.handle(CHANNELS.updaterGetState, () => updater.getState());
     ipcMain.handle(CHANNELS.updaterCheck, () => updater.check());
@@ -528,6 +546,11 @@ export function registerIpc(
   nodeRuntime.onProgress((progress) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) window.webContents.send(CHANNELS.nodeRuntimeProgress, progress);
+    }
+  });
+  nodeRuntime.shell?.onProgress((progress) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send(CHANNELS.shellRuntimeProgress, progress);
     }
   });
 }

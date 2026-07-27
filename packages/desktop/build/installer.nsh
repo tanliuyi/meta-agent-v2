@@ -1,0 +1,102 @@
+!include "nsDialogs.nsh"
+!include "LogicLib.nsh"
+!include "FileFunc.nsh"
+
+Var RuntimeComponents
+Var RuntimeNodeCheckbox
+Var RuntimeShellCheckbox
+
+!macro customInit
+  StrCpy $RuntimeComponents ""
+  ${GetParameters} $0
+  ${GetOptions} $0 "/RUNTIMES=" $1
+  ${IfNot} ${Errors}
+    StrCpy $RuntimeComponents $1
+  ${EndIf}
+!macroend
+
+!macro customPageAfterChangeDir
+  Page custom RuntimePageCreate RuntimePageLeave
+!macroend
+
+Function RuntimePageCreate
+  ${If} ${Silent}
+    Abort
+  ${EndIf}
+  ${If} ${isForAllUsers}
+    StrCpy $RuntimeComponents ""
+    Abort
+  ${EndIf}
+
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $0 == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateLabel} 0 0 100% 24u "选择 Meta Agent 使用的运行环境。已有兼容环境时可以取消选择，之后仍可在应用内安装。"
+  Pop $0
+
+  ${NSD_CreateCheckbox} 0 34u 100% 14u "下载 Node.js 24.15.0（约 32 MB）"
+  Pop $RuntimeNodeCheckbox
+  ${NSD_Check} $RuntimeNodeCheckbox
+  SearchPath $0 "node.exe"
+  ${If} $0 != ""
+    ${NSD_Uncheck} $RuntimeNodeCheckbox
+  ${ElseIf} ${FileExists} "$APPDATA\Meta Agent\node-runtime\active.json"
+    ${NSD_Uncheck} $RuntimeNodeCheckbox
+  ${EndIf}
+
+  ${NSD_CreateCheckbox} 0 56u 100% 14u "下载 Git Bash / PortableGit 2.53.0.3（约 56 MB）"
+  Pop $RuntimeShellCheckbox
+  ${NSD_Check} $RuntimeShellCheckbox
+  StrCpy $0 ""
+  IfFileExists "$PROGRAMFILES64\Git\bin\bash.exe" shell_found
+  IfFileExists "$PROGRAMFILES32\Git\bin\bash.exe" shell_found
+  SearchPath $0 "bash.exe"
+  ${If} $0 != ""
+    Goto shell_found
+  ${EndIf}
+  IfFileExists "$APPDATA\Meta Agent\shell-runtime\active.json" shell_found shell_detection_done
+
+  shell_found:
+  ${NSD_Uncheck} $RuntimeShellCheckbox
+
+  shell_detection_done:
+  ${NSD_CreateLabel} 0 82u 100% 30u "运行时安装在当前用户目录，不修改系统 PATH，不注册为系统 Node.js 或 Git。下载文件会进行 SHA-256 校验。"
+  Pop $0
+
+  nsDialogs::Show
+FunctionEnd
+
+Function RuntimePageLeave
+  StrCpy $RuntimeComponents ""
+  ${NSD_GetState} $RuntimeNodeCheckbox $0
+  ${If} $0 == ${BST_CHECKED}
+    StrCpy $RuntimeComponents "node"
+  ${EndIf}
+  ${NSD_GetState} $RuntimeShellCheckbox $0
+  ${If} $0 == ${BST_CHECKED}
+    ${If} $RuntimeComponents == ""
+      StrCpy $RuntimeComponents "shell"
+    ${Else}
+      StrCpy $RuntimeComponents "$RuntimeComponents,shell"
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+!macro customInstall
+  ${If} ${isForAllUsers}
+    StrCpy $RuntimeComponents ""
+    DetailPrint "所有用户安装跳过用户级运行环境；每位用户可在首次启动时安装。"
+  ${EndIf}
+  ${If} $RuntimeComponents != ""
+    runtime_setup_retry:
+    DetailPrint "正在准备 Meta Agent 运行环境: $RuntimeComponents"
+    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --runtime-setup=$RuntimeComponents' $0
+    ${If} $0 != 0
+      MessageBox MB_ABORTRETRYIGNORE|MB_ICONEXCLAMATION "运行环境下载或安装失败。可以重试，或跳过并稍后在 Meta Agent 中安装。日志位于 $APPDATA\Meta Agent\runtime-setup.log。" /SD IDIGNORE IDRETRY runtime_setup_retry IDIGNORE runtime_setup_ignore
+      runtime_setup_ignore:
+    ${EndIf}
+  ${EndIf}
+!macroend

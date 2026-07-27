@@ -1,8 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assertTargetRuntime, validateManagedShell } from "../../../scripts/validate-desktop-package.mjs";
+import { assertTargetRuntime } from "../../../scripts/validate-desktop-package.mjs";
 
 const manifest = (platform: string, arch: string) => ({ compatibility: { platform, arch } });
 
@@ -25,16 +24,9 @@ describe("packaged Desktop target validation", () => {
     );
   });
 
-  it("rejects a Windows package without the managed Bash executable or manifest", () => {
-    const resources = mkdtempSync(join(tmpdir(), "desktop-managed-shell-package-"));
-    try {
-      expect(() => validateManagedShell(resources)).toThrow("Managed Bash is missing from package");
-      const root = join(resources, "managed-shell");
-      mkdirSync(join(root, "bin"), { recursive: true });
-      writeFileSync(join(root, "bin", "bash.exe"), "");
-      expect(() => validateManagedShell(resources)).toThrow("Managed Bash manifest is missing from package");
-    } finally {
-      rmSync(resources, { recursive: true, force: true });
-    }
+  it("keeps PortableGit out of the standard Windows package", () => {
+    const config = readFileSync(resolve(import.meta.dirname, "../electron-builder.yml"), "utf8");
+    expect(config).toContain("include: build/installer.nsh");
+    expect(config).not.toContain("output/managed-shell");
   });
 });

@@ -88,6 +88,16 @@ export interface NodeRuntimeProgress {
   error?: string;
 }
 
+export interface ShellRuntimeStatus {
+  state: "ready" | "missing" | "invalid";
+  path?: string;
+  version?: string;
+  message: string;
+  installUrl: string;
+}
+
+export type ShellRuntimeProgress = NodeRuntimeProgress;
+
 /** Renderer 可以调用的最小 Desktop API。 */
 export interface DesktopApi {
   platform: DesktopPlatform;
@@ -100,6 +110,14 @@ export interface DesktopApi {
     getStatus(): Promise<NodeRuntimeStatus>;
     install(): Promise<NodeRuntimeStatus>;
     onProgress(listener: (progress: NodeRuntimeProgress) => void): () => void;
+  };
+  shellRuntime: {
+    getStatus(): Promise<ShellRuntimeStatus>;
+    install(): Promise<ShellRuntimeStatus>;
+    onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
+  };
+  runtime: {
+    restart(): void;
   };
   links: {
     open(projectId: string, url: string): Promise<void>;

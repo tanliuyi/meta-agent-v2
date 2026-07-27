@@ -1,20 +1,12 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  createWriteStream,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { chmod, mkdir, readFile } from "node:fs/promises";
-import { get } from "node:https";
 import { join } from "node:path";
 import type { NodeRuntimeProgress, NodeRuntimeStatus } from "../../shared/desktop-api.ts";
 import { REQUIRED_NODE_VERSION } from "./node-runtime-locator.ts";
+import { downloadRuntimeArchive } from "./runtime-download.ts";
+import { activateRuntime, withRuntimeLock } from "./runtime-lock.ts";
 
 const NODE_VERSION = "24.15.0";
 const ARTIFACTS: Record<string, { filename: string; sha256: string }> = {
@@ -85,20 +77,41 @@ export class NodeRuntimeInstaller {
   }
 
   private async installOnce(): Promise<NodeRuntimeStatus> {
+    const runtimeRoot = join(this.userDataDir, "node-runtime");
+    return withRuntimeLock(runtimeRoot, () => this.installLocked(runtimeRoot));
+  }
+
+  private async installLocked(runtimeRoot: string): Promise<NodeRuntimeStatus> {
+    const activePath = this.activeNodePath();
+    if (activePath) {
+      try {
+        await run(activePath, ["-e", `if(process.version!=="v${NODE_VERSION}")process.exit(1)`]);
+        return {
+          state: "ready",
+          path: activePath,
+          version: `v${NODE_VERSION}`,
+          requiredVersion: REQUIRED_NODE_VERSION,
+          message: `Node.js ${NODE_VERSION} 已安装`,
+          installUrl: nodeRuntimeUrl(),
+        };
+      } catch {
+        // Replace an incomplete active runtime from the verified archive below.
+      }
+    }
     const key = `${process.platform}-${process.arch}`;
     const artifact = ARTIFACTS[key];
     if (!artifact) throw new Error(`Unsupported Node runtime target: ${key}`);
-    const runtimeRoot = join(this.userDataDir, "node-runtime");
     const cacheRoot = join(runtimeRoot, "cache");
     const cachePath = join(cacheRoot, artifact.filename);
     const stagingRoot = join(runtimeRoot, `.staging-${process.pid}-${Date.now()}`);
     const finalRoot = join(runtimeRoot, `node-v${NODE_VERSION}-${key}`);
+    const url = nodeRuntimeUrl();
     this.emit({ phase: "checking", percent: 0, message: "准备 Node.js 安装目录" });
     await mkdir(cacheRoot, { recursive: true });
     try {
       if (!existsSync(cachePath) || (await sha256(cachePath)) !== artifact.sha256) {
         this.emit({ phase: "downloading", percent: 0, message: `下载 Node.js ${NODE_VERSION}` });
-        await download(`https://nodejs.org/dist/v${NODE_VERSION}/${artifact.filename}`, cachePath, (percent) =>
+        await downloadRuntimeArchive(url, cachePath, "Node.js", (percent) =>
           this.emit({ phase: "downloading", percent, message: `下载 Node.js ${NODE_VERSION} (${percent}%)` }),
         );
       }
@@ -114,8 +127,7 @@ export class NodeRuntimeInstaller {
       if (process.platform !== "win32") await chmod(executable, 0o755);
       rmSync(finalRoot, { recursive: true, force: true });
       renameSync(stagingRoot, finalRoot);
-      writeFileSync(join(runtimeRoot, "active.json.tmp"), `${JSON.stringify({ root: finalRoot })}\n`);
-      renameSync(join(runtimeRoot, "active.json.tmp"), join(runtimeRoot, "active.json"));
+      activateRuntime(runtimeRoot, finalRoot);
       this.emit({ phase: "ready", percent: 100, message: `Node.js ${NODE_VERSION} 安装完成` });
       return {
         state: "ready",
@@ -123,7 +135,7 @@ export class NodeRuntimeInstaller {
         version: `v${NODE_VERSION}`,
         requiredVersion: REQUIRED_NODE_VERSION,
         message: `Node.js ${NODE_VERSION} 已安装`,
-        installUrl: `https://nodejs.org/dist/v${NODE_VERSION}/${artifact.filename}`,
+        installUrl: url,
       };
     } catch (error) {
       rmSync(stagingRoot, { recursive: true, force: true });
@@ -134,27 +146,9 @@ export class NodeRuntimeInstaller {
   }
 }
 
-function download(url: string, destination: string, onProgress: (percent: number) => void): Promise<void> {
-  return new Promise((resolveDownload, rejectDownload) => {
-    const request = get(url, (response) => {
-      if (response.statusCode !== 200) {
-        response.resume();
-        rejectDownload(new Error(`Node.js 下载失败: HTTP ${response.statusCode ?? "unknown"}`));
-        return;
-      }
-      const total = Number(response.headers["content-length"] ?? 0);
-      let received = 0;
-      const output = createWriteStream(destination, { flags: "w" });
-      response.on("data", (chunk: Buffer) => {
-        received += chunk.length;
-        if (total > 0) onProgress(Math.min(50, Math.floor((received / total) * 50)));
-      });
-      response.pipe(output);
-      output.once("finish", () => output.close((error) => (error ? rejectDownload(error) : resolveDownload())));
-      output.once("error", rejectDownload);
-    });
-    request.once("error", rejectDownload);
-  });
+function nodeRuntimeUrl(): string {
+  const artifact = ARTIFACTS[`${process.platform}-${process.arch}`];
+  return artifact ? `https://nodejs.org/dist/v${NODE_VERSION}/${artifact.filename}` : "https://nodejs.org/";
 }
 
 async function extractArchive(archivePath: string, destination: string, filename: string): Promise<void> {
@@ -189,9 +183,22 @@ function requireDirectoryEntries(path: string): string[] {
 
 function run(command: string, args: string[]): Promise<void> {
   return new Promise((resolveRun, rejectRun) => {
+    let timedOut = false;
     const child = spawn(command, args, { stdio: "ignore", windowsHide: true });
-    child.once("error", rejectRun);
-    child.once("exit", (code) => (code === 0 ? resolveRun() : rejectRun(new Error(`${command} exited with ${code}`))));
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, 5 * 60_000);
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      rejectRun(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timeout);
+      if (timedOut) rejectRun(new Error(`${command} timed out after 5 minutes`));
+      else if (code === 0) resolveRun();
+      else rejectRun(new Error(`${command} exited with ${code}`));
+    });
   });
 }
 

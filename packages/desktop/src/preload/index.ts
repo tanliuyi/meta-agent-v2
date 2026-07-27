@@ -11,7 +11,7 @@ import type {
   TerminalEvent,
   Thread,
 } from "../shared/contracts.ts";
-import type { DesktopApi, DesktopPlatform, NodeRuntimeProgress } from "../shared/desktop-api.ts";
+import type { DesktopApi, DesktopPlatform, NodeRuntimeProgress, ShellRuntimeProgress } from "../shared/desktop-api.ts";
 import type { SaveProvidersInput, SaveProvidersResult } from "../shared/providers-config-contracts.ts";
 import type { UpdaterState } from "../shared/updater-contracts.ts";
 
@@ -228,6 +228,18 @@ const desktopApi: DesktopApi = {
       ipcRenderer.on(CHANNELS.nodeRuntimeProgress, handler);
       return () => ipcRenderer.removeListener(CHANNELS.nodeRuntimeProgress, handler);
     },
+  },
+  shellRuntime: {
+    getStatus: () => ipcRenderer.invoke(CHANNELS.shellRuntimeStatus),
+    install: () => ipcRenderer.invoke(CHANNELS.shellRuntimeInstall),
+    onProgress(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, progress: ShellRuntimeProgress) => listener(progress);
+      ipcRenderer.on(CHANNELS.shellRuntimeProgress, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.shellRuntimeProgress, handler);
+    },
+  },
+  runtime: {
+    restart: () => ipcRenderer.send(CHANNELS.runtimeRestart),
   },
   windowControls: {
     minimize: () => ipcRenderer.send(CHANNELS.windowMinimize),
