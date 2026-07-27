@@ -219,6 +219,7 @@ export type ThreadSidecarCommand =
   | { type: "prompt"; input: SessionPromptInput }
   | { type: "edit"; input: SessionEditInput }
   | { type: "reload"; input: SessionReloadInput }
+  | { type: "reloadResources"; requestId: string; extensionSet: ResolvedExtensionSet }
   | { type: "cancel" }
   | { type: "clearQueue" }
   | { type: "compact" }

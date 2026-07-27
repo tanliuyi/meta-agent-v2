@@ -7,7 +7,11 @@ import TestTube from "lucide-react/dist/esm/icons/test-tube.mjs";
 import { useEffect, useState } from "react";
 import { useMarketplaceEndpointSettings } from "./use-marketplace-endpoint-settings.ts";
 
-export function MarketplaceEndpointSettings() {
+interface MarketplaceEndpointSettingsProps {
+  onSaved?(): void;
+}
+
+export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSettingsProps) {
   const controller = useMarketplaceEndpointSettings();
   const [baseUrl, setBaseUrl] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -18,7 +22,7 @@ export function MarketplaceEndpointSettings() {
 
   useEffect(() => {
     // 只同步未编辑的输入；快照刷新（保存冲突、后台重载）不覆盖用户正在输入的地址。
-    if (!dirty && active) setBaseUrl(active.baseUrl);
+    if (!dirty) setBaseUrl(active?.baseUrl ?? "");
   }, [active, dirty]);
 
   const ready = controller.testResult?.status === "ready" ? controller.testResult : undefined;
@@ -28,8 +32,8 @@ export function MarketplaceEndpointSettings() {
     (!ready?.confirmationRequired || (trustFingerprint && Boolean(ready.confirmationToken)));
 
   return (
-    <section className="settings-section marketplace-endpoint-settings" aria-labelledby="marketplace-endpoint-heading">
-      <div className="settings-section-heading extensions-section-heading">
+    <section className="marketplace-endpoint-settings" aria-labelledby="marketplace-endpoint-heading">
+      <div className="marketplace-endpoint-heading">
         <div>
           <h3 id="marketplace-endpoint-heading">插件市场</h3>
           <span>{active ? `${active.marketplaceId} · ${active.signing.fingerprint}` : "未配置市场 API"}</span>
@@ -42,6 +46,8 @@ export function MarketplaceEndpointSettings() {
           title="重新载入"
           onClick={() => {
             setDirty(false);
+            setTrustFingerprint(false);
+            controller.resetTest();
             void controller.reload();
           }}
         >
@@ -79,7 +85,10 @@ export function MarketplaceEndpointSettings() {
             disabled={!canSave}
             onClick={() =>
               void controller.save(baseUrl, trustFingerprint).then((result) => {
-                if (result?.status === "saved") setDirty(false);
+                if (result?.status === "saved") {
+                  setDirty(false);
+                  onSaved?.();
+                }
               })
             }
           >
@@ -107,7 +116,7 @@ export function MarketplaceEndpointSettings() {
         </div>
       ) : null}
       {controller.error ? (
-        <div className="extensions-message" data-tone="error" role="alert">
+        <div className="plugin-marketplace-notice" data-tone="error" role="alert">
           {controller.error}
         </div>
       ) : null}

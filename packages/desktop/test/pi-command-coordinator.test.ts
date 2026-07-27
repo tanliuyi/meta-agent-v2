@@ -15,6 +15,8 @@ describe("PiCommandCoordinator", () => {
   const addAttachment = vi.fn();
   const getState = vi.fn(() => ({ text: "current draft" }));
   const resolveReloadTarget = vi.fn((parentId: string | null) => parentId);
+  const notify = vi.fn(() => "notification");
+  const updateNotification = vi.fn();
   const report = vi.fn();
   let phase: PiThreadSnapshot["phase"];
 
@@ -45,6 +47,44 @@ describe("PiCommandCoordinator", () => {
       expect.objectContaining({ projectId: "project", threadId: "thread", text: "first", desiredMode: "followUp" }),
     );
     expect(prompt).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "second", desiredMode: "steer" }));
+  });
+
+  it("/reload 显示进行中和完成 Toast 且不恢复 Composer", async () => {
+    const coordinator = createCoordinator();
+
+    coordinator.enqueue(userMessage("/reload"), { steer: false });
+
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(updateNotification).toHaveBeenCalledOnce());
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "正在重新加载", tone: "info", duration: 60_000 }),
+    );
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(updateNotification).toHaveBeenCalledWith(
+      "notification",
+      expect.objectContaining({ title: "重新加载完成", tone: "success", duration: 5_000 }),
+    );
+    expect(setText).not.toHaveBeenCalled();
+  });
+
+  it("/reload 未被接受时显示失败 Toast 并恢复 Composer", async () => {
+    prompt.mockResolvedValueOnce({ accepted: false, queued: false, error: "reload blocked" });
+    const coordinator = createCoordinator();
+
+    coordinator.enqueue(userMessage("/reload"), { steer: false });
+
+    await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(updateNotification).toHaveBeenCalledWith(
+      "notification",
+      expect.objectContaining({
+        title: "重新加载失败",
+        message: "reload blocked",
+        tone: "error",
+        duration: 5_000,
+      }),
+    );
+    expect(setText).toHaveBeenCalledWith("/reload");
   });
 
   it("将 assistant-ui quote metadata 作为结构化 IPC 字段发送", async () => {
@@ -240,6 +280,8 @@ describe("PiCommandCoordinator", () => {
       getComposer: () => ({ getState, setText, addAttachment }),
       getPhase: () => phase,
       resolveReloadTarget,
+      notify,
+      updateNotification,
       report,
     });
   }

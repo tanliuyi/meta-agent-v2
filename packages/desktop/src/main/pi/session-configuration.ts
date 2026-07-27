@@ -131,7 +131,7 @@ function fallbackExtensionSet(projectId: string): ResolvedExtensionSet {
 
 export function sessionReadiness(hasModel: boolean, availableCount: number, allCount: number): Readiness {
   if (hasModel) return { state: "ready" };
-  if (allCount === 0) return { state: "missing-model", message: "Pi 没有可用模型配置" };
-  if (availableCount === 0) return { state: "missing-credentials", message: "请先在 Pi 中配置模型凭据" };
+  if (allCount === 0) return { state: "missing-model", message: "没有可用模型配置" };
+  if (availableCount === 0) return { state: "missing-credentials", message: "请先配置模型凭据" };
   return { state: "unavailable-model", message: "当前会话模型不可用，请选择其他模型" };
 }

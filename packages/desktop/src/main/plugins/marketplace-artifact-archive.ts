@@ -127,7 +127,7 @@ export async function durablyFlushMarketplaceArchive(root: string): Promise<void
   const info = await lstat(root);
   if (info.isSymbolicLink()) throw new Error("Marketplace staging tree contains a symlink");
   if (info.isFile()) {
-    const handle = await open(root, "r");
+    const handle = await open(root, process.platform === "win32" ? "r+" : "r");
     try {
       await handle.sync();
     } finally {

@@ -18,7 +18,7 @@ export function cardState(
   return { label: statusLabel(plugin.status), tone: statusTone(plugin.status) };
 }
 
-function statusTone(status: MarketplacePluginSummary["status"]): "neutral" | "success" | "warning" | "danger" {
+export function statusTone(status: MarketplacePluginSummary["status"]): "neutral" | "success" | "warning" | "danger" {
   if (status === "available") return "success";
   if (status === "blocked") return "danger";
   if (status === "withdrawn" || status === "deprecated") return "warning";

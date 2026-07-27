@@ -72,4 +72,15 @@ describe("DraftComposerThread", () => {
 
     expect(markup).not.toContain(' disabled=""');
   });
+
+  it("模型列表加载时显示进度并禁用选择器", () => {
+    const markup = renderToStaticMarkup(
+      <ModelSelect availableModels={[]} model={undefined} loading onValueChange={vi.fn()} />,
+    );
+
+    expect(markup).toContain('aria-label="正在加载模型"');
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('disabled=""');
+    expect(markup).toContain("加载模型");
+  });
 });

@@ -70,6 +70,11 @@ export function NewSessionSurface() {
   }, [catalogLoading, projectId, projects]);
 
   useEffect(() => {
+    setConfig(null);
+    setConfigProjectId(null);
+  }, [setConfig, setConfigProjectId]);
+
+  useEffect(() => {
     if (catalogLoading) return;
     if (!projectId) {
       setConfig(null);
@@ -100,7 +105,7 @@ export function NewSessionSurface() {
     return () => {
       active = false;
     };
-  }, [catalogLoading, configProjectId, projectId]);
+  }, [catalogLoading, configProjectId, projectId, setConfig, setConfigProjectId, setLoadError]);
 
   const project = projects.find((entry) => entry.id === projectId) ?? null;
 

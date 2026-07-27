@@ -39,7 +39,11 @@ describe("DesktopSubagentRuntime", () => {
       requestHost: async (hostRequest, emit) => {
         captured = hostRequest;
         emit?.({ type: "started", runId: "run-1" });
-        emit?.({ type: "text-delta", text: "ok" });
+        emit?.({
+          type: "message_update",
+          message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+          assistantMessageEvent: { type: "text_delta", delta: "ok" },
+        });
         emit?.({ type: "completed", runId: "run-1" });
         return { status: "completed" };
       },
@@ -57,7 +61,7 @@ describe("DesktopSubagentRuntime", () => {
         childIndex: 0,
       }),
     });
-    expect(events.map(({ type }) => type)).toEqual(["started", "text-delta", "completed"]);
+    expect(events.map(({ type }) => type)).toEqual(["started", "message_update", "completed"]);
   });
 
   it("fails duplicate runs and converts host failures into failed events", async () => {
@@ -86,7 +90,7 @@ describe("DesktopSubagentRuntime", () => {
         captured = input;
         yield { type: "started", runId: input.runId };
         yield {
-          type: "message-end",
+          type: "message_end",
           message: {
             role: "assistant",
             content: [{ type: "text", text: "programmatic result" }],

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createAgentSessionServices } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  controlledResourceLoaderOptions,
   extensionLoadDiagnostics,
   validateResolvedExtensionSet,
 } from "../src/main/pi/desktop-extension-runtime-policy.ts";
@@ -66,6 +67,63 @@ describe("desktop controlled Pi resources", () => {
     expect(commands).not.toContain("unapproved");
     expect(services.resourceLoader.getSkills().skills.map(({ name }) => name)).toContain("global-review");
     expect(services.resourceLoader.getPrompts().prompts.map(({ name }) => name)).toContain("global-review");
+  });
+
+  it("keeps built-in plugin lifecycle skills in root sessions while allowing subagent isolation", async () => {
+    const root = join(tmpdir(), `desktop-builtin-skills-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    tempDirs.push(root);
+    await mkdir(cwd, { recursive: true });
+    await mkdir(agentDir, { recursive: true });
+
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      resourceLoaderOptions: {
+        ...controlledResourceLoaderOptions(
+          {
+            generation: "builtins-only",
+            projectId: "project",
+            entries: [],
+            diagnostics: [],
+            resolvedAt: 0,
+          },
+          [],
+        ),
+        noSkills: true,
+      },
+    });
+
+    const skills = services.resourceLoader.getSkills();
+    expect(skills.diagnostics.filter(({ type }) => type === "error")).toEqual([]);
+    expect(skills.skills.map(({ name }) => name)).toEqual(["plugin-create", "plugin-publish"]);
+    expect(skills.skills.find(({ name }) => name === "plugin-create")?.description).toContain(
+      "standard Pi Extension plugins for Meta Agent Desktop",
+    );
+    expect(skills.skills.find(({ name }) => name === "plugin-publish")?.description).toContain(
+      "publishes standard Pi Extension plugins",
+    );
+
+    const isolatedServices = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      resourceLoaderOptions: {
+        ...controlledResourceLoaderOptions(
+          {
+            generation: "isolated-subagent",
+            projectId: "project",
+            entries: [],
+            diagnostics: [],
+            resolvedAt: 0,
+          },
+          [],
+          { includeBuiltinSkills: false },
+        ),
+        noSkills: true,
+      },
+    });
+    expect(isolatedServices.resourceLoader.getSkills().skills).toEqual([]);
   });
 
   it("rejects path-backed bytes changed after generation resolution", async () => {

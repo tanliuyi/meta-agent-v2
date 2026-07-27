@@ -1,7 +1,9 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { MarketplacePluginCard } from "../src/renderer/src/features/plugins/plugin-marketplace-page.tsx";
+import { pluginActionConfirmation } from "../src/renderer/src/features/plugins/plugin-detail-dialog.tsx";
+import { MarketplacePluginCard } from "../src/renderer/src/features/plugins/plugin-marketplace-card.tsx";
+import { PluginMarketplacePage } from "../src/renderer/src/features/plugins/plugin-marketplace-page.tsx";
 import type {
   InstalledMarketplacePluginSummary,
   MarketplacePluginSummary,
@@ -26,6 +28,48 @@ const plugin: MarketplacePluginSummary = {
   updatedAt: 2,
 };
 
+vi.mock("../src/renderer/src/features/plugins/use-plugin-marketplace.ts", () => ({
+  canInstallMarketplacePlugin: () => true,
+  usePluginMarketplace: () => ({
+    page: {
+      marketplaceId: "example.market",
+      plugins: [],
+      source: "network",
+      stale: false,
+      fetchedAt: 1,
+    },
+    installed: { revision: "installed-one", plugins: [] },
+    query: "",
+    loading: false,
+    clearError: vi.fn(),
+    clearNotice: vi.fn(),
+    setQuery: vi.fn(),
+    refresh: vi.fn(async () => undefined),
+    install: vi.fn(async () => undefined),
+    update: vi.fn(async () => undefined),
+    uninstall: vi.fn(async () => undefined),
+  }),
+}));
+
+vi.mock("../src/renderer/src/features/plugins/use-local-plugins.ts", () => ({
+  useLocalPlugins: () => ({
+    snapshot: {
+      revision: "extensions-one",
+      developerMode: false,
+      reloadRequired: false,
+      desiredGeneration: "generation-one",
+      diagnostics: [],
+      entries: [],
+    },
+    loading: false,
+    mutating: false,
+    clearError: vi.fn(),
+    reload: vi.fn(async () => undefined),
+    mutate: vi.fn(async () => undefined),
+    chooseDevelopmentEntry: vi.fn(async () => undefined),
+  }),
+}));
+
 const installed: InstalledMarketplacePluginSummary = {
   id: plugin.id,
   displayName: plugin.name,
@@ -38,6 +82,33 @@ const installed: InstalledMarketplacePluginSummary = {
   state: "installed",
   installedAt: 1,
 };
+
+describe("plugin marketplace page", () => {
+  it("renders refresh and settings actions in the topbar without the old extensions settings link", () => {
+    const markup = renderToStaticMarkup(<PluginMarketplacePage />);
+
+    expect(markup).toContain('aria-label="刷新插件目录"');
+    expect(markup).toContain('aria-label="插件中心设置"');
+    expect(markup).not.toContain("/settings/extensions");
+  });
+});
+
+describe("plugin detail confirmation", () => {
+  it("keeps install and uninstall warnings in the detail dialog confirmation state", () => {
+    expect(pluginActionConfirmation("install", plugin.name, plugin)).toEqual({
+      title: "安装 Example Tools？",
+      description:
+        "市场插件是全信任 Pi Extension，可读写本机文件、访问网络并执行进程，不受能力声明限制。该版本包含原生模块或平台二进制。声明能力：tools.register。",
+      confirmLabel: "确认安装",
+    });
+    expect(pluginActionConfirmation("uninstall", plugin.name, plugin)).toEqual({
+      title: "卸载 Example Tools？",
+      description:
+        "插件将不再用于新会话。当前运行中的会话会继续使用原版本，直到运行 /reload；本地版本会暂时保留，以保护仍在运行或已修改的文件。",
+      confirmLabel: "确认卸载",
+    });
+  });
+});
 
 describe("plugin marketplace cards", () => {
   it("renders a keyboard-accessible catalog card with compact plugin metadata", () => {

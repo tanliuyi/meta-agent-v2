@@ -194,15 +194,21 @@ Desktop Host Profile
 
 插件中心负责发现、详情、安装、更新和卸载。两个页面使用同一个 main-owned snapshot，不建立两个配置源。
 
+插件中心提供“市场”和“本地”两个来源视图：
+
+- “市场”继续使用 marketplace catalog 与 marketplace installation registry；
+- “本地”只投影现有 Desktop Development extension approval，复用 extension settings revision、Developer Mode、entry enablement 和 apply/replacement 流程；
+- 本地 entry 不因出现在插件中心而成为市场安装项，也不写入 marketplace registry；
+- 后续发布能力可以从本地 entry 发起制品准备、校验和提交，但发布后的 market plugin identity、签名 artifact 与本地 development approval 必须保持显式分离。
+
 ### 7.2 插件中心布局
 
 插件中心是高密度工作页面，不使用营销式大卡片瀑布流。
 
 ```text
-顶部：搜索 / 分类 / 刷新
-├─ 左侧：发现、已安装、可更新、分类
-├─ 中间：可扫描插件列表
-└─ 右侧或详情路由：说明、版本、兼容性、风险和操作
+顶部：市场 / 本地来源切换、刷新
+├─ 市场：搜索、发现、已安装、可更新和详情
+└─ 本地：Developer Mode、已批准 entry、启停、移除和应用到当前会话
 ```
 
 列表项至少显示：

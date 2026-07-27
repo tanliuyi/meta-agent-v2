@@ -7,7 +7,11 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 import * as path from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
-import { SUBAGENT_TIMEOUT_CODE, type SubagentRunEvent } from "../../../../../../../shared/subagent-contracts.ts";
+import {
+  SUBAGENT_TIMEOUT_CODE,
+  subagentTextDelta,
+  type SubagentRunEvent,
+} from "../../../../../../../shared/subagent-contracts.ts";
 import type { AgentConfig } from "../../agents/agents.ts";
 import {
 	ensureArtifactsDir,
@@ -349,8 +353,8 @@ async function runProgrammaticSingleAttempt(
 				// Artifact writes are best effort and must not fail the child run.
 			}
 		}
-		if (event.type === "text-delta") return;
-		if (event.type === "message-end") {
+		if (subagentTextDelta(event) !== undefined) return;
+		if (event.type === "message_end") {
 			const message = event.message as unknown as Message;
 			result.messages?.push(message);
 			if (message.role === "assistant") {
@@ -371,7 +375,7 @@ async function runProgrammaticSingleAttempt(
 			emitUpdate();
 			return;
 		}
-		if (event.type === "tool-start") {
+		if (event.type === "tool_execution_start") {
 			const args = event.args && typeof event.args === "object" && !Array.isArray(event.args)
 				? event.args as Record<string, unknown>
 				: {};
@@ -385,7 +389,7 @@ async function runProgrammaticSingleAttempt(
 			emitUpdate();
 			return;
 		}
-		if (event.type === "tool-end") {
+		if (event.type === "tool_execution_end") {
 			if (progress.currentTool) {
 				progress.recentTools.push({ tool: progress.currentTool, args: progress.currentToolArgs || "", endMs: Date.now() });
 			}

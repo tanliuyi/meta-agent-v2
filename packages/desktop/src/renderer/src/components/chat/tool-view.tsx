@@ -33,8 +33,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
   const toolState: ToolState = error ? "error" : running ? "running" : "complete";
   const displayedResult = result ?? artifactState?.partialResult;
   const header = toolHeader(toolName, args);
-  const cursorFollowsArgs = running && execution === "streaming-args";
-  const cursorAtEnd = running && execution !== "streaming-args";
+  const cursorFollowsArgs = running;
   const stateLabel = toolState === "running" ? "运行中" : toolState === "error" ? "失败" : "已完成";
 
   useEffect(() => {
@@ -53,7 +52,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
       open={expanded}
       onOpenChange={setExpanded}
     >
-      <div className="tool-trigger-row" data-cursor-position={cursorAtEnd ? "end" : undefined}>
+      <div className="tool-trigger-row">
         <CollapsibleTrigger asChild>
           <button
             className="tool-trigger"
@@ -78,7 +77,6 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
         {cursorFollowsArgs && header.target?.type === "file" ? (
           <span className="tool-running-cursor" aria-hidden="true" />
         ) : null}
-        {cursorAtEnd ? <span className="tool-running-cursor tool-running-cursor-end" aria-hidden="true" /> : null}
         <span className="sr-only" aria-live="polite">
           {stateLabel}
         </span>

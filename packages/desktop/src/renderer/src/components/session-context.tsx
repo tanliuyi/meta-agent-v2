@@ -6,6 +6,7 @@ interface SessionScope {
   record: CachedSessionRecord;
   active: boolean;
   commandsReady: boolean;
+  modelsRefreshing: boolean;
   clearQueue(): Promise<void>;
   branch(sourceEntryId: string): Promise<SessionBranchResult>;
   refreshModels(): Promise<void>;

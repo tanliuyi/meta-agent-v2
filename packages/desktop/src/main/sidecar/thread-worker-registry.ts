@@ -145,9 +145,14 @@ export class ThreadWorkerRegistry {
   private readonly liveClients = new Map<string, ThreadWorkerClient>();
   private readonly pending = new Map<string, Promise<WorkerRecord>>();
   private readonly pendingCreations = new Map<string, Promise<SessionBootstrap>>();
+  private readonly resourceReloadRequests = new Map<
+    string,
+    { promise: Promise<SessionCommandResult>; timer?: ReturnType<typeof setTimeout> }
+  >();
   private readonly subagentAttachments = new Map<string, number>();
   private readonly operationTails = new Map<string, Promise<void>>();
   private readonly drainingThreads = new Set<string>();
+  private readonly extensionApplyCompletions = new Map<string, Promise<void>>();
   private readonly blockedDevelopmentSets = new Map<string, string>();
   private readonly developmentCrashCounts = new Map<string, { count: number; lastAt: number }>();
   private readonly drainingProjects = new Set<string>();
@@ -318,11 +323,16 @@ export class ThreadWorkerRegistry {
       this.subagentAttachments.set(key, (this.subagentAttachments.get(key) ?? 0) + 1);
       return subagentBootstrap;
     }
-    const bootstrap = await this.use(projectId, threadId, async (record) => {
-      const result = await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
-      record.attachments += 1;
-      return decorateBootstrap(record, result);
-    });
+    const bootstrap = await this.use(
+      projectId,
+      threadId,
+      async (record) => {
+        const result = await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
+        record.attachments += 1;
+        return decorateBootstrap(record, result);
+      },
+      true,
+    );
     return bootstrap;
   }
 
@@ -350,6 +360,9 @@ export class ThreadWorkerRegistry {
   }
 
   async prompt(input: SessionPromptInput): Promise<SessionCommandResult> {
+    if (input.text.trim() === "/reload" && input.images.length === 0) {
+      return this.reloadResources(input.projectId, input.threadId, input.requestId);
+    }
     return this.use(input.projectId, input.threadId, (record) =>
       record.client.request({ type: "prompt", input }, null),
     );
@@ -363,6 +376,58 @@ export class ThreadWorkerRegistry {
     return this.use(input.projectId, input.threadId, (record) =>
       record.client.request({ type: "reload", input }, null),
     );
+  }
+
+  private reloadResources(projectId: string, threadId: string, requestId: string): Promise<SessionCommandResult> {
+    const requestKey = `${workerKey(projectId, threadId)}\0${requestId}`;
+    const existing = this.resourceReloadRequests.get(requestKey);
+    if (existing) return existing.promise;
+    const promise = this.reloadResourcesOnce(projectId, threadId, requestId);
+    const entry: { promise: Promise<SessionCommandResult>; timer?: ReturnType<typeof setTimeout> } = { promise };
+    this.resourceReloadRequests.set(requestKey, entry);
+    const scheduleExpiry = () => {
+      if (this.resourceReloadRequests.get(requestKey) !== entry) return;
+      entry.timer = setTimeout(() => this.resourceReloadRequests.delete(requestKey), 60_000);
+      entry.timer.unref();
+    };
+    void promise.then(scheduleExpiry, scheduleExpiry);
+    return promise;
+  }
+
+  private async reloadResourcesOnce(
+    projectId: string,
+    threadId: string,
+    requestId: string,
+  ): Promise<SessionCommandResult> {
+    const key = workerKey(projectId, threadId);
+    return this.use(projectId, threadId, async (record) => {
+      const desired = await this.options.extensionSourcePolicy.resolve(projectId);
+      const previousSet = cloneExtensionSet(record.extensionSet);
+      record.desiredExtensionGeneration = desired.generation;
+      record.desiredExtensionDiagnostics = desired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
+      this.options.generationReferences?.retain(`thread:${record.client.instanceId}`, desired);
+      record.extensionSet = cloneExtensionSet(desired);
+      try {
+        const result = await record.client.request<SessionCommandResult>(
+          { type: "reloadResources", requestId, extensionSet: desired },
+          null,
+        );
+        if (!result.accepted) {
+          this.options.generationReferences?.retain(`thread:${record.client.instanceId}`, previousSet);
+          record.extensionSet = previousSet;
+        }
+        const latestDesired = await this.options.extensionSourcePolicy.resolve(projectId).catch(() => desired);
+        record.desiredExtensionGeneration = latestDesired.generation;
+        record.desiredExtensionDiagnostics = latestDesired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
+        return result;
+      } catch (error) {
+        this.options.generationReferences?.retain(`thread:${record.client.instanceId}`, previousSet);
+        record.extensionSet = previousSet;
+        this.options.resync(projectId, threadId, "extension-reload-failed");
+        this.retireAfterReloadFailure(key, record, error);
+        throw error;
+      }
+    });
   }
 
   async branch(input: SessionBranchInput): Promise<SessionBranchResult> {
@@ -407,7 +472,12 @@ export class ThreadWorkerRegistry {
     const key = workerKey(projectId, threadId);
     if (this.drainingThreads.has(key))
       throw new Error(`Extension set apply is already running for ${projectId}/${threadId}`);
+    let completeApply!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      completeApply = resolve;
+    });
     this.drainingThreads.add(key);
+    this.extensionApplyCompletions.set(key, completion);
     try {
       return await this.withThreadLock(key, async () => {
         const existing = this.records.get(key);
@@ -559,6 +629,8 @@ export class ThreadWorkerRegistry {
       });
     } finally {
       this.drainingThreads.delete(key);
+      if (this.extensionApplyCompletions.get(key) === completion) this.extensionApplyCompletions.delete(key);
+      completeApply();
     }
   }
 
@@ -662,7 +734,11 @@ export class ThreadWorkerRegistry {
   async dispose(): Promise<void> {
     this.disposing = true;
     clearInterval(this.idleTimer);
-    await Promise.allSettled([...this.pending.values(), ...this.pendingCreations.values()]);
+    await Promise.allSettled([
+      ...this.pending.values(),
+      ...this.pendingCreations.values(),
+      ...this.extensionApplyCompletions.values(),
+    ]);
     await this.capacityTail;
     const records = [...this.records.values()];
     for (const record of records) record.retired = true;
@@ -671,22 +747,39 @@ export class ThreadWorkerRegistry {
     if (failure?.status === "rejected") throw failure.reason;
     this.records.clear();
     this.subagentAttachments.clear();
+    for (const request of this.resourceReloadRequests.values()) {
+      if (request.timer) clearTimeout(request.timer);
+    }
+    this.resourceReloadRequests.clear();
   }
 
   private async use<T>(
     projectId: string,
     threadId: string,
     operation: (record: WorkerRecord) => Promise<T>,
+    waitForExtensionApply = false,
   ): Promise<T> {
     this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
-    if (this.drainingThreads.has(key)) throw new Error(`Thread ${projectId}/${threadId} is applying extensions`);
+    if (!waitForExtensionApply && this.drainingThreads.has(key)) {
+      throw new Error(`Thread ${projectId}/${threadId} is applying extensions`);
+    }
     let record!: WorkerRecord;
-    await this.withThreadLock(key, async () => {
-      record = await this.requireUnlocked(projectId, threadId);
-      record.lastActivityAt = Date.now();
-      record.inFlight += 1;
-    });
+    while (true) {
+      let applyCompletion: Promise<void> | undefined;
+      await this.withThreadLock(key, async () => {
+        applyCompletion = this.extensionApplyCompletions.get(key);
+        if (waitForExtensionApply && applyCompletion) return;
+        if (this.drainingThreads.has(key)) {
+          throw new Error(`Thread ${projectId}/${threadId} is applying extensions`);
+        }
+        record = await this.requireUnlocked(projectId, threadId);
+        record.lastActivityAt = Date.now();
+        record.inFlight += 1;
+      });
+      if (!waitForExtensionApply || !applyCompletion) break;
+      await applyCompletion;
+    }
     try {
       return await operation(record);
     } catch (error) {
@@ -938,6 +1031,16 @@ export class ThreadWorkerRegistry {
     if (record.retired) return;
     record.retired = true;
     this.beginRecordShutdown(record);
+    if (this.records.get(key) !== record || record.failureReported) return;
+    record.failureReported = true;
+    this.options.failed(record.projectId, record.threadId, error instanceof Error ? error : new Error(String(error)));
+  }
+
+  private retireAfterReloadFailure(key: string, record: WorkerRecord, error: unknown): void {
+    if (!record.retired) {
+      record.retired = true;
+      this.beginRecordShutdown(record);
+    }
     if (this.records.get(key) !== record || record.failureReported) return;
     record.failureReported = true;
     this.options.failed(record.projectId, record.threadId, error instanceof Error ? error : new Error(String(error)));

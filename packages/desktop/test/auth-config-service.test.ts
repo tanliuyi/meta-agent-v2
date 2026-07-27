@@ -109,6 +109,44 @@ describe("AuthConfigService", () => {
     }
   });
 
+  test("writes real line breaks when adding credentials to an existing compact file", async () => {
+    await mkdir(directory, { recursive: true });
+    await writeFile(configPath, "{}", "utf8");
+    const snapshot = await service.getConfig();
+
+    const result = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      providers: [{ key: "meta-agent", apiKey: { key: "test-key" } }],
+    });
+
+    expect(result.status).toBe("saved");
+    const saved = await readFile(configPath, "utf8");
+    expect(saved).toContain("\n");
+    expect(saved).not.toContain("\\n");
+    expect(JSON.parse(saved)).toEqual({ "meta-agent": { type: "api_key", key: "test-key" } });
+  });
+
+  test("preserves CRLF line endings when updating an existing file", async () => {
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      configPath,
+      '{\r\n  "meta-agent": {\r\n    "type": "api_key",\r\n    "key": "old"\r\n  }\r\n}\r\n',
+      "utf8",
+    );
+    const snapshot = await service.getConfig();
+
+    const result = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      providers: [{ key: "meta-agent", origin: "meta-agent", apiKey: { key: "new" } }],
+    });
+
+    expect(result.status).toBe("saved");
+    const saved = await readFile(configPath, "utf8");
+    expect(saved).toContain("\r\n");
+    expect(saved.replaceAll("\r\n", "")).not.toContain("\n");
+    expect(JSON.parse(saved)["meta-agent"].key).toBe("new");
+  });
+
   test("normalizes empty key to delete provider", async () => {
     await mkdir(directory, { recursive: true });
     await writeFile(configPath, SOURCE_VALID, "utf8");

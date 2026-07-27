@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { InlineExtension, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
   DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
@@ -61,10 +62,16 @@ export async function validateResolvedExtensionSet(
   };
 }
 
-export function controlledResourceLoaderOptions(set: ResolvedExtensionSet, extensionFactories: InlineExtension[]) {
+export function controlledResourceLoaderOptions(
+  set: ResolvedExtensionSet,
+  extensionFactories: InlineExtension[],
+  options: { includeBuiltinSkills?: boolean } = {},
+) {
   return {
     noExtensions: true,
     additionalExtensionPaths: set.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
+    additionalSkillPaths:
+      options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))],
     extensionFactories,
     packageManagerOnMissing: async () => "error" as const,
   };

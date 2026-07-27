@@ -48,16 +48,30 @@ export interface SubagentResumeRequest extends SubagentRunRequest {
   sessionFile: string;
 }
 
+/** Preserve Pi runtime event names end to end so upstream progress and transcript consumers share one protocol. */
 export type SubagentRunEvent =
   | { type: "started"; runId: string; workerInstanceId?: string; sessionFile?: string }
-  | { type: "text-delta"; text: string }
-  | { type: "message-end"; message: JsonValue }
-  | { type: "tool-start"; toolCallId: string; toolName: string; args: JsonValue }
-  | { type: "tool-update"; toolCallId: string; toolName: string; partialResult: JsonValue }
-  | { type: "tool-end"; toolCallId: string; toolName: string; result: JsonValue; isError: boolean }
-  | { type: "usage"; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }
+  | { type: "message_update"; message: JsonValue; assistantMessageEvent: JsonValue }
+  | { type: "message_end"; message: JsonValue }
+  | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: JsonValue }
+  | { type: "tool_execution_update"; toolCallId: string; toolName: string; partialResult: JsonValue }
+  | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: JsonValue; isError: boolean }
   | { type: "completed"; runId: string; sessionFile?: string }
   | { type: "failed"; runId: string; error: string; code?: string; sessionFile?: string };
+
+export function subagentTextDelta(event: SubagentRunEvent): string | undefined {
+  if (
+    event.type !== "message_update" ||
+    !event.assistantMessageEvent ||
+    typeof event.assistantMessageEvent !== "object" ||
+    Array.isArray(event.assistantMessageEvent)
+  ) {
+    return undefined;
+  }
+  return event.assistantMessageEvent.type === "text_delta" && typeof event.assistantMessageEvent.delta === "string"
+    ? event.assistantMessageEvent.delta
+    : undefined;
+}
 
 export type SubagentWorkerBinding = {
   projectId: string;

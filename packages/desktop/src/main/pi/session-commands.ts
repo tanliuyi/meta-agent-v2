@@ -3,6 +3,14 @@ import type { SlashCommand } from "../../shared/contracts.ts";
 
 type CommandSession = Pick<AgentSession, "extensionRunner" | "promptTemplates" | "resourceLoader">;
 
+const DESKTOP_BUILTIN_COMMANDS: SlashCommand[] = [
+  {
+    name: "reload",
+    description: "Reload extensions, skills, prompts, and context files",
+    source: "builtin",
+  },
+];
+
 /** 从 Pi session 的真实资源生成 Composer slash command。 */
 export function getSessionCommands(session: CommandSession): SlashCommand[] {
   const extensions = session.extensionRunner.getRegisteredCommands().map((command) => ({
@@ -20,7 +28,7 @@ export function getSessionCommands(session: CommandSession): SlashCommand[] {
     description: skill.description,
     source: "skill" as const,
   }));
-  return [...extensions, ...prompts, ...skills];
+  return [...DESKTOP_BUILTIN_COMMANDS, ...extensions, ...prompts, ...skills];
 }
 
 /** 从尚未 materialize 的 Pi resources 生成 draft Composer 命令。 */

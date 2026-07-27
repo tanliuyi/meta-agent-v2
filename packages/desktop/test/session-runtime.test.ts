@@ -325,6 +325,111 @@ describe("SessionRuntime Pi-native commands", () => {
     await runtime.dispose();
   });
 
+  it("通过 AgentSession.reload 热重载受控 extension set", async () => {
+    const session = createSession();
+    const services = createServices();
+    (session as unknown as { resourceLoader: typeof services.resourceLoader }).resourceLoader = services.resourceLoader;
+    mocks.createAgentSessionServices.mockResolvedValue(services);
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    await expect(
+      runtime.reloadResources("reload-request", {
+        generation: "extensions-next",
+        projectId: "project",
+        entries: [
+          {
+            id: "development:next",
+            displayName: "Next",
+            source: "development",
+            entryPath: "/approved/next.ts",
+            hostProfileVersion: 1,
+            capabilities: [],
+          },
+        ],
+        diagnostics: [],
+        resolvedAt: 1,
+      }),
+    ).resolves.toEqual({ accepted: true, queued: false });
+
+    expect(session.reload).toHaveBeenCalledWith({
+      resourceLoader: { additionalExtensionPaths: ["/approved/next.ts"] },
+    });
+    expect(runtime.bootstrap().control.extensionSet.generation).toBe("extensions-next");
+
+    await runtime.reloadResources("reload-request", {
+      generation: "extensions-next",
+      projectId: "project",
+      entries: [],
+      diagnostics: [],
+      resolvedAt: 2,
+    });
+    expect(session.reload).toHaveBeenCalledTimes(1);
+    await runtime.dispose();
+  });
+
+  it("运行期间拒绝 /reload 且不调用 AgentSession.reload", async () => {
+    const session = createSession(true);
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    await expect(
+      runtime.reloadResources("busy-reload", {
+        generation: "extensions-next",
+        projectId: "project",
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 1,
+      }),
+    ).resolves.toMatchObject({ accepted: false, queued: false });
+    expect(session.reload).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it("资源重载失败时恢复之前的 extension generation", async () => {
+    const session = createSession();
+    session.reload.mockRejectedValueOnce(new Error("reload failed"));
+    const push = vi.fn();
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push,
+      onSummaryChanged: () => {},
+    });
+
+    await expect(
+      runtime.reloadResources("failed-reload", {
+        generation: "extensions-next",
+        projectId: "project",
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 1,
+      }),
+    ).rejects.toThrow("reload failed");
+
+    expect(runtime.bootstrap().control.extensionSet.generation).toBe("desktop-builtins-only");
+    expect(push).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "control",
+        control: expect.objectContaining({
+          extensionSet: expect.objectContaining({ generation: "desktop-builtins-only" }),
+        }),
+      }),
+    );
+    await runtime.dispose();
+  });
+
   it("刷新模型时重载 sidecar 凭据、刷新 registry 并发布 control", async () => {
     const session = createSession();
     const services = createServices();
@@ -436,6 +541,7 @@ function createServices() {
 
 function createSession(streaming = false): AgentSession & {
   prompt: ReturnType<typeof vi.fn>;
+  reload: ReturnType<typeof vi.fn>;
   bindExtensions: ReturnType<typeof vi.fn>;
   waitForIdle: ReturnType<typeof vi.fn>;
 } {
@@ -458,7 +564,10 @@ function createSession(streaming = false): AgentSession & {
       emit: vi.fn(async () => undefined),
     },
     promptTemplates: [],
-    resourceLoader: { getSkills: () => ({ skills: [] }) },
+    resourceLoader: {
+      getExtensions: () => ({ extensions: [], errors: [] }),
+      getSkills: () => ({ skills: [] }),
+    },
     sessionManager: {
       getLeafId: () => null,
       getBranch: () => [],
@@ -471,6 +580,7 @@ function createSession(streaming = false): AgentSession & {
       createBranchedSession: () => "/sessions/branch.jsonl",
     },
     prompt,
+    reload: vi.fn(async () => undefined),
     sendUserMessage: vi.fn(),
     abort: vi.fn(async () => {}),
     clearQueue: () => ({ steering: [], followUp: [] }),
@@ -488,6 +598,7 @@ function createSession(streaming = false): AgentSession & {
     dispose() {},
   } as unknown as AgentSession & {
     prompt: ReturnType<typeof vi.fn>;
+    reload: ReturnType<typeof vi.fn>;
     bindExtensions: ReturnType<typeof vi.fn>;
     waitForIdle: ReturnType<typeof vi.fn>;
   };

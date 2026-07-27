@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { marketplaceEndpointErrorMessage } from "../src/renderer/src/features/plugins/use-marketplace-endpoint-settings.ts";
 import {
   canInstallMarketplacePlugin,
   marketplaceErrorMessage,
   resolvePluginMarketplaceLoad,
 } from "../src/renderer/src/features/plugins/use-plugin-marketplace.ts";
-import { marketplaceEndpointErrorMessage } from "../src/renderer/src/features/settings/use-marketplace-endpoint-settings.ts";
 
 describe("plugin marketplace renderer loading", () => {
   const installed = { revision: "installed-one", plugins: [] };

@@ -139,7 +139,9 @@ export class SubagentWorkerService implements SidecarService {
       cwd: request.cwd,
       agentDir: this.binding.agentDir,
       resourceLoaderOptions: {
-        ...controlledResourceLoaderOptions(extensionSet, extensionFactories),
+        ...controlledResourceLoaderOptions(extensionSet, extensionFactories, {
+          includeBuiltinSkills: request.inheritSkills,
+        }),
         noSkills: !request.inheritSkills,
         noContextFiles: !request.inheritProjectContext,
         ...(request.systemPromptMode === "replace" && request.systemPrompt
@@ -273,7 +275,11 @@ export class SubagentWorkerService implements SidecarService {
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         this.context.emit({
           type: "subagent-event",
-          event: { type: "text-delta", text: event.assistantMessageEvent.delta },
+          event: {
+            type: "message_update",
+            message: toJsonValue(event.message),
+            assistantMessageEvent: toJsonValue(event.assistantMessageEvent),
+          },
         });
       } else if (event.type === "message_end") {
         if (event.message.role === "assistant") {
@@ -290,13 +296,13 @@ export class SubagentWorkerService implements SidecarService {
         }
         this.context.emit({
           type: "subagent-event",
-          event: { type: "message-end", message: toJsonValue(event.message) },
+          event: { type: "message_end", message: toJsonValue(event.message) },
         });
       } else if (event.type === "tool_execution_start") {
         this.context.emit({
           type: "subagent-event",
           event: {
-            type: "tool-start",
+            type: "tool_execution_start",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             args: toJsonValue(event.args),
@@ -306,7 +312,7 @@ export class SubagentWorkerService implements SidecarService {
         this.context.emit({
           type: "subagent-event",
           event: {
-            type: "tool-update",
+            type: "tool_execution_update",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             partialResult: toJsonValue(event.partialResult),
@@ -316,7 +322,7 @@ export class SubagentWorkerService implements SidecarService {
         this.context.emit({
           type: "subagent-event",
           event: {
-            type: "tool-end",
+            type: "tool_execution_end",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             result: toJsonValue(event.result),

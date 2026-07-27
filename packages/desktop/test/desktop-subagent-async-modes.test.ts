@@ -42,7 +42,7 @@ class CompletingRuntime implements SubagentRuntime {
       this.outputForRequest?.(request) ?? (request.task.includes("first output") ? "second output" : "first output");
     yield { type: "started" as const, runId: request.runId };
     yield {
-      type: "message-end" as const,
+      type: "message_end" as const,
       message: {
         role: "assistant",
         content: [{ type: "text", text }],
@@ -98,13 +98,17 @@ class SteerableRuntime implements SubagentRuntime {
 
   async *run(request: SubagentRuntimeRunRequest) {
     yield { type: "started" as const, runId: request.runId };
-    yield { type: "text-delta" as const, text: "waiting for steering" };
+    yield {
+      type: "message_update" as const,
+      message: { role: "assistant", content: [{ type: "text", text: "waiting for steering" }] },
+      assistantMessageEvent: { type: "text_delta", delta: "waiting for steering" },
+    };
     this.markStarted();
     await new Promise<void>((resolve) => {
       this.release = resolve;
     });
     yield {
-      type: "message-end" as const,
+      type: "message_end" as const,
       message: { role: "assistant", content: [{ type: "text", text: "steered output" }] },
     };
     yield { type: "completed" as const, runId: request.runId };
@@ -171,7 +175,7 @@ class ConcurrencyRuntime implements SubagentRuntime {
     try {
       await new Promise((resolve) => setTimeout(resolve, 15));
       yield {
-        type: "message-end" as const,
+        type: "message_end" as const,
         message: { role: "assistant", content: [{ type: "text", text: `output-${request.childIndex}` }] },
       };
       yield { type: "completed" as const, runId: request.runId };
@@ -209,9 +213,13 @@ class LiveProgressRuntime implements SubagentRuntime {
       return;
     }
     yield { type: "started" as const, runId: request.runId };
-    yield { type: "text-delta" as const, text: "visible streamed progress" };
     yield {
-      type: "tool-start" as const,
+      type: "message_update" as const,
+      message: { role: "assistant", content: [{ type: "text", text: "visible streamed progress" }] },
+      assistantMessageEvent: { type: "text_delta", delta: "visible streamed progress" },
+    };
+    yield {
+      type: "tool_execution_start" as const,
       toolCallId: "read-1",
       toolName: "read",
       args: { path: "packages/plugin-marketplace-server/src/store.ts" },
@@ -221,14 +229,14 @@ class LiveProgressRuntime implements SubagentRuntime {
       this.release = resolve;
     });
     yield {
-      type: "tool-end" as const,
+      type: "tool_execution_end" as const,
       toolCallId: "read-1",
       toolName: "read",
       result: { content: [{ type: "text", text: "done" }] },
       isError: false,
     };
     yield {
-      type: "message-end" as const,
+      type: "message_end" as const,
       message: { role: "assistant", content: [{ type: "text", text: "final progress result" }] },
     };
     yield { type: "completed" as const, runId: request.runId };
@@ -257,7 +265,7 @@ class FailFastRuntime implements SubagentRuntime {
       return;
     }
     yield {
-      type: "message-end" as const,
+      type: "message_end" as const,
       message: { role: "assistant", content: [{ type: "text", text: "unexpected" }] },
     };
     yield { type: "completed" as const, runId: request.runId };
@@ -460,6 +468,38 @@ describe("Desktop programmatic async modes", () => {
     expect(result).toMatchObject({ sessionId: "parent-session", state: "complete", summary: "second output" });
     expect(status).toMatchObject({ state: "complete", currentStep: 2, turnCount: 2 });
     expect(status.steps).toHaveLength(2);
+  });
+
+  it("passes the shared deadline and turn budget to every programmatic chain leaf", async () => {
+    const id = `desktop-async-chain-limits-${Date.now()}`;
+    const { resultPath } = paths(id);
+    const runtime = new CompletingRuntime();
+
+    executeAsyncChain(id, {
+      chain: [
+        { agent: "worker", task: "first", acceptance: false },
+        { agent: "worker", task: "second", acceptance: false },
+      ],
+      agents: [agent],
+      ctx: context(),
+      subagentRuntime: runtime,
+      artifactConfig: { enabled: false } as never,
+      shareEnabled: false,
+      maxSubagentDepth: 1,
+      timeoutMs: 10_000,
+      turnBudget: { maxTurns: 5, graceTurns: 2 },
+    });
+
+    await readResult(resultPath);
+    expect(runtime.requests).toHaveLength(2);
+    expect(runtime.requests[0]?.timeoutMs).toBeGreaterThan(0);
+    expect(runtime.requests[0]?.timeoutMs).toBeLessThanOrEqual(10_000);
+    expect(runtime.requests[1]?.timeoutMs).toBeGreaterThan(0);
+    expect(runtime.requests[1]?.timeoutMs).toBeLessThanOrEqual(runtime.requests[0]?.timeoutMs ?? 0);
+    expect(runtime.requests.map(({ turnBudget }) => turnBudget)).toEqual([
+      { maxTurns: 5, graceTurns: 2 },
+      { maxTurns: 5, graceTurns: 2 },
+    ]);
   });
 
   it("resolves named outputs literally and preserves the chain writer session directory", async () => {

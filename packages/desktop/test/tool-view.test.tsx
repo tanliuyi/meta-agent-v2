@@ -50,7 +50,9 @@ describe("ToolView TUI parity", () => {
     );
 
     expect(markup).toContain("generate output");
-    expect(markup).toContain('data-cursor-position="end"');
+    expect(markup).toContain("tool-running-cursor");
+    expect(markup).not.toContain("tool-running-cursor-end");
+    expect(markup).not.toContain("data-cursor-position");
     expect(markup).not.toContain("line-1");
   });
 

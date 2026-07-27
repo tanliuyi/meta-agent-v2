@@ -6,6 +6,7 @@ import {
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useToast } from "../shared/ui/use-toast.ts";
 import { imageAttachmentAdapter } from "./image-attachments.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
@@ -26,6 +27,7 @@ export interface PiSessionRuntimeBinding {
 /** Creates the one assistant-ui runtime owned by a cached session activity. */
 export function usePiSessionRuntime({ record, active, transport }: PiSessionRuntimeOptions): PiSessionRuntimeBinding {
   const stores = record.stores;
+  const { notify, update } = useToast();
   const snapshot = useSyncExternalStore(
     stores.timeline.subscribe,
     stores.timeline.getSnapshot,
@@ -64,9 +66,11 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
         getComposer: () => runtimeRef.current?.thread.composer ?? null,
         getPhase: () => snapshotRef.current.phase,
         resolveReloadTarget: (parentId) => resolveReloadUserEntry(snapshotRef.current, parentId),
+        notify,
+        updateNotification: update,
         report: (error) => console.error("Pi command failed", error),
       }),
-    [record, stores.connection, transport],
+    [notify, record, stores.connection, transport, update],
   );
 
   useEffect(() => coordinator.observeQueue(snapshot.queue), [coordinator, snapshot.queue]);

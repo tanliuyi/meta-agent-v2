@@ -58,7 +58,7 @@ export class SessionRuntime {
   private readonly projector: PiThreadProjector;
   private readonly compatibility: PiCompatibilityAdapter;
   private readonly commands = new Map<string, Promise<SessionCommandResult>>();
-  private readonly extensionSet: ResolvedExtensionSet;
+  private extensionSet: ResolvedExtensionSet;
   private extensionDiagnostics: DesktopExtensionDiagnostic[];
   private extensionPhase: DesktopExtensionDiagnostic["phase"] = "start";
   private readonly commandExpiryTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -303,6 +303,55 @@ export class SessionRuntime {
     this.assertTimelineAvailable();
     if (input.threadId !== this.id || input.projectId !== this.projectId) throw new Error("Pi reload session 不匹配");
     return this.runCommand(input.requestId, () => this.compatibility.reload(input));
+  }
+
+  reloadResources(requestId: string, extensionSet: ResolvedExtensionSet): Promise<SessionCommandResult> {
+    this.assertTimelineAvailable();
+    return this.runCommand(requestId, () => this.reloadResourcesOnce(extensionSet));
+  }
+
+  private async reloadResourcesOnce(extensionSet: ResolvedExtensionSet): Promise<SessionCommandResult> {
+    if (this.session.isStreaming || this.session.isCompacting) {
+      return { accepted: false, queued: false, error: "请等待当前运行结束后再执行 /reload" };
+    }
+    const previousSet = cloneExtensionSet(this.extensionSet);
+    const previousDiagnostics = this.extensionDiagnostics.map((diagnostic) => ({ ...diagnostic }));
+    this.extensionSet = cloneExtensionSet(extensionSet);
+    this.extensionDiagnostics = extensionSet.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      projectId: this.projectId,
+      threadId: this.id,
+    }));
+    this.extensionPhase = "start";
+    this.lastError = undefined;
+    try {
+      await this.session.reload({
+        resourceLoader: {
+          additionalExtensionPaths: extensionSet.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
+        },
+      });
+      const runtimeDiagnostics = this.extensionDiagnostics.slice(extensionSet.diagnostics.length);
+      this.extensionDiagnostics = [
+        ...extensionLoadDiagnostics(extensionSet, this.session.resourceLoader.getExtensions()).map((diagnostic) => ({
+          ...diagnostic,
+          projectId: this.projectId,
+          threadId: this.id,
+        })),
+        ...runtimeDiagnostics,
+      ];
+      this.lastError = this.extensionDiagnostics.length
+        ? this.extensionDiagnostics.map(({ extensionId, message }) => `${extensionId}: ${message}`).join("\n")
+        : undefined;
+      return { accepted: true, queued: false, ...(this.lastError ? { error: this.lastError } : {}) };
+    } catch (error) {
+      this.extensionSet = previousSet;
+      this.extensionDiagnostics = previousDiagnostics;
+      this.lastError = errorMessage(error);
+      throw error;
+    } finally {
+      this.extensionPhase = "runtime";
+      this.publishControl();
+    }
   }
 
   /** 在指定 entry 处 fork 当前 session 为新 session 文件，返回新会话 id + 文件路径。 */
@@ -562,6 +611,14 @@ export class PiTimelineUnavailableError extends Error {
     super(`Pi timeline 不可用: ${errorMessage(projectionError)}; rebuild 失败: ${errorMessage(rebuildError)}`);
     this.name = "PiTimelineUnavailableError";
   }
+}
+
+function cloneExtensionSet(extensionSet: ResolvedExtensionSet): ResolvedExtensionSet {
+  return {
+    ...extensionSet,
+    entries: extensionSet.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+    diagnostics: extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+  };
 }
 
 function builtinOnlyExtensionSet(projectId: string): ResolvedExtensionSet {

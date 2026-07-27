@@ -1,9 +1,12 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
+import { runSync } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/execution.ts";
+import { DesktopSubagentRuntime } from "../src/main/pi/subagents/desktop-subagent-runtime.ts";
 import type { SidecarEventBody } from "../src/shared/sidecar-contracts.ts";
 import {
   SUBAGENT_TIMEOUT_CODE,
@@ -133,7 +136,7 @@ describe("SubagentWorkerService", () => {
 
     const subagentEvents = events.flatMap((event) => (event.type === "subagent-event" ? [event.event] : []));
     expect(subagentEvents.map(({ type }) => type)).toEqual(
-      expect.arrayContaining(["started", "text-delta", "message-end", "completed"]),
+      expect.arrayContaining(["started", "message_update", "message_end", "completed"]),
     );
     expect(subagentEvents.find((event) => event.type === "started")).toMatchObject({
       sessionFile: join(root, "child", "session.jsonl"),
@@ -141,9 +144,139 @@ describe("SubagentWorkerService", () => {
     expect(existsSync(markerPath)).toBe(false);
     expect(
       subagentEvents.some(
-        (event) => event.type === "message-end" && JSON.stringify(event.message).includes("worker complete"),
+        (event) => event.type === "message_end" && JSON.stringify(event.message).includes("worker complete"),
       ),
     ).toBe(true);
+  });
+
+  it("preserves canonical worker events and transcript records through the Desktop runtime boundary", async () => {
+    const root = join(tmpdir(), `desktop-subagent-boundary-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "README.md"), "worker boundary input\n");
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+
+    const faux = registerFauxProvider({ models: [{ id: "boundary-model", reasoning: false }] });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" }),
+      fauxAssistantMessage("worker boundary complete"),
+    ]);
+    cleanups.push(() => faux.unregister());
+    const model = faux.getModel();
+    const providerFactory = (api: ExtensionAPI): void => {
+      api.registerProvider(model.provider, {
+        baseUrl: model.baseUrl,
+        apiKey: "faux-key",
+        api: faux.api,
+        models: faux.models.map((registeredModel) => ({
+          id: registeredModel.id,
+          name: registeredModel.name,
+          api: registeredModel.api,
+          reasoning: registeredModel.reasoning,
+          input: registeredModel.input,
+          cost: registeredModel.cost,
+          contextWindow: registeredModel.contextWindow,
+          maxTokens: registeredModel.maxTokens,
+        })),
+      });
+    };
+    const workerServices: Array<Awaited<ReturnType<typeof SubagentWorkerService.create>>["service"]> = [];
+    const workerEvents: SubagentRunEvent[] = [];
+    cleanups.push(async () => {
+      for (const service of workerServices.reverse()) await service.dispose();
+    });
+
+    const runtime = new DesktopSubagentRuntime({
+      projectId: "project",
+      parentThreadId: "thread",
+      requestHost: async (hostRequest, onEvent) => {
+        if (hostRequest.type !== "subagent.run") throw new Error(`Unexpected worker control: ${hostRequest.type}`);
+        const created = await SubagentWorkerService.create(
+          {
+            role: "subagent",
+            value: {
+              projectId: hostRequest.request.projectId,
+              parentThreadId: hostRequest.request.parentThreadId,
+              runId: hostRequest.request.runId,
+              childIndex: hostRequest.request.childIndex,
+              agentDir: root,
+            },
+          },
+          {
+            emit: (event) => {
+              if (event.type !== "subagent-event") return;
+              workerEvents.push(event.event);
+              onEvent?.(event.event);
+            },
+            requestHost: async () => undefined,
+            flushEvents: async () => undefined,
+          },
+          { extensionFactories: [providerFactory] },
+        );
+        workerServices.push(created.service);
+        return created.service.command({ type: "subagentRun", request: hostRequest.request });
+      },
+    });
+    cleanups.push(() => runtime.dispose());
+    const agent: AgentConfig = {
+      name: "worker",
+      description: "Worker",
+      model: `${model.provider}/${model.id}`,
+      tools: ["read"],
+      systemPromptMode: "append",
+      inheritProjectContext: false,
+      inheritSkills: false,
+      systemPrompt: "Read the assigned file and report completion.",
+      source: "builtin",
+      filePath: "worker.md",
+      completionGuard: false,
+    };
+
+    const result = await runSync(root, [agent], agent.name, "Read README.md", {
+      subagentRuntime: runtime,
+      runId: "boundary-run",
+      acceptance: false,
+      artifactsDir: join(root, "artifacts"),
+      artifactConfig: { enabled: true },
+    });
+
+    expect(result).toMatchObject({ exitCode: 0, finalOutput: "worker boundary complete" });
+    expect(workerEvents.map(({ type }) => type)).toEqual(
+      expect.arrayContaining([
+        "started",
+        "message_update",
+        "message_end",
+        "tool_execution_start",
+        "tool_execution_end",
+        "completed",
+      ]),
+    );
+    const records = readFileSync(result.transcriptPath!, "utf8")
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            sourceEventType?: string;
+            recordType?: string;
+            role?: string;
+            text?: string;
+            toolName?: string;
+          },
+      );
+    expect(records.find(({ sourceEventType }) => sourceEventType === "tool_execution_start")).toMatchObject({
+      recordType: "tool_start",
+      toolName: "read",
+    });
+    expect(records.find(({ sourceEventType }) => sourceEventType === "tool_execution_end")).toMatchObject({
+      recordType: "tool_end",
+      toolName: "read",
+    });
+    expect(
+      records.find(
+        ({ sourceEventType, role, text }) =>
+          sourceEventType === "message_end" && role === "assistant" && text === "worker boundary complete",
+      ),
+    ).toMatchObject({ recordType: "message" });
   });
 
   it("emits a structured timeout code from the worker boundary", async () => {
@@ -326,7 +459,7 @@ describe("SubagentWorkerService", () => {
       events.some(
         (event) =>
           event.type === "subagent-event" &&
-          event.event.type === "message-end" &&
+          event.event.type === "message_end" &&
           JSON.stringify(event.event.message).includes("parent received nested result"),
       ),
     ).toBe(true);

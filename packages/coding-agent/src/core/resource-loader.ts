@@ -38,6 +38,7 @@ export interface ResourceExtensionPaths {
 
 export interface ResourceLoaderReloadOptions {
 	resolveProjectTrust?: (input: { extensionsResult: LoadExtensionsResult }) => Promise<boolean>;
+	additionalExtensionPaths?: string[];
 }
 
 export interface ResourceLoader {
@@ -345,6 +346,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {
 		resetTimings("extensions");
+		if (options?.additionalExtensionPaths) {
+			this.additionalExtensionPaths = [...options.additionalExtensionPaths];
+		}
 
 		if (this.loaded) {
 			clearExtensionCache();

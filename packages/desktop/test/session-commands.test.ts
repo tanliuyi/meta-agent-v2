@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getDraftCommands, getSessionCommands } from "../src/main/pi/session-commands.ts";
 
 describe("session commands", () => {
-  it("只从 Pi public resources 合并 extension、prompt 和 skill 命令", () => {
+  it("合并 Desktop 支持的 builtin 与 Pi public resource 命令", () => {
     const commands = getSessionCommands({
       extensionRunner: {
         getRegisteredCommands: () => [{ invocationName: "review", description: "审查代码" }],
@@ -15,11 +15,16 @@ describe("session commands", () => {
     });
 
     expect(commands).toEqual([
+      {
+        name: "reload",
+        description: "Reload extensions, skills, prompts, and context files",
+        source: "builtin",
+      },
       { name: "review", description: "审查代码", source: "extension" },
       { name: "fix", description: "修复问题", source: "prompt" },
       { name: "skill:frontend", description: "前端设计", source: "skill" },
     ]);
-    expect(commands.some(({ source }) => source === "builtin")).toBe(false);
+    expect(commands.filter(({ source }) => source === "builtin")).toHaveLength(1);
   });
 
   it("从 draft resources 暴露全局 extension 命令并保留重复命令后缀", () => {

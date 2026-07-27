@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSlashCommandFormatter } from "../src/renderer/src/components/chat/composer-command-trigger.tsx";
+import { createSlashCommandFormatter } from "../src/renderer/src/components/chat/composer/composer-command-trigger.tsx";
 import type { SlashCommand } from "../src/shared/contracts.ts";
 
 const COMMANDS: readonly SlashCommand[] = [

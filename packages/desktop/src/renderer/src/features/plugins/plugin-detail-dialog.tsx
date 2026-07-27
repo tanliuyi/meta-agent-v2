@@ -9,6 +9,7 @@ import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
 import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import { useState } from "react";
 import type {
   InstalledMarketplacePluginSummary,
   MarketplacePluginSummary,
@@ -35,8 +36,10 @@ interface PluginDetailDialogProps {
   onClose(): void;
   onInstall(plugin: MarketplacePluginSummary): void;
   onUpdate(plugin: MarketplacePluginSummary): void;
-  onUninstall(id: string, name: string): void;
+  onUninstall(id: string): void;
 }
+
+type PendingAction = "install" | "update" | "uninstall";
 
 export function PluginDetailDialog({
   plugin,
@@ -52,6 +55,7 @@ export function PluginDetailDialog({
   onUpdate,
   onUninstall,
 }: PluginDetailDialogProps) {
+  const [pendingAction, setPendingAction] = useState<PendingAction>();
   if (!plugin && !installed) return null;
   const name = plugin?.name ?? installed!.displayName;
   const publisher = plugin?.publisher.displayName ?? installed!.marketplaceId;
@@ -59,9 +63,24 @@ export function PluginDetailDialog({
   const capabilities = plugin?.capabilities ?? installed?.capabilities ?? [];
   const hasUpdate = plugin ? updateAvailable(plugin, installed ? [installed] : undefined) : false;
   const state = cardState(plugin, installed);
+  const close = () => {
+    setPendingAction(undefined);
+    onClose();
+  };
+  const confirmation = pendingAction ? pluginActionConfirmation(pendingAction, name, plugin) : undefined;
+  const confirmAction = () => {
+    const action = pendingAction;
+    setPendingAction(undefined);
+    if ((action === "install" || action === "update") && plugin) {
+      if (action === "install") onInstall(plugin);
+      else onUpdate(plugin);
+    } else if (action === "uninstall" && installed) {
+      onUninstall(installed.id);
+    }
+  };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
       <DialogContent className="plugin-marketplace-detail-dialog w-[min(60rem,calc(100vw-48px))] max-w-none sm:max-w-none">
         <DialogHeader className="plugin-marketplace-detail-header">
           <div className="plugin-marketplace-detail-identity">
@@ -204,27 +223,73 @@ export function PluginDetailDialog({
         </div>
 
         <DialogFooter className="plugin-marketplace-detail-footer">
-          {installed ? (
-            <Button variant="outline" disabled={mutationPending} onClick={() => onUninstall(installed.id, name)}>
-              <Trash2 />
-              {uninstalling ? "卸载中" : "卸载"}
-            </Button>
-          ) : null}
-          {hasUpdate && plugin ? (
-            <Button disabled={mutationPending} onClick={() => onUpdate(plugin)}>
-              <RefreshCw />
-              {updating ? "更新中" : "更新"}
-            </Button>
-          ) : !installed && plugin ? (
-            <Button
-              disabled={mutationPending || !canInstallMarketplacePlugin(plugin)}
-              onClick={() => onInstall(plugin)}
-            >
-              {installing ? "安装中" : canInstallMarketplacePlugin(plugin) ? "安装" : "当前不可安装"}
-            </Button>
-          ) : null}
+          {confirmation ? (
+            <div className="plugin-marketplace-detail-confirmation" role="group" aria-label={confirmation.title}>
+              <div>
+                <strong>{confirmation.title}</strong>
+                <p>{confirmation.description}</p>
+              </div>
+              <div className="plugin-marketplace-detail-confirmation-actions">
+                <Button variant="ghost" onClick={() => setPendingAction(undefined)}>
+                  取消
+                </Button>
+                <Button
+                  variant={pendingAction === "uninstall" ? "destructive" : "default"}
+                  disabled={mutationPending}
+                  onClick={confirmAction}
+                >
+                  {confirmation.confirmLabel}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {installed ? (
+                <Button variant="outline" disabled={mutationPending} onClick={() => setPendingAction("uninstall")}>
+                  <Trash2 />
+                  {uninstalling ? "卸载中" : "卸载"}
+                </Button>
+              ) : null}
+              {hasUpdate && plugin ? (
+                <Button disabled={mutationPending} onClick={() => setPendingAction("update")}>
+                  <RefreshCw />
+                  {updating ? "更新中" : "更新"}
+                </Button>
+              ) : !installed && plugin ? (
+                <Button
+                  disabled={mutationPending || !canInstallMarketplacePlugin(plugin)}
+                  onClick={() => setPendingAction("install")}
+                >
+                  {installing ? "安装中" : canInstallMarketplacePlugin(plugin) ? "安装" : "当前不可安装"}
+                </Button>
+              ) : null}
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+export function pluginActionConfirmation(
+  action: PendingAction,
+  name: string,
+  plugin: MarketplacePluginSummary | undefined,
+): { title: string; description: string; confirmLabel: string } {
+  if (action === "uninstall") {
+    return {
+      title: `卸载 ${name}？`,
+      description:
+        "插件将不再用于新会话。当前运行中的会话会继续使用原版本，直到运行 /reload；本地版本会暂时保留，以保护仍在运行或已修改的文件。",
+      confirmLabel: "确认卸载",
+    };
+  }
+
+  const nativeWarning = plugin?.containsNativeCode ? "该版本包含原生模块或平台二进制。" : "";
+  const capabilities = plugin?.capabilities?.length ? `声明能力：${plugin.capabilities.join("、")}。` : "";
+  return {
+    title: `${action === "install" ? "安装" : "更新"} ${name}？`,
+    description: `市场插件是全信任 Pi Extension，可读写本机文件、访问网络并执行进程，不受能力声明限制。${nativeWarning}${capabilities}`,
+    confirmLabel: action === "install" ? "确认安装" : "确认更新",
+  };
 }

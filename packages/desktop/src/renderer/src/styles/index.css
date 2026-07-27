@@ -12,7 +12,6 @@
 @import "./updater.css" layer(components);
 @import "./models-settings.css" layer(components);
 @import "./auth-settings.css" layer(components);
-@import "./extensions-settings.css" layer(components);
 @import "./plugin-marketplace.css" layer(components);
 @import "./subagent-settings.css" layer(components);
 @import "./providers-settings.css" layer(components);

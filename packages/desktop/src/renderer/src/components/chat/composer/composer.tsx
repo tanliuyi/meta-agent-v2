@@ -200,6 +200,7 @@ export function Composer(props: ComposerProps) {
                         availableModels={props.config?.models ?? EMPTY_MODELS}
                         model={props.config?.model}
                         disabled={disabled || configLoading}
+                        loading={configLoading}
                         onValueChange={props.onModelChange}
                       />
                       <ThinkingSelect
@@ -215,6 +216,7 @@ export function Composer(props: ComposerProps) {
                         availableModels={props.models}
                         model={props.model}
                         disabled={disabled || props.phase !== "idle"}
+                        loading={props.modelsLoading}
                         onOpen={() => {
                           setError(null);
                           void props.onRefreshModels().catch(reportError);

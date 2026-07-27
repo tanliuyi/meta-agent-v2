@@ -21,11 +21,20 @@ interface ComposerTarget {
   addAttachment(attachment: CreateAttachment): Promise<void>;
 }
 
+interface CommandNotification {
+  title: string;
+  message: string;
+  tone: "info" | "success" | "error";
+  duration?: number;
+}
+
 interface CoordinatorOptions {
   getTarget(): SessionTarget | null;
   getComposer(): ComposerTarget | null;
   getPhase(): PiThreadPhase;
   resolveReloadTarget(parentId: string | null): string | null;
+  notify(notification: CommandNotification): string;
+  updateNotification(id: string, notification: CommandNotification): void;
   report(error: unknown): void;
 }
 
@@ -40,6 +49,8 @@ export class PiCommandCoordinator {
   private readonly getComposer: CoordinatorOptions["getComposer"];
   private readonly getPhase: CoordinatorOptions["getPhase"];
   private readonly resolveReloadTarget: CoordinatorOptions["resolveReloadTarget"];
+  private readonly notify: CoordinatorOptions["notify"];
+  private readonly updateNotification: CoordinatorOptions["updateNotification"];
   private readonly report: CoordinatorOptions["report"];
   private readonly pendingInputs = new Map<string, PendingInput>();
 
@@ -48,6 +59,8 @@ export class PiCommandCoordinator {
     this.getComposer = options.getComposer;
     this.getPhase = options.getPhase;
     this.resolveReloadTarget = options.resolveReloadTarget;
+    this.notify = options.notify;
+    this.updateNotification = options.updateNotification;
     this.report = options.report;
   }
 
@@ -157,10 +170,49 @@ export class PiCommandCoordinator {
     if (phase === "running" && messageText(message).trim().length === 0)
       throw new Error("Pi running queue 不接受仅包含图片的输入");
     const input = await promptInput(message, target, desiredMode, requestId);
-    const result = await window.desktop.sessions.prompt(input);
-    assertAccepted(result);
-    if (result.error) this.report(result.error);
-    return result;
+    const isResourceReload = input.text.trim() === "/reload" && input.images.length === 0;
+    const progressNotificationId = isResourceReload
+      ? this.notify({
+          title: "正在重新加载",
+          message: "正在重新加载扩展、技能、提示词和上下文文件",
+          tone: "info",
+          duration: 60_000,
+        })
+      : undefined;
+    try {
+      const result = await window.desktop.sessions.prompt(input);
+      assertAccepted(result);
+      if (progressNotificationId) {
+        this.updateNotification(
+          progressNotificationId,
+          result.error
+            ? {
+                title: "重新加载失败",
+                message: result.error,
+                tone: "error",
+                duration: 5_000,
+              }
+            : {
+                title: "重新加载完成",
+                message: "当前会话已使用最新扩展和资源",
+                tone: "success",
+                duration: 5_000,
+              },
+        );
+      }
+      if (result.error) this.report(result.error);
+      return result;
+    } catch (error) {
+      if (progressNotificationId) {
+        this.updateNotification(progressNotificationId, {
+          title: "重新加载失败",
+          message: error instanceof Error ? error.message : String(error),
+          tone: "error",
+          duration: 5_000,
+        });
+      }
+      throw error;
+    }
   }
 
   private requireTarget(): SessionTarget {

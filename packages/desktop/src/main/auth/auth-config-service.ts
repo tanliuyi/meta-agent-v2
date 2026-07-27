@@ -457,9 +457,9 @@ function applyValueDiff(source: string, current: unknown, desired: unknown): str
 }
 
 function detectFormatting(source: string): FormattingOptions {
-  const eol = source.includes("\\r\\n") ? "\\r\\n" : "\\n";
-  const indent = source.match(/\\n([\\t ]+)"/)?.[1] ?? "  ";
-  return indent.includes("\\t")
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  const indent = source.match(/\n([\t ]+)"/)?.[1] ?? "  ";
+  return indent.includes("\t")
     ? { insertSpaces: false, tabSize: 1, eol }
     : { insertSpaces: true, tabSize: Math.max(1, indent.length), eol };
 }

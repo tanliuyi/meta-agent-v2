@@ -56,6 +56,7 @@ import { appendJsonl } from "../../shared/artifacts.ts";
 import type { SubagentRuntime, SubagentRuntimeRunRequest } from "../../runtime/subagent-runtime.ts";
 import {
 	SUBAGENT_TIMEOUT_CODE,
+	subagentTextDelta,
 	type SubagentExtensionProfile,
 	type SubagentRunEvent,
 } from "../../../../../../../shared/subagent-contracts.ts";
@@ -690,6 +691,8 @@ export function executeAsyncChain(
 			runnerCwd,
 			sessionId: ctx.currentSessionId,
 			globalConcurrencyLimit: params.globalConcurrencyLimit,
+			deadlineAt,
+			turnBudget: params.turnBudget,
 		}).catch((error) => {
 			const errMsg = error instanceof Error ? error.message : String(error);
 			const latestStatus = readStatus(asyncDir) ?? { runId: id, mode: resultMode, state: "running" as const, startedAt: now, lastUpdate: now };
@@ -1123,8 +1126,9 @@ async function consumeAsyncSingleRun(
 	try {
 		for await (const event of runtime.run(request)) {
 			appendJsonl(eventsPath, JSON.stringify(event));
-			if (event.type === "text-delta") {
-				streamedText = appendProgrammaticStreamText(streamedText, event.text);
+			const textDelta = subagentTextDelta(event);
+			if (textDelta !== undefined) {
+				streamedText = appendProgrammaticStreamText(streamedText, textDelta);
 				projector.project(event, streamedText);
 			} else {
 				projector.project(event);
@@ -1278,6 +1282,8 @@ interface ConsumeAsyncChainOptions {
 	runnerCwd: string;
 	sessionId: string;
 	globalConcurrencyLimit?: number;
+	deadlineAt?: number;
+	turnBudget?: ResolvedTurnBudget;
 }
 
 const PROGRAMMATIC_TEXT_PROJECTION_INTERVAL_MS = 1_000;
@@ -1304,8 +1310,10 @@ function runnerStepToRequest(
 	runId: string,
 	childIndex: number,
 	cwd: string,
+	limits: Pick<ConsumeAsyncChainOptions, "deadlineAt" | "turnBudget">,
 ): SubagentRuntimeRunRequest {
 	const programmaticModel = step.model ? splitKnownThinkingSuffix(step.model).baseModel : undefined;
+	const timeoutMs = limits.deadlineAt === undefined ? undefined : Math.max(0, limits.deadlineAt - Date.now());
 	return {
 		runId,
 		rootRunId: runId,
@@ -1338,6 +1346,8 @@ function runnerStepToRequest(
 			? ["provider", "runtime", "fanout"]
 			: ["provider", "runtime"],
 		...(step.toolBudget ? { toolBudget: step.toolBudget } : {}),
+		...(timeoutMs !== undefined ? { timeoutMs } : {}),
+		...(limits.turnBudget ? { turnBudget: limits.turnBudget } : {}),
 	};
 }
 
@@ -1369,8 +1379,9 @@ async function consumeLeafRun(
 	try {
 		for await (const event of runtime.run(request)) {
 			appendJsonl(eventsPath, JSON.stringify(event));
-			if (event.type === "text-delta") {
-				streamedText = appendProgrammaticStreamText(streamedText, event.text);
+			const textDelta = subagentTextDelta(event);
+			if (textDelta !== undefined) {
+				streamedText = appendProgrammaticStreamText(streamedText, textDelta);
 				projector.project(event, streamedText);
 			} else {
 				projector.project(event);
@@ -1497,6 +1508,7 @@ async function consumeAsyncChainRun(
 						`${id}-${logicalIndex}-${taskIndex}`,
 						baseIndex + taskIndex,
 						task.cwd ?? runnerCwd,
+						options,
 					),
 				);
 				let groupFailed = false;
@@ -1562,6 +1574,7 @@ async function consumeAsyncChainRun(
 						`${id}-${logicalIndex}`,
 						index,
 						sequential.cwd ?? runnerCwd,
+						options,
 					);
 					active.set(index, request);
 					markProgrammaticStep(asyncDir, index, { status: "running", startedAt: Date.now() });
@@ -1753,7 +1766,7 @@ function programmaticRecentOutput(text: string): string[] {
 }
 
 function programmaticMessageUsage(event: SubagentRunEvent): { input: number; output: number } | undefined {
-	if (event.type !== "message-end" || !event.message || typeof event.message !== "object" || Array.isArray(event.message)) {
+	if (event.type !== "message_end" || !event.message || typeof event.message !== "object" || Array.isArray(event.message)) {
 		return undefined;
 	}
 	const usage = (event.message as Record<string, unknown>).usage;
@@ -1811,7 +1824,7 @@ function createProgrammaticStepProjector(asyncDir: string, index: number): Progr
 	};
 	const project = (event: SubagentRunEvent, streamedText?: string): void => {
 		const last = pendingEvents[pendingEvents.length - 1];
-		if (event.type === "text-delta" && last?.event.type === "text-delta") {
+		if (subagentTextDelta(event) !== undefined && last && subagentTextDelta(last.event) !== undefined) {
 			// Only the cumulative streamed text matters; coalesce consecutive deltas.
 			pendingEvents[pendingEvents.length - 1] = { event, ...(streamedText !== undefined ? { streamedText } : {}) };
 		} else {
@@ -1844,9 +1857,9 @@ function applyProgrammaticStepEvent(
 		step.status = "running";
 		step.startedAt ??= now;
 		if (event.sessionFile) step.sessionFile = event.sessionFile;
-	} else if (event.type === "text-delta") {
+	} else if (subagentTextDelta(event) !== undefined) {
 		if (streamedText) step.recentOutput = programmaticRecentOutput(streamedText);
-	} else if (event.type === "tool-start") {
+	} else if (event.type === "tool_execution_start") {
 		const args = event.args && typeof event.args === "object" && !Array.isArray(event.args)
 			? event.args as Record<string, unknown>
 			: {};
@@ -1855,7 +1868,7 @@ function applyProgrammaticStepEvent(
 		step.currentToolArgs = extractToolArgsPreview(args);
 		step.currentToolStartedAt = now;
 		step.currentPath = resolveCurrentPath(event.toolName, args);
-	} else if (event.type === "tool-end") {
+	} else if (event.type === "tool_execution_end") {
 		const recentTools = Array.isArray(step.recentTools) ? [...step.recentTools] : [];
 		recentTools.push({
 			tool: typeof step.currentTool === "string" ? step.currentTool : event.toolName,
@@ -1867,7 +1880,7 @@ function applyProgrammaticStepEvent(
 		step.currentToolArgs = undefined;
 		step.currentToolStartedAt = undefined;
 		step.currentPath = undefined;
-	} else if (event.type === "message-end") {
+	} else if (event.type === "message_end") {
 		const text = assistantOutput(event);
 		if (text) step.recentOutput = programmaticRecentOutput(text);
 		const message = event.message && typeof event.message === "object" && !Array.isArray(event.message)
@@ -1885,8 +1898,6 @@ function applyProgrammaticStepEvent(
 				step.tokens = { input, output, total: input + output };
 			}
 		}
-	} else if (event.type === "usage") {
-		step.tokens = { input: event.input, output: event.output, total: event.input + event.output };
 	} else if ((event.type === "completed" || event.type === "failed") && event.sessionFile) {
 		step.sessionFile = event.sessionFile;
 	}
@@ -1918,7 +1929,7 @@ function projectProgrammaticStepResult(
 }
 
 function assistantOutput(event: SubagentRunEvent): string {
-	if (event.type !== "message-end" || !event.message || typeof event.message !== "object" || Array.isArray(event.message)) {
+	if (event.type !== "message_end" || !event.message || typeof event.message !== "object" || Array.isArray(event.message)) {
 		return "";
 	}
 	const message = event.message as Record<string, unknown>;

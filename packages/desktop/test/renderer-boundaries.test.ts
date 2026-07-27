@@ -40,7 +40,9 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
       '@import "./updater.css" layer(components);',
       '@import "./models-settings.css" layer(components);',
       '@import "./auth-settings.css" layer(components);',
-      '@import "./extensions-settings.css" layer(components);',
+      '@import "./plugin-marketplace.css" layer(components);',
+      '@import "./subagent-settings.css" layer(components);',
+      '@import "./providers-settings.css" layer(components);',
       '@import "./chat.css" layer(components);',
       '@import "./markdown.css" layer(components);',
       '@import "./panel.css" layer(components);',
@@ -60,7 +62,9 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
     "styles/updater.css": ".updater { color: hsl(var(--foreground)); }",
     "styles/models-settings.css": ".models { color: hsl(var(--foreground)); }",
     "styles/auth-settings.css": ".auth { color: hsl(var(--foreground)); }",
-    "styles/extensions-settings.css": ".extensions { color: hsl(var(--foreground)); }",
+    "styles/subagent-settings.css": ".subagents { color: hsl(var(--foreground)); }",
+    "styles/providers-settings.css": ".providers { color: hsl(var(--foreground)); }",
+    "styles/plugin-marketplace.css": ".plugins { color: hsl(var(--foreground)); }",
     "styles/chat.css": '.chat[data-state="open"] { color: hsl(var(--foreground)); }',
     "styles/markdown.css": ".markdown { color: hsl(var(--foreground)); }",
     "styles/panel.css": ".panel { color: hsl(var(--foreground)); }",
@@ -77,17 +81,17 @@ describe("Desktop renderer boundary verifier", () => {
   it("accepts one component per file and forward-only feature imports", async () => {
     const root = await fixture({
       "features/settings/settings-page.tsx": [
-        'import { ErrorToast } from "@renderer/shared/ui/error-toast";',
+        'import { Toast } from "@renderer/shared/ui/toast";',
         'import Search from "lucide-react/dist/esm/icons/search.mjs";',
         "export function SettingsPage() {",
-        '  return <><Search /><ErrorToast message="error" onDismiss={() => undefined} /></>;',
+        '  return <><Search /><Toast open message="error" onDismiss={() => undefined} /></>;',
         "}",
       ].join("\n"),
       "shared/ui/dialog.tsx": [
         'import * as DialogPrimitive from "@radix-ui/react-dialog";',
         "export const Dialog = DialogPrimitive.Root;",
       ].join("\n"),
-      "shared/ui/error-toast.tsx": "export function ErrorToast() { return <div />; }",
+      "shared/ui/toast.tsx": "export function Toast() { return <div />; }",
     });
 
     const result = verify(root);

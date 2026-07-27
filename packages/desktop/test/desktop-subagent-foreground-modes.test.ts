@@ -49,7 +49,7 @@ class RecordingRuntime implements SubagentRuntime {
       await this.gate;
       this.beforeComplete?.(request);
       yield {
-        type: "message-end" as const,
+        type: "message_end" as const,
         message: {
           role: "assistant",
           content: [{ type: "text", text: this.outputForRequest?.(request) ?? `output-${request.childIndex}` }],
@@ -70,6 +70,51 @@ class RecordingRuntime implements SubagentRuntime {
     } finally {
       this.active -= 1;
     }
+  }
+
+  async cancel() {}
+  async steer() {}
+  resume(request: SubagentRuntimeRunRequest) {
+    return this.run(request);
+  }
+  async dispose() {}
+}
+
+class TranscriptRuntime implements SubagentRuntime {
+  async *run(request: SubagentRuntimeRunRequest) {
+    yield { type: "started" as const, runId: request.runId };
+    yield {
+      type: "tool_execution_start" as const,
+      toolCallId: "read-1",
+      toolName: "read",
+      args: { path: "README.md" },
+    };
+    yield {
+      type: "tool_execution_end" as const,
+      toolCallId: "read-1",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "contents" }] },
+      isError: false,
+    };
+    yield {
+      type: "message_end" as const,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "review complete" }],
+        provider: "faux",
+        model: "model",
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "stop",
+        timestamp: Date.now(),
+      },
+    };
+    yield { type: "completed" as const, runId: request.runId };
   }
 
   async cancel() {}
@@ -159,6 +204,32 @@ describe("Desktop foreground programmatic modes", () => {
     expect(results.map(({ exitCode, finalOutput }) => ({ exitCode, finalOutput }))).toEqual([
       { exitCode: 0, finalOutput: "output-0" },
       { exitCode: 0, finalOutput: "output-1" },
+    ]);
+  });
+
+  it("persists canonical programmatic events in the upstream child transcript", async () => {
+    const root = mkdtempSync(join(tmpdir(), "desktop-subagent-transcript-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+
+    const result = await runSync(root, agents, "first", "review files", {
+      subagentRuntime: new TranscriptRuntime(),
+      runId: "transcript-run",
+      acceptance: false,
+      artifactsDir: root,
+      artifactConfig: { enabled: true },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.transcriptPath).toBeDefined();
+    const records = readFileSync(result.transcriptPath!, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { sourceEventType?: string });
+    expect(records.map(({ sourceEventType }) => sourceEventType)).toEqual([
+      "initial_prompt",
+      "tool_execution_start",
+      "tool_execution_end",
+      "message_end",
     ]);
   });
 

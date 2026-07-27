@@ -5,7 +5,9 @@ import {
   composerSuggestionOptionId,
   fileSuggestions,
   scrollSelectedSuggestion,
-} from "../src/renderer/src/components/chat/composer-suggestion-model.ts";
+  searchSlashCommands,
+  slashCommandDisplayName,
+} from "../src/renderer/src/components/chat/composer/composer-suggestion-model.ts";
 import type { SlashCommand } from "../src/shared/contracts.ts";
 
 describe("ComposerSuggestions", () => {
@@ -28,17 +30,44 @@ describe("ComposerSuggestions", () => {
 
     scrollSelectedSuggestion(container);
 
-    expect(querySelector).toHaveBeenCalledWith('[aria-selected="true"]');
+    expect(querySelector).toHaveBeenCalledWith('[aria-selected="true"], [data-highlighted]');
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   });
 
-  it("输入命令前缀时仍按名称过滤", () => {
+  it("忽略大小写与分隔符并优先返回名称匹配", () => {
     const commands: SlashCommand[] = [
-      { name: "memory-insights", source: "extension" },
+      { name: "provider-help", description: "Add an LLM integration", source: "extension" },
+      { name: "skill:add-llm-provider", description: "Add a new LLM provider", source: "skill" },
+      { name: "models", description: "Inspect the active provider", source: "builtin" },
+    ];
+
+    expect(searchSlashCommands(commands, "/ADD_LLM").map(({ name }) => name)).toEqual([
+      "skill:add-llm-provider",
+      "provider-help",
+    ]);
+    expect(searchSlashCommands(commands, "provider").map(({ name }) => name)).toEqual([
+      "provider-help",
+      "skill:add-llm-provider",
+      "models",
+    ]);
+  });
+
+  it("仅在 UI 展示名称中移除命令协议前缀", () => {
+    expect(slashCommandDisplayName({ name: "reload", source: "builtin" })).toBe("reload");
+    expect(slashCommandDisplayName({ name: "skill:add-llm-provider", source: "skill" })).toBe("add-llm-provider");
+  });
+
+  it("支持多关键词、来源名称和说明检索", () => {
+    const commands: SlashCommand[] = [
+      { name: "memory-insights", description: "List managed and loaded procedural skills", source: "extension" },
+      { name: "skill:add-llm-provider", description: "Checklist for adding a provider", source: "skill" },
       { name: "parallel", source: "extension" },
     ];
 
-    expect(commandSuggestions(commands, "MEMORY").map(({ label }) => label)).toEqual(["/memory-insights"]);
+    expect(commandSuggestions(commands, "managed skills").map(({ label }) => label)).toEqual(["/memory-insights"]);
+    expect(commandSuggestions(commands, "技能 provider").map(({ label }) => label)).toEqual([
+      "/skill:add-llm-provider",
+    ]);
   });
 
   it("为 combobox 解析补全上下文并生成稳定 option id", () => {

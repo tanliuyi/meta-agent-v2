@@ -39,6 +39,25 @@ describe("DefaultResourceLoader", () => {
 			expect(loader.getThemes().themes).toEqual([]);
 		});
 
+		it("should replace additional extension paths during reload", async () => {
+			const first = join(tempDir, "first-extension.ts");
+			const second = join(tempDir, "second-extension.ts");
+			writeFileSync(first, "export default function() {}");
+			writeFileSync(second, "export default function() {}");
+			const loader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				noExtensions: true,
+				additionalExtensionPaths: [first],
+			});
+
+			await loader.reload();
+			expect(loader.getExtensions().extensions.map((extension) => extension.path)).toEqual([first]);
+
+			await loader.reload({ additionalExtensionPaths: [second] });
+			expect(loader.getExtensions().extensions.map((extension) => extension.path)).toEqual([second]);
+		});
+
 		it("should discover skills from agentDir", async () => {
 			const skillsDir = join(agentDir, "skills");
 			mkdirSync(skillsDir, { recursive: true });

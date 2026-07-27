@@ -37,7 +37,7 @@ export function ComposerFileTrigger({ projectId, onOpenChange }: ComposerFileTri
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Directive />
       <ComposerFileTriggerState onOpenChange={onOpenChange} />
-      <ComposerPrimitive.Unstable_TriggerPopoverItems>
+      <ComposerPrimitive.Unstable_TriggerPopoverItems className="composer-suggestions-scroll">
         {(items) =>
           items.length > 0 ? (
             items.map((item) => (

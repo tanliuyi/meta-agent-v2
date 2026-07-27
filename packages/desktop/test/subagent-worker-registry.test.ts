@@ -147,6 +147,11 @@ class FakeClient implements SubagentWorkerClient {
     this.failure = error;
   }
 
+  crash(error: Error): void {
+    this.failure = error;
+    this.options.onFailure?.(error);
+  }
+
   emitSidecarEvent(sidecarEvent: SidecarEvent): void {
     this.options.onEvent?.(sidecarEvent);
   }
@@ -479,7 +484,7 @@ describe("SubagentWorkerRegistry", () => {
       );
       client?.emitSidecarEvent(
         event(client.instanceId, 2, {
-          type: "message-end",
+          type: "message_end",
           message: { role: "assistant", content: [{ type: "text", text: "done" }] },
         }),
       );
@@ -675,6 +680,36 @@ describe("SubagentWorkerRegistry", () => {
 
     release();
     await parentRun;
+  });
+
+  it("reports an abnormal worker exit as a child failure without rejecting the parent host call", async () => {
+    let rejectRun!: (error: Error) => void;
+    const workerRun = new Promise<unknown>((_resolve, reject) => {
+      rejectRun = reject;
+    });
+    let client: FakeClient | undefined;
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = workerRun;
+        return client;
+      },
+    });
+    const events: SubagentRunEvent[] = [];
+    const run = registry.handleHostRequest({ type: "subagent.run", request: runRequest("oom-review", 0) }, (event) =>
+      events.push(event),
+    );
+    await expect.poll(() => client).toBeDefined();
+
+    const failure = new Error("Sidecar exited (134): JavaScript heap out of memory");
+    client?.crash(failure);
+    rejectRun(failure);
+
+    await expect(run).resolves.toEqual({ status: "failed", error: failure.message });
+    expect(events).toEqual([{ type: "failed", runId: "oom-review", error: failure.message }]);
+    expect(client?.shutdownCount).toBe(1);
   });
 
   it("fails a run when its event stream requires resynchronization", async () => {

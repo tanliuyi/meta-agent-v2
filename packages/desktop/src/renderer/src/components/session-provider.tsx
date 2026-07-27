@@ -1,5 +1,5 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { type ReactNode, useCallback, useMemo, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useTransportManager } from "../runtime/session-transport-context.tsx";
@@ -27,6 +27,9 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
   );
   const commandsReady =
     active && connection === "ready" && control?.interaction !== "read-only" && transport.hasCommittedLease(record);
+  const modelsRefreshRequested = useRef(false);
+  const modelsRefreshRequest = useRef<Promise<void> | null>(null);
+  const [modelsRefreshing, setModelsRefreshing] = useState(false);
   const { runtime, clearQueue: clearRuntimeQueue } = usePiSessionRuntime({ record, active, transport });
   const requireCommandsReady = useCallback(() => {
     if (
@@ -57,8 +60,28 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
   );
   const refreshModels = useCallback(async () => {
     requireCommandsReady();
-    await window.desktop.sessions.refreshModels(record.identity.projectId, record.identity.threadId);
+    const existing = modelsRefreshRequest.current;
+    if (existing) return existing;
+    setModelsRefreshing(true);
+    const request = Promise.resolve().then(() =>
+      window.desktop.sessions.refreshModels(record.identity.projectId, record.identity.threadId),
+    );
+    const tracked = request.finally(() => {
+      if (modelsRefreshRequest.current !== tracked) return;
+      modelsRefreshRequest.current = null;
+      setModelsRefreshing(false);
+    });
+    modelsRefreshRequest.current = tracked;
+    return tracked;
   }, [record, requireCommandsReady]);
+  useEffect(() => {
+    if (!commandsReady || modelsRefreshRequested.current) return;
+    modelsRefreshRequested.current = true;
+    void refreshModels().catch((error: unknown) => {
+      modelsRefreshRequested.current = false;
+      console.error("Session model refresh failed", error);
+    });
+  }, [commandsReady, refreshModels]);
   const setModel = useCallback(
     async (provider: string, modelId: string) => {
       requireCommandsReady();
@@ -90,6 +113,7 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
       record,
       active,
       commandsReady,
+      modelsRefreshing,
       clearQueue,
       branch,
       refreshModels,
@@ -97,7 +121,18 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
       setThinking,
       updateWorkbench,
     }),
-    [active, branch, clearQueue, commandsReady, record, refreshModels, setModel, setThinking, updateWorkbench],
+    [
+      active,
+      branch,
+      clearQueue,
+      commandsReady,
+      modelsRefreshing,
+      record,
+      refreshModels,
+      setModel,
+      setThinking,
+      updateWorkbench,
+    ],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>

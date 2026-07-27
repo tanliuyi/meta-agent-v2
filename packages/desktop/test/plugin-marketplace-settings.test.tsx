@@ -1,9 +1,9 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { MarketplaceEndpointSettings } from "../src/renderer/src/features/settings/marketplace-endpoint-settings.tsx";
+import { MarketplaceEndpointSettings } from "../src/renderer/src/features/plugins/marketplace-endpoint-settings.tsx";
 
-vi.mock("../src/renderer/src/features/settings/use-marketplace-endpoint-settings.ts", () => ({
+vi.mock("../src/renderer/src/features/plugins/use-marketplace-endpoint-settings.ts", () => ({
   useMarketplaceEndpointSettings: () => ({
     snapshot: { revision: "one", endpoints: [] },
     loading: false,
@@ -26,6 +26,7 @@ vi.mock("../src/renderer/src/features/settings/use-marketplace-endpoint-settings
       },
     },
     reload: vi.fn(),
+    resetTest: vi.fn(),
     test: vi.fn(),
     save: vi.fn(),
   }),

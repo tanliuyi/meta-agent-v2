@@ -33,6 +33,8 @@ interface SubagentWorkerRecord {
   metadataFailure?: Error;
   finalizePromise?: Promise<void>;
   failure?: Error;
+  protocolFailure?: Error;
+  terminalEvent?: Extract<SubagentRunEvent, { type: "completed" | "failed" }>;
 }
 
 export interface SubagentWorkerRegistryOptions {
@@ -147,11 +149,42 @@ export class SubagentWorkerRegistry {
     record = { key, request, client, emit, metadataTail: Promise.resolve() };
     this.records.set(key, record);
     try {
-      await client.ready();
-      const result = await client.request<JsonValue>({ type: "subagentRun", request }, null);
-      if (record.failure) throw record.failure;
-      if (record.metadataFailure) throw record.metadataFailure;
-      return result;
+      try {
+        await client.ready();
+        const result = await client.request<JsonValue>({ type: "subagentRun", request }, null);
+        if (record.failure) throw record.failure;
+        if (record.metadataFailure) throw record.metadataFailure;
+        return result;
+      } catch (error) {
+        if (record.protocolFailure) throw record.protocolFailure;
+        if (record.metadataFailure) throw record.metadataFailure;
+        if (record.terminalEvent?.type === "completed") {
+          return {
+            status: "completed",
+            ...(record.terminalEvent.sessionFile ? { sessionFile: record.terminalEvent.sessionFile } : {}),
+          };
+        }
+        const failure = error instanceof Error ? error : new Error(String(error));
+        const terminalEvent =
+          record.terminalEvent?.type === "failed"
+            ? record.terminalEvent
+            : {
+                type: "failed" as const,
+                runId: request.runId,
+                error: record.failure?.message ?? failure.message,
+                ...(record.liveSessionFile ? { sessionFile: record.liveSessionFile } : {}),
+              };
+        if (!record.terminalEvent) {
+          record.terminalEvent = terminalEvent;
+          this.projectCatalogEvent(record, terminalEvent);
+          record.emit(terminalEvent);
+        }
+        return {
+          status: "failed",
+          error: terminalEvent.error,
+          ...(terminalEvent.sessionFile ? { sessionFile: terminalEvent.sessionFile } : {}),
+        };
+      }
     } finally {
       await this.cancelDescendants(record);
       await this.finalizeRecord(record, "subagent-writer-completed");
@@ -224,6 +257,9 @@ export class SubagentWorkerRegistry {
       return;
     }
     if (event.event.type === "subagent-event") {
+      if (event.event.event.type === "completed" || event.event.event.type === "failed") {
+        record.terminalEvent = event.event.event;
+      }
       const persistence = this.projectCatalogEvent(record, event.event.event);
       record.emit(event.event.event);
       if (persistence && (event.event.event.type === "completed" || event.event.event.type === "failed")) {
@@ -234,8 +270,9 @@ export class SubagentWorkerRegistry {
         return;
       }
     } else if (event.event.type === "resync-required") {
-      record.failure = new Error(`Subagent worker requires resync: ${event.event.reason}`);
-      record.client.fail(record.failure);
+      record.protocolFailure = new Error(`Subagent worker requires resync: ${event.event.reason}`);
+      record.failure = record.protocolFailure;
+      record.client.fail(record.protocolFailure);
     }
     record.client.acknowledge(event.sequence);
   }
@@ -255,12 +292,12 @@ export class SubagentWorkerRegistry {
     const current =
       record.catalogThread ?? (sessionFile ? threadFromSubagentRequest(record.request, sessionFile) : undefined);
     if (!current) return undefined;
-    if (event.type === "text-delta" || event.type === "tool-update" || event.type === "usage") return undefined;
+    if (event.type === "message_update" || event.type === "tool_execution_update") return undefined;
     const terminal = event.type === "completed" || event.type === "failed";
     const next = {
       ...current,
       updatedAt: Date.now(),
-      messageCount: current.messageCount + (event.type === "message-end" ? 1 : 0),
+      messageCount: current.messageCount + (event.type === "message_end" ? 1 : 0),
       running: !terminal,
     };
     record.catalogThread = next;

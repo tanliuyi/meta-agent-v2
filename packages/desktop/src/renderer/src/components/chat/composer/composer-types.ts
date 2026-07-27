@@ -34,6 +34,7 @@ export type ComposerProps =
       widgets: SessionControlState["extensionHost"]["widgets"];
       composerCommand: SessionControlState["extensionHost"]["composerCommand"];
       commandsReady: boolean;
+      modelsLoading: boolean;
       onClearQueue(): Promise<void>;
       onRefreshModels(): Promise<void>;
       onSetModel(provider: string, modelId: string): Promise<void>;
