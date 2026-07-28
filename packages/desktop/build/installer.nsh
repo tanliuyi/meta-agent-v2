@@ -2,6 +2,8 @@
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
+!ifndef BUILD_UNINSTALLER
+
 Var RuntimeComponents
 Var RuntimeNodeCheckbox
 Var RuntimeShellCheckbox
@@ -17,13 +19,12 @@ Var RuntimeShellCheckbox
 
 !macro customPageAfterChangeDir
   Page custom RuntimePageCreate RuntimePageLeave
-!macroend
 
 Function RuntimePageCreate
   ${If} ${Silent}
     Abort
   ${EndIf}
-  ${If} ${isForAllUsers}
+  ${If} $installMode == "all"
     StrCpy $RuntimeComponents ""
     Abort
   ${EndIf}
@@ -84,9 +85,10 @@ Function RuntimePageLeave
     ${EndIf}
   ${EndIf}
 FunctionEnd
+!macroend
 
 !macro customInstall
-  ${If} ${isForAllUsers}
+  ${If} $installMode == "all"
     StrCpy $RuntimeComponents ""
     DetailPrint "所有用户安装跳过用户级运行环境；每位用户可在首次启动时安装。"
   ${EndIf}
@@ -100,3 +102,5 @@ FunctionEnd
     ${EndIf}
   ${EndIf}
 !macroend
+
+!endif
