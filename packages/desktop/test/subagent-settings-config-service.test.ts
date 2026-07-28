@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { fileURLToPath } from "node:url";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { SubagentSettingsConfigService } from "../src/main/subagents/subagent-settings-config-service.ts";
 
@@ -9,6 +10,7 @@ let root = "";
 let agentDir = "";
 let projectDir = "";
 let previousAgentDir: string | undefined;
+const sourceBuiltinAgentsDir = fileURLToPath(new URL("../src/main/pi/extensions/pi-subagents/agents", import.meta.url));
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "desktop-subagent-settings-"));
@@ -25,10 +27,15 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-function createService(): SubagentSettingsConfigService {
+async function createService(builtinAgentsDir = sourceBuiltinAgentsDir): Promise<SubagentSettingsConfigService> {
+  const modelRuntime = await ModelRuntime.create({
+    modelsPath: null,
+    allowModelNetwork: false,
+  });
   return new SubagentSettingsConfigService({
     agentDir,
-    modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
+    builtinAgentsDir,
+    modelRuntime,
     getProjectCwd: () => projectDir,
     getActiveProject: async () => ({ id: "project", cwd: projectDir }),
   });
@@ -36,7 +43,7 @@ function createService(): SubagentSettingsConfigService {
 
 describe("SubagentSettingsConfigService", () => {
   test("discovers bundled agents and exposes extension defaults", async () => {
-    const snapshot = await createService().getSnapshot({ projectId: "project" });
+    const snapshot = await (await createService()).getSnapshot({ projectId: "project" });
 
     expect(snapshot.builtinAgents.map((agent) => agent.name)).toEqual(
       expect.arrayContaining([
@@ -64,8 +71,22 @@ describe("SubagentSettingsConfigService", () => {
     expect(snapshot.projectScopeAvailable).toBe(true);
   });
 
+  test("uses a host-provided builtin directory after module bundling", async () => {
+    const bundledAgentsDir = join(root, "sidecar", "main", "pi", "extensions", "pi-subagents", "agents");
+    await mkdir(bundledAgentsDir, { recursive: true });
+    await writeFile(
+      join(bundledAgentsDir, "packaged-only.md"),
+      "---\nname: packaged-only\ndescription: Packaged agent fixture\n---\n\nUse the packaged fixture.\n",
+      "utf8",
+    );
+
+    const snapshot = await (await createService(bundledAgentsDir)).getSnapshot({ projectId: "project" });
+
+    expect(snapshot.builtinAgents.map((agent) => agent.name)).toEqual(["packaged-only"]);
+  });
+
   test("creates, updates, and deletes user agents and chains", async () => {
-    const service = createService();
+    const service = await createService();
     let snapshot = await service.getSnapshot({ projectId: "project" });
 
     let result = await service.saveConfig({
@@ -149,7 +170,7 @@ describe("SubagentSettingsConfigService", () => {
   });
 
   test("persists builtin overrides and extension config", async () => {
-    const service = createService();
+    const service = await createService();
     let snapshot = await service.getSnapshot({ projectId: "project" });
 
     let result = await service.saveConfig({
@@ -209,7 +230,7 @@ describe("SubagentSettingsConfigService", () => {
       "utf8",
     );
 
-    const snapshot = await createService().getSnapshot({ projectId: "project" });
+    const snapshot = await (await createService()).getSnapshot({ projectId: "project" });
 
     expect(snapshot.chains.find((chain) => chain.name === "advanced")).toMatchObject({
       editable: false,
@@ -222,7 +243,7 @@ describe("SubagentSettingsConfigService", () => {
     const configPath = join(agentDir, "extensions", "subagent", "config.json");
     await mkdir(join(agentDir, "extensions", "subagent"), { recursive: true });
     await writeFile(configPath, "{ malformed\n", "utf8");
-    const service = createService();
+    const service = await createService();
     const snapshot = await service.getSnapshot({ projectId: "project" });
 
     expect(snapshot.diagnostics).toContainEqual(
@@ -240,7 +261,7 @@ describe("SubagentSettingsConfigService", () => {
   });
 
   test("updates and toggles a builtin override in project scope", async () => {
-    const service = createService();
+    const service = await createService();
     let snapshot = await service.getSnapshot({ projectId: "project" });
     const projectResult = await service.saveConfig({
       requestId: "project-override",
@@ -284,7 +305,7 @@ describe("SubagentSettingsConfigService", () => {
   });
 
   test("returns a conflict after an external source change", async () => {
-    const service = createService();
+    const service = await createService();
     const snapshot = await service.getSnapshot({ projectId: "project" });
     await writeFile(join(agentDir, "settings.json"), '{"subagents":{"defaultModel":"external/model"}}\n', "utf8");
 
@@ -299,7 +320,7 @@ describe("SubagentSettingsConfigService", () => {
   });
 
   test("rejects duplicate names in the same scope", async () => {
-    const service = createService();
+    const service = await createService();
     let snapshot = await service.getSnapshot({ projectId: "project" });
     const first = await service.saveConfig({
       requestId: "first",

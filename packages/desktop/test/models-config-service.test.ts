@@ -1,7 +1,10 @@
 import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { InMemoryCredentialStore, InMemoryModelsStore } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { validateModelsConfigValue } from "../src/main/models/models-config-schema.ts";
 import { MISSING_MODELS_CONFIG_REVISION, ModelsConfigService } from "../src/main/models/models-config-service.ts";
 
 const SOURCE = `{
@@ -191,6 +194,138 @@ describe("ModelsConfigService", () => {
     expect(saved).not.toContain('"input"');
     expect(saved).not.toContain('"thinkingLevelMap"');
     expect(saved).not.toContain('"sort"');
+  });
+
+  test("accepts empty built-in providers and modelOverrides-only providers", () => {
+    expect(
+      validateModelsConfigValue({
+        providers: {
+          anthropic: {},
+          openai: { modelOverrides: { "gpt-5.5": { maxTokens: 4096 } } },
+          custom: { modelOverrides: { inherited: { contextWindow: 128000 } } },
+        },
+      }),
+    ).toEqual(expect.objectContaining({ ok: true }));
+  });
+
+  test("serializes accepted no-op built-ins and overrides into a ModelRuntime-compatible file", async () => {
+    const result = await service.saveConfig({
+      expectedRevision: MISSING_MODELS_CONFIG_REVISION,
+      providers: [
+        { key: "anthropic", config: {}, headers: [], models: [], modelOverrides: [] },
+        {
+          key: "openai",
+          config: {},
+          headers: [],
+          models: [],
+          modelOverrides: [
+            {
+              modelId: "gpt-5.5",
+              config: { name: "Saved Desktop Override", maxTokens: 4096 },
+              headers: [],
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.status).toBe("saved");
+    const serialized = JSON.parse(await readFile(configPath, "utf8")) as { providers: Record<string, unknown> };
+    expect(serialized.providers.anthropic).toBeUndefined();
+    expect(serialized.providers.openai).toBeDefined();
+
+    const runtime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      modelsPath: configPath,
+      modelsStore: new InMemoryModelsStore(),
+      allowModelNetwork: false,
+    });
+    expect(runtime.getError()).toBeUndefined();
+    expect(runtime.getModel("openai", "gpt-5.5")).toEqual(
+      expect.objectContaining({ name: "Saved Desktop Override", maxTokens: 4096 }),
+    );
+  });
+
+  test("reports every Desktop models semantic constraint", () => {
+    const result = validateModelsConfigValue({
+      providers: {
+        "": {},
+        custom: {
+          models: [
+            {
+              id: "duplicate",
+              contextWindow: 0,
+              maxTokens: -1,
+              cost: {
+                input: -1,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                tiers: [
+                  { inputTokensAbove: -1, input: -1, output: 0, cacheRead: 0, cacheWrite: 0 },
+                  { inputTokensAbove: -1, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                ],
+              },
+            },
+            {
+              id: "duplicate",
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            },
+          ],
+          modelOverrides: { "": { maxTokens: 0 } },
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const paths = result.diagnostics.map((diagnostic) => diagnostic.path.join("."));
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "providers.",
+        "providers.custom.baseUrl",
+        "providers.custom.models.0.api",
+        "providers.custom.models.0.contextWindow",
+        "providers.custom.models.0.maxTokens",
+        "providers.custom.models.0.cost.input",
+        "providers.custom.models.0.cost.tiers.0.inputTokensAbove",
+        "providers.custom.models.0.cost.tiers.0.input",
+        "providers.custom.models.0.cost.tiers.1.inputTokensAbove",
+        "providers.custom.models.1.id",
+        "providers.custom.models.1.api",
+        "providers.custom.modelOverrides.",
+        "providers.custom.modelOverrides..maxTokens",
+      ]),
+    );
+  });
+
+  test("rejects empty model ids at schema validation", () => {
+    const result = validateModelsConfigValue({
+      providers: {
+        custom: {
+          baseUrl: "https://example.test/v1",
+          api: "openai-completions",
+          models: [{ id: "" }],
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.diagnostics[0]?.path).toEqual(["providers", "custom", "models", 0, "id"]);
+  });
+
+  test("rejects semantic errors before replacing models.json", async () => {
+    await mkdir(directory, { recursive: true });
+    await writeFile(configPath, SOURCE, "utf8");
+    const snapshot = await service.getConfig();
+    const original = await readFile(configPath, "utf8");
+    const model = snapshot.providers[0]!.models[0]!;
+    model.config.contextWindow = 0;
+    snapshot.providers[0]!.models.push(structuredClone(model));
+
+    const result = await service.saveConfig({ expectedRevision: snapshot.revision, providers: snapshot.providers });
+
+    expect(result.status).toBe("invalid");
+    expect(await readFile(configPath, "utf8")).toBe(original);
   });
 
   test("returns invalid snapshots and refuses to overwrite them", async () => {

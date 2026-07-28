@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -8,8 +10,11 @@ import {
   createAgentSessionServices,
   type ExtensionAPI,
   type InlineExtension,
+  ModelRuntime,
   SessionManager,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { FileCredentialStore } from "../main/models/credential-store.ts";
 import { DesktopBuiltinProviderRegistry } from "../main/pi/desktop-builtin-provider.ts";
 import { DesktopExtensionHost } from "../main/pi/desktop-extension-host.ts";
 import { controlledResourceLoaderOptions } from "../main/pi/desktop-extension-runtime-policy.ts";
@@ -48,6 +53,8 @@ export class SubagentWorkerService implements SidecarService {
   private readonly context: SidecarServiceContext;
   private readonly dependencies: SubagentWorkerServiceDependencies;
   private session?: AgentSession;
+  private modelRuntime?: ModelRuntime;
+  private modelConfigurationGeneration = 0;
   private extensionHost?: DesktopExtensionHost;
   private projector?: PiThreadProjector;
   private controlState?: SessionControlState;
@@ -82,6 +89,43 @@ export class SubagentWorkerService implements SidecarService {
     switch (subagentCommand.type) {
       case "subagentRun":
         return this.run(subagentCommand.request);
+      case "refreshModelConfiguration": {
+        if (subagentCommand.revision.generation <= this.modelConfigurationGeneration) return null;
+        await this.modelRuntime?.refresh({ allowNetwork: false });
+        if (this.session && this.modelRuntime) {
+          const currentModel = this.session.model;
+          if (currentModel) {
+            const refreshed = this.modelRuntime.getModel(currentModel.provider, currentModel.id);
+            if (
+              refreshed &&
+              isModelMateriallyDifferent(currentModel, refreshed) &&
+              this.modelRuntime.hasConfiguredAuth(currentModel.provider)
+            ) {
+              await this.session.setModel(refreshed);
+            }
+          }
+          const activeModel = this.session.model;
+          const availableModels = this.modelRuntime.getAvailableSnapshot();
+          if (this.controlState) {
+            this.controlState = {
+              ...this.controlState,
+              model: activeModel
+                ? { provider: activeModel.provider, id: activeModel.id, name: activeModel.name }
+                : undefined,
+              models: availableModels.map((item) => ({
+                provider: item.provider,
+                id: item.id,
+                name: item.name,
+                contextWindow: item.contextWindow,
+                thinking: item.reasoning,
+              })),
+            };
+          }
+          this.publishControl();
+        }
+        this.modelConfigurationGeneration = subagentCommand.revision.generation;
+        return null;
+      }
       case "subagentBootstrap":
         return this.bootstrap();
       case "subagentCancel":
@@ -135,9 +179,22 @@ export class SubagentWorkerService implements SidecarService {
       ...(this.dependencies.extensionFactories ?? []),
     ];
     const extensionSet = childExtensionSet(request, extensionFactories);
+    const settingsManager = SettingsManager.create(request.cwd, this.binding.agentDir);
+    if (!settingsManager.getShellPath() && this.binding.shellPath) {
+      settingsManager.applyOverrides({ shellPath: this.binding.shellPath });
+    }
+    const modelRuntime = await ModelRuntime.create({
+      credentials: new FileCredentialStore(join(this.binding.agentDir, "auth.json")),
+      modelsPath: join(this.binding.agentDir, "models.json"),
+      allowModelNetwork: false,
+    });
+    this.modelRuntime = modelRuntime;
+    if (this.modelConfigurationGeneration > 0) await modelRuntime.refresh({ allowNetwork: false });
     const services = await createAgentSessionServices({
       cwd: request.cwd,
       agentDir: this.binding.agentDir,
+      settingsManager,
+      modelRuntime,
       resourceLoaderOptions: {
         ...controlledResourceLoaderOptions(extensionSet, extensionFactories, {
           includeBuiltinSkills: request.inheritSkills,
@@ -162,7 +219,8 @@ export class SubagentWorkerService implements SidecarService {
     if (services.diagnostics.some(({ type }) => type === "error")) {
       throw new Error(services.diagnostics.map(({ message }) => message).join("\n"));
     }
-    const model = resolveModel(request, services.modelRegistry.getAvailable());
+    const availableModels = await services.modelRuntime.getAvailable();
+    const model = resolveModel(request, availableModels);
     if (request.model && !model) throw new Error(`Unknown model: ${request.model}`);
     const sessionManager = createSessionManager(request);
     const created = await createAgentSessionFromServices({
@@ -209,7 +267,6 @@ export class SubagentWorkerService implements SidecarService {
           payload: { type: "timeline", projectId: request.projectId, threadId: created.session.sessionId, batch },
         }),
     });
-    const availableModels = services.modelRegistry.getAvailable();
     const contextUsage = created.session.getContextUsage();
     const activeModel = created.session.model;
     this.controlState = {
@@ -404,7 +461,10 @@ export class SubagentWorkerService implements SidecarService {
       event.type === "auto_retry_start" ||
       event.type === "auto_retry_end" ||
       event.type === "compaction_start" ||
-      event.type === "compaction_end"
+      event.type === "compaction_end" ||
+      event.type === "summarization_retry_scheduled" ||
+      event.type === "summarization_retry_attempt_start" ||
+      event.type === "summarization_retry_finished"
     ) {
       this.publishControl();
     }
@@ -489,10 +549,7 @@ function createSessionManager(request: SubagentRunRequest): SessionManager {
   return SessionManager.create(request.cwd, request.sessionDir);
 }
 
-function resolveModel(
-  request: SubagentRunRequest,
-  models: ReturnType<Awaited<ReturnType<typeof createAgentSessionServices>>["modelRegistry"]["getAvailable"]>,
-) {
+function resolveModel(request: SubagentRunRequest, models: readonly Model<Api>[]) {
   if (!request.model) return undefined;
   const slash = request.model.indexOf("/");
   if (slash > 0) {
@@ -609,4 +666,15 @@ function unavailableCommandActions(session: AgentSession) {
     switchSession: unavailable,
     reload: unavailable,
   };
+}
+
+/**
+ * Returns true when two Model instances differ in fields that affect the
+ * session (endpoint, config, capabilities, compat, headers,
+ * thinkingLevelMap). Rejects different provider/id as non-material
+ * (shouldn't happen in the refresh path).
+ */
+function isModelMateriallyDifferent(current: Model<Api>, candidate: Model<Api>): boolean {
+  if (current.provider !== candidate.provider || current.id !== candidate.id) return false;
+  return !isDeepStrictEqual(current, candidate);
 }

@@ -15,6 +15,7 @@ import type { SidecarService, SidecarServiceContext } from "./sidecar-host.ts";
 
 export class ThreadWorkerService implements SidecarService {
   private readonly runtime: SessionRuntime;
+  private modelConfigurationGeneration = 0;
 
   private constructor(runtime: SessionRuntime) {
     this.runtime = runtime;
@@ -47,6 +48,7 @@ export class ThreadWorkerService implements SidecarService {
         projectId: input.projectId,
         cwd: input.cwd,
         agentDir: input.agentDir,
+        ...(input.shellPath ? { shellPath: input.shellPath } : {}),
         sessionManager,
         createInput: input.mode === "create" ? input.createInput : undefined,
         extensionSet,
@@ -99,11 +101,6 @@ export class ThreadWorkerService implements SidecarService {
         return this.runtime.edit(command.input);
       case "reload":
         return this.runtime.reload(command.input);
-      case "reloadResources":
-        return this.runtime.reloadResources(
-          command.requestId,
-          await validateResolvedExtensionSet(this.runtime.projectId, command.extensionSet),
-        );
       case "branch":
         return this.runtime.branch(command.input);
       case "cancel":
@@ -115,7 +112,12 @@ export class ThreadWorkerService implements SidecarService {
         await this.runtime.compact();
         return null;
       case "refreshModels":
-        this.runtime.refreshModels();
+        await this.runtime.refreshModels();
+        return null;
+      case "refreshModelConfiguration":
+        if (command.revision.generation <= this.modelConfigurationGeneration) return null;
+        await this.runtime.refreshModels();
+        this.modelConfigurationGeneration = command.revision.generation;
         return null;
       case "setModel":
         await this.runtime.setModel(command.provider, command.modelId);

@@ -240,7 +240,10 @@ Desktop 不把缺失 package source 交给官方交互式安装路径。marketpl
 
 | 状态 | 包/路径 | 通用能力或缺陷 | 为什么 Desktop adapter 不足 | 核心测试 | Changelog |
 | --- | --- | --- | --- | --- | --- |
-| 无 | - | 当前无批准偏差 | - | - | - |
+| 已实施 | `packages/agent/src/types.ts`、`packages/agent/src/agent-loop.ts` | 将工具显式返回的 `AgentToolResult.isError` 传播到 `tool_execution_end` 和持久化 tool-result message | Desktop adapter 无法在核心 agent loop 已丢失该通用错误标记后恢复它 | `packages/agent/test/agent-loop.test.ts`：`should preserve handled tool errors and usage through results` | `packages/agent/CHANGELOG.md` `[Unreleased] / Fixed` |
+| 已实施 | `packages/ai/src/api/openai-codex-responses.ts` | 将 zstd 压缩的 Codex SSE 请求体转换为 Web `BodyInit` 兼容的 `ArrayBuffer` | 请求体类型在 `pi-ai` transport 内确定，Desktop 调用层无法修正 fetch 的核心类型/运行时兼容性 | `packages/ai/test/openai-codex-stream.test.ts`：`zstd-compresses SSE request bodies`，并由共享 decoder 覆盖 `ArrayBuffer` | `packages/ai/CHANGELOG.md` `[Unreleased] / Fixed` |
+
+`packages/coding-agent/npm-shrinkwrap.json` 与 `packages/coding-agent/install-lock/package-lock.json` 也会相对 tag 变化；它们不是源码偏差，而是合并后根工作区依赖元数据驱动的确定性生成产物。必须分别通过 `node scripts/generate-coding-agent-shrinkwrap.mjs --check` 与 `node scripts/generate-coding-agent-install-lock.mjs --check`，不得手工恢复为 tag 内容。
 
 新增偏差时必须把“无”行替换为具体记录，并在对应阶段写明 public API、调用方和回滚方式。以下现有本地改动默认不进入偏差清单：
 

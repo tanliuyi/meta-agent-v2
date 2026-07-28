@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IDisposable, IPty } from "node-pty";
@@ -9,7 +9,7 @@ import type { TerminalEvent } from "../src/shared/contracts.ts";
 const ptyMock = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node-pty", () => ({ spawn: ptyMock.spawn }));
 
-import { TerminalSupervisor } from "../src/main/terminal/terminal-supervisor.ts";
+import { createTerminalShellResolver, TerminalSupervisor } from "../src/main/terminal/terminal-supervisor.ts";
 
 const roots: string[] = [];
 
@@ -36,6 +36,44 @@ describe("TerminalSupervisor", () => {
     expect(terminals.open(project.id, "second", "bottom", 90, 28).output).toBe("second output");
     expect(ptyMock.spawn).toHaveBeenCalledTimes(2);
     expect(events.filter(({ type }) => type === "data")).toHaveLength(2);
+  });
+
+  it("prefers the user shellPath over the managed fallback and uses interactive bash args", async () => {
+    const { project, root, store } = await createStore();
+    const agentDir = join(root, "agent");
+    const userShell = join(root, "user-shell", process.platform === "win32" ? "bash.exe" : "bash");
+    const managedShell = join(root, "managed-shell", process.platform === "win32" ? "bash.exe" : "bash");
+    await Promise.all([mkdir(agentDir), mkdir(join(root, "user-shell")), mkdir(join(root, "managed-shell"))]);
+    await Promise.all([writeFile(userShell, ""), writeFile(managedShell, "")]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ shellPath: userShell }));
+    ptyMock.spawn.mockReturnValue(new FakePty());
+    const terminals = new TerminalSupervisor(
+      store,
+      () => undefined,
+      createTerminalShellResolver(agentDir, managedShell),
+    );
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+
+    expect(ptyMock.spawn).toHaveBeenCalledWith(userShell, ["--login", "-i"], expect.any(Object));
+  });
+
+  it("uses the managed shell when the user has not configured shellPath", async () => {
+    const { project, root, store } = await createStore();
+    const agentDir = join(root, "agent");
+    const managedShell = join(root, "managed-shell", process.platform === "win32" ? "bash.exe" : "bash");
+    await Promise.all([mkdir(agentDir), mkdir(join(root, "managed-shell"))]);
+    await writeFile(managedShell, "");
+    ptyMock.spawn.mockReturnValue(new FakePty());
+    const terminals = new TerminalSupervisor(
+      store,
+      () => undefined,
+      createTerminalShellResolver(agentDir, managedShell),
+    );
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+
+    expect(ptyMock.spawn).toHaveBeenCalledWith(managedShell, ["--login", "-i"], expect.any(Object));
   });
 
   it("只释放指定 session 的 PTY", async () => {
@@ -112,5 +150,5 @@ async function createStore() {
   const store = new ProjectStore(join(root, "state.json"));
   await store.load();
   const project = await store.add(cwd);
-  return { project, store };
+  return { project, root, store };
 }

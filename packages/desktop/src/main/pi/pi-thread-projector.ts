@@ -281,6 +281,11 @@ export class PiThreadProjector {
       case "auto_retry_end":
         this.setPhase(this.session.isStreaming ? "running" : "idle", !event.success);
         return;
+      case "summarization_retry_scheduled":
+      case "summarization_retry_attempt_start":
+      case "summarization_retry_finished":
+      case "bash_execution_update":
+        return;
       default:
         assertNever(event);
     }
@@ -730,6 +735,7 @@ export class PiThreadProjector {
         content: message.content,
         ...(message.details !== undefined ? { details: message.details } : {}),
         ...(message.addedToolNames ? { addedToolNames: message.addedToolNames } : {}),
+        ...(message.usage ? { usage: message.usage } : {}),
       }),
       isError: message.isError,
     });

@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { getShellConfig, SettingsManager } from "@earendil-works/pi-coding-agent";
 import * as pty from "node-pty";
 import type { TerminalEvent, TerminalSnapshot } from "../../shared/contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
@@ -8,6 +9,13 @@ const MIN_COLS = 20;
 const MAX_COLS = 500;
 const MIN_ROWS = 4;
 const MAX_ROWS = 200;
+
+export interface TerminalShellCommand {
+  file: string;
+  args: string[];
+}
+
+export type TerminalShellResolver = (cwd: string) => TerminalShellCommand;
 
 interface TerminalProcess {
   pty: pty.IPty;
@@ -26,10 +34,16 @@ export class TerminalSupervisor {
   private readonly revisions = new Map<string, number>();
   private readonly projects: ProjectStore;
   private readonly changed: (event: TerminalEvent) => void;
+  private readonly resolveShell: TerminalShellResolver;
 
-  constructor(projects: ProjectStore, changed: (event: TerminalEvent) => void) {
+  constructor(
+    projects: ProjectStore,
+    changed: (event: TerminalEvent) => void,
+    resolveShell: TerminalShellResolver = () => resolveTerminalShell(),
+  ) {
     this.projects = projects;
     this.changed = changed;
+    this.resolveShell = resolveShell;
   }
 
   /** 打开已有 PTY，若不存在则在 Project cwd 中创建。 */
@@ -93,10 +107,11 @@ export class TerminalSupervisor {
 
   private create(projectId: string, threadId: string, terminalId: string, cols: number, rows: number): TerminalProcess {
     const key = terminalKey(projectId, threadId, terminalId);
-    const shell = shellCommand();
+    const cwd = this.projects.getCwd(projectId);
+    const shell = this.resolveShell(cwd);
     const terminalPty = pty.spawn(shell.file, shell.args, {
       name: "xterm-256color",
-      cwd: this.projects.getCwd(projectId),
+      cwd,
       env: process.env,
       cols: clamp(cols, MIN_COLS, MAX_COLS),
       rows: clamp(rows, MIN_ROWS, MAX_ROWS),
@@ -153,13 +168,36 @@ function terminalKey(projectId: string, threadId: string, terminalId: string): s
   return `${projectId}:${threadId}:${terminalId}`;
 }
 
-function shellCommand(): { file: string; args: string[] } {
-  const file =
+export function createTerminalShellResolver(agentDir: string, managedShellPath?: string): TerminalShellResolver {
+  return (cwd) => {
+    const configuredShellPath = SettingsManager.create(cwd, agentDir).getShellPath();
+    return resolveTerminalShell(configuredShellPath, managedShellPath);
+  };
+}
+
+export function resolveTerminalShell(configuredShellPath?: string, managedShellPath?: string): TerminalShellCommand {
+  const candidates = [
+    ...new Set([configuredShellPath, managedShellPath].filter((path): path is string => Boolean(path))),
+    undefined,
+  ];
+  for (const candidate of candidates) {
+    try {
+      return interactiveShellCommand(getShellConfig(candidate).shell);
+    } catch {
+      // Continue through managed/system discovery before the terminal-only platform fallback.
+    }
+  }
+  const fallback =
     process.env.SHELL ?? process.env.COMSPEC ?? (process.platform === "win32" ? "powershell.exe" : "/bin/sh");
+  return interactiveShellCommand(fallback);
+}
+
+function interactiveShellCommand(file: string): TerminalShellCommand {
   const name = basename(file).toLowerCase();
   if (name === "powershell.exe" || name === "pwsh.exe" || name === "pwsh") return { file, args: ["-NoLogo"] };
-  if (name === "bash" || name === "bash.exe" || name === "zsh" || name === "zsh.exe")
+  if (name === "bash" || name === "bash.exe" || name === "zsh" || name === "zsh.exe") {
     return { file, args: ["--login", "-i"] };
+  }
   return { file, args: [] };
 }
 

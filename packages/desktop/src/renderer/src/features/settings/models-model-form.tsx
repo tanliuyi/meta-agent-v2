@@ -1,9 +1,8 @@
-import type { ModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
 import { Select } from "@renderer/components/assistant-ui/select/select";
 import { Checkbox } from "@renderer/shared/ui/checkbox";
 import { Input } from "@renderer/shared/ui/input";
 import { useRef, useState } from "react";
-import type { ModelsModelDraft } from "../../../../shared/models-config-contracts.ts";
+import type { ModelsConfigMetadata, ModelsModelDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsCompatEditor } from "./models-compat-editor.tsx";
 import { ModelsCostEditor, type ModelsCostValue } from "./models-cost-editor.tsx";
 import { ModelsMapEditor } from "./models-map-editor.tsx";

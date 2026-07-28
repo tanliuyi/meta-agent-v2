@@ -1,21 +1,30 @@
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { InMemoryCredentialStore, InMemoryModelsStore } from "@earendil-works/pi-ai";
+import {
+  type BuiltinProvider,
+  fauxAssistantMessage,
+  fauxToolCall,
+  getModels,
+  getProviders,
+  registerFauxProvider,
+} from "@earendil-works/pi-ai/compat";
 import {
   type AgentSession,
   type AgentSessionEvent,
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getModelsConfigMetadata } from "../src/main/models/models-config-metadata.ts";
+import { parseModelsConfigSource } from "../src/main/models/models-config-schema.ts";
 
-describe("Pi coding-agent 0.80.7 public compatibility", () => {
+describe("Pi coding-agent 0.82.1 public compatibility", () => {
   let harness: Awaited<ReturnType<typeof createPublicHarness>>;
 
   beforeEach(async () => {
@@ -49,6 +58,88 @@ describe("Pi coding-agent 0.80.7 public compatibility", () => {
       "user",
       "assistant",
     ]);
+  });
+
+  it("loads a realistic Desktop models.json through the public ModelRuntime contract", async () => {
+    const modelsPath = join(harness.tempDir, "models.json");
+    const source = JSON.stringify(
+      {
+        providers: {
+          openai: {
+            modelOverrides: {
+              "gpt-5.5": { name: "Desktop Override", maxTokens: 4096 },
+            },
+          },
+          "desktop-contract": {
+            name: "Desktop Contract",
+            baseUrl: "https://models.example.test/v1",
+            api: "openai-completions",
+            apiKey: "contract-key",
+            headers: { "X-Desktop": "contract" },
+            compat: { supportsDeveloperRole: true, maxTokensField: "max_tokens" },
+            models: [
+              {
+                id: "desktop-model",
+                name: "Desktop Model",
+                reasoning: true,
+                thinkingLevelMap: { off: null, high: "high" },
+                input: ["text", "image"],
+                cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2 },
+                contextWindow: 128000,
+                maxTokens: 8192,
+                headers: { "X-Model": "contract" },
+                compat: { supportsStrictMode: true },
+              },
+            ],
+          },
+        },
+      },
+      null,
+      2,
+    );
+    await writeFile(modelsPath, source, "utf8");
+    const parsed = parseModelsConfigSource(source, modelsPath);
+    expect(parsed.ok).toBe(true);
+
+    const runtime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      modelsPath,
+      modelsStore: new InMemoryModelsStore(),
+      allowModelNetwork: false,
+    });
+
+    expect(runtime.getError()).toBeUndefined();
+    expect(runtime.getModel("anthropic", "claude-opus-4-8")).toBeDefined();
+    expect(runtime.getModel("openai", "gpt-5.5")).toEqual(
+      expect.objectContaining({ name: "Desktop Override", maxTokens: 4096 }),
+    );
+    const desktopModel = runtime.getModel("desktop-contract", "desktop-model");
+    expect(desktopModel).toEqual(
+      expect.objectContaining({
+        thinkingLevelMap: { off: null, high: "high" },
+        compat: expect.objectContaining({ supportsDeveloperRole: true, supportsStrictMode: true }),
+      }),
+    );
+    expect(desktopModel ? (await runtime.getAuth(desktopModel))?.auth.headers : undefined).toEqual({
+      "X-Desktop": "contract",
+      "X-Model": "contract",
+    });
+  });
+
+  it("preserves all public built-in model metadata used by the Desktop editor", () => {
+    const metadata = getModelsConfigMetadata();
+    const sourceModels = getProviders().flatMap((provider) => getModels(provider as BuiltinProvider));
+    expect(metadata.builtInProviders.find(({ id }) => id === "google-vertex")?.displayName).toBe("Google Vertex AI");
+    expect(metadata.builtInProviders.find(({ id }) => id === "opencode")?.displayName).toBe("OpenCode Zen");
+    for (const field of ["thinkingLevelMap", "headers", "compat"] as const) {
+      const sourceModel = sourceModels.find((model) => model[field] !== undefined);
+      expect(sourceModel, `missing built-in model fixture for ${field}`).toBeDefined();
+      const projected = metadata.builtInProviders
+        .find(({ id }) => id === sourceModel?.provider)
+        ?.models.find(({ id }) => id === sourceModel?.id);
+      expect(projected?.name).toBe(sourceModel?.name);
+      expect(projected?.[field]).toEqual(sourceModel?.[field]);
+    }
   });
 
   it("runs controlled commands, input events, and custom messages through public Pi APIs", async () => {
@@ -141,11 +232,17 @@ describe("Pi coding-agent 0.80.7 public compatibility", () => {
 
 async function createPublicHarness() {
   const tempDir = join(tmpdir(), `desktop-pi-public-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  await mkdir(tempDir, { recursive: true });
   const faux = registerFauxProvider({ tokensPerSecond: 100_000 });
-  const authStorage = AuthStorage.inMemory();
-  authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
-  const modelRegistry = ModelRegistry.inMemory(authStorage);
-  modelRegistry.registerProvider(faux.getModel().provider, {
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify(faux.getModel().provider, async () => ({ type: "api_key", key: "faux-key" }));
+  const modelRuntime = await ModelRuntime.create({
+    credentials,
+    modelsPath: null,
+    modelsStore: new InMemoryModelsStore(),
+    allowModelNetwork: false,
+  });
+  modelRuntime.registerProvider(faux.getModel().provider, {
     baseUrl: faux.getModel().baseUrl,
     apiKey: "faux-key",
     api: faux.api,
@@ -161,6 +258,7 @@ async function createPublicHarness() {
       maxTokens: model.maxTokens,
     })),
   });
+  await modelRuntime.refresh({ allowNetwork: false });
   const settingsManager = SettingsManager.inMemory({ compaction: { keepRecentTokens: 1 } });
   const extensionObservations: string[] = [];
   const resourceLoader = new DefaultResourceLoader({
@@ -209,8 +307,7 @@ async function createPublicHarness() {
   const { session } = await createAgentSession({
     cwd: tempDir,
     agentDir: tempDir,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     model: faux.getModel(),
     noTools: "builtin",
     resourceLoader,

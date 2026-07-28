@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "../../shared/contracts.ts";
 import type {
   AgentSummary,
@@ -20,6 +20,7 @@ import { handleManagementAction } from "../pi/extensions/pi-subagents/src/agents
 import {
   type AgentConfig,
   type ChainConfig,
+  configureBuiltinAgentsDir,
   discoverAgentsAll,
   mergeBuiltinAgentOverride,
 } from "../pi/extensions/pi-subagents/src/agents/agents.ts";
@@ -29,7 +30,8 @@ import type { ExtensionConfig } from "../pi/extensions/pi-subagents/src/shared/t
 
 interface SubagentSettingsConfigServiceOptions {
   agentDir: string;
-  modelRegistry: ModelRegistry;
+  builtinAgentsDir: string;
+  modelRuntime: ModelRuntime;
   getProjectCwd(projectId: string): string;
   getActiveProject(): Promise<{ id: string; cwd: string } | null>;
 }
@@ -49,6 +51,7 @@ export class SubagentSettingsConfigService {
 
   constructor(options: SubagentSettingsConfigServiceOptions) {
     this.options = options;
+    configureBuiltinAgentsDir(options.builtinAgentsDir);
   }
 
   async getSnapshot(input: GetSubagentSettingsInput = {}): Promise<SubagentSettingsSnapshot> {
@@ -72,7 +75,7 @@ export class SubagentSettingsConfigService {
     const cached = this.requestResults.get(input.requestId);
     if (cached) return cached;
     const context = await this.resolveContext(input.projectId);
-    const current = this.buildSnapshot(context);
+    const current = await this.buildSnapshot(context);
     if (current.revision !== input.expectedSnapshotRevision) {
       const result: SaveSubagentSettingsResult = { status: "conflict", current };
       this.requestResults.set(input.requestId, result);
@@ -80,7 +83,7 @@ export class SubagentSettingsConfigService {
     }
 
     this.applyMutation(context, input.mutation);
-    const result: SaveSubagentSettingsResult = { status: "saved", snapshot: this.buildSnapshot(context) };
+    const result: SaveSubagentSettingsResult = { status: "saved", snapshot: await this.buildSnapshot(context) };
     this.requestResults.set(input.requestId, result);
     return result;
   }
@@ -91,11 +94,10 @@ export class SubagentSettingsConfigService {
     return active ? { projectId: active.id, cwd: active.cwd } : { cwd: homedir() };
   }
 
-  private buildSnapshot(context: ResolvedContext): SubagentSettingsSnapshot {
+  private async buildSnapshot(context: ResolvedContext): Promise<SubagentSettingsSnapshot> {
     const discovered = discoverAgentsAll(context.cwd);
-    this.options.modelRegistry.refresh();
-    const models = this.options.modelRegistry
-      .getAvailable()
+    await this.options.modelRuntime.refresh({ allowNetwork: false });
+    const models = (await this.options.modelRuntime.getAvailable())
       .map((model) => ({
         id: `${model.provider}/${model.id}`,
         provider: model.provider,
@@ -232,7 +234,7 @@ export class SubagentSettingsConfigService {
       { action, ...params },
       {
         cwd,
-        modelRegistry: this.options.modelRegistry,
+        modelRegistry: new ModelRegistry(this.options.modelRuntime),
       },
     );
     if ("isError" in result && result.isError === true) {

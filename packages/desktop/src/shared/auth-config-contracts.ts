@@ -1,15 +1,14 @@
 /**
  * Desktop auth config IPC contracts.
  *
- * Types are defined locally because @earendil-works/pi-coding-agent does not
- * export them as a subpath. They mirror the same JSON structure used by
- * AuthStorage / FileAuthStorageBackend in the coding-agent package.
+ * Types are defined locally. They mirror the same JSON structure used by
+ * the Desktop FileCredentialStore.
  */
 
-// Mirror of @earendil-works/pi-coding-agent's ApiKeyCredential (from auth-storage.ts)
+// Mirror of pi-ai's ApiKeyCredential
 export interface AuthApiKeyCredential {
   type: "api_key";
-  key: string;
+  key?: string;
   env?: Record<string, string>;
 }
 
@@ -75,6 +74,11 @@ export interface AuthOauthLoginInput {
   providerId: string;
 }
 
+export interface AuthInfoLink {
+  url: string;
+  label?: string;
+}
+
 export type AuthOauthLoginEvent =
   | {
       loginId: string;
@@ -91,6 +95,12 @@ export type AuthOauthLoginEvent =
     }
   | {
       loginId: string;
+      type: "info";
+      message: string;
+      links?: readonly AuthInfoLink[];
+    }
+  | {
+      loginId: string;
       type: "progress";
       message: string;
     }
@@ -102,7 +112,7 @@ export type AuthOauthLoginEvent =
       message: string;
       placeholder?: string;
       allowEmpty?: boolean;
-      options?: Array<{ id: string; label: string }>;
+      options?: Array<{ id: string; label: string; description?: string }>;
     };
 
 export interface AuthOauthLoginResponse {

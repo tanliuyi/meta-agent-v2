@@ -12,7 +12,6 @@
  */
 
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
-import { getModelsConfigMetadata, type ModelsModelDefinition } from "@earendil-works/pi-coding-agent/models-config";
 import type { AuthProviderInfo } from "../../shared/auth-config-contracts.ts";
 import {
   DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
@@ -22,6 +21,8 @@ import type {
   ProviderBuiltInModelMetadata,
   ProviderConnectionDefaults,
 } from "../../shared/providers-config-contracts.ts";
+import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
+import type { ModelsModelDefinition } from "../models/models-config-schema.ts";
 import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
 import subagentsExtension from "./extensions/pi-subagents/index.ts";
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";

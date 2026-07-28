@@ -1,11 +1,10 @@
-import type { ModelsChatTemplateKwarg } from "@earendil-works/pi-coding-agent/models-config";
 import { Button } from "@renderer/shared/ui/button";
 import { Checkbox } from "@renderer/shared/ui/checkbox";
 import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useRef, useState } from "react";
-import type { ModelsCompatDraft } from "../../../../shared/models-config-contracts.ts";
+import type { ModelsChatTemplateKwarg, ModelsCompatDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsOptionSelect } from "./models-option-select.tsx";
 
 interface ModelsChatTemplateEditorProps {

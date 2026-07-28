@@ -23,9 +23,15 @@ vi.mock("electron", () => ({
 }));
 
 describe("models IPC", () => {
+  const refreshActiveModelRuntimes = vi.fn(async () => undefined);
   const models = {
     getConfig: vi.fn(),
     getConfigRevision: vi.fn(),
+    saveConfig: vi.fn(),
+    getExternalOpenTarget: vi.fn(),
+  };
+  const providers = {
+    getConfig: vi.fn(),
     saveConfig: vi.fn(),
     getExternalOpenTarget: vi.fn(),
   };
@@ -50,15 +56,20 @@ describe("models IPC", () => {
       { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
       models as never,
       {} as never,
-      {} as never,
+      providers as never,
       {} as never,
       dirtyGuard as never,
-      { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
+      {
+        getStatus: vi.fn(),
+        install: vi.fn(),
+        onProgress: vi.fn(),
+        refreshActiveModelRuntimes,
+      },
     );
   });
 
   test("maps fixed-path model service handlers", async () => {
-    const snapshot = { revision: "one" };
+    const snapshot = { revision: "one", activeSessionsRefreshed: false };
     models.getConfig.mockResolvedValue(snapshot);
     models.getConfigRevision.mockResolvedValue("one");
     models.saveConfig.mockResolvedValue({ status: "saved", snapshot });
@@ -70,13 +81,43 @@ describe("models IPC", () => {
     await expect(electron.handles.get(CHANNELS.modelsGetConfigRevision)?.(event)).resolves.toBe("one");
     await expect(electron.handles.get(CHANNELS.modelsSaveConfig)?.(event, input)).resolves.toEqual({
       status: "saved",
-      snapshot,
+      snapshot: { ...snapshot, activeSessionsRefreshed: true },
     });
     await electron.handles.get(CHANNELS.modelsOpenConfigExternally)?.(event);
 
     expect(models.saveConfig).toHaveBeenCalledWith(input);
+    expect(refreshActiveModelRuntimes).toHaveBeenCalledOnce();
     expect(models.getExternalOpenTarget).toHaveBeenCalledWith();
     expect(electron.openPath).toHaveBeenCalledWith("/agent/models.json");
+  });
+
+  test("awaits active-runtime refresh after a unified providers save", async () => {
+    const snapshot = { modelsRevision: "m1", authRevision: "a1" };
+    providers.saveConfig.mockResolvedValue({ status: "saved", snapshot });
+
+    await expect(
+      electron.handles.get(CHANNELS.providersSaveConfig)?.(
+        {},
+        {
+          expectedModelsRevision: "m0",
+          expectedAuthRevision: "a0",
+          modelsProviders: [],
+          authProviders: [],
+        },
+      ),
+    ).resolves.toEqual({ status: "saved", snapshot });
+    expect(refreshActiveModelRuntimes).toHaveBeenCalledOnce();
+  });
+
+  test("keeps a committed save successful when an active-runtime refresh fails", async () => {
+    const snapshot = { revision: "two", activeSessionsRefreshed: false };
+    models.saveConfig.mockResolvedValue({ status: "saved", snapshot });
+    refreshActiveModelRuntimes.mockRejectedValueOnce(new Error("worker refresh failed"));
+
+    await expect(
+      electron.handles.get(CHANNELS.modelsSaveConfig)?.({}, { expectedRevision: "one", providers: [] }),
+    ).resolves.toEqual({ status: "saved", snapshot });
+    expect(models.saveConfig).toHaveBeenCalledOnce();
   });
 
   test("sets dirty synchronously and clears sender state on destruction", () => {

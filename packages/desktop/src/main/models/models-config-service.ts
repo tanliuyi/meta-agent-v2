@@ -3,18 +3,7 @@ import type { Stats } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import {
-  formatModelsConfigDiagnostics,
-  getModelsConfigMetadata,
-  type ModelsCompat,
-  type ModelsConfig,
-  type ModelsModelDefinition,
-  type ModelsModelOverride,
-  type ModelsProviderConfig,
-  type ModelsConfigDiagnostic as PiModelsConfigDiagnostic,
-  parseModelsConfigSource,
-  validateModelsConfigValue,
-} from "@earendil-works/pi-coding-agent/models-config";
+import { getProviders } from "@earendil-works/pi-ai/compat";
 import { applyEdits, type FormattingOptions, findNodeAtLocation, modify, type Node, parseTree } from "jsonc-parser";
 import lockfile from "proper-lockfile";
 import type {
@@ -29,6 +18,19 @@ import type {
   SaveModelsConfigInput,
   SaveModelsConfigResult,
 } from "../../shared/models-config-contracts.ts";
+import { getModelsConfigMetadata } from "./models-config-metadata.ts";
+import {
+  formatModelsConfigDiagnostics,
+  type ModelsChatTemplateKwarg,
+  type ModelsCompat,
+  type ModelsConfig,
+  type ModelsModelDefinition,
+  type ModelsModelOverride,
+  type ModelsProviderConfig,
+  parseModelsConfigSource,
+  type ModelsConfigDiagnostic as SchemaModelsConfigDiagnostic,
+  validateModelsConfigValue,
+} from "./models-config-schema.ts";
 
 export const MISSING_MODELS_CONFIG_REVISION = "missing:models-config-v1";
 
@@ -60,8 +62,9 @@ const COMPAT_KEYS = [
   "cacheControlFormat",
   "openRouterRouting",
   "vercelGatewayRouting",
-  "zaiToolStream",
+  "supportsOpenAIGrammarTools",
   "supportsStrictMode",
+  "deferredToolsMode",
   "sendSessionAffinityHeaders",
   "sessionAffinityFormat",
   "supportsLongCacheRetention",
@@ -71,6 +74,7 @@ const COMPAT_KEYS = [
   "supportsTemperature",
   "forceAdaptiveThinking",
   "allowEmptySignature",
+  "supportsStrictTools",
   "supportsToolReferences",
 ] as const;
 const PROVIDER_ALL_KEYS = new Set<string>([...PROVIDER_KEYS, "headers", "compat", "models", "modelOverrides"]);
@@ -96,6 +100,7 @@ const OPEN_ROUTER_KEYS = new Set([
   "preferred_max_latency",
 ]);
 const VERCEL_ROUTING_KEYS = new Set(["only", "order"]);
+const BUILT_IN_PROVIDER_IDS = new Set<string>(getProviders());
 
 interface CurrentSource {
   exists: boolean;
@@ -313,13 +318,22 @@ export class ModelsConfigService {
       await handle.close();
       handle = undefined;
       await rename(tempPath, this.path);
-      await chmod(this.path, 0o600);
+      // Post-rename chmod/dir-fsync are best-effort; failures must not roll back the write.
+      try {
+        await chmod(this.path, 0o600);
+      } catch (postError) {
+        this.log?.(`models config: post-rename chmod failed: ${postError}`);
+      }
       if (process.platform !== "win32") {
-        const directory = await open(this.agentDir, "r");
         try {
-          await directory.sync();
-        } finally {
-          await directory.close();
+          const directory = await open(this.agentDir, "r");
+          try {
+            await directory.sync();
+          } finally {
+            await directory.close();
+          }
+        } catch (postError) {
+          this.log?.(`models config: post-rename dir fsync failed: ${postError}`);
         }
       }
     } finally {
@@ -392,7 +406,9 @@ function projectDraft(
     }
 
     const projected = projectProvider(provider, currentProvider, originKey, diagnostics, renames, modelAlignments);
-    if (projected) nextProviders[provider.key] = projected;
+    if (projected && (!BUILT_IN_PROVIDER_IDS.has(provider.key) || Object.keys(projected).length > 0)) {
+      nextProviders[provider.key] = projected;
+    }
   }
 
   if (diagnostics.length > 0) return { ok: false, diagnostics };
@@ -600,8 +616,8 @@ function projectCompat(
   if (!draft) return undefined;
   const compat = mergeKnown(current, draft.config, COMPAT_ALL_KEYS) as ModelsCompat;
   const currentKwargs = current?.chatTemplateKwargs;
-  const kwargs = projectMap(
-    draft.chatTemplateKwargs ?? [],
+  const kwargs = projectMap<ModelsChatTemplateKwarg>(
+    (draft.chatTemplateKwargs ?? []) as ModelsMapEntryDraft<ModelsChatTemplateKwarg>[],
     currentKwargs,
     originPath ? [...originPath, "chatTemplateKwargs"] : undefined,
     [...nextPath, "chatTemplateKwargs"],
@@ -985,7 +1001,7 @@ function assertOrigin(value: unknown, kind: "provider" | "model" | "override" | 
   }
 }
 
-function toDesktopDiagnostic(diagnostic: PiModelsConfigDiagnostic): ModelsConfigDiagnostic {
+function toDesktopDiagnostic(diagnostic: SchemaModelsConfigDiagnostic): ModelsConfigDiagnostic {
   return { ...diagnostic, path: [...diagnostic.path] };
 }
 

@@ -45,6 +45,7 @@ export type ThreadWorkerBinding =
       projectId: string;
       cwd: string;
       agentDir: string;
+      shellPath?: string;
       sessionId: string;
       createInput: SessionCreateInput;
       extensionSet: ResolvedExtensionSet;
@@ -54,6 +55,7 @@ export type ThreadWorkerBinding =
       projectId: string;
       cwd: string;
       agentDir: string;
+      shellPath?: string;
       threadId: string;
       sessionFile: string;
       extensionSet: ResolvedExtensionSet;
@@ -214,16 +216,20 @@ export type SidecarEventBody =
   | { type: "subagent-event"; event: SubagentRunEvent }
   | { type: "resync-required"; reason: string; lastSafeSequence: number };
 
+export interface ModelConfigurationRevision {
+  generation: number;
+}
+
 export type ThreadSidecarCommand =
   | { type: "bootstrap" }
   | { type: "prompt"; input: SessionPromptInput }
   | { type: "edit"; input: SessionEditInput }
   | { type: "reload"; input: SessionReloadInput }
-  | { type: "reloadResources"; requestId: string; extensionSet: ResolvedExtensionSet }
   | { type: "cancel" }
   | { type: "clearQueue" }
   | { type: "compact" }
   | { type: "refreshModels" }
+  | { type: "refreshModelConfiguration"; revision: ModelConfigurationRevision }
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinking"; level: SessionControlState["thinkingLevel"] }
   | { type: "rename"; title: string }

@@ -8,7 +8,12 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "@earendil-works/pi-coding-agent/models-config": ["../coding-agent/src/core/models-config.ts"]
+      "@earendil-works/pi-ai": ["../ai/src/index.ts"],
+      "@earendil-works/pi-ai/*": ["../ai/src/*"],
+      "@earendil-works/pi-agent-core": ["../agent/src/index.ts"],
+      "@earendil-works/pi-coding-agent": ["../coding-agent/src/index.ts"],
+      "@earendil-works/pi-coding-agent/*": ["../coding-agent/src/*"],
+      "@earendil-works/pi-tui": ["../tui/src/index.ts"]
     },
     "noEmit": true,
     "types": ["node", "electron-vite/node"]

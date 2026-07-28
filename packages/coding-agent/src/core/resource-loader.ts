@@ -16,12 +16,7 @@ import {
 	loadExtensionsCached,
 } from "./extensions/loader.ts";
 import type { Extension, ExtensionRuntime, InlineExtension, LoadExtensionsResult } from "./extensions/types.ts";
-import {
-	DefaultPackageManager,
-	type MissingSourceAction,
-	type PathMetadata,
-	type ResolvedResource,
-} from "./package-manager.ts";
+import { DefaultPackageManager, type PathMetadata, type ResolvedResource } from "./package-manager.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import { loadPromptTemplates } from "./prompt-templates.ts";
 import { SettingsManager } from "./settings-manager.ts";
@@ -38,7 +33,6 @@ export interface ResourceExtensionPaths {
 
 export interface ResourceLoaderReloadOptions {
 	resolveProjectTrust?: (input: { extensionsResult: LoadExtensionsResult }) => Promise<boolean>;
-	additionalExtensionPaths?: string[];
 }
 
 export interface ResourceLoader {
@@ -76,6 +70,9 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
 			try {
+				if (!statSync(filePath).isFile()) {
+					continue;
+				}
 				return {
 					path: filePath,
 					content: readFileSync(filePath, "utf-8"),
@@ -143,7 +140,6 @@ export interface DefaultResourceLoaderOptions {
 	systemPrompt?: string;
 	appendSystemPrompt?: string[];
 	extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
-	packageManagerOnMissing?: (source: string) => Promise<MissingSourceAction>;
 	skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
 		diagnostics: ResourceDiagnostic[];
@@ -182,7 +178,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private systemPromptSource?: string;
 	private appendSystemPromptSource?: string[];
 	private extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
-	private packageManagerOnMissing?: (source: string) => Promise<MissingSourceAction>;
 	private skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
 		diagnostics: ResourceDiagnostic[];
@@ -242,7 +237,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.systemPromptSource = options.systemPrompt;
 		this.appendSystemPromptSource = options.appendSystemPrompt;
 		this.extensionsOverride = options.extensionsOverride;
-		this.packageManagerOnMissing = options.packageManagerOnMissing;
 		this.skillsOverride = options.skillsOverride;
 		this.promptsOverride = options.promptsOverride;
 		this.themesOverride = options.themesOverride;
@@ -346,9 +340,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {
 		resetTimings("extensions");
-		if (options?.additionalExtensionPaths) {
-			this.additionalExtensionPaths = [...options.additionalExtensionPaths];
-		}
 
 		if (this.loaded) {
 			clearExtensionCache();
@@ -363,10 +354,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		// reload() preserves SettingsManager.projectTrusted and reloads settings for that trust state.
 		await this.settingsManager.reload();
-		const resolvedPaths = await this.packageManager.resolve(this.packageManagerOnMissing);
+		const resolvedPaths = await this.packageManager.resolve();
 		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
 			temporary: true,
-			onMissing: this.packageManagerOnMissing,
 		});
 		const metadataByPath = new Map<string, PathMetadata>();
 
@@ -503,10 +493,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private async loadCurrentExtensionSet(options: { includeInlineFactories: boolean }): Promise<LoadExtensionsResult> {
-		const resolvedPaths = await this.packageManager.resolve(this.packageManagerOnMissing);
+		const resolvedPaths = await this.packageManager.resolve();
 		const cliExtensionPaths = await this.packageManager.resolveExtensionSources(this.additionalExtensionPaths, {
 			temporary: true,
-			onMissing: this.packageManagerOnMissing,
 		});
 		const enabledExtensions = resolvedPaths.extensions.filter((r) => r.enabled).map((r) => r.path);
 		const cliEnabledExtensions = cliExtensionPaths.extensions.filter((r) => r.enabled).map((r) => r.path);
@@ -913,6 +902,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			const extensionPath = `<inline:${isNamed ? input.name : index + 1}>`;
 			try {
 				const extension = await loadExtensionFromFactory(factory, this.cwd, this.eventBus, runtime, extensionPath);
+				extension.hidden = isNamed && input.hidden;
 				extensions.push(extension);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "failed to load extension";

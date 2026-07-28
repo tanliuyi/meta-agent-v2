@@ -1,10 +1,15 @@
+import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
   type AgentSessionEvent,
   createAgentSessionFromServices,
   createAgentSessionServices,
-  type ModelRegistry,
+  getAgentDir,
+  ModelRuntime,
   SessionManager,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
   type ClearedQueue,
@@ -22,6 +27,7 @@ import {
   type Thread,
 } from "../../shared/contracts.ts";
 import type { DesktopExtensionDiagnostic, ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
+import { FileCredentialStore } from "../models/credential-store.ts";
 import { DesktopBuiltinProviderRegistry } from "./desktop-builtin-provider.ts";
 import { DesktopExtensionCompatibilityError, DesktopExtensionHost } from "./desktop-extension-host.ts";
 import {
@@ -44,6 +50,7 @@ interface RuntimeOptions {
   projectId: string;
   cwd: string;
   agentDir?: string;
+  shellPath?: string;
   sessionManager?: SessionManager;
   createInput?: SessionCreateInput;
   extensionSet?: ResolvedExtensionSet;
@@ -71,7 +78,7 @@ export class SessionRuntime {
   readonly projectId: string;
   readonly cwd: string;
   readonly session: AgentSession;
-  private readonly models: ModelRegistry;
+  private readonly models: ModelRuntime;
   private readonly push: (update: SessionPushPayload) => void;
   private readonly onSummaryChanged: (runtime: SessionRuntime) => void;
   private readonly subagentRuntime?: SubagentRuntime;
@@ -80,7 +87,7 @@ export class SessionRuntime {
     projectId: string,
     cwd: string,
     session: AgentSession,
-    models: ModelRegistry,
+    models: ModelRuntime,
     extensionSet: ResolvedExtensionSet,
     subagentRuntime: SubagentRuntime | undefined,
     push: (update: SessionPushPayload) => void,
@@ -116,9 +123,20 @@ export class SessionRuntime {
   /** 创建新会话或从指定 SessionManager 恢复会话。 */
   static async create(options: RuntimeOptions): Promise<SessionRuntime> {
     const extensionSet = options.extensionSet ?? builtinOnlyExtensionSet(options.projectId);
+    const agentDir = options.agentDir ?? getAgentDir();
+    const settingsManager = SettingsManager.create(options.cwd, agentDir);
+    if (!settingsManager.getShellPath() && options.shellPath)
+      settingsManager.applyOverrides({ shellPath: options.shellPath });
+    const modelRuntime = await ModelRuntime.create({
+      credentials: new FileCredentialStore(join(agentDir, "auth.json")),
+      modelsPath: join(agentDir, "models.json"),
+      allowModelNetwork: false,
+    });
     const services = await createAgentSessionServices({
       cwd: options.cwd,
-      agentDir: options.agentDir,
+      agentDir,
+      settingsManager,
+      modelRuntime,
       resourceLoaderOptions: controlledResourceLoaderOptions(
         extensionSet,
         DesktopBuiltinProviderRegistry.getExtensionFactories({ subagentRuntime: options.subagentRuntime }),
@@ -133,9 +151,9 @@ export class SessionRuntime {
     }
     const sessionManager = options.sessionManager ?? SessionManager.create(services.cwd);
     const selection = options.createInput
-      ? resolveSessionCreateSelection(options.createInput, services.modelRegistry)
+      ? resolveSessionCreateSelection(options.createInput, services.modelRuntime)
       : options.sessionManager
-        ? resolveSessionResumeSelection(options.sessionManager, services.modelRegistry)
+        ? resolveSessionResumeSelection(options.sessionManager, services.modelRuntime)
         : undefined;
     const result = await createAgentSessionFromServices({
       services,
@@ -149,7 +167,7 @@ export class SessionRuntime {
         options.projectId,
         options.cwd,
         result.session,
-        services.modelRegistry,
+        services.modelRuntime,
         extensionSet,
         options.subagentRuntime,
         options.push,
@@ -305,55 +323,6 @@ export class SessionRuntime {
     return this.runCommand(input.requestId, () => this.compatibility.reload(input));
   }
 
-  reloadResources(requestId: string, extensionSet: ResolvedExtensionSet): Promise<SessionCommandResult> {
-    this.assertTimelineAvailable();
-    return this.runCommand(requestId, () => this.reloadResourcesOnce(extensionSet));
-  }
-
-  private async reloadResourcesOnce(extensionSet: ResolvedExtensionSet): Promise<SessionCommandResult> {
-    if (this.session.isStreaming || this.session.isCompacting) {
-      return { accepted: false, queued: false, error: "请等待当前运行结束后再执行 /reload" };
-    }
-    const previousSet = cloneExtensionSet(this.extensionSet);
-    const previousDiagnostics = this.extensionDiagnostics.map((diagnostic) => ({ ...diagnostic }));
-    this.extensionSet = cloneExtensionSet(extensionSet);
-    this.extensionDiagnostics = extensionSet.diagnostics.map((diagnostic) => ({
-      ...diagnostic,
-      projectId: this.projectId,
-      threadId: this.id,
-    }));
-    this.extensionPhase = "start";
-    this.lastError = undefined;
-    try {
-      await this.session.reload({
-        resourceLoader: {
-          additionalExtensionPaths: extensionSet.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
-        },
-      });
-      const runtimeDiagnostics = this.extensionDiagnostics.slice(extensionSet.diagnostics.length);
-      this.extensionDiagnostics = [
-        ...extensionLoadDiagnostics(extensionSet, this.session.resourceLoader.getExtensions()).map((diagnostic) => ({
-          ...diagnostic,
-          projectId: this.projectId,
-          threadId: this.id,
-        })),
-        ...runtimeDiagnostics,
-      ];
-      this.lastError = this.extensionDiagnostics.length
-        ? this.extensionDiagnostics.map(({ extensionId, message }) => `${extensionId}: ${message}`).join("\n")
-        : undefined;
-      return { accepted: true, queued: false, ...(this.lastError ? { error: this.lastError } : {}) };
-    } catch (error) {
-      this.extensionSet = previousSet;
-      this.extensionDiagnostics = previousDiagnostics;
-      this.lastError = errorMessage(error);
-      throw error;
-    } finally {
-      this.extensionPhase = "runtime";
-      this.publishControl();
-    }
-  }
-
   /** 在指定 entry 处 fork 当前 session 为新 session 文件，返回新会话 id + 文件路径。 */
   async branch(input: SessionBranchInput): Promise<SessionBranchResult> {
     this.assertTimelineAvailable();
@@ -380,16 +349,27 @@ export class SessionRuntime {
     await this.compatibility.compact();
   }
 
-  refreshModels(): void {
-    this.models.authStorage.reload();
-    this.models.refresh();
-    this.publishControl();
+  async refreshModels(): Promise<void> {
+    await this.models.refresh({ allowNetwork: false });
     const error = this.models.getError();
     if (error) throw new Error(error);
+
+    const currentModel = this.session.model;
+    if (currentModel) {
+      const refreshedModel = this.models.getModel(currentModel.provider, currentModel.id);
+      if (
+        refreshedModel &&
+        isModelMateriallyDifferent(currentModel, refreshedModel) &&
+        this.models.hasConfiguredAuth(currentModel.provider)
+      ) {
+        await this.session.setModel(refreshedModel);
+      }
+    }
+    this.publishControl();
   }
 
   async setModel(provider: string, modelId: string): Promise<void> {
-    const model = this.models.find(provider, modelId);
+    const model = this.models.getModel(provider, modelId);
     if (!model) throw new Error(`模型不存在: ${provider}/${modelId}`);
     await this.session.setModel(model);
     this.publishControl();
@@ -439,7 +419,7 @@ export class SessionRuntime {
 
   private control(): SessionControlState {
     const model = this.session.model;
-    const available = this.models.getAvailable();
+    const available = this.models.getAvailableSnapshot();
     const context = this.session.getContextUsage();
     return {
       protocolVersion: PROTOCOL_VERSION,
@@ -466,7 +446,7 @@ export class SessionRuntime {
       context: context
         ? { tokens: context.tokens, contextWindow: context.contextWindow, percent: context.percent }
         : undefined,
-      readiness: sessionReadiness(Boolean(model), available.length, this.models.getAll().length),
+      readiness: sessionReadiness(Boolean(model), available.length, this.models.getModels().length),
       lastError: this.lastError ?? this.session.state.errorMessage,
       hostRequests: this.extensionHost.requests,
       extensionSet: {
@@ -510,7 +490,10 @@ export class SessionRuntime {
       event.type === "agent_start" ||
       event.type === "agent_settled" ||
       event.type === "thinking_level_changed" ||
-      event.type === "compaction_start"
+      event.type === "compaction_start" ||
+      event.type === "summarization_retry_scheduled" ||
+      event.type === "summarization_retry_attempt_start" ||
+      event.type === "summarization_retry_finished"
     ) {
       publish = true;
     }
@@ -613,14 +596,6 @@ export class PiTimelineUnavailableError extends Error {
   }
 }
 
-function cloneExtensionSet(extensionSet: ResolvedExtensionSet): ResolvedExtensionSet {
-  return {
-    ...extensionSet,
-    entries: extensionSet.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
-    diagnostics: extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-  };
-}
-
 function builtinOnlyExtensionSet(projectId: string): ResolvedExtensionSet {
   return {
     generation: "desktop-builtins-only",
@@ -664,4 +639,15 @@ function joinRuntimeDiagnostics(primary: string | undefined, ...groups: string[]
 
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
+}
+
+/**
+ * Returns true when two Model instances differ in fields that affect the
+ * session (endpoint, config, capabilities, compat overrides, headers,
+ * thinking-level map).  Uses deep equality so changes in any of these
+ * properties trigger a session model update.
+ */
+function isModelMateriallyDifferent(current: Model<Api>, candidate: Model<Api>): boolean {
+  if (current.provider !== candidate.provider || current.id !== candidate.id) return false;
+  return !isDeepStrictEqual(current, candidate);
 }

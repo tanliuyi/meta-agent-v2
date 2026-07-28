@@ -6,15 +6,20 @@ const mocks = vi.hoisted(() => ({
   createAgentSessionFromServices: vi.fn(),
   createAgentSessionServices: vi.fn(),
   createSessionManager: vi.fn(() => ({})),
+  createModelRuntime: vi.fn(async () => ({})),
+  createSettingsManager: vi.fn(() => ({ getShellPath: () => undefined, applyOverrides: vi.fn() })),
   resolveSelection: vi.fn(),
   resolveResumeSelection: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  VERSION: "0.80.7",
+  VERSION: "0.82.1",
   createAgentSessionFromServices: mocks.createAgentSessionFromServices,
   createAgentSessionServices: mocks.createAgentSessionServices,
+  getAgentDir: () => "/agent",
+  ModelRuntime: { create: mocks.createModelRuntime },
   SessionManager: { create: mocks.createSessionManager },
+  SettingsManager: { create: mocks.createSettingsManager },
 }));
 
 vi.mock("../src/main/pi/session-configuration.ts", () => ({
@@ -51,9 +56,45 @@ describe("SessionRuntime Pi-native commands", () => {
     mocks.createAgentSessionFromServices.mockReset();
     mocks.createAgentSessionServices.mockReset();
     mocks.createSessionManager.mockClear();
+    mocks.createModelRuntime.mockClear();
+    mocks.createSettingsManager.mockClear();
     mocks.resolveSelection.mockReset();
     mocks.resolveResumeSelection.mockReset();
     mocks.createAgentSessionServices.mockResolvedValue(createServices());
+  });
+
+  it("injects the managed shell fallback only when settings have no user shellPath", async () => {
+    const applyOverrides = vi.fn();
+    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => undefined, applyOverrides });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session: createSession() });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      shellPath: "/managed/bin/bash",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    expect(applyOverrides).toHaveBeenCalledWith({ shellPath: "/managed/bin/bash" });
+    await runtime.dispose();
+  });
+
+  it("preserves a user-configured shellPath over the managed fallback", async () => {
+    const applyOverrides = vi.fn();
+    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => "/user/bin/bash", applyOverrides });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session: createSession() });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      shellPath: "/managed/bin/bash",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    expect(applyOverrides).not.toHaveBeenCalled();
+    await runtime.dispose();
   });
 
   it("fails worker startup before AgentSession creation when a curated extension cannot load", async () => {
@@ -325,112 +366,7 @@ describe("SessionRuntime Pi-native commands", () => {
     await runtime.dispose();
   });
 
-  it("通过 AgentSession.reload 热重载受控 extension set", async () => {
-    const session = createSession();
-    const services = createServices();
-    (session as unknown as { resourceLoader: typeof services.resourceLoader }).resourceLoader = services.resourceLoader;
-    mocks.createAgentSessionServices.mockResolvedValue(services);
-    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
-    const runtime = await SessionRuntime.create({
-      projectId: "project",
-      cwd: "/workspace",
-      push: () => {},
-      onSummaryChanged: () => {},
-    });
-
-    await expect(
-      runtime.reloadResources("reload-request", {
-        generation: "extensions-next",
-        projectId: "project",
-        entries: [
-          {
-            id: "development:next",
-            displayName: "Next",
-            source: "development",
-            entryPath: "/approved/next.ts",
-            hostProfileVersion: 1,
-            capabilities: [],
-          },
-        ],
-        diagnostics: [],
-        resolvedAt: 1,
-      }),
-    ).resolves.toEqual({ accepted: true, queued: false });
-
-    expect(session.reload).toHaveBeenCalledWith({
-      resourceLoader: { additionalExtensionPaths: ["/approved/next.ts"] },
-    });
-    expect(runtime.bootstrap().control.extensionSet.generation).toBe("extensions-next");
-
-    await runtime.reloadResources("reload-request", {
-      generation: "extensions-next",
-      projectId: "project",
-      entries: [],
-      diagnostics: [],
-      resolvedAt: 2,
-    });
-    expect(session.reload).toHaveBeenCalledTimes(1);
-    await runtime.dispose();
-  });
-
-  it("运行期间拒绝 /reload 且不调用 AgentSession.reload", async () => {
-    const session = createSession(true);
-    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
-    const runtime = await SessionRuntime.create({
-      projectId: "project",
-      cwd: "/workspace",
-      push: () => {},
-      onSummaryChanged: () => {},
-    });
-
-    await expect(
-      runtime.reloadResources("busy-reload", {
-        generation: "extensions-next",
-        projectId: "project",
-        entries: [],
-        diagnostics: [],
-        resolvedAt: 1,
-      }),
-    ).resolves.toMatchObject({ accepted: false, queued: false });
-    expect(session.reload).not.toHaveBeenCalled();
-    await runtime.dispose();
-  });
-
-  it("资源重载失败时恢复之前的 extension generation", async () => {
-    const session = createSession();
-    session.reload.mockRejectedValueOnce(new Error("reload failed"));
-    const push = vi.fn();
-    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
-    const runtime = await SessionRuntime.create({
-      projectId: "project",
-      cwd: "/workspace",
-      push,
-      onSummaryChanged: () => {},
-    });
-
-    await expect(
-      runtime.reloadResources("failed-reload", {
-        generation: "extensions-next",
-        projectId: "project",
-        entries: [],
-        diagnostics: [],
-        resolvedAt: 1,
-      }),
-    ).rejects.toThrow("reload failed");
-
-    expect(runtime.bootstrap().control.extensionSet.generation).toBe("desktop-builtins-only");
-    expect(push).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        type: "control",
-        control: expect.objectContaining({
-          extensionSet: expect.objectContaining({ generation: "desktop-builtins-only" }),
-        }),
-      }),
-    );
-    await runtime.dispose();
-  });
-
-  it("刷新模型时重载 sidecar 凭据、刷新 registry 并发布 control", async () => {
+  it("刷新模型时通过 process-local ModelRuntime 重读凭据并发布 control", async () => {
     const session = createSession();
     const services = createServices();
     const push = vi.fn();
@@ -443,13 +379,161 @@ describe("SessionRuntime Pi-native commands", () => {
       onSummaryChanged: () => {},
     });
 
-    runtime.refreshModels();
+    await runtime.refreshModels();
 
-    expect(services.modelRegistry.authStorage.reload).toHaveBeenCalledOnce();
-    expect(services.modelRegistry.refresh).toHaveBeenCalledOnce();
+    expect(services.modelRuntime.refresh).toHaveBeenCalledOnce();
     expect(push).toHaveBeenCalledWith(
       expect.objectContaining({ type: "control", control: expect.objectContaining({ models: [] }) }),
     );
+    await runtime.dispose();
+  });
+
+  it("刷新后模型 endpoint 变化时更新 session 模型 (setModel)", async () => {
+    const session = createSession();
+    const services = createServices();
+    const push = vi.fn();
+    const setModel = vi.fn(async () => undefined);
+    const currentModel = {
+      provider: "test-provider",
+      id: "test-model",
+      name: "Old Name",
+      baseUrl: "http://old.example/v1",
+      api: "openai-completions",
+      contextWindow: 8192,
+      maxTokens: 4096,
+      reasoning: false,
+      cost: { input: 1, output: 2 },
+      input: ["text"],
+    };
+    const refreshedModel = {
+      ...currentModel,
+      name: "Refreshed Name",
+      baseUrl: "http://refreshed.example/v1",
+      contextWindow: 16384,
+      maxTokens: 8192,
+      reasoning: true,
+      cost: { input: 2, output: 4 },
+      input: ["text", "image"],
+      headers: { "X-Custom": "value" },
+    };
+    Object.defineProperty(session, "model", { get: () => currentModel });
+    Object.defineProperty(session, "setModel", { value: setModel, writable: true });
+    services.modelRuntime = {
+      refresh: vi.fn(async () => undefined),
+      getError: () => undefined,
+      getAvailableSnapshot: () => [refreshedModel],
+      getModels: () => [refreshedModel],
+      getModel: vi.fn(() => refreshedModel),
+      hasConfiguredAuth: vi.fn(() => true),
+    };
+    mocks.createAgentSessionServices.mockResolvedValue(services);
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push,
+      onSummaryChanged: () => {},
+    });
+
+    await runtime.refreshModels();
+
+    expect(services.modelRuntime.refresh).toHaveBeenCalledOnce();
+    expect(setModel).toHaveBeenCalledOnce();
+    expect(setModel).toHaveBeenCalledWith(refreshedModel);
+    expect(push).toHaveBeenCalledWith(expect.objectContaining({ type: "control" }));
+    await runtime.dispose();
+  });
+
+  it("刷新后模型未变化时不调用 setModel", async () => {
+    const session = createSession();
+    const services = createServices();
+    const push = vi.fn();
+    const setModel = vi.fn(async () => undefined);
+    const theModel = {
+      provider: "test-provider",
+      id: "test-model",
+      name: "Same Name",
+      baseUrl: "http://same.example/v1",
+      api: "openai-completions",
+      contextWindow: 8192,
+      maxTokens: 4096,
+      reasoning: false,
+      cost: { input: 1, output: 2 },
+      input: ["text"],
+    };
+    Object.defineProperty(session, "model", { get: () => theModel });
+    Object.defineProperty(session, "setModel", { value: setModel, writable: true });
+    services.modelRuntime = {
+      refresh: vi.fn(async () => undefined),
+      getError: () => undefined,
+      getAvailableSnapshot: () => [theModel],
+      getModels: () => [theModel],
+      getModel: vi.fn(() => theModel),
+      hasConfiguredAuth: vi.fn(() => true),
+    };
+    mocks.createAgentSessionServices.mockResolvedValue(services);
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push,
+      onSummaryChanged: () => {},
+    });
+
+    await runtime.refreshModels();
+
+    expect(services.modelRuntime.refresh).toHaveBeenCalledOnce();
+    // The model is the same object, so no setModel call
+    expect(setModel).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it("刷新后 auth-only 变化不调用 setModel (模型未变)", async () => {
+    const session = createSession();
+    const services = createServices();
+    const push = vi.fn();
+    const setModel = vi.fn(async () => undefined);
+    const theModel = {
+      provider: "test-provider",
+      id: "test-model",
+      name: "Stable",
+      baseUrl: "http://stable.example/v1",
+      api: "openai-completions",
+      contextWindow: 8192,
+      maxTokens: 4096,
+      reasoning: false,
+      cost: { input: 1, output: 2 },
+      input: ["text"],
+    };
+    Object.defineProperty(session, "model", { get: () => theModel });
+    Object.defineProperty(session, "setModel", { value: setModel, writable: true });
+    // Auth changes (hasConfiguredAuth returns different values) but the model object
+    // is still the same reference from getModel.
+    services.modelRuntime = {
+      refresh: vi.fn(async () => undefined),
+      getError: () => undefined,
+      getAvailableSnapshot: () => [theModel],
+      getModels: () => [theModel],
+      getModel: vi.fn(() => theModel),
+      hasConfiguredAuth: vi.fn(() => true),
+    };
+    mocks.createAgentSessionServices.mockResolvedValue(services);
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push,
+      onSummaryChanged: () => {},
+    });
+
+    await runtime.refreshModels();
+
+    expect(services.modelRuntime.refresh).toHaveBeenCalledOnce();
+    // Model didn't change (same reference), so no setModel
+    expect(setModel).not.toHaveBeenCalled();
     await runtime.dispose();
   });
 
@@ -524,12 +608,12 @@ describe("SessionRuntime Pi-native commands", () => {
 function createServices() {
   return {
     cwd: "/workspace",
-    modelRegistry: {
-      authStorage: { reload: vi.fn() },
-      refresh: vi.fn(),
+    modelRuntime: {
+      refresh: vi.fn(async () => undefined),
       getError: () => undefined,
-      getAvailable: () => [],
-      getAll: () => [],
+      getAvailableSnapshot: () => [],
+      getModels: () => [],
+      getModel: () => undefined,
     },
     resourceLoader: {
       getExtensions: () => ({ extensions: [], errors: [] }),

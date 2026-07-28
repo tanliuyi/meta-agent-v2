@@ -87,6 +87,7 @@ export function registerIpc(
     getStatus(): NodeRuntimeStatus;
     install(): Promise<NodeRuntimeStatus>;
     onProgress(listener: (progress: NodeRuntimeProgress) => void): () => void;
+    refreshActiveModelRuntimes?(): Promise<void>;
     shell?: {
       getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
       install(): Promise<ShellRuntimeStatus>;
@@ -130,11 +131,22 @@ export function registerIpc(
   );
   ipcMain.handle(CHANNELS.modelsGetConfig, () => models.getConfig());
   ipcMain.handle(CHANNELS.modelsGetConfigRevision, () => models.getConfigRevision());
-  ipcMain.handle(CHANNELS.modelsSaveConfig, (_event, input: SaveModelsConfigInput) => models.saveConfig(input));
+  ipcMain.handle(CHANNELS.modelsSaveConfig, async (_event, input: SaveModelsConfigInput) => {
+    const result = await models.saveConfig(input);
+    if (result.status !== "saved" || !nodeRuntime.refreshActiveModelRuntimes) return result;
+    const activeSessionsRefreshed = await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+    return { ...result, snapshot: { ...result.snapshot, activeSessionsRefreshed } };
+  });
   ipcMain.handle(CHANNELS.modelsOpenConfigExternally, async () => openPath(await models.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.authGetConfig, () => auth.getConfig());
   ipcMain.handle(CHANNELS.authGetConfigRevision, () => auth.getConfigRevision());
-  ipcMain.handle(CHANNELS.authSaveConfig, (_event, input: SaveAuthConfigInput) => auth.saveConfig(input));
+  ipcMain.handle(CHANNELS.authSaveConfig, async (_event, input: SaveAuthConfigInput) => {
+    const result = await auth.saveConfig(input);
+    if (result.status === "saved" && nodeRuntime.refreshActiveModelRuntimes) {
+      await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+    }
+    return result;
+  });
   ipcMain.handle(CHANNELS.authOpenConfigExternally, async () => openPath(await auth.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.authOauthLogin, (event, input: AuthOauthLoginInput) => {
     const ownerId = event.sender.id;
@@ -145,14 +157,21 @@ export function registerIpc(
         oauth.cancelOwner(ownerId);
       });
     }
-    return oauth.start(
-      ownerId,
-      input,
-      (oauthEvent) => {
-        if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.authOauthEvent, oauthEvent);
-      },
-      openOauthUrl,
-    );
+    return oauth
+      .start(
+        ownerId,
+        input,
+        (oauthEvent) => {
+          if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.authOauthEvent, oauthEvent);
+        },
+        openOauthUrl,
+      )
+      .then(async (snapshot) => {
+        if (nodeRuntime.refreshActiveModelRuntimes) {
+          await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+        }
+        return snapshot;
+      });
   });
   ipcMain.handle(CHANNELS.authOauthRespond, (event, response: AuthOauthLoginResponse) => {
     oauth.respond(event.sender.id, response);
@@ -161,7 +180,13 @@ export function registerIpc(
     oauth.cancel(event.sender.id, loginId);
   });
   ipcMain.handle(CHANNELS.providersGetConfig, () => providers.getConfig());
-  ipcMain.handle(CHANNELS.providersSaveConfig, async (_event, input) => providers.saveConfig(input));
+  ipcMain.handle(CHANNELS.providersSaveConfig, async (_event, input) => {
+    const result = await providers.saveConfig(input);
+    if (result.status === "saved" && nodeRuntime.refreshActiveModelRuntimes) {
+      await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+    }
+    return result;
+  });
   ipcMain.handle(CHANNELS.providersOpenConfigExternally, async () => openPath(await providers.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
   ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
@@ -631,6 +656,16 @@ function isColdExtensionSetApplyStartupError(
   error: unknown,
 ): error is Error & { code: "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED" } {
   return error instanceof Error && "code" in error && error.code === "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED";
+}
+
+async function refreshActiveModelRuntimes(refresh: () => Promise<void>): Promise<boolean> {
+  try {
+    await refresh();
+    return true;
+  } catch (error) {
+    console.error("Model configuration was saved, but one or more active runtimes failed to refresh:", error);
+    return false;
+  }
 }
 
 function publicMarketplaceApplication(application: ApplyDesktopExtensionSetResult): ApplyDesktopExtensionSetResult {

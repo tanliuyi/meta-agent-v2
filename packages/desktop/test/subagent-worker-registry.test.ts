@@ -133,6 +133,10 @@ class FakeClient implements SubagentWorkerClient {
     return null as T;
   }
 
+  get shellPath(): string | undefined {
+    return this.options.binding.role === "subagent" ? this.options.binding.value.shellPath : undefined;
+  }
+
   hostRequest(request: Parameters<NonNullable<WorkerClientOptions["onHostRequest"]>>[0]) {
     const handler = this.options.onHostRequest;
     if (!handler) throw new Error("Host request handler is unavailable");
@@ -219,6 +223,48 @@ describe("SubagentWorkerRegistry", () => {
       ),
     ).rejects.toThrow("registered tool names");
     expect(spawned).toBe(false);
+  });
+
+  it("passes the resolved shell fallback in the explicit subagent binding", async () => {
+    let client: FakeClient | undefined;
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      shellPath: "/managed/bin/bash",
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        return client;
+      },
+    });
+
+    await registry.handleHostRequest({ type: "subagent.run", request: runRequest() }, () => undefined);
+
+    expect(client?.shellPath).toBe("/managed/bin/bash");
+  });
+
+  it("broadcasts revisioned model refreshes to active subagent workers", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+    const run = registry.handleHostRequest({ type: "subagent.run", request: runRequest() }, () => undefined);
+    await expect.poll(() => client).toBeDefined();
+
+    await registry.refreshAllModels({ generation: 8 });
+
+    expect(client?.commandTypes).toContain("refreshModelConfiguration");
+    release();
+    await run;
   });
 
   it("owns a worker, forwards typed events, acknowledges them, and shuts it down", async () => {

@@ -1432,7 +1432,11 @@ function resolveNearestProjectChainDirs(cwd: string): { readDirs: string[]; pref
 		preferredDir,
 	};
 }
-const BUILTIN_AGENTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+let builtinAgentsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+
+export function configureBuiltinAgentsDir(directory: string): void {
+	builtinAgentsDir = path.resolve(directory);
+}
 
 export const EXTRA_AGENT_DIRS_ENV = "PI_SUBAGENT_EXTRA_AGENT_DIRS";
 
@@ -1466,7 +1470,7 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	});
 
 	const builtinAgents = applyBuiltinOverrides(
-		applySubagentDefaultModel(loadAgentsFromDir(BUILTIN_AGENTS_DIR, "builtin"), defaultModel),
+		applySubagentDefaultModel(loadAgentsFromDir(builtinAgentsDir, "builtin"), defaultModel),
 		userSettings,
 		projectSettings,
 		userSettingsPath,
@@ -1531,7 +1535,7 @@ export function discoverAgentsAll(cwd: string): {
 	const packageSubagentPaths = collectPackageSubagentPaths(cwd);
 
 	const builtin = applyBuiltinOverrides(
-		applySubagentDefaultModel(loadAgentsFromDir(BUILTIN_AGENTS_DIR, "builtin"), defaultModel),
+		applySubagentDefaultModel(loadAgentsFromDir(builtinAgentsDir, "builtin"), defaultModel),
 		userSettings,
 		projectSettings,
 		userSettingsPath,

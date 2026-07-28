@@ -1,5 +1,6 @@
-import type { ModelRegistry, ResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime, ResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import { selectInitialModel } from "../src/main/pi/model-selection-adapter.ts";
 import {
   loadDraftSessionConfig,
   resolveSessionCreateSelection,
@@ -52,6 +53,23 @@ describe("draft session configuration", () => {
     expect(config.commands).toEqual([
       { name: "memory-insights", description: "Inspect memories", source: "extension" },
     ]);
+  });
+
+  it("uses Pi provider defaults for fallback and resets thinking to medium", () => {
+    const first = { ...reasoningModel, provider: "openai", id: "other-model" };
+    const providerDefault = { ...reasoningModel, provider: "openai", id: "gpt-5.5" };
+    const models = {
+      getModel: () => undefined,
+      hasConfiguredAuth: () => false,
+    } as unknown as ModelRuntime;
+
+    expect(
+      selectInitialModel(models, [first, providerDefault], {
+        provider: "missing",
+        modelId: "missing",
+        thinkingLevel: "high",
+      }),
+    ).toEqual({ model: providerDefault, thinkingLevel: "medium" });
   });
 
   it("显式 create 选择失效时拒绝，不静默 fallback", () => {
@@ -115,12 +133,12 @@ function sessionManagerWithContext(provider: string, modelId: string, thinkingLe
 function services(): SessionConfigurationServices {
   const available = [reasoningModel, plainModel];
   const models = {
-    getAvailable: () => available,
-    getAll: () => available,
-    find: (provider: string, modelId: string) =>
+    getAvailable: async () => available,
+    getModels: () => available,
+    getModel: (provider: string, modelId: string) =>
       available.find((model) => model.provider === provider && model.id === modelId),
     hasConfiguredAuth: () => true,
-  } as unknown as ModelRegistry;
+  } as unknown as ModelRuntime;
   const settings = {
     getDefaultProvider: () => reasoningModel.provider,
     getDefaultModel: () => reasoningModel.id,
