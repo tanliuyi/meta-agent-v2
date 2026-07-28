@@ -30,6 +30,7 @@ export const ProjectItem = memo(function ProjectItem({
   const [loading, setLoading] = useState(false);
   const wasActive = useRef(active);
   const threadListId = `project-threads-${project.id}`;
+  const showRunningIndicator = !expanded && threads?.some(({ archived, running }) => !archived && running) === true;
 
   useEffect(() => {
     const becameActive = active && !wasActive.current;
@@ -77,16 +78,32 @@ export const ProjectItem = memo(function ProjectItem({
           <span className="min-w-0 flex-1 select-none truncate font-medium">{project.name}</span>
           {project.available ? null : <span className="project-warning">不可用</span>}
         </button>
-        <TooltipIconButton
-          tooltip="新建任务"
-          side="right"
-          disabled={!project.available || newTaskDisabled}
-          className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 disabled:opacity-0"
-          aria-label={`在 ${project.name} 中新建任务`}
-          onClick={() => onNewTask(project.id)}
+        <div
+          className={
+            showRunningIndicator
+              ? "flex h-6 w-6 shrink-0 overflow-hidden transition-[width] group-hover:w-12 group-has-focus-visible:w-12"
+              : "size-6 shrink-0"
+          }
         >
-          <Plus className="size-3.5" />
-        </TooltipIconButton>
+          {showRunningIndicator ? (
+            <span
+              className="text-muted-foreground/60 grid size-6 shrink-0 place-items-center"
+              aria-label={`${project.name} 中有任务正在运行`}
+            >
+              <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+            </span>
+          ) : null}
+          <TooltipIconButton
+            tooltip="新建任务"
+            side="right"
+            disabled={!project.available || newTaskDisabled}
+            className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 disabled:opacity-0"
+            aria-label={`在 ${project.name} 中新建任务`}
+            onClick={() => onNewTask(project.id)}
+          >
+            <Plus className="size-3.5" />
+          </TooltipIconButton>
+        </div>
       </div>
       <div id={threadListId} hidden={!expanded}>
         {expanded && threads ? (
