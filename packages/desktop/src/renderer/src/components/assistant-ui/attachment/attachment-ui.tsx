@@ -45,7 +45,7 @@ export function AttachmentUI({ disabled }: { disabled?: boolean }) {
     <Tooltip>
       <AttachmentPrimitive.Root
         className={cn(
-          "aui-attachment-root relative",
+          "aui-attachment-root relative flex flex-row",
           isImage && !isComposer && "aui-attachment-root-message only:*:first:size-24",
         )}
       >

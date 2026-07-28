@@ -1,7 +1,10 @@
-import * as Tabs from "@radix-ui/react-tabs";
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Input } from "@renderer/shared/ui/input";
+import { Tabs } from "@renderer/shared/ui/tabs";
+import { TabsContent } from "@renderer/shared/ui/tabs-content";
+import { TabsList } from "@renderer/shared/ui/tabs-list";
+import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
 import { selectProjects } from "@renderer/state/desktop-selectors";
 import { useDesktopStore } from "@renderer/state/desktop-store-context";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
@@ -171,11 +174,11 @@ export function SubagentSettingsPage() {
         </Button>
       </header>
 
-      <Tabs.Root className="subagent-scope-tabs" value={activeTab} onValueChange={selectTab}>
-        <Tabs.List className="subagent-scope-tab-list" aria-label="子智能体配置作用域">
-          <Tabs.Trigger value={USER_TAB}>个人</Tabs.Trigger>
+      <Tabs className="subagent-scope-tabs" value={activeTab} onValueChange={selectTab}>
+        <TabsList className="subagent-scope-tab-list" aria-label="子智能体配置作用域">
+          <TabsTrigger value={USER_TAB}>个人</TabsTrigger>
           {projects.map((project) => (
-            <Tabs.Trigger
+            <TabsTrigger
               key={project.id}
               value={`${PROJECT_TAB_PREFIX}${project.id}`}
               aria-disabled={!project.available}
@@ -185,12 +188,12 @@ export function SubagentSettingsPage() {
               title={project.available ? project.cwd : project.issue}
             >
               {project.name}
-            </Tabs.Trigger>
+            </TabsTrigger>
           ))}
-          <Tabs.Trigger value={SYSTEM_TAB}>系统</Tabs.Trigger>
-        </Tabs.List>
+          <TabsTrigger value={SYSTEM_TAB}>系统</TabsTrigger>
+        </TabsList>
 
-        <Tabs.Content className="subagent-scope-tab-content" value={activeTab}>
+        <TabsContent className="subagent-scope-tab-content" value={activeTab}>
           {controller.error ? (
             <div className="subagent-error" role="alert">
               {controller.error}
@@ -348,8 +351,8 @@ export function SubagentSettingsPage() {
               />
             </>
           ) : null}
-        </Tabs.Content>
-      </Tabs.Root>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

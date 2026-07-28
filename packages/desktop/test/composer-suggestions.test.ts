@@ -120,9 +120,15 @@ describe("ComposerSuggestions", () => {
     expect(composerSuggestionOptionId("composer-list", 2)).toBe("composer-list-option-2");
   });
 
-  it("将选中的文件序列化为 assistant-ui directive", () => {
-    expect(fileSuggestions([{ name: "main.ts", path: "src/main.ts", type: "file" }])).toMatchObject([
-      { text: ":file[src/main.ts] " },
+  it("将文件名与父路径分层展示，并序列化原始路径", () => {
+    expect(
+      fileSuggestions([
+        { name: "main.ts", path: "src/main.ts", type: "file" },
+        { name: "README.md", path: "README.md", type: "file" },
+      ]),
+    ).toMatchObject([
+      { id: "src/main.ts", label: "main.ts", detail: "src", text: ":file[src/main.ts] " },
+      { id: "README.md", label: "README.md", detail: undefined, text: ":file[README.md] " },
     ]);
   });
 });

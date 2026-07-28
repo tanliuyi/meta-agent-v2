@@ -88,7 +88,7 @@ export function SubagentAgentSection({
   return (
     <Collapsible asChild defaultOpen={false}>
       <section className="settings-section subagent-section" aria-labelledby={headingId}>
-        <div className="settings-section-heading">
+        <div className="settings-section-heading subagent-collapsible-header">
           <h3 id={headingId} className="subagent-collapsible-title">
             <CollapsibleTrigger type="button" className="subagent-collapsible-heading">
               <span>{title}</span>

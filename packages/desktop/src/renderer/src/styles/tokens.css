@@ -71,6 +71,7 @@
 
     --type-size-caption: 0.625rem;
     --type-size-meta: 0.6875rem;
+    --type-size-code: 12px;
     --type-size-control: 0.75rem;
     --type-size-ui: 0.8125rem;
     --type-size-body: 0.875rem;
@@ -133,7 +134,7 @@
     --layout-sidebar-width: 280px;
     --layout-sidebar-min-width: 220px;
     --layout-sidebar-max-width: 420px;
-    --layout-thread-max-width: 704px;
+    --layout-thread-max-width: 810px;
     --composer-radius: 24px;
     --composer-padding: var(--space-4);
     --composer-background: color-mix(in oklab, hsl(var(--muted)) 30%, hsl(var(--background)));

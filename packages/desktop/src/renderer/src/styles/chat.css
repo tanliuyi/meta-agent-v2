@@ -209,14 +209,15 @@
   min-width: 0;
   padding: 5px 0;
   font-family: var(--font-family-mono);
-  font-size: var(--type-size-meta);
-  line-height: 1.55;
+  font-size: var(--type-size-code);
+  line-height: 1.65;
 }
 .tool-diff-line {
   display: flex;
   min-width: 0;
   padding-right: 10px;
 }
+
 .tool-diff-sign {
   flex: 0 0 18px;
   text-align: center;
@@ -388,8 +389,8 @@
 .aui-lexical-placeholder {
   position: absolute;
   top: 4px;
-  right: 10px;
-  left: 10px;
+  right: 4px;
+  left: 4px;
   pointer-events: none;
   color: hsl(var(--muted-foreground) / 0.8);
 }
@@ -413,39 +414,47 @@
 .composer-suggestions {
   position: absolute;
   right: 0;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 8px);
   left: 0;
   z-index: var(--stack-suggestions);
   padding: 0;
   overflow: hidden;
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--shape-radius-md);
+  border: 1px solid hsl(var(--border) / 0.9);
+  border-radius: var(--shape-radius-xl);
   background: hsl(var(--popover));
+  box-shadow: var(--elevation-popover);
 }
 .composer-suggestions-scroll {
-  max-height: 280px;
-  padding: 5px;
+  max-height: min(360px, 48vh);
+  padding: 7px;
   overflow-x: hidden;
   overflow-y: auto;
-  scroll-padding-block: 5px;
+  scroll-padding-block: 7px;
 }
 .composer-suggestions button {
   display: grid;
-  grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, auto) minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  column-gap: 8px;
   width: 100%;
-  min-height: 32px;
-  padding: 0 8px;
+  min-height: 38px;
+  padding: 0 10px;
   border: 0;
-  border-radius: var(--shape-radius-sm);
+  border-radius: var(--shape-radius-md);
   background: transparent;
-  font-size: var(--type-size-control);
+  color: hsl(var(--foreground));
+  font-size: var(--type-size-body);
+  line-height: var(--type-line-compact);
   text-align: left;
 }
+.composer-suggestions button:hover,
 .composer-suggestions button[data-state="active"],
 .composer-suggestions button[data-highlighted] {
   background: hsl(var(--accent));
+}
+.composer-suggestions button:focus-visible {
+  outline: 1px solid hsl(var(--ring));
+  outline-offset: -1px;
 }
 .composer-suggestions strong {
   overflow: hidden;
@@ -453,11 +462,11 @@
   white-space: nowrap;
   font-weight: 550;
 }
-.composer-suggestions span {
+.composer-suggestions button > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--muted-foreground) / 0.72);
 }
 .composer-command-groups,
 .composer-command-group {
@@ -465,44 +474,33 @@
 }
 .composer-command-groups {
   display: grid;
-  gap: 5px;
-}
-.composer-command-group + .composer-command-group {
-  padding-top: 5px;
-  border-top: 1px solid hsl(var(--border) / 0.65);
+  gap: 3px;
 }
 .composer-command-group-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 24px;
-  padding: 0 8px;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--type-size-meta);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 28px;
+  padding: 6px 10px 2px;
+  background: hsl(var(--popover));
+  color: hsl(var(--muted-foreground) / 0.76);
+  font-size: var(--type-size-ui);
   font-weight: 550;
+  line-height: 20px;
 }
-.composer-command-group-count {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
-.composer-suggestions .composer-command-item {
-  display: flex;
+.composer-suggestions .composer-command-item,
+.composer-suggestions .composer-file-item {
   min-width: 0;
   max-width: 100%;
-  min-height: 34px;
 }
-.composer-command-item strong {
+.composer-command-item strong,
+.composer-file-item strong {
   min-width: 0;
-  max-width: 55%;
-  flex: 0 1 auto;
+  max-width: 48%;
 }
-.composer-command-item > span {
-  display: block;
-  min-width: 0;
-  flex: 1;
-}
-.composer-command-item-icon {
-  width: 20px;
+.composer-command-item-icon,
+.composer-file-item-icon {
+  width: 22px;
   flex-shrink: 0;
   color: hsl(var(--muted-foreground));
 }
@@ -515,13 +513,30 @@
 .composer-command-item[data-command-source="skill"] .composer-command-item-icon {
   color: hsl(var(--warning));
 }
-.composer-suggestions-empty {
+.composer-suggestions-empty,
+.composer-suggestions-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  font-size: var(--type-size-control);
+  min-height: 52px;
   color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-control);
+}
+.composer-suggestions-loading {
+  gap: 7px;
+}
+.composer-suggestions-loading svg {
+  animation: composer-suggestions-spin var(--motion-duration-spinner) linear infinite;
+}
+@keyframes composer-suggestions-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-suggestions-loading svg {
+    animation: none;
+  }
 }
 .composer-widgets {
   display: grid;

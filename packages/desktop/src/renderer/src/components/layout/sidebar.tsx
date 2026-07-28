@@ -106,7 +106,7 @@ export const Sidebar = memo(function Sidebar() {
           </Button>
         </nav>
 
-        <div className="sidebar-navigation-scroll">
+        <div className="sidebar-navigation-scroll py-1">
           <nav className="sidebar-actions sidebar-secondary-actions" aria-label="辅助操作">
             <Button asChild variant="ghost" className={sidebarRowClass}>
               <Link to="/plugins" search={settingsSearch}>
