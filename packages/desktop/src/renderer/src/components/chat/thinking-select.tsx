@@ -14,7 +14,7 @@ export function ThinkingSelect({ value, levels, disabled = false, onValueChange 
   return (
     <Select
       value={value}
-      className="text-sm"
+      className="text-sm ps-2 pe-2"
       tooltip="选择思考等级"
       options={levels.map((level) => ({ value: level, label: getThinkingLevelLabel(level) }))}
       disabled={disabled || levels.length === 0}

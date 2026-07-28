@@ -43,7 +43,7 @@ export function ComposerSubmitControl({
           composer.config.readiness.state !== "ready"
         }
       >
-        {loading ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+        {loading ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4!" />}
       </TooltipIconButton>
     );
   }

@@ -50,7 +50,7 @@ export interface SubagentResumeRequest extends SubagentRunRequest {
 
 /** Preserve Pi runtime event names end to end so upstream progress and transcript consumers share one protocol. */
 export type SubagentRunEvent =
-  | { type: "started"; runId: string; workerInstanceId?: string; sessionFile?: string }
+  | { type: "started"; runId: string; threadId?: string; workerInstanceId?: string; sessionFile?: string }
   | { type: "message_update"; message: JsonValue; assistantMessageEvent: JsonValue }
   | { type: "message_end"; message: JsonValue }
   | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: JsonValue }

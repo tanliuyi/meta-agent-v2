@@ -49,14 +49,14 @@ export function RunActivityGroup({
   return (
     <ReasoningRoot
       variant="ghost"
-      className="aui-run-activity-root"
+      className="aui-run-activity-root w-full"
       open={running || open}
       onOpenChange={(nextOpen) => {
         if (!running && hasContent) setOpen(nextOpen);
       }}
     >
       <ReasoningTrigger
-        className="aui-run-activity-trigger"
+        className="aui-run-activity-trigger w-full max-w-full pb-2 border-b"
         label={label}
         active={running}
         hideChevron={running || !hasContent}

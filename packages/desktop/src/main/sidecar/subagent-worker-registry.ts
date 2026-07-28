@@ -307,13 +307,21 @@ export class SubagentWorkerRegistry {
   }
 
   private projectCatalogEvent(record: SubagentWorkerRecord, event: SubagentRunEvent): Promise<void> | undefined {
-    if ((event.type === "started" || event.type === "completed" || event.type === "failed") && event.sessionFile) {
-      record.liveSessionFile = event.sessionFile;
-    }
+    const announcedSessionFile =
+      (event.type === "started" || event.type === "completed" || event.type === "failed") && event.sessionFile
+        ? event.sessionFile
+        : undefined;
+    const sessionFileAnnounced = announcedSessionFile !== undefined && announcedSessionFile !== record.liveSessionFile;
+    if (announcedSessionFile) record.liveSessionFile = announcedSessionFile;
     const sessionFile = record.liveSessionFile ?? record.request.sessionFile;
     const firstProjection = !record.catalogThread;
     const current =
-      record.catalogThread ?? (sessionFile ? threadFromSubagentRequest(record.request, sessionFile) : undefined);
+      record.catalogThread ??
+      (event.type === "started" && event.threadId
+        ? threadFromSubagentStart(record.request, event.threadId)
+        : sessionFile
+          ? threadFromSubagentRequest(record.request, sessionFile)
+          : undefined);
     if (!current) return undefined;
     if (event.type === "message_update" || event.type === "tool_execution_update") return undefined;
     const terminal = event.type === "completed" || event.type === "failed";
@@ -325,7 +333,7 @@ export class SubagentWorkerRegistry {
     };
     record.catalogThread = next;
     const persistence =
-      sessionFile && (firstProjection || terminal)
+      sessionFile && (firstProjection || sessionFileAnnounced || terminal)
         ? this.queueMetadataPersistence(record, sessionFile, next)
         : undefined;
     this.options.catalogChanged?.({ ...next });
@@ -388,18 +396,31 @@ export class SubagentWorkerRegistry {
   }
 }
 
+function threadFromSubagentStart(request: SubagentRunRequest, threadId: string): Thread {
+  return createSubagentThread(request, threadId, Date.now(), request.parentSessionId ?? request.parentThreadId);
+}
+
 function threadFromSubagentRequest(request: SubagentRunRequest, sessionFile: string): Thread | undefined {
   const header = readSessionHeader(sessionFile);
   if (!header) return undefined;
-  const title = subagentTitle(request.task);
   const parentThreadId = header.parentSessionPath
-    ? (readSessionHeader(header.parentSessionPath)?.id ?? request.parentThreadId)
-    : request.parentThreadId;
+    ? (readSessionHeader(header.parentSessionPath)?.id ?? request.parentSessionId ?? request.parentThreadId)
+    : (request.parentSessionId ?? request.parentThreadId);
+  return createSubagentThread(request, header.id, header.createdAt, parentThreadId);
+}
+
+function createSubagentThread(
+  request: SubagentRunRequest,
+  threadId: string,
+  createdAt: number,
+  parentThreadId: string,
+): Thread {
+  const title = subagentTitle(request.task);
   return {
-    id: header.id,
+    id: threadId,
     projectId: request.projectId,
     title,
-    createdAt: header.createdAt,
+    createdAt,
     updatedAt: Date.now(),
     messageCount: 0,
     preview: title,

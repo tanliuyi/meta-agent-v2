@@ -37,6 +37,7 @@ export function ModelSelect({
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const { models, groups, modelByKey } = useMemo(() => createModelSelectorState(availableModels), [availableModels]);
   const value = model ? composerModelKey(model.provider, model.id) : undefined;
+  const showLoading = loading && !model;
 
   return (
     <ModelSelectorRoot
@@ -65,12 +66,12 @@ export function ModelSelect({
           <ModelSelectorTrigger
             variant="ghost"
             size="sm"
-            aria-label={loading ? "正在加载模型" : "选择模型"}
+            aria-label={showLoading ? "正在加载模型" : "选择模型"}
             aria-busy={loading || undefined}
-            disabled={disabled || loading}
+            disabled={disabled || showLoading}
             className="max-w-44 rounded-md px-2.5 text-[length:var(--type-size-ui)] font-medium data-[state=open]:bg-muted data-[state=open]:text-foreground"
           >
-            {loading ? (
+            {showLoading ? (
               <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground" role="status">
                 <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
                 <span>加载模型</span>

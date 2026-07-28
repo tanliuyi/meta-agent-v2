@@ -110,12 +110,12 @@ export const ProjectItem = memo(function ProjectItem({
           threads.length > 0 ? (
             <DesktopThreadList project={project} threads={threads} />
           ) : (
-            <div className="flex h-8 items-center gap-2 px-8 text-xs text-muted-foreground" role="status">
+            <div className="flex h-8 items-center gap-2 px-8 text-sm text-muted-foreground" role="status">
               <span>没有会话</span>
             </div>
           )
         ) : expanded && loading ? (
-          <div className="flex h-8 items-center gap-2 px-8 text-xs text-muted-foreground" role="status">
+          <div className="flex h-8 items-center gap-2 px-8 text-sm text-muted-foreground" role="status">
             <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
             <span>加载中</span>
           </div>

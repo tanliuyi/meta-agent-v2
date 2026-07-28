@@ -1,30 +1,58 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { cn } from "@renderer/shared/lib/cn";
+import { Tooltip } from "@renderer/shared/ui/tooltip";
+import { TooltipContent } from "@renderer/shared/ui/tooltip-content";
+import { TooltipTrigger } from "@renderer/shared/ui/tooltip-trigger";
 import ChevronDownIcon from "lucide-react/dist/esm/icons/chevron-down.mjs";
+import { useState } from "react";
 import { SelectContent } from "./select-content.tsx";
 import { SelectItem } from "./select-item.tsx";
 import { SelectRoot } from "./select-root.tsx";
 import type { SelectProps } from "./select-types.ts";
 
-export function Select({ options, placeholder, className, ...props }: SelectProps) {
+export function Select({ options, placeholder, tooltip, className, ...props }: SelectProps) {
+  const [selectOpen, setSelectOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const selectedOption = options.find((option) => option.value === props.value);
+  const trigger = (
+    <SelectPrimitive.Trigger
+      className={cn(
+        "group flex items-center gap-1 rounded-[0.625rem] py-1 px-2 text-sm transition-colors outline-none",
+        "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        !selectedOption && placeholder ? "italic opacity-70" : null,
+        className,
+      )}
+    >
+      <span>{selectedOption?.label ?? placeholder}</span>
+      <SelectPrimitive.Icon asChild>
+        <ChevronDownIcon className="size-4 opacity-50 transition-transform group-data-[state=open]:rotate-180" />
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+  );
 
   return (
-    <SelectRoot {...props}>
-      <SelectPrimitive.Trigger
-        className={cn(
-          "group flex items-center gap-1.5 rounded-[0.625rem] py-1 ps-3 pe-2 text-sm transition-colors outline-none",
-          "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-          !selectedOption && placeholder ? "italic opacity-70" : null,
-          className,
-        )}
-      >
-        <span>{selectedOption?.label ?? placeholder}</span>
-        <SelectPrimitive.Icon asChild>
-          <ChevronDownIcon className="size-4 opacity-50 transition-transform group-data-[state=open]:rotate-180" />
-        </SelectPrimitive.Icon>
-      </SelectPrimitive.Trigger>
+    <SelectRoot
+      {...props}
+      open={selectOpen}
+      onOpenChange={(open) => {
+        setSelectOpen(open);
+        if (open) setTooltipOpen(false);
+      }}
+    >
+      {tooltip ? (
+        <Tooltip
+          open={tooltipOpen && !selectOpen}
+          onOpenChange={(open) => {
+            setTooltipOpen(selectOpen ? false : open);
+          }}
+        >
+          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+          <TooltipContent side="top">{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        trigger
+      )}
 
       <SelectContent>
         {options.map(({ label, disabled, textValue, ...itemProps }) => (

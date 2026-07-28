@@ -311,6 +311,7 @@ export class SubagentWorkerService implements SidecarService {
       event: {
         type: "started",
         runId: request.runId,
+        threadId: created.session.sessionId,
         ...(announcedSessionFile ? { sessionFile: announcedSessionFile } : {}),
       },
     });
@@ -325,7 +326,12 @@ export class SubagentWorkerService implements SidecarService {
           announcedSessionFile = materialized;
           this.context.emit({
             type: "subagent-event",
-            event: { type: "started", runId: request.runId, sessionFile: materialized },
+            event: {
+              type: "started",
+              runId: request.runId,
+              threadId: created.session.sessionId,
+              sessionFile: materialized,
+            },
           });
         }
       }

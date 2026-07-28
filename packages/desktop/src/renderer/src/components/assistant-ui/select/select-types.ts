@@ -14,5 +14,6 @@ export interface SelectProps
   onValueChange: (value: string) => void;
   options: readonly SelectOption[];
   placeholder?: string;
+  tooltip?: string;
   className?: string;
 }

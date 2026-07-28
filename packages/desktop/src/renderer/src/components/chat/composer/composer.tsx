@@ -193,7 +193,7 @@ export function Composer(props: ComposerProps) {
                     </div>
                   ) : null}
                 </div>
-                <div className="flex min-w-0 items-center gap-1">
+                <div className="flex min-w-0 items-center gap-2">
                   {props.mode === "draft" ? (
                     <>
                       <ModelSelect
