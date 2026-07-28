@@ -464,7 +464,7 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
-  it("routes /reload through process-level extension replacement", async () => {
+  it("routes dedicated resource reload through process-level extension replacement", async () => {
     const retain = vi.fn();
     const release = vi.fn();
     const harness = createHarness(userDataDir, { generationReferences: { retain, release } });
@@ -474,12 +474,10 @@ describe("ThreadWorkerRegistry", () => {
     harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-next"));
 
     await expect(
-      registry.prompt({
+      registry.reloadResources({
         requestId: "reload-resources",
         projectId: "project",
         threadId: "thread",
-        text: "/reload",
-        images: [],
       }),
     ).resolves.toEqual({ accepted: true, queued: false });
 
@@ -492,12 +490,10 @@ describe("ThreadWorkerRegistry", () => {
     });
 
     harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-newer"));
-    await registry.prompt({
+    await registry.reloadResources({
       requestId: "reload-resources",
       projectId: "project",
       threadId: "thread",
-      text: "/reload",
-      images: [],
     });
     expect(harness.clients).toHaveLength(2);
     await expect(registry.getExtensionState("project", "thread")).resolves.toMatchObject({
@@ -508,7 +504,78 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
-  it("keeps an in-flight /reload idempotent beyond the completed-request TTL", async () => {
+  it("reloads Pi resources in the current worker when the extension set is unchanged", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const current = harness.clients[0];
+
+    await expect(
+      registry.reloadResources({ requestId: "reload-current", projectId: "project", threadId: "thread" }),
+    ).resolves.toEqual({ accepted: true, queued: false });
+
+    expect(current?.requests).toContain("reloadResources");
+    expect(current?.requests).not.toContain("prompt");
+    expect(current?.shutdownCount).toBe(0);
+    expect(harness.clients).toHaveLength(1);
+    await registry.dispose();
+  });
+
+  it("keeps same-generation resource reload exclusive", async () => {
+    const reloadGate = deferred<void>();
+    const harness = createHarness(userDataDir, { reloadGate });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    const first = registry.reloadResources({
+      requestId: "exclusive-reload",
+      projectId: "project",
+      threadId: "thread",
+    });
+    await waitFor(() => harness.clients[0]?.requests.includes("reloadResources") === true);
+
+    await expect(
+      registry.prompt({
+        requestId: "prompt-during-reload",
+        projectId: "project",
+        threadId: "thread",
+        text: "blocked",
+        images: [],
+      }),
+    ).rejects.toThrow("is reloading resources");
+    await expect(
+      registry.reloadResources({
+        requestId: "second-reload",
+        projectId: "project",
+        threadId: "thread",
+      }),
+    ).resolves.toMatchObject({ accepted: false, queued: false, error: expect.stringContaining("busy") });
+
+    reloadGate.resolve();
+    await expect(first).resolves.toEqual({ accepted: true, queued: false });
+    await registry.dispose();
+  });
+
+  it("does not interpret /reload inside the generic prompt transport", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const current = harness.clients[0];
+
+    await registry.prompt({
+      requestId: "literal-reload-prompt",
+      projectId: "project",
+      threadId: "thread",
+      text: "/reload",
+      images: [],
+    });
+
+    expect(current?.requests).toContain("prompt");
+    expect(current?.requests).not.toContain("reloadResources");
+    await registry.dispose();
+  });
+
+  it("keeps an in-flight dedicated resource reload idempotent beyond the completed-request TTL", async () => {
     vi.useFakeTimers();
     const shutdownGate = deferred<void>();
     const harness = createHarness(userDataDir, { shutdownGate });
@@ -520,13 +587,11 @@ describe("ThreadWorkerRegistry", () => {
       requestId: "slow-reload",
       projectId: "project",
       threadId: "thread",
-      text: "/reload",
-      images: [],
     };
-    const first = registry.prompt(input);
+    const first = registry.reloadResources(input);
     await vi.waitFor(() => expect(harness.clients[0]?.shutdownCount).toBe(1));
     await vi.advanceTimersByTimeAsync(60_001);
-    const duplicate = registry.prompt(input);
+    const duplicate = registry.reloadResources(input);
     await Promise.resolve();
 
     expect(harness.clients).toHaveLength(1);
@@ -539,19 +604,17 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
-  it("rolls /reload back when replacement startup fails", async () => {
+  it("rolls a dedicated resource reload back when replacement startup fails", async () => {
     const harness = createHarness(userDataDir, { failGeneration: "extensions-broken" });
     const registry = new ThreadWorkerRegistry(harness.options);
     await registry.attach("project", "thread");
     harness.resolveExtensions.mockResolvedValue(extensionSet("project", "extensions-broken"));
 
     await expect(
-      registry.prompt({
+      registry.reloadResources({
         requestId: "reload-failure",
         projectId: "project",
         threadId: "thread",
-        text: "/reload",
-        images: [],
       }),
     ).resolves.toMatchObject({ accepted: false, queued: false, error: expect.any(String) });
 
@@ -881,6 +944,7 @@ function createHarness(
     maxLiveWorkers?: number;
     failGeneration?: string;
     shutdownGate?: ReturnType<typeof deferred<void>>;
+    reloadGate?: ReturnType<typeof deferred<void>>;
     generationReferences?: ThreadWorkerRegistryOptions["generationReferences"];
     extensionApplyJournal?: ThreadWorkerRegistryOptions["extensionApplyJournal"];
   },
@@ -933,6 +997,7 @@ function createHarness(
         overrides?.readyGate,
         overrides?.failGeneration,
         overrides?.shutdownGate,
+        overrides?.reloadGate,
       );
       clients.push(client);
       return client;
@@ -957,17 +1022,20 @@ class FakeWorkerClient implements ThreadWorkerClient {
   private readonly readyGate?: ReturnType<typeof deferred<void>>;
   private readonly failGeneration?: string;
   private readonly shutdownGate?: ReturnType<typeof deferred<void>>;
+  private readonly reloadGate?: ReturnType<typeof deferred<void>>;
 
   constructor(
     options: WorkerClientOptions,
     readyGate?: ReturnType<typeof deferred<void>>,
     failGeneration?: string,
     shutdownGate?: ReturnType<typeof deferred<void>>,
+    reloadGate?: ReturnType<typeof deferred<void>>,
   ) {
     this.options = options;
     this.readyGate = readyGate;
     this.failGeneration = failGeneration;
     this.shutdownGate = shutdownGate;
+    this.reloadGate = reloadGate;
     const sequence = fakeWorkerSequence++;
     this.instanceId = `worker-${sequence}`;
     this.pid = 10_000 + sequence;
@@ -997,6 +1065,10 @@ class FakeWorkerClient implements ThreadWorkerClient {
     this.requests.push(command.type);
     if (command.type === "bootstrap") return this.bootstrap as unknown as T;
     if (command.type === "getSummary") return thread(this.bootstrap.threadId) as unknown as T;
+    if (command.type === "reloadResources") {
+      await this.reloadGate?.promise;
+      return { accepted: true, queued: false } as T;
+    }
     return null as T;
   }
 

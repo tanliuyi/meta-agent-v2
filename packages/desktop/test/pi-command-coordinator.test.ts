@@ -10,6 +10,7 @@ describe("PiCommandCoordinator", () => {
   const prompt = vi.fn();
   const edit = vi.fn();
   const reload = vi.fn();
+  const reloadResources = vi.fn();
   const clearQueue = vi.fn();
   const setText = vi.fn();
   const addAttachment = vi.fn();
@@ -25,12 +26,13 @@ describe("PiCommandCoordinator", () => {
     prompt.mockResolvedValue({ accepted: true, queued: false });
     edit.mockResolvedValue({ accepted: true, queued: false });
     reload.mockResolvedValue({ accepted: true, queued: false });
+    reloadResources.mockResolvedValue({ accepted: true, queued: false });
     addAttachment.mockResolvedValue(undefined);
     getState.mockReturnValue({ text: "current draft" });
     phase = "idle";
     resolveReloadTarget.mockImplementation((parentId: string | null) => parentId);
     vi.stubGlobal("window", {
-      desktop: { sessions: { prompt, edit, reload, clearQueue } },
+      desktop: { sessions: { prompt, edit, reload, reloadResources, clearQueue } },
     });
   });
 
@@ -54,8 +56,12 @@ describe("PiCommandCoordinator", () => {
 
     coordinator.enqueue(userMessage("/reload"), { steer: false });
 
-    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(reloadResources).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(updateNotification).toHaveBeenCalledOnce());
+    expect(reloadResources).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project", threadId: "thread", requestId: expect.any(String) }),
+    );
+    expect(prompt).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({ title: "正在重新加载", tone: "info", duration: 60_000 }),
     );
@@ -68,7 +74,7 @@ describe("PiCommandCoordinator", () => {
   });
 
   it("/reload 未被接受时显示失败 Toast 并恢复 Composer", async () => {
-    prompt.mockResolvedValueOnce({ accepted: false, queued: false, error: "reload blocked" });
+    reloadResources.mockResolvedValueOnce({ accepted: false, queued: false, error: "reload blocked" });
     const coordinator = createCoordinator();
 
     coordinator.enqueue(userMessage("/reload"), { steer: false });

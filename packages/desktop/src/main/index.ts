@@ -433,12 +433,6 @@ app.whenReady().then(async () => {
       if (projectId === GENERAL_WORKSPACE_ID) throw new Error("通用工作区不支持 subagent project scope");
       return projects.getCwd(projectId);
     },
-    getActiveProject: async () => {
-      const project = await projects.getActive();
-      // 通用工作区不是用户项目，不暴露为 subagent 项目级配置目标
-      if (!project || project.id === GENERAL_WORKSPACE_ID) return null;
-      return { id: project.id, cwd: project.cwd };
-    },
   });
   registerIpc(
     projects,

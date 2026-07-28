@@ -18,6 +18,7 @@ import type {
   SessionEditInput,
   SessionPromptInput,
   SessionReloadInput,
+  SessionResourceReloadInput,
   TerminalEvent,
   Thread,
   WorkbenchState,
@@ -483,6 +484,9 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsPrompt, (_event, input: SessionPromptInput) => sessions.prompt(input));
   ipcMain.handle(CHANNELS.sessionsEdit, (_event, input: SessionEditInput) => sessions.edit(input));
   ipcMain.handle(CHANNELS.sessionsReload, (_event, input: SessionReloadInput) => sessions.reload(input));
+  ipcMain.handle(CHANNELS.sessionsReloadResources, (_event, input: SessionResourceReloadInput) =>
+    sessions.reloadResources(input),
+  );
   ipcMain.handle(
     CHANNELS.sessionsBranch,
     (_event, input: SessionBranchInput): Promise<SessionBranchResult> => sessions.branch(input),

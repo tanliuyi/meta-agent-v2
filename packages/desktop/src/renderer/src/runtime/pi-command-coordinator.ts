@@ -180,7 +180,13 @@ export class PiCommandCoordinator {
         })
       : undefined;
     try {
-      const result = await window.desktop.sessions.prompt(input);
+      const result = isResourceReload
+        ? await window.desktop.sessions.reloadResources({
+            requestId: input.requestId,
+            projectId: input.projectId,
+            threadId: input.threadId,
+          })
+        : await window.desktop.sessions.prompt(input);
       assertAccepted(result);
       if (progressNotificationId) {
         this.updateNotification(

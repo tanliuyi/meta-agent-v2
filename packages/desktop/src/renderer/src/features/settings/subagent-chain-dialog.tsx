@@ -30,7 +30,7 @@ interface SubagentChainDialogProps {
   agents: AgentSummary[];
   models: SubagentModelOption[];
   skills: SubagentSkillOption[];
-  projectScopeAvailable: boolean;
+  scope: SubagentSettingsScope;
   saving: boolean;
   onClose(): void;
   onSave(
@@ -57,14 +57,14 @@ export function SubagentChainDialog({
   agents,
   models,
   skills = [],
-  projectScopeAvailable,
+  scope,
   saving,
   onClose,
   onSave,
 }: SubagentChainDialogProps) {
   const name = useRef(chain?.localName ?? chain?.name ?? "");
   const description = useRef(chain?.description ?? "");
-  const scope = useRef<SubagentSettingsScope>(chain?.source === "project" ? "project" : "user");
+  const chainScope = useRef<SubagentSettingsScope>(scope);
   const steps = useRef<ChainStepDraft[]>(
     chain?.steps.length ? chain.steps.map(stepDraft) : [emptyStep(agents[0]?.name)],
   );
@@ -90,7 +90,7 @@ export function SubagentChainDialog({
         progress: step.progress,
       })),
     };
-    if (await onSave(scope.current, config)) onClose();
+    if (await onSave(chainScope.current, config)) onClose();
   }
 
   function updateStep(index: number, change: Partial<ChainStepDraft>): void {
@@ -129,21 +129,7 @@ export function SubagentChainDialog({
             </label>
             <label className="subagent-field">
               <span>作用域</span>
-              <SelectRoot
-                disabled={Boolean(chain)}
-                defaultValue={scope.current}
-                onValueChange={(value) => (scope.current = value as SubagentSettingsScope)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">用户</SelectItem>
-                  <SelectItem value="project" disabled={!projectScopeAvailable}>
-                    项目
-                  </SelectItem>
-                </SelectContent>
-              </SelectRoot>
+              <Input disabled value={scope === "user" ? "个人" : "项目"} />
             </label>
           </div>
           <label className="subagent-field">

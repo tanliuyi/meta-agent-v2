@@ -289,16 +289,18 @@ export type SubagentSettingsMutation =
   | { type: "delete-chain"; chain: string; scope: SubagentSettingsScope }
   | { type: "update-extension-config"; config: Partial<SubagentExtensionConfig> };
 
-export interface GetSubagentSettingsInput {
-  projectId?: string;
-}
+export type SubagentSettingsTarget =
+  | { settingsScope?: "user"; projectId?: undefined }
+  | { settingsScope?: "project"; projectId: string }
+  | { settingsScope: "system"; projectId?: undefined };
 
-export interface SaveSubagentSettingsInput {
+export type GetSubagentSettingsInput = SubagentSettingsTarget;
+
+export type SaveSubagentSettingsInput = SubagentSettingsTarget & {
   requestId: string;
-  projectId?: string;
   expectedSnapshotRevision: string;
   mutation: SubagentSettingsMutation;
-}
+};
 
 export type SaveSubagentSettingsResult =
   | { status: "saved"; snapshot: SubagentSettingsSnapshot }

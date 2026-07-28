@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRegistry, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "../../shared/contracts.ts";
@@ -33,12 +33,12 @@ interface SubagentSettingsConfigServiceOptions {
   builtinAgentsDir: string;
   modelRuntime: ModelRuntime;
   getProjectCwd(projectId: string): string;
-  getActiveProject(): Promise<{ id: string; cwd: string } | null>;
 }
 
 interface ResolvedContext {
   projectId?: string;
   cwd: string;
+  discoveryScope: "user" | "both" | "system";
 }
 
 type BuiltinOverrideInput = Parameters<typeof mergeBuiltinAgentOverride>[3];
@@ -55,7 +55,7 @@ export class SubagentSettingsConfigService {
   }
 
   async getSnapshot(input: GetSubagentSettingsInput = {}): Promise<SubagentSettingsSnapshot> {
-    const context = await this.resolveContext(input.projectId);
+    const context = this.resolveContext(input);
     return this.buildSnapshot(context);
   }
 
@@ -72,9 +72,12 @@ export class SubagentSettingsConfigService {
 
   private async saveConfigLocked(input: SaveSubagentSettingsInput): Promise<SaveSubagentSettingsResult> {
     assertSaveInput(input);
+    if (input.settingsScope === "system" && input.mutation.type !== "update-extension-config") {
+      throw new Error("System subagent settings only allow extension configuration updates");
+    }
     const cached = this.requestResults.get(input.requestId);
     if (cached) return cached;
-    const context = await this.resolveContext(input.projectId);
+    const context = this.resolveContext(input);
     const current = await this.buildSnapshot(context);
     if (current.revision !== input.expectedSnapshotRevision) {
       const result: SaveSubagentSettingsResult = { status: "conflict", current };
@@ -88,14 +91,16 @@ export class SubagentSettingsConfigService {
     return result;
   }
 
-  private async resolveContext(projectId?: string): Promise<ResolvedContext> {
-    if (projectId) return { projectId, cwd: this.options.getProjectCwd(projectId) };
-    const active = await this.options.getActiveProject();
-    return active ? { projectId: active.id, cwd: active.cwd } : { cwd: homedir() };
+  private resolveContext(input: GetSubagentSettingsInput): ResolvedContext {
+    if (input.settingsScope === "system") return { cwd: tmpdir(), discoveryScope: "system" };
+    if (input.projectId) {
+      return { projectId: input.projectId, cwd: this.options.getProjectCwd(input.projectId), discoveryScope: "both" };
+    }
+    return { cwd: tmpdir(), discoveryScope: "user" };
   }
 
   private async buildSnapshot(context: ResolvedContext): Promise<SubagentSettingsSnapshot> {
-    const discovered = discoverAgentsAll(context.cwd);
+    const discovered = discoverAgentsAll(context.cwd, context.discoveryScope);
     await this.options.modelRuntime.refresh({ allowNetwork: false });
     const models = (await this.options.modelRuntime.getAvailable())
       .map((model) => ({
@@ -162,7 +167,7 @@ export class SubagentSettingsConfigService {
         });
         return;
       case "update-agent": {
-        const discovered = discoverAgentsAll(context.cwd);
+        const discovered = discoverAgentsAll(context.cwd, context.discoveryScope);
         const custom = (mutation.scope === "user" ? discovered.user : discovered.project).some(
           (agent) => agent.name === mutation.agent,
         );

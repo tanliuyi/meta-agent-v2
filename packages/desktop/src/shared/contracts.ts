@@ -437,6 +437,12 @@ export interface SessionReloadInput {
   parentId: string | null;
 }
 
+export interface SessionResourceReloadInput {
+  requestId: string;
+  projectId: string;
+  threadId: string;
+}
+
 /** 在指定 entry 处 fork 当前 session 为新 session 文件。position 默认 "at"。 */
 export interface SessionBranchInput {
   requestId: string;

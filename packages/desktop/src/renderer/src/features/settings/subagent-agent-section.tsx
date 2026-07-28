@@ -1,6 +1,6 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Switch } from "@renderer/shared/ui/switch";
-import GitFork from "lucide-react/dist/esm/icons/git-fork.mjs";
+import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import type { AgentSummary } from "../../../../shared/subagent-contracts.ts";
 
@@ -10,6 +10,7 @@ interface SubagentAgentSectionProps {
   mutating: boolean;
   builtin?: boolean;
   readOnly?: boolean;
+  copyLabel?: string;
   onEdit?(agent: AgentSummary): void;
   onToggle?(agent: AgentSummary, disabled: boolean): Promise<boolean>;
   onEject?(agent: AgentSummary): Promise<boolean>;
@@ -21,6 +22,7 @@ export function SubagentAgentSection({
   mutating,
   builtin = false,
   readOnly = false,
+  copyLabel = "复制",
   onEdit,
   onToggle,
   onEject,
@@ -60,8 +62,8 @@ export function SubagentAgentSection({
               ) : null}
               {builtin ? (
                 <Button variant="ghost" size="sm" disabled={mutating} onClick={() => void onEject?.(agent)}>
-                  <GitFork />
-                  弹出到用户级
+                  <Copy />
+                  {copyLabel}
                 </Button>
               ) : null}
             </div>

@@ -27,6 +27,7 @@ export const CHANNELS = {
   sessionsPrompt: "desktop:sessions:prompt",
   sessionsEdit: "desktop:sessions:edit",
   sessionsReload: "desktop:sessions:reload",
+  sessionsReloadResources: "desktop:sessions:reload-resources",
   sessionsBranch: "desktop:sessions:branch",
   sessionsPush: "desktop:sessions:push",
   sessionsCatalogChanged: "desktop:sessions:catalog-changed",

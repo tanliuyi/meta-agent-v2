@@ -1,4 +1,59 @@
-.subagent-settings {
+.subagent-scope-tabs {
+  min-width: 0;
+}
+
+.subagent-scope-tab-list {
+  display: flex;
+  min-width: 0;
+  gap: 2px;
+  margin: 0 0 20px;
+  padding: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.subagent-scope-tab-list [role="tab"] {
+  display: inline-flex;
+  min-width: max-content;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--shape-radius-round);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-control);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease-standard),
+    color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.subagent-scope-tab-list [role="tab"]:hover:not([aria-disabled="true"]) {
+  background: hsl(var(--muted) / 0.65);
+  color: hsl(var(--foreground));
+}
+
+.subagent-scope-tab-list [role="tab"][data-state="active"] {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  font-weight: 500;
+}
+
+.subagent-scope-tab-list [role="tab"]:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+
+.subagent-scope-tab-list [role="tab"][aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.subagent-scope-tab-content {
+  min-width: 0;
+  outline: none;
 }
 
 .subagent-page-heading {

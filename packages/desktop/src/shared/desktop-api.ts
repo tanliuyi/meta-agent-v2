@@ -25,6 +25,7 @@ import type {
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
+  SessionResourceReloadInput,
   TerminalEvent,
   TerminalSnapshot,
   TextFile,
@@ -199,6 +200,7 @@ export interface DesktopApi {
     prompt(input: SessionPromptInput): Promise<SessionCommandResult>;
     edit(input: SessionEditInput): Promise<SessionCommandResult>;
     reload(input: SessionReloadInput): Promise<SessionCommandResult>;
+    reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult>;
     branch(input: SessionBranchInput): Promise<SessionBranchResult>;
     cancel(projectId: string, threadId: string): Promise<void>;
     clearQueue(projectId: string, threadId: string): Promise<ClearedQueue>;
