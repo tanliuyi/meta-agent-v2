@@ -115,13 +115,22 @@ export class SettingsConfigService {
       await handle.close();
       handle = undefined;
       await rename(tempPath, this.path);
-      await chmod(this.path, 0o600);
+      // Post-rename chmod/dir-fsync are best-effort; failures must not roll back the write.
+      try {
+        await chmod(this.path, 0o600);
+      } catch {
+        // best-effort
+      }
       if (process.platform !== "win32") {
-        const directoryHandle = await open(directory, "r");
         try {
-          await directoryHandle.sync();
-        } finally {
-          await directoryHandle.close();
+          const directoryHandle = await open(directory, "r");
+          try {
+            await directoryHandle.sync();
+          } finally {
+            await directoryHandle.close();
+          }
+        } catch {
+          // best-effort
         }
       }
     } finally {

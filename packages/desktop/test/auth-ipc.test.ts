@@ -24,6 +24,7 @@ vi.mock("electron", () => ({
 }));
 
 describe("auth IPC", () => {
+  const refreshActiveModelRuntimes = vi.fn(async () => undefined);
   const auth = {
     getConfig: vi.fn(),
     getConfigRevision: vi.fn(),
@@ -61,7 +62,12 @@ describe("auth IPC", () => {
       {} as never,
       {} as never,
       dirtyGuard as never,
-      { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
+      {
+        getStatus: vi.fn(),
+        install: vi.fn(),
+        onProgress: vi.fn(),
+        refreshActiveModelRuntimes,
+      },
     );
   });
 
@@ -83,14 +89,26 @@ describe("auth IPC", () => {
     await electron.handles.get(CHANNELS.authOpenConfigExternally)?.(event);
 
     expect(auth.saveConfig).toHaveBeenCalledWith(input);
+    expect(refreshActiveModelRuntimes).toHaveBeenCalledOnce();
     expect(auth.getExternalOpenTarget).toHaveBeenCalledWith();
     expect(electron.openPath).toHaveBeenCalledWith("/agent/auth.json");
   });
 
+  test("keeps a committed auth save successful when an active-runtime refresh fails", async () => {
+    const snapshot = { revision: "saved", providers: [], knownProviders: [] };
+    auth.saveConfig.mockResolvedValue({ status: "saved", snapshot });
+    refreshActiveModelRuntimes.mockRejectedValueOnce(new Error("worker refresh failed"));
+
+    await expect(
+      electron.handles.get(CHANNELS.authSaveConfig)?.({}, { expectedRevision: "one", providers: [] }),
+    ).resolves.toEqual({ status: "saved", snapshot });
+    expect(refreshActiveModelRuntimes).toHaveBeenCalledOnce();
+  });
+
   test("forwards OAuth login events to the requesting renderer", async () => {
     const snapshot = { revision: "oauth", providers: [], knownProviders: [] };
-    auth.loginOauth.mockImplementation(async (_providerId, callbacks) => {
-      callbacks.onProgress("Waiting");
+    auth.loginOauth.mockImplementation(async (_providerId, interaction) => {
+      interaction.notify({ type: "progress", message: "Waiting" });
       return snapshot;
     });
     const sender = {
@@ -109,6 +127,7 @@ describe("auth IPC", () => {
       type: "progress",
       message: "Waiting",
     });
+    expect(refreshActiveModelRuntimes).toHaveBeenCalledOnce();
   });
 
   test("sets dirty synchronously and clears sender state on destruction", () => {

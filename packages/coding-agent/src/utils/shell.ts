@@ -9,17 +9,6 @@ export interface ShellConfig {
 	commandTransport?: "argv" | "stdin";
 }
 
-export function getWindowsBashCandidates(environment: NodeJS.ProcessEnv = process.env): string[] {
-	const paths: string[] = [];
-	const programFiles = environment.ProgramFiles;
-	if (programFiles) paths.push(`${programFiles}\\Git\\bin\\bash.exe`);
-	const programFilesX86 = environment["ProgramFiles(x86)"];
-	if (programFilesX86) paths.push(`${programFilesX86}\\Git\\bin\\bash.exe`);
-	const managedShellPath = environment.PI_CODING_AGENT_MANAGED_BASH_PATH;
-	if (managedShellPath) paths.push(managedShellPath);
-	return paths;
-}
-
 /**
  * Find bash executable on PATH (cross-platform)
  */
@@ -72,7 +61,7 @@ function findBashOnPath(): string | null {
  * Resolve shell configuration based on platform and an optional explicit shell path.
  * Resolution order:
  * 1. User-specified shellPath
- * 2. On Windows: Git Bash in known locations, a managed Bash runtime, then bash on PATH
+ * 2. On Windows: Git Bash in known locations, then bash on PATH
  * 3. On Unix: /bin/bash, then bash on PATH, then fallback to sh
  */
 export function getShellConfig(customShellPath?: string): ShellConfig {
@@ -85,8 +74,17 @@ export function getShellConfig(customShellPath?: string): ShellConfig {
 	}
 
 	if (process.platform === "win32") {
-		// 2. Try system Git Bash, followed by an application-managed Bash runtime.
-		const paths = getWindowsBashCandidates();
+		// 2. Try Git Bash in known locations
+		const paths: string[] = [];
+		const programFiles = process.env.ProgramFiles;
+		if (programFiles) {
+			paths.push(`${programFiles}\\Git\\bin\\bash.exe`);
+		}
+		const programFilesX86 = process.env["ProgramFiles(x86)"];
+		if (programFilesX86) {
+			paths.push(`${programFilesX86}\\Git\\bin\\bash.exe`);
+		}
+
 		for (const path of paths) {
 			if (existsSync(path)) {
 				return getBashShellConfig(path);
@@ -104,7 +102,7 @@ export function getShellConfig(customShellPath?: string): ShellConfig {
 				`  1. Install Git for Windows: https://git-scm.com/download/win\n` +
 				`  2. Add your bash to PATH (Cygwin, MSYS2, etc.)\n` +
 				"  3. Set shellPath in settings.json\n\n" +
-				`Searched Bash candidates:\n${paths.map((p) => `  ${p}`).join("\n")}`,
+				`Searched Git Bash in:\n${paths.map((p) => `  ${p}`).join("\n")}`,
 		);
 	}
 

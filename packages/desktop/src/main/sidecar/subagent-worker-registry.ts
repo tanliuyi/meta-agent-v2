@@ -1,7 +1,7 @@
 import { closeSync, openSync, readSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { JsonValue, SessionBootstrap, SessionPushPayload, Thread } from "../../shared/contracts.ts";
-import type { SidecarEvent } from "../../shared/sidecar-contracts.ts";
+import type { ModelConfigurationRevision, SidecarEvent } from "../../shared/sidecar-contracts.ts";
 import type {
   SubagentHostRequest,
   SubagentRunEvent,
@@ -40,6 +40,7 @@ interface SubagentWorkerRecord {
 export interface SubagentWorkerRegistryOptions {
   manifest: NodeRuntimeManifest;
   agentDir: string;
+  shellPath?: string;
   log?(scope: string, text: string): void;
   createWorkerClient?(options: WorkerClientOptions): SubagentWorkerClient;
   catalogChanged?(thread: Thread): void;
@@ -99,6 +100,27 @@ export class SubagentWorkerRegistry {
     return true;
   }
 
+  async refreshAllModels(revision: ModelConfigurationRevision): Promise<void> {
+    const records = [...this.records.values()];
+    const results = await Promise.allSettled(
+      records.map((record) => record.client.request({ type: "refreshModelConfiguration", revision })),
+    );
+    const failures = results.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [
+            new Error(
+              `Subagent model refresh failed for ${records[index]?.request.runId}/${
+                records[index]?.request.childIndex
+              }: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+              { cause: result.reason },
+            ),
+          ]
+        : [],
+    );
+    if (failures.length > 0)
+      throw new AggregateError(failures, "One or more subagent workers failed to refresh models");
+  }
+
   async cancelThread(projectId: string, parentThreadId: string): Promise<void> {
     const records = [...this.records.values()].filter(
       ({ request }) => request.projectId === projectId && request.parentThreadId === parentThreadId,
@@ -133,6 +155,7 @@ export class SubagentWorkerRegistry {
       runId: request.runId,
       childIndex: request.childIndex,
       agentDir: this.options.agentDir,
+      ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
     };
     let record!: SubagentWorkerRecord;
     const clientOptions: WorkerClientOptions = {

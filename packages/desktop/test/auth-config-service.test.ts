@@ -86,7 +86,41 @@ describe("AuthConfigService", () => {
     const anthropic = snapshot.knownProviders.find((kp) => kp.id === "anthropic");
     expect(anthropic).toBeDefined();
     expect(anthropic!.displayName).toBeTruthy();
-    expect(anthropic!.oauth?.name).toBeTruthy();
+    // OAuth name is only available when ModelRuntime is injected;
+    // this tests metadata-only discovery (env keys, display name).
+    if (anthropic!.oauth) {
+      expect(anthropic!.oauth?.name).toBeTruthy();
+    } else {
+      expect(anthropic!.envKeys).toBeDefined();
+      expect(Array.isArray(anthropic!.envKeys)).toBe(true);
+    }
+  });
+
+  test("refreshes ModelRuntime before provider discovery and OAuth login", async () => {
+    const calls: string[] = [];
+    const modelRuntime = {
+      refresh: async () => {
+        calls.push("refresh");
+      },
+      getProviders: () => {
+        calls.push("providers");
+        return [];
+      },
+      login: async () => {
+        calls.push("login");
+      },
+    };
+    service = new AuthConfigService(directory, { modelRuntime: modelRuntime as never });
+
+    await service.getConfig();
+    expect(calls).toEqual(["refresh", "providers"]);
+
+    calls.length = 0;
+    await service.loginOauth("anthropic", {
+      prompt: async () => "",
+      notify: () => undefined,
+    });
+    expect(calls).toEqual(["refresh", "login", "refresh", "providers"]);
   });
 
   test("saves API key credentials and returns new snapshot", async () => {

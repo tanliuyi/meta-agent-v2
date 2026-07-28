@@ -40,7 +40,11 @@ function authSnapshot(revision: string, providers: AuthProviderDraft[] = []): Au
   };
 }
 
-function createService(models: ModelsConfigSnapshot, auth: AuthConfigSnapshot) {
+function createService(
+  models: ModelsConfigSnapshot,
+  auth: AuthConfigSnapshot,
+  modelRuntime?: { getProviderAuthStatus(providerId: string): { configured: boolean; source?: string } },
+) {
   const modelsService = {
     getConfig: vi.fn(async () => models),
     createBackup: vi.fn(async () => ({ snapshot: models, exists: models.exists, source: "" })),
@@ -54,7 +58,7 @@ function createService(models: ModelsConfigSnapshot, auth: AuthConfigSnapshot) {
     saveConfig: vi.fn(),
   };
   return {
-    service: new ProvidersConfigService(modelsService as never, authService as never),
+    service: new ProvidersConfigService(modelsService as never, authService as never, modelRuntime as never),
     modelsService,
     authService,
   };
@@ -74,6 +78,34 @@ describe("ProvidersConfigService", () => {
         credentialStatus: "configured",
       }),
     );
+  });
+
+  test("uses refreshed ModelRuntime auth status instead of treating env variable names as available credentials", async () => {
+    const runtime = {
+      getProviderAuthStatus: vi.fn((providerId: string) =>
+        providerId === "anthropic" ? { configured: false } : { configured: true, source: "environment" },
+      ),
+    };
+    const { service } = createService(modelsSnapshot("m0"), authSnapshot("a0"), runtime);
+
+    const snapshot = await service.getConfig();
+
+    expect(snapshot.providers.find(({ key }) => key === "anthropic")?.credentialStatus).toBe("missing");
+    expect(snapshot.providers.some(({ credentialStatus }) => credentialStatus === "env-available")).toBe(true);
+  });
+
+  test("reports a stored but unresolved credential as missing for a known provider", async () => {
+    const runtime = {
+      getProviderAuthStatus: () => ({ configured: true, source: "stored" }),
+      getModels: (providerId: string) => (providerId === "anthropic" ? [{ id: "model" }] : []),
+      hasConfiguredAuth: () => false,
+    };
+    const auth = authSnapshot("a0", [{ key: "anthropic", apiKey: { key: "$MISSING_ANTHROPIC_KEY" } }]);
+    const { service } = createService(modelsSnapshot("m0"), auth, runtime);
+
+    const snapshot = await service.getConfig();
+
+    expect(snapshot.providers.find(({ key }) => key === "anthropic")?.credentialStatus).toBe("missing");
   });
 
   test("does not rewrite models.json for an auth-only change", async () => {

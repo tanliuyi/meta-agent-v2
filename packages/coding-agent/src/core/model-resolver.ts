@@ -3,19 +3,12 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import {
-	type Api,
-	clampThinkingLevel,
-	getSupportedThinkingLevels,
-	type KnownProvider,
-	type Model,
-	modelsAreEqual,
-} from "@earendil-works/pi-ai";
+import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
-import type { ModelRegistry } from "./model-registry.ts";
+import type { ModelRuntime } from "./model-runtime.ts";
 
 /** Default model IDs for each known provider */
 export const defaultModelPerProvider: Record<KnownProvider, string> = {
@@ -33,7 +26,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"github-copilot": "gpt-5.4",
 	openrouter: "moonshotai/kimi-k2.6",
 	"vercel-ai-gateway": "zai/glm-5.1",
-	xai: "grok-4.20-0309-reasoning",
+	xai: "grok-4.5",
 	groq: "openai/gpt-oss-120b",
 	cerebras: "zai-glm-4.7",
 	zai: "glm-5.1",
@@ -51,6 +44,8 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"kimi-coding": "kimi-for-coding",
 	"cloudflare-workers-ai": "@cf/moonshotai/kimi-k2.6",
 	"cloudflare-ai-gateway": "workers-ai/@cf/moonshotai/kimi-k2.6",
+	"qwen-token-plan": "qwen3.7-max",
+	"qwen-token-plan-cn": "qwen3.7-max",
 	xiaomi: "mimo-v2.5-pro",
 	"xiaomi-token-plan-cn": "mimo-v2.5-pro",
 	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
@@ -265,6 +260,7 @@ export function parseModelPattern(
  */
 export interface ModelScopeDiagnostic {
 	type: "warning";
+	code: "no-match" | "invalid-thinking-level";
 	message: string;
 	pattern: string;
 }
@@ -276,9 +272,9 @@ export interface ResolveModelScopeResult {
 
 export async function resolveModelScopeWithDiagnostics(
 	patterns: string[],
-	modelRegistry: ModelRegistry,
+	modelRuntime: ModelRuntime,
 ): Promise<ResolveModelScopeResult> {
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = [...(await modelRuntime.getAvailable())];
 	const scopedModels: ScopedModel[] = [];
 	const diagnostics: ModelScopeDiagnostic[] = [];
 
@@ -298,6 +294,14 @@ export async function resolveModelScopeWithDiagnostics(
 				}
 			}
 
+			const exactMatch = findExactModelReferenceMatch(globPattern, availableModels);
+			if (exactMatch) {
+				if (!scopedModels.find((sm) => modelsAreEqual(sm.model, exactMatch))) {
+					scopedModels.push({ model: exactMatch, thinkingLevel });
+				}
+				continue;
+			}
+
 			// Match against "provider/modelId" format OR just model ID
 			// This allows "*sonnet*" to match without requiring "anthropic/*sonnet*"
 			const matchingModels = availableModels.filter((m) => {
@@ -306,7 +310,12 @@ export async function resolveModelScopeWithDiagnostics(
 			});
 
 			if (matchingModels.length === 0) {
-				diagnostics.push({ type: "warning", message: `No models match pattern "${pattern}"`, pattern });
+				diagnostics.push({
+					type: "warning",
+					code: "no-match",
+					message: `No models match pattern "${pattern}"`,
+					pattern,
+				});
 				continue;
 			}
 
@@ -321,11 +330,16 @@ export async function resolveModelScopeWithDiagnostics(
 		const { model, thinkingLevel, warning } = parseModelPattern(pattern, availableModels);
 
 		if (warning) {
-			diagnostics.push({ type: "warning", message: warning, pattern });
+			diagnostics.push({ type: "warning", code: "invalid-thinking-level", message: warning, pattern });
 		}
 
 		if (!model) {
-			diagnostics.push({ type: "warning", message: `No models match pattern "${pattern}"`, pattern });
+			diagnostics.push({
+				type: "warning",
+				code: "no-match",
+				message: `No models match pattern "${pattern}"`,
+				pattern,
+			});
 			continue;
 		}
 
@@ -338,8 +352,8 @@ export async function resolveModelScopeWithDiagnostics(
 	return { scopedModels, diagnostics };
 }
 
-export async function resolveModelScope(patterns: string[], modelRegistry: ModelRegistry): Promise<ScopedModel[]> {
-	const { scopedModels, diagnostics } = await resolveModelScopeWithDiagnostics(patterns, modelRegistry);
+export async function resolveModelScope(patterns: string[], modelRuntime: ModelRuntime): Promise<ScopedModel[]> {
+	const { scopedModels, diagnostics } = await resolveModelScopeWithDiagnostics(patterns, modelRuntime);
 	for (const diagnostic of diagnostics) {
 		console.warn(chalk.yellow(`Warning: ${diagnostic.message}`));
 	}
@@ -372,9 +386,9 @@ export function resolveCliModel(options: {
 	cliProvider?: string;
 	cliModel?: string;
 	cliThinking?: ThinkingLevel;
-	modelRegistry: ModelRegistry;
+	modelRuntime: ModelRuntime;
 }): ResolveCliModelResult {
-	const { cliProvider, cliModel, cliThinking, modelRegistry } = options;
+	const { cliProvider, cliModel, cliThinking, modelRuntime } = options;
 
 	if (!cliModel) {
 		return { model: undefined, warning: undefined, error: undefined };
@@ -382,7 +396,7 @@ export function resolveCliModel(options: {
 
 	// Important: use *all* models here, not just models with pre-configured auth.
 	// This allows "--api-key" to be used for first-time setup.
-	const availableModels = modelRegistry.getAll();
+	const availableModels = [...modelRuntime.getModels()];
 	if (availableModels.length === 0) {
 		return {
 			model: undefined,
@@ -462,8 +476,8 @@ export function resolveCliModel(options: {
 			const rawExactMatches = availableModels.filter(
 				(m) => m.id.toLowerCase() === cliModel.toLowerCase() && !modelsAreEqual(m, model),
 			);
-			if (rawExactMatches.length > 0 && !modelRegistry.hasConfiguredAuth(model)) {
-				const authenticatedRawMatches = rawExactMatches.filter((m) => modelRegistry.hasConfiguredAuth(m));
+			if (rawExactMatches.length > 0 && !modelRuntime.hasConfiguredAuth(model.provider)) {
+				const authenticatedRawMatches = rawExactMatches.filter((m) => modelRuntime.hasConfiguredAuth(m.provider));
 				if (authenticatedRawMatches.length === 1) {
 					return {
 						model: authenticatedRawMatches[0],
@@ -547,23 +561,6 @@ export interface InitialModelResult {
 	fallbackMessage: string | undefined;
 }
 
-export interface ThinkingConfiguration {
-	thinkingLevel: ThinkingLevel;
-	thinkingLevels: ThinkingLevel[];
-}
-
-/** 使用与 AgentSession 相同的模型能力规则解析 thinking。 */
-export function resolveThinkingConfiguration(
-	model: Model<Api> | undefined,
-	requestedLevel: ThinkingLevel,
-): ThinkingConfiguration {
-	if (!model) return { thinkingLevel: "off", thinkingLevels: ["off"] };
-	return {
-		thinkingLevel: clampThinkingLevel(model, requestedLevel) as ThinkingLevel,
-		thinkingLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
-	};
-}
-
 /**
  * Find the initial model to use based on priority:
  * 1. CLI args (provider + model)
@@ -580,7 +577,7 @@ export async function findInitialModel(options: {
 	defaultProvider?: string;
 	defaultModelId?: string;
 	defaultThinkingLevel?: ThinkingLevel;
-	modelRegistry: ModelRegistry;
+	modelRuntime: ModelRuntime;
 }): Promise<InitialModelResult> {
 	const {
 		cliProvider,
@@ -590,7 +587,7 @@ export async function findInitialModel(options: {
 		defaultProvider,
 		defaultModelId,
 		defaultThinkingLevel,
-		modelRegistry,
+		modelRuntime,
 	} = options;
 
 	let model: Model<Api> | undefined;
@@ -601,7 +598,7 @@ export async function findInitialModel(options: {
 		const resolved = resolveCliModel({
 			cliProvider,
 			cliModel,
-			modelRegistry,
+			modelRuntime,
 		});
 		if (resolved.error) {
 			console.error(chalk.red(resolved.error));
@@ -623,8 +620,8 @@ export async function findInitialModel(options: {
 
 	// 3. Try saved default from settings if auth is configured.
 	if (defaultProvider && defaultModelId) {
-		const found = modelRegistry.find(defaultProvider, defaultModelId);
-		if (found && modelRegistry.hasConfiguredAuth(found)) {
+		const found = modelRuntime.getModel(defaultProvider, defaultModelId);
+		if (found && modelRuntime.hasConfiguredAuth(found.provider)) {
 			model = found;
 			if (defaultThinkingLevel) {
 				thinkingLevel = defaultThinkingLevel;
@@ -634,7 +631,7 @@ export async function findInitialModel(options: {
 	}
 
 	// 4. Try first available model with valid API key
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = [...(await modelRuntime.getAvailable())];
 
 	if (availableModels.length > 0) {
 		// Try to find a default model from known providers
@@ -662,12 +659,12 @@ export async function restoreModelFromSession(
 	savedModelId: string,
 	currentModel: Model<Api> | undefined,
 	shouldPrintMessages: boolean,
-	modelRegistry: ModelRegistry,
+	modelRuntime: ModelRuntime,
 ): Promise<{ model: Model<Api> | undefined; fallbackMessage: string | undefined }> {
-	const restoredModel = modelRegistry.find(savedProvider, savedModelId);
+	const restoredModel = modelRuntime.getModel(savedProvider, savedModelId);
 
 	// Check if restored model exists and still has auth configured
-	const hasConfiguredAuth = restoredModel ? modelRegistry.hasConfiguredAuth(restoredModel) : false;
+	const hasConfiguredAuth = restoredModel ? modelRuntime.hasConfiguredAuth(restoredModel.provider) : false;
 
 	if (restoredModel && hasConfiguredAuth) {
 		if (shouldPrintMessages) {
@@ -695,7 +692,7 @@ export async function restoreModelFromSession(
 	}
 
 	// Try to find any available model
-	const availableModels = await modelRegistry.getAvailable();
+	const availableModels = [...(await modelRuntime.getAvailable())];
 
 	if (availableModels.length > 0) {
 		// Try to find a default model from known providers

@@ -1,9 +1,7 @@
 import {
   createAgentSessionServices,
-  findInitialModel,
-  type ModelRegistry,
+  type ModelRuntime,
   type ResourceLoader,
-  resolveThinkingConfiguration,
   type SessionManager,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -18,10 +16,11 @@ import {
   extensionLoadDiagnostics,
   extensionServiceDiagnostics,
 } from "./desktop-extension-runtime-policy.ts";
+import { resolveThinkingConfiguration, selectInitialModel } from "./model-selection-adapter.ts";
 import { getDraftCommands } from "./session-commands.ts";
 
 export interface SessionConfigurationServices {
-  models: ModelRegistry;
+  models: ModelRuntime;
   settings: SettingsManager;
   resources?: ResourceLoader;
 }
@@ -34,7 +33,7 @@ export async function loadDraftSessionConfig(
   resolvedExtensionSet?: ResolvedExtensionSet,
 ): Promise<DraftSessionConfig> {
   const extensionSet = resolvedExtensionSet ?? fallbackExtensionSet(cwd);
-  let models: ModelRegistry;
+  let models: ModelRuntime;
   let settings: SettingsManager;
   let resources: ResourceLoader | undefined;
   let serviceDiagnostics: Array<{ type: string; message: string }> = [];
@@ -49,21 +48,18 @@ export async function loadDraftSessionConfig(
         DesktopBuiltinProviderRegistry.getExtensionFactories(),
       ),
     });
-    models = runtimeServices.modelRegistry;
+    models = runtimeServices.modelRuntime;
     settings = runtimeServices.settingsManager;
     resources = runtimeServices.resourceLoader;
     serviceDiagnostics = runtimeServices.diagnostics;
   }
-  const initial = await findInitialModel({
-    scopedModels: [],
-    isContinuing: false,
-    defaultProvider: settings.getDefaultProvider(),
-    defaultModelId: settings.getDefaultModel(),
-    defaultThinkingLevel: settings.getDefaultThinkingLevel(),
-    modelRegistry: models,
+  const available = await models.getAvailable();
+  const initial = selectInitialModel(models, available, {
+    provider: settings.getDefaultProvider(),
+    modelId: settings.getDefaultModel(),
+    thinkingLevel: settings.getDefaultThinkingLevel(),
   });
   const requestedThinking = settings.getDefaultThinkingLevel() ?? initial.thinkingLevel;
-  const available = models.getAvailable();
   const thinking = resolveThinkingConfiguration(initial.model, requestedThinking);
   return {
     models: available.map((model) => ({
@@ -78,7 +74,7 @@ export async function loadDraftSessionConfig(
     model: initial.model ? { provider: initial.model.provider, id: initial.model.id, name: initial.model.name } : null,
     thinkingLevel: thinking.thinkingLevel,
     thinkingLevels: thinking.thinkingLevels,
-    readiness: sessionReadiness(Boolean(initial.model), available.length, models.getAll().length),
+    readiness: sessionReadiness(Boolean(initial.model), available.length, models.getModels().length),
     extensions: {
       extensionSetGeneration: extensionSet.generation,
       diagnostics: [
@@ -92,23 +88,24 @@ export async function loadDraftSessionConfig(
 /** 校验 renderer 选择并转换为 createAgentSession 的精确输入。 */
 export function resolveSessionCreateSelection(
   input: SessionCreateInput,
-  models: ModelRegistry,
-): { model: NonNullable<ReturnType<ModelRegistry["find"]>>; thinkingLevel: ThinkingLevel } {
-  const model = models.find(input.model.provider, input.model.id);
+  models: ModelRuntime,
+): { model: NonNullable<ReturnType<ModelRuntime["getModel"]>>; thinkingLevel: ThinkingLevel } {
+  const model = models.getModel(input.model.provider, input.model.id);
   if (!model) throw new Error(`模型不存在: ${input.model.provider}/${input.model.id}`);
-  if (!models.hasConfiguredAuth(model)) throw new Error(`模型凭据不可用: ${input.model.provider}/${input.model.id}`);
+  if (!models.hasConfiguredAuth(model.provider))
+    throw new Error(`模型凭据不可用: ${input.model.provider}/${input.model.id}`);
   return { model, thinkingLevel: resolveThinkingConfiguration(model, input.thinkingLevel).thinkingLevel };
 }
 
 /** 恢复已有会话时显式带上 session 文件记录的 model/thinking，包括尚无消息的空 thread。 */
 export function resolveSessionResumeSelection(
   sessionManager: SessionManager,
-  models: ModelRegistry,
-): { model: NonNullable<ReturnType<ModelRegistry["find"]>>; thinkingLevel: ThinkingLevel } | undefined {
+  models: ModelRuntime,
+): { model: NonNullable<ReturnType<ModelRuntime["getModel"]>>; thinkingLevel: ThinkingLevel } | undefined {
   const context = sessionManager.buildSessionContext();
   if (!context.model) return undefined;
-  const model = models.find(context.model.provider, context.model.modelId);
-  if (!model || !models.hasConfiguredAuth(model)) return undefined;
+  const model = models.getModel(context.model.provider, context.model.modelId);
+  if (!model || !models.hasConfiguredAuth(model.provider)) return undefined;
   return {
     model,
     thinkingLevel: resolveThinkingConfiguration(model, context.thinkingLevel as ThinkingLevel).thinkingLevel,

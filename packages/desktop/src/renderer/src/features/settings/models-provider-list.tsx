@@ -1,8 +1,7 @@
-import type { ModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
 import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import { useMemo, useState } from "react";
-import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
+import type { ModelsConfigMetadata, ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import { TooltipIconButton } from "../../components/assistant-ui/tooltip-icon-button.tsx";
 
 interface ModelsProviderListProps {

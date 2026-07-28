@@ -6,9 +6,9 @@
  * credential status.
  */
 
-import type { ModelsModelDefinition } from "@earendil-works/pi-coding-agent/models-config";
 import type { AuthProviderDraft, AuthProviderInfo } from "./auth-config-contracts.ts";
 import type {
+  ModelsBuiltInModelMetadata,
   ModelsCompatDraft,
   ModelsConfigPath,
   ModelsModelDraft,
@@ -16,11 +16,7 @@ import type {
   ModelsProviderDraft,
 } from "./models-config-contracts.ts";
 
-export type ProviderBuiltInModelMetadata = ModelsModelDefinition & {
-  id: string;
-  name: string;
-  api: string;
-};
+export type ProviderBuiltInModelMetadata = ModelsBuiltInModelMetadata;
 
 export interface ProvidersConfigMetadata {
   knownApis: string[];

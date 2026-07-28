@@ -23,7 +23,12 @@ import type {
   ResolvedExtensionSet,
   StaleDraftExtensionSetErrorDetails,
 } from "../../shared/desktop-extension-contracts.ts";
-import type { CreationReservation, SidecarEvent, ThreadWorkerBinding } from "../../shared/sidecar-contracts.ts";
+import type {
+  CreationReservation,
+  ModelConfigurationRevision,
+  SidecarEvent,
+  ThreadWorkerBinding,
+} from "../../shared/sidecar-contracts.ts";
 import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
 import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
 import type {
@@ -70,6 +75,7 @@ export interface ThreadWorkerRegistryOptions {
   metadata: MetadataWorkerClient;
   userDataDir: string;
   agentDir: string;
+  shellPath?: string;
   extensionSourcePolicy: DesktopExtensionSourcePolicy;
   generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
   extensionApplyJournal?: Pick<
@@ -268,6 +274,7 @@ export class ThreadWorkerRegistry {
       projectId: input.projectId,
       cwd,
       agentDir: this.options.agentDir,
+      ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
       sessionId,
       createInput: input,
       extensionSet,
@@ -397,37 +404,22 @@ export class ThreadWorkerRegistry {
   private async reloadResourcesOnce(
     projectId: string,
     threadId: string,
-    requestId: string,
+    _requestId: string,
   ): Promise<SessionCommandResult> {
-    const key = workerKey(projectId, threadId);
-    return this.use(projectId, threadId, async (record) => {
-      const desired = await this.options.extensionSourcePolicy.resolve(projectId);
-      const previousSet = cloneExtensionSet(record.extensionSet);
-      record.desiredExtensionGeneration = desired.generation;
-      record.desiredExtensionDiagnostics = desired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
-      this.options.generationReferences?.retain(`thread:${record.client.instanceId}`, desired);
-      record.extensionSet = cloneExtensionSet(desired);
-      try {
-        const result = await record.client.request<SessionCommandResult>(
-          { type: "reloadResources", requestId, extensionSet: desired },
-          null,
-        );
-        if (!result.accepted) {
-          this.options.generationReferences?.retain(`thread:${record.client.instanceId}`, previousSet);
-          record.extensionSet = previousSet;
-        }
-        const latestDesired = await this.options.extensionSourcePolicy.resolve(projectId).catch(() => desired);
-        record.desiredExtensionGeneration = latestDesired.generation;
-        record.desiredExtensionDiagnostics = latestDesired.diagnostics.map((diagnostic) => ({ ...diagnostic }));
-        return result;
-      } catch (error) {
-        this.options.generationReferences?.retain(`thread:${record.client.instanceId}`, previousSet);
-        record.extensionSet = previousSet;
-        this.options.resync(projectId, threadId, "extension-reload-failed");
-        this.retireAfterReloadFailure(key, record, error);
-        throw error;
+    const desired = await this.options.extensionSourcePolicy.resolve(projectId);
+    try {
+      const result = await this.applyExtensionSet(projectId, threadId, desired.generation);
+      if (result.status === "rolled-back") {
+        return { accepted: false, queued: false, error: result.error };
       }
-    });
+      return { accepted: true, queued: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("commands are in flight") || message.includes("confirm abort")) {
+        return { accepted: false, queued: false, error: message };
+      }
+      throw error;
+    }
   }
 
   async branch(input: SessionBranchInput): Promise<SessionBranchResult> {
@@ -451,6 +443,26 @@ export class ThreadWorkerRegistry {
 
   async refreshModels(projectId: string, threadId: string): Promise<void> {
     await this.use(projectId, threadId, (record) => record.client.request({ type: "refreshModels" }));
+  }
+
+  async refreshAllModels(revision: ModelConfigurationRevision): Promise<void> {
+    const records = [...this.records.values()].filter((record) => !record.retired && record.client.available !== false);
+    const results = await Promise.allSettled(
+      records.map((record) => record.client.request({ type: "refreshModelConfiguration", revision })),
+    );
+    const failures = results.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [
+            new Error(
+              `Thread model refresh failed for ${records[index]?.projectId}/${records[index]?.threadId}: ${
+                result.reason instanceof Error ? result.reason.message : String(result.reason)
+              }`,
+              { cause: result.reason },
+            ),
+          ]
+        : [],
+    );
+    if (failures.length > 0) throw new AggregateError(failures, "One or more thread workers failed to refresh models");
   }
 
   async setModel(projectId: string, threadId: string, provider: string, modelId: string): Promise<void> {
@@ -533,6 +545,7 @@ export class ThreadWorkerRegistry {
               projectId,
               cwd: this.options.getCwd(projectId),
               agentDir: this.options.agentDir,
+              ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
               threadId,
               sessionFile,
               extensionSet: desired,
@@ -572,6 +585,7 @@ export class ThreadWorkerRegistry {
               projectId,
               cwd: this.options.getCwd(projectId),
               agentDir: this.options.agentDir,
+              ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
               threadId,
               sessionFile,
               extensionSet: previousSet,
@@ -847,6 +861,7 @@ export class ThreadWorkerRegistry {
         projectId,
         cwd,
         agentDir: this.options.agentDir,
+        ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
         threadId,
         sessionFile: session.path,
         extensionSet,
@@ -1031,16 +1046,6 @@ export class ThreadWorkerRegistry {
     if (record.retired) return;
     record.retired = true;
     this.beginRecordShutdown(record);
-    if (this.records.get(key) !== record || record.failureReported) return;
-    record.failureReported = true;
-    this.options.failed(record.projectId, record.threadId, error instanceof Error ? error : new Error(String(error)));
-  }
-
-  private retireAfterReloadFailure(key: string, record: WorkerRecord, error: unknown): void {
-    if (!record.retired) {
-      record.retired = true;
-      this.beginRecordShutdown(record);
-    }
     if (this.records.get(key) !== record || record.failureReported) return;
     record.failureReported = true;
     this.options.failed(record.projectId, record.threadId, error instanceof Error ? error : new Error(String(error)));

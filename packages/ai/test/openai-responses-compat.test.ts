@@ -4,12 +4,14 @@ import { stream as streamOpenAIResponses } from "../src/api/openai-responses.ts"
 import { getModel } from "../src/compat.ts";
 import type { Model } from "../src/types.ts";
 
+type CapturedHeaders = Headers | string[][] | Record<string, string | readonly string[] | undefined> | undefined;
+
 interface CapturedResponsesPayload {
 	prompt_cache_key?: string;
 	session_id?: string;
 }
 
-function getHeader(headers: RequestInit["headers"], name: string): string | null {
+function getHeader(headers: CapturedHeaders, name: string): string | null {
 	if (!headers) return null;
 	if (headers instanceof Headers) return headers.get(name);
 
@@ -20,7 +22,8 @@ function getHeader(headers: RequestInit["headers"], name: string): string | null
 	}
 
 	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === lowerName) return value ?? null;
+		if (key.toLowerCase() !== lowerName || value === undefined) continue;
+		return typeof value === "string" ? value : value.join(", ");
 	}
 	return null;
 }

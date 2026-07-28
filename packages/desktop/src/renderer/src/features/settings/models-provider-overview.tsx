@@ -1,7 +1,6 @@
-import type { ModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
 import { Button } from "@renderer/shared/ui/button";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
-import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
+import type { ModelsConfigMetadata, ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 
 interface ModelsProviderOverviewProps {
   provider: ModelsProviderDraft;

@@ -1,4 +1,3 @@
-import type { ModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Select } from "@renderer/components/assistant-ui/select/select";
 import { Button } from "@renderer/shared/ui/button";
@@ -7,7 +6,7 @@ import { Input } from "@renderer/shared/ui/input";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useEffect, useState } from "react";
-import type { ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
+import type { ModelsConfigMetadata, ModelsProviderDraft } from "../../../../shared/models-config-contracts.ts";
 import { ModelsCompatEditor } from "./models-compat-editor.tsx";
 import { ModelsMapEditor } from "./models-map-editor.tsx";
 import { ModelsModelForm } from "./models-model-form.tsx";

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AuthStorage, getShellConfig, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { getShellConfig, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { app, BrowserWindow, Menu } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
@@ -13,6 +13,7 @@ import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-
 import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, broadcastThreadCatalogUpdate, registerIpc } from "./ipc.ts";
+import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "./plugins/default-plugin-marketplace.ts";
@@ -48,7 +49,7 @@ import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
 import { ProjectStore } from "./store/project-store.ts";
 import { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
-import { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
+import { createTerminalShellResolver, TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
 import { AutoUpdateService, scheduleAutoUpdateChecks } from "./updater.ts";
 import { WindowDirtyGuard } from "./window-dirty-guard.ts";
 
@@ -243,8 +244,6 @@ app.whenReady().then(async () => {
       resourcesPath: process.resourcesPath,
       appDir,
     });
-  if (managedBashPath) process.env.PI_CODING_AGENT_MANAGED_BASH_PATH = managedBashPath;
-  else delete process.env.PI_CODING_AGENT_MANAGED_BASH_PATH;
   const generalWorkspaceCwd = join(userDataDir, "workspaces", "general");
   const projects = new ProjectStore(
     join(userDataDir, "desktop-state.json"),
@@ -257,8 +256,14 @@ app.whenReady().then(async () => {
   const models = new ModelsConfigService(agentDir, {
     log: (text) => sidecarLog?.write("models", text),
   });
+  const authModelRuntime = await ModelRuntime.create({
+    credentials: new FileCredentialStore(join(agentDir, "auth.json")),
+    modelsPath: join(agentDir, "models.json"),
+    allowModelNetwork: false,
+  });
   const auth = new AuthConfigService(agentDir, {
     log: (text) => sidecarLog?.write("auth", text),
+    modelRuntime: authModelRuntime,
   });
   const settings = new SettingsConfigService(userDataDir);
   const builtinExtensions = DesktopControlledExtensionRegistry.getBuiltinDefinitions();
@@ -360,6 +365,7 @@ app.whenReady().then(async () => {
   subagents = new SubagentWorkerRegistry({
     manifest: runtimeManifest,
     agentDir,
+    ...(managedBashPath ? { shellPath: managedBashPath } : {}),
     log: (scope, text) => sidecarLog?.write(scope, text),
     catalogChanged: broadcastThreadCatalogUpdate,
     persistSession: (projectId, sessionFile, thread) =>
@@ -375,6 +381,7 @@ app.whenReady().then(async () => {
     metadata,
     userDataDir,
     agentDir,
+    ...(managedBashPath ? { shellPath: managedBashPath } : {}),
     extensionSourcePolicy,
     generationReferences: marketplaceGenerationReferences,
     extensionApplyJournal: marketplaceApplyJournal,
@@ -402,8 +409,13 @@ app.whenReady().then(async () => {
   });
   supervisor = startedSupervisor;
   sessions = startedSupervisor;
-  terminals = new TerminalSupervisor(projects, broadcastTerminalEvent);
-  const providers = new ProvidersConfigService(models, auth);
+  terminals = new TerminalSupervisor(
+    projects,
+    broadcastTerminalEvent,
+    createTerminalShellResolver(agentDir, managedBashPath),
+  );
+  const providers = new ProvidersConfigService(models, auth, authModelRuntime);
+  let modelConfigurationGeneration = 0;
   const subagentSettings = new SubagentSettingsConfigService({
     agentDir,
     builtinAgentsDir: join(
@@ -415,7 +427,7 @@ app.whenReady().then(async () => {
       "pi-subagents",
       "agents",
     ),
-    modelRegistry: ModelRegistry.create(AuthStorage.create(join(agentDir, "auth.json")), join(agentDir, "models.json")),
+    modelRuntime: authModelRuntime,
     getProjectCwd: (projectId) => {
       // 通用工作区不是用户项目，不用于 subagent project-scoped 配置
       if (projectId === GENERAL_WORKSPACE_ID) throw new Error("通用工作区不支持 subagent project scope");
@@ -445,6 +457,18 @@ app.whenReady().then(async () => {
       },
       install: () => installer.install(),
       onProgress: (listener) => installer.onProgress(listener),
+      refreshActiveModelRuntimes: async () => {
+        modelConfigurationGeneration += 1;
+        const revision = { generation: modelConfigurationGeneration };
+        const results = await Promise.allSettled([
+          workers.refreshAllModels(revision),
+          subagents!.refreshAllModels(revision),
+        ]);
+        const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+        if (failures.length > 0) {
+          throw new AggregateError(failures, "Failed to refresh one or more active model runtimes");
+        }
+      },
       shell: {
         getStatus: async () => {
           const activeProject = await projects.getActive();

@@ -1,4 +1,4 @@
-import type { OAuthLoginCallbacks, OAuthSelectPrompt } from "@earendil-works/pi-ai/oauth";
+import type { AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
 import type {
   AuthConfigSnapshot,
   AuthOauthLoginEvent,
@@ -9,6 +9,7 @@ import type {
 interface PendingRequest {
   resolve(value: string | undefined): void;
   reject(error: Error): void;
+  cleanup(): void;
 }
 
 interface LoginSession {
@@ -18,7 +19,7 @@ interface LoginSession {
 }
 
 interface OauthLoginCoordinatorDependencies {
-  login(providerId: string, callbacks: OAuthLoginCallbacks): Promise<AuthConfigSnapshot>;
+  login(providerId: string, interaction: AuthInteraction): Promise<AuthConfigSnapshot>;
   createId?(): string;
 }
 
@@ -50,59 +51,80 @@ export class OauthLoginCoordinator {
 
     const request = (
       event: Omit<Extract<AuthOauthLoginEvent, { type: "request" }>, "loginId" | "requestId">,
+      signal?: AbortSignal,
     ): Promise<string | undefined> => {
       const requestId = this.createId();
       return new Promise((resolve, reject) => {
-        session.pending.set(requestId, { resolve, reject });
+        const abort = () => {
+          session.pending.delete(requestId);
+          reject(new Error("Login cancelled"));
+        };
+        const cleanup = () => signal?.removeEventListener("abort", abort);
+        session.pending.set(requestId, { resolve, reject, cleanup });
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
         emit({ ...event, loginId: input.loginId, requestId });
+      });
+    };
+
+    const prompt = (authPrompt: AuthPrompt): Promise<string> => {
+      const response = request(
+        {
+          type: "request",
+          requestType:
+            authPrompt.type === "select" ? "select" : authPrompt.type === "manual_code" ? "manual-code" : "prompt",
+          message: authPrompt.message,
+          ...(authPrompt.type === "select" ? { options: [...authPrompt.options] } : {}),
+          ...("placeholder" in authPrompt && authPrompt.placeholder ? { placeholder: authPrompt.placeholder } : {}),
+          ...(authPrompt.type !== "select" && "allowEmpty" in authPrompt && authPrompt.allowEmpty
+            ? { allowEmpty: true }
+            : {}),
+        },
+        authPrompt.signal,
+      );
+      return response.then((value) => {
+        if (value === undefined) throw new Error("Login cancelled");
+        return value;
       });
     };
 
     try {
       return await this.login(input.providerId, {
-        onAuth: (info) => {
-          emit({ loginId: input.loginId, type: "auth", ...info });
-          void openExternal(info.url).catch((error: unknown) => {
-            const message = error instanceof Error ? error.message : String(error);
-            emit({ loginId: input.loginId, type: "progress", message: `无法自动打开浏览器: ${message}` });
-          });
-        },
-        onDeviceCode: (info) => {
-          emit({
-            loginId: input.loginId,
-            type: "device-code",
-            verificationUri: info.verificationUri,
-            userCode: info.userCode,
-            ...(info.expiresInSeconds === undefined ? {} : { expiresInSeconds: info.expiresInSeconds }),
-          });
-          void openExternal(info.verificationUri).catch((error: unknown) => {
-            const message = error instanceof Error ? error.message : String(error);
-            emit({ loginId: input.loginId, type: "progress", message: `无法自动打开浏览器: ${message}` });
-          });
-        },
-        onPrompt: async (prompt) => {
-          const value = await request({ type: "request", requestType: "prompt", ...prompt });
-          if (value === undefined) throw new Error("Login cancelled");
-          return value;
-        },
-        onProgress: (message) => emit({ loginId: input.loginId, type: "progress", message }),
-        onSelect: (prompt: OAuthSelectPrompt) =>
-          request({
-            type: "request",
-            requestType: "select",
-            message: prompt.message,
-            options: prompt.options,
-          }),
-        onManualCodeInput: () =>
-          request({
-            type: "request",
-            requestType: "manual-code",
-            message: "粘贴重定向 URL，或在浏览器中完成登录",
-          }).then((value) => {
-            if (value === undefined) throw new Error("Login cancelled");
-            return value;
-          }),
         signal: session.abortController.signal,
+        prompt,
+        notify: (event) => {
+          if (event.type === "auth_url") {
+            emit({ loginId: input.loginId, type: "auth", url: event.url, instructions: event.instructions });
+            void openExternal(event.url).catch((error: unknown) => {
+              const message = error instanceof Error ? error.message : String(error);
+              emit({ loginId: input.loginId, type: "progress", message: `无法自动打开浏览器: ${message}` });
+            });
+          } else if (event.type === "device_code") {
+            emit({
+              loginId: input.loginId,
+              type: "device-code",
+              verificationUri: event.verificationUri,
+              userCode: event.userCode,
+              ...(event.expiresInSeconds === undefined ? {} : { expiresInSeconds: event.expiresInSeconds }),
+            });
+            void openExternal(event.verificationUri).catch((error: unknown) => {
+              const message = error instanceof Error ? error.message : String(error);
+              emit({ loginId: input.loginId, type: "progress", message: `无法自动打开浏览器: ${message}` });
+            });
+          } else if (event.type === "info") {
+            emit({
+              loginId: input.loginId,
+              type: "info",
+              message: event.message,
+              ...(event.links ? { links: [...event.links] } : {}),
+            });
+          } else {
+            emit({ loginId: input.loginId, type: "progress", message: event.message });
+          }
+        },
       });
     } finally {
       this.finish(input.loginId);
@@ -115,6 +137,7 @@ export class OauthLoginCoordinator {
     const pending = session.pending.get(response.requestId);
     if (!pending) throw new Error("Unknown OAuth prompt request");
     session.pending.delete(response.requestId);
+    pending.cleanup();
     pending.resolve(response.canceled ? undefined : (response.value ?? ""));
   }
 
@@ -122,7 +145,10 @@ export class OauthLoginCoordinator {
     const session = this.sessions.get(loginId);
     if (!session || session.ownerId !== ownerId) return;
     session.abortController.abort();
-    for (const pending of session.pending.values()) pending.reject(new Error("Login cancelled"));
+    for (const pending of session.pending.values()) {
+      pending.cleanup();
+      pending.reject(new Error("Login cancelled"));
+    }
     session.pending.clear();
   }
 
@@ -135,7 +161,10 @@ export class OauthLoginCoordinator {
   private finish(loginId: string): void {
     const session = this.sessions.get(loginId);
     if (!session) return;
-    for (const pending of session.pending.values()) pending.resolve(undefined);
+    for (const pending of session.pending.values()) {
+      pending.cleanup();
+      pending.resolve(undefined);
+    }
     session.pending.clear();
     this.sessions.delete(loginId);
   }

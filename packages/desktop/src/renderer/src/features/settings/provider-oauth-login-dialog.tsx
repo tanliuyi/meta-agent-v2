@@ -27,6 +27,7 @@ interface ProviderOauthLoginDialogProps {
 export function ProviderOauthLoginDialog({ state, onClose }: ProviderOauthLoginDialogProps) {
   const auth = useMemo(() => state.events.findLast((event) => event.type === "auth"), [state.events]);
   const deviceCode = useMemo(() => state.events.findLast((event) => event.type === "device-code"), [state.events]);
+  const info = useMemo(() => state.events.findLast((event) => event.type === "info"), [state.events]);
   const progress = useMemo(() => state.events.findLast((event) => event.type === "progress"), [state.events]);
   const request = useMemo(() => state.events.findLast((event) => event.type === "request"), [state.events]);
   const [value, setValue] = useState("");
@@ -89,6 +90,25 @@ export function ProviderOauthLoginDialog({ state, onClose }: ProviderOauthLoginD
           </div>
         ) : null}
 
+        {info?.type === "info" ? (
+          <div className="grid gap-1 rounded-md border p-3 text-sm">
+            <span>{info.message}</span>
+            {info.links?.map((link) => (
+              <a
+                key={link.url}
+                href={link.url}
+                className="break-all text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void window.desktop.links.open("", link.url);
+                }}
+              >
+                {link.label ?? link.url}
+              </a>
+            ))}
+          </div>
+        ) : null}
+
         {activeRequest ? (
           <div className="grid gap-2">
             <label className="text-sm font-medium">{activeRequest.message}</label>
@@ -96,7 +116,10 @@ export function ProviderOauthLoginDialog({ state, onClose }: ProviderOauthLoginD
               <Select
                 value={value}
                 placeholder="请选择"
-                options={(activeRequest.options ?? []).map((option) => ({ value: option.id, label: option.label }))}
+                options={(activeRequest.options ?? []).map((option) => ({
+                  value: option.id,
+                  label: option.description ? `${option.label} — ${option.description}` : option.label,
+                }))}
                 onValueChange={setValue}
               />
             ) : (

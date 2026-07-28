@@ -43,6 +43,27 @@ describe("PiThreadProjector", () => {
       result: { content: [{ type: "text", text: "result" }] },
     });
     expect(snapshot.headId).toBe("c");
+    expect(assistantNode.usage).toEqual(assistant.usage);
+    projector.dispose();
+  });
+
+  it("显式忽略 summarization retry 与 bash execution update 事件", () => {
+    const { session } = sessionHarness([messageEntry("assistant", null, assistantMessage("stop", 1, []))]);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const before = projector.snapshot();
+
+    projector.handle({
+      type: "summarization_retry_scheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 100,
+      errorMessage: "transient",
+    });
+    projector.handle({ type: "summarization_retry_attempt_start", source: "branchSummary" });
+    projector.handle({ type: "summarization_retry_finished" });
+    projector.handle({ type: "bash_execution_update", id: "bash-1", delta: "output" });
+
+    expect(projector.snapshot()).toEqual(before);
     projector.dispose();
   });
 

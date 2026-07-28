@@ -49,6 +49,7 @@ const REENTRANT_CONTROL_COMMANDS = new Set<SidecarCommand["type"]>([
   "cancel",
   "clearQueue",
   "setThinking",
+  "refreshModelConfiguration",
   "respondHostUi",
   "subagentBootstrap",
   "subagentCancel",

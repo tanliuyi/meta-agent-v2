@@ -88,7 +88,8 @@ describe("models settings components", () => {
           config: {
             allowEmptySignature: true,
             supportsTemperature: false,
-            zaiToolStream: true,
+            supportsOpenAIGrammarTools: true,
+            supportsStrictTools: true,
             openRouterRouting: {},
             vercelGatewayRouting: {},
           },
@@ -100,7 +101,8 @@ describe("models settings components", () => {
     for (const field of [
       "allowEmptySignature",
       "supportsTemperature",
-      "zaiToolStream",
+      "supportsOpenAIGrammarTools",
+      "supportsStrictTools",
       "supportsToolSearch",
       "maxTokensField",
       "thinkingFormat",

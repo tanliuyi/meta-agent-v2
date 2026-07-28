@@ -79,10 +79,12 @@ export type SubagentWorkerBinding = {
   runId: string;
   childIndex: number;
   agentDir: string;
+  shellPath?: string;
 };
 
 export type SubagentWorkerCommand =
   | { type: "subagentRun"; request: SubagentRunRequest }
+  | { type: "refreshModelConfiguration"; revision: { generation: number } }
   | { type: "subagentBootstrap" }
   | { type: "subagentCancel"; runId: string }
   | { type: "subagentSteer"; runId: string; message: string }

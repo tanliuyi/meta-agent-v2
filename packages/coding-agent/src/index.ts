@@ -23,17 +23,7 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
-// Auth and model registry
-export {
-	type ApiKeyCredential,
-	type AuthCredential,
-	type AuthStatus,
-	AuthStorage,
-	type AuthStorageBackend,
-	FileAuthStorageBackend,
-	InMemoryAuthStorageBackend,
-	type OAuthCredential,
-} from "./core/auth-storage.ts";
+export { readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {
 	type BranchPreparation,
@@ -52,6 +42,7 @@ export {
 	type GenerateBranchSummaryOptions,
 	generateBranchSummary,
 	generateSummary,
+	generateSummaryWithUsage,
 	getLastAssistantUsage,
 	prepareBranchEntries,
 	serializeConversation,
@@ -99,7 +90,6 @@ export type {
 	ExtensionShortcut,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
-	ExtensionUINotificationOptions,
 	ExtensionWidgetOptions,
 	FindToolCallEvent,
 	GrepToolCallEvent,
@@ -110,8 +100,11 @@ export type {
 	KeybindingsManager,
 	LoadExtensionsResult,
 	LsToolCallEvent,
+	MessageEndEvent,
 	MessageRenderer,
 	MessageRenderOptions,
+	MessageStartEvent,
+	MessageUpdateEvent,
 	ProjectTrustContext,
 	ProjectTrustEvent,
 	ProjectTrustEventDecision,
@@ -139,7 +132,10 @@ export type {
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolDefinition,
+	ToolExecutionEndEvent,
 	ToolExecutionMode,
+	ToolExecutionStartEvent,
+	ToolExecutionUpdateEvent,
 	ToolInfo,
 	ToolRenderResultOptions,
 	ToolResultEvent,
@@ -172,38 +168,18 @@ export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts"
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
-	findInitialModel,
-	type InitialModelResult,
 	type ModelScopeDiagnostic,
 	type ResolveCliModelResult,
 	type ResolveModelScopeResult,
 	resolveCliModel,
 	resolveModelScopeWithDiagnostics,
-	resolveThinkingConfiguration,
 	type ScopedModel,
-	type ThinkingConfiguration,
 } from "./core/model-resolver.ts";
 export {
-	formatModelsConfigDiagnostics,
-	getModelsConfigMetadata,
-	type ModelsAnthropicMessagesCompat,
-	type ModelsBuiltInModelMetadata,
-	type ModelsChatTemplateKwarg,
-	type ModelsCompat,
-	type ModelsCompatWithoutFreeMaps,
-	type ModelsConfig,
-	type ModelsConfigDiagnostic,
-	type ModelsConfigMetadata,
-	type ModelsConfigParseResult,
-	type ModelsConfigValidationResult,
-	type ModelsModelDefinition,
-	type ModelsModelOverride,
-	type ModelsOpenAICompletionsCompat,
-	type ModelsOpenAIResponsesCompat,
-	type ModelsProviderConfig,
-	parseModelsConfigSource,
-	validateModelsConfigValue,
-} from "./core/models-config.ts";
+	type CreateModelRuntimeOptions,
+	ModelRuntime,
+	type ModelRuntimeAuthOverrides,
+} from "./core/model-runtime.ts";
 export type {
 	PackageManager,
 	PathMetadata,

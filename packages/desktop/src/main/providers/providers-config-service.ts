@@ -6,7 +6,7 @@
  * plus their credential status. Save writes to both files sequentially.
  */
 
-import { getModelsConfigMetadata } from "@earendil-works/pi-coding-agent/models-config";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type {
   AuthConfigDiagnostic,
   AuthConfigSnapshot,
@@ -29,21 +29,24 @@ import type {
   SaveProvidersResult,
 } from "../../shared/providers-config-contracts.ts";
 import type { AuthConfigService } from "../auth/auth-config-service.ts";
+import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
 import type { ModelsConfigBackup, ModelsConfigService } from "../models/models-config-service.ts";
 import { DesktopBuiltinProviderRegistry } from "../pi/desktop-builtin-provider.ts";
 
 export class ProvidersConfigService {
   private readonly models: ModelsConfigService;
   private readonly auth: AuthConfigService;
+  private readonly modelRuntime?: ModelRuntime;
 
-  constructor(models: ModelsConfigService, auth: AuthConfigService) {
+  constructor(models: ModelsConfigService, auth: AuthConfigService, modelRuntime?: ModelRuntime) {
     this.models = models;
     this.auth = auth;
+    this.modelRuntime = modelRuntime;
   }
 
   async getConfig(): Promise<ProvidersSnapshot> {
     const [modelsSnapshot, authSnapshot] = await Promise.all([this.models.getConfig(), this.auth.getConfig()]);
-    return buildSnapshot(modelsSnapshot, authSnapshot);
+    return buildSnapshot(modelsSnapshot, authSnapshot, this.modelRuntime);
   }
 
   async getExternalOpenTarget(): Promise<string> {
@@ -64,13 +67,19 @@ export class ProvidersConfigService {
       baselineModels.revision !== input.expectedModelsRevision ||
       baselineAuth.revision !== input.expectedAuthRevision
     ) {
-      return { status: "conflict", current: await buildSnapshot(baselineModels, baselineAuth) };
+      return {
+        status: "conflict",
+        current: await buildSnapshot(baselineModels, baselineAuth, this.modelRuntime),
+      };
     }
 
     const modelsChanged = !draftsEqual(input.modelsProviders, baselineModels.providers);
     const authChanged = !draftsEqual(input.authProviders, baselineAuth.providers);
     if (!modelsChanged && !authChanged) {
-      return { status: "saved", snapshot: await buildSnapshot(baselineModels, baselineAuth) };
+      return {
+        status: "saved",
+        snapshot: await buildSnapshot(baselineModels, baselineAuth, this.modelRuntime),
+      };
     }
 
     let savedModels = baselineModels;
@@ -90,7 +99,7 @@ export class ProvidersConfigService {
       if (modelsResult.status === "conflict") {
         return {
           status: "conflict",
-          current: await buildSnapshot(modelsResult.current, await this.auth.getConfig()),
+          current: await buildSnapshot(modelsResult.current, await this.auth.getConfig(), this.modelRuntime),
         };
       }
       if (modelsResult.status === "confirmation-required") {
@@ -108,7 +117,10 @@ export class ProvidersConfigService {
       savedModels = modelsResult.snapshot;
     }
 
-    if (!authChanged) return { status: "saved", snapshot: await buildSnapshot(savedModels, baselineAuth) };
+    if (!authChanged) {
+      await this.refreshModelRuntime();
+      return { status: "saved", snapshot: await buildSnapshot(savedModels, baselineAuth, this.modelRuntime) };
+    }
 
     let authResult: SaveAuthConfigResult;
     try {
@@ -129,10 +141,21 @@ export class ProvidersConfigService {
           diagnostics: authResult.diagnostics.map((diagnostic) => ({ ...diagnostic, source: "auth" as const })),
         };
       }
-      return { status: "conflict", current: await buildSnapshot(restoredModels, authResult.current) };
+      return {
+        status: "conflict",
+        current: await buildSnapshot(restoredModels, authResult.current, this.modelRuntime),
+      };
     }
 
-    return { status: "saved", snapshot: await buildSnapshot(savedModels, authResult.snapshot) };
+    await this.refreshModelRuntime();
+    return {
+      status: "saved",
+      snapshot: await buildSnapshot(savedModels, authResult.snapshot, this.modelRuntime),
+    };
+  }
+
+  private async refreshModelRuntime(): Promise<void> {
+    await this.modelRuntime?.refresh({ allowNetwork: false });
   }
 
   private rollbackModels(savedModels: ModelsConfigSnapshot, backup: ModelsConfigBackup): Promise<ModelsConfigSnapshot> {
@@ -144,7 +167,11 @@ export class ProvidersConfigService {
 // Snapshot builder
 // =============================================================================
 
-function buildSnapshot(modelsSnapshot: ModelsConfigSnapshot, authSnapshot: AuthConfigSnapshot): ProvidersSnapshot {
+function buildSnapshot(
+  modelsSnapshot: ModelsConfigSnapshot,
+  authSnapshot: AuthConfigSnapshot,
+  modelRuntime?: ModelRuntime,
+): ProvidersSnapshot {
   const coreMetadata = getModelsConfigMetadata() as ProvidersConfigMetadata;
   const desktopInfos = DesktopBuiltinProviderRegistry.getProviderInfos();
   const desktopProviders = desktopInfos.filter(
@@ -187,6 +214,7 @@ function buildSnapshot(modelsSnapshot: ModelsConfigSnapshot, authSnapshot: AuthC
         authSnapshot,
         desktopInfos,
         bp.defaultConfig,
+        modelRuntime,
       ),
     );
   }
@@ -196,7 +224,17 @@ function buildSnapshot(modelsSnapshot: ModelsConfigSnapshot, authSnapshot: AuthC
     if (allKeys.has(dp.id)) continue;
     allKeys.add(dp.id);
     entries.push(
-      makeEntry(dp.id, dp.displayName, "desktop-builtin", dp.models.length, modelsSnapshot, authSnapshot, desktopInfos),
+      makeEntry(
+        dp.id,
+        dp.displayName,
+        "desktop-builtin",
+        dp.models.length,
+        modelsSnapshot,
+        authSnapshot,
+        desktopInfos,
+        undefined,
+        modelRuntime,
+      ),
     );
   }
 
@@ -204,14 +242,36 @@ function buildSnapshot(modelsSnapshot: ModelsConfigSnapshot, authSnapshot: AuthC
   for (const mp of modelsSnapshot.providers) {
     if (allKeys.has(mp.key)) continue;
     allKeys.add(mp.key);
-    entries.push(makeEntry(mp.key, mp.config.name || mp.key, "custom", 0, modelsSnapshot, authSnapshot, desktopInfos));
+    entries.push(
+      makeEntry(
+        mp.key,
+        typeof mp.config.name === "string" && mp.config.name ? mp.config.name : mp.key,
+        "custom",
+        0,
+        modelsSnapshot,
+        authSnapshot,
+        desktopInfos,
+        undefined,
+        modelRuntime,
+      ),
+    );
   }
   for (const ap of authSnapshot.providers) {
     if (allKeys.has(ap.key)) continue;
     allKeys.add(ap.key);
     const known = knownProviders.find((provider) => provider.id === ap.key);
     entries.push(
-      makeEntry(ap.key, known?.displayName ?? ap.key, "custom", 0, modelsSnapshot, authSnapshot, desktopInfos),
+      makeEntry(
+        ap.key,
+        known?.displayName ?? ap.key,
+        "custom",
+        0,
+        modelsSnapshot,
+        authSnapshot,
+        desktopInfos,
+        undefined,
+        modelRuntime,
+      ),
     );
   }
 
@@ -250,12 +310,13 @@ function makeEntry(
     defaultConfig: ProviderEntry["defaultConfig"];
   }>,
   builtInDefaultConfig?: ProviderEntry["defaultConfig"],
+  modelRuntime?: ModelRuntime,
 ): ProviderEntry {
   const modelsCfg = modelsSnapshot.providers.find((p) => p.key === key);
   const authCfg = authSnapshot.providers.find((p) => p.key === key);
   const desktopInfo = desktopInfos.find((d) => d.id === key);
 
-  const credentialStatus = computeCredentialStatus(modelsCfg, authCfg, key, desktopInfo?.envKeys);
+  const credentialStatus = computeCredentialStatus(modelsCfg, authCfg, key, desktopInfo?.envKeys, modelRuntime);
 
   return {
     key,
@@ -266,12 +327,12 @@ function makeEntry(
     defaultConfig: builtInDefaultConfig ?? desktopInfo?.defaultConfig,
     providerConfig: modelsCfg
       ? {
-          name: modelsCfg.config.name,
-          baseUrl: modelsCfg.config.baseUrl,
-          api: modelsCfg.config.api,
-          apiKey: modelsCfg.config.apiKey,
-          oauth: modelsCfg.config.oauth,
-          authHeader: modelsCfg.config.authHeader,
+          name: optionalString(modelsCfg.config.name),
+          baseUrl: optionalString(modelsCfg.config.baseUrl),
+          api: optionalString(modelsCfg.config.api),
+          apiKey: optionalString(modelsCfg.config.apiKey),
+          oauth: optionalString(modelsCfg.config.oauth),
+          authHeader: optionalBoolean(modelsCfg.config.authHeader),
           headers: modelsCfg.headers.map((h) => ({
             key: h.key,
             value: typeof h.value === "string" ? h.value : String(h.value ?? ""),
@@ -288,12 +349,23 @@ function makeEntry(
 function computeCredentialStatus(
   modelsCfg: ModelsProviderDraft | undefined,
   authCfg: AuthProviderDraft | undefined,
-  _providerKey: string,
+  providerKey: string,
   envKeys?: string[],
+  modelRuntime?: ModelRuntime,
 ): ProviderEntry["credentialStatus"] {
+  const runtimeStatus = modelRuntime?.getProviderAuthStatus(providerKey);
+  if (runtimeStatus?.configured && modelRuntime) {
+    if (runtimeStatus.source === "stored") {
+      const knownProvider =
+        modelsCfg !== undefined || envKeys !== undefined || modelRuntime.getModels(providerKey).length > 0;
+      if (knownProvider && !modelRuntime.hasConfiguredAuth(providerKey)) return "missing";
+    }
+    return runtimeStatus.source === "environment" ? "env-available" : "configured";
+  }
+  if (runtimeStatus && !runtimeStatus.configured) return "missing";
   if (authCfg?.apiKey?.key || authCfg?.oauth) return "configured";
   if (modelsCfg?.config.apiKey) return "configured";
-  if (envKeys && envKeys.length > 0) return "env-available";
+  if (envKeys?.some((key) => Boolean(process.env[key]))) return "env-available";
   return "missing";
 }
 
@@ -317,6 +389,14 @@ function toCredentialDraft(authCfg: AuthProviderDraft | undefined): ProviderCred
     };
   }
   return undefined;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function draftsEqual<T>(left: T[], right: T[]): boolean {

@@ -54,9 +54,9 @@ const BOOLEAN_FIELDS = [
     hint: "启用推理时，回放的 assistant 消息必须带空的 reasoning_content 字段",
   },
   {
-    key: "zaiToolStream",
-    label: "z.ai 工具流式输出",
-    hint: "z.ai 是否支持 tool_stream: true 流式返回工具调用",
+    key: "supportsOpenAIGrammarTools",
+    label: "支持 OpenAI grammar 工具",
+    hint: "工具定义是否支持 OpenAI grammar 格式",
   },
   {
     key: "supportsStrictMode",
@@ -102,6 +102,11 @@ const BOOLEAN_FIELDS = [
     key: "allowEmptySignature",
     label: "允许空思考签名",
     hint: '思考签名为空时按 signature: "" 回放，而不是转成文本',
+  },
+  {
+    key: "supportsStrictTools",
+    label: "支持严格工具定义",
+    hint: "Anthropic 工具定义是否支持 strict 字段",
   },
   {
     key: "supportsToolReferences",
