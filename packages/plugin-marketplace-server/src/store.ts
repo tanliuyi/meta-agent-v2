@@ -5,6 +5,7 @@ import { buildSignedArtifact, referencePayloadFiles } from "./artifact-builder.t
 import { type ListPluginsInput, listPluginPage, type PluginAggregates } from "./catalog-query.ts";
 import { parseCatalogDocument } from "./catalog-validation.ts";
 import type {
+	AdminUserView,
 	ArtifactTarget,
 	CatalogDocument,
 	CatalogRevocation,
@@ -20,8 +21,11 @@ import type {
 	StoredArtifact,
 	StoredPlugin,
 	StoredPluginVersion,
+	UserRole,
 } from "./contracts.ts";
 import { canonicalJson, type MarketplaceSigningService } from "./signing-service.ts";
+import { type ArtifactStorage, artifactObjectKey } from "./storage/artifact-storage.ts";
+import { DATABASE_SCHEMA } from "./storage/database-schema.ts";
 
 export interface MarketplaceStoreOptions {
 	databaseUrl: string;
@@ -29,18 +33,21 @@ export interface MarketplaceStoreOptions {
 	signing: MarketplaceSigningService;
 	marketplaceId: string;
 	clock(): number;
+	artifactStorage: ArtifactStorage;
 }
 
 export interface StoredUser {
 	id: number;
 	username: string;
 	passwordHash: string;
+	role: UserRole;
 	createdAt: number;
 }
 
 export interface SessionUser {
 	userId: number;
 	username: string;
+	role: UserRole;
 	createdAt: number;
 }
 
@@ -48,6 +55,7 @@ export interface ArtifactUploadContext {
 	pluginName: string;
 	publisherId: string;
 	desktop: StoredPluginVersion["desktop"];
+	configuration?: StoredPluginVersion["configuration"];
 	capabilities: string[];
 	artifact: { id: string; target: ArtifactTarget; entry: string };
 }
@@ -79,98 +87,6 @@ types.setTypeParser(INT8_OID, (value) => {
 	return parsed;
 });
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS meta (
-	key TEXT PRIMARY KEY,
-	value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS publishers (
-	id TEXT PRIMARY KEY,
-	display_name TEXT NOT NULL,
-	verified BOOLEAN NOT NULL DEFAULT FALSE
-);
-CREATE TABLE IF NOT EXISTS users (
-	id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-	username TEXT NOT NULL UNIQUE,
-	password_hash TEXT NOT NULL,
-	created_at BIGINT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-	token_hash TEXT PRIMARY KEY,
-	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	created_at BIGINT NOT NULL,
-	expires_at BIGINT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS publisher_members (
-	publisher_id TEXT NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
-	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	PRIMARY KEY (publisher_id, user_id)
-);
-CREATE TABLE IF NOT EXISTS plugins (
-	id TEXT PRIMARY KEY,
-	name TEXT NOT NULL,
-	description TEXT NOT NULL,
-	publisher_id TEXT NOT NULL REFERENCES publishers(id),
-	categories TEXT NOT NULL,
-	icon_asset_id TEXT,
-	published_at BIGINT NOT NULL,
-	updated_at BIGINT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS plugin_versions (
-	plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
-	version TEXT NOT NULL,
-	status TEXT NOT NULL,
-	draft BOOLEAN NOT NULL DEFAULT FALSE,
-	changelog TEXT NOT NULL,
-	published_at BIGINT NOT NULL,
-	desktop TEXT NOT NULL,
-	capabilities TEXT NOT NULL,
-	PRIMARY KEY (plugin_id, version)
-);
-CREATE TABLE IF NOT EXISTS plugin_artifacts (
-	plugin_id TEXT NOT NULL,
-	version TEXT NOT NULL,
-	artifact_id TEXT NOT NULL,
-	target TEXT NOT NULL,
-	contains_native_code BOOLEAN NOT NULL,
-	preferred BOOLEAN NOT NULL,
-	entry TEXT NOT NULL,
-	sha256 TEXT,
-	size INTEGER,
-	bytes BYTEA,
-	manifest TEXT,
-	signature TEXT,
-	PRIMARY KEY (plugin_id, version, artifact_id),
-	FOREIGN KEY (plugin_id, version) REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS ratings (
-	plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
-	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	stars INTEGER NOT NULL,
-	review TEXT,
-	updated_at BIGINT NOT NULL,
-	PRIMARY KEY (plugin_id, user_id)
-);
-CREATE TABLE IF NOT EXISTS downloads (
-	plugin_id TEXT NOT NULL,
-	version TEXT NOT NULL,
-	artifact_id TEXT NOT NULL,
-	count INTEGER NOT NULL DEFAULT 0,
-	PRIMARY KEY (plugin_id, version, artifact_id),
-	FOREIGN KEY (plugin_id, version) REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS revocations (
-	id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-	plugin_id TEXT NOT NULL,
-	version TEXT NOT NULL,
-	artifact_ids TEXT,
-	status TEXT NOT NULL,
-	reason_code TEXT NOT NULL,
-	message TEXT NOT NULL,
-	replacement_version TEXT
-);
-`;
-
 interface PluginRow {
 	id: string;
 	name: string;
@@ -192,6 +108,7 @@ interface VersionRow {
 	changelog: string;
 	published_at: number;
 	desktop: string;
+	configuration: string | null;
 	capabilities: string;
 }
 
@@ -209,11 +126,13 @@ interface ArtifactRow {
 export class MarketplaceStore {
 	private readonly pool: Pool;
 	private readonly clock: () => number;
+	private readonly artifactStorage: ArtifactStorage;
 	private closed = false;
 
-	private constructor(pool: Pool, clock: () => number) {
+	private constructor(pool: Pool, clock: () => number, artifactStorage: ArtifactStorage) {
 		this.pool = pool;
 		this.clock = clock;
+		this.artifactStorage = artifactStorage;
 	}
 
 	static async open(options: MarketplaceStoreOptions): Promise<MarketplaceStore> {
@@ -243,16 +162,18 @@ export class MarketplaceStore {
 
 		let store: MarketplaceStore;
 		try {
+			await options.artifactStorage.ensureReady();
 			const client = await pool.connect();
 			try {
 				if (poolOptions.schema) {
 					await client.query(`CREATE SCHEMA IF NOT EXISTS "${poolOptions.schema}"`);
 				}
-				await client.query(SCHEMA);
+				await client.query(DATABASE_SCHEMA);
+				await migrateLegacyArtifactBytes(client, options.artifactStorage);
 			} finally {
 				client.release();
 			}
-			store = new MarketplaceStore(pool, options.clock);
+			store = new MarketplaceStore(pool, options.clock, options.artifactStorage);
 			await store.seedIfEmpty(catalog, options.signing, options.marketplaceId);
 			return store;
 		} catch (error) {
@@ -302,7 +223,7 @@ export class MarketplaceStore {
 				);
 				for (const version of plugin.versions) {
 					await client.query(
-						"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+						"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
 						[
 							plugin.id,
 							version.version,
@@ -311,6 +232,7 @@ export class MarketplaceStore {
 							version.changelog,
 							version.publishedAt,
 							JSON.stringify(version.desktop),
+							version.configuration ? JSON.stringify(version.configuration) : null,
 							JSON.stringify(version.capabilities),
 						],
 					);
@@ -329,11 +251,17 @@ export class MarketplaceStore {
 							entry,
 							desktop: version.desktop,
 							target: artifact.target,
+							configuration: version.configuration,
 							capabilities: version.capabilities,
 							files,
 						});
+						const objectKey = artifactObjectKey(built.sha256);
+						await this.artifactStorage.put(objectKey, {
+							bytes: built.bytes,
+							contentType: "application/vnd.meta-agent.plugin+zip",
+						});
 						await client.query(
-							"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry, sha256, size, bytes, manifest, signature) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+							"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry, sha256, size, object_key, manifest, signature) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
 							[
 								plugin.id,
 								version.version,
@@ -344,7 +272,7 @@ export class MarketplaceStore {
 								entry,
 								built.sha256,
 								built.size,
-								Buffer.from(built.bytes),
+								objectKey,
 								canonicalJson(built.manifest),
 								JSON.stringify(built.signature),
 							],
@@ -399,12 +327,14 @@ export class MarketplaceStore {
 		artifactId: string,
 	): Promise<ArtifactContent | undefined> {
 		const result = await this.pool.query(
-			"SELECT a.bytes, a.sha256, a.size FROM plugin_artifacts a JOIN plugin_versions v ON v.plugin_id = a.plugin_id AND v.version = a.version WHERE a.plugin_id = $1 AND a.version = $2 AND a.artifact_id = $3 AND v.draft = false AND a.sha256 IS NOT NULL",
+			"SELECT a.object_key, a.sha256, a.size FROM plugin_artifacts a JOIN plugin_versions v ON v.plugin_id = a.plugin_id AND v.version = a.version WHERE a.plugin_id = $1 AND a.version = $2 AND a.artifact_id = $3 AND v.draft = false AND a.sha256 IS NOT NULL AND a.object_key IS NOT NULL",
 			[pluginId, version, artifactId],
 		);
 		if (result.rows.length === 0) return undefined;
-		const row = result.rows[0] as { bytes: Buffer; sha256: string; size: number };
-		return { bytes: row.bytes, sha256: row.sha256, size: row.size };
+		const row = result.rows[0] as { object_key: string; sha256: string; size: number };
+		const bytes = await this.artifactStorage.get(row.object_key, row.size);
+		if (!bytes || bytes.byteLength !== row.size) return undefined;
+		return { bytes, sha256: row.sha256, size: row.size };
 	}
 
 	async getRevocations(): Promise<CatalogRevocation[]> {
@@ -434,17 +364,18 @@ export class MarketplaceStore {
 
 	// --- users and sessions ---
 
-	async createUser(username: string, passwordHash: string): Promise<StoredUser> {
+	async createUser(username: string, passwordHash: string, role: UserRole = "user"): Promise<StoredUser> {
 		const createdAt = Math.trunc(this.clock());
 		try {
 			const result = await this.pool.query(
-				"INSERT INTO users (username, password_hash, created_at) VALUES ($1, $2, $3) RETURNING id",
-				[username, passwordHash, createdAt],
+				"INSERT INTO users (username, password_hash, role, created_at) VALUES ($1, $2, $3, $4) RETURNING id",
+				[username, passwordHash, role, createdAt],
 			);
 			return {
 				id: result.rows[0].id as number,
 				username,
 				passwordHash,
+				role,
 				createdAt,
 			};
 		} catch (error: unknown) {
@@ -455,12 +386,57 @@ export class MarketplaceStore {
 
 	async getUserByUsername(username: string): Promise<StoredUser | undefined> {
 		const result = await this.pool.query(
-			"SELECT id, username, password_hash, created_at FROM users WHERE username = $1",
+			"SELECT id, username, password_hash, role, created_at FROM users WHERE username = $1",
 			[username],
 		);
 		if (result.rows.length === 0) return undefined;
-		const row = result.rows[0] as { id: number; username: string; password_hash: string; created_at: number };
-		return { id: row.id, username: row.username, passwordHash: row.password_hash, createdAt: row.created_at };
+		const row = result.rows[0] as {
+			id: number;
+			username: string;
+			password_hash: string;
+			role: UserRole;
+			created_at: number;
+		};
+		return {
+			id: row.id,
+			username: row.username,
+			passwordHash: row.password_hash,
+			role: row.role,
+			createdAt: row.created_at,
+		};
+	}
+
+	async ensureBootstrapUser(username: string, passwordHash: string, role: "admin" | "super_admin"): Promise<void> {
+		if (await this.getUserByUsername(username)) return;
+		try {
+			await this.createUser(username, passwordHash, role);
+		} catch (error) {
+			if (!(error instanceof Error) || error.message !== "USERNAME_TAKEN") throw error;
+		}
+	}
+
+	async listUsers(): Promise<AdminUserView[]> {
+		const result = await this.pool.query("SELECT id, username, role, created_at FROM users ORDER BY username");
+		return (result.rows as Array<{ id: number; username: string; role: UserRole; created_at: number }>).map(
+			(row) => ({ id: row.id, username: row.username, role: row.role, createdAt: row.created_at }),
+		);
+	}
+
+	async updateUserRole(username: string, role: UserRole): Promise<AdminUserView> {
+		return this.transaction(async (client) => {
+			const current = await client.query("SELECT role FROM users WHERE username = $1 FOR UPDATE", [username]);
+			if (current.rows.length === 0) throw new Error("USER_NOT_FOUND");
+			if ((current.rows[0] as { role: UserRole }).role === "super_admin" && role !== "super_admin") {
+				const count = await client.query("SELECT COUNT(*)::int AS count FROM users WHERE role = 'super_admin'");
+				if ((count.rows[0] as { count: number }).count <= 1) throw new Error("LAST_SUPER_ADMIN");
+			}
+			const result = await client.query(
+				"UPDATE users SET role = $1 WHERE username = $2 RETURNING id, username, role, created_at",
+				[role, username],
+			);
+			const row = result.rows[0] as { id: number; username: string; role: UserRole; created_at: number };
+			return { id: row.id, username: row.username, role: row.role, createdAt: row.created_at };
+		});
 	}
 
 	async createSession(tokenHash: string, userId: number, expiresAt: number): Promise<void> {
@@ -474,16 +450,22 @@ export class MarketplaceStore {
 
 	async getSessionUser(tokenHash: string): Promise<SessionUser | undefined> {
 		const result = await this.pool.query(
-			"SELECT s.expires_at, u.id AS user_id, u.username, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1",
+			"SELECT s.expires_at, u.id AS user_id, u.username, u.role, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1",
 			[tokenHash],
 		);
 		if (result.rows.length === 0) return undefined;
-		const row = result.rows[0] as { expires_at: number; user_id: number; username: string; created_at: number };
+		const row = result.rows[0] as {
+			expires_at: number;
+			user_id: number;
+			username: string;
+			role: UserRole;
+			created_at: number;
+		};
 		if (row.expires_at <= this.clock()) {
 			await this.deleteSession(tokenHash);
 			return undefined;
 		}
-		return { userId: row.user_id, username: row.username, createdAt: row.created_at };
+		return { userId: row.user_id, username: row.username, role: row.role, createdAt: row.created_at };
 	}
 
 	async deleteSession(tokenHash: string): Promise<void> {
@@ -609,12 +591,13 @@ export class MarketplaceStore {
 
 		await this.transaction(async (client) => {
 			await client.query(
-				"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES ($1, $2, 'available', true, $3, 0, $4, $5)",
+				"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities) VALUES ($1, $2, 'available', true, $3, 0, $4, $5, $6)",
 				[
 					pluginId,
 					request.version,
 					request.changelog,
 					JSON.stringify(request.desktop),
+					request.configuration ? JSON.stringify(request.configuration) : null,
 					JSON.stringify(request.capabilities),
 				],
 			);
@@ -654,6 +637,9 @@ export class MarketplaceStore {
 			pluginName: pluginRow.name,
 			publisherId: pluginRow.publisher_id,
 			desktop: JSON.parse(versionRow.desktop) as StoredPluginVersion["desktop"],
+			...(versionRow.configuration
+				? { configuration: JSON.parse(versionRow.configuration) as StoredPluginVersion["configuration"] }
+				: {}),
 			capabilities: JSON.parse(versionRow.capabilities) as string[],
 			artifact: {
 				id: artifactId,
@@ -669,15 +655,20 @@ export class MarketplaceStore {
 		artifactId: string,
 		content: ArtifactContentInput,
 	): Promise<void> {
+		const objectKey = artifactObjectKey(content.sha256);
+		await this.artifactStorage.put(objectKey, {
+			bytes: content.bytes,
+			contentType: "application/vnd.meta-agent.plugin+zip",
+		});
 		await this.transaction(async (client) => {
 			const versionRow = await this.requireVersionRow(pluginId, version, client, true);
 			if (!versionRow.draft) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
 			const result = await client.query(
-				"UPDATE plugin_artifacts SET sha256 = $1, size = $2, bytes = $3, manifest = $4, signature = $5 WHERE plugin_id = $6 AND version = $7 AND artifact_id = $8",
+				"UPDATE plugin_artifacts SET sha256 = $1, size = $2, object_key = $3, manifest = $4, signature = $5 WHERE plugin_id = $6 AND version = $7 AND artifact_id = $8",
 				[
 					content.sha256,
 					content.size,
-					Buffer.from(content.bytes),
+					objectKey,
 					content.manifestJson,
 					content.signatureJson,
 					pluginId,
@@ -698,20 +689,26 @@ export class MarketplaceStore {
 			const versionRow = await this.requireVersionRow(pluginId, version, client, true);
 			if (!versionRow.draft) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
 			const artifactResult = await client.query(
-				"SELECT artifact_id, contains_native_code, bytes FROM plugin_artifacts WHERE plugin_id = $1 AND version = $2 ORDER BY artifact_id",
+				"SELECT artifact_id, contains_native_code, object_key, size FROM plugin_artifacts WHERE plugin_id = $1 AND version = $2 ORDER BY artifact_id",
 				[pluginId, version],
 			);
-			const artifacts = (
-				artifactResult.rows as Array<{
-					artifact_id: string;
-					contains_native_code: boolean;
-					bytes: Buffer | null;
-				}>
-			).map((row) => ({
-				artifactId: row.artifact_id,
-				containsNativeCode: row.contains_native_code,
-				...(row.bytes ? { bytes: row.bytes } : {}),
-			}));
+			const artifacts: PublishArtifactAuditContent[] = [];
+			for (const row of artifactResult.rows as Array<{
+				artifact_id: string;
+				contains_native_code: boolean;
+				object_key: string | null;
+				size: number | null;
+			}>) {
+				const bytes =
+					row.object_key && row.size !== null
+						? await this.artifactStorage.get(row.object_key, row.size)
+						: undefined;
+				artifacts.push({
+					artifactId: row.artifact_id,
+					containsNativeCode: row.contains_native_code,
+					...(bytes ? { bytes } : {}),
+				});
+			}
 			audit(artifacts);
 			if (artifacts.some((artifact) => artifact.bytes === undefined)) {
 				throw new Error("PLUGIN_VERSION_INCOMPLETE");
@@ -926,7 +923,7 @@ export class MarketplaceStore {
 		forUpdate = false,
 	): Promise<VersionRow> {
 		const result = await client.query(
-			`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = $1 AND version = $2${forUpdate ? " FOR UPDATE" : ""}`,
+			`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities FROM plugin_versions WHERE plugin_id = $1 AND version = $2${forUpdate ? " FOR UPDATE" : ""}`,
 			[pluginId, version],
 		);
 		if (result.rows.length === 0) throw new Error("PLUGIN_VERSION_NOT_FOUND");
@@ -988,7 +985,7 @@ JOIN publishers b ON b.id = p.publisher_id`;
 		for (const row of pluginRows) {
 			const draftFilter = includeDrafts ? "" : " AND draft = false";
 			const versionResult = await this.pool.query(
-				`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = $1${draftFilter} ORDER BY version`,
+				`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities FROM plugin_versions WHERE plugin_id = $1${draftFilter} ORDER BY version`,
 				[row.id],
 			);
 			const versionRows = versionResult.rows as unknown as VersionRow[];
@@ -1036,6 +1033,9 @@ JOIN publishers b ON b.id = p.publisher_id`;
 					changelog: versionRow.changelog,
 					publishedAt: versionRow.published_at,
 					desktop: JSON.parse(versionRow.desktop) as StoredPluginVersion["desktop"],
+					...(versionRow.configuration
+						? { configuration: JSON.parse(versionRow.configuration) as StoredPluginVersion["configuration"] }
+						: {}),
 					capabilities: JSON.parse(versionRow.capabilities) as string[],
 					artifacts: artifactsByVersion.get(versionRow.version) ?? [],
 				})),
@@ -1058,6 +1058,40 @@ JOIN publishers b ON b.id = p.publisher_id`;
 			client.release();
 		}
 	}
+}
+
+/** 将旧版 BYTEA 制品逐个迁入对象存储，全部成功后才删除二进制列。 */
+async function migrateLegacyArtifactBytes(client: PoolClient, artifactStorage: ArtifactStorage): Promise<void> {
+	const column = await client.query(
+		"SELECT 1 AS found FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'plugin_artifacts' AND column_name = 'bytes'",
+	);
+	if (column.rows.length === 0) return;
+	const legacy = await client.query(
+		"SELECT plugin_id, version, artifact_id, sha256, bytes FROM plugin_artifacts WHERE bytes IS NOT NULL",
+	);
+	for (const row of legacy.rows as Array<{
+		plugin_id: string;
+		version: string;
+		artifact_id: string;
+		sha256: string | null;
+		bytes: Buffer;
+	}>) {
+		if (!row.sha256) {
+			throw new Error(
+				`Legacy artifact has bytes without SHA-256: ${row.plugin_id}@${row.version}/${row.artifact_id}`,
+			);
+		}
+		const objectKey = artifactObjectKey(row.sha256);
+		await artifactStorage.put(objectKey, {
+			bytes: row.bytes,
+			contentType: "application/vnd.meta-agent.plugin+zip",
+		});
+		await client.query(
+			"UPDATE plugin_artifacts SET object_key = $1 WHERE plugin_id = $2 AND version = $3 AND artifact_id = $4",
+			[objectKey, row.plugin_id, row.version, row.artifact_id],
+		);
+	}
+	await client.query("ALTER TABLE plugin_artifacts DROP COLUMN bytes");
 }
 
 function postgresPoolOptions(databaseUrl: string): { connectionString: string; schema?: string } {

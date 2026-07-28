@@ -17,6 +17,12 @@ import { Separator } from "@/components/ui/separator.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { errorMessage } from "@/lib/marketplace-ui.ts";
 import { ArtifactDraftFields } from "./artifact-draft-fields.tsx";
+import {
+  buildConfigurationSchema,
+  type ConfigurationFieldDraft,
+  ConfigurationSchemaBuilder,
+  createConfigurationFieldDraft,
+} from "./configuration-schema-builder.tsx";
 import { PluginFormField } from "./plugin-form-field.tsx";
 import { type ArtifactDraft, createArtifactDraft, splitList } from "./plugin-form-utils.ts";
 
@@ -38,6 +44,9 @@ export function PluginVersionDialog({
   const [minVersion, setMinVersion] = useState("");
   const [maxVersionExclusive, setMaxVersionExclusive] = useState("");
   const [capabilities, setCapabilities] = useState("");
+  const [configurationFields, setConfigurationFields] = useState<ConfigurationFieldDraft[]>([]);
+  const [nextConfigurationKey, setNextConfigurationKey] = useState(0);
+  const [configurationError, setConfigurationError] = useState<string>();
   const [nextArtifactKey, setNextArtifactKey] = useState(1);
   const [artifacts, setArtifacts] = useState<ArtifactDraft[]>([createArtifactDraft(0)]);
 
@@ -49,6 +58,9 @@ export function PluginVersionDialog({
     setMinVersion("");
     setMaxVersionExclusive("");
     setCapabilities("");
+    setConfigurationFields([]);
+    setNextConfigurationKey(0);
+    setConfigurationError(undefined);
     setNextArtifactKey(1);
     setArtifacts([createArtifactDraft(0)]);
     mutation.reset();
@@ -60,6 +72,14 @@ export function PluginVersionDialog({
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
+    let configuration: PublishVersionInput["configuration"];
+    try {
+      configuration = buildConfigurationSchema(configurationFields);
+      setConfigurationError(undefined);
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "配置字段无效");
+      return;
+    }
     const artifactInputs: PublishArtifactInput[] = artifacts.map((artifact) => ({
       id: artifact.id.trim(),
       entry: artifact.entry.trim(),
@@ -75,6 +95,7 @@ export function PluginVersionDialog({
         ...(minVersion.trim() ? { minVersion: minVersion.trim() } : {}),
         ...(maxVersionExclusive.trim() ? { maxVersionExclusive: maxVersionExclusive.trim() } : {}),
       },
+      ...(configuration ? { configuration } : {}),
       capabilities: splitList(capabilities),
       artifacts: artifactInputs,
     };
@@ -147,11 +168,26 @@ export function PluginVersionDialog({
           <PluginFormField label="能力声明" htmlFor="version-capabilities" hint="用逗号分隔">
             <Input
               id="version-capabilities"
-              placeholder="tools.register, events.subscribe"
+              placeholder="tools.register, configuration.read"
               value={capabilities}
               onChange={(event) => setCapabilities(event.target.value)}
             />
           </PluginFormField>
+
+          <ConfigurationSchemaBuilder
+            fields={configurationFields}
+            onChange={setConfigurationFields}
+            onAdd={() => {
+              setConfigurationFields((current) => [...current, createConfigurationFieldDraft(nextConfigurationKey)]);
+              setNextConfigurationKey((value) => value + 1);
+            }}
+          />
+          {configurationError ? (
+            <Alert variant="destructive">
+              <CircleAlert />
+              <AlertDescription>{configurationError}</AlertDescription>
+            </Alert>
+          ) : null}
 
           <Separator />
           <ArtifactDraftFields

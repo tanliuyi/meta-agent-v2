@@ -42,6 +42,7 @@ export function versionDetail(
 		changelog: version.changelog,
 		publishedAt: version.publishedAt,
 		desktop: { ...version.desktop },
+		...(version.configuration ? { configuration: structuredClone(version.configuration) } : {}),
 		capabilities: [...version.capabilities],
 		artifacts: version.artifacts.map((artifact) =>
 			artifactMetadata(pluginId, version.version, artifact, publicBaseUrl),

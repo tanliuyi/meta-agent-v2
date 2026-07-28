@@ -10,13 +10,13 @@ import {
 } from "@nestjs/common";
 import { hashToken, tokenEquals } from "./auth.ts";
 import type { MarketplaceServerConfig } from "./config.ts";
-import type { MarketplaceErrorBody } from "./contracts.ts";
+import type { MarketplaceErrorBody, UserRole } from "./contracts.ts";
 import type { MarketplaceSigningService } from "./signing-service.ts";
 import type { MarketplaceStore } from "./store.ts";
 
 export type MarketplacePrincipal =
 	| { kind: "admin" }
-	| { kind: "user"; userId: number; username: string; createdAt: number };
+	| { kind: "user"; userId: number; username: string; role: UserRole; createdAt: number };
 
 export interface AuthRuntime {
 	config: MarketplaceServerConfig;
@@ -37,6 +37,7 @@ const STORE_ERRORS: Record<
 > = {
 	PUBLISHER_NOT_FOUND: { status: "not-found", message: "Publisher not found" },
 	USER_NOT_FOUND: { status: "not-found", message: "User not found" },
+	LAST_SUPER_ADMIN: { status: "conflict", message: "At least one super administrator must remain" },
 	PLUGIN_NOT_FOUND: { status: "not-found", message: "Plugin not found" },
 	PLUGIN_VERSION_NOT_FOUND: { status: "not-found", message: "Plugin version not found" },
 	PLUGIN_ARTIFACT_NOT_FOUND: { status: "not-found", message: "Plugin artifact not found" },
@@ -141,7 +142,13 @@ export async function authenticate(
 	if (runtime.config.adminToken && tokenEquals(token, runtime.config.adminToken)) return { kind: "admin" };
 	const session = await runtime.store.getSessionUser(hashToken(token));
 	if (!session) throw unauthorized("AUTH_INVALID", "Authorization token is invalid or expired");
-	return { kind: "user", userId: session.userId, username: session.username, createdAt: session.createdAt };
+	return {
+		kind: "user",
+		userId: session.userId,
+		username: session.username,
+		role: session.role,
+		createdAt: session.createdAt,
+	};
 }
 
 export function bearerToken(authorization: string): string {
@@ -176,12 +183,20 @@ export async function requireUser(
 }
 
 export async function requireAdmin(runtime: AuthRuntime, authorization: string | undefined): Promise<void> {
-	if (!runtime.config.adminToken) {
-		throw forbidden("ADMIN_DISABLED", "MARKETPLACE_ADMIN_TOKEN is not configured");
-	}
 	const principal = await requirePrincipal(runtime, authorization);
-	if (principal.kind !== "admin") {
-		throw forbidden("ADMIN_REQUIRED", "This operation requires the marketplace admin token");
+	if (!isAdminPrincipal(principal)) {
+		throw forbidden("ADMIN_REQUIRED", "This operation requires an administrator account");
+	}
+}
+
+export function isAdminPrincipal(principal: MarketplacePrincipal): boolean {
+	return principal.kind === "admin" || principal.role === "admin" || principal.role === "super_admin";
+}
+
+export async function requireSuperAdmin(runtime: AuthRuntime, authorization: string | undefined): Promise<void> {
+	const principal = await requirePrincipal(runtime, authorization);
+	if (principal.kind !== "user" || principal.role !== "super_admin") {
+		throw forbidden("SUPER_ADMIN_REQUIRED", "This operation requires a super administrator account");
 	}
 }
 

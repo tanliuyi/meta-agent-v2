@@ -1,6 +1,6 @@
-import { LayoutDashboard, type LucideIcon, Package, Store } from "lucide-react";
+import { LayoutDashboard, type LucideIcon, Package, Settings2, Store } from "lucide-react";
 
-export type ConsoleRoute = "/" | "/manage" | "/catalog";
+export type ConsoleRoute = "/" | "/manage" | "/catalog" | "/admin";
 
 export interface ConsoleNavigationItem {
   to: ConsoleRoute;
@@ -13,6 +13,7 @@ export const consoleNavigation: ConsoleNavigationItem[] = [
   { to: "/", label: "概览", description: "发布者工作区运行状态", icon: LayoutDashboard },
   { to: "/manage", label: "我的插件", description: "管理插件资料、制品和发布版本", icon: Package },
   { to: "/catalog", label: "市场目录", description: "核对公开插件、版本和市场数据", icon: Store },
+  { to: "/admin", label: "系统管理", description: "维护账户角色、发布者与成员权限", icon: Settings2 },
 ];
 
 export function consolePageMetadata(pathname: string): Pick<ConsoleNavigationItem, "label" | "description"> {

@@ -36,6 +36,19 @@ if (!TEST_DB_URL) {
 		maxArtifactBytes: 1024 * 1024,
 		allowRegistration: true,
 		maxLoginFailures: 10,
+		artifactStorage: {
+			endPoint: "127.0.0.1",
+			port: Number(process.env.MARKETPLACE_TEST_MINIO_PORT ?? "59000"),
+			useSSL: false,
+			accessKey: "marketplace-test",
+			secretKey: "marketplace-test-secret",
+			bucket: "marketplace-accounts-test",
+			region: "us-east-1",
+		},
+		bootstrapAccounts: [
+			{ username: "admin", password: "admin-password", role: "admin" },
+			{ username: "super", password: "super-password", role: "super_admin" },
+		],
 	};
 
 	const PLUGIN_ID = "com.acme.tools";
@@ -71,7 +84,8 @@ if (!TEST_DB_URL) {
 				.expect(200);
 			expect(me.body).toEqual({
 				admin: false,
-				user: { username: "alice", createdAt: 1_800_000_000_000 },
+				role: "user",
+				user: { username: "alice", role: "user", createdAt: 1_800_000_000_000 },
 				publisherIds: [],
 			});
 
@@ -119,7 +133,49 @@ if (!TEST_DB_URL) {
 				.get("/v1/auth/me")
 				.set("authorization", `Bearer ${ADMIN_TOKEN}`)
 				.expect(200);
-			expect(me.body).toEqual({ admin: true, publisherIds: [] });
+			expect(me.body).toEqual({ admin: true, role: "admin", publisherIds: [] });
+		});
+
+		it("seeds administrator accounts and reserves role management for the super administrator", async () => {
+			const adminLogin = await request(app.getHttpServer())
+				.post("/v1/auth/login")
+				.send({ username: "admin", password: "admin-password" })
+				.expect(200);
+			const superLogin = await request(app.getHttpServer())
+				.post("/v1/auth/login")
+				.send({ username: "super", password: "super-password" })
+				.expect(200);
+			const adminToken = (adminLogin.body as { token: string }).token;
+			const superToken = (superLogin.body as { token: string }).token;
+
+			await request(app.getHttpServer())
+				.get("/v1/admin/publishers")
+				.set("authorization", `Bearer ${adminToken}`)
+				.expect(200);
+			await request(app.getHttpServer())
+				.get("/v1/admin/users")
+				.set("authorization", `Bearer ${adminToken}`)
+				.expect(403);
+
+			const users = await request(app.getHttpServer())
+				.get("/v1/admin/users")
+				.set("authorization", `Bearer ${superToken}`)
+				.expect(200);
+			expect(users.body.users).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ username: "admin", role: "admin" }),
+					expect.objectContaining({ username: "super", role: "super_admin" }),
+				]),
+			);
+
+			const lastSuper = await request(app.getHttpServer())
+				.put("/v1/admin/users/super/role")
+				.set("authorization", `Bearer ${superToken}`)
+				.send({ role: "admin" })
+				.expect(409);
+			expect(lastSuper.body).toEqual({
+				error: { code: "LAST_SUPER_ADMIN", message: "At least one super administrator must remain" },
+			});
 		});
 
 		it("hashes and verifies passwords asynchronously in the stored scrypt format", async () => {

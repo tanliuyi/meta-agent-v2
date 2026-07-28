@@ -2,6 +2,7 @@ import { Body, Headers, Param, Req, type Type } from "@nestjs/common";
 import { valid as validSemver } from "semver";
 import { buildSignedArtifact, extractPayloadArchive, validatePayloadPath } from "./artifact-builder.ts";
 import { ARTIFACT_ID, PLUGIN_ID, parseTarget } from "./catalog-validation.ts";
+import { parsePluginConfigurationSchema } from "./configuration-schema.ts";
 import type {
 	MarketplacePluginVersionDetail,
 	PublishPluginRequest,
@@ -22,6 +23,7 @@ import {
 	bodyString,
 	bodyStringArray,
 	forbidden,
+	isAdminPrincipal,
 	type MarketplaceHttpRuntime,
 	mapStoreErrors,
 	notFound,
@@ -44,7 +46,9 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 		async list(authorization: string | undefined): Promise<{ plugins: PublishPluginState[] }> {
 			const principal = await requirePrincipal(runtime, authorization);
 			const publisherIds =
-				principal.kind === "admin" ? undefined : await runtime.store.publisherIdsForUser(principal.userId);
+				principal.kind === "user" && principal.role === "user"
+					? await runtime.store.publisherIdsForUser(principal.userId)
+					: undefined;
 			return { plugins: await runtime.store.listPublishStates(publisherIds) };
 		}
 
@@ -63,6 +67,7 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 			const request = parsePublishPluginRequest(body);
 			const principal = await requirePrincipal(runtime, authorization);
 			if (
+				!isAdminPrincipal(principal) &&
 				principal.kind === "user" &&
 				!(await runtime.store.isPublisherMember(principal.userId, request.publisherId))
 			) {
@@ -110,6 +115,7 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 					entry: context.artifact.entry,
 					desktop: context.desktop,
 					target: context.artifact.target,
+					configuration: context.configuration,
 					capabilities: context.capabilities,
 					files,
 				});
@@ -214,7 +220,8 @@ async function requirePluginMember(
 	pluginId: string,
 ): Promise<void> {
 	const principal = await requirePrincipal(runtime, authorization);
-	if (principal.kind === "admin") return;
+	if (isAdminPrincipal(principal)) return;
+	if (principal.kind !== "user") return;
 	const publisherId = await runtime.store.getPluginPublisherId(pluginId);
 	if (publisherId === undefined) throw notFound("PLUGIN_NOT_FOUND", `Plugin not found: ${pluginId}`);
 	if (!(await runtime.store.isPublisherMember(principal.userId, publisherId))) {
@@ -260,6 +267,12 @@ function parsePublishVersionRequest(body: unknown): PublishVersionRequest {
 	if (new Set(artifacts.map(({ id }) => id)).size !== artifacts.length) {
 		throw badRequest("BODY_INVALID", "artifacts must have unique ids");
 	}
+	let configuration: PublishVersionRequest["configuration"];
+	try {
+		configuration = parsePluginConfigurationSchema(record.configuration);
+	} catch (error) {
+		throw badRequest("BODY_INVALID", error instanceof Error ? error.message : "configuration is invalid");
+	}
 	return {
 		version,
 		changelog: bodyString(record, "changelog", 4000),
@@ -268,6 +281,7 @@ function parsePublishVersionRequest(body: unknown): PublishVersionRequest {
 			...(minVersion === undefined ? {} : { minVersion }),
 			...(maxVersionExclusive === undefined ? {} : { maxVersionExclusive }),
 		},
+		...(configuration ? { configuration } : {}),
 		capabilities: bodyStringArray(record, "capabilities", 32, 64),
 		artifacts,
 	};

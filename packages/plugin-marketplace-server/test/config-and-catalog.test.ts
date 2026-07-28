@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { versionCompatible } from "../src/catalog-query.ts";
-import { loadMarketplaceServerConfig } from "../src/config.ts";
+import { loadMarketplaceServerConfig as loadConfigWithoutStorage } from "../src/config.ts";
 import type { PluginStatus, StoredPluginVersion } from "../src/contracts.ts";
 import { MarketplaceSigningService } from "../src/signing-service.ts";
+import { MemoryArtifactStorage } from "../src/storage/artifact-storage.ts";
 import { MarketplaceStore } from "../src/store.ts";
 import { dropTestSchema, testDatabaseUrl } from "./postgres-harness.ts";
 
@@ -17,6 +18,16 @@ const TEST_SCHEMAS = new Set([TEST_STORE_SCHEMA]);
 const TEST_STORE_DB_URL = TEST_DB_URL ? testDatabaseUrl(TEST_DB_URL, TEST_STORE_SCHEMA) : undefined;
 
 const directories: string[] = [];
+const artifactStorage = new MemoryArtifactStorage();
+
+function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv) {
+	return loadConfigWithoutStorage({
+		MARKETPLACE_MINIO_ENDPOINT: "http://127.0.0.1:9000",
+		MARKETPLACE_MINIO_ACCESS_KEY: "test-access",
+		MARKETPLACE_MINIO_SECRET_KEY: "test-secret",
+		...env,
+	});
+}
 
 afterEach(async () => {
 	await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -257,6 +268,7 @@ if (!TEST_DB_URL) {
 				signing: new MarketplaceSigningService(generateKeyPairSync("ed25519").privateKey),
 				marketplaceId: "test-marketplace",
 				clock: () => now,
+				artifactStorage,
 			});
 			try {
 				const user = await store.createUser("session-user", "password-hash");
@@ -393,6 +405,7 @@ if (!TEST_DB_URL) {
 				signing,
 				marketplaceId: "test-marketplace",
 				clock: () => 1_800_000_000_000,
+				artifactStorage,
 			});
 			try {
 				const user = await first.createUser("persist-user", "password-hash");
@@ -419,6 +432,7 @@ if (!TEST_DB_URL) {
 				signing,
 				marketplaceId: "test-marketplace",
 				clock: () => 1_800_000_100_000,
+				artifactStorage,
 			});
 			try {
 				const user = await second.getUserByUsername("persist-user");
@@ -443,6 +457,7 @@ async function openStore(catalogPath?: URL): Promise<MarketplaceStore> {
 		signing: new MarketplaceSigningService(generateKeyPairSync("ed25519").privateKey),
 		marketplaceId: "test-marketplace",
 		clock: () => 1_800_000_000_000,
+		artifactStorage,
 	});
 }
 

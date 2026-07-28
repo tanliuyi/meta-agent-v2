@@ -17,7 +17,7 @@ function RootLayout() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const protectedRoute = pathname === "/" || pathname === "/manage";
+    const protectedRoute = pathname === "/" || pathname === "/manage" || pathname === "/admin";
     if (!sessionQuery.isPending && !token && protectedRoute) navigate({ to: "/login", replace: true });
   }, [navigate, pathname, sessionQuery.isPending, token]);
 
@@ -44,7 +44,13 @@ function RootLayout() {
   }
 
   return (
-    <ConsoleShell pathname={pathname} username={user?.user?.username} onNavigate={goTo} onSignOut={signOut}>
+    <ConsoleShell
+      pathname={pathname}
+      username={user?.user?.username}
+      isAdmin={user?.admin === true}
+      onNavigate={goTo}
+      onSignOut={signOut}
+    >
       <Outlet />
     </ConsoleShell>
   );

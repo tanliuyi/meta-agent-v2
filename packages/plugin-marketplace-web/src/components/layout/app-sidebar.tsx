@@ -26,11 +26,13 @@ import { type ConsoleRoute, consoleNavigation } from "./console-navigation.ts";
 export function AppSidebar({
   pathname,
   username,
+  isAdmin,
   onNavigate,
   onSignOut,
 }: {
   pathname: string;
   username?: string;
+  isAdmin: boolean;
   onNavigate(to: ConsoleRoute | "/login"): void;
   onSignOut(): void;
 }) {
@@ -64,18 +66,20 @@ export function AppSidebar({
           <SidebarGroupLabel>工作台</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {consoleNavigation.map((item) => {
-                const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
-                const Icon = item.icon;
-                return (
-                  <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton isActive={active} tooltip={item.label} onClick={() => navigate(item.to)}>
-                      <Icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+              {consoleNavigation
+                .filter((item) => item.to !== "/admin" || isAdmin)
+                .map((item) => {
+                  const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
+                  const Icon = item.icon;
+                  return (
+                    <SidebarMenuItem key={item.to}>
+                      <SidebarMenuButton isActive={active} tooltip={item.label} onClick={() => navigate(item.to)}>
+                        <Icon />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

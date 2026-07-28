@@ -14,6 +14,20 @@ export interface MarketplaceServerConfig {
 	maxArtifactBytes: number;
 	allowRegistration: boolean;
 	maxLoginFailures: number;
+	artifactStorage: {
+		endPoint: string;
+		port: number;
+		useSSL: boolean;
+		accessKey: string;
+		secretKey: string;
+		bucket: string;
+		region: string;
+	};
+	bootstrapAccounts: Array<{
+		username: string;
+		password: string;
+		role: "admin" | "super_admin";
+	}>;
 }
 
 export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env): MarketplaceServerConfig {
@@ -67,6 +81,8 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 		true,
 	);
 	const maxLoginFailures = parseMaxLoginFailures(env.MARKETPLACE_MAX_LOGIN_FAILURES);
+	const artifactStorage = parseArtifactStorage(env);
+	const bootstrapAccounts = parseBootstrapAccounts(env);
 
 	return {
 		host,
@@ -82,7 +98,83 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 		maxArtifactBytes,
 		allowRegistration,
 		maxLoginFailures,
+		artifactStorage,
+		bootstrapAccounts,
 	};
+}
+
+function parseArtifactStorage(env: NodeJS.ProcessEnv): MarketplaceServerConfig["artifactStorage"] {
+	const endpointSource = env.MARKETPLACE_MINIO_ENDPOINT?.trim();
+	if (!endpointSource) throw new Error("MARKETPLACE_MINIO_ENDPOINT is required");
+	let endpoint: URL;
+	try {
+		endpoint = new URL(endpointSource);
+	} catch {
+		throw new Error("MARKETPLACE_MINIO_ENDPOINT must be a valid HTTP(S) URL");
+	}
+	if (
+		(endpoint.protocol !== "http:" && endpoint.protocol !== "https:") ||
+		endpoint.username ||
+		endpoint.password ||
+		endpoint.pathname !== "/" ||
+		endpoint.search ||
+		endpoint.hash
+	) {
+		throw new Error("MARKETPLACE_MINIO_ENDPOINT must be an HTTP(S) origin without credentials or paths");
+	}
+	const accessKey = env.MARKETPLACE_MINIO_ACCESS_KEY?.trim();
+	const secretKey = env.MARKETPLACE_MINIO_SECRET_KEY?.trim();
+	if (!accessKey || !secretKey) {
+		throw new Error("MARKETPLACE_MINIO_ACCESS_KEY and MARKETPLACE_MINIO_SECRET_KEY are required");
+	}
+	const bucket = env.MARKETPLACE_MINIO_BUCKET?.trim() || "meta-agent-plugins";
+	if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) {
+		throw new Error("MARKETPLACE_MINIO_BUCKET must be a valid S3 bucket name");
+	}
+	const region = env.MARKETPLACE_MINIO_REGION?.trim() || "us-east-1";
+	if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(region)) {
+		throw new Error("MARKETPLACE_MINIO_REGION is invalid");
+	}
+	return {
+		endPoint: endpoint.hostname,
+		port: endpoint.port ? Number(endpoint.port) : endpoint.protocol === "https:" ? 443 : 80,
+		useSSL: endpoint.protocol === "https:",
+		accessKey,
+		secretKey,
+		bucket,
+		region,
+	};
+}
+
+function parseBootstrapAccounts(env: NodeJS.ProcessEnv): MarketplaceServerConfig["bootstrapAccounts"] {
+	const definitions = [
+		{
+			username: env.MARKETPLACE_DEFAULT_ADMIN_USERNAME?.trim() || "admin",
+			password: env.MARKETPLACE_DEFAULT_ADMIN_PASSWORD,
+			role: "admin" as const,
+		},
+		{
+			username: env.MARKETPLACE_DEFAULT_SUPER_USERNAME?.trim() || "super",
+			password: env.MARKETPLACE_DEFAULT_SUPER_PASSWORD,
+			role: "super_admin" as const,
+		},
+	];
+	return definitions.flatMap((definition) => {
+		if (!definition.password) return [];
+		if (!/^[a-z0-9][a-z0-9._-]{2,63}$/.test(definition.username)) {
+			throw new Error(`Bootstrap account username is invalid: ${definition.username}`);
+		}
+		if (definition.password.length < 8 || definition.password.length > 128) {
+			throw new Error(`Bootstrap account password length is invalid: ${definition.username}`);
+		}
+		return [
+			{
+				username: definition.username,
+				password: definition.password,
+				role: definition.role,
+			},
+		];
+	});
 }
 
 function validateDatabaseUrl(url: string): void {

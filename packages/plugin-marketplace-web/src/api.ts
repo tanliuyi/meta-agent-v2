@@ -1,4 +1,5 @@
 export type PluginStatus = "available" | "deprecated" | "withdrawn" | "blocked";
+export type UserRole = "user" | "admin" | "super_admin";
 
 export interface PublisherRecord {
   id: string;
@@ -66,8 +67,43 @@ export interface PluginVersionDetail {
     minVersion?: string;
     maxVersionExclusive?: string;
   };
+  configuration?: PluginConfigurationSchema;
   capabilities: string[];
   artifacts: ArtifactMetadata[];
+}
+
+interface PluginConfigurationFieldBase {
+  key: string;
+  label: string;
+  description?: string;
+  required?: boolean;
+}
+
+export type PluginConfigurationField =
+  | (PluginConfigurationFieldBase & {
+      type: "text" | "textarea" | "path" | "secret";
+      defaultValue?: string;
+      placeholder?: string;
+      minLength?: number;
+      maxLength?: number;
+    })
+  | (PluginConfigurationFieldBase & {
+      type: "number";
+      defaultValue?: number;
+      minimum?: number;
+      maximum?: number;
+      step?: number;
+    })
+  | (PluginConfigurationFieldBase & { type: "boolean"; defaultValue?: boolean })
+  | (PluginConfigurationFieldBase & {
+      type: "select";
+      defaultValue?: string;
+      options: Array<{ value: string; label: string }>;
+    });
+
+export interface PluginConfigurationSchema {
+  version: 1;
+  fields: PluginConfigurationField[];
 }
 
 export interface PluginDetail
@@ -90,6 +126,7 @@ export interface RatingsResponse {
 
 export interface AuthUser {
   username: string;
+  role: UserRole;
   createdAt: number;
 }
 
@@ -101,8 +138,17 @@ export interface AuthSession {
 
 export interface AuthMe {
   admin: boolean;
+  role: UserRole;
   user?: AuthUser;
   publisherIds: string[];
+}
+
+export interface AdminUser extends AuthUser {
+  id: number;
+}
+
+export interface PublisherAdminView extends PublisherRecord {
+  members: string[];
 }
 
 export interface DownloadMetadata {
@@ -157,6 +203,7 @@ export interface PublishVersionInput {
     minVersion?: string;
     maxVersionExclusive?: string;
   };
+  configuration?: PluginConfigurationSchema;
   capabilities: string[];
   artifacts: PublishArtifactInput[];
 }
@@ -328,6 +375,47 @@ export function deleteManagedDraft(pluginId: string, version: string, token: str
   return request<void>(
     `/v1/publish/plugins/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}`,
     { method: "DELETE" },
+    token,
+  );
+}
+
+export function listAdminUsers(token: string): Promise<{ users: AdminUser[] }> {
+  return request<{ users: AdminUser[] }>("/v1/admin/users", {}, token);
+}
+
+export function updateAdminUserRole(username: string, role: UserRole, token: string): Promise<{ user: AdminUser }> {
+  return request<{ user: AdminUser }>(
+    `/v1/admin/users/${encodeURIComponent(username)}/role`,
+    { method: "PUT", body: JSON.stringify({ role }) },
+    token,
+  );
+}
+
+export function listAdminPublishers(token: string): Promise<{ publishers: PublisherAdminView[] }> {
+  return request<{ publishers: PublisherAdminView[] }>("/v1/admin/publishers", {}, token);
+}
+
+export function upsertAdminPublisher(
+  publisherId: string,
+  input: { displayName: string; verified: boolean },
+  token: string,
+): Promise<{ publisher: PublisherAdminView }> {
+  return request<{ publisher: PublisherAdminView }>(
+    `/v1/admin/publishers/${encodeURIComponent(publisherId)}`,
+    { method: "PUT", body: JSON.stringify(input) },
+    token,
+  );
+}
+
+export function updateAdminPublisherMember(
+  publisherId: string,
+  username: string,
+  operation: "add" | "remove",
+  token: string,
+): Promise<void> {
+  return request<void>(
+    `/v1/admin/publishers/${encodeURIComponent(publisherId)}/members/${encodeURIComponent(username)}`,
+    { method: operation === "add" ? "PUT" : "DELETE" },
     token,
   );
 }

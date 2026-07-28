@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as CatalogRouteImport } from './routes/catalog'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManageRouteImport } from './routes/manage'
@@ -18,6 +19,11 @@ import { Route as PluginPluginIdRouteImport } from './routes/plugin.$pluginId'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CatalogRoute = CatalogRouteImport.update({
@@ -43,6 +49,7 @@ const PluginPluginIdRoute = PluginPluginIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/catalog': typeof CatalogRoute
   '/login': typeof LoginRoute
   '/manage': typeof ManageRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/catalog': typeof CatalogRoute
   '/login': typeof LoginRoute
   '/manage': typeof ManageRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/catalog': typeof CatalogRoute
   '/login': typeof LoginRoute
   '/manage': typeof ManageRoute
@@ -65,14 +74,23 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/catalog' | '/login' | '/manage' | '/plugin/$pluginId'
+  fullPaths:
+    '/' | '/admin' | '/catalog' | '/login' | '/manage' | '/plugin/$pluginId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/catalog' | '/login' | '/manage' | '/plugin/$pluginId'
-  id: '__root__' | '/' | '/catalog' | '/login' | '/manage' | '/plugin/$pluginId'
+  to: '/' | '/admin' | '/catalog' | '/login' | '/manage' | '/plugin/$pluginId'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/catalog'
+    | '/login'
+    | '/manage'
+    | '/plugin/$pluginId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   CatalogRoute: typeof CatalogRoute
   LoginRoute: typeof LoginRoute
   ManageRoute: typeof ManageRoute
@@ -86,6 +104,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/catalog': {
@@ -121,6 +146,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   CatalogRoute: CatalogRoute,
   LoginRoute: LoginRoute,
   ManageRoute: ManageRoute,

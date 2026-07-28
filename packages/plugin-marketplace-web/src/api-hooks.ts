@@ -9,6 +9,8 @@ import {
   getDownload,
   getPlugin,
   getRatings,
+  listAdminPublishers,
+  listAdminUsers,
   listManagedPlugins,
   listPlugins,
   logout,
@@ -17,7 +19,11 @@ import {
   type PublishVersionInput,
   publishManagedVersion,
   ratePlugin,
+  type UserRole,
+  updateAdminPublisherMember,
+  updateAdminUserRole,
   uploadManagedArtifact,
+  upsertAdminPublisher,
   upsertManagedPlugin,
 } from "./api.ts";
 import { clearSession, readSession, type SessionState, writeSession } from "./lib/marketplace-ui.ts";
@@ -260,6 +266,81 @@ export function useDeleteManagedDraft() {
       deleteManagedDraft(pluginId, version, token),
     ({ pluginId }) => pluginId,
   );
+}
+
+export function useAdminUsers(token: string | null | undefined, enabled: boolean) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ["adminUsers"],
+    queryFn: () => withSessionAuth(queryClient, token!, () => listAdminUsers(token!)),
+    enabled: !!token && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useUpdateAdminUserRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ username, role, token }: { username: string; role: UserRole; token: string }) =>
+      withSessionAuth(queryClient, token, () => updateAdminUserRole(username, role, token)),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["adminUsers"] }),
+        queryClient.invalidateQueries({ queryKey: ["currentUser"] }),
+      ]),
+  });
+}
+
+export function useAdminPublishers(token: string | null | undefined, enabled: boolean) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ["adminPublishers"],
+    queryFn: () => withSessionAuth(queryClient, token!, () => listAdminPublishers(token!)),
+    enabled: !!token && enabled,
+    staleTime: 10_000,
+  });
+}
+
+export function useUpsertAdminPublisher() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      publisherId,
+      displayName,
+      verified,
+      token,
+    }: {
+      publisherId: string;
+      displayName: string;
+      verified: boolean;
+      token: string;
+    }) =>
+      withSessionAuth(queryClient, token, () => upsertAdminPublisher(publisherId, { displayName, verified }, token)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["adminPublishers"] }),
+  });
+}
+
+export function useUpdateAdminPublisherMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      publisherId,
+      username,
+      operation,
+      token,
+    }: {
+      publisherId: string;
+      username: string;
+      operation: "add" | "remove";
+      token: string;
+    }) =>
+      withSessionAuth(queryClient, token, () => updateAdminPublisherMember(publisherId, username, operation, token)),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["adminPublishers"] }),
+        queryClient.invalidateQueries({ queryKey: ["managedPlugins"] }),
+      ]),
+  });
 }
 
 async function withSessionAuth<T>(queryClient: QueryClient, token: string, request: () => Promise<T>): Promise<T> {

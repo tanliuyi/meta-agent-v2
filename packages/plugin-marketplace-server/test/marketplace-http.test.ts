@@ -53,6 +53,16 @@ if (!TEST_DB_URL) {
 		maxArtifactBytes: 32 * 1024 * 1024,
 		allowRegistration: true,
 		maxLoginFailures: 10,
+		artifactStorage: {
+			endPoint: "127.0.0.1",
+			port: Number(process.env.MARKETPLACE_TEST_MINIO_PORT ?? "59000"),
+			useSSL: false,
+			accessKey: "marketplace-test",
+			secretKey: "marketplace-test-secret",
+			bucket: "marketplace-http-test",
+			region: "us-east-1",
+		},
+		bootstrapAccounts: [],
 	};
 
 	let app: INestApplication;

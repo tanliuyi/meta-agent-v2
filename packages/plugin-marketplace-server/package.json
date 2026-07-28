@@ -17,6 +17,7 @@
     "@nestjs/core": "11.1.28",
     "@nestjs/platform-express": "11.1.28",
     "fflate": "0.8.2",
+    "minio": "8.0.7",
     "pg": "8.22.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",

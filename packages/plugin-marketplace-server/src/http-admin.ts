@@ -1,7 +1,7 @@
 import { Body, Headers, Param, type Type } from "@nestjs/common";
 import { valid as validSemver } from "semver";
 import { PLUGIN_ID } from "./catalog-validation.ts";
-import type { CatalogRevocation, PublisherAdminView } from "./contracts.ts";
+import type { AdminUserView, CatalogRevocation, PublisherAdminView, UserRole } from "./contracts.ts";
 import { applyController, applyHttpCode, applyParameter, applyRoute } from "./http-decorators.ts";
 import {
 	badRequest,
@@ -14,11 +14,33 @@ import {
 	mapStoreErrors,
 	PUBLISHER_ID_PATTERN,
 	requireAdmin,
+	requireSuperAdmin,
 	USERNAME_PATTERN,
 } from "./http-util.ts";
 
 export function createAdminControllers(runtime: MarketplaceHttpRuntime): Type<unknown>[] {
 	class AdminController {
+		async users(authorization: string | undefined): Promise<{ users: AdminUserView[] }> {
+			await requireSuperAdmin(runtime, authorization);
+			return { users: await runtime.store.listUsers() };
+		}
+
+		async updateUserRole(
+			username: string,
+			body: unknown,
+			authorization: string | undefined,
+		): Promise<{ user: AdminUserView }> {
+			await requireSuperAdmin(runtime, authorization);
+			if (!USERNAME_PATTERN.test(username)) {
+				throw badRequest("USERNAME_INVALID", "Username must be a lowercase identifier");
+			}
+			const role = bodyString(bodyObject(body), "role", 32) as UserRole;
+			if (role !== "user" && role !== "admin" && role !== "super_admin") {
+				throw badRequest("BODY_INVALID", "role must be user, admin, or super_admin");
+			}
+			return { user: await mapStoreErrors(() => runtime.store.updateUserRole(username, role)) };
+		}
+
 		async publishers(authorization: string | undefined): Promise<{ publishers: PublisherAdminView[] }> {
 			await requireAdmin(runtime, authorization);
 			return { publishers: await runtime.store.listPublishers() };
@@ -83,6 +105,12 @@ export function createAdminControllers(runtime: MarketplaceHttpRuntime): Type<un
 	}
 
 	applyController(AdminController, "v1/admin");
+	applyRoute(AdminController.prototype, "users", "get", "users");
+	applyParameter(AdminController.prototype, "users", 0, Headers("authorization"));
+	applyRoute(AdminController.prototype, "updateUserRole", "put", "users/:username/role");
+	applyParameter(AdminController.prototype, "updateUserRole", 0, Param("username"));
+	applyParameter(AdminController.prototype, "updateUserRole", 1, Body());
+	applyParameter(AdminController.prototype, "updateUserRole", 2, Headers("authorization"));
 	applyRoute(AdminController.prototype, "publishers", "get", "publishers");
 	applyParameter(AdminController.prototype, "publishers", 0, Headers("authorization"));
 	applyRoute(AdminController.prototype, "upsertPublisher", "put", "publishers/:publisherId");

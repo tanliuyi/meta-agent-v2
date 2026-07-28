@@ -1,5 +1,7 @@
 export type PluginStatus = "available" | "deprecated" | "withdrawn" | "blocked";
 
+export type UserRole = "user" | "admin" | "super_admin";
+
 export interface PublisherRecord {
 	id: string;
 	displayName: string;
@@ -17,6 +19,48 @@ export interface ArtifactTarget {
 	toolchain?: string;
 	piVersion?: string;
 	runtimeCompatibilityId?: string;
+}
+
+export type PluginConfigurationValue = string | number | boolean;
+
+interface PluginConfigurationFieldBase {
+	key: string;
+	label: string;
+	description?: string;
+	required?: boolean;
+}
+
+export type PluginConfigurationField =
+	| (PluginConfigurationFieldBase & {
+			type: "text" | "textarea" | "path";
+			defaultValue?: string;
+			placeholder?: string;
+			minLength?: number;
+			maxLength?: number;
+	  })
+	| (PluginConfigurationFieldBase & {
+			type: "secret";
+			placeholder?: string;
+			minLength?: number;
+			maxLength?: number;
+	  })
+	| (PluginConfigurationFieldBase & {
+			type: "number";
+			defaultValue?: number;
+			minimum?: number;
+			maximum?: number;
+			step?: number;
+	  })
+	| (PluginConfigurationFieldBase & { type: "boolean"; defaultValue?: boolean })
+	| (PluginConfigurationFieldBase & {
+			type: "select";
+			defaultValue?: string;
+			options: Array<{ value: string; label: string }>;
+	  });
+
+export interface PluginConfigurationSchema {
+	version: 1;
+	fields: PluginConfigurationField[];
 }
 
 export interface MarketplaceArtifactManifest {
@@ -39,6 +83,7 @@ export interface MarketplaceArtifactManifest {
 		maxVersionExclusive?: string;
 	};
 	target: ArtifactTarget;
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	nativeModules: Array<{
 		path: string;
@@ -85,6 +130,7 @@ export interface CatalogPluginVersion {
 		minVersion?: string;
 		maxVersionExclusive?: string;
 	};
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: CatalogArtifact[];
 }
@@ -176,6 +222,7 @@ export interface MarketplacePluginVersionDetail {
 	changelog: string;
 	publishedAt: number;
 	desktop: CatalogPluginVersion["desktop"];
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: MarketplaceArtifactMetadata[];
 }
@@ -204,6 +251,7 @@ export interface StoredPluginVersion {
 	changelog: string;
 	publishedAt: number;
 	desktop: CatalogPluginVersion["desktop"];
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: StoredArtifact[];
 }
@@ -222,6 +270,7 @@ export interface StoredPlugin {
 
 export interface AuthUserSummary {
 	username: string;
+	role: UserRole;
 	createdAt: number;
 }
 
@@ -233,8 +282,13 @@ export interface AuthSessionResponse {
 
 export interface AuthMeResponse {
 	admin: boolean;
+	role: UserRole;
 	user?: AuthUserSummary;
 	publisherIds: string[];
+}
+
+export interface AdminUserView extends AuthUserSummary {
+	id: number;
 }
 
 export interface PublisherAdminView extends PublisherRecord {
@@ -261,6 +315,7 @@ export interface PublishVersionRequest {
 	version: string;
 	changelog: string;
 	desktop: CatalogPluginVersion["desktop"];
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: PublishVersionArtifactRequest[];
 }

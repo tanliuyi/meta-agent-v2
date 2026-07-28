@@ -69,7 +69,7 @@ export function createAuthControllers(runtime: MarketplaceHttpRuntime): Type<unk
 			const password = bodyString(record, "password", 128, 8);
 			const passwordHash = await hashPassword(password);
 			const user = await mapStoreErrors(() => runtime.store.createUser(username, passwordHash));
-			return issueSession(runtime, user.id, user.username, user.createdAt);
+			return issueSession(runtime, user.id, user.username, user.role, user.createdAt);
 		}
 
 		async login(body: unknown, request: LoginRequestLike): Promise<AuthSessionResponse> {
@@ -86,7 +86,7 @@ export function createAuthControllers(runtime: MarketplaceHttpRuntime): Type<unk
 				throw unauthorized("AUTH_INVALID", "Invalid username or password");
 			}
 			loginFailures.delete(clientKey);
-			return issueSession(runtime, user.id, user.username, user.createdAt);
+			return issueSession(runtime, user.id, user.username, user.role, user.createdAt);
 		}
 
 		async logout(authorization: string | undefined): Promise<void> {
@@ -96,10 +96,11 @@ export function createAuthControllers(runtime: MarketplaceHttpRuntime): Type<unk
 
 		async me(authorization: string | undefined): Promise<AuthMeResponse> {
 			const principal = await requirePrincipal(runtime, authorization);
-			if (principal.kind === "admin") return { admin: true, publisherIds: [] };
+			if (principal.kind === "admin") return { admin: true, role: "admin", publisherIds: [] };
 			return {
-				admin: false,
-				user: { username: principal.username, createdAt: principal.createdAt },
+				admin: principal.role === "admin" || principal.role === "super_admin",
+				role: principal.role,
+				user: { username: principal.username, role: principal.role, createdAt: principal.createdAt },
 				publisherIds: await runtime.store.publisherIdsForUser(principal.userId),
 			};
 		}
@@ -125,10 +126,11 @@ async function issueSession(
 	runtime: MarketplaceHttpRuntime,
 	userId: number,
 	username: string,
+	role: "user" | "admin" | "super_admin",
 	createdAt: number,
 ): Promise<AuthSessionResponse> {
 	const { token, tokenHash } = generateSessionToken();
 	const expiresAt = Math.trunc(runtime.clock()) + SESSION_TTL_MS;
 	await runtime.store.createSession(tokenHash, userId, expiresAt);
-	return { token, expiresAt, user: { username, createdAt } };
+	return { token, expiresAt, user: { username, role, createdAt } };
 }

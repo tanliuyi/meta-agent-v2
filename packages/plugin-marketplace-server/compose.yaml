@@ -1,4 +1,37 @@
+name: meta-agent-plugin-marketplace
+
 services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    volumes:
+      - marketplace-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    volumes:
+      - marketplace-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
   plugin-marketplace:
     image: ${MARKETPLACE_IMAGE:-meta-agent-plugin-marketplace:local}
     build:
@@ -10,6 +43,11 @@ services:
     environment:
       MARKETPLACE_HOST: 0.0.0.0
       MARKETPLACE_PORT: "4317"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     ports:
       - "100.91.230.10:4317:4317"
     security_opt:
@@ -24,3 +62,28 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+
+  plugin-marketplace-web:
+    image: ${MARKETPLACE_WEB_IMAGE:-meta-agent-plugin-marketplace-web:local}
+    build:
+      context: ../..
+      dockerfile: packages/plugin-marketplace-web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      plugin-marketplace:
+        condition: service_healthy
+    ports:
+      - "100.91.230.10:4318:8080"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=1m,mode=0755
+
+volumes:
+  marketplace-postgres:
+  marketplace-minio:
