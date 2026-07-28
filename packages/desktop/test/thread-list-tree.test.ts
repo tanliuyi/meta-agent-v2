@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { flattenVisibleThreadTree, threadTreeByArchiveState } from "../src/renderer/src/state/thread-list-commands.ts";
+import {
+  COLLAPSED_THREAD_COUNT,
+  flattenVisibleThreadTree,
+  threadTreeByArchiveState,
+} from "../src/renderer/src/state/thread-list-commands.ts";
 import type { Thread } from "../src/shared/contracts.ts";
 
 describe("thread list tree", () => {
@@ -34,6 +38,59 @@ describe("thread list tree", () => {
     expect(flattenVisibleThreadTree(roots, new Set()).map(({ thread: item }) => item.id)).toEqual([
       "parent",
       "other-parent",
+    ]);
+  });
+
+  it("collapses each expanded child group with the same limit as root sessions", () => {
+    const children = Array.from({ length: 18 }, (_, index) =>
+      thread(`child-${index + 1}`, 100 - index, { parentThreadId: "parent" }),
+    );
+    const roots = threadTreeByArchiveState([thread("parent", 200), ...children], false, 10);
+
+    const collapsed = flattenVisibleThreadTree(roots, new Set(["parent"]));
+    expect(collapsed.map(({ thread: item }) => item.id)).toEqual([
+      "parent",
+      "child-1",
+      "child-2",
+      "child-3",
+      "child-4",
+      "child-5",
+    ]);
+    expect(collapsed.at(-1)?.siblingExpansions).toEqual([
+      {
+        parentThreadId: "parent",
+        depth: 1,
+        threadCount: 18,
+        hasMore: true,
+        expanded: false,
+      },
+    ]);
+
+    const expanded = flattenVisibleThreadTree(
+      roots,
+      new Set(["parent"]),
+      new Map([["parent", COLLAPSED_THREAD_COUNT + 10]]),
+    );
+    expect(expanded).toHaveLength(16);
+    expect(expanded.at(-1)?.thread.id).toBe("child-15");
+    expect(expanded.at(-1)?.siblingExpansions?.[0]).toMatchObject({ hasMore: true, expanded: true });
+  });
+
+  it("keeps nested child-group controls when their visible tails share a row", () => {
+    const children = Array.from({ length: 6 }, (_, index) =>
+      thread(`child-${index + 1}`, 100 - index, { parentThreadId: "parent" }),
+    );
+    const grandchildren = Array.from({ length: 6 }, (_, index) =>
+      thread(`grandchild-${index + 1}`, 50 - index, { parentThreadId: "child-5" }),
+    );
+    const roots = threadTreeByArchiveState([thread("parent", 200), ...children, ...grandchildren], false, 10);
+
+    const visible = flattenVisibleThreadTree(roots, new Set(["parent", "child-5"]));
+
+    expect(visible.at(-1)?.thread.id).toBe("grandchild-5");
+    expect(visible.at(-1)?.siblingExpansions?.map(({ parentThreadId }) => parentThreadId)).toEqual([
+      "child-5",
+      "parent",
     ]);
   });
 

@@ -10,12 +10,27 @@ export type { DesktopExtensionHostState } from "./desktop-extension-contracts.ts
 /** Desktop 与 renderer 之间使用的协议版本。 */
 export const PROTOCOL_VERSION = 9;
 
+/** Desktop 内部通用对话工作区的稳定 ID。不写入用户 Project 列表。 */
+export const GENERAL_WORKSPACE_ID = "__general__";
+
+/** 判断 Project 是否为内部通用工作区。 */
+export function isGeneralProject(idOrProject: string | { id: string; kind?: string }): boolean {
+  const id = typeof idOrProject === "string" ? idOrProject : idOrProject.id;
+  return id === GENERAL_WORKSPACE_ID;
+}
+
+/** 判断 Project 是否为真实用户项目（非通用工作区）。 */
+export function isUserProject(idOrProject: string | { id: string; kind?: string }): boolean {
+  return !isGeneralProject(idOrProject);
+}
+
 /** 可以安全通过 Electron IPC 传输的 JSON 值。 */
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
-/** 本地工作区项目。 */
+/** 本地工作区项目。kind 为 "general" 表示 Desktop 管理的通用对话工作区。 */
 export interface Project {
   id: string;
+  kind?: "project" | "general";
   name: string;
   cwd: string;
   lastOpenedAt: number;
@@ -36,6 +51,8 @@ export interface Thread {
   running: boolean;
   parentThreadId?: string;
   origin?: "branch" | "subagent";
+  /** Configured agent identity for subagent sessions; independent from the user-editable title. */
+  agentName?: string;
 }
 
 /** 可供当前会话选择的模型。 */

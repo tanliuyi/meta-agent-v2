@@ -683,12 +683,8 @@
   color: hsl(var(--destructive));
 }
 .builtin-notification-card {
-  width: 100%;
+  width: fit-content;
   overflow: hidden;
-  border: 1px solid hsl(var(--border) / 0.75);
-  border-left: 3px solid hsl(var(--info));
-  border-radius: var(--shape-radius-sm);
-  background: hsl(var(--muted) / 0.3);
   color: hsl(var(--foreground));
 }
 .builtin-notification-card[data-tone="warning"] {
@@ -702,8 +698,6 @@
   min-height: 34px;
   align-items: center;
   gap: 7px;
-  padding: 6px 10px;
-  border-bottom: 1px solid hsl(var(--border) / 0.55);
   font-size: var(--type-size-ui);
 }
 .builtin-notification-header strong {
@@ -729,11 +723,192 @@
   width: 15px;
   height: 15px;
 }
+.builtin-notification-card[data-layout="subagent"] {
+  width: min(100%, 760px);
+}
+.builtin-subagent-results {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.builtin-subagent-result {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--muted) / 0.42);
+}
+.builtin-subagent-result[data-status="completed"] {
+  background: hsl(var(--success) / 0.08);
+}
+.builtin-subagent-result[data-status="failed"] {
+  background: hsl(var(--destructive) / 0.1);
+}
+.builtin-subagent-result[data-status="paused"] {
+  background: hsl(var(--warning) / 0.1);
+}
+.builtin-subagent-result-row {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px 5px 10px;
+}
+.builtin-subagent-result-trigger {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+.builtin-subagent-result-trigger:disabled {
+  cursor: default;
+}
+.builtin-subagent-result-trigger:focus-visible {
+  border-radius: var(--shape-radius-xs);
+  outline: 1px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+.builtin-subagent-result-trigger strong,
+.builtin-subagent-status,
+.builtin-subagent-meta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.builtin-subagent-result-trigger strong {
+  font-family: var(--font-family-mono);
+  font-size: var(--type-size-control);
+  font-weight: 650;
+}
+.builtin-subagent-status,
+.builtin-subagent-meta {
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-family-mono);
+  font-size: var(--type-size-meta);
+}
+.builtin-subagent-summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-size-control);
+}
+.builtin-subagent-result[data-status="running"] .tool-subagent-status-dot {
+  background: hsl(var(--info));
+}
+.builtin-subagent-result[data-status="completed"] .tool-subagent-status-dot,
+.builtin-acceptance-row[data-status="completed"] .tool-subagent-status-dot {
+  background: hsl(var(--success));
+}
+.builtin-subagent-result[data-status="failed"] .tool-subagent-status-dot,
+.builtin-acceptance-row[data-status="failed"] .tool-subagent-status-dot {
+  background: hsl(var(--destructive));
+}
+.builtin-acceptance-row[data-status="not-applicable"] .tool-subagent-status-dot {
+  background: hsl(var(--muted-foreground));
+}
+.builtin-subagent-result[data-status="paused"] .tool-subagent-status-dot {
+  background: hsl(var(--warning));
+}
+.builtin-subagent-result[data-state="open"] .tool-chevron {
+  transform: rotate(90deg);
+}
+.builtin-subagent-detail-scroll {
+  max-height: min(360px, 45vh);
+  overflow-y: auto;
+  border-top: 1px solid hsl(var(--foreground) / 0.07);
+}
+.builtin-subagent-markdown {
+  padding: 8px 10px;
+  font-size: var(--type-size-control);
+}
+.builtin-subagent-session-value {
+  overflow-wrap: anywhere;
+  font-family: var(--font-family-mono);
+}
+.builtin-acceptance-report {
+  display: grid;
+}
+.builtin-notification-section {
+  min-width: 0;
+  padding: 8px 10px;
+  border-top: 1px solid hsl(var(--foreground) / 0.07);
+}
+.builtin-notification-section h4 {
+  margin: 0 0 6px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+  font-weight: 600;
+}
+.builtin-notification-section ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--type-size-control);
+}
+.builtin-notification-section[data-tone="warning"] {
+  color: hsl(var(--warning));
+}
+.builtin-acceptance-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: var(--type-size-control);
+}
+.builtin-acceptance-row strong {
+  flex: 0 0 auto;
+  font-family: var(--font-family-mono);
+  font-size: var(--type-size-meta);
+}
+.builtin-acceptance-row small {
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
+.builtin-acceptance-row > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.builtin-acceptance-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  padding: 3px 0;
+  font-size: var(--type-size-control);
+}
+.builtin-acceptance-command code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-family-mono);
+}
+.builtin-acceptance-command > span {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
+.builtin-acceptance-command > span[data-result="passed"],
+.builtin-acceptance-command > span[data-result="satisfied"] {
+  color: hsl(var(--success));
+}
+.builtin-acceptance-command small {
+  grid-column: 1 / -1;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
 .builtin-notification-message,
 .builtin-notification-detail,
 .builtin-notification-action {
-  margin: 0;
-  padding: 8px 10px;
+  margin: 4px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: var(--type-size-control);
@@ -751,7 +926,7 @@
 .builtin-notification-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  margin: 0;
+  margin: 4px 0 0;
 }
 .builtin-notification-stats > div {
   display: grid;
@@ -784,6 +959,19 @@
   color: hsl(var(--muted-foreground));
   font-size: var(--type-size-meta);
   line-height: 1.5;
+}
+.builtin-notification-body {
+  max-height: 320px;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-top: 1px solid hsl(var(--border) / 0.45);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-family-mono);
+  font-size: var(--type-size-meta);
+  line-height: 1.55;
 }
 .pi-notice-command {
   display: grid;

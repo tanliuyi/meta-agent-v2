@@ -6,6 +6,7 @@ import { app, BrowserWindow, Menu } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
+import { GENERAL_WORKSPACE_ID } from "../shared/contracts.ts";
 import { AuthConfigService } from "./auth/auth-config-service.ts";
 import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extension-registry.ts";
 import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
@@ -244,7 +245,12 @@ app.whenReady().then(async () => {
     });
   if (managedBashPath) process.env.PI_CODING_AGENT_MANAGED_BASH_PATH = managedBashPath;
   else delete process.env.PI_CODING_AGENT_MANAGED_BASH_PATH;
-  const projects = new ProjectStore(join(userDataDir, "desktop-state.json"), join(agentDir, "projects.json"));
+  const generalWorkspaceCwd = join(userDataDir, "workspaces", "general");
+  const projects = new ProjectStore(
+    join(userDataDir, "desktop-state.json"),
+    join(agentDir, "projects.json"),
+    generalWorkspaceCwd,
+  );
   await projects.load();
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
@@ -400,11 +406,26 @@ app.whenReady().then(async () => {
   const providers = new ProvidersConfigService(models, auth);
   const subagentSettings = new SubagentSettingsConfigService({
     agentDir,
+    builtinAgentsDir: join(
+      dirname(runtimeManifest.entries.subagent),
+      "..",
+      "main",
+      "pi",
+      "extensions",
+      "pi-subagents",
+      "agents",
+    ),
     modelRegistry: ModelRegistry.create(AuthStorage.create(join(agentDir, "auth.json")), join(agentDir, "models.json")),
-    getProjectCwd: (projectId) => projects.getCwd(projectId),
+    getProjectCwd: (projectId) => {
+      // 通用工作区不是用户项目，不用于 subagent project-scoped 配置
+      if (projectId === GENERAL_WORKSPACE_ID) throw new Error("通用工作区不支持 subagent project scope");
+      return projects.getCwd(projectId);
+    },
     getActiveProject: async () => {
       const project = await projects.getActive();
-      return project ? { id: project.id, cwd: project.cwd } : null;
+      // 通用工作区不是用户项目，不暴露为 subagent 项目级配置目标
+      if (!project || project.id === GENERAL_WORKSPACE_ID) return null;
+      return { id: project.id, cwd: project.cwd };
     },
   });
   registerIpc(

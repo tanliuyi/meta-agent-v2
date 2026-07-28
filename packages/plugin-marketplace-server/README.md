@@ -6,13 +6,10 @@ NestJS backend for the Meta Agent Desktop plugin marketplace protocol. It is a s
 
 ```bash
 npm install --ignore-scripts
-set -a
-. packages/plugin-marketplace-server/.env.example
-set +a
 npm --prefix packages/plugin-marketplace-server run dev
 ```
 
-The server reads the process environment directly; it does not load `.env` files implicitly. The default development server listens on `127.0.0.1:4317`. Ephemeral signing keys are rejected unless `MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY=true` is set explicitly. Production deployments must provide `MARKETPLACE_SIGNING_PRIVATE_KEY` as a base64-encoded PKCS#8 PEM value.
+The development script always uses an in-memory ephemeral signing key and ignores `MARKETPLACE_SIGNING_PRIVATE_KEY` inherited from the shell. The default development server listens on `127.0.0.1:4317`. It still reads other settings from the process environment and does not load `.env` files implicitly. `MARKETPLACE_DATA_DIR` cannot be used with this ephemeral development mode. Production startup and deployments must provide `MARKETPLACE_SIGNING_PRIVATE_KEY` as a base64-encoded PKCS#8 PEM value.
 
 ## Endpoints
 
@@ -45,6 +42,7 @@ Ratings (user account token):
 
 Publishing (publisher member or admin token):
 
+- `GET /v1/publish/plugins` — list plugins managed by the current publisher memberships, including drafts
 - `GET /v1/publish/plugins/:pluginId` — publisher view including drafts
 - `PUT /v1/publish/plugins/:pluginId` — create or update plugin metadata
 - `POST /v1/publish/plugins/:pluginId/versions` — declare a draft version and its artifacts

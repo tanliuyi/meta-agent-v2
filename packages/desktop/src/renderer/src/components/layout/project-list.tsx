@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { isUserProject } from "../../../../shared/contracts.ts";
 import { useDesktopSelector } from "../../state/desktop-context.tsx";
 import { selectProjects } from "../../state/desktop-selectors.ts";
 import { ProjectItem } from "./project-item.tsx";
@@ -19,7 +20,7 @@ export const ProjectList = memo(function ProjectList({
 
   return (
     <ul className="m-0 list-none p-0">
-      {projects.map((project) => (
+      {projects.filter(isUserProject).map((project) => (
         <ProjectItem
           key={project.id}
           project={project}

@@ -66,6 +66,12 @@ export interface ArtifactContent {
 	size: number;
 }
 
+export interface PublishArtifactAuditContent {
+	artifactId: string;
+	containsNativeCode: boolean;
+	bytes?: Uint8Array;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
 	key TEXT PRIMARY KEY,
@@ -604,6 +610,25 @@ export class MarketplaceStore {
 		if (result.changes === 0) throw new Error("PLUGIN_ARTIFACT_NOT_FOUND");
 	}
 
+	publishArtifactAuditContents(pluginId: string, version: string): PublishArtifactAuditContent[] {
+		const versionRow = this.requireVersionRow(pluginId, version);
+		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
+		const rows = this.db
+			.prepare(
+				"SELECT artifact_id, contains_native_code, bytes FROM plugin_artifacts WHERE plugin_id = ? AND version = ? ORDER BY artifact_id",
+			)
+			.all(pluginId, version) as Array<{
+			artifact_id: string;
+			contains_native_code: number;
+			bytes: Uint8Array | null;
+		}>;
+		return rows.map((row) => ({
+			artifactId: row.artifact_id,
+			containsNativeCode: row.contains_native_code !== 0,
+			...(row.bytes ? { bytes: row.bytes } : {}),
+		}));
+	}
+
 	publishVersion(pluginId: string, version: string): void {
 		const versionRow = this.requireVersionRow(pluginId, version);
 		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
@@ -658,26 +683,17 @@ export class MarketplaceStore {
 		});
 	}
 
+	listPublishStates(publisherIds?: readonly string[]): PublishPluginState[] {
+		const allowedPublisherIds = publisherIds ? new Set(publisherIds) : undefined;
+		return this.loadPlugins(undefined, true)
+			.filter((plugin) => !allowedPublisherIds || allowedPublisherIds.has(plugin.publisher.id))
+			.map((plugin) => this.toPublishState(plugin));
+	}
+
 	publishState(pluginId: string): PublishPluginState {
 		const plugin = this.loadPlugins(pluginId, true)[0];
 		if (!plugin) throw new Error("PLUGIN_NOT_FOUND");
-		return {
-			id: plugin.id,
-			name: plugin.name,
-			description: plugin.description,
-			publisherId: plugin.publisher.id,
-			categories: [...plugin.categories],
-			...(plugin.iconAssetId ? { iconAssetId: plugin.iconAssetId } : {}),
-			versions: plugin.versions.map((version) => ({
-				version: version.version,
-				status: version.status,
-				draft: version.draft,
-				artifacts: version.artifacts.map((artifact) => ({
-					id: artifact.id,
-					uploaded: artifact.sha256 !== null,
-				})),
-			})),
-		};
+		return this.toPublishState(plugin);
 	}
 
 	// --- ratings ---
@@ -786,6 +802,26 @@ export class MarketplaceStore {
 
 	private versionState(pluginId: string, version: string): PublishVersionState | undefined {
 		return this.publishState(pluginId).versions.find((entry) => entry.version === version);
+	}
+
+	private toPublishState(plugin: StoredPlugin): PublishPluginState {
+		return {
+			id: plugin.id,
+			name: plugin.name,
+			description: plugin.description,
+			publisherId: plugin.publisher.id,
+			categories: [...plugin.categories],
+			...(plugin.iconAssetId ? { iconAssetId: plugin.iconAssetId } : {}),
+			versions: plugin.versions.map((version) => ({
+				version: version.version,
+				status: version.status,
+				draft: version.draft,
+				artifacts: version.artifacts.map((artifact) => ({
+					id: artifact.id,
+					uploaded: artifact.sha256 !== null,
+				})),
+			})),
+		};
 	}
 
 	private requireVersionRow(pluginId: string, version: string): VersionRow {

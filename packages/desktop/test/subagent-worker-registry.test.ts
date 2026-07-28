@@ -267,7 +267,13 @@ describe("SubagentWorkerRegistry", () => {
         parentSession: parentSessionFile,
       })}\n`,
     );
-    const summaries: Array<{ id: string; title: string; running: boolean; parentThreadId?: string }> = [];
+    const summaries: Array<{
+      id: string;
+      title: string;
+      running: boolean;
+      parentThreadId?: string;
+      agentName?: string;
+    }> = [];
     const registry = new SubagentWorkerRegistry({
       manifest: manifest(),
       agentDir: process.cwd(),
@@ -289,6 +295,7 @@ describe("SubagentWorkerRegistry", () => {
         title: "Inspect the renderer tree",
         running: true,
         parentThreadId: "direct-parent-thread",
+        agentName: "worker",
       });
       expect(summaries.at(-1)).toMatchObject({ id: "child-thread", running: false });
       expect(registry.listThreads("project")).toEqual([]);

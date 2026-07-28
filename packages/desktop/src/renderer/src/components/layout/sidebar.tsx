@@ -5,8 +5,8 @@ import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Settings from "lucide-react/dist/esm/icons/settings.mjs";
 import { type CSSProperties, memo, useCallback } from "react";
-import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
-import { selectHasAvailableProject } from "../../state/desktop-selectors.ts";
+import { GENERAL_WORKSPACE_ID } from "../../../../shared/contracts.ts";
+import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useLayout } from "../../state/layout.tsx";
 import { getSidebarMaxWidth, SIDEBAR_MIN_WIDTH } from "../../state/layout-preference.ts";
 import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
@@ -14,6 +14,7 @@ import { draftSearch } from "../../state/session-navigation.ts";
 import { settingsReturnSession, validateSettingsSearch } from "../../state/settings-navigation.ts";
 import { runControlledThreadAction } from "../../state/thread-list-commands.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
+import { GeneralConversationSection } from "./general-conversation-section.tsx";
 import { ProjectList } from "./project-list.tsx";
 import { UpdateBanner } from "./update-banner.tsx";
 
@@ -24,7 +25,6 @@ const sidebarRowClass =
 /** Codex Desktop 风格的 Project 与 session 主导航。 */
 export const Sidebar = memo(function Sidebar() {
   const actions = useDesktopActions();
-  const canStartDraft = useDesktopSelector(selectHasAvailableProject);
   const { draftMaterializing } = useSessionCacheSnapshot();
   const { sidebarWidth, setSidebarWidth } = useLayout();
   const matchRoute = useMatchRoute();
@@ -97,40 +97,53 @@ export const Sidebar = memo(function Sidebar() {
         <nav className="sidebar-actions" aria-label="主要操作">
           <Button
             variant="ghost"
-            disabled={!canStartDraft || draftMaterializing}
+            disabled={draftMaterializing}
             className={sidebarRowClass}
-            onClick={(event) =>
-              runControlledThreadAction(event, () => {
-                startDraft();
-              })
-            }
+            onClick={(event) => runControlledThreadAction(event, () => startDraft())}
           >
             <Plus size={16} />
             <span className="whitespace-nowrap">新建任务</span>
           </Button>
-          <Button asChild variant="ghost" className={sidebarRowClass}>
-            <Link to="/plugins" search={settingsSearch}>
-              <Blocks size={16} />
-              <span className="whitespace-nowrap">插件中心</span>
-            </Link>
-          </Button>
         </nav>
 
-        <div className="sidebar-section-heading">
-          <span>项目</span>
-          <TooltipIconButton
-            variant="ghost"
-            size="icon"
-            aria-label="添加项目"
-            tooltip="添加项目"
-            side="top"
-            onClick={() => void actions.chooseProject().catch(() => undefined)}
-          >
-            <Plus />
-          </TooltipIconButton>
-        </div>
-        <div className="sidebar-projects">
-          <ProjectList activeProjectId={activeProjectId} newTaskDisabled={draftMaterializing} onNewTask={startDraft} />
+        <div className="sidebar-navigation-scroll">
+          <nav className="sidebar-actions sidebar-secondary-actions" aria-label="辅助操作">
+            <Button asChild variant="ghost" className={sidebarRowClass}>
+              <Link to="/plugins" search={settingsSearch}>
+                <Blocks size={16} />
+                <span className="whitespace-nowrap">插件中心</span>
+              </Link>
+            </Button>
+          </nav>
+
+          <section className="sidebar-project-section">
+            <div className="sidebar-section-heading">
+              <span>项目</span>
+              <TooltipIconButton
+                variant="ghost"
+                size="icon"
+                aria-label="添加项目"
+                tooltip="添加项目"
+                side="top"
+                onClick={() => void actions.chooseProject().catch(() => undefined)}
+              >
+                <Plus />
+              </TooltipIconButton>
+            </div>
+            <div className="sidebar-projects">
+              <ProjectList
+                activeProjectId={activeProjectId}
+                newTaskDisabled={draftMaterializing}
+                onNewTask={startDraft}
+              />
+            </div>
+          </section>
+
+          <GeneralConversationSection
+            active={activeProjectId === GENERAL_WORKSPACE_ID}
+            newConversationDisabled={draftMaterializing}
+            onNewConversation={() => startDraft(GENERAL_WORKSPACE_ID)}
+          />
         </div>
 
         <div className="sidebar-footer">

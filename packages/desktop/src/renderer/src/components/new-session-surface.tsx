@@ -57,7 +57,7 @@ export function NewSessionSurface() {
     });
     setPhase((current) => {
       if (current === "materializing") return current;
-      return projects.length ? "editing" : "no-project";
+      return projects.length > 0 ? "editing" : "no-project";
     });
   }, [catalogLoading, projects, search.projectId]);
 
@@ -194,7 +194,10 @@ export function NewSessionSurface() {
         </header>
         <div className="workspace-row">
           <main className="chat-workspace">
-            <EmptyChatState title="没有可用 Project" detail={loadError ?? "请先在侧边栏添加 Project。"} />
+            <EmptyChatState
+              title="没有可用工作区"
+              detail={loadError ?? "通用工作区不可用，且没有可用的 Project。请添加一个 Project。"}
+            />
           </main>
         </div>
       </>

@@ -7,7 +7,7 @@
   "main": "./dist/main.js",
   "scripts": {
     "build": "tsgo -p tsconfig.build.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "node scripts/dev.mjs",
     "start": "node dist/main.js",
     "test": "vitest --run",
     "typecheck": "tsgo --noEmit -p tsconfig.build.json"

@@ -111,6 +111,64 @@ export interface DownloadMetadata {
   size: number;
 }
 
+export interface PublishArtifactState {
+  id: string;
+  uploaded: boolean;
+}
+
+export interface PublishVersionState {
+  version: string;
+  status: PluginStatus;
+  draft: boolean;
+  artifacts: PublishArtifactState[];
+}
+
+export interface PublishPluginState {
+  id: string;
+  name: string;
+  description: string;
+  publisherId: string;
+  categories: string[];
+  iconAssetId?: string;
+  versions: PublishVersionState[];
+}
+
+export interface PublishPluginInput {
+  name: string;
+  description: string;
+  publisherId: string;
+  categories: string[];
+  iconAssetId?: string;
+}
+
+export interface PublishArtifactInput {
+  id: string;
+  target: ArtifactTarget;
+  entry: string;
+  containsNativeCode: boolean;
+  preferred: boolean;
+}
+
+export interface PublishVersionInput {
+  version: string;
+  changelog: string;
+  desktop: {
+    hostProfileVersion: number;
+    minVersion?: string;
+    maxVersionExclusive?: string;
+  };
+  capabilities: string[];
+  artifacts: PublishArtifactInput[];
+}
+
+export interface ArtifactUploadResult {
+  pluginId: string;
+  version: string;
+  artifactId: string;
+  sha256: string;
+  size: number;
+}
+
 interface MarketplaceErrorBody {
   error?: {
     code?: string;
@@ -185,8 +243,8 @@ export function authenticate(mode: "login" | "register", username: string, passw
   });
 }
 
-export function getCurrentUser(token: string): Promise<AuthMe> {
-  return request<AuthMe>("/v1/auth/me", {}, token);
+export function getCurrentUser(token: string, signal?: AbortSignal): Promise<AuthMe> {
+  return request<AuthMe>("/v1/auth/me", { signal }, token);
 }
 
 export function logout(token: string): Promise<void> {
@@ -206,4 +264,70 @@ export function ratePlugin(pluginId: string, stars: number, review: string, toke
 
 export function deleteRating(pluginId: string, token: string): Promise<void> {
   return request<void>(`/v1/plugins/${encodeURIComponent(pluginId)}/rating`, { method: "DELETE" }, token);
+}
+
+export function listManagedPlugins(token: string): Promise<{ plugins: PublishPluginState[] }> {
+  return request<{ plugins: PublishPluginState[] }>("/v1/publish/plugins", {}, token);
+}
+
+export function upsertManagedPlugin(
+  pluginId: string,
+  input: PublishPluginInput,
+  token: string,
+): Promise<{ plugin: PublishPluginState }> {
+  return request<{ plugin: PublishPluginState }>(
+    `/v1/publish/plugins/${encodeURIComponent(pluginId)}`,
+    { method: "PUT", body: JSON.stringify(input) },
+    token,
+  );
+}
+
+export function createManagedVersion(
+  pluginId: string,
+  input: PublishVersionInput,
+  token: string,
+): Promise<{ pluginId: string; version: PublishVersionState }> {
+  return request<{ pluginId: string; version: PublishVersionState }>(
+    `/v1/publish/plugins/${encodeURIComponent(pluginId)}/versions`,
+    { method: "POST", body: JSON.stringify(input) },
+    token,
+  );
+}
+
+export function uploadManagedArtifact(
+  pluginId: string,
+  version: string,
+  artifactId: string,
+  file: File,
+  token: string,
+): Promise<ArtifactUploadResult> {
+  return request<ArtifactUploadResult>(
+    `/v1/publish/plugins/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}/artifacts/${encodeURIComponent(artifactId)}`,
+    { method: "PUT", headers: { "content-type": "application/zip" }, body: file },
+    token,
+  );
+}
+
+export function publishManagedVersion(pluginId: string, version: string, token: string): Promise<void> {
+  return request<void>(
+    `/v1/publish/plugins/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}/publish`,
+    { method: "POST" },
+    token,
+  );
+}
+
+export function deprecateManagedVersion(pluginId: string, version: string, token: string): Promise<void> {
+  return request<void>(
+    `/v1/publish/plugins/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}/deprecate`,
+    { method: "POST" },
+    token,
+  );
+}
+
+export function deleteManagedDraft(pluginId: string, version: string, token: string): Promise<void> {
+  return request<void>(
+    `/v1/publish/plugins/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(version)}`,
+    { method: "DELETE" },
+    token,
+  );
 }

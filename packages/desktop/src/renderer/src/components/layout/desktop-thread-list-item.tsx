@@ -9,8 +9,8 @@ import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { memo, useEffect, useState } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
 
-const TREE_GUIDE_START = 14;
-const TREE_LEVEL_INDENT = 14;
+const TREE_GUIDE_START = 16;
+const TREE_LEVEL_INDENT = 16;
 const TREE_TOGGLE_SIZE = 16;
 
 function formatElapsedTime(updatedAt: number, now: number): string {
@@ -39,6 +39,7 @@ interface DesktopThreadListItemProps {
   expanded: boolean;
   ancestorContinuations: readonly boolean[];
   isLastChild: boolean;
+  compactRoot?: boolean;
   onToggle(threadId: string): void;
   onRenameStart(thread: Thread): void;
   onOpen(thread: Thread): void;
@@ -51,6 +52,8 @@ interface DesktopThreadListItemProps {
 export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   const { thread } = props;
   const isPending = props.isSwitching || props.isRenamingPending || props.isArchivePending || props.isDeletePending;
+  const contentIndent =
+    props.compactRoot && props.depth === 0 && props.childCount === 0 ? 8 : 32 + props.depth * TREE_LEVEL_INDENT;
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -130,8 +133,8 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           ) : null}
           <button
             type="button"
-            className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1 rounded-md pe-2 text-start text-sm outline-none focus-visible:ring-[3px]"
-            style={{ paddingInlineStart: 32 + props.depth * TREE_LEVEL_INDENT }}
+            className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1 rounded-md pe-2 text-start outline-none focus-visible:ring-[3px]"
+            style={{ paddingInlineStart: contentIndent }}
             role="treeitem"
             aria-level={props.depth + 1}
             aria-expanded={props.childCount > 0 ? props.expanded : undefined}
@@ -146,7 +149,18 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             ) : thread.origin === "branch" ? (
               <GitBranch className="text-muted-foreground size-3.5 shrink-0" aria-label="分支会话" />
             ) : null}
-            <span className="min-w-0 flex-1 truncate">{thread.title || "新会话"}</span>
+            {thread.origin === "subagent" && thread.agentName ? (
+              <span
+                data-slot="subagent-name"
+                className="text-foreground/75 max-w-20 shrink-0 truncate text-xs font-medium"
+                title={thread.agentName}
+              >
+                {thread.agentName}
+              </span>
+            ) : null}
+            <span data-slot="thread-title" className="min-w-0 flex-1 truncate" title={thread.title || "新会话"}>
+              {thread.title || "新会话"}
+            </span>
             {!props.expanded && props.childCount > 0 ? (
               <span className="text-muted-foreground shrink-0 text-xs" aria-label={`${props.childCount} 个子会话`}>
                 {props.childCount}

@@ -6,6 +6,7 @@ import type { INestApplication } from "@nestjs/common";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { assertNoNativePayload } from "../src/artifact-builder.ts";
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "../src/auth.ts";
 import type { MarketplaceServerConfig } from "../src/config.ts";
 import { createMarketplaceApp } from "../src/create-app.ts";
@@ -60,10 +61,13 @@ describe("accounts and sessions", () => {
 			publisherIds: [],
 		});
 
-		await request(app.getHttpServer())
+		const duplicate = await request(app.getHttpServer())
 			.post("/v1/auth/register")
 			.send({ username: "alice", password: "password123" })
 			.expect(409);
+		expect(duplicate.body).toEqual({
+			error: { code: "USERNAME_TAKEN", message: "Username is already taken" },
+		});
 		await request(app.getHttpServer())
 			.post("/v1/auth/register")
 			.send({ username: "Invalid Name", password: "password123" })
@@ -142,6 +146,22 @@ describe("accounts and sessions", () => {
 	});
 });
 
+describe("artifact native-code policy", () => {
+	it.each([
+		["ELF", [0x7f, 0x45, 0x4c, 0x46]],
+		["PE", [0x4d, 0x5a, 0, 0]],
+		["Mach-O FAT", [0xca, 0xfe, 0xba, 0xbe]],
+		["Mach-O FAT64", [0xca, 0xfe, 0xba, 0xbf]],
+		["Mach-O FAT64 reversed", [0xbf, 0xba, 0xfe, 0xca]],
+		["Mach-O FAT reversed", [0xbe, 0xba, 0xfe, 0xca]],
+		["WebAssembly", [0, 0x61, 0x73, 0x6d]],
+	] as const)("rejects %s magic without relying on the filename", (_label, magic) => {
+		expect(() => assertNoNativePayload(new Map([["payload/addon.dat", new Uint8Array(magic)]]))).toThrow(
+			"PAYLOAD_NATIVE_UNSUPPORTED",
+		);
+	});
+});
+
 describe("publisher administration", () => {
 	it("restricts publisher management to the admin token", async () => {
 		await request(app.getHttpServer()).get("/v1/admin/publishers").expect(401);
@@ -196,6 +216,13 @@ describe("publishing", () => {
 			.send(pluginMetadata())
 			.expect(403);
 
+		await request(app.getHttpServer()).get("/v1/publish/plugins").expect(401);
+		const unauthorizedList = await request(app.getHttpServer())
+			.get("/v1/publish/plugins")
+			.set("authorization", `Bearer ${bobToken}`)
+			.expect(200);
+		expect(unauthorizedList.body).toEqual({ plugins: [] });
+
 		const created = await request(app.getHttpServer())
 			.put(`/v1/publish/plugins/${PLUGIN_ID}`)
 			.set("authorization", `Bearer ${aliceToken}`)
@@ -210,6 +237,30 @@ describe("publishing", () => {
 				categories: ["productivity"],
 				versions: [],
 			},
+		});
+		const ownPlugins = await request(app.getHttpServer())
+			.get("/v1/publish/plugins")
+			.set("authorization", `Bearer ${aliceToken}`)
+			.expect(200);
+		expect(ownPlugins.body).toEqual({ plugins: [created.body.plugin] });
+		const adminPlugins = await request(app.getHttpServer())
+			.get("/v1/publish/plugins")
+			.set("authorization", `Bearer ${ADMIN_TOKEN}`)
+			.expect(200);
+		expect((adminPlugins.body as { plugins: Array<{ id: string }> }).plugins.map(({ id }) => id)).toEqual([
+			PLUGIN_ID,
+			"dev.meta-agent.example-tools",
+		]);
+
+		const nativeDeclaration = versionDeclaration("0.9.0");
+		nativeDeclaration.artifacts[0]!.containsNativeCode = true;
+		const rejectedNativeDeclaration = await request(app.getHttpServer())
+			.post(`/v1/publish/plugins/${PLUGIN_ID}/versions`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.send(nativeDeclaration)
+			.expect(400);
+		expect(rejectedNativeDeclaration.body).toMatchObject({
+			error: { code: "NATIVE_ARTIFACT_UNSUPPORTED" },
 		});
 
 		const draft = await request(app.getHttpServer())
@@ -265,6 +316,28 @@ describe("publishing", () => {
 			.set("content-type", "application/zip")
 			.send(Buffer.from(zipSync({ "index.ts": strToU8(ENTRY_SOURCE), "lib/": strToU8(HELPER_SOURCE) })))
 			.expect(400);
+		const rejectedNativeName = await request(app.getHttpServer())
+			.put(`/v1/publish/plugins/${PLUGIN_ID}/versions/1.0.0/artifacts/${ARTIFACT_ID}`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.set("content-type", "application/zip")
+			.send(
+				Buffer.from(
+					zipSync({ "index.ts": strToU8(ENTRY_SOURCE), "native/addon.node": new Uint8Array([0, 0, 0, 0]) }),
+				),
+			)
+			.expect(400);
+		expect(rejectedNativeName.body).toMatchObject({ error: { code: "PAYLOAD_NATIVE_UNSUPPORTED" } });
+		const rejectedNativeMagic = await request(app.getHttpServer())
+			.put(`/v1/publish/plugins/${PLUGIN_ID}/versions/1.0.0/artifacts/${ARTIFACT_ID}`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.set("content-type", "application/zip")
+			.send(
+				Buffer.from(
+					zipSync({ "index.ts": strToU8(ENTRY_SOURCE), "native/addon.dat": new Uint8Array([0x4d, 0x5a, 0, 0]) }),
+				),
+			)
+			.expect(400);
+		expect(rejectedNativeMagic.body).toMatchObject({ error: { code: "PAYLOAD_NATIVE_UNSUPPORTED" } });
 
 		const uploaded = await request(app.getHttpServer())
 			.put(`/v1/publish/plugins/${PLUGIN_ID}/versions/1.0.0/artifacts/${ARTIFACT_ID}`)

@@ -41,6 +41,13 @@ export interface ArtifactUploadResponse {
 
 export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<unknown>[] {
 	class PublishController {
+		list(authorization: string | undefined): { plugins: PublishPluginState[] } {
+			const principal = requirePrincipal(runtime, authorization);
+			const publisherIds =
+				principal.kind === "admin" ? undefined : runtime.store.publisherIdsForUser(principal.userId);
+			return { plugins: runtime.store.listPublishStates(publisherIds) };
+		}
+
 		state(pluginId: string, authorization: string | undefined): { plugin: PublishPluginState } {
 			validatePluginId(pluginId);
 			requirePluginMember(runtime, authorization, pluginId);
@@ -119,7 +126,13 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 		): { pluginId: string; version: MarketplacePluginVersionDetail } {
 			validatePluginId(pluginId);
 			requirePluginMember(runtime, authorization, pluginId);
-			mapStoreErrors(() => runtime.store.publishVersion(pluginId, version));
+			mapStoreErrors(() => {
+				for (const artifact of runtime.store.publishArtifactAuditContents(pluginId, version)) {
+					if (artifact.containsNativeCode) throw new Error("PAYLOAD_NATIVE_UNSUPPORTED");
+					if (artifact.bytes) extractPayloadArchive(artifact.bytes, 5 * runtime.config.maxArtifactBytes);
+				}
+				runtime.store.publishVersion(pluginId, version);
+			});
 			const published = runtime.store.getPublicVersion(pluginId, version);
 			if (!published) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
 			return { pluginId, version: versionDetail(pluginId, published, runtime.config.publicBaseUrl) };
@@ -144,6 +157,8 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 	}
 
 	applyController(PublishController, "v1/publish/plugins");
+	applyRoute(PublishController.prototype, "list", "get", "");
+	applyParameter(PublishController.prototype, "list", 0, Headers("authorization"));
 	applyRoute(PublishController.prototype, "state", "get", ":pluginId");
 	applyParameter(PublishController.prototype, "state", 0, Param("pluginId"));
 	applyParameter(PublishController.prototype, "state", 1, Headers("authorization"));
@@ -266,11 +281,18 @@ function parsePublishArtifact(value: unknown, path: string): PublishVersionArtif
 	} catch (error) {
 		throw badRequest("BODY_INVALID", error instanceof Error ? error.message : `${path}.target is invalid`);
 	}
+	const containsNativeCode = bodyBoolean(record, "containsNativeCode");
+	if (containsNativeCode) {
+		throw badRequest(
+			"NATIVE_ARTIFACT_UNSUPPORTED",
+			`${path}.containsNativeCode cannot be enabled until signed native metadata is supported`,
+		);
+	}
 	return {
 		id,
 		target,
 		entry,
-		containsNativeCode: bodyBoolean(record, "containsNativeCode"),
+		containsNativeCode,
 		preferred: bodyBoolean(record, "preferred"),
 	};
 }

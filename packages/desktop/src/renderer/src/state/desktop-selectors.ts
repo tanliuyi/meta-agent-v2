@@ -1,6 +1,7 @@
 import type { Thread } from "../../../shared/contracts.ts";
 import type { DesktopState } from "./desktop-model.ts";
 
+/** 全部 workspace，包括通用对话。 */
 export function selectProjects(state: DesktopState) {
   return state.projects;
 }

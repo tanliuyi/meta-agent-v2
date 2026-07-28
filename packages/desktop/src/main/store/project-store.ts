@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Project, WorkbenchState } from "../../shared/contracts.ts";
+import { GENERAL_WORKSPACE_ID } from "../../shared/contracts.ts";
 
 type ProjectStatus = "available" | "missing" | "permissionDenied" | "invalid";
 
@@ -35,18 +37,30 @@ interface LegacyDesktopState extends DesktopState {
 const EMPTY_PROJECTS: ProjectMetadataFile = { version: 1, projects: [] };
 const EMPTY_DESKTOP_STATE: DesktopState = { version: 1, archivedThreads: {}, workbenches: {} };
 
+/** 内部通用工作区的展示名。 */
+const GENERAL_WORKSPACE_NAME = "对话";
+
 /** 持久化 Pi-compatible Project metadata 与 Desktop 专属 UI 状态。 */
 export class ProjectStore {
   private projectMetadata: ProjectMetadataFile = EMPTY_PROJECTS;
   private desktopState: DesktopState = EMPTY_DESKTOP_STATE;
   private readonly projectFile: string;
   private readonly desktopFile: string;
+  private readonly generalWorkspaceCwd: string | undefined;
   private saveProjectsTask: Promise<void> = Promise.resolve();
   private saveDesktopTask: Promise<void> = Promise.resolve();
 
-  constructor(desktopFile: string, projectFile = join(dirname(desktopFile), "projects.json")) {
+  constructor(
+    desktopFile: string,
+    projectFile = join(dirname(desktopFile), "projects.json"),
+    generalWorkspaceCwd?: string,
+  ) {
     this.desktopFile = desktopFile;
     this.projectFile = projectFile;
+    this.generalWorkspaceCwd = generalWorkspaceCwd;
+    if (generalWorkspaceCwd !== undefined) {
+      if (!existsSync(generalWorkspaceCwd)) mkdirSync(generalWorkspaceCwd, { recursive: true });
+    }
   }
 
   async load(): Promise<void> {
@@ -83,14 +97,39 @@ export class ProjectStore {
     this.projectMetadata = { ...EMPTY_PROJECTS, projects: [] };
   }
 
+  /** 检查 projectId 是否合法：已存储的真实项目或已配置的通用工作区。 */
+  private assertProjectAccessible(projectId: string): void {
+    if (projectId === GENERAL_WORKSPACE_ID) {
+      if (!this.generalWorkspaceCwd) throw new Error("通用工作区未初始化");
+      return;
+    }
+    if (!this.projectMetadata.projects.some(({ projectId: id }) => id === projectId)) {
+      throw new Error(`Project 不存在: ${projectId}`);
+    }
+  }
+
+  private generalProject(): Project | null {
+    if (!this.generalWorkspaceCwd) return null;
+    return {
+      id: GENERAL_WORKSPACE_ID,
+      kind: "general",
+      name: GENERAL_WORKSPACE_NAME,
+      cwd: this.generalWorkspaceCwd,
+      lastOpenedAt: 0,
+      available: true,
+    };
+  }
+
   async list(): Promise<Project[]> {
-    return Promise.all(this.projectMetadata.projects.map((project) => this.toProject(project)));
+    const projects = await Promise.all(this.projectMetadata.projects.map((project) => this.toProject(project)));
+    const general = this.generalProject();
+    return general ? [general, ...projects] : projects;
   }
 
   async getActive(): Promise<Project | null> {
-    const project = this.projectMetadata.projects.find(
-      ({ projectId }) => projectId === this.desktopState.activeProjectId,
-    );
+    const activeId = this.desktopState.activeProjectId;
+    if (activeId === GENERAL_WORKSPACE_ID) return this.generalProject();
+    const project = this.projectMetadata.projects.find(({ projectId }) => projectId === activeId);
     return project ? this.toProject(project) : null;
   }
 
@@ -120,6 +159,13 @@ export class ProjectStore {
   }
 
   async open(projectId: string): Promise<Project> {
+    if (projectId === GENERAL_WORKSPACE_ID) {
+      const descriptor = this.generalProject();
+      if (!descriptor) throw new Error("通用工作区未初始化");
+      this.desktopState.activeProjectId = projectId;
+      await this.saveDesktop();
+      return descriptor;
+    }
     const project = this.requireStored(projectId);
     const result = await this.toProject(project);
     if (!result.available) throw new Error(result.issue ?? "Project 目录不可用");
@@ -133,6 +179,9 @@ export class ProjectStore {
   }
 
   async remove(projectId: string): Promise<void> {
+    if (projectId === GENERAL_WORKSPACE_ID) {
+      throw new Error("不能删除内置通用工作区");
+    }
     this.requireStored(projectId);
     this.projectMetadata.projects = this.projectMetadata.projects.filter(({ projectId: id }) => id !== projectId);
     delete this.desktopState.archivedThreads[projectId];
@@ -144,15 +193,20 @@ export class ProjectStore {
   }
 
   getCwd(projectId: string): string {
+    if (projectId === GENERAL_WORKSPACE_ID) {
+      if (!this.generalWorkspaceCwd) throw new Error("通用工作区未初始化");
+      return this.generalWorkspaceCwd;
+    }
     return this.requireStored(projectId).path;
   }
 
   isArchived(projectId: string, threadId: string): boolean {
+    this.assertProjectAccessible(projectId);
     return this.desktopState.archivedThreads[projectId]?.includes(threadId) ?? false;
   }
 
   async setArchived(projectId: string, threadId: string, archived: boolean): Promise<void> {
-    this.requireStored(projectId);
+    this.assertProjectAccessible(projectId);
     const values = new Set(this.desktopState.archivedThreads[projectId] ?? []);
     if (archived) values.add(threadId);
     else values.delete(threadId);
@@ -161,7 +215,7 @@ export class ProjectStore {
   }
 
   getWorkbench(projectId: string, threadId: string): WorkbenchState {
-    this.requireStored(projectId);
+    this.assertProjectAccessible(projectId);
     return (
       this.desktopState.workbenches[workbenchKey(projectId, threadId)] ?? {
         projectId,
@@ -178,12 +232,13 @@ export class ProjectStore {
   }
 
   async setWorkbench(value: WorkbenchState): Promise<void> {
-    this.requireStored(value.projectId);
+    this.assertProjectAccessible(value.projectId);
     this.desktopState.workbenches[workbenchKey(value.projectId, value.threadId)] = value;
     await this.saveDesktop();
   }
 
   async removeWorkbench(projectId: string, threadId: string): Promise<void> {
+    this.assertProjectAccessible(projectId);
     delete this.desktopState.workbenches[workbenchKey(projectId, threadId)];
     await this.saveDesktop();
   }
@@ -201,6 +256,7 @@ export class ProjectStore {
       project.status = "available";
       return {
         id: project.projectId,
+        kind: "project",
         name: project.name,
         cwd: project.path,
         lastOpenedAt: parseTimestamp(project.lastOpenedAt),
@@ -210,6 +266,7 @@ export class ProjectStore {
       project.status = statusFromError(error);
       return {
         id: project.projectId,
+        kind: "project",
         name: project.name,
         cwd: project.path,
         lastOpenedAt: parseTimestamp(project.lastOpenedAt),

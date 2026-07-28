@@ -76,6 +76,27 @@ describe("desktop catalog reducer", () => {
     expect(state.threadCatalogs[project.id]).toBe(catalog);
   });
 
+  it("后台重新加载 thread catalog 时保留已有标题并刷新其他摘要字段", () => {
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [{ ...thread, title: "当前标题" }],
+    });
+
+    state = desktopReducer(state, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [{ ...thread, title: "持久化旧标题", updatedAt: 2, messageCount: 1, preview: "最新消息" }],
+    });
+
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({
+      title: "当前标题",
+      updatedAt: 2,
+      messageCount: 1,
+      preview: "最新消息",
+    });
+  });
+
   it("cached control 只更新 thread summary，不进入全局 control 副本", () => {
     let state = desktopReducer(INITIAL_STATE, {
       type: "project-threads-loaded",

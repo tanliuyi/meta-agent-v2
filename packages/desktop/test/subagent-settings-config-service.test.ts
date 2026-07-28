@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { SubagentSettingsConfigService } from "../src/main/subagents/subagent-settings-config-service.ts";
@@ -9,6 +10,7 @@ let root = "";
 let agentDir = "";
 let projectDir = "";
 let previousAgentDir: string | undefined;
+const sourceBuiltinAgentsDir = fileURLToPath(new URL("../src/main/pi/extensions/pi-subagents/agents", import.meta.url));
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "desktop-subagent-settings-"));
@@ -25,9 +27,10 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-function createService(): SubagentSettingsConfigService {
+function createService(builtinAgentsDir = sourceBuiltinAgentsDir): SubagentSettingsConfigService {
   return new SubagentSettingsConfigService({
     agentDir,
+    builtinAgentsDir,
     modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
     getProjectCwd: () => projectDir,
     getActiveProject: async () => ({ id: "project", cwd: projectDir }),
@@ -62,6 +65,20 @@ describe("SubagentSettingsConfigService", () => {
       scheduledRuns: { enabled: false },
     });
     expect(snapshot.projectScopeAvailable).toBe(true);
+  });
+
+  test("uses a host-provided builtin directory after module bundling", async () => {
+    const bundledAgentsDir = join(root, "sidecar", "main", "pi", "extensions", "pi-subagents", "agents");
+    await mkdir(bundledAgentsDir, { recursive: true });
+    await writeFile(
+      join(bundledAgentsDir, "packaged-only.md"),
+      "---\nname: packaged-only\ndescription: Packaged agent fixture\n---\n\nUse the packaged fixture.\n",
+      "utf8",
+    );
+
+    const snapshot = await createService(bundledAgentsDir).getSnapshot({ projectId: "project" });
+
+    expect(snapshot.builtinAgents.map((agent) => agent.name)).toEqual(["packaged-only"]);
   });
 
   test("creates, updates, and deletes user agents and chains", async () => {

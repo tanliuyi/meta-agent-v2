@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "../src/shared/contracts.ts";
 
 const mocks = vi.hoisted(() => ({
+  listAllSessions: vi.fn(),
   listSessions: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  SessionManager: { list: mocks.listSessions },
+  SessionManager: { list: mocks.listSessions, listAll: mocks.listAllSessions },
 }));
 
 import { SessionMetadataIndex } from "../src/sidecar/session-metadata-index.ts";
@@ -21,6 +22,8 @@ describe("SessionMetadataIndex", () => {
   beforeEach(() => {
     userDataDir = mkdtempSync(join(tmpdir(), "session-metadata-index-"));
     cwd = join(userDataDir, "project");
+    mocks.listAllSessions.mockReset();
+    mocks.listAllSessions.mockResolvedValue([]);
     mocks.listSessions.mockReset();
     mocks.listSessions.mockResolvedValue([]);
   });
@@ -194,6 +197,7 @@ describe("SessionMetadataIndex", () => {
       preview: "Inspect the renderer tree",
       parentThreadId: "parent",
       origin: "subagent",
+      agentName: "reviewer",
     });
     index.upsert("project", cwd, childFile, {
       ...thread("child", "[Read from: plan.md]"),
@@ -215,6 +219,7 @@ describe("SessionMetadataIndex", () => {
         title: "Inspect the renderer tree",
         parentThreadId: "parent",
         origin: "subagent",
+        agentName: "reviewer",
       }),
     ]);
     expect(mocks.listSessions).toHaveBeenCalledTimes(1);
@@ -224,18 +229,19 @@ describe("SessionMetadataIndex", () => {
       preview: "[Read from: plan.md]\n\nInspect the renderer tree",
     });
     await expect(index.list("project", cwd)).resolves.toContainEqual(
-      expect.objectContaining({ id: "child", title: "Renamed child" }),
+      expect.objectContaining({ id: "child", title: "Renamed child", agentName: "reviewer" }),
     );
 
     mocks.listSessions.mockClear();
-    await expect(new SessionMetadataIndex(userDataDir).resolve("project", cwd, "child")).resolves.toEqual({
-      id: "child",
-      path: childFile,
-    });
+    const restartedIndex = new SessionMetadataIndex(userDataDir);
+    await expect(restartedIndex.resolve("project", cwd, "child")).resolves.toEqual({ id: "child", path: childFile });
+    await expect(restartedIndex.list("project", cwd)).resolves.toContainEqual(
+      expect.objectContaining({ id: "child", title: "Renamed child", agentName: "reviewer" }),
+    );
     expect(mocks.listSessions).not.toHaveBeenCalled();
   });
 
-  it("refreshes explicit metadata when the child file changes or is recreated with the same ID", async () => {
+  it("refreshes explicit worktree metadata when the child file changes or is recreated with the same ID", async () => {
     const sessionDirectory = join(userDataDir, "sessions");
     const parentFile = join(sessionDirectory, "parent.jsonl");
     const childDirectory = join(sessionDirectory, "parent", "abc12345", "run-0");
@@ -248,9 +254,16 @@ describe("SessionMetadataIndex", () => {
     await index.list("project", cwd);
 
     mkdirSync(childDirectory, { recursive: true });
+    const worktreeCwd = join(userDataDir, "project.worktrees", "review");
     writeFileSync(
       childFile,
-      '{"type":"session","version":3,"id":"child","timestamp":"1970-01-01T00:00:00.010Z"}\n' +
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "child",
+        timestamp: "1970-01-01T00:00:00.010Z",
+        cwd: worktreeCwd,
+      })}\n` +
         '{"type":"message","timestamp":"1970-01-01T00:00:00.020Z","message":{"role":"user","timestamp":20,"content":[{"type":"text","text":"Initial task"}]}}\n',
     );
     index.registerExternalSession("project", cwd, childFile, {
@@ -269,17 +282,26 @@ describe("SessionMetadataIndex", () => {
       firstMessage: "Initial task",
       messageCount: 2,
     });
-    mocks.listSessions.mockImplementation(async (_cwd: string, requestedDirectory?: string) =>
-      requestedDirectory === childDirectory ? [childInfo] : [sessionInfo("parent", parentFile, "Parent", 2)],
+    mocks.listSessions.mockResolvedValue([sessionInfo("parent", parentFile, "Parent", 2)]);
+    mocks.listAllSessions.mockImplementation(async (requestedDirectory: string) =>
+      requestedDirectory === childDirectory ? [childInfo] : [],
     );
     await expect(index.list("project", cwd)).resolves.toContainEqual(
       expect.objectContaining({ id: "child", title: "Renamed externally", updatedAt: 30, messageCount: 2 }),
     );
 
+    expect(mocks.listAllSessions).toHaveBeenLastCalledWith(childDirectory);
+
     rmSync(childFile);
     writeFileSync(
       childFile,
-      '{"type":"session","version":3,"id":"child","timestamp":"1970-01-01T00:00:00.100Z"}\n' +
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "child",
+        timestamp: "1970-01-01T00:00:00.100Z",
+        cwd: worktreeCwd,
+      })}\n` +
         '{"type":"message","timestamp":"1970-01-01T00:00:00.110Z","message":{"role":"user","timestamp":110,"content":[{"type":"text","text":"Replacement task"}]}}\n',
     );
     childInfo = sessionInfo("child", childFile, "", 110, {
@@ -296,6 +318,8 @@ describe("SessionMetadataIndex", () => {
         messageCount: 1,
       }),
     );
+    expect(mocks.listAllSessions).toHaveBeenCalledTimes(2);
+    expect(mocks.listAllSessions).toHaveBeenLastCalledWith(childDirectory);
   });
 
   it("retries an incomplete nested-session backfill instead of marking it complete", async () => {
@@ -307,32 +331,32 @@ describe("SessionMetadataIndex", () => {
     writeFileSync(parentFile, '{"type":"session","id":"parent"}\n');
     writeFileSync(childFile, '{"type":"session","id":"child"}\n');
     let childReadable = false;
-    mocks.listSessions.mockImplementation(async (_cwd: string, requestedDirectory?: string) =>
-      requestedDirectory === childDirectory
-        ? childReadable
-          ? [sessionInfo("child", childFile, "Child", 3)]
-          : []
-        : [sessionInfo("parent", parentFile, "Parent", 2)],
+    mocks.listSessions.mockResolvedValue([sessionInfo("parent", parentFile, "Parent", 2)]);
+    mocks.listAllSessions.mockImplementation(async (requestedDirectory: string) =>
+      requestedDirectory === childDirectory && childReadable ? [sessionInfo("child", childFile, "Child", 3)] : [],
     );
     const index = new SessionMetadataIndex(userDataDir);
 
     await expect(index.list("project", cwd)).resolves.toEqual([expect.objectContaining({ id: "parent" })]);
     childReadable = true;
+    mocks.listAllSessions.mockClear();
     mocks.listSessions.mockClear();
     await expect(index.list("project", cwd)).resolves.toEqual([
       expect.objectContaining({ id: "child", parentThreadId: "parent", origin: "subagent" }),
       expect.objectContaining({ id: "parent" }),
     ]);
-    expect(mocks.listSessions).toHaveBeenCalledTimes(2);
+    expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.listAllSessions).toHaveBeenCalledTimes(1);
   });
 
-  it("backfills existing nested run sessions once when upgrading the metadata index", async () => {
+  it("backfills existing worktree run sessions once when upgrading the metadata index", async () => {
     const sessionDirectory = join(userDataDir, "sessions");
     const parentFile = join(sessionDirectory, "parent.jsonl");
     const childDirectory = join(sessionDirectory, "parent", "abc12345", "run-0");
     const childFile = join(childDirectory, "session.jsonl");
     mkdirSync(childDirectory, { recursive: true });
     writeFileSync(parentFile, '{"type":"session","id":"parent"}\n');
+    const worktreeCwd = join(userDataDir, "project.worktrees", "review");
     writeFileSync(
       childFile,
       `${JSON.stringify({
@@ -340,7 +364,7 @@ describe("SessionMetadataIndex", () => {
         version: 3,
         id: "child",
         timestamp: "1970-01-01T00:00:00.010Z",
-        cwd,
+        cwd: worktreeCwd,
       })}\n${JSON.stringify({
         type: "message",
         timestamp: "1970-01-01T00:00:00.020Z",
@@ -356,10 +380,11 @@ describe("SessionMetadataIndex", () => {
         },
       })}\n`,
     );
-    mocks.listSessions.mockImplementation(async (_cwd: string, requestedDirectory?: string) =>
+    mocks.listSessions.mockResolvedValue([sessionInfo("parent", parentFile, "Parent", 2)]);
+    mocks.listAllSessions.mockImplementation(async (requestedDirectory: string) =>
       requestedDirectory === childDirectory
         ? [sessionInfo("child", childFile, "", 20, { created: 10, firstMessage: "[Read from: plan.md]" })]
-        : [sessionInfo("parent", parentFile, "Parent", 2)],
+        : [],
     );
 
     await expect(new SessionMetadataIndex(userDataDir).list("project", cwd)).resolves.toEqual([
@@ -371,8 +396,11 @@ describe("SessionMetadataIndex", () => {
       }),
       expect.objectContaining({ id: "parent" }),
     ]);
-    expect(mocks.listSessions).toHaveBeenCalledTimes(2);
+    expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.listAllSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.listAllSessions).toHaveBeenCalledWith(childDirectory);
 
+    mocks.listAllSessions.mockClear();
     mocks.listSessions.mockClear();
     mocks.listSessions.mockResolvedValue([sessionInfo("parent", parentFile, "Parent", 2)]);
     await expect(new SessionMetadataIndex(userDataDir).resolve("project", cwd, "child")).resolves.toEqual({
@@ -381,6 +409,7 @@ describe("SessionMetadataIndex", () => {
     });
     expect(mocks.listSessions).toHaveBeenCalledTimes(1);
     expect(mocks.listSessions).toHaveBeenCalledWith(cwd);
+    expect(mocks.listAllSessions).not.toHaveBeenCalled();
   });
 
   it("rejects external session header mismatches and duplicate IDs at different paths", async () => {

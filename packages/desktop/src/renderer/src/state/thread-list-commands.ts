@@ -18,6 +18,14 @@ export interface ThreadTreeNode {
   children: ThreadTreeNode[];
 }
 
+export interface ThreadSiblingExpansion {
+  parentThreadId: string;
+  depth: number;
+  threadCount: number;
+  hasMore: boolean;
+  expanded: boolean;
+}
+
 export interface VisibleThreadTreeItem {
   thread: Thread;
   depth: number;
@@ -25,6 +33,7 @@ export interface VisibleThreadTreeItem {
   expanded: boolean;
   ancestorContinuations: boolean[];
   isLastChild: boolean;
+  siblingExpansions?: ThreadSiblingExpansion[];
 }
 
 export function nextThreadVisibleLimit(currentLimit: number, threadCount: number): number {
@@ -64,15 +73,21 @@ export function threadTreeByArchiveState(
 export function flattenVisibleThreadTree(
   roots: readonly ThreadTreeNode[],
   expandedThreadIds: ReadonlySet<string>,
+  childVisibleLimits: ReadonlyMap<string, number> = new Map(),
 ): VisibleThreadTreeItem[] {
   const visible: VisibleThreadTreeItem[] = [];
   const appendSiblings = (
     siblings: readonly ThreadTreeNode[],
     depth: number,
     ancestorContinuations: boolean[],
+    parentThreadId?: string,
   ): void => {
-    siblings.forEach((node, index) => {
-      const isLastChild = index === siblings.length - 1;
+    const visibleLimit = parentThreadId
+      ? (childVisibleLimits.get(parentThreadId) ?? COLLAPSED_THREAD_COUNT)
+      : siblings.length;
+    const visibleSiblings = siblings.slice(0, visibleLimit);
+    visibleSiblings.forEach((node, index) => {
+      const isLastChild = index === visibleSiblings.length - 1;
       const expanded = node.children.length > 0 && expandedThreadIds.has(node.thread.id);
       visible.push({
         thread: node.thread,
@@ -83,9 +98,27 @@ export function flattenVisibleThreadTree(
         isLastChild,
       });
       if (expanded) {
-        appendSiblings(node.children, depth + 1, depth === 0 ? [] : [...ancestorContinuations, !isLastChild]);
+        appendSiblings(
+          node.children,
+          depth + 1,
+          depth === 0 ? [] : [...ancestorContinuations, !isLastChild],
+          node.thread.id,
+        );
       }
     });
+    if (parentThreadId && siblings.length > COLLAPSED_THREAD_COUNT && visibleSiblings.length > 0) {
+      const lastVisible = visible[visible.length - 1]!;
+      lastVisible.siblingExpansions = [
+        ...(lastVisible.siblingExpansions ?? []),
+        {
+          parentThreadId,
+          depth,
+          threadCount: siblings.length,
+          hasMore: siblings.length > visibleLimit,
+          expanded: isThreadListExpanded(visibleLimit, siblings.length),
+        },
+      ];
+    }
   };
   appendSiblings(roots, 0, []);
   return visible;

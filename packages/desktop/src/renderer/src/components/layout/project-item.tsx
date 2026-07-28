@@ -74,7 +74,7 @@ export const ProjectItem = memo(function ProjectItem({
           onClick={toggleExpanded}
         >
           {expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
-          <span className="min-w-0 flex-1 select-none truncate">{project.name}</span>
+          <span className="min-w-0 flex-1 select-none truncate font-medium">{project.name}</span>
           {project.available ? null : <span className="project-warning">不可用</span>}
         </button>
         <TooltipIconButton

@@ -50,7 +50,7 @@ export function ReasoningRoot({
   const isControlled = controlledOpen !== undefined;
   const automaticOpen = autoExpand ? (autoOpen ?? streaming) : undefined;
   const isOpen = isControlled ? controlledOpen : (userOpen ?? automaticOpen ?? initialOpenRef.current);
-  const isPreview = streaming === true && isOpen && (isControlled || userOpen === null);
+  const isPreview = streaming === true && isOpen;
 
   useLayoutEffect(() => {
     if (previousOpenRef.current !== undefined && previousOpenRef.current !== isOpen) lockScroll();

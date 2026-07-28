@@ -20,6 +20,7 @@ import { handleManagementAction } from "../pi/extensions/pi-subagents/src/agents
 import {
   type AgentConfig,
   type ChainConfig,
+  configureBuiltinAgentsDir,
   discoverAgentsAll,
   mergeBuiltinAgentOverride,
 } from "../pi/extensions/pi-subagents/src/agents/agents.ts";
@@ -29,6 +30,7 @@ import type { ExtensionConfig } from "../pi/extensions/pi-subagents/src/shared/t
 
 interface SubagentSettingsConfigServiceOptions {
   agentDir: string;
+  builtinAgentsDir: string;
   modelRegistry: ModelRegistry;
   getProjectCwd(projectId: string): string;
   getActiveProject(): Promise<{ id: string; cwd: string } | null>;
@@ -49,6 +51,7 @@ export class SubagentSettingsConfigService {
 
   constructor(options: SubagentSettingsConfigServiceOptions) {
     this.options = options;
+    configureBuiltinAgentsDir(options.builtinAgentsDir);
   }
 
   async getSnapshot(input: GetSubagentSettingsInput = {}): Promise<SubagentSettingsSnapshot> {

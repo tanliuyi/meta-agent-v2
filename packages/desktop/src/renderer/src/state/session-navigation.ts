@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import type { Project } from "../../../shared/contracts.ts";
+import { GENERAL_WORKSPACE_ID, type Project } from "../../../shared/contracts.ts";
 import { useTransportManager } from "../runtime/session-transport-context";
 
 /**
@@ -34,7 +34,27 @@ export function resolveDraftProjectId(
   if (requestedProjectId && projects.some((project) => project.id === requestedProjectId)) return requestedProjectId;
   if (selectedProjectId && projects.some((project) => project.id === selectedProjectId)) return selectedProjectId;
   if (selectedProjectId || !allowFallback) return null;
+  // 通用工作区始终可用，作为兜底选项
+  if (projects.some((project) => project.id === GENERAL_WORKSPACE_ID)) return GENERAL_WORKSPACE_ID;
   return projects[0]?.id ?? null;
+}
+
+/**
+ * 从已加载的 project 列表中解析根入口默认导航目标。
+ * 优先级：可用的通用工作区 → draftProjectId → activeProjectId → 第一个可用 Project。
+ * 无匹配时返回 null。
+ */
+export function resolveRootTarget(
+  projects: readonly Pick<Project, "id" | "available">[],
+  draftProjectId: string | null,
+  activeProjectId: string | null,
+): string | null {
+  const candidate =
+    projects.find((p) => p.id === GENERAL_WORKSPACE_ID && p.available) ??
+    projects.find((p) => p.id === draftProjectId && p.available) ??
+    projects.find((p) => p.id === activeProjectId && p.available);
+  if (candidate) return candidate.id;
+  return projects.find((p) => p.available)?.id ?? null;
 }
 
 /**

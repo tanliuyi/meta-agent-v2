@@ -1,6 +1,6 @@
 import type { PiNoticeMessage } from "../../../../../../shared/contracts.ts";
-import { SubagentStatusNotification } from "./subagent-status-notification.tsx";
+import { SubagentResultNotification } from "./subagent-result-notification.tsx";
 
 export function SubagentCompletionNotification({ notice }: { notice: PiNoticeMessage }) {
-  return <SubagentStatusNotification notice={notice} customType="subagent-notify" />;
+  return <SubagentResultNotification notice={notice} title="后台子代理完成" />;
 }

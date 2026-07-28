@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSelect } from "../src/renderer/src/components/chat/project-select.tsx";
-import type { Project } from "../src/shared/contracts.ts";
+import { GENERAL_WORKSPACE_ID, type Project } from "../src/shared/contracts.ts";
 
 const PROJECT = {
   id: "project-a",
@@ -11,6 +11,17 @@ const PROJECT = {
 } as Project;
 
 describe("ProjectSelect", () => {
+  it("将通用工作区显示为无项目", () => {
+    const element = ProjectSelect({
+      projects: [{ ...PROJECT, id: GENERAL_WORKSPACE_ID, kind: "general" }],
+      projectId: GENERAL_WORKSPACE_ID,
+      disabled: false,
+      onValueChange: vi.fn(),
+    }) as ReactElement<{ options: Array<{ value: string; label: string }> }>;
+
+    expect(element.props.options).toEqual([{ value: GENERAL_WORKSPACE_ID, label: "无项目", disabled: false }]);
+  });
+
   it("忽略 Select 在 options 回填期间发出的空项目值", () => {
     const onValueChange = vi.fn();
     const element = ProjectSelect({

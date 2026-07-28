@@ -66,13 +66,20 @@ const JsonSchemaObject = Type.Unsafe({
 	description: "JSON Schema object for strict structured output. Non-object roots are rejected.",
 });
 
+const EXPLICIT_ACCEPTANCE_STRING_LEVELS = ["auto", "attested", "checked", "verified"];
+const EXPLICIT_ACCEPTANCE_OBJECT_LEVELS = ["auto", "none", "attested", "checked", "verified"];
+
 const AcceptanceOverride = Type.Unsafe({
 	anyOf: [
-		{ type: "string", enum: ["auto", "attested", "checked", "verified", "reviewed"] },
+		{ type: "string", enum: EXPLICIT_ACCEPTANCE_STRING_LEVELS },
 		{ type: "boolean", enum: [false] },
-		{ type: "object", additionalProperties: true },
+		{
+			type: "object",
+			properties: { level: { type: "string", enum: EXPLICIT_ACCEPTANCE_OBJECT_LEVELS } },
+			additionalProperties: true,
+		},
 	],
-	description: "Optional acceptance policy. In the current/default contract, omitted means auto-inferred; verified requires configured runtime commands. With agentContract.version=1, omitted means not requested and acceptance failures are reported separately from execution.",
+	description: "Optional acceptance policy. In the current/default contract, omitted means auto-inferred; reviewed is inferred-only and cannot be requested explicitly; verified requires configured runtime commands. With agentContract.version=1, omitted means not requested and acceptance failures are reported separately from execution.",
 });
 
 const AgentContractOverride = Type.Object({

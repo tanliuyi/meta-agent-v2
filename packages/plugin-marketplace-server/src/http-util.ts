@@ -55,6 +55,10 @@ const STORE_ERRORS: Record<
 	PAYLOAD_INVALID_PATH: { status: "bad-request", message: "Artifact payload contains an unsafe file path" },
 	PAYLOAD_DUPLICATE_PATH: { status: "bad-request", message: "Artifact payload contains duplicate file paths" },
 	PAYLOAD_TOO_MANY_FILES: { status: "bad-request", message: "Artifact payload contains too many files" },
+	PAYLOAD_NATIVE_UNSUPPORTED: {
+		status: "bad-request",
+		message: "Native modules and executable binaries are not supported yet",
+	},
 	PAYLOAD_TOO_LARGE: { status: "payload-too-large", message: "Artifact payload exceeds the size limit" },
 };
 

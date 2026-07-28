@@ -1,4 +1,5 @@
 import { type DynamicModule, GoneException, Module, Param, Req, Res, type Type } from "@nestjs/common";
+import { extractPayloadArchive } from "./artifact-builder.ts";
 import type {
 	MarketplaceArtifactMetadata,
 	MarketplacePluginDetail,
@@ -15,7 +16,7 @@ import { createCommunityControllers } from "./http-community.ts";
 import { applyController, applyParameter, applyRoute } from "./http-decorators.ts";
 import { artifactMetadata, artifactUrl, pluginDetail, versionDetail } from "./http-mapping.ts";
 import { createPublishControllers } from "./http-publish.ts";
-import { badRequest, errorBody, type MarketplaceHttpRuntime, notFound } from "./http-util.ts";
+import { badRequest, errorBody, type MarketplaceHttpRuntime, mapStoreErrors, notFound } from "./http-util.ts";
 
 export type { MarketplaceHttpRuntime } from "./http-util.ts";
 
@@ -123,6 +124,12 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			if (!artifact || artifact.sha256 === null || artifact.size === null) {
 				throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
 			}
+			if (artifact.containsNativeCode) {
+				throw badRequest("PAYLOAD_NATIVE_UNSUPPORTED", "Native plugin artifacts are not available for download");
+			}
+			const content = runtime.store.getArtifactContent(pluginId, version, artifactId);
+			if (!content) throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
+			mapStoreErrors(() => extractPayloadArchive(content.bytes, 5 * runtime.config.maxArtifactBytes));
 			const url = artifactUrl(runtime.config.publicBaseUrl, pluginId, version, artifactId);
 			return {
 				pluginId,
@@ -143,11 +150,16 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			request: DownloadRequestLike,
 			response: ResponseLike,
 		): unknown {
-			requireAvailableVersion(runtime, pluginId, version);
+			const found = requireAvailableVersion(runtime, pluginId, version);
+			const metadata = found.artifacts.find(({ id }) => id === artifactId);
+			if (metadata?.containsNativeCode) {
+				throw badRequest("PAYLOAD_NATIVE_UNSUPPORTED", "Native plugin artifacts are not available for download");
+			}
 			const artifact = runtime.store.getArtifactContent(pluginId, version, artifactId);
 			if (!artifact) {
 				throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
 			}
+			mapStoreErrors(() => extractPayloadArchive(artifact.bytes, 5 * runtime.config.maxArtifactBytes));
 			// Express routes HEAD to this GET handler; only count downloads that transfer bytes.
 			if (request.method === "GET") {
 				runtime.store.incrementDownload(pluginId, version, artifactId);

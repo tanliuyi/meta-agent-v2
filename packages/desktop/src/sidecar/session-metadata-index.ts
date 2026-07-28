@@ -184,14 +184,14 @@ export class SessionMetadataIndex {
     const backfill = currentProject?.backfillComplete
       ? { sessions: [], complete: true }
       : sessionDirectory
-        ? await listNestedSessionInfos(cwd, sessionDirectory)
+        ? await listNestedSessionInfos(sessionDirectory)
         : { sessions: [], complete: false };
     const validExplicitSessions = (
       await Promise.all(
         (currentProject?.explicitSessions ?? []).map(async (explicit) => {
           const fileFingerprint = explicitSessionFingerprint(explicit.session.path, explicit.session.id);
           if (!fileFingerprint) return undefined;
-          return refreshExplicitSession(cwd, projectId, explicit, fileFingerprint);
+          return refreshExplicitSession(projectId, explicit, fileFingerprint);
         }),
       )
     ).filter((explicit): explicit is ExplicitIndexedSession => explicit !== undefined);
@@ -330,6 +330,7 @@ function isIndexedSession(value: unknown): value is IndexedSession {
     typeof value.running === "boolean" &&
     (value.parentThreadId === undefined || typeof value.parentThreadId === "string") &&
     (value.origin === undefined || value.origin === "branch" || value.origin === "subagent") &&
+    (value.agentName === undefined || typeof value.agentName === "string") &&
     typeof value.path === "string"
   );
 }
@@ -353,10 +354,12 @@ function hasAutomaticSessionTitle(thread: Thread): boolean {
 function indexedSession(thread: Thread, sessionFile: string, existing?: IndexedSession): IndexedSession {
   const parentThreadId = thread.parentThreadId ?? existing?.parentThreadId;
   const origin = thread.origin ?? existing?.origin;
+  const agentName = thread.agentName ?? existing?.agentName;
   return {
     ...thread,
     ...(parentThreadId ? { parentThreadId } : {}),
     ...(origin ? { origin } : {}),
+    ...(agentName ? { agentName } : {}),
     running: false,
     path: sessionFile,
   };
@@ -376,7 +379,6 @@ function registerSessionIdentity(paths: Map<string, string>, sessionId: string, 
 }
 
 async function refreshExplicitSession(
-  cwd: string,
   projectId: string,
   explicit: ExplicitIndexedSession,
   fileFingerprint: string,
@@ -384,7 +386,7 @@ async function refreshExplicitSession(
   if (fileFingerprint === explicit.fileFingerprint) {
     return { session: { ...explicit.session, running: false }, fileFingerprint };
   }
-  const listed = await SessionManager.list(cwd, dirname(explicit.session.path));
+  const listed = await SessionManager.listAll(dirname(explicit.session.path));
   const session = listed.find(
     ({ id, path }) => id === explicit.session.id && resolve(path) === resolve(explicit.session.path),
   );
@@ -490,7 +492,6 @@ function truncateTitle(value: string): string {
 }
 
 async function listNestedSessionInfos(
-  cwd: string,
   sessionDirectory: string,
 ): Promise<{ sessions: SessionInfo[]; complete: boolean }> {
   const directories: string[] = [];
@@ -534,7 +535,7 @@ async function listNestedSessionInfos(
   const sessions: SessionInfo[] = [];
   for (let index = 0; index < directories.length; index += 10) {
     const batchDirectories = directories.slice(index, index + 10);
-    const batch = await Promise.all(batchDirectories.map((directory) => SessionManager.list(cwd, directory)));
+    const batch = await Promise.all(batchDirectories.map((directory) => SessionManager.listAll(directory)));
     batch.forEach((listed, batchIndex) => {
       const directory = batchDirectories[batchIndex];
       if (listed.length === 0 && directory && existsSync(join(directory, "session.jsonl"))) complete = false;

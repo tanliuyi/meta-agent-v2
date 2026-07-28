@@ -7,14 +7,16 @@ export interface NotificationCardProps {
   title: string;
   icon: ReactNode;
   tone?: "info" | "warning" | "error";
+  layout?: "subagent";
   children?: ReactNode;
 }
 
-export function NotificationCard({ notice, title, icon, tone, children }: NotificationCardProps) {
+export function NotificationCard({ notice, title, icon, tone, layout, children }: NotificationCardProps) {
   const semantics = getHostNotificationSemantics(tone ?? notice.notificationType);
   return (
     <section
       className="builtin-notification-card"
+      data-layout={layout}
       data-tone={semantics.tone}
       role={semantics.role}
       aria-live={semantics.live}

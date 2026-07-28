@@ -60,6 +60,7 @@ export function buildSignedArtifact(
 ): BuiltMarketplaceArtifact {
 	if (input.files.size === 0) throw new Error("PAYLOAD_EMPTY");
 	if (!input.files.has(input.entry)) throw new Error("PAYLOAD_ENTRY_MISSING");
+	assertNoNativePayload(input.files);
 	const files: MarketplaceArtifactManifest["files"] = {};
 	for (const path of [...input.files.keys()].sort()) {
 		const bytes = input.files.get(path)!;
@@ -135,6 +136,7 @@ export function extractPayloadArchive(bytes: Uint8Array, maxTotalBytes: number):
 		files.set(path, content);
 	}
 	if (files.size === 0) throw new Error("PAYLOAD_EMPTY");
+	assertNoNativePayload(files);
 	return files;
 }
 
@@ -145,6 +147,37 @@ export function validatePayloadPath(path: string): void {
 	for (const segment of path.split("/")) {
 		if (segment === "" || segment === "." || segment === "..") throw new Error("PAYLOAD_INVALID_PATH");
 	}
+}
+
+export function assertNoNativePayload(files: ReadonlyMap<string, Uint8Array>): void {
+	for (const [path, bytes] of files) {
+		if (nativeFileName(path) || nativeBinaryMagic(bytes)) throw new Error("PAYLOAD_NATIVE_UNSUPPORTED");
+	}
+}
+
+function nativeFileName(path: string): boolean {
+	return /(?:^|\/)[^/]+\.(?:node|dll|exe|dylib|so(?:\.\d+)*)$/i.test(path);
+}
+
+function nativeBinaryMagic(bytes: Uint8Array): boolean {
+	if (bytes.byteLength < 4) return false;
+	const magic = [bytes[0], bytes[1], bytes[2], bytes[3]].map((value) => value ?? 0).join(",");
+	return (
+		[
+			"127,69,76,70",
+			"77,90,0,0",
+			"254,237,250,206",
+			"254,237,250,207",
+			"206,250,237,254",
+			"207,250,237,254",
+			"202,254,186,190",
+			"202,254,186,191",
+			"191,186,254,202",
+			"190,186,254,202",
+			"0,97,115,109",
+		].includes(magic) ||
+		(bytes[0] === 0x4d && bytes[1] === 0x5a)
+	);
 }
 
 function zipFile(source: string): [Uint8Array, ReturnType<typeof fileOptions>] {

@@ -183,8 +183,15 @@ function updateProjectThreads(
 }
 
 function reuseThreadCatalog(previous: Thread[] | undefined, next: Thread[]): Thread[] {
-  if (!previous || previous.length !== next.length) return next;
-  return previous.every((thread, index) => equalThread(thread, next[index])) ? previous : next;
+  if (!previous) return next;
+  const previousById = new Map(previous.map((thread) => [thread.id, thread]));
+  const stable = next.map((thread) => {
+    const current = previousById.get(thread.id);
+    return current && current.title !== thread.title ? { ...thread, title: current.title } : thread;
+  });
+  return previous.length === stable.length && previous.every((thread, index) => equalThread(thread, stable[index]))
+    ? previous
+    : stable;
 }
 
 function equalThread(left: Thread, right: Thread | undefined): boolean {
@@ -200,6 +207,7 @@ function equalThread(left: Thread, right: Thread | undefined): boolean {
     left.archived === right.archived &&
     left.running === right.running &&
     left.parentThreadId === right.parentThreadId &&
-    left.origin === right.origin
+    left.origin === right.origin &&
+    left.agentName === right.agentName
   );
 }

@@ -15,6 +15,16 @@ export function notificationText(notice: PiNoticeMessage): string {
     .trim();
 }
 
+/** 通知正文只作为自然语言回退；JSON 由各通知的专用 details renderer 负责展示。 */
+export function notificationDisplayText(notice: PiNoticeMessage, fallback = "结构化通知"): string {
+  const text = notificationText(notice)
+    .replace(/```(?:json|acceptance-report|acceptance_report)\s*\n[\s\S]*?```/gi, "")
+    .trim();
+  const looksLikeJson = (text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"));
+  if (!text || looksLikeJson) return fallback;
+  return text;
+}
+
 export function asRecord(value: JsonValue | undefined): { [key: string]: JsonValue } | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }

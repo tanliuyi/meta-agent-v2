@@ -500,6 +500,53 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("重建 branch 时将隐藏的 slash 最终结果合并到可见初始卡片", () => {
+    const entries: SessionEntry[] = [
+      slashResultEntry("slash-initial", null, "request-1", "running", true, 1),
+      slashResultEntry("slash-final", "slash-initial", "request-1", "completed", false, 2),
+    ];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    expect(projector.snapshot().nodes).toEqual([
+      expect.objectContaining({
+        id: "slash-initial",
+        sourceEntryId: "slash-initial",
+        content: expect.objectContaining({
+          type: "custom",
+          content: [{ type: "text", text: "completed" }],
+          details: expect.objectContaining({ requestId: "request-1", status: "completed" }),
+        }),
+      }),
+    ]);
+    expect(projector.snapshot().headId).toBe("slash-initial");
+    projector.dispose();
+  });
+
+  it("增量同步时用隐藏的 slash 最终结果替换初始卡片且不新增节点", () => {
+    const entries: SessionEntry[] = [slashResultEntry("slash-initial", null, "request-1", "running", true, 1)];
+    const batches: PiThreadEventBatch[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: (batch) => batches.push(batch) });
+
+    entries.push(slashResultEntry("slash-final", "slash-initial", "request-1", "failed", false, 2));
+    projector.checkpoint();
+    projector.flush();
+
+    expect(projector.snapshot().nodes).toHaveLength(1);
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      id: "slash-initial",
+      content: {
+        type: "custom",
+        content: [{ type: "text", text: "failed" }],
+        details: { requestId: "request-1", status: "failed", result: { details: { rows: [] } } },
+      },
+    });
+    expect(batches.flatMap((batch) => batch.events).map(({ event }) => event.type)).toContain("node-replaced");
+    expect(batches.flatMap((batch) => batch.events).map(({ event }) => event.type)).not.toContain("node-added");
+    projector.dispose();
+  });
+
   it("non-trigger custom event 绑定唯一 canonical entry，不创建 transient duplicate", () => {
     const custom = customMessage(6);
     const entries: SessionEntry[] = [customEntry("custom", null, custom, 6)];
@@ -645,6 +692,26 @@ function customMessage(timestamp: number) {
     display: true,
     details: { source: "test" },
     timestamp,
+  };
+}
+
+function slashResultEntry(
+  id: string,
+  parentId: string | null,
+  requestId: string,
+  status: string,
+  display: boolean,
+  timestamp: number,
+): SessionEntry {
+  return {
+    type: "custom_message",
+    id,
+    parentId,
+    timestamp: iso(timestamp),
+    customType: "subagent-slash-result",
+    content: [{ type: "text", text: status }],
+    display,
+    details: { requestId, status, result: { details: { rows: [] } } },
   };
 }
 

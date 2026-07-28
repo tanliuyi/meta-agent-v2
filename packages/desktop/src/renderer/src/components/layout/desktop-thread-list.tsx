@@ -7,7 +7,7 @@ import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
+import { type FormEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, Thread } from "../../../../shared/contracts.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
@@ -25,6 +25,7 @@ import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
 interface DesktopThreadListProps {
   project: Project;
   threads: readonly Thread[];
+  compactRoot?: boolean;
 }
 
 interface RenameState {
@@ -33,7 +34,7 @@ interface RenameState {
 }
 
 /** 使用 Router 导航渲染当前 Project 的 session 列表。 */
-export function DesktopThreadList({ project, threads }: DesktopThreadListProps) {
+export function DesktopThreadList({ project, threads, compactRoot = false }: DesktopThreadListProps) {
   const actions = useDesktopActions();
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
@@ -46,11 +47,12 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
   const [visibleLimit, setVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
   const threadTree = useMemo(() => threadTreeByArchiveState(threads, false, Number.MAX_SAFE_INTEGER), [threads]);
   const [expandedThreadIds, setExpandedThreadIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [childVisibleLimits, setChildVisibleLimits] = useState<ReadonlyMap<string, number>>(() => new Map());
   const regularThreadCount = threadTree.length;
   const visibleThreadTree = useMemo(() => threadTree.slice(0, visibleLimit), [threadTree, visibleLimit]);
   const visibleThreads = useMemo(
-    () => flattenVisibleThreadTree(visibleThreadTree, expandedThreadIds),
-    [expandedThreadIds, visibleThreadTree],
+    () => flattenVisibleThreadTree(visibleThreadTree, expandedThreadIds, childVisibleLimits),
+    [childVisibleLimits, expandedThreadIds, visibleThreadTree],
   );
   const hasMoreThreads = regularThreadCount > visibleLimit;
   const isExpanded = isThreadListExpanded(visibleLimit, regularThreadCount);
@@ -116,30 +118,80 @@ export function DesktopThreadList({ project, threads }: DesktopThreadListProps) 
 
   return (
     <div className="thread-list" role="tree" aria-label={`${project.name} 会话`}>
-      {visibleThreads.map(({ thread, depth, childCount, expanded, ancestorContinuations, isLastChild }) => (
-        <DesktopThreadListItem
-          key={thread.id}
-          thread={thread}
-          active={activeThreadId === thread.id}
-          isSwitching={navigationDisabled || pendingKeys.has(`switch:${thread.id}`)}
-          isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
-          isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
-          isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
-          depth={depth}
-          childCount={childCount}
-          expanded={expanded}
-          ancestorContinuations={ancestorContinuations}
-          isLastChild={isLastChild}
-          onToggle={toggleThread}
-          onRenameStart={startRename}
-          onOpen={openThread}
-          onArchive={archiveThread}
-          onDelete={setPendingDelete}
-          onPrewarm={prewarmThread}
-        />
-      ))}
+      {visibleThreads.map(
+        ({ thread, depth, childCount, expanded, ancestorContinuations, isLastChild, siblingExpansions }) => (
+          <Fragment key={thread.id}>
+            <DesktopThreadListItem
+              thread={thread}
+              active={activeThreadId === thread.id}
+              isSwitching={navigationDisabled || pendingKeys.has(`switch:${thread.id}`)}
+              isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
+              isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
+              isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
+              depth={depth}
+              childCount={childCount}
+              expanded={expanded}
+              ancestorContinuations={ancestorContinuations}
+              isLastChild={isLastChild}
+              compactRoot={compactRoot}
+              onToggle={toggleThread}
+              onRenameStart={startRename}
+              onOpen={openThread}
+              onArchive={archiveThread}
+              onDelete={setPendingDelete}
+              onPrewarm={prewarmThread}
+            />
+            {siblingExpansions?.map((siblingExpansion) => (
+              <div
+                key={siblingExpansion.parentThreadId}
+                className="flex items-center gap-2"
+                style={{ paddingInlineStart: 32 + siblingExpansion.depth * 14 }}
+              >
+                {siblingExpansion.hasMore ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                    onClick={() =>
+                      setChildVisibleLimits((current) => {
+                        const next = new Map(current);
+                        next.set(
+                          siblingExpansion.parentThreadId,
+                          nextThreadVisibleLimit(
+                            current.get(siblingExpansion.parentThreadId) ?? COLLAPSED_THREAD_COUNT,
+                            siblingExpansion.threadCount,
+                          ),
+                        );
+                        return next;
+                      })
+                    }
+                  >
+                    展开更多
+                  </Button>
+                ) : null}
+                {siblingExpansion.expanded ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                    onClick={() =>
+                      setChildVisibleLimits((current) => {
+                        const next = new Map(current);
+                        next.set(siblingExpansion.parentThreadId, COLLAPSED_THREAD_COUNT);
+                        return next;
+                      })
+                    }
+                  >
+                    收起
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+          </Fragment>
+        ),
+      )}
       {hasMoreThreads || isExpanded ? (
-        <div className="flex items-center gap-1 px-8 py-1">
+        <div className="flex items-center gap-2" style={{ paddingInlineStart: compactRoot ? 8 : 32 }}>
           {hasMoreThreads ? (
             <Button
               variant="ghost"

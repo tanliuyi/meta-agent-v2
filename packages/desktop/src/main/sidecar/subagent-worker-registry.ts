@@ -384,6 +384,7 @@ function threadFromSubagentRequest(request: SubagentRunRequest, sessionFile: str
     running: true,
     parentThreadId,
     origin: "subagent",
+    agentName: request.agent,
   };
 }
 

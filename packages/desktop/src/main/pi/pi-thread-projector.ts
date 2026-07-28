@@ -60,6 +60,7 @@ export class PiThreadProjector {
   private readonly liveMessages = new Set<AgentMessage>();
   private readonly toolOwners = new Map<string, ToolOwner>();
   private readonly finalAssistantMessages = new Map<string, AssistantMessage>();
+  private readonly slashResultNodes = new Map<string, string>();
   private branchIds: string[] = [];
   private queueItems: PiQueueItem[] = [];
   private pendingConsumption: PiQueueItem[] = [];
@@ -548,6 +549,15 @@ export class PiThreadProjector {
 
   private appendPersistedEntry(entry: SessionEntry): void {
     const parentId = entry.parentId ? (this.visibleByEntryId.get(entry.parentId) ?? null) : null;
+    const slashRequestId = slashResultRequestId(entry);
+    const slashNodeId = slashRequestId ? this.slashResultNodes.get(slashRequestId) : undefined;
+    if (entry.type === "custom_message" && !entry.display && slashNodeId) {
+      const current = this.byId.get(slashNodeId);
+      if (current?.kind === "notice") this.replaceNode(updateCustomNotice(current, entry));
+      this.visibleByEntryId.set(entry.id, slashNodeId);
+      return;
+    }
+
     const projected = projectEntry(entry, parentId);
     if (!projected) {
       if (entry.type === "message" && entry.message.role === "toolResult") this.foldToolResult(entry.message);
@@ -567,6 +577,7 @@ export class PiThreadProjector {
     }
     if (entry.type === "message") this.liveMessages.delete(entry.message);
     this.visibleByEntryId.set(entry.id, entry.id);
+    if (slashRequestId) this.slashResultNodes.set(slashRequestId, entry.id);
     this.applyLabel(entry.id);
   }
 
@@ -585,8 +596,17 @@ export class PiThreadProjector {
     this.visibleByEntryId.clear();
     this.messageNodeIds.clear();
     this.toolOwners.clear();
+    this.slashResultNodes.clear();
     for (const entry of branch) {
       const parentId = entry.parentId ? (this.visibleByEntryId.get(entry.parentId) ?? null) : null;
+      const slashRequestId = slashResultRequestId(entry);
+      const slashNodeId = slashRequestId ? this.slashResultNodes.get(slashRequestId) : undefined;
+      if (entry.type === "custom_message" && !entry.display && slashNodeId) {
+        const current = this.byId.get(slashNodeId);
+        if (current?.kind === "notice") this.replaceNode(updateCustomNotice(current, entry), false);
+        this.visibleByEntryId.set(entry.id, slashNodeId);
+        continue;
+      }
       const node = projectEntry(entry, parentId);
       if (!node) {
         if (entry.type === "message" && entry.message.role === "toolResult") this.foldToolResult(entry.message, false);
@@ -596,6 +616,7 @@ export class PiThreadProjector {
       this.nodes.push(node);
       this.byId.set(node.id, node);
       this.visibleByEntryId.set(entry.id, node.id);
+      if (slashRequestId) this.slashResultNodes.set(slashRequestId, node.id);
       if (entry.type === "message") this.messageNodeIds.set(entry.message, node.id);
       this.indexTools(node);
     }
@@ -859,6 +880,29 @@ export class ProjectionError extends Error {
     super(message);
     this.name = "ProjectionError";
   }
+}
+
+function slashResultRequestId(entry: SessionEntry): string | undefined {
+  if (entry.type !== "custom_message" || entry.customType !== "subagent-slash-result") return undefined;
+  if (!entry.details || typeof entry.details !== "object" || Array.isArray(entry.details)) return undefined;
+  const requestId = Reflect.get(entry.details, "requestId");
+  return typeof requestId === "string" && requestId.length > 0 ? requestId : undefined;
+}
+
+function updateCustomNotice(
+  current: Extract<PiTimelineNode, { kind: "notice" }>,
+  entry: Extract<SessionEntry, { type: "custom_message" }>,
+): PiTimelineNode {
+  return {
+    ...current,
+    title: entry.customType,
+    content: {
+      type: "custom",
+      customType: entry.customType,
+      content: userContent(entry.content),
+      ...(entry.details !== undefined ? { details: toJson(entry.details) } : {}),
+    },
+  };
 }
 
 function projectEntry(entry: SessionEntry, parentId: string | null): PiTimelineNode | undefined {
