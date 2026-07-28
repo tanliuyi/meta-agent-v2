@@ -37,6 +37,10 @@ import type {
 } from "../shared/desktop-extension-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
 import type {
+  SavePluginConfigurationInput,
+  SavePluginConfigurationResult,
+} from "../shared/plugin-configuration-contracts.ts";
+import type {
   InstallMarketplacePluginInput,
   InstallMarketplacePluginResult,
   ListMarketplacePluginsInput,
@@ -62,6 +66,7 @@ import type { MarketplaceMutationApplyCoordinator } from "./plugins/marketplace-
 import type { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
 import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
 import type { MarketplaceRevocationService } from "./plugins/marketplace-revocation-service.ts";
+import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
 import type { ProjectStore } from "./store/project-store.ts";
@@ -105,6 +110,7 @@ export function registerIpc(
   marketplaceMutationApply?: MarketplaceMutationApplyCoordinator,
   marketplaceApplyJournal?: MarketplaceExtensionApplyJournal,
   marketplaceRevocations?: MarketplaceRevocationService,
+  pluginConfigurations?: PluginConfigurationService,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -215,6 +221,19 @@ export function registerIpc(
         const snapshot = await marketplaceRegistry.getSnapshot();
         return marketplaceRevocations ? marketplaceRevocations.decorateSnapshot(snapshot) : snapshot;
       });
+      ipcMain.handle(CHANNELS.marketplaceGetPluginConfiguration, (_event, pluginId: string) => {
+        if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
+        return pluginConfigurations.getConfig(pluginId);
+      });
+      ipcMain.handle(
+        CHANNELS.marketplaceSavePluginConfiguration,
+        async (_event, input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult> => {
+          if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
+          const result = await pluginConfigurations.saveConfig(input);
+          if (result.status === "saved") await sessions.extensionSettingsChanged();
+          return result;
+        },
+      );
       ipcMain.handle(CHANNELS.marketplaceInstallPlugin, async (_event, input: InstallMarketplacePluginInput) => {
         assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
         const result = await marketplaceInstaller.install(input);

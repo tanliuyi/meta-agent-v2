@@ -5,6 +5,7 @@ import type {
 	CatalogPluginVersion,
 	MarketplaceArtifactManifest,
 	MarketplaceArtifactSignature,
+	PluginConfigurationSchema,
 } from "./contracts.ts";
 import { canonicalJson, type MarketplaceSigningService } from "./signing-service.ts";
 
@@ -28,6 +29,7 @@ export interface ArtifactBuildInput {
 	entry: string;
 	desktop: CatalogPluginVersion["desktop"];
 	target: ArtifactTarget;
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	files: Map<string, Uint8Array>;
 }
@@ -81,6 +83,7 @@ export function buildSignedArtifact(
 		},
 		desktop: { ...input.desktop },
 		target: { ...input.target },
+		...(input.configuration ? { configuration: input.configuration } : {}),
 		capabilities: [...input.capabilities],
 		nativeModules: [],
 		executables: [],

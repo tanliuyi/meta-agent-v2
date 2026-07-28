@@ -1,4 +1,5 @@
 import { valid as validSemver } from "semver";
+import { parsePluginConfigurationSchema } from "./configuration-schema.ts";
 import type {
 	ArtifactTarget,
 	CatalogArtifact,
@@ -88,6 +89,9 @@ function parseVersion(value: unknown, path: string): CatalogPluginVersion {
 		changelog: stringValue(record.changelog, `${path}.changelog`),
 		publishedAt: timestampValue(record.publishedAt, `${path}.publishedAt`),
 		desktop: parseDesktopCompatibility(desktop, `${path}.desktop`),
+		...(record.configuration === undefined
+			? {}
+			: { configuration: parsePluginConfigurationSchema(record.configuration)! }),
 		capabilities: stringArray(record.capabilities, `${path}.capabilities`),
 		artifacts,
 	};

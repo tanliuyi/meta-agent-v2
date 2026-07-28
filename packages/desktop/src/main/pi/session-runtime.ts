@@ -102,7 +102,11 @@ export class SessionRuntime {
     this.subagentRuntime = subagentRuntime;
     this.extensionSet = {
       ...extensionSet,
-      entries: extensionSet.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+      entries: extensionSet.entries.map((entry) => ({
+        ...entry,
+        capabilities: [...entry.capabilities],
+        ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
+      })),
       diagnostics: extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     };
     this.extensionDiagnostics = extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic }));

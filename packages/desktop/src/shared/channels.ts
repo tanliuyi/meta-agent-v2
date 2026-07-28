@@ -81,6 +81,8 @@ export const CHANNELS = {
   marketplaceSaveEndpoint: "desktop:marketplace:save-endpoint",
   marketplaceListPlugins: "desktop:marketplace:list-plugins",
   marketplaceGetInstalled: "desktop:marketplace:get-installed",
+  marketplaceGetPluginConfiguration: "desktop:marketplace:get-plugin-configuration",
+  marketplaceSavePluginConfiguration: "desktop:marketplace:save-plugin-configuration",
   marketplaceInstallPlugin: "desktop:marketplace:install-plugin",
   marketplaceUpdatePlugin: "desktop:marketplace:update-plugin",
   marketplaceUninstallPlugin: "desktop:marketplace:uninstall-plugin",

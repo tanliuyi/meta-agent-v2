@@ -913,8 +913,9 @@ export class ThreadWorkerRegistry {
     const session = await this.options.metadata.resolve(projectId, cwd, threadId);
     const applyJournal = this.options.extensionApplyJournal;
     const rollbackOverride = applyJournal?.getRollbackOverride(projectId, threadId);
-    const extensionSet =
-      rollbackOverride?.extensionSet ?? (await this.options.extensionSourcePolicy.resolve(projectId));
+    const extensionSet = rollbackOverride
+      ? await this.options.extensionSourcePolicy.hydrateRuntimeConfigurations(rollbackOverride.extensionSet)
+      : await this.options.extensionSourcePolicy.resolve(projectId);
     const record = await this.spawn(
       {
         mode: "open",
@@ -1450,7 +1451,11 @@ async function waitForIdleSummary(record: WorkerRecord): Promise<void> {
 function cloneExtensionSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
   return {
     ...set,
-    entries: set.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+    entries: set.entries.map((entry) => ({
+      ...entry,
+      capabilities: [...entry.capabilities],
+      ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
+    })),
     diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
   };
 }

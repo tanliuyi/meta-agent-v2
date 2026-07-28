@@ -35,6 +35,7 @@ import type {
 	EntryRenderer,
 	Extension,
 	ExtensionAPI,
+	ExtensionConfiguration,
 	ExtensionFactory,
 	ExtensionRuntime,
 	LoadExtensionsResult,
@@ -232,8 +233,15 @@ function createExtensionAPI(
 	runtime: ExtensionRuntime,
 	cwd: string,
 	eventBus: EventBus,
+	configuration: ExtensionConfiguration = Object.freeze({}),
 ): ExtensionAPI {
+	const frozenConfiguration = Object.freeze({ ...configuration });
 	const api = {
+		getConfig<T = ExtensionConfiguration>(): Readonly<T> {
+			runtime.assertActive();
+			return frozenConfiguration as Readonly<T>;
+		},
+
 		// Registration methods - write to extension
 		on(event: string, handler: HandlerFn): void {
 			runtime.assertActive();
@@ -457,6 +465,7 @@ async function loadExtension(
 	eventBus: EventBus,
 	runtime: ExtensionRuntime,
 	cacheToken?: ExtensionCacheToken,
+	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<{ extension: Extension | null; error: string | null }> {
 	const resolvedPath = resolvePath(extensionPath, cwd, { normalizeUnicodeSpaces: true });
 
@@ -468,7 +477,7 @@ async function loadExtension(
 		}
 
 		const extension = createExtension(extensionPath, resolvedPath);
-		const api = createExtensionAPI(extension, runtime, cwd, eventBus);
+		const api = createExtensionAPI(extension, runtime, cwd, eventBus, extensionConfigurations?.[resolvedPath]);
 		await factory(api);
 		time(`${extensionPath} factory`, "extensions");
 
@@ -488,10 +497,11 @@ export async function loadExtensionFromFactory(
 	eventBus: EventBus,
 	runtime: ExtensionRuntime,
 	extensionPath = "<inline>",
+	configuration?: ExtensionConfiguration,
 ): Promise<Extension> {
 	const extension = createExtension(extensionPath, extensionPath);
 	const resolvedCwd = resolvePath(cwd);
-	const api = createExtensionAPI(extension, runtime, resolvedCwd, eventBus);
+	const api = createExtensionAPI(extension, runtime, resolvedCwd, eventBus, configuration);
 	await factory(api);
 	time(`${extensionPath} factory`, "extensions");
 	return extension;
@@ -506,6 +516,7 @@ async function loadExtensionsInternal(
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
 	useCache = false,
+	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
 	const errors: Array<{ path: string; error: string }> = [];
@@ -521,6 +532,7 @@ async function loadExtensionsInternal(
 			resolvedEventBus,
 			resolvedRuntime,
 			cacheToken,
+			extensionConfigurations,
 		);
 
 		if (error) {
@@ -545,8 +557,9 @@ export async function loadExtensions(
 	cwd: string,
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
+	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<LoadExtensionsResult> {
-	return loadExtensionsInternal(paths, cwd, eventBus, runtime);
+	return loadExtensionsInternal(paths, cwd, eventBus, runtime, false, extensionConfigurations);
 }
 
 export async function loadExtensionsCached(
@@ -554,8 +567,9 @@ export async function loadExtensionsCached(
 	cwd: string,
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
+	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<LoadExtensionsResult> {
-	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true);
+	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true, extensionConfigurations);
 }
 
 interface PiManifest {

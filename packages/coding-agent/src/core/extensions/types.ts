@@ -1173,10 +1173,19 @@ export interface ResolvedCommand extends RegisteredCommand {
 // biome-ignore lint/suspicious/noConfusingVoidType: void allows bare return statements
 export type ExtensionHandler<E, R = undefined> = (event: E, ctx: ExtensionContext) => Promise<R | void> | R | void;
 
+/** Scalar configuration value supplied by an extension host. */
+export type ExtensionConfigValue = string | number | boolean;
+
+/** Host-supplied configuration scoped to one extension instance. */
+export type ExtensionConfiguration = Readonly<Record<string, ExtensionConfigValue>>;
+
 /**
  * ExtensionAPI passed to extension factory functions.
  */
 export interface ExtensionAPI {
+	/** Read the immutable host configuration scoped to this extension. */
+	getConfig<T = ExtensionConfiguration>(): Readonly<T>;
+
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================

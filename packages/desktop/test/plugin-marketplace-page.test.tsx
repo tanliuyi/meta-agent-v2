@@ -1,6 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { PluginConfigurationForm } from "../src/renderer/src/features/plugins/plugin-configuration-form.tsx";
 import { pluginActionConfirmation } from "../src/renderer/src/features/plugins/plugin-detail-dialog.tsx";
 import { MarketplacePluginCard } from "../src/renderer/src/features/plugins/plugin-marketplace-card.tsx";
 import { PluginMarketplacePage } from "../src/renderer/src/features/plugins/plugin-marketplace-page.tsx";
@@ -79,6 +80,7 @@ const installed: InstalledMarketplacePluginSummary = {
   enabled: true,
   capabilities: ["tools.register"],
   containsNativeCode: true,
+  configurable: true,
   state: "installed",
   installedAt: 1,
 };
@@ -94,6 +96,13 @@ describe("plugin marketplace page", () => {
 });
 
 describe("plugin detail confirmation", () => {
+  it("mounts the host-rendered configuration section for configurable installed plugins", () => {
+    const markup = renderToStaticMarkup(<PluginConfigurationForm pluginId={installed.id} />);
+
+    expect(markup).toContain('id="plugin-detail-configuration"');
+    expect(markup).toContain("正在载入配置");
+  });
+
   it("keeps install and uninstall warnings in the detail dialog confirmation state", () => {
     expect(pluginActionConfirmation("install", plugin.name, plugin)).toEqual({
       title: "安装 Example Tools？",

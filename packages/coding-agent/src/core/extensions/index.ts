@@ -63,6 +63,8 @@ export type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 	ExtensionCommandContextActions,
+	ExtensionConfiguration,
+	ExtensionConfigValue,
 	ExtensionContext,
 	ExtensionContextActions,
 	// Errors

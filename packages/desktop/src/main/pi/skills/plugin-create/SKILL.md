@@ -56,6 +56,7 @@ Do not retain placeholder tools or comments in the finished plugin.
 Prefer surfaces supported by Desktop Host Profile v1:
 
 - Standard extension events, tools, commands, custom messages, session reads, and abort. Use compaction only when the installed Desktop characterization covers the exact flow; Host Profile v1 treats it as conditionally supported.
+- `pi.getConfig()` returns the immutable, host-validated configuration scoped to the current extension. Marketplace configuration schemas are signed artifact metadata; Desktop renders their fields, stores non-secret values in an owner-only settings file, encrypts secret values with Electron `safeStorage`, and never returns secret plaintext to the renderer.
 - `ctx.ui.select`, `confirm`, `input`, `editor`, `notify`, `setStatus`, `setTitle`, `setEditorText`, and `pasteToEditor`.
 - `ctx.ui.setWidget` only with `string[]` content.
 - Provider registration only when the plugin genuinely supplies a provider; verify it against the installed Pi types and Desktop marketplace compatibility.

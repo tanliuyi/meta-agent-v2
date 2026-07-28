@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getShellConfig, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { app, BrowserWindow, Menu } from "electron";
+import { app, BrowserWindow, Menu, safeStorage } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
@@ -28,6 +28,7 @@ import { MarketplacePluginReconciler } from "./plugins/marketplace-plugin-reconc
 import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
 import { MarketplacePluginTransactionStore } from "./plugins/marketplace-plugin-transaction-store.ts";
 import { MarketplaceRevocationService } from "./plugins/marketplace-revocation-service.ts";
+import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { locateManagedBash } from "./sidecar/managed-shell-locator.ts";
@@ -276,6 +277,11 @@ app.whenReady().then(async () => {
     defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
   });
   const marketplaceRegistry = new MarketplacePluginRegistry(userDataDir);
+  const pluginConfigurations = new PluginConfigurationService(userDataDir, marketplaceRegistry, {
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (value) => safeStorage.encryptString(value).toString("base64"),
+    decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
+  });
   const marketplaceTransactions = new MarketplacePluginTransactionStore(userDataDir);
   const marketplaceGenerationReferences = new MarketplaceGenerationReferenceTracker();
   const marketplaceReconciler = new MarketplacePluginReconciler(
@@ -307,6 +313,7 @@ app.whenReady().then(async () => {
     getBuiltinDefinitions: () => builtinExtensions,
     getCuratedDefinitions: () => curatedExtensions,
     getMarketplaceExtensions: () => marketplaceRegistry.getInternalSnapshot(),
+    pluginConfigurations,
     getMarketplaceRevocation: (plugin) => marketplaceRevocations.getCachedPluginRevocation(plugin),
     marketplaceRoot: join(agentDir, "extensions"),
     curatedRoot: app.isPackaged ? join(process.resourcesPath, "extensions") : join(appDir, "../extensions"),
@@ -499,6 +506,7 @@ app.whenReady().then(async () => {
     marketplaceMutationApply,
     marketplaceApplyJournal,
     marketplaceRevocations,
+    pluginConfigurations,
   );
   await installReactDevTools();
   createWindow();

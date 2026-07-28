@@ -4,6 +4,11 @@ import { join, resolve } from "node:path";
 import { gte, lt, valid } from "semver";
 import type { DesktopExtensionCapability } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
+import {
+  clonePluginConfigurationSchema,
+  type PluginConfigurationSchema,
+  parsePluginConfigurationSchema,
+} from "../../shared/plugin-configuration-contracts.ts";
 import type { RuntimeCompatibility } from "../../shared/sidecar-contracts.ts";
 import type { ExtractedMarketplaceArchive } from "./marketplace-artifact-archive.ts";
 import type { TrustedMarketplaceEndpoint } from "./marketplace-endpoint-settings-service.ts";
@@ -26,6 +31,7 @@ export interface VerifiedMarketplaceArtifact {
   entryPath: string;
   capabilities: DesktopExtensionCapability[];
   containsNativeCode: boolean;
+  configurationSchema?: PluginConfigurationSchema;
   verifiedFiles: Array<{ path: string; sha256: string; size: number }>;
 }
 
@@ -37,6 +43,7 @@ interface Manifest {
   pi: { entry: string; extensionApi: string };
   desktop: { hostProfileVersion: number; minVersion?: string; maxVersionExclusive?: string };
   target: MarketplaceArtifactTarget;
+  configuration?: PluginConfigurationSchema;
   capabilities: DesktopExtensionCapability[];
   nativeModules: Array<{
     path: string;
@@ -49,6 +56,7 @@ interface Manifest {
 const SHA256 = /^[a-f0-9]{64}$/;
 const CAPABILITIES = new Set<DesktopExtensionCapability>([
   "events.subscribe",
+  "configuration.read",
   "tools.register",
   "commands.register",
   "providers.register",
@@ -120,6 +128,9 @@ export async function verifyMarketplaceArtifact(input: {
   if (!targetsEqual(manifest.target, input.artifactTarget) || !targetMatchesRuntime(manifest.target, input.runtime)) {
     throw new Error("Marketplace artifact target is incompatible");
   }
+  if (manifest.configuration && !manifest.capabilities.includes("configuration.read")) {
+    throw new Error("Marketplace artifact configuration requires configuration.read capability");
+  }
   const expectedFiles = new Set(["market-manifest.json", "signature.json", ...Object.keys(manifest.files)]);
   if (
     expectedFiles.size !== input.archive.files.size ||
@@ -168,6 +179,7 @@ export async function verifyMarketplaceArtifact(input: {
     entryPath: resolve(input.stagingRoot, ...manifest.pi.entry.split("/")),
     capabilities: [...manifest.capabilities],
     containsNativeCode: manifest.nativeModules.length > 0 || manifest.executables.length > 0,
+    ...(manifest.configuration ? { configurationSchema: clonePluginConfigurationSchema(manifest.configuration) } : {}),
     verifiedFiles: [...input.archive.files.values()].map(({ path, sha256, size }) => ({ path, sha256, size })),
   };
 }
@@ -234,7 +246,8 @@ function parseManifest(bytes: Buffer): Manifest {
       throw new Error(`Marketplace file metadata is invalid: ${path}`);
     files[path] = { sha256: metadata.sha256, size: metadata.size, mode: metadata.mode };
   }
-  return { ...value, files } as Manifest;
+  const configuration = parsePluginConfigurationSchema(value.configuration);
+  return { ...value, ...(configuration ? { configuration } : {}), files } as Manifest;
 }
 
 function parseSignature(bytes: Buffer): { algorithm: "ed25519"; keyId: string; value: string } {

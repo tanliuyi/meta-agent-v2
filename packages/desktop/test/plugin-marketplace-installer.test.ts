@@ -47,13 +47,21 @@ describe("MarketplacePluginInstaller", () => {
       expect.objectContaining({
         id: "dev.meta-agent.example-tools",
         version: "1.0.0",
-        capabilities: ["tools.register"],
+        capabilities: ["tools.register", "configuration.read"],
         containsNativeCode: false,
+        configurable: true,
         enabled: true,
       }),
     ]);
     await expect(harness.registry.getInternalSnapshot()).resolves.toEqual(
-      expect.objectContaining({ plugins: [expect.objectContaining({ artifactHash: harness.artifactHash })] }),
+      expect.objectContaining({
+        plugins: [
+          expect.objectContaining({
+            artifactHash: harness.artifactHash,
+            configurationSchema: expect.objectContaining({ version: 1 }),
+          }),
+        ],
+      }),
     );
     const root = join(harness.agentDir, "extensions", "dev.meta-agent.example-tools");
     const installedEntry = join(root, ".versions", harness.artifactHash, "payload", "index.ts");
@@ -79,6 +87,21 @@ describe("MarketplacePluginInstaller", () => {
       confirmFullTrust: true,
     });
     expect(repeated.status).toBe("already-installed");
+  });
+
+  it("rejects a signed configurable artifact without configuration.read", async () => {
+    const harness = await createHarness({ omitConfigurationCapability: true });
+    const initial = await harness.registry.getSnapshot();
+
+    await expect(
+      harness.installer.install({
+        requestId: "install-missing-config-capability",
+        expectedRevision: initial.revision,
+        pluginId: "dev.meta-agent.example-tools",
+        version: "1.0.0",
+        confirmFullTrust: true,
+      }),
+    ).rejects.toThrow("configuration requires configuration.read capability");
   });
 
   it("retains a projection-committed transaction while immediate apply is pending", async () => {
@@ -477,6 +500,7 @@ describe("MarketplacePluginInstaller", () => {
 async function createHarness(
   options: {
     corruptSignature?: boolean;
+    omitConfigurationCapability?: boolean;
     failJournalPhase?: string;
     revocationError?: string;
     writeUnknownRootOnJournalFailure?: boolean;
@@ -510,7 +534,19 @@ async function createHarness(
       pi: { entry: "payload/index.ts", extensionApi: "1" },
       desktop: { hostProfileVersion: 1, minVersion: "0.0.31" },
       target,
-      capabilities: ["tools.register"],
+      configuration: {
+        version: 1,
+        fields: [
+          {
+            key: "endpoint",
+            label: "Endpoint",
+            type: "text",
+            required: true,
+            defaultValue: "https://example.test",
+          },
+        ],
+      },
+      capabilities: options.omitConfigurationCapability ? ["tools.register"] : ["tools.register", "configuration.read"],
       nativeModules: [],
       executables: [],
       files: {

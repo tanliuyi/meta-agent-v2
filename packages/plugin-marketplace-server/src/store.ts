@@ -48,6 +48,7 @@ export interface ArtifactUploadContext {
 	pluginName: string;
 	publisherId: string;
 	desktop: StoredPluginVersion["desktop"];
+	configuration?: StoredPluginVersion["configuration"];
 	capabilities: string[];
 	artifact: { id: string; target: ArtifactTarget; entry: string };
 }
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS plugin_versions (
 	changelog TEXT NOT NULL,
 	published_at INTEGER NOT NULL,
 	desktop TEXT NOT NULL,
+	configuration TEXT,
 	capabilities TEXT NOT NULL,
 	PRIMARY KEY (plugin_id, version)
 );
@@ -185,6 +187,7 @@ interface VersionRow {
 	changelog: string;
 	published_at: number;
 	desktop: string;
+	configuration: string | null;
 	capabilities: string;
 }
 
@@ -224,6 +227,7 @@ export class MarketplaceStore {
 			db.exec("PRAGMA journal_mode = WAL;");
 			db.exec("PRAGMA foreign_keys = ON;");
 			db.exec(SCHEMA);
+			ensurePluginConfigurationColumn(db);
 			const store = new MarketplaceStore(db, options.clock);
 			store.seedIfEmpty(catalog, options.signing, options.marketplaceId);
 			return store;
@@ -262,7 +266,7 @@ export class MarketplaceStore {
 				for (const version of plugin.versions) {
 					this.db
 						.prepare(
-							"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES (?, ?, ?, 0, ?, ?, ?, ?)",
+							"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)",
 						)
 						.run(
 							plugin.id,
@@ -271,6 +275,7 @@ export class MarketplaceStore {
 							version.changelog,
 							version.publishedAt,
 							JSON.stringify(version.desktop),
+							version.configuration ? JSON.stringify(version.configuration) : null,
 							JSON.stringify(version.capabilities),
 						);
 					for (const artifact of version.artifacts) {
@@ -288,6 +293,7 @@ export class MarketplaceStore {
 							entry,
 							desktop: version.desktop,
 							target: artifact.target,
+							configuration: version.configuration,
 							capabilities: version.capabilities,
 							files,
 						});
@@ -538,13 +544,14 @@ export class MarketplaceStore {
 		this.transaction(() => {
 			this.db
 				.prepare(
-					"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES (?, ?, 'available', 1, ?, 0, ?, ?)",
+					"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities) VALUES (?, ?, 'available', 1, ?, 0, ?, ?, ?)",
 				)
 				.run(
 					pluginId,
 					request.version,
 					request.changelog,
 					JSON.stringify(request.desktop),
+					request.configuration ? JSON.stringify(request.configuration) : null,
 					JSON.stringify(request.capabilities),
 				);
 			for (const artifact of request.artifacts) {
@@ -581,6 +588,9 @@ export class MarketplaceStore {
 			pluginName: pluginRow.name,
 			publisherId: pluginRow.publisher_id,
 			desktop: JSON.parse(versionRow.desktop) as StoredPluginVersion["desktop"],
+			...(versionRow.configuration
+				? { configuration: JSON.parse(versionRow.configuration) as StoredPluginVersion["configuration"] }
+				: {}),
 			capabilities: JSON.parse(versionRow.capabilities) as string[],
 			artifact: {
 				id: artifactId,
@@ -827,7 +837,7 @@ export class MarketplaceStore {
 	private requireVersionRow(pluginId: string, version: string): VersionRow {
 		const row = this.db
 			.prepare(
-				"SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = ? AND version = ?",
+				"SELECT plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities FROM plugin_versions WHERE plugin_id = ? AND version = ?",
 			)
 			.get(pluginId, version) as VersionRow | undefined;
 		if (!row) throw new Error("PLUGIN_VERSION_NOT_FOUND");
@@ -884,7 +894,7 @@ export class MarketplaceStore {
 			const draftFilter = includeDrafts ? "" : " AND draft = 0";
 			const versionRows = this.db
 				.prepare(
-					`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = ?${draftFilter} ORDER BY version`,
+					`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, configuration, capabilities FROM plugin_versions WHERE plugin_id = ?${draftFilter} ORDER BY version`,
 				)
 				.all(row.id) as unknown as VersionRow[];
 			versionRows.sort((left, right) => compareSemver(left.version, right.version));
@@ -928,6 +938,9 @@ export class MarketplaceStore {
 					changelog: versionRow.changelog,
 					publishedAt: versionRow.published_at,
 					desktop: JSON.parse(versionRow.desktop) as StoredPluginVersion["desktop"],
+					...(versionRow.configuration
+						? { configuration: JSON.parse(versionRow.configuration) as StoredPluginVersion["configuration"] }
+						: {}),
 					capabilities: JSON.parse(versionRow.capabilities) as string[],
 					artifacts: artifactsByVersion.get(versionRow.version) ?? [],
 				})),
@@ -946,6 +959,13 @@ export class MarketplaceStore {
 			this.db.exec("ROLLBACK");
 			throw error;
 		}
+	}
+}
+
+function ensurePluginConfigurationColumn(db: DatabaseSync): void {
+	const columns = db.prepare("PRAGMA table_info(plugin_versions)").all() as unknown as Array<{ name: string }>;
+	if (!columns.some((column) => column.name === "configuration")) {
+		db.exec("ALTER TABLE plugin_versions ADD COLUMN configuration TEXT");
 	}
 }
 

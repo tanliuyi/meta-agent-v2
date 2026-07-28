@@ -124,8 +124,12 @@ describe("DesktopExtensionSourcePolicy", () => {
       artifactId: "linux-x64",
       artifactHash: "hash",
       enabled: true,
-      capabilities: ["tools.register"],
+      capabilities: ["tools.register", "configuration.read"],
       containsNativeCode: false,
+      configurationSchema: {
+        version: 1,
+        fields: [{ key: "endpoint", label: "Endpoint", type: "text", defaultValue: "https://example.test" }],
+      },
       state: "installed",
       installedAt: 1,
       entryPath: marketplaceEntry,
@@ -144,6 +148,12 @@ describe("DesktopExtensionSourcePolicy", () => {
       getBuiltinDefinitions: () => harness.builtin,
       getCuratedDefinitions: () => harness.curated,
       getMarketplaceExtensions: async () => ({ revision: "market-1", plugins: [plugin] }),
+      pluginConfigurations: {
+        getRuntimeConfiguration: async () => ({
+          revision: "configuration-1",
+          values: { endpoint: "https://configured.test" },
+        }),
+      },
       marketplaceRoot: join(harness.root, "marketplace"),
       curatedRoot: harness.curatedRoot,
     });
@@ -155,8 +165,16 @@ describe("DesktopExtensionSourcePolicy", () => {
       expect.objectContaining({
         id: "publisher.plugin",
         entryPath: await realpath(marketplaceEntry),
-        capabilities: ["tools.register"],
+        capabilities: ["tools.register", "configuration.read"],
+        configuration: { endpoint: "https://configured.test" },
       }),
+    );
+    const restored = await harness.policy.hydrateRuntimeConfigurations({
+      ...resolved,
+      entries: resolved.entries.map(({ configuration: _configuration, ...entry }) => entry),
+    });
+    expect(restored.entries[1]).toEqual(
+      expect.objectContaining({ configuration: { endpoint: "https://configured.test" } }),
     );
 
     const blockedPolicy = new DesktopExtensionSourcePolicy({

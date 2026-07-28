@@ -104,6 +104,7 @@ export interface InstalledMarketplacePluginSummary {
   enabled: boolean;
   capabilities: DesktopExtensionCapability[];
   containsNativeCode: boolean;
+  configurable: boolean;
   state: "installed" | "broken";
   installedAt: number;
   revocation?: MarketplacePluginRevocation;

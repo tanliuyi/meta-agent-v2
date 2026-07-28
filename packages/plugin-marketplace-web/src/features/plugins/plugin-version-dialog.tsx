@@ -1,6 +1,6 @@
 import { CircleAlert, LoaderCircle, Plus } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import type { PublishArtifactInput, PublishVersionInput } from "@/api.ts";
+import type { PluginConfigurationSchema, PublishArtifactInput, PublishVersionInput } from "@/api.ts";
 import { useCreateManagedVersion } from "@/api-hooks.ts";
 import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -38,6 +38,8 @@ export function PluginVersionDialog({
   const [minVersion, setMinVersion] = useState("");
   const [maxVersionExclusive, setMaxVersionExclusive] = useState("");
   const [capabilities, setCapabilities] = useState("");
+  const [configuration, setConfiguration] = useState("");
+  const [configurationError, setConfigurationError] = useState<string>();
   const [nextArtifactKey, setNextArtifactKey] = useState(1);
   const [artifacts, setArtifacts] = useState<ArtifactDraft[]>([createArtifactDraft(0)]);
 
@@ -49,6 +51,8 @@ export function PluginVersionDialog({
     setMinVersion("");
     setMaxVersionExclusive("");
     setCapabilities("");
+    setConfiguration("");
+    setConfigurationError(undefined);
     setNextArtifactKey(1);
     setArtifacts([createArtifactDraft(0)]);
     mutation.reset();
@@ -60,6 +64,14 @@ export function PluginVersionDialog({
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
+    let configurationSchema: PluginConfigurationSchema | undefined;
+    try {
+      configurationSchema = parseConfigurationSchema(configuration);
+      setConfigurationError(undefined);
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : "配置 Schema 无效");
+      return;
+    }
     const artifactInputs: PublishArtifactInput[] = artifacts.map((artifact) => ({
       id: artifact.id.trim(),
       entry: artifact.entry.trim(),
@@ -75,6 +87,7 @@ export function PluginVersionDialog({
         ...(minVersion.trim() ? { minVersion: minVersion.trim() } : {}),
         ...(maxVersionExclusive.trim() ? { maxVersionExclusive: maxVersionExclusive.trim() } : {}),
       },
+      ...(configurationSchema ? { configuration: configurationSchema } : {}),
       capabilities: splitList(capabilities),
       artifacts: artifactInputs,
     };
@@ -147,11 +160,26 @@ export function PluginVersionDialog({
           <PluginFormField label="能力声明" htmlFor="version-capabilities" hint="用逗号分隔">
             <Input
               id="version-capabilities"
-              placeholder="tools.register, events.subscribe"
+              placeholder="tools.register, configuration.read"
               value={capabilities}
               onChange={(event) => setCapabilities(event.target.value)}
             />
           </PluginFormField>
+          <PluginFormField label="配置 Schema" htmlFor="version-configuration" hint="JSON，可选">
+            <Textarea
+              id="version-configuration"
+              rows={8}
+              value={configuration}
+              placeholder={'{"version":1,"fields":[]}'}
+              onChange={(event) => setConfiguration(event.target.value)}
+            />
+          </PluginFormField>
+          {configurationError ? (
+            <Alert variant="destructive">
+              <CircleAlert />
+              <AlertDescription>{configurationError}</AlertDescription>
+            </Alert>
+          ) : null}
 
           <Separator />
           <ArtifactDraftFields
@@ -183,4 +211,26 @@ export function PluginVersionDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function parseConfigurationSchema(source: string): PluginConfigurationSchema | undefined {
+  if (!source.trim()) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    throw new Error("配置 Schema 必须是有效 JSON");
+  }
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !("version" in value) ||
+    value.version !== 1 ||
+    !("fields" in value) ||
+    !Array.isArray(value.fields)
+  ) {
+    throw new Error("配置 Schema 必须包含 version: 1 和 fields 数组");
+  }
+  return value as PluginConfigurationSchema;
 }

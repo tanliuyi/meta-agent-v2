@@ -1,7 +1,10 @@
+import type { PluginConfigurationValue } from "./plugin-configuration-contracts.ts";
+
 export const DESKTOP_EXTENSION_HOST_PROFILE_VERSION = 1 as const;
 
 export type DesktopExtensionCapability =
   | "events.subscribe"
+  | "configuration.read"
   | "tools.register"
   | "commands.register"
   | "providers.register"
@@ -57,6 +60,7 @@ export interface ResolvedExtensionEntry {
   contentHash?: string;
   hostProfileVersion: typeof DESKTOP_EXTENSION_HOST_PROFILE_VERSION;
   capabilities: DesktopExtensionCapability[];
+  configuration?: Record<string, PluginConfigurationValue>;
 }
 
 export interface ResolvedExtensionSet {

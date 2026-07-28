@@ -1328,6 +1328,25 @@ export default function (pi: ExtensionAPI) {
 
 ## ExtensionAPI Methods
 
+### pi.getConfig<T>()
+
+Read immutable scalar configuration supplied by the current host for this extension. Hosts that do not provide configuration return an empty object. The configuration is available during the extension factory, so it can be used to register providers and tools.
+
+```typescript
+interface MyPluginConfig {
+  endpoint?: string;
+  retries?: number;
+  enabled?: boolean;
+}
+
+export default function (pi: ExtensionAPI) {
+  const config = pi.getConfig<MyPluginConfig>();
+  // config is read-only and scoped to this extension instance.
+}
+```
+
+Do not mutate the returned object or persist secret values into session entries, logs, tool results, or messages. Host configuration is not extension session state; use normal extension state patterns for branch-sensitive data.
+
 ### pi.on(event, handler)
 
 Subscribe to events. See [Events](#events) for event types and return values.

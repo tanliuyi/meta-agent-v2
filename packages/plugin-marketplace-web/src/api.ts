@@ -56,6 +56,11 @@ export interface ArtifactMetadata {
   downloadEndpoint: string;
 }
 
+export interface PluginConfigurationSchema {
+  version: 1;
+  fields: Array<Record<string, unknown>>;
+}
+
 export interface PluginVersionDetail {
   version: string;
   status: PluginStatus;
@@ -66,6 +71,7 @@ export interface PluginVersionDetail {
     minVersion?: string;
     maxVersionExclusive?: string;
   };
+  configuration?: PluginConfigurationSchema;
   capabilities: string[];
   artifacts: ArtifactMetadata[];
 }
@@ -157,6 +163,7 @@ export interface PublishVersionInput {
     minVersion?: string;
     maxVersionExclusive?: string;
   };
+  configuration?: PluginConfigurationSchema;
   capabilities: string[];
   artifacts: PublishArtifactInput[];
 }

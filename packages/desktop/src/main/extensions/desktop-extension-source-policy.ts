@@ -14,6 +14,7 @@ import {
   validateMarketplaceOwnershipAndProjection,
 } from "../plugins/marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
+import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
 import type { DesktopExtensionSettingsService } from "./desktop-extension-settings-service.ts";
 
 interface DesktopExtensionSourcePolicyOptions {
@@ -21,6 +22,7 @@ interface DesktopExtensionSourcePolicyOptions {
   getBuiltinDefinitions(): DesktopExtensionDefinition[];
   getCuratedDefinitions(): DesktopExtensionDefinition[];
   getMarketplaceExtensions?(): Promise<{ revision: string; plugins: InstalledMarketplacePluginRecord[] }>;
+  pluginConfigurations?: Pick<PluginConfigurationService, "getRuntimeConfiguration">;
   getMarketplaceRevocation?(plugin: InstalledMarketplacePluginRecord): Promise<MarketplacePluginRevocation | undefined>;
   marketplaceRoot?: string;
   curatedRoot?: string;
@@ -79,7 +81,13 @@ export class DesktopExtensionSourcePolicy {
           const entryPath = await validateInstalledMarketplacePlugin(plugin, this.options.marketplaceRoot);
           await validateMarketplaceOwnershipAndProjection(plugin);
           const contentHash = await hashFile(entryPath);
-          fingerprintParts.push(`${plugin.id}:${plugin.artifactHash}:${contentHash}`);
+          const configuration =
+            plugin.configurationSchema && plugin.capabilities.includes("configuration.read")
+              ? await this.options.pluginConfigurations?.getRuntimeConfiguration(plugin.id)
+              : undefined;
+          fingerprintParts.push(
+            `${plugin.id}:${plugin.artifactHash}:${contentHash}:${configuration?.revision ?? "unconfigured"}`,
+          );
           pathEntries.push({
             id: plugin.id,
             displayName: plugin.displayName,
@@ -88,6 +96,7 @@ export class DesktopExtensionSourcePolicy {
             contentHash,
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [...plugin.capabilities],
+            ...(configuration ? { configuration: { ...configuration.values } } : {}),
           });
         } catch {
           fingerprintParts.push(`${plugin.id}:broken`);
@@ -160,6 +169,31 @@ export class DesktopExtensionSourcePolicy {
     return cloneSet(set);
   }
 
+  async hydrateRuntimeConfigurations(set: ResolvedExtensionSet): Promise<ResolvedExtensionSet> {
+    const pluginConfigurations = this.options.pluginConfigurations;
+    if (!this.options.getMarketplaceExtensions || !pluginConfigurations) return cloneSet(set);
+    const marketplace = await this.options.getMarketplaceExtensions();
+    const plugins = new Map(marketplace.plugins.map((plugin) => [plugin.id, plugin]));
+    const entries = await Promise.all(
+      set.entries.map(async (entry) => {
+        if (
+          entry.source !== "marketplace" ||
+          !entry.capabilities.includes("configuration.read") ||
+          !plugins.get(entry.id)?.configurationSchema
+        ) {
+          return { ...entry, capabilities: [...entry.capabilities] };
+        }
+        const configuration = await pluginConfigurations.getRuntimeConfiguration(entry.id);
+        return { ...entry, capabilities: [...entry.capabilities], configuration: { ...configuration.values } };
+      }),
+    );
+    return {
+      ...set,
+      entries,
+      diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+    };
+  }
+
   invalidate(projectId?: string): void {
     if (projectId) this.cache.delete(projectId);
     else this.cache.clear();
@@ -208,7 +242,11 @@ function assertUniqueIds(entries: ResolvedExtensionEntry[]): void {
 function cloneSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
   return {
     ...set,
-    entries: set.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+    entries: set.entries.map((entry) => ({
+      ...entry,
+      capabilities: [...entry.capabilities],
+      ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
+    })),
     diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
   };
 }

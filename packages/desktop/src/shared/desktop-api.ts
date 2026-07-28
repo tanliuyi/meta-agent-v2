@@ -42,6 +42,11 @@ import type {
 } from "./desktop-extension-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
 import type {
+  PluginConfigurationSnapshot,
+  SavePluginConfigurationInput,
+  SavePluginConfigurationResult,
+} from "./plugin-configuration-contracts.ts";
+import type {
   InstalledMarketplacePluginsSnapshot,
   InstallMarketplacePluginInput,
   InstallMarketplacePluginResult,
@@ -163,6 +168,8 @@ export interface DesktopApi {
     saveEndpoint(input: SaveMarketplaceEndpointInput): Promise<SaveMarketplaceEndpointResult>;
     listPlugins(input?: ListMarketplacePluginsInput): Promise<MarketplacePluginPage>;
     getInstalled(): Promise<InstalledMarketplacePluginsSnapshot>;
+    getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
+    savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
     installPlugin(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult>;
     updatePlugin(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult>;
     uninstallPlugin(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult>;

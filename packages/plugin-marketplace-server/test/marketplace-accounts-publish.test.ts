@@ -263,6 +263,17 @@ describe("publishing", () => {
 			error: { code: "NATIVE_ARTIFACT_UNSUPPORTED" },
 		});
 
+		const missingConfigurationCapability = versionDeclaration("0.9.1");
+		missingConfigurationCapability.capabilities = ["tools.register"];
+		const rejectedConfigurationCapability = await request(app.getHttpServer())
+			.post(`/v1/publish/plugins/${PLUGIN_ID}/versions`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.send(missingConfigurationCapability)
+			.expect(400);
+		expect(rejectedConfigurationCapability.body).toMatchObject({
+			error: { code: "BODY_INVALID", message: "configuration requires the configuration.read capability" },
+		});
+
 		const draft = await request(app.getHttpServer())
 			.post(`/v1/publish/plugins/${PLUGIN_ID}/versions`)
 			.set("authorization", `Bearer ${aliceToken}`)
@@ -417,6 +428,18 @@ describe("publishing", () => {
 			artifactId: ARTIFACT_ID,
 			plugin: { id: PLUGIN_ID, name: "Acme Tools", version: "1.0.0", publisherId: "acme" },
 			pi: { entry: "payload/index.ts" },
+			configuration: {
+				version: 1,
+				fields: [
+					{
+						key: "endpoint",
+						label: "Endpoint",
+						type: "text",
+						required: true,
+						defaultValue: "https://example.test",
+					},
+				],
+			},
 			files: {
 				"payload/index.ts": {
 					sha256: createHash("sha256").update(strToU8(ENTRY_SOURCE)).digest("hex"),
@@ -721,7 +744,19 @@ function versionDeclaration(version: string) {
 		version,
 		changelog: "Test release",
 		desktop: { hostProfileVersion: 1 },
-		capabilities: ["tools.register"],
+		capabilities: ["tools.register", "configuration.read"],
+		configuration: {
+			version: 1,
+			fields: [
+				{
+					key: "endpoint",
+					label: "Endpoint",
+					type: "text",
+					required: true,
+					defaultValue: "https://example.test",
+				},
+			],
+		},
 		artifacts: [
 			{
 				id: ARTIFACT_ID,

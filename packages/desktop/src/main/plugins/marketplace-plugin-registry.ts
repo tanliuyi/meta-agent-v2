@@ -2,6 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
+import {
+  clonePluginConfigurationSchema,
+  type PluginConfigurationSchema,
+  parsePluginConfigurationSchema,
+} from "../../shared/plugin-configuration-contracts.ts";
 import type {
   InstalledMarketplacePluginSummary,
   InstalledMarketplacePluginsSnapshot,
@@ -9,10 +14,12 @@ import type {
 
 export const MISSING_MARKETPLACE_REGISTRY_REVISION = "missing:marketplace-installed-v1";
 
-export interface InstalledMarketplacePluginRecord extends Omit<InstalledMarketplacePluginSummary, "revocation"> {
+export interface InstalledMarketplacePluginRecord
+  extends Omit<InstalledMarketplacePluginSummary, "configurable" | "revocation"> {
   artifactHash: string;
   entryPath: string;
   rootPath: string;
+  configurationSchema?: PluginConfigurationSchema;
   verifiedFiles: Array<{ path: string; sha256: string; size: number }>;
 }
 
@@ -275,10 +282,12 @@ function snapshot(current: CurrentRegistry): InstalledMarketplacePluginsSnapshot
         artifactHash: _artifactHash,
         entryPath: _entryPath,
         rootPath: _rootPath,
+        configurationSchema,
         verifiedFiles: _verifiedFiles,
         ...plugin
       }) => ({
         ...plugin,
+        configurable: configurationSchema !== undefined,
         capabilities: [...plugin.capabilities],
       }),
     ),
@@ -289,6 +298,9 @@ function cloneRecord(record: InstalledMarketplacePluginRecord): InstalledMarketp
   return {
     ...record,
     capabilities: [...record.capabilities],
+    ...(record.configurationSchema
+      ? { configurationSchema: clonePluginConfigurationSchema(record.configurationSchema) }
+      : {}),
     verifiedFiles: record.verifiedFiles.map((file) => ({ ...file })),
   };
 }
@@ -328,6 +340,12 @@ function assertRegistryFile(value: unknown): asserts value is RegistryFileData {
       typeof plugin.installedAt !== "number"
     ) {
       throw new Error("installed.json plugin entry is invalid");
+    }
+    if (plugin.configurationSchema !== undefined) {
+      parsePluginConfigurationSchema(plugin.configurationSchema);
+      if (!plugin.capabilities.includes("configuration.read")) {
+        throw new Error("installed.json configurable plugin lacks configuration.read capability");
+      }
     }
     if (ids.has(plugin.id)) throw new Error(`installed.json duplicate plugin ID: ${plugin.id}`);
     ids.add(plugin.id);

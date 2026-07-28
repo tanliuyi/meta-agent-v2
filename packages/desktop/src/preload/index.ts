@@ -201,6 +201,8 @@ const desktopApi: DesktopApi = {
     saveEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSaveEndpoint, input),
     listPlugins: (input = {}) => ipcRenderer.invoke(CHANNELS.marketplaceListPlugins, input),
     getInstalled: () => ipcRenderer.invoke(CHANNELS.marketplaceGetInstalled),
+    getPluginConfiguration: (pluginId) => ipcRenderer.invoke(CHANNELS.marketplaceGetPluginConfiguration, pluginId),
+    savePluginConfiguration: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSavePluginConfiguration, input),
     installPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceInstallPlugin, input),
     updatePlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUpdatePlugin, input),
     uninstallPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUninstallPlugin, input),

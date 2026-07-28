@@ -19,6 +19,48 @@ export interface ArtifactTarget {
 	runtimeCompatibilityId?: string;
 }
 
+export type PluginConfigurationValue = string | number | boolean;
+
+interface PluginConfigurationFieldBase {
+	key: string;
+	label: string;
+	description?: string;
+	required?: boolean;
+}
+
+export type PluginConfigurationField =
+	| (PluginConfigurationFieldBase & {
+			type: "text" | "textarea" | "path";
+			defaultValue?: string;
+			placeholder?: string;
+			minLength?: number;
+			maxLength?: number;
+	  })
+	| (PluginConfigurationFieldBase & {
+			type: "secret";
+			placeholder?: string;
+			minLength?: number;
+			maxLength?: number;
+	  })
+	| (PluginConfigurationFieldBase & {
+			type: "number";
+			defaultValue?: number;
+			minimum?: number;
+			maximum?: number;
+			step?: number;
+	  })
+	| (PluginConfigurationFieldBase & { type: "boolean"; defaultValue?: boolean })
+	| (PluginConfigurationFieldBase & {
+			type: "select";
+			defaultValue?: string;
+			options: Array<{ value: string; label: string }>;
+	  });
+
+export interface PluginConfigurationSchema {
+	version: 1;
+	fields: PluginConfigurationField[];
+}
+
 export interface MarketplaceArtifactManifest {
 	schemaVersion: 1;
 	marketplaceId: string;
@@ -39,6 +81,7 @@ export interface MarketplaceArtifactManifest {
 		maxVersionExclusive?: string;
 	};
 	target: ArtifactTarget;
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	nativeModules: Array<{
 		path: string;
@@ -85,6 +128,7 @@ export interface CatalogPluginVersion {
 		minVersion?: string;
 		maxVersionExclusive?: string;
 	};
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: CatalogArtifact[];
 }
@@ -176,6 +220,7 @@ export interface MarketplacePluginVersionDetail {
 	changelog: string;
 	publishedAt: number;
 	desktop: CatalogPluginVersion["desktop"];
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: MarketplaceArtifactMetadata[];
 }
@@ -204,6 +249,7 @@ export interface StoredPluginVersion {
 	changelog: string;
 	publishedAt: number;
 	desktop: CatalogPluginVersion["desktop"];
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: StoredArtifact[];
 }
@@ -261,6 +307,7 @@ export interface PublishVersionRequest {
 	version: string;
 	changelog: string;
 	desktop: CatalogPluginVersion["desktop"];
+	configuration?: PluginConfigurationSchema;
 	capabilities: string[];
 	artifacts: PublishVersionArtifactRequest[];
 }

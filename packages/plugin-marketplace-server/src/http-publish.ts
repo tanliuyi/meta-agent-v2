@@ -2,6 +2,7 @@ import { Body, Headers, Param, Req, type Type } from "@nestjs/common";
 import { valid as validSemver } from "semver";
 import { buildSignedArtifact, extractPayloadArchive, validatePayloadPath } from "./artifact-builder.ts";
 import { ARTIFACT_ID, PLUGIN_ID, parseTarget } from "./catalog-validation.ts";
+import { parsePluginConfigurationSchema } from "./configuration-schema.ts";
 import type {
 	MarketplacePluginVersionDetail,
 	PublishPluginRequest,
@@ -103,6 +104,7 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 					entry: context.artifact.entry,
 					desktop: context.desktop,
 					target: context.artifact.target,
+					configuration: context.configuration,
 					capabilities: context.capabilities,
 					files,
 				});
@@ -252,6 +254,16 @@ function parsePublishVersionRequest(body: unknown): PublishVersionRequest {
 	if (new Set(artifacts.map(({ id }) => id)).size !== artifacts.length) {
 		throw badRequest("BODY_INVALID", "artifacts must have unique ids");
 	}
+	let configuration: PublishVersionRequest["configuration"];
+	try {
+		configuration = parsePluginConfigurationSchema(record.configuration);
+	} catch (error) {
+		throw badRequest("BODY_INVALID", error instanceof Error ? error.message : "configuration is invalid");
+	}
+	const capabilities = bodyStringArray(record, "capabilities", 32, 64);
+	if (configuration && !capabilities.includes("configuration.read")) {
+		throw badRequest("BODY_INVALID", "configuration requires the configuration.read capability");
+	}
 	return {
 		version,
 		changelog: bodyString(record, "changelog", 4000),
@@ -260,7 +272,8 @@ function parsePublishVersionRequest(body: unknown): PublishVersionRequest {
 			...(minVersion === undefined ? {} : { minVersion }),
 			...(maxVersionExclusive === undefined ? {} : { maxVersionExclusive }),
 		},
-		capabilities: bodyStringArray(record, "capabilities", 32, 64),
+		...(configuration ? { configuration } : {}),
+		capabilities,
 		artifacts,
 	};
 }
