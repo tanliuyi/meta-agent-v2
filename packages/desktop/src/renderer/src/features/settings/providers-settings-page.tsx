@@ -71,25 +71,6 @@ export function ProvidersSettingsPage() {
           <span className="providers-subtitle">{statusText(controller.status)}</span>
         </div>
         <div className="providers-actions">
-          <Button size="sm" variant="outline" onClick={() => setShowAddDialog(true)}>
-            <Plus />
-            新增
-          </Button>
-          <Button
-            size="sm"
-            disabled={!controller.dirty || controller.diagnostics.length > 0 || controller.status === "saving"}
-            onClick={() => void controller.save()}
-          >
-            保存
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={controller.status === "loading"}
-            onClick={() => void controller.reload()}
-          >
-            重新载入
-          </Button>
           <Button
             size="sm"
             variant="ghost"
@@ -105,6 +86,25 @@ export function ProvidersSettingsPage() {
             onClick={() => void controller.openAuthExternally()}
           >
             auth.json
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={controller.status === "loading"}
+            onClick={() => void controller.reload()}
+          >
+            重新载入
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowAddDialog(true)}>
+            <Plus />
+            新增
+          </Button>
+          <Button
+            size="sm"
+            disabled={!controller.dirty || controller.diagnostics.length > 0 || controller.status === "saving"}
+            onClick={() => void controller.save()}
+          >
+            保存
           </Button>
         </div>
       </header>

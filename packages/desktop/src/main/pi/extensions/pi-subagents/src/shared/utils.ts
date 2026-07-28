@@ -14,7 +14,7 @@ import type { AgentProgress, AsyncStatus, Details, DisplayItem, ErrorInfo, Neste
 // File System Utilities
 // ============================================================================
 
-const DEFAULT_CONFIG_DIR_NAME = ".pi";
+const DEFAULT_CONFIG_DIR_NAME = ".pi-desk";
 const PI_CODING_AGENT_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 export const PI_CODING_AGENT_PACKAGE_ROOT_ENV = "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT";
 

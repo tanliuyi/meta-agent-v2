@@ -11,6 +11,7 @@ import type {
   ThreadSidecarCommand,
   ThreadWorkerBinding,
 } from "../shared/sidecar-contracts.ts";
+import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
 import type { SidecarService, SidecarServiceContext } from "./sidecar-host.ts";
 
 export class ThreadWorkerService implements SidecarService {
@@ -30,11 +31,12 @@ export class ThreadWorkerService implements SidecarService {
     const extensionSet = await validateResolvedExtensionSet(input.projectId, input.extensionSet);
     const createSessionId = input.mode === "create" ? input.sessionId : undefined;
     let sessionManager: SessionManager | undefined;
+    const sessionDir = resolveDesktopSessionDirectory(input.projectId, input.agentDir);
     if (input.mode === "create") {
-      sessionManager = SessionManager.create(input.cwd, undefined, { id: createSessionId });
+      sessionManager = SessionManager.create(input.cwd, sessionDir, { id: createSessionId });
     } else {
       const sessionFile = await resolveCanonicalSessionFile(input);
-      sessionManager = SessionManager.open(sessionFile, undefined, input.cwd);
+      sessionManager = SessionManager.open(sessionFile, sessionDir, input.cwd);
     }
     const parentThreadId = input.mode === "create" ? input.sessionId : input.threadId;
     const subagentRuntime = new DesktopSubagentRuntime({

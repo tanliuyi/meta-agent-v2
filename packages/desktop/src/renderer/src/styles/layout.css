@@ -278,7 +278,6 @@
 
 .thread-row[data-active="true"] .thread-main {
   color: hsl(var(--foreground));
-  font-weight: 500;
 }
 
 .thread-row[data-pending="true"] button,
@@ -587,7 +586,7 @@
 .settings-content {
   width: min(100%, 920px);
   margin: 0 auto;
-  padding: 36px 40px 48px;
+  padding: 36px 40px;
 }
 
 .settings-page-heading {
@@ -742,7 +741,7 @@
 
 @media (max-width: 51.25rem) {
   .settings-content {
-    padding: 28px 24px 40px;
+    padding: 28px 24px 28px;
   }
 
   .settings-row {

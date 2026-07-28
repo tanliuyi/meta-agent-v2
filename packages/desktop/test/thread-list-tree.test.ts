@@ -39,6 +39,34 @@ describe("thread list tree", () => {
       "parent",
       "other-parent",
     ]);
+    expect(flattenVisibleThreadTree(roots, new Set())[0]).toMatchObject({
+      childCount: 1,
+      runningChildCount: 1,
+    });
+  });
+
+  it("counts only directly running child sessions", () => {
+    const roots = threadTreeByArchiveState(
+      [
+        thread("parent", 50),
+        thread("running-child", 40, { parentThreadId: "parent", running: true }),
+        thread("idle-child", 30, { parentThreadId: "parent" }),
+        thread("running-grandchild", 20, { parentThreadId: "idle-child", running: true }),
+      ],
+      false,
+      10,
+    );
+
+    const visible = flattenVisibleThreadTree(roots, new Set(["parent"]));
+
+    expect(visible.find(({ thread: item }) => item.id === "parent")).toMatchObject({
+      childCount: 2,
+      runningChildCount: 1,
+    });
+    expect(visible.find(({ thread: item }) => item.id === "idle-child")).toMatchObject({
+      childCount: 1,
+      runningChildCount: 1,
+    });
   });
 
   it("collapses each expanded child group with the same limit as root sessions", () => {

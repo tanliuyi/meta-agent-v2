@@ -284,6 +284,7 @@ export function SubagentSettingsPage() {
                 title="内置智能体"
                 agents={filtered.builtin}
                 mutating={controller.mutating}
+                defaultCollapsed
                 builtin={!systemTab}
                 readOnly={systemTab}
                 copyLabel={scope === "project" ? "复制到项目" : "复制到个人"}

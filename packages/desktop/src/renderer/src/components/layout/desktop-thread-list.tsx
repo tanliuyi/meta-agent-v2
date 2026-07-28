@@ -119,7 +119,16 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   return (
     <div className="thread-list" role="tree" aria-label={`${project.name} 会话`}>
       {visibleThreads.map(
-        ({ thread, depth, childCount, expanded, ancestorContinuations, isLastChild, siblingExpansions }) => (
+        ({
+          thread,
+          depth,
+          childCount,
+          runningChildCount,
+          expanded,
+          ancestorContinuations,
+          isLastChild,
+          siblingExpansions,
+        }) => (
           <Fragment key={thread.id}>
             <DesktopThreadListItem
               thread={thread}
@@ -130,6 +139,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
               depth={depth}
               childCount={childCount}
+              runningChildCount={runningChildCount}
               expanded={expanded}
               ancestorContinuations={ancestorContinuations}
               isLastChild={isLastChild}
@@ -151,7 +161,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                    className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
                     onClick={() =>
                       setChildVisibleLimits((current) => {
                         const next = new Map(current);
@@ -173,7 +183,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                    className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
                     onClick={() =>
                       setChildVisibleLimits((current) => {
                         const next = new Map(current);
@@ -196,7 +206,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
             <Button
               variant="ghost"
               size="sm"
-              className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+              className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
               onClick={() => setVisibleLimit((current) => nextThreadVisibleLimit(current, regularThreadCount))}
             >
               展开更多
@@ -206,7 +216,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
             <Button
               variant="ghost"
               size="sm"
-              className="text-muted-foreground hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+              className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
               onClick={() => setVisibleLimit(COLLAPSED_THREAD_COUNT)}
             >
               收起

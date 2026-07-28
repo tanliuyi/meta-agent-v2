@@ -235,7 +235,7 @@ app.whenReady().then(async () => {
     }
     return;
   }
-  const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
+  const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi-desk", "agent");
   const shellInstaller = new ShellRuntimeInstaller(userDataDir, () => undefined);
   const managedBashPath =
     shellInstaller.activeBashPath() ??

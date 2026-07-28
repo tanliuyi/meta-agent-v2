@@ -15,7 +15,7 @@ export class MetadataWorkerService implements SidecarService {
 
   private constructor(agentDir: string, userDataDir: string) {
     this.agentDir = agentDir;
-    this.index = new SessionMetadataIndex(userDataDir);
+    this.index = new SessionMetadataIndex(userDataDir, agentDir);
   }
 
   static async create(binding: SidecarBinding): Promise<{ service: MetadataWorkerService }> {

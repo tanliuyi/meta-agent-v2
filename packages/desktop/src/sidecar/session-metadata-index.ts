@@ -18,6 +18,11 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { Thread } from "../shared/contracts.ts";
+import {
+  migrateLegacyGeneralSessionDirectory,
+  remapLegacyGeneralSessionPath,
+  resolveDesktopSessionDirectory,
+} from "./desktop-session-directory.ts";
 
 const INDEX_VERSION = 4;
 const INDEX_FILE_NAME = "session-metadata-index.json";
@@ -47,10 +52,12 @@ interface StoredIndex {
 
 export class SessionMetadataIndex {
   private readonly path: string;
+  private readonly agentDir: string | undefined;
   private data?: StoredIndex;
 
-  constructor(userDataDir: string) {
+  constructor(userDataDir: string, agentDir?: string) {
     this.path = join(userDataDir, INDEX_FILE_NAME);
+    this.agentDir = agentDir;
   }
 
   async list(projectId: string, cwd: string): Promise<Thread[]> {
@@ -60,7 +67,7 @@ export class SessionMetadataIndex {
 
   async resolve(projectId: string, cwd: string, threadId: string): Promise<{ id: string; path: string }> {
     const cached = this.load().projects[projectId];
-    const cacheWasFresh = this.isProjectFresh(cached, cwd);
+    const cacheWasFresh = this.isProjectFresh(projectId, cached, cwd);
     let project = cacheWasFresh ? cached : await this.rebuild(projectId, cwd);
     let session = project.sessions.find(({ id }) => id === threadId);
     if (!session && cacheWasFresh) {
@@ -177,18 +184,36 @@ export class SessionMetadataIndex {
   async rebuild(projectId: string, cwd: string): Promise<IndexedProject> {
     const data = this.load();
     const currentProject = data.projects[projectId]?.cwd === cwd ? data.projects[projectId] : undefined;
-    const knownDirectory = currentProject?.sessionDirectory ?? null;
+    if (this.agentDir) migrateLegacyGeneralSessionDirectory(projectId, cwd, this.agentDir);
+    const configuredDirectory = this.agentDir ? resolveDesktopSessionDirectory(projectId, this.agentDir) : undefined;
+    const directoryChanged =
+      configuredDirectory !== undefined && currentProject?.sessionDirectory !== configuredDirectory;
+    const currentExplicitSessions = (currentProject?.explicitSessions ?? []).map((explicit) =>
+      directoryChanged && this.agentDir
+        ? {
+            ...explicit,
+            session: {
+              ...explicit.session,
+              path: remapLegacyGeneralSessionPath(projectId, cwd, this.agentDir, explicit.session.path),
+            },
+          }
+        : explicit,
+    );
+    const knownDirectory = configuredDirectory ?? currentProject?.sessionDirectory ?? null;
     const fingerprintBeforeScan = fingerprintSessionDirectory(knownDirectory);
-    const rootSessions = await SessionManager.list(cwd);
+    const rootSessions = configuredDirectory
+      ? await SessionManager.list(cwd, configuredDirectory)
+      : await SessionManager.list(cwd);
     const sessionDirectory = knownDirectory ?? (rootSessions[0] ? dirname(rootSessions[0].path) : null);
-    const backfill = currentProject?.backfillComplete
-      ? { sessions: [], complete: true }
-      : sessionDirectory
-        ? await listNestedSessionInfos(sessionDirectory)
-        : { sessions: [], complete: false };
+    const backfill =
+      currentProject?.backfillComplete && !directoryChanged
+        ? { sessions: [], complete: true }
+        : sessionDirectory
+          ? await listNestedSessionInfos(sessionDirectory)
+          : { sessions: [], complete: false };
     const validExplicitSessions = (
       await Promise.all(
-        (currentProject?.explicitSessions ?? []).map(async (explicit) => {
+        currentExplicitSessions.map(async (explicit) => {
           const fileFingerprint = explicitSessionFingerprint(explicit.session.path, explicit.session.id);
           if (!fileFingerprint) return undefined;
           return refreshExplicitSession(projectId, explicit, fileFingerprint);
@@ -260,13 +285,19 @@ export class SessionMetadataIndex {
 
   private async requireProject(projectId: string, cwd: string): Promise<IndexedProject> {
     const project = this.load().projects[projectId];
-    if (this.isProjectFresh(project, cwd)) return project;
+    if (this.isProjectFresh(projectId, project, cwd)) return project;
     return this.rebuild(projectId, cwd);
   }
 
-  private isProjectFresh(project: IndexedProject | undefined, cwd: string): project is IndexedProject {
+  private isProjectFresh(
+    projectId: string,
+    project: IndexedProject | undefined,
+    cwd: string,
+  ): project is IndexedProject {
+    const configuredDirectory = this.agentDir ? resolveDesktopSessionDirectory(projectId, this.agentDir) : undefined;
     return (
       project?.cwd === cwd &&
+      (configuredDirectory === undefined || project.sessionDirectory === configuredDirectory) &&
       project.backfillComplete &&
       project.directoryFingerprint !== null &&
       fingerprintSessionDirectory(project.sessionDirectory) === project.directoryFingerprint &&

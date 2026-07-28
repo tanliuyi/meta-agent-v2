@@ -14,7 +14,7 @@ export function ProjectSelect({ projects, projectId, disabled, onValueChange }: 
     if (project.id === GENERAL_WORKSPACE_ID) {
       return {
         value: project.id,
-        label: "无项目",
+        label: "对话",
         disabled: !project.available,
       };
     }
@@ -30,6 +30,7 @@ export function ProjectSelect({ projects, projectId, disabled, onValueChange }: 
       value={projectId ?? ""}
       options={options}
       placeholder="选择会话目标"
+      tooltip="选择项目"
       disabled={disabled}
       onValueChange={(nextProjectId) => {
         if (nextProjectId.length > 0) onValueChange(nextProjectId);

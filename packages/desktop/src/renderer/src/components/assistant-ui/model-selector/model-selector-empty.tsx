@@ -5,7 +5,7 @@ export type ModelSelectorEmptyProps = ComponentPropsWithoutRef<typeof CommandEmp
 
 export function ModelSelectorEmpty({ children, ...props }: ModelSelectorEmptyProps) {
   return (
-    <CommandEmpty data-slot="model-selector-empty" {...props}>
+    <CommandEmpty data-slot="model-selector-empty" className="text-sm" {...props}>
       {children ?? "未找到模型"}
     </CommandEmpty>
   );

@@ -21,7 +21,7 @@ const baseThread: Thread = {
 
 function renderThread(
   thread: Thread,
-  options: { depth?: number; childCount?: number; compactRoot?: boolean } = {},
+  options: { depth?: number; childCount?: number; runningChildCount?: number; compactRoot?: boolean } = {},
 ): string {
   return renderToStaticMarkup(
     <DesktopThreadListItem
@@ -33,6 +33,7 @@ function renderThread(
       isDeletePending={false}
       depth={options.depth ?? 1}
       childCount={options.childCount ?? 0}
+      runningChildCount={options.runningChildCount ?? 0}
       expanded={false}
       ancestorContinuations={[]}
       isLastChild
@@ -62,6 +63,22 @@ describe("DesktopThreadListItem", () => {
 
     expect(markup).not.toContain('data-slot="subagent-name"');
     expect(markup).toContain(">Inspect the renderer tree</span>");
+  });
+
+  it("shows only the number of running child sessions", () => {
+    const markup = renderThread(baseThread, { childCount: 6, runningChildCount: 2 });
+
+    expect(markup).toContain('aria-label="2 个子会话正在运行"');
+    expect(markup).toContain(">2</span>");
+    expect(markup).not.toContain(">6</span>");
+  });
+
+  it("hides the child count when no child session is running", () => {
+    const markup = renderThread(baseThread, { childCount: 6 });
+
+    expect(markup).not.toContain("个子会话正在运行");
+    expect(markup).not.toContain(">6</span>");
+    expect(markup).toContain('aria-label="展开子会话"');
   });
 
   it("aligns compact root threads unless they own child sessions", () => {

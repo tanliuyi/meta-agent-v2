@@ -208,11 +208,11 @@
 
 .plugin-marketplace-toolbar {
   gap: var(--space-2);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-6);
 }
 
 .plugin-marketplace-toolbar[data-has-options="true"] {
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-6);
 }
 
 .plugin-marketplace-options {

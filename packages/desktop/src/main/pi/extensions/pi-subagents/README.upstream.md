@@ -155,7 +155,7 @@ For a persistent override, edit settings. This example pins the reviewer everywh
 }
 ```
 
-Use `~/.pi/agent/settings.json` for a user override or the project config settings file (`.pi/settings.json` in standard Pi) for a project override. `subagents.defaultModel` applies to builtin, package, user, and project agents that do not set `model` in frontmatter. Per-run model overrides and `agentOverrides.<name>.model` still win, and explicit agent frontmatter still wins over the global default. The same `agentOverrides` block can change `tools`, `skills`, inherited context, prompt text, or disable a builtin. Matching user and project agents also receive override fields that their frontmatter leaves unset, so a shared project config agent can keep the persona while local settings choose the model.
+Use `~/.pi-desk/agent/settings.json` for a user override or the project config settings file (`.pi-desk/settings.json` in standard Pi) for a project override. `subagents.defaultModel` applies to builtin, package, user, and project agents that do not set `model` in frontmatter. Per-run model overrides and `agentOverrides.<name>.model` still win, and explicit agent frontmatter still wins over the global default. The same `agentOverrides` block can change `tools`, `skills`, inherited context, prompt text, or disable a builtin. Matching user and project agents also receive override fields that their frontmatter leaves unset, so a shared project config agent can keep the persona while local settings choose the model.
 
 If your provider rejects model IDs with thinking suffixes, set `subagents.disableThinking: true` in user or project settings. That clears bundled builtin thinking defaults in one place; an explicit higher-precedence `agentOverrides.<name>.thinking` value can opt a role back in.
 
@@ -186,7 +186,7 @@ Use `/subagents-watchdog recommend-model` to ask pi-subagents for the current st
 /subagents-watchdog model recommended
 ```
 
-`session model recommended` changes only the current Pi session. `model recommended` saves the recommendation to `~/.pi/agent/settings.json`; it does not turn the watchdog on. Enable it separately with `/subagents-watchdog on` when you want the extra review pass.
+`session model recommended` changes only the current Pi session. `model recommended` saves the recommendation to `~/.pi-desk/agent/settings.json`; it does not turn the watchdog on. Enable it separately with `/subagents-watchdog on` when you want the extra review pass.
 
 You can also set the model explicitly:
 
@@ -443,7 +443,7 @@ Skip this section until you want exact syntax.
 | `/subagents-doctor` | Show read-only setup diagnostics |
 | `/subagents-models [agent]` | Show the runtime-loaded builtin model mapping, optionally filtered to one builtin |
 | `/subagents-watchdog [status|on|off|recommend-model|model ...|session model ...|check]` | Show or configure the opt-in watchdog; use a strong complementary model such as Opus 4.8 high or GPT 5.5 high |
-| `/subagents-profiles` | List saved subagent profiles from `~/.pi/agent/profiles/pi-subagents/` |
+| `/subagents-profiles` | List saved subagent profiles from `~/.pi-desk/agent/profiles/pi-subagents/` |
 | `/subagents-load-profile <name>` | Replace only `settings.subagents` with a saved profile and optionally switch this session to the profile worker model |
 | `/subagents-refresh-provider-models <provider> [--force]` | Create or refresh the cached provider model catalog |
 | `/subagents-generate-profiles <provider>` | Generate `<provider>.quota.json` and `<provider>.quality.json` profiles |
@@ -458,13 +458,13 @@ Commands validate agent names locally, support tab completion, and send results 
 Profiles are stored under:
 
 ```text
-~/.pi/agent/profiles/pi-subagents/
+~/.pi-desk/agent/profiles/pi-subagents/
 ```
 
 Provider model catalogs are cached under:
 
 ```text
-~/.pi/agent/profiles/pi-subagents/providers/
+~/.pi-desk/agent/profiles/pi-subagents/providers/
 ```
 
 Use the profile workflow like this:
@@ -629,10 +629,10 @@ Agent locations, lowest to highest priority:
 
 | Scope | Path |
 |-------|------|
-| Builtin | `~/.pi/agent/extensions/subagent/agents/` |
+| Builtin | `~/.pi-desk/agent/extensions/subagent/agents/` |
 | Installed package | `package.json` `pi-subagents.agents` or `pi.subagents.agents` |
-| User | `~/.pi/agent/agents/**/*.md` |
-| Project | Project config `agents/**/*.md` (`.pi/agents/**/*.md` in standard Pi) |
+| User | `~/.pi-desk/agent/agents/**/*.md` |
+| Project | Project config `agents/**/*.md` (`.pi-desk/agents/**/*.md` in standard Pi) |
 
 Project discovery also reads legacy `.agents/**/*.md` files. Nested subdirectories are discovered recursively. `.chain.md` files do not define agents. Installed Pi packages can expose agent directories from either `{"pi-subagents":{"agents":["./agents"]}}` or `{"pi":{"subagents":{"agents":["./agents"]}}}` in their package manifest. Package agents load above builtins and below user/project agents. If both `.agents/` and the project config agents directory define the same parsed runtime agent name, the project config directory wins. Use `agentScope: "user" | "project" | "both"` to control discovery; `both` is the default and project definitions win runtime-name collisions.
 
@@ -648,8 +648,8 @@ pi install npm:pi-web-access
 
 You can override selected builtin fields without copying the whole agent. Overrides live in settings:
 
-- User: `~/.pi/agent/settings.json`
-- Project: project config settings file (`.pi/settings.json` in standard Pi)
+- User: `~/.pi-desk/agent/settings.json`
+- Project: project config settings file (`.pi-desk/settings.json` in standard Pi)
 
 Example:
 
@@ -764,7 +764,7 @@ Important fields:
 | `completionGuard` | Set `false` only for non-implementation agents that may mention implementation words while using mutation-capable tools such as `bash`. |
 | `interactive` | Parsed for compatibility but not enforced in v1. |
 | `maxSubagentDepth` | Tightens nested delegation for this agent's children. |
-| `memory` | Opt-in role-specific persistent memory. `memory: { scope: "project" \| "user", path: "<name>" }` injects the first lines of a `MEMORY.md` from a dedicated `agent-memory/` directory into the child system prompt. Agents with write tools (`edit`/`write`/`bash`) get a read-write block; read-only agents get a read-only fallback. Project scope resolves under `<project>/.pi/agent-memory/`, user scope under `~/.pi/agent/agent-memory/`. Paths are validated against traversal and symlink escape. |
+| `memory` | Opt-in role-specific persistent memory. `memory: { scope: "project" \| "user", path: "<name>" }` injects the first lines of a `MEMORY.md` from a dedicated `agent-memory/` directory into the child system prompt. Agents with write tools (`edit`/`write`/`bash`) get a read-write block; read-only agents get a read-only fallback. Project scope resolves under `<project>/.pi-desk/agent-memory/`, user scope under `~/.pi-desk/agent/agent-memory/`. Paths are validated against traversal and symlink escape. |
 
 Agent-local `skillPath` candidates never enter Pi's parent/global skills catalog. Pair `inheritSkills: false` with explicit `skills` and `skillPath` when a child should receive only its selected private skills.
 
@@ -780,7 +780,7 @@ memory:
 
 On each run, the first 200 lines of `MEMORY.md` in the resolved memory directory are injected into the child system prompt so the agent can recall accumulated role notes such as threat-model entries, release gotchas, or verified commands. Agents that have write tools (`edit`, `write`, or `bash`, or no `tools` allowlist at all) are told they may append concise dated entries to the file. Agents without write tools receive a read-only memory block and are not instructed to edit it, so a read-only reviewer can still recall prior notes without being granted write capability. The memory directory is never created eagerly; the agent's own `write` tool creates it (and `MEMORY.md`) on the first persist. Memory paths are validated against `.`/`..` traversal and symlink escape, and an unsafe or unresolvable scope is silently skipped rather than breaking the run.
 
-Project-scoped memory resolves under `<project>/.pi/agent-memory/<path>` and travels with the repo. User-scoped memory resolves under `~/.pi/agent/agent-memory/<path>` and is shared across projects for that agent.
+Project-scoped memory resolves under `<project>/.pi-desk/agent-memory/<path>` and travels with the repo. User-scoped memory resolves under `~/.pi-desk/agent/agent-memory/<path>` and is shared across projects for that agent.
 
 ### Tool and extension selection
 
@@ -821,8 +821,8 @@ Chains are reusable workflows stored separately from agent files. Use `.chain.md
 | Scope | Path |
 |-------|------|
 | Installed package | `package.json` `pi-subagents.chains` or `pi.subagents.chains` |
-| User | `~/.pi/agent/chains/**/*.chain.md`, `~/.pi/agent/chains/**/*.chain.json` |
-| Project | Project config `chains/**/*.chain.md`, `chains/**/*.chain.json` (`.pi/chains/...` in standard Pi) |
+| User | `~/.pi-desk/agent/chains/**/*.chain.md`, `~/.pi-desk/agent/chains/**/*.chain.json` |
+| Project | Project config `chains/**/*.chain.md`, `chains/**/*.chain.json` (`.pi-desk/chains/...` in standard Pi) |
 
 Nested subdirectories are discovered recursively. Installed Pi packages can expose chain directories from either `{"pi-subagents":{"chains":["./chains"]}}` or `{"pi":{"subagents":{"chains":["./chains"]}}}` in their package manifest. Package chains load below user/project chains. If both `.chain.md` and `.chain.json` define the same parsed runtime chain name in the same scope, `.chain.json` wins. If user and project scopes define the same parsed runtime chain name, the project chain wins. Chains support the same optional `package` frontmatter as agents; `name: review-flow` plus `package: code-analysis` runs as `code-analysis.review-flow`.
 
@@ -928,13 +928,13 @@ Skills are `SKILL.md` files made available to an agent. The prompt includes skil
 
 Discovery uses project-first precedence:
 
-1. Project config `skills/{name}/SKILL.md` (`.pi/skills/{name}/SKILL.md` in standard Pi)
+1. Project config `skills/{name}/SKILL.md` (`.pi-desk/skills/{name}/SKILL.md` in standard Pi)
 2. Project packages and project settings packages via `package.json -> pi.skills`
 3. Current task cwd package via `package.json -> pi.skills`
 4. Project config `settings.json -> skills`
-5. `~/.pi/agent/skills/{name}/SKILL.md`
+5. `~/.pi-desk/agent/skills/{name}/SKILL.md`
 6. User packages and user settings packages via `package.json -> pi.skills`
-7. `~/.pi/agent/settings.json -> skills`
+7. `~/.pi-desk/agent/settings.json -> skills`
 
 Use agent defaults, override them at runtime, or disable them:
 
@@ -1303,7 +1303,7 @@ After a worktree parallel step completes, per-agent diff stats are appended to t
 
 ## Configuration
 
-`pi-subagents` reads optional JSON config from `~/.pi/agent/extensions/subagent/config.json`.
+`pi-subagents` reads optional JSON config from `~/.pi-desk/agent/extensions/subagent/config.json`.
 
 ### `toolDescriptionMode`
 
@@ -1313,7 +1313,7 @@ After a worktree parallel step completes, per-agent diff stats are appended to t
 
 Controls the parent-facing `subagent` tool description registered at startup. `full` is the default. `compact` keeps the execution modes, async/`subagent_wait` guidance, child-safety boundary, management/action split, one-writer review guidance, and artifact/status essentials with less prompt bloat.
 
-`custom` reads `subagent-tool-description.md` from the project config directory, then from `~/.pi/agent/subagent-tool-description.md`. Missing, empty, unreadable, or oversized custom files fall back to the full description. Custom templates may use `{{fullDescription}}`, `{{compactDescription}}`, `{{safetyGuidance}}`, `{{agentDir}}`, and `{{projectConfigDir}}`; the safety guidance is always present so custom prose cannot remove the runtime guardrails. Restart Pi after changing the mode or custom file.
+`custom` reads `subagent-tool-description.md` from the project config directory, then from `~/.pi-desk/agent/subagent-tool-description.md`. Missing, empty, unreadable, or oversized custom files fall back to the full description. Custom templates may use `{{fullDescription}}`, `{{compactDescription}}`, `{{safetyGuidance}}`, `{{agentDir}}`, and `{{projectConfigDir}}`; the safety guidance is always present so custom prose cannot remove the runtime guardrails. Restart Pi after changing the mode or custom file.
 
 ### `asyncByDefault`
 
@@ -1391,7 +1391,7 @@ Enables optional one-shot scheduled subagent runs. When enabled, `subagent({ act
 ### `defaultSessionDir`
 
 ```json
-{ "defaultSessionDir": "~/.pi/agent/sessions/subagent/" }
+{ "defaultSessionDir": "~/.pi-desk/agent/sessions/subagent/" }
 ```
 
 Session directory precedence is: `params.sessionDir`, then `config.defaultSessionDir`, then a directory derived from the parent session. Sessions are always enabled.
@@ -1399,7 +1399,7 @@ Session directory precedence is: `params.sessionDir`, then `config.defaultSessio
 ### `singleRunOutputBaseDir`
 
 ```json
-{ "singleRunOutputBaseDir": "~/.pi/subagent-outputs" }
+{ "singleRunOutputBaseDir": "~/.pi-desk/subagent-outputs" }
 ```
 
 Routes relative `output` paths for single-agent `/run` calls under this directory. Absolute per-call or agent output paths are still used as-is. When unset, relative single-run outputs go under the run's output artifact directory instead of the project root.
@@ -1436,7 +1436,7 @@ Controls whether subagents receive runtime intercom coordination instructions an
 Fields:
 
 - `mode`: default `always`; use `fork-only` to inject only for forked runs, or `off` to disable the bridge.
-- `instructionFile`: optional Markdown template replacing the default bridge instructions. `{orchestratorTarget}` is interpolated. Relative paths resolve from `~/.pi/agent/extensions/subagent/`.
+- `instructionFile`: optional Markdown template replacing the default bridge instructions. `{orchestratorTarget}` is interpolated. Relative paths resolve from `~/.pi-desk/agent/extensions/subagent/`.
 
 Bridge activation requires a targetable current parent session id, which `pi-subagents` passes to children automatically. It no longer depends on an external `pi-intercom` installation or per-agent extension allowlists.
 
@@ -1477,7 +1477,7 @@ stdin is a JSON object with `repoRoot`, `worktreePath`, `agentCwd`, `branch`, `i
 }
 ```
 
-Controls where subagent artifact files (inputs, outputs, transcripts, metadata) are stored. Defaults to `"project"`, which writes to `<cwd>/.pi-subagents/artifacts/`. Set to `"session"` to store artifacts under pi's session directory (`~/.pi/agent/sessions/<session>/subagent-artifacts/`), keeping the working directory clean. Set to `"temp"` to use the OS temp directory.
+Controls where subagent artifact files (inputs, outputs, transcripts, metadata) are stored. Defaults to `"project"`, which writes to `<cwd>/.pi-subagents/artifacts/`. Set to `"session"` to store artifacts under pi's session directory (`~/.pi-desk/agent/sessions/<session>/subagent-artifacts/`), keeping the working directory clean. Set to `"temp"` to use the OS temp directory.
 
 The `"session"` option uses the same directory that `cleanupAllArtifactDirs` already scans for age-based cleanup, so artifacts are still cleaned up automatically.
 
@@ -1625,7 +1625,7 @@ The result watcher emits `subagent:async-complete`; `src/extension/index.ts` reg
 
 `pi-subagents` works standalone through natural language, the `subagent` tool, slash commands, and the packaged prompt shortcuts listed near the top of this README. It also includes a native prompt-workflow adapter for reusable subagent prompt templates, so you do not need `pi-prompt-template-model` for the common subagent workflow path.
 
-Create a prompt in `.pi/prompts/` or `~/.pi/agent/prompts/`:
+Create a prompt in `.pi-desk/prompts/` or `~/.pi-desk/agent/prompts/`:
 
 ```md
 ---

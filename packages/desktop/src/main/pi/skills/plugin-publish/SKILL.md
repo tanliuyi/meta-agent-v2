@@ -19,7 +19,7 @@ Marketplace operations cross explicit trust boundaries:
 - Artifact upload and version publication change public marketplace state. Publication is irreversible through the draft-delete API.
 - Plugins are full-trust Node code, not sandboxed. Capability declarations are review metadata, not enforcement.
 
-Never place passwords, session tokens, admin tokens, signing private keys, or SSH passwords in source, committed files, command-line arguments, logs, final responses, or persistent memory. Prefer an existing authenticated session. When temporary credential files are unavoidable, create them outside the plugin payload with owner-only permissions, use them for one operation, and remove them in a `finally`/trap path. Never upload `.env`, auth files, private keys, test fixtures containing credentials, or local configuration such as `~/.pi/web-search.json`.
+Never place passwords, session tokens, admin tokens, signing private keys, or SSH passwords in source, committed files, command-line arguments, logs, final responses, or persistent memory. Prefer an existing authenticated session. When temporary credential files are unavoidable, create them outside the plugin payload with owner-only permissions, use them for one operation, and remove them in a `finally`/trap path. Never upload `.env`, auth files, private keys, test fixtures containing credentials, or local configuration such as `~/.pi-desk/web-search.json`.
 
 ## Workflow
 
