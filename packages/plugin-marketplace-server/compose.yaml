@@ -10,9 +10,6 @@ services:
     environment:
       MARKETPLACE_HOST: 0.0.0.0
       MARKETPLACE_PORT: "4317"
-      MARKETPLACE_DATA_DIR: /data
-    volumes:
-      - marketplace-data:/data
     ports:
       - "100.91.230.10:4317:4317"
     security_opt:
@@ -27,6 +24,3 @@ services:
       options:
         max-size: 10m
         max-file: "3"
-
-volumes:
-  marketplace-data:

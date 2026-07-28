@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { DatabaseSync } from "node:sqlite";
+import { Pool, type PoolClient, types } from "pg";
 import { compare as compareSemver } from "semver";
 import { buildSignedArtifact, referencePayloadFiles } from "./artifact-builder.ts";
 import { type ListPluginsInput, listPluginPage, type PluginAggregates } from "./catalog-query.ts";
@@ -24,7 +24,7 @@ import type {
 import { canonicalJson, type MarketplaceSigningService } from "./signing-service.ts";
 
 export interface MarketplaceStoreOptions {
-	databasePath?: string;
+	databaseUrl: string;
 	catalogPath?: URL;
 	signing: MarketplaceSigningService;
 	marketplaceId: string;
@@ -72,6 +72,13 @@ export interface PublishArtifactAuditContent {
 	bytes?: Uint8Array;
 }
 
+const INT8_OID = 20;
+types.setTypeParser(INT8_OID, (value) => {
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed)) throw new Error("PostgreSQL BIGINT exceeds JavaScript's safe integer range");
+	return parsed;
+});
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
 	key TEXT PRIMARY KEY,
@@ -80,19 +87,19 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS publishers (
 	id TEXT PRIMARY KEY,
 	display_name TEXT NOT NULL,
-	verified INTEGER NOT NULL DEFAULT 0
+	verified BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE TABLE IF NOT EXISTS users (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
 	username TEXT NOT NULL UNIQUE,
 	password_hash TEXT NOT NULL,
-	created_at INTEGER NOT NULL
+	created_at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
 	token_hash TEXT PRIMARY KEY,
 	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	created_at INTEGER NOT NULL,
-	expires_at INTEGER NOT NULL
+	created_at BIGINT NOT NULL,
+	expires_at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS publisher_members (
 	publisher_id TEXT NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
@@ -106,16 +113,16 @@ CREATE TABLE IF NOT EXISTS plugins (
 	publisher_id TEXT NOT NULL REFERENCES publishers(id),
 	categories TEXT NOT NULL,
 	icon_asset_id TEXT,
-	published_at INTEGER NOT NULL,
-	updated_at INTEGER NOT NULL
+	published_at BIGINT NOT NULL,
+	updated_at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS plugin_versions (
 	plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
 	version TEXT NOT NULL,
 	status TEXT NOT NULL,
-	draft INTEGER NOT NULL DEFAULT 0,
+	draft BOOLEAN NOT NULL DEFAULT FALSE,
 	changelog TEXT NOT NULL,
-	published_at INTEGER NOT NULL,
+	published_at BIGINT NOT NULL,
 	desktop TEXT NOT NULL,
 	capabilities TEXT NOT NULL,
 	PRIMARY KEY (plugin_id, version)
@@ -125,12 +132,12 @@ CREATE TABLE IF NOT EXISTS plugin_artifacts (
 	version TEXT NOT NULL,
 	artifact_id TEXT NOT NULL,
 	target TEXT NOT NULL,
-	contains_native_code INTEGER NOT NULL,
-	preferred INTEGER NOT NULL,
+	contains_native_code BOOLEAN NOT NULL,
+	preferred BOOLEAN NOT NULL,
 	entry TEXT NOT NULL,
 	sha256 TEXT,
 	size INTEGER,
-	bytes BLOB,
+	bytes BYTEA,
 	manifest TEXT,
 	signature TEXT,
 	PRIMARY KEY (plugin_id, version, artifact_id),
@@ -141,7 +148,7 @@ CREATE TABLE IF NOT EXISTS ratings (
 	user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	stars INTEGER NOT NULL,
 	review TEXT,
-	updated_at INTEGER NOT NULL,
+	updated_at BIGINT NOT NULL,
 	PRIMARY KEY (plugin_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS downloads (
@@ -153,7 +160,7 @@ CREATE TABLE IF NOT EXISTS downloads (
 	FOREIGN KEY (plugin_id, version) REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS revocations (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
 	plugin_id TEXT NOT NULL,
 	version TEXT NOT NULL,
 	artifact_ids TEXT,
@@ -170,7 +177,7 @@ interface PluginRow {
 	description: string;
 	publisher_id: string;
 	publisher_display_name: string;
-	publisher_verified: number;
+	publisher_verified: boolean;
 	categories: string;
 	icon_asset_id: string | null;
 	published_at: number;
@@ -181,7 +188,7 @@ interface VersionRow {
 	plugin_id: string;
 	version: string;
 	status: string;
-	draft: number;
+	draft: boolean;
 	changelog: string;
 	published_at: number;
 	desktop: string;
@@ -192,26 +199,31 @@ interface ArtifactRow {
 	version: string;
 	artifact_id: string;
 	target: string;
-	contains_native_code: number;
-	preferred: number;
+	contains_native_code: boolean;
+	preferred: boolean;
 	entry: string;
 	sha256: string | null;
 	size: number | null;
 }
 
 export class MarketplaceStore {
-	private readonly db: DatabaseSync;
+	private readonly pool: Pool;
 	private readonly clock: () => number;
 	private closed = false;
 
-	private constructor(db: DatabaseSync, clock: () => number) {
-		this.db = db;
+	private constructor(pool: Pool, clock: () => number) {
+		this.pool = pool;
 		this.clock = clock;
 	}
 
 	static async open(options: MarketplaceStoreOptions): Promise<MarketplaceStore> {
 		const catalogUrl = options.catalogPath ?? new URL("../catalog/plugins.json", import.meta.url);
-		const source = await readFile(catalogUrl, "utf8");
+		let source: string;
+		try {
+			source = await readFile(catalogUrl, "utf8");
+		} catch (error) {
+			throw new Error(`Cannot read catalog file: ${errorMessage(error)}`);
+		}
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(source);
@@ -219,37 +231,65 @@ export class MarketplaceStore {
 			throw new Error(`Marketplace catalog JSON is invalid: ${errorMessage(error)}`);
 		}
 		const catalog = parseCatalogDocument(parsed);
-		const db = new DatabaseSync(options.databasePath ?? ":memory:");
+
+		const poolOptions = postgresPoolOptions(options.databaseUrl);
+		const pool = new Pool({
+			connectionString: poolOptions.connectionString,
+			...(poolOptions.schema ? { options: `-c search_path=${poolOptions.schema}` } : {}),
+			max: 10,
+			idleTimeoutMillis: 30_000,
+			connectionTimeoutMillis: 10_000,
+		});
+
+		let store: MarketplaceStore;
 		try {
-			db.exec("PRAGMA journal_mode = WAL;");
-			db.exec("PRAGMA foreign_keys = ON;");
-			db.exec(SCHEMA);
-			const store = new MarketplaceStore(db, options.clock);
-			store.seedIfEmpty(catalog, options.signing, options.marketplaceId);
+			const client = await pool.connect();
+			try {
+				if (poolOptions.schema) {
+					await client.query(`CREATE SCHEMA IF NOT EXISTS "${poolOptions.schema}"`);
+				}
+				await client.query(SCHEMA);
+			} finally {
+				client.release();
+			}
+			store = new MarketplaceStore(pool, options.clock);
+			await store.seedIfEmpty(catalog, options.signing, options.marketplaceId);
 			return store;
 		} catch (error) {
-			db.close();
+			await pool.end().catch(() => {});
 			throw error;
 		}
 	}
 
-	close(): void {
+	async close(): Promise<void> {
 		if (this.closed) return;
 		this.closed = true;
-		this.db.close();
+		await this.pool.end();
 	}
 
-	private seedIfEmpty(catalog: CatalogDocument, signing: MarketplaceSigningService, marketplaceId: string): void {
-		const seeded = this.db.prepare("SELECT value FROM meta WHERE key = 'seeded'").get();
-		if (seeded) return;
-		this.transaction(() => {
+	private async seedIfEmpty(
+		catalog: CatalogDocument,
+		signing: MarketplaceSigningService,
+		marketplaceId: string,
+	): Promise<void> {
+		const seeded = await this.pool.query("SELECT value FROM meta WHERE key = 'seeded'");
+		if (seeded.rows.length > 0) return;
+
+		await this.transaction(async (client) => {
+			// Acquire an advisory transaction lock to prevent concurrent seeding
+			await client.query("SELECT pg_advisory_xact_lock(hashtext('marketplace-seed'))");
+			// Recheck after lock acquisition
+			const recheck = await client.query("SELECT value FROM meta WHERE key = 'seeded'");
+			if (recheck.rows.length > 0) return;
+
 			for (const plugin of catalog.plugins) {
-				this.upsertPublisherRow(plugin.publisher.id, plugin.publisher.displayName, plugin.publisher.verified);
-				this.db
-					.prepare(
-						"INSERT INTO plugins (id, name, description, publisher_id, categories, icon_asset_id, published_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-					)
-					.run(
+				await client.query(
+					"INSERT INTO publishers (id, display_name, verified) VALUES ($1, $2, $3) ON CONFLICT(id) DO UPDATE SET display_name = EXCLUDED.display_name, verified = EXCLUDED.verified",
+					[plugin.publisher.id, plugin.publisher.displayName, plugin.publisher.verified],
+				);
+				await client.query(
+					"INSERT INTO plugins (id, name, description, publisher_id, categories, icon_asset_id, published_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+					[
 						plugin.id,
 						plugin.name,
 						plugin.description,
@@ -258,21 +298,22 @@ export class MarketplaceStore {
 						plugin.iconAssetId ?? null,
 						plugin.publishedAt,
 						plugin.updatedAt,
-					);
+					],
+				);
 				for (const version of plugin.versions) {
-					this.db
-						.prepare(
-							"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES (?, ?, ?, 0, ?, ?, ?, ?)",
-						)
-						.run(
+					await client.query(
+						"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+						[
 							plugin.id,
 							version.version,
 							version.status,
+							false,
 							version.changelog,
 							version.publishedAt,
 							JSON.stringify(version.desktop),
 							JSON.stringify(version.capabilities),
-						);
+						],
+					);
 					for (const artifact of version.artifacts) {
 						const files = referencePayloadFiles();
 						const entry = [...files.keys()][0]!;
@@ -291,40 +332,39 @@ export class MarketplaceStore {
 							capabilities: version.capabilities,
 							files,
 						});
-						this.db
-							.prepare(
-								"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry, sha256, size, bytes, manifest, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-							)
-							.run(
+						await client.query(
+							"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry, sha256, size, bytes, manifest, signature) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+							[
 								plugin.id,
 								version.version,
 								artifact.id,
 								JSON.stringify(artifact.target),
-								artifact.containsNativeCode ? 1 : 0,
-								artifact.preferred ? 1 : 0,
+								artifact.containsNativeCode,
+								artifact.preferred,
 								entry,
 								built.sha256,
 								built.size,
-								built.bytes,
+								Buffer.from(built.bytes),
 								canonicalJson(built.manifest),
 								JSON.stringify(built.signature),
-							);
+							],
+						);
 					}
 				}
 			}
 			for (const revocation of catalog.revocations) {
-				this.insertRevocationRow(revocation);
+				await this.insertRevocationRow(client, revocation);
 			}
-			this.db.prepare("INSERT INTO meta (key, value) VALUES ('seeded', '1')").run();
+			await client.query("INSERT INTO meta (key, value) VALUES ('seeded', '1')");
 		});
 	}
 
 	// --- public catalog reads ---
 
-	list(input: ListPluginsInput): MarketplacePluginPage {
-		const plugins = this.loadPlugins(undefined, false);
-		const ratings = this.ratingAggregatesAll();
-		const downloads = this.downloadTotalsAll();
+	async list(input: ListPluginsInput): Promise<MarketplacePluginPage> {
+		const plugins = await this.loadPlugins(undefined, false);
+		const ratings = await this.ratingAggregatesAll();
+		const downloads = await this.downloadTotalsAll();
 		const aggregates = (pluginId: string): PluginAggregates => ({
 			rating: ratings.get(pluginId) ?? { count: 0, average: null },
 			downloadCount: downloads.get(pluginId) ?? 0,
@@ -332,177 +372,207 @@ export class MarketplaceStore {
 		return listPluginPage(plugins, input, aggregates);
 	}
 
-	getPublicPlugin(pluginId: string): StoredPlugin | undefined {
-		return this.loadPlugins(pluginId, false)[0];
+	async getPublicPlugin(pluginId: string): Promise<StoredPlugin | undefined> {
+		const plugins = await this.loadPlugins(pluginId, false);
+		return plugins[0];
 	}
 
-	getPublicVersion(pluginId: string, version: string): StoredPluginVersion | undefined {
-		return this.getPublicPlugin(pluginId)?.versions.find((entry) => entry.version === version);
+	async getPublicVersion(pluginId: string, version: string): Promise<StoredPluginVersion | undefined> {
+		const plugin = await this.getPublicPlugin(pluginId);
+		return plugin?.versions.find((entry) => entry.version === version);
 	}
 
-	hasPublicPlugin(pluginId: string): boolean {
-		return this.getPublicPlugin(pluginId) !== undefined;
+	async hasPublicPlugin(pluginId: string): Promise<boolean> {
+		return (await this.getPublicPlugin(pluginId)) !== undefined;
 	}
 
-	pluginAggregates(pluginId: string): PluginAggregates {
+	async pluginAggregates(pluginId: string): Promise<PluginAggregates> {
 		return {
-			rating: this.ratingAggregate(pluginId),
-			downloadCount: this.downloadTotal(pluginId),
+			rating: await this.ratingAggregate(pluginId),
+			downloadCount: await this.downloadTotal(pluginId),
 		};
 	}
 
-	getArtifactContent(pluginId: string, version: string, artifactId: string): ArtifactContent | undefined {
-		const row = this.db
-			.prepare(
-				"SELECT a.bytes AS bytes, a.sha256 AS sha256, a.size AS size FROM plugin_artifacts a JOIN plugin_versions v ON v.plugin_id = a.plugin_id AND v.version = a.version WHERE a.plugin_id = ? AND a.version = ? AND a.artifact_id = ? AND v.draft = 0 AND a.sha256 IS NOT NULL",
-			)
-			.get(pluginId, version, artifactId) as { bytes: Uint8Array; sha256: string; size: number } | undefined;
-		if (!row) return undefined;
+	async getArtifactContent(
+		pluginId: string,
+		version: string,
+		artifactId: string,
+	): Promise<ArtifactContent | undefined> {
+		const result = await this.pool.query(
+			"SELECT a.bytes, a.sha256, a.size FROM plugin_artifacts a JOIN plugin_versions v ON v.plugin_id = a.plugin_id AND v.version = a.version WHERE a.plugin_id = $1 AND a.version = $2 AND a.artifact_id = $3 AND v.draft = false AND a.sha256 IS NOT NULL",
+			[pluginId, version, artifactId],
+		);
+		if (result.rows.length === 0) return undefined;
+		const row = result.rows[0] as { bytes: Buffer; sha256: string; size: number };
 		return { bytes: row.bytes, sha256: row.sha256, size: row.size };
 	}
 
-	getRevocations(): CatalogRevocation[] {
-		const rows = this.db
-			.prepare(
-				"SELECT plugin_id, version, artifact_ids, status, reason_code, message, replacement_version FROM revocations ORDER BY id",
-			)
-			.all() as unknown as Array<{
-			plugin_id: string;
-			version: string;
-			artifact_ids: string | null;
-			status: string;
-			reason_code: string;
-			message: string;
-			replacement_version: string | null;
-		}>;
-		return rows.map((row) => ({
-			pluginId: row.plugin_id,
-			version: row.version,
-			...(row.artifact_ids ? { artifactIds: JSON.parse(row.artifact_ids) as string[] } : {}),
-			status: row.status as "withdrawn" | "blocked",
-			reasonCode: row.reason_code,
-			message: row.message,
-			...(row.replacement_version ? { replacementVersion: row.replacement_version } : {}),
-		}));
+	async getRevocations(): Promise<CatalogRevocation[]> {
+		const result = await this.pool.query(
+			"SELECT plugin_id, version, artifact_ids, status, reason_code, message, replacement_version FROM revocations ORDER BY id",
+		);
+		return result.rows.map(
+			(row: {
+				plugin_id: string;
+				version: string;
+				artifact_ids: string | null;
+				status: string;
+				reason_code: string;
+				message: string;
+				replacement_version: string | null;
+			}) => ({
+				pluginId: row.plugin_id,
+				version: row.version,
+				...(row.artifact_ids ? { artifactIds: JSON.parse(row.artifact_ids) as string[] } : {}),
+				status: row.status as "withdrawn" | "blocked",
+				reasonCode: row.reason_code,
+				message: row.message,
+				...(row.replacement_version ? { replacementVersion: row.replacement_version } : {}),
+			}),
+		);
 	}
 
 	// --- users and sessions ---
 
-	createUser(username: string, passwordHash: string): StoredUser {
-		if (this.getUserByUsername(username)) throw new Error("USERNAME_TAKEN");
+	async createUser(username: string, passwordHash: string): Promise<StoredUser> {
 		const createdAt = Math.trunc(this.clock());
-		const result = this.db
-			.prepare("INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)")
-			.run(username, passwordHash, createdAt);
-		return { id: Number(result.lastInsertRowid), username, passwordHash, createdAt };
+		try {
+			const result = await this.pool.query(
+				"INSERT INTO users (username, password_hash, created_at) VALUES ($1, $2, $3) RETURNING id",
+				[username, passwordHash, createdAt],
+			);
+			return {
+				id: result.rows[0].id as number,
+				username,
+				passwordHash,
+				createdAt,
+			};
+		} catch (error: unknown) {
+			if (isUniqueViolation(error)) throw new Error("USERNAME_TAKEN");
+			throw error;
+		}
 	}
 
-	getUserByUsername(username: string): StoredUser | undefined {
-		const row = this.db
-			.prepare("SELECT id, username, password_hash, created_at FROM users WHERE username = ?")
-			.get(username) as { id: number; username: string; password_hash: string; created_at: number } | undefined;
-		if (!row) return undefined;
+	async getUserByUsername(username: string): Promise<StoredUser | undefined> {
+		const result = await this.pool.query(
+			"SELECT id, username, password_hash, created_at FROM users WHERE username = $1",
+			[username],
+		);
+		if (result.rows.length === 0) return undefined;
+		const row = result.rows[0] as { id: number; username: string; password_hash: string; created_at: number };
 		return { id: row.id, username: row.username, passwordHash: row.password_hash, createdAt: row.created_at };
 	}
 
-	createSession(tokenHash: string, userId: number, expiresAt: number): void {
+	async createSession(tokenHash: string, userId: number, expiresAt: number): Promise<void> {
 		const now = Math.trunc(this.clock());
-		this.db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
-		this.db
-			.prepare("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-			.run(tokenHash, userId, now, expiresAt);
+		await this.pool.query("DELETE FROM sessions WHERE expires_at <= $1", [now]);
+		await this.pool.query(
+			"INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)",
+			[tokenHash, userId, now, expiresAt],
+		);
 	}
 
-	getSessionUser(tokenHash: string): SessionUser | undefined {
-		const row = this.db
-			.prepare(
-				"SELECT s.expires_at AS expires_at, u.id AS user_id, u.username AS username, u.created_at AS created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
-			)
-			.get(tokenHash) as { expires_at: number; user_id: number; username: string; created_at: number } | undefined;
-		if (!row) return undefined;
+	async getSessionUser(tokenHash: string): Promise<SessionUser | undefined> {
+		const result = await this.pool.query(
+			"SELECT s.expires_at, u.id AS user_id, u.username, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1",
+			[tokenHash],
+		);
+		if (result.rows.length === 0) return undefined;
+		const row = result.rows[0] as { expires_at: number; user_id: number; username: string; created_at: number };
 		if (row.expires_at <= this.clock()) {
-			this.deleteSession(tokenHash);
+			await this.deleteSession(tokenHash);
 			return undefined;
 		}
 		return { userId: row.user_id, username: row.username, createdAt: row.created_at };
 	}
 
-	deleteSession(tokenHash: string): void {
-		this.db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
+	async deleteSession(tokenHash: string): Promise<void> {
+		await this.pool.query("DELETE FROM sessions WHERE token_hash = $1", [tokenHash]);
 	}
 
 	// --- publishers ---
 
-	upsertPublisher(publisherId: string, displayName: string, verified: boolean): PublisherAdminView {
-		this.upsertPublisherRow(publisherId, displayName, verified);
-		return this.publisherView(publisherId)!;
+	async upsertPublisher(publisherId: string, displayName: string, verified: boolean): Promise<PublisherAdminView> {
+		await this.upsertPublisherRow(publisherId, displayName, verified);
+		const publisher = await this.publisherView(publisherId);
+		if (!publisher) throw new Error("PUBLISHER_NOT_FOUND");
+		return publisher;
 	}
 
-	listPublishers(): PublisherAdminView[] {
-		const rows = this.db.prepare("SELECT id FROM publishers ORDER BY id").all() as unknown as Array<{ id: string }>;
-		return rows.map((row) => this.publisherView(row.id)!);
+	async listPublishers(): Promise<PublisherAdminView[]> {
+		const result = await this.pool.query("SELECT id FROM publishers ORDER BY id");
+		const views: PublisherAdminView[] = [];
+		for (const row of result.rows as Array<{ id: string }>) {
+			const view = await this.publisherView(row.id);
+			if (view) views.push(view);
+		}
+		return views;
 	}
 
-	getPublisher(publisherId: string): PublisherRecord | undefined {
-		const row = this.db.prepare("SELECT id, display_name, verified FROM publishers WHERE id = ?").get(publisherId) as
-			| { id: string; display_name: string; verified: number }
-			| undefined;
-		if (!row) return undefined;
-		return { id: row.id, displayName: row.display_name, verified: row.verified !== 0 };
+	async getPublisher(publisherId: string): Promise<PublisherRecord | undefined> {
+		const result = await this.pool.query("SELECT id, display_name, verified FROM publishers WHERE id = $1", [
+			publisherId,
+		]);
+		if (result.rows.length === 0) return undefined;
+		const row = result.rows[0] as { id: string; display_name: string; verified: boolean };
+		return { id: row.id, displayName: row.display_name, verified: row.verified };
 	}
 
-	addPublisherMember(publisherId: string, username: string): void {
-		if (!this.getPublisher(publisherId)) throw new Error("PUBLISHER_NOT_FOUND");
-		const user = this.getUserByUsername(username);
+	async addPublisherMember(publisherId: string, username: string): Promise<void> {
+		if (!(await this.getPublisher(publisherId))) throw new Error("PUBLISHER_NOT_FOUND");
+		const user = await this.getUserByUsername(username);
 		if (!user) throw new Error("USER_NOT_FOUND");
-		this.db
-			.prepare("INSERT OR IGNORE INTO publisher_members (publisher_id, user_id) VALUES (?, ?)")
-			.run(publisherId, user.id);
+		await this.pool.query(
+			"INSERT INTO publisher_members (publisher_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+			[publisherId, user.id],
+		);
 	}
 
-	removePublisherMember(publisherId: string, username: string): void {
-		if (!this.getPublisher(publisherId)) throw new Error("PUBLISHER_NOT_FOUND");
-		const user = this.getUserByUsername(username);
+	async removePublisherMember(publisherId: string, username: string): Promise<void> {
+		if (!(await this.getPublisher(publisherId))) throw new Error("PUBLISHER_NOT_FOUND");
+		const user = await this.getUserByUsername(username);
 		if (!user) throw new Error("USER_NOT_FOUND");
-		this.db.prepare("DELETE FROM publisher_members WHERE publisher_id = ? AND user_id = ?").run(publisherId, user.id);
+		await this.pool.query("DELETE FROM publisher_members WHERE publisher_id = $1 AND user_id = $2", [
+			publisherId,
+			user.id,
+		]);
 	}
 
-	isPublisherMember(userId: number, publisherId: string): boolean {
-		const row = this.db
-			.prepare("SELECT 1 AS found FROM publisher_members WHERE publisher_id = ? AND user_id = ?")
-			.get(publisherId, userId);
-		return row !== undefined;
+	async isPublisherMember(userId: number, publisherId: string): Promise<boolean> {
+		const result = await this.pool.query(
+			"SELECT 1 AS found FROM publisher_members WHERE publisher_id = $1 AND user_id = $2",
+			[publisherId, userId],
+		);
+		return result.rows.length > 0;
 	}
 
-	publisherIdsForUser(userId: number): string[] {
-		const rows = this.db
-			.prepare("SELECT publisher_id FROM publisher_members WHERE user_id = ? ORDER BY publisher_id")
-			.all(userId) as unknown as Array<{ publisher_id: string }>;
-		return rows.map((row) => row.publisher_id);
+	async publisherIdsForUser(userId: number): Promise<string[]> {
+		const result = await this.pool.query(
+			"SELECT publisher_id FROM publisher_members WHERE user_id = $1 ORDER BY publisher_id",
+			[userId],
+		);
+		return (result.rows as Array<{ publisher_id: string }>).map((row) => row.publisher_id);
 	}
 
 	// --- publishing ---
 
-	getPluginPublisherId(pluginId: string): string | undefined {
-		const row = this.db.prepare("SELECT publisher_id FROM plugins WHERE id = ?").get(pluginId) as
-			| { publisher_id: string }
-			| undefined;
-		return row?.publisher_id;
+	async getPluginPublisherId(pluginId: string): Promise<string | undefined> {
+		const result = await this.pool.query("SELECT publisher_id FROM plugins WHERE id = $1", [pluginId]);
+		if (result.rows.length === 0) return undefined;
+		return (result.rows[0] as { publisher_id: string }).publisher_id;
 	}
 
-	upsertPlugin(pluginId: string, request: PublishPluginRequest): PublishPluginState {
-		if (!this.getPublisher(request.publisherId)) throw new Error("PUBLISHER_NOT_FOUND");
-		const existingPublisher = this.getPluginPublisherId(pluginId);
+	async upsertPlugin(pluginId: string, request: PublishPluginRequest): Promise<PublishPluginState> {
+		if (!(await this.getPublisher(request.publisherId))) throw new Error("PUBLISHER_NOT_FOUND");
+		const existingPublisher = await this.getPluginPublisherId(pluginId);
 		if (existingPublisher !== undefined && existingPublisher !== request.publisherId) {
 			throw new Error("PLUGIN_PUBLISHER_MISMATCH");
 		}
 		const now = Math.trunc(this.clock());
 		if (existingPublisher === undefined) {
-			this.db
-				.prepare(
-					"INSERT INTO plugins (id, name, description, publisher_id, categories, icon_asset_id, published_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-				)
-				.run(
+			await this.pool.query(
+				"INSERT INTO plugins (id, name, description, publisher_id, categories, icon_asset_id, published_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+				[
 					pluginId,
 					request.name,
 					request.description,
@@ -511,72 +581,75 @@ export class MarketplaceStore {
 					request.iconAssetId ?? null,
 					now,
 					now,
-				);
+				],
+			);
 		} else {
-			this.db
-				.prepare(
-					"UPDATE plugins SET name = ?, description = ?, categories = ?, icon_asset_id = ?, updated_at = ? WHERE id = ?",
-				)
-				.run(
+			await this.pool.query(
+				"UPDATE plugins SET name = $1, description = $2, categories = $3, icon_asset_id = $4, updated_at = $5 WHERE id = $6",
+				[
 					request.name,
 					request.description,
 					JSON.stringify(request.categories),
 					request.iconAssetId ?? null,
 					now,
 					pluginId,
-				);
+				],
+			);
 		}
 		return this.publishState(pluginId);
 	}
 
-	createDraftVersion(pluginId: string, request: PublishVersionRequest): PublishVersionState {
-		if (this.getPluginPublisherId(pluginId) === undefined) throw new Error("PLUGIN_NOT_FOUND");
-		const existing = this.db
-			.prepare("SELECT 1 AS found FROM plugin_versions WHERE plugin_id = ? AND version = ?")
-			.get(pluginId, request.version);
-		if (existing) throw new Error("PLUGIN_VERSION_EXISTS");
-		this.transaction(() => {
-			this.db
-				.prepare(
-					"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES (?, ?, 'available', 1, ?, 0, ?, ?)",
-				)
-				.run(
+	async createDraftVersion(pluginId: string, request: PublishVersionRequest): Promise<PublishVersionState> {
+		if ((await this.getPluginPublisherId(pluginId)) === undefined) throw new Error("PLUGIN_NOT_FOUND");
+		const existing = await this.pool.query(
+			"SELECT 1 AS found FROM plugin_versions WHERE plugin_id = $1 AND version = $2",
+			[pluginId, request.version],
+		);
+		if (existing.rows.length > 0) throw new Error("PLUGIN_VERSION_EXISTS");
+
+		await this.transaction(async (client) => {
+			await client.query(
+				"INSERT INTO plugin_versions (plugin_id, version, status, draft, changelog, published_at, desktop, capabilities) VALUES ($1, $2, 'available', true, $3, 0, $4, $5)",
+				[
 					pluginId,
 					request.version,
 					request.changelog,
 					JSON.stringify(request.desktop),
 					JSON.stringify(request.capabilities),
-				);
+				],
+			);
 			for (const artifact of request.artifacts) {
-				this.db
-					.prepare(
-						"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry) VALUES (?, ?, ?, ?, ?, ?, ?)",
-					)
-					.run(
+				await client.query(
+					"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+					[
 						pluginId,
 						request.version,
 						artifact.id,
 						JSON.stringify(artifact.target),
-						artifact.containsNativeCode ? 1 : 0,
-						artifact.preferred ? 1 : 0,
+						artifact.containsNativeCode,
+						artifact.preferred,
 						artifact.entry,
-					);
+					],
+				);
 			}
 		});
-		return this.versionState(pluginId, request.version)!;
+		const state = await this.versionState(pluginId, request.version);
+		if (!state) throw new Error("PLUGIN_VERSION_NOT_FOUND");
+		return state;
 	}
 
-	getUploadContext(pluginId: string, version: string, artifactId: string): ArtifactUploadContext {
-		const versionRow = this.requireVersionRow(pluginId, version);
-		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
-		const artifactRow = this.db
-			.prepare("SELECT target, entry FROM plugin_artifacts WHERE plugin_id = ? AND version = ? AND artifact_id = ?")
-			.get(pluginId, version, artifactId) as { target: string; entry: string } | undefined;
-		if (!artifactRow) throw new Error("PLUGIN_ARTIFACT_NOT_FOUND");
-		const pluginRow = this.db.prepare("SELECT name, publisher_id FROM plugins WHERE id = ?").get(pluginId) as
-			| { name: string; publisher_id: string }
-			| undefined;
-		if (!pluginRow) throw new Error("PLUGIN_NOT_FOUND");
+	async getUploadContext(pluginId: string, version: string, artifactId: string): Promise<ArtifactUploadContext> {
+		const versionRow = await this.requireVersionRow(pluginId, version);
+		if (!versionRow.draft) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
+		const artifactResult = await this.pool.query(
+			"SELECT target, entry FROM plugin_artifacts WHERE plugin_id = $1 AND version = $2 AND artifact_id = $3",
+			[pluginId, version, artifactId],
+		);
+		if (artifactResult.rows.length === 0) throw new Error("PLUGIN_ARTIFACT_NOT_FOUND");
+		const artifactRow = artifactResult.rows[0] as { target: string; entry: string };
+		const pluginResult = await this.pool.query("SELECT name, publisher_id FROM plugins WHERE id = $1", [pluginId]);
+		if (pluginResult.rows.length === 0) throw new Error("PLUGIN_NOT_FOUND");
+		const pluginRow = pluginResult.rows[0] as { name: string; publisher_id: string };
 		return {
 			pluginName: pluginRow.name,
 			publisherId: pluginRow.publisher_id,
@@ -590,161 +663,174 @@ export class MarketplaceStore {
 		};
 	}
 
-	putArtifactContent(pluginId: string, version: string, artifactId: string, content: ArtifactContentInput): void {
-		const versionRow = this.requireVersionRow(pluginId, version);
-		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
-		const result = this.db
-			.prepare(
-				"UPDATE plugin_artifacts SET sha256 = ?, size = ?, bytes = ?, manifest = ?, signature = ? WHERE plugin_id = ? AND version = ? AND artifact_id = ?",
-			)
-			.run(
-				content.sha256,
-				content.size,
-				content.bytes,
-				content.manifestJson,
-				content.signatureJson,
-				pluginId,
-				version,
-				artifactId,
+	async putArtifactContent(
+		pluginId: string,
+		version: string,
+		artifactId: string,
+		content: ArtifactContentInput,
+	): Promise<void> {
+		await this.transaction(async (client) => {
+			const versionRow = await this.requireVersionRow(pluginId, version, client, true);
+			if (!versionRow.draft) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
+			const result = await client.query(
+				"UPDATE plugin_artifacts SET sha256 = $1, size = $2, bytes = $3, manifest = $4, signature = $5 WHERE plugin_id = $6 AND version = $7 AND artifact_id = $8",
+				[
+					content.sha256,
+					content.size,
+					Buffer.from(content.bytes),
+					content.manifestJson,
+					content.signatureJson,
+					pluginId,
+					version,
+					artifactId,
+				],
 			);
-		if (result.changes === 0) throw new Error("PLUGIN_ARTIFACT_NOT_FOUND");
-	}
-
-	publishArtifactAuditContents(pluginId: string, version: string): PublishArtifactAuditContent[] {
-		const versionRow = this.requireVersionRow(pluginId, version);
-		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
-		const rows = this.db
-			.prepare(
-				"SELECT artifact_id, contains_native_code, bytes FROM plugin_artifacts WHERE plugin_id = ? AND version = ? ORDER BY artifact_id",
-			)
-			.all(pluginId, version) as Array<{
-			artifact_id: string;
-			contains_native_code: number;
-			bytes: Uint8Array | null;
-		}>;
-		return rows.map((row) => ({
-			artifactId: row.artifact_id,
-			containsNativeCode: row.contains_native_code !== 0,
-			...(row.bytes ? { bytes: row.bytes } : {}),
-		}));
-	}
-
-	publishVersion(pluginId: string, version: string): void {
-		const versionRow = this.requireVersionRow(pluginId, version);
-		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
-		const pending = this.db
-			.prepare(
-				"SELECT COUNT(*) AS pending FROM plugin_artifacts WHERE plugin_id = ? AND version = ? AND sha256 IS NULL",
-			)
-			.get(pluginId, version) as { pending: number };
-		if (pending.pending > 0) throw new Error("PLUGIN_VERSION_INCOMPLETE");
-		const now = Math.trunc(this.clock());
-		this.transaction(() => {
-			this.db
-				.prepare("UPDATE plugin_versions SET draft = 0, published_at = ? WHERE plugin_id = ? AND version = ?")
-				.run(now, pluginId, version);
-			this.db.prepare("UPDATE plugins SET updated_at = ? WHERE id = ?").run(now, pluginId);
+			if (result.rowCount === 0) throw new Error("PLUGIN_ARTIFACT_NOT_FOUND");
 		});
 	}
 
-	deleteDraftVersion(pluginId: string, version: string): void {
-		const versionRow = this.requireVersionRow(pluginId, version);
-		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
-		this.db.prepare("DELETE FROM plugin_versions WHERE plugin_id = ? AND version = ?").run(pluginId, version);
+	async publishVersion(
+		pluginId: string,
+		version: string,
+		audit: (artifacts: PublishArtifactAuditContent[]) => void,
+	): Promise<void> {
+		await this.transaction(async (client) => {
+			const versionRow = await this.requireVersionRow(pluginId, version, client, true);
+			if (!versionRow.draft) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
+			const artifactResult = await client.query(
+				"SELECT artifact_id, contains_native_code, bytes FROM plugin_artifacts WHERE plugin_id = $1 AND version = $2 ORDER BY artifact_id",
+				[pluginId, version],
+			);
+			const artifacts = (
+				artifactResult.rows as Array<{
+					artifact_id: string;
+					contains_native_code: boolean;
+					bytes: Buffer | null;
+				}>
+			).map((row) => ({
+				artifactId: row.artifact_id,
+				containsNativeCode: row.contains_native_code,
+				...(row.bytes ? { bytes: row.bytes } : {}),
+			}));
+			audit(artifacts);
+			if (artifacts.some((artifact) => artifact.bytes === undefined)) {
+				throw new Error("PLUGIN_VERSION_INCOMPLETE");
+			}
+			const now = Math.trunc(this.clock());
+			await client.query(
+				"UPDATE plugin_versions SET draft = false, published_at = $1 WHERE plugin_id = $2 AND version = $3",
+				[now, pluginId, version],
+			);
+			await client.query("UPDATE plugins SET updated_at = $1 WHERE id = $2", [now, pluginId]);
+		});
 	}
 
-	deprecateVersion(pluginId: string, version: string): void {
-		const versionRow = this.requireVersionRow(pluginId, version);
-		if (versionRow.draft !== 0 || versionRow.status !== "available") {
+	async deleteDraftVersion(pluginId: string, version: string): Promise<void> {
+		const versionRow = await this.requireVersionRow(pluginId, version);
+		if (!versionRow.draft) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
+		await this.pool.query("DELETE FROM plugin_versions WHERE plugin_id = $1 AND version = $2", [pluginId, version]);
+	}
+
+	async deprecateVersion(pluginId: string, version: string): Promise<void> {
+		const versionRow = await this.requireVersionRow(pluginId, version);
+		if (versionRow.draft || versionRow.status !== "available") {
 			throw new Error("PLUGIN_VERSION_STATUS_INVALID");
 		}
 		const now = Math.trunc(this.clock());
-		this.transaction(() => {
-			this.db
-				.prepare("UPDATE plugin_versions SET status = 'deprecated' WHERE plugin_id = ? AND version = ?")
-				.run(pluginId, version);
-			this.db.prepare("UPDATE plugins SET updated_at = ? WHERE id = ?").run(now, pluginId);
+		await this.transaction(async (client) => {
+			await client.query("UPDATE plugin_versions SET status = 'deprecated' WHERE plugin_id = $1 AND version = $2", [
+				pluginId,
+				version,
+			]);
+			await client.query("UPDATE plugins SET updated_at = $1 WHERE id = $2", [now, pluginId]);
 		});
 	}
 
-	applyRevocation(revocation: CatalogRevocation): void {
-		const versionRow = this.requireVersionRow(revocation.pluginId, revocation.version);
-		if (versionRow.draft !== 0) throw new Error("PLUGIN_VERSION_NOT_FOUND");
+	async applyRevocation(revocation: CatalogRevocation): Promise<void> {
+		const versionRow = await this.requireVersionRow(revocation.pluginId, revocation.version);
+		if (versionRow.draft) throw new Error("PLUGIN_VERSION_NOT_FOUND");
 		if (versionRow.status === "withdrawn" || versionRow.status === "blocked") {
 			throw new Error("PLUGIN_VERSION_STATUS_INVALID");
 		}
 		const now = Math.trunc(this.clock());
-		this.transaction(() => {
-			this.db
-				.prepare("UPDATE plugin_versions SET status = ? WHERE plugin_id = ? AND version = ?")
-				.run(revocation.status, revocation.pluginId, revocation.version);
-			this.insertRevocationRow(revocation);
-			this.db.prepare("UPDATE plugins SET updated_at = ? WHERE id = ?").run(now, revocation.pluginId);
+		await this.transaction(async (client) => {
+			await client.query("UPDATE plugin_versions SET status = $1 WHERE plugin_id = $2 AND version = $3", [
+				revocation.status,
+				revocation.pluginId,
+				revocation.version,
+			]);
+			await this.insertRevocationRow(client, revocation);
+			await client.query("UPDATE plugins SET updated_at = $1 WHERE id = $2", [now, revocation.pluginId]);
 		});
 	}
 
-	listPublishStates(publisherIds?: readonly string[]): PublishPluginState[] {
+	async listPublishStates(publisherIds?: readonly string[]): Promise<PublishPluginState[]> {
 		const allowedPublisherIds = publisherIds ? new Set(publisherIds) : undefined;
-		return this.loadPlugins(undefined, true)
+		const plugins = await this.loadPlugins(undefined, true);
+		return plugins
 			.filter((plugin) => !allowedPublisherIds || allowedPublisherIds.has(plugin.publisher.id))
 			.map((plugin) => this.toPublishState(plugin));
 	}
 
-	publishState(pluginId: string): PublishPluginState {
-		const plugin = this.loadPlugins(pluginId, true)[0];
+	async publishState(pluginId: string): Promise<PublishPluginState> {
+		const plugins = await this.loadPlugins(pluginId, true);
+		const plugin = plugins[0];
 		if (!plugin) throw new Error("PLUGIN_NOT_FOUND");
 		return this.toPublishState(plugin);
 	}
 
 	// --- ratings ---
 
-	upsertRating(pluginId: string, userId: number, stars: number, review: string | undefined): void {
-		if (!this.hasPublicPlugin(pluginId)) throw new Error("PLUGIN_NOT_FOUND");
-		this.db
-			.prepare(
-				"INSERT INTO ratings (plugin_id, user_id, stars, review, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(plugin_id, user_id) DO UPDATE SET stars = excluded.stars, review = excluded.review, updated_at = excluded.updated_at",
-			)
-			.run(pluginId, userId, stars, review ?? null, Math.trunc(this.clock()));
+	async upsertRating(pluginId: string, userId: number, stars: number, review: string | undefined): Promise<void> {
+		if (!(await this.hasPublicPlugin(pluginId))) throw new Error("PLUGIN_NOT_FOUND");
+		await this.pool.query(
+			"INSERT INTO ratings (plugin_id, user_id, stars, review, updated_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(plugin_id, user_id) DO UPDATE SET stars = EXCLUDED.stars, review = EXCLUDED.review, updated_at = EXCLUDED.updated_at",
+			[pluginId, userId, stars, review ?? null, Math.trunc(this.clock())],
+		);
 	}
 
-	deleteRating(pluginId: string, userId: number): void {
-		if (!this.hasPublicPlugin(pluginId)) throw new Error("PLUGIN_NOT_FOUND");
-		this.db.prepare("DELETE FROM ratings WHERE plugin_id = ? AND user_id = ?").run(pluginId, userId);
+	async deleteRating(pluginId: string, userId: number): Promise<void> {
+		if (!(await this.hasPublicPlugin(pluginId))) throw new Error("PLUGIN_NOT_FOUND");
+		await this.pool.query("DELETE FROM ratings WHERE plugin_id = $1 AND user_id = $2", [pluginId, userId]);
 	}
 
-	ratingAggregate(pluginId: string): { count: number; average: number | null } {
-		const row = this.db
-			.prepare("SELECT COUNT(*) AS count, AVG(stars) AS average FROM ratings WHERE plugin_id = ?")
-			.get(pluginId) as { count: number; average: number | null };
+	async ratingAggregate(pluginId: string): Promise<{ count: number; average: number | null }> {
+		const result = await this.pool.query(
+			"SELECT COUNT(*)::int AS count, AVG(stars)::double precision AS average FROM ratings WHERE plugin_id = $1",
+			[pluginId],
+		);
+		const row = result.rows[0] as { count: number; average: number | null };
 		return {
 			count: row.count,
 			average: row.count > 0 && row.average !== null ? roundAverage(row.average) : null,
 		};
 	}
 
-	ratingHistogram(pluginId: string): [number, number, number, number, number] {
-		const rows = this.db
-			.prepare("SELECT stars, COUNT(*) AS count FROM ratings WHERE plugin_id = ? GROUP BY stars")
-			.all(pluginId) as unknown as Array<{ stars: number; count: number }>;
+	async ratingHistogram(pluginId: string): Promise<[number, number, number, number, number]> {
+		const result = await this.pool.query(
+			"SELECT stars, COUNT(*)::int AS count FROM ratings WHERE plugin_id = $1 GROUP BY stars",
+			[pluginId],
+		);
 		const histogram: [number, number, number, number, number] = [0, 0, 0, 0, 0];
-		for (const row of rows) {
+		for (const row of result.rows as Array<{ stars: number; count: number }>) {
 			if (row.stars >= 1 && row.stars <= 5) histogram[row.stars - 1] = row.count;
 		}
 		return histogram;
 	}
 
-	ratingsFor(pluginId: string, limit: number): PluginRatingEntry[] {
-		const rows = this.db
-			.prepare(
-				"SELECT u.username AS username, r.stars AS stars, r.review AS review, r.updated_at AS updated_at FROM ratings r JOIN users u ON u.id = r.user_id WHERE r.plugin_id = ? ORDER BY r.updated_at DESC, u.username LIMIT ?",
-			)
-			.all(pluginId, limit) as unknown as Array<{
-			username: string;
-			stars: number;
-			review: string | null;
-			updated_at: number;
-		}>;
-		return rows.map((row) => ({
+	async ratingsFor(pluginId: string, limit: number): Promise<PluginRatingEntry[]> {
+		const result = await this.pool.query(
+			"SELECT u.username, r.stars, r.review, r.updated_at FROM ratings r JOIN users u ON u.id = r.user_id WHERE r.plugin_id = $1 ORDER BY r.updated_at DESC, u.username LIMIT $2",
+			[pluginId, limit],
+		);
+		return (
+			result.rows as Array<{
+				username: string;
+				stars: number;
+				review: string | null;
+				updated_at: number;
+			}>
+		).map((row) => ({
 			username: row.username,
 			stars: row.stars,
 			...(row.review ? { review: row.review } : {}),
@@ -752,12 +838,18 @@ export class MarketplaceStore {
 		}));
 	}
 
-	private ratingAggregatesAll(): Map<string, { count: number; average: number | null }> {
-		const rows = this.db
-			.prepare("SELECT plugin_id, COUNT(*) AS count, AVG(stars) AS average FROM ratings GROUP BY plugin_id")
-			.all() as unknown as Array<{ plugin_id: string; count: number; average: number | null }>;
+	private async ratingAggregatesAll(): Promise<Map<string, { count: number; average: number | null }>> {
+		const result = await this.pool.query(
+			"SELECT plugin_id, COUNT(*)::int AS count, AVG(stars)::double precision AS average FROM ratings GROUP BY plugin_id",
+		);
 		return new Map(
-			rows.map((row) => [
+			(
+				result.rows as Array<{
+					plugin_id: string;
+					count: number;
+					average: number | null;
+				}>
+			).map((row) => [
 				row.plugin_id,
 				{ count: row.count, average: row.average !== null ? roundAverage(row.average) : null },
 			]),
@@ -766,42 +858,45 @@ export class MarketplaceStore {
 
 	// --- downloads ---
 
-	incrementDownload(pluginId: string, version: string, artifactId: string): void {
-		this.db
-			.prepare(
-				"INSERT INTO downloads (plugin_id, version, artifact_id, count) VALUES (?, ?, ?, 1) ON CONFLICT(plugin_id, version, artifact_id) DO UPDATE SET count = count + 1",
-			)
-			.run(pluginId, version, artifactId);
+	async incrementDownload(pluginId: string, version: string, artifactId: string): Promise<void> {
+		await this.pool.query(
+			"INSERT INTO downloads (plugin_id, version, artifact_id, count) VALUES ($1, $2, $3, 1) ON CONFLICT(plugin_id, version, artifact_id) DO UPDATE SET count = downloads.count + 1",
+			[pluginId, version, artifactId],
+		);
 	}
 
-	downloadTotal(pluginId: string): number {
-		const row = this.db
-			.prepare("SELECT COALESCE(SUM(count), 0) AS total FROM downloads WHERE plugin_id = ?")
-			.get(pluginId) as { total: number };
-		return row.total;
+	async downloadTotal(pluginId: string): Promise<number> {
+		const result = await this.pool.query(
+			"SELECT COALESCE(SUM(count), 0)::int AS total FROM downloads WHERE plugin_id = $1",
+			[pluginId],
+		);
+		return (result.rows[0] as { total: number }).total;
 	}
 
-	downloadsByVersion(pluginId: string): Record<string, number> {
-		const rows = this.db
-			.prepare(
-				"SELECT version, SUM(count) AS total FROM downloads WHERE plugin_id = ? GROUP BY version ORDER BY version",
-			)
-			.all(pluginId) as unknown as Array<{ version: string; total: number }>;
+	async downloadsByVersion(pluginId: string): Promise<Record<string, number>> {
+		const result = await this.pool.query(
+			"SELECT version, SUM(count)::int AS total FROM downloads WHERE plugin_id = $1 GROUP BY version",
+			[pluginId],
+		);
+		const rows = result.rows as Array<{ version: string; total: number }>;
 		rows.sort((left, right) => compareSemver(left.version, right.version));
 		return Object.fromEntries(rows.map((row) => [row.version, row.total]));
 	}
 
-	private downloadTotalsAll(): Map<string, number> {
-		const rows = this.db
-			.prepare("SELECT plugin_id, SUM(count) AS total FROM downloads GROUP BY plugin_id")
-			.all() as unknown as Array<{ plugin_id: string; total: number }>;
-		return new Map(rows.map((row) => [row.plugin_id, row.total]));
+	private async downloadTotalsAll(): Promise<Map<string, number>> {
+		const result = await this.pool.query(
+			"SELECT plugin_id, SUM(count)::int AS total FROM downloads GROUP BY plugin_id",
+		);
+		return new Map(
+			(result.rows as Array<{ plugin_id: string; total: number }>).map((row) => [row.plugin_id, row.total]),
+		);
 	}
 
 	// --- internals ---
 
-	private versionState(pluginId: string, version: string): PublishVersionState | undefined {
-		return this.publishState(pluginId).versions.find((entry) => entry.version === version);
+	private async versionState(pluginId: string, version: string): Promise<PublishVersionState | undefined> {
+		const state = await this.publishState(pluginId);
+		return state.versions.find((entry) => entry.version === version);
 	}
 
 	private toPublishState(plugin: StoredPlugin): PublishPluginState {
@@ -824,41 +919,44 @@ export class MarketplaceStore {
 		};
 	}
 
-	private requireVersionRow(pluginId: string, version: string): VersionRow {
-		const row = this.db
-			.prepare(
-				"SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = ? AND version = ?",
-			)
-			.get(pluginId, version) as VersionRow | undefined;
-		if (!row) throw new Error("PLUGIN_VERSION_NOT_FOUND");
-		return row;
+	private async requireVersionRow(
+		pluginId: string,
+		version: string,
+		client: Pool | PoolClient = this.pool,
+		forUpdate = false,
+	): Promise<VersionRow> {
+		const result = await client.query(
+			`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = $1 AND version = $2${forUpdate ? " FOR UPDATE" : ""}`,
+			[pluginId, version],
+		);
+		if (result.rows.length === 0) throw new Error("PLUGIN_VERSION_NOT_FOUND");
+		return result.rows[0] as unknown as VersionRow;
 	}
 
-	private publisherView(publisherId: string): PublisherAdminView | undefined {
-		const publisher = this.getPublisher(publisherId);
+	private async publisherView(publisherId: string): Promise<PublisherAdminView | undefined> {
+		const publisher = await this.getPublisher(publisherId);
 		if (!publisher) return undefined;
-		const members = this.db
-			.prepare(
-				"SELECT u.username AS username FROM publisher_members m JOIN users u ON u.id = m.user_id WHERE m.publisher_id = ? ORDER BY u.username",
-			)
-			.all(publisherId) as unknown as Array<{ username: string }>;
-		return { ...publisher, members: members.map((row) => row.username) };
+		const members = await this.pool.query(
+			"SELECT u.username FROM publisher_members m JOIN users u ON u.id = m.user_id WHERE m.publisher_id = $1 ORDER BY u.username",
+			[publisherId],
+		);
+		return {
+			...publisher,
+			members: (members.rows as Array<{ username: string }>).map((row) => row.username),
+		};
 	}
 
-	private upsertPublisherRow(publisherId: string, displayName: string, verified: boolean): void {
-		this.db
-			.prepare(
-				"INSERT INTO publishers (id, display_name, verified) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, verified = excluded.verified",
-			)
-			.run(publisherId, displayName, verified ? 1 : 0);
+	private async upsertPublisherRow(publisherId: string, displayName: string, verified: boolean): Promise<void> {
+		await this.pool.query(
+			"INSERT INTO publishers (id, display_name, verified) VALUES ($1, $2, $3) ON CONFLICT(id) DO UPDATE SET display_name = EXCLUDED.display_name, verified = EXCLUDED.verified",
+			[publisherId, displayName, verified],
+		);
 	}
 
-	private insertRevocationRow(revocation: CatalogRevocation): void {
-		this.db
-			.prepare(
-				"INSERT INTO revocations (plugin_id, version, artifact_ids, status, reason_code, message, replacement_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			)
-			.run(
+	private async insertRevocationRow(client: PoolClient, revocation: CatalogRevocation): Promise<void> {
+		await client.query(
+			"INSERT INTO revocations (plugin_id, version, artifact_ids, status, reason_code, message, replacement_version) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+			[
 				revocation.pluginId,
 				revocation.version,
 				revocation.artifactIds ? JSON.stringify(revocation.artifactIds) : null,
@@ -866,48 +964,58 @@ export class MarketplaceStore {
 				revocation.reasonCode,
 				revocation.message,
 				revocation.replacementVersion ?? null,
-			);
+			],
+		);
 	}
 
-	private loadPlugins(pluginId: string | undefined, includeDrafts: boolean): StoredPlugin[] {
-		const pluginQuery =
-			"SELECT p.id AS id, p.name AS name, p.description AS description, p.publisher_id AS publisher_id, b.display_name AS publisher_display_name, b.verified AS publisher_verified, p.categories AS categories, p.icon_asset_id AS icon_asset_id, p.published_at AS published_at, p.updated_at AS updated_at FROM plugins p JOIN publishers b ON b.id = p.publisher_id";
+	private async loadPlugins(pluginId: string | undefined, includeDrafts: boolean): Promise<StoredPlugin[]> {
+		const pluginQuery = `
+SELECT p.id, p.name, p.description, p.publisher_id,
+       b.display_name AS publisher_display_name, b.verified AS publisher_verified,
+       p.categories, p.icon_asset_id, p.published_at, p.updated_at
+FROM plugins p
+JOIN publishers b ON b.id = p.publisher_id`;
 		let pluginRows: PluginRow[];
 		if (pluginId === undefined) {
-			pluginRows = this.db.prepare(`${pluginQuery} ORDER BY p.id`).all() as unknown as PluginRow[];
+			const result = await this.pool.query(`${pluginQuery} ORDER BY p.id`);
+			pluginRows = result.rows as unknown as PluginRow[];
 		} else {
-			const row = this.db.prepare(`${pluginQuery} WHERE p.id = ?`).get(pluginId) as unknown as PluginRow | undefined;
-			pluginRows = row ? [row] : [];
+			const result = await this.pool.query(`${pluginQuery} WHERE p.id = $1`, [pluginId]);
+			pluginRows = result.rows as unknown as PluginRow[];
 		}
+
 		const plugins: StoredPlugin[] = [];
 		for (const row of pluginRows) {
-			const draftFilter = includeDrafts ? "" : " AND draft = 0";
-			const versionRows = this.db
-				.prepare(
-					`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = ?${draftFilter} ORDER BY version`,
-				)
-				.all(row.id) as unknown as VersionRow[];
+			const draftFilter = includeDrafts ? "" : " AND draft = false";
+			const versionResult = await this.pool.query(
+				`SELECT plugin_id, version, status, draft, changelog, published_at, desktop, capabilities FROM plugin_versions WHERE plugin_id = $1${draftFilter} ORDER BY version`,
+				[row.id],
+			);
+			const versionRows = versionResult.rows as unknown as VersionRow[];
 			versionRows.sort((left, right) => compareSemver(left.version, right.version));
 			if (versionRows.length === 0 && !includeDrafts) continue;
-			const artifactRows = this.db
-				.prepare(
-					"SELECT version, artifact_id, target, contains_native_code, preferred, entry, sha256, size FROM plugin_artifacts WHERE plugin_id = ? ORDER BY version, artifact_id",
-				)
-				.all(row.id) as unknown as ArtifactRow[];
+
+			const artifactResult = await this.pool.query(
+				"SELECT version, artifact_id, target, contains_native_code, preferred, entry, sha256, size FROM plugin_artifacts WHERE plugin_id = $1 ORDER BY version, artifact_id",
+				[row.id],
+			);
+			const artifactRows = artifactResult.rows as unknown as ArtifactRow[];
+
 			const artifactsByVersion = new Map<string, StoredArtifact[]>();
 			for (const artifactRow of artifactRows) {
 				const list = artifactsByVersion.get(artifactRow.version) ?? [];
 				list.push({
 					id: artifactRow.artifact_id,
 					target: JSON.parse(artifactRow.target) as ArtifactTarget,
-					containsNativeCode: artifactRow.contains_native_code !== 0,
-					preferred: artifactRow.preferred !== 0,
+					containsNativeCode: artifactRow.contains_native_code,
+					preferred: artifactRow.preferred,
 					entry: artifactRow.entry,
 					sha256: artifactRow.sha256,
 					size: artifactRow.size,
 				});
 				artifactsByVersion.set(artifactRow.version, list);
 			}
+
 			plugins.push({
 				id: row.id,
 				name: row.name,
@@ -915,7 +1023,7 @@ export class MarketplaceStore {
 				publisher: {
 					id: row.publisher_id,
 					displayName: row.publisher_display_name,
-					verified: row.publisher_verified !== 0,
+					verified: row.publisher_verified,
 				},
 				categories: JSON.parse(row.categories) as string[],
 				...(row.icon_asset_id ? { iconAssetId: row.icon_asset_id } : {}),
@@ -924,7 +1032,7 @@ export class MarketplaceStore {
 				versions: versionRows.map((versionRow) => ({
 					version: versionRow.version,
 					status: versionRow.status as PluginStatus,
-					draft: versionRow.draft !== 0,
+					draft: versionRow.draft,
 					changelog: versionRow.changelog,
 					publishedAt: versionRow.published_at,
 					desktop: JSON.parse(versionRow.desktop) as StoredPluginVersion["desktop"],
@@ -936,17 +1044,37 @@ export class MarketplaceStore {
 		return plugins;
 	}
 
-	private transaction<T>(work: () => T): T {
-		this.db.exec("BEGIN");
+	private async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+		const client = await this.pool.connect();
 		try {
-			const result = work();
-			this.db.exec("COMMIT");
+			await client.query("BEGIN");
+			const result = await work(client);
+			await client.query("COMMIT");
 			return result;
 		} catch (error) {
-			this.db.exec("ROLLBACK");
+			await client.query("ROLLBACK").catch(() => {});
 			throw error;
+		} finally {
+			client.release();
 		}
 	}
+}
+
+function postgresPoolOptions(databaseUrl: string): { connectionString: string; schema?: string } {
+	const url = new URL(databaseUrl);
+	const schema = url.searchParams.get("schema")?.trim();
+	url.searchParams.delete("schema");
+	if (!schema) return { connectionString: url.href };
+	if (!/^[a-z_][a-z0-9_]*$/.test(schema)) {
+		throw new Error("MARKETPLACE_DATABASE_URL schema is invalid");
+	}
+	return { connectionString: url.href, schema };
+}
+
+function isUniqueViolation(error: unknown): boolean {
+	return (
+		typeof error === "object" && error !== null && "code" in error && (error as { code: string }).code === "23505"
+	);
 }
 
 function roundAverage(average: number): number {

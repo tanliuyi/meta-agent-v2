@@ -63,12 +63,12 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	}
 
 	class PluginsController {
-		list(request: RequestLike) {
+		async list(request: RequestLike) {
 			const query = request.query;
 			const limit = parseLimit(query.limit);
 			const runtimeQuery = parseRuntimeQuery(query);
 			try {
-				return runtime.store.list({
+				return await runtime.store.list({
 					...(optionalQueryString(query.query, "query")
 						? { query: optionalQueryString(query.query, "query") }
 						: {}),
@@ -89,28 +89,28 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			}
 		}
 
-		detail(pluginId: string): MarketplacePluginDetail {
+		async detail(pluginId: string): Promise<MarketplacePluginDetail> {
 			return pluginDetail(
-				requirePlugin(runtime, pluginId),
+				await requirePlugin(runtime, pluginId),
 				runtime.config.publicBaseUrl,
-				runtime.store.pluginAggregates(pluginId),
+				await runtime.store.pluginAggregates(pluginId),
 			);
 		}
 
-		versions(pluginId: string): MarketplacePluginVersionDetail[] {
-			return requirePlugin(runtime, pluginId).versions.map((version) =>
+		async versions(pluginId: string): Promise<MarketplacePluginVersionDetail[]> {
+			return (await requirePlugin(runtime, pluginId)).versions.map((version) =>
 				versionDetail(pluginId, version, runtime.config.publicBaseUrl),
 			);
 		}
 
-		version(pluginId: string, version: string): MarketplacePluginVersionDetail {
-			const found = runtime.store.getPublicVersion(pluginId, version);
+		async version(pluginId: string, version: string): Promise<MarketplacePluginVersionDetail> {
+			const found = await runtime.store.getPublicVersion(pluginId, version);
 			if (!found) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
 			return versionDetail(pluginId, found, runtime.config.publicBaseUrl);
 		}
 
-		artifacts(pluginId: string, version: string): { artifacts: MarketplaceArtifactMetadata[] } {
-			const found = requireAvailableVersion(runtime, pluginId, version);
+		async artifacts(pluginId: string, version: string): Promise<{ artifacts: MarketplaceArtifactMetadata[] }> {
+			const found = await requireAvailableVersion(runtime, pluginId, version);
 			return {
 				artifacts: found.artifacts.map((artifact) =>
 					artifactMetadata(pluginId, version, artifact, runtime.config.publicBaseUrl),
@@ -118,8 +118,8 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			};
 		}
 
-		download(pluginId: string, version: string, artifactId: string) {
-			const found = requireAvailableVersion(runtime, pluginId, version);
+		async download(pluginId: string, version: string, artifactId: string) {
+			const found = await requireAvailableVersion(runtime, pluginId, version);
 			const artifact = found.artifacts.find(({ id }) => id === artifactId);
 			if (!artifact || artifact.sha256 === null || artifact.size === null) {
 				throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
@@ -127,7 +127,7 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			if (artifact.containsNativeCode) {
 				throw badRequest("PAYLOAD_NATIVE_UNSUPPORTED", "Native plugin artifacts are not available for download");
 			}
-			const content = runtime.store.getArtifactContent(pluginId, version, artifactId);
+			const content = await runtime.store.getArtifactContent(pluginId, version, artifactId);
 			if (!content) throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
 			mapStoreErrors(() => extractPayloadArchive(content.bytes, 5 * runtime.config.maxArtifactBytes));
 			const url = artifactUrl(runtime.config.publicBaseUrl, pluginId, version, artifactId);
@@ -143,26 +143,26 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	}
 
 	class ArtifactsController {
-		bytes(
+		async bytes(
 			pluginId: string,
 			version: string,
 			artifactId: string,
 			request: DownloadRequestLike,
 			response: ResponseLike,
-		): unknown {
-			const found = requireAvailableVersion(runtime, pluginId, version);
+		): Promise<unknown> {
+			const found = await requireAvailableVersion(runtime, pluginId, version);
 			const metadata = found.artifacts.find(({ id }) => id === artifactId);
 			if (metadata?.containsNativeCode) {
 				throw badRequest("PAYLOAD_NATIVE_UNSUPPORTED", "Native plugin artifacts are not available for download");
 			}
-			const artifact = runtime.store.getArtifactContent(pluginId, version, artifactId);
+			const artifact = await runtime.store.getArtifactContent(pluginId, version, artifactId);
 			if (!artifact) {
 				throw notFound("PLUGIN_ARTIFACT_NOT_FOUND", `Plugin artifact not found: ${artifactId}`);
 			}
 			mapStoreErrors(() => extractPayloadArchive(artifact.bytes, 5 * runtime.config.maxArtifactBytes));
 			// Express routes HEAD to this GET handler; only count downloads that transfer bytes.
 			if (request.method === "GET") {
-				runtime.store.incrementDownload(pluginId, version, artifactId);
+				await runtime.store.incrementDownload(pluginId, version, artifactId);
 			}
 			response.setHeader("content-type", "application/vnd.meta-agent.plugin+zip");
 			response.setHeader("content-length", artifact.size);
@@ -175,7 +175,7 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 
 	let lastRevocationSequence = -1;
 	class RevocationsController {
-		revocations() {
+		async revocations() {
 			const issuedAt = Math.trunc(runtime.clock());
 			if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) throw new Error("Marketplace clock is invalid");
 			const sequence = Math.max(issuedAt, lastRevocationSequence + 1);
@@ -186,7 +186,7 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 				issuedAt,
 				nextUpdateAt: issuedAt + 4 * 60 * 60 * 1000,
 				revokedKeys: [],
-				pluginVersions: runtime.store.getRevocations(),
+				pluginVersions: await runtime.store.getRevocations(),
 			};
 			return runtime.signing.envelope(data);
 		}
@@ -233,8 +233,8 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	applyRoute(RevocationsController.prototype, "revocations", "get", "revocations");
 
 	class MarketplaceModule {
-		onApplicationShutdown(): void {
-			runtime.store.close();
+		async onApplicationShutdown(): Promise<void> {
+			await runtime.store.close();
 		}
 	}
 	Module({
@@ -254,18 +254,18 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	return { module: MarketplaceModule as Type<unknown> };
 }
 
-function requirePlugin(runtime: MarketplaceHttpRuntime, pluginId: string): StoredPlugin {
-	const plugin = runtime.store.getPublicPlugin(pluginId);
+async function requirePlugin(runtime: MarketplaceHttpRuntime, pluginId: string): Promise<StoredPlugin> {
+	const plugin = await runtime.store.getPublicPlugin(pluginId);
 	if (!plugin) throw notFound("PLUGIN_NOT_FOUND", `Plugin not found: ${pluginId}`);
 	return plugin;
 }
 
-function requireAvailableVersion(
+async function requireAvailableVersion(
 	runtime: MarketplaceHttpRuntime,
 	pluginId: string,
 	version: string,
-): StoredPluginVersion {
-	const found = runtime.store.getPublicVersion(pluginId, version);
+): Promise<StoredPluginVersion> {
+	const found = await runtime.store.getPublicVersion(pluginId, version);
 	if (!found) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
 	if (found.status === "withdrawn" || found.status === "blocked") {
 		throw new GoneException(

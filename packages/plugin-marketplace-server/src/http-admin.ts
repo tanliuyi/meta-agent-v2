@@ -19,40 +19,40 @@ import {
 
 export function createAdminControllers(runtime: MarketplaceHttpRuntime): Type<unknown>[] {
 	class AdminController {
-		publishers(authorization: string | undefined): { publishers: PublisherAdminView[] } {
-			requireAdmin(runtime, authorization);
-			return { publishers: runtime.store.listPublishers() };
+		async publishers(authorization: string | undefined): Promise<{ publishers: PublisherAdminView[] }> {
+			await requireAdmin(runtime, authorization);
+			return { publishers: await runtime.store.listPublishers() };
 		}
 
-		upsertPublisher(
+		async upsertPublisher(
 			publisherId: string,
 			body: unknown,
 			authorization: string | undefined,
-		): { publisher: PublisherAdminView } {
-			requireAdmin(runtime, authorization);
+		): Promise<{ publisher: PublisherAdminView }> {
+			await requireAdmin(runtime, authorization);
 			if (!PUBLISHER_ID_PATTERN.test(publisherId)) {
 				throw badRequest("PUBLISHER_ID_INVALID", "Publisher ID must be a lowercase identifier");
 			}
 			const record = bodyObject(body);
 			const displayName = bodyString(record, "displayName", 120);
 			const verified = bodyBoolean(record, "verified");
-			return { publisher: runtime.store.upsertPublisher(publisherId, displayName, verified) };
+			return { publisher: await runtime.store.upsertPublisher(publisherId, displayName, verified) };
 		}
 
-		addMember(publisherId: string, username: string, authorization: string | undefined): void {
-			requireAdmin(runtime, authorization);
+		async addMember(publisherId: string, username: string, authorization: string | undefined): Promise<void> {
+			await requireAdmin(runtime, authorization);
 			validateMemberPath(publisherId, username);
-			mapStoreErrors(() => runtime.store.addPublisherMember(publisherId, username));
+			await mapStoreErrors(() => runtime.store.addPublisherMember(publisherId, username));
 		}
 
-		removeMember(publisherId: string, username: string, authorization: string | undefined): void {
-			requireAdmin(runtime, authorization);
+		async removeMember(publisherId: string, username: string, authorization: string | undefined): Promise<void> {
+			await requireAdmin(runtime, authorization);
 			validateMemberPath(publisherId, username);
-			mapStoreErrors(() => runtime.store.removePublisherMember(publisherId, username));
+			await mapStoreErrors(() => runtime.store.removePublisherMember(publisherId, username));
 		}
 
-		revoke(body: unknown, authorization: string | undefined): { revocation: CatalogRevocation } {
-			requireAdmin(runtime, authorization);
+		async revoke(body: unknown, authorization: string | undefined): Promise<{ revocation: CatalogRevocation }> {
+			await requireAdmin(runtime, authorization);
 			const record = bodyObject(body);
 			const pluginId = bodyString(record, "pluginId", 200);
 			if (!PLUGIN_ID.test(pluginId)) throw badRequest("BODY_INVALID", "pluginId is not a valid plugin identifier");
@@ -77,7 +77,7 @@ export function createAdminControllers(runtime: MarketplaceHttpRuntime): Type<un
 				message: bodyString(record, "message", 500),
 				...(replacementVersion === undefined ? {} : { replacementVersion }),
 			};
-			mapStoreErrors(() => runtime.store.applyRevocation(revocation));
+			await mapStoreErrors(() => runtime.store.applyRevocation(revocation));
 			return { revocation };
 		}
 	}

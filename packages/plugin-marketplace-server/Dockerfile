@@ -22,7 +22,6 @@ RUN npm ci --omit=dev --ignore-scripts --workspace @earendil-works/plugin-market
   && npm cache clean --force
 COPY --from=build /workspace/packages/plugin-marketplace-server/dist packages/plugin-marketplace-server/dist
 COPY packages/plugin-marketplace-server/catalog packages/plugin-marketplace-server/catalog
-RUN mkdir -p /data && chown node:node /data
 
 USER node
 EXPOSE 4317

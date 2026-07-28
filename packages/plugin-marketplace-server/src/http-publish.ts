@@ -41,40 +41,47 @@ export interface ArtifactUploadResponse {
 
 export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<unknown>[] {
 	class PublishController {
-		list(authorization: string | undefined): { plugins: PublishPluginState[] } {
-			const principal = requirePrincipal(runtime, authorization);
+		async list(authorization: string | undefined): Promise<{ plugins: PublishPluginState[] }> {
+			const principal = await requirePrincipal(runtime, authorization);
 			const publisherIds =
-				principal.kind === "admin" ? undefined : runtime.store.publisherIdsForUser(principal.userId);
-			return { plugins: runtime.store.listPublishStates(publisherIds) };
+				principal.kind === "admin" ? undefined : await runtime.store.publisherIdsForUser(principal.userId);
+			return { plugins: await runtime.store.listPublishStates(publisherIds) };
 		}
 
-		state(pluginId: string, authorization: string | undefined): { plugin: PublishPluginState } {
+		async state(pluginId: string, authorization: string | undefined): Promise<{ plugin: PublishPluginState }> {
 			validatePluginId(pluginId);
-			requirePluginMember(runtime, authorization, pluginId);
-			return { plugin: mapStoreErrors(() => runtime.store.publishState(pluginId)) };
+			await requirePluginMember(runtime, authorization, pluginId);
+			return { plugin: await mapStoreErrors(() => runtime.store.publishState(pluginId)) };
 		}
 
-		upsertPlugin(pluginId: string, body: unknown, authorization: string | undefined): { plugin: PublishPluginState } {
-			validatePluginId(pluginId);
-			const request = parsePublishPluginRequest(body);
-			const principal = requirePrincipal(runtime, authorization);
-			if (principal.kind === "user" && !runtime.store.isPublisherMember(principal.userId, request.publisherId)) {
-				throw forbidden("PUBLISHER_MEMBERSHIP_REQUIRED", "You are not a member of this publisher");
-			}
-			return { plugin: mapStoreErrors(() => runtime.store.upsertPlugin(pluginId, request)) };
-		}
-
-		createVersion(
+		async upsertPlugin(
 			pluginId: string,
 			body: unknown,
 			authorization: string | undefined,
-		): { pluginId: string; version: PublishVersionState } {
+		): Promise<{ plugin: PublishPluginState }> {
 			validatePluginId(pluginId);
-			requirePluginMember(runtime, authorization, pluginId);
+			const request = parsePublishPluginRequest(body);
+			const principal = await requirePrincipal(runtime, authorization);
+			if (
+				principal.kind === "user" &&
+				!(await runtime.store.isPublisherMember(principal.userId, request.publisherId))
+			) {
+				throw forbidden("PUBLISHER_MEMBERSHIP_REQUIRED", "You are not a member of this publisher");
+			}
+			return { plugin: await mapStoreErrors(() => runtime.store.upsertPlugin(pluginId, request)) };
+		}
+
+		async createVersion(
+			pluginId: string,
+			body: unknown,
+			authorization: string | undefined,
+		): Promise<{ pluginId: string; version: PublishVersionState }> {
+			validatePluginId(pluginId);
+			await requirePluginMember(runtime, authorization, pluginId);
 			const request = parsePublishVersionRequest(body);
 			return {
 				pluginId,
-				version: mapStoreErrors(() => runtime.store.createDraftVersion(pluginId, request)),
+				version: await mapStoreErrors(() => runtime.store.createDraftVersion(pluginId, request)),
 			};
 		}
 
@@ -86,8 +93,8 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 			request: RawUploadRequest,
 		): Promise<ArtifactUploadResponse> {
 			validatePluginId(pluginId);
-			requirePluginMember(runtime, authorization, pluginId);
-			const context = mapStoreErrors(() => runtime.store.getUploadContext(pluginId, version, artifactId));
+			await requirePluginMember(runtime, authorization, pluginId);
+			const context = await mapStoreErrors(() => runtime.store.getUploadContext(pluginId, version, artifactId));
 			const bytes = await readUploadBody(request, runtime.config.maxArtifactBytes);
 			const built = mapStoreErrors(() => {
 				const files = extractPayloadArchive(bytes, 4 * runtime.config.maxArtifactBytes);
@@ -107,7 +114,7 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 					files,
 				});
 			});
-			mapStoreErrors(() =>
+			await mapStoreErrors(() =>
 				runtime.store.putArtifactContent(pluginId, version, artifactId, {
 					bytes: built.bytes,
 					sha256: built.sha256,
@@ -119,40 +126,41 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 			return { pluginId, version, artifactId, sha256: built.sha256, size: built.size };
 		}
 
-		publish(
+		async publish(
 			pluginId: string,
 			version: string,
 			authorization: string | undefined,
-		): { pluginId: string; version: MarketplacePluginVersionDetail } {
+		): Promise<{ pluginId: string; version: MarketplacePluginVersionDetail }> {
 			validatePluginId(pluginId);
-			requirePluginMember(runtime, authorization, pluginId);
-			mapStoreErrors(() => {
-				for (const artifact of runtime.store.publishArtifactAuditContents(pluginId, version)) {
-					if (artifact.containsNativeCode) throw new Error("PAYLOAD_NATIVE_UNSUPPORTED");
-					if (artifact.bytes) extractPayloadArchive(artifact.bytes, 5 * runtime.config.maxArtifactBytes);
-				}
-				runtime.store.publishVersion(pluginId, version);
-			});
-			const published = runtime.store.getPublicVersion(pluginId, version);
+			await requirePluginMember(runtime, authorization, pluginId);
+			await mapStoreErrors(() =>
+				runtime.store.publishVersion(pluginId, version, (artifacts) => {
+					for (const artifact of artifacts) {
+						if (artifact.containsNativeCode) throw new Error("PAYLOAD_NATIVE_UNSUPPORTED");
+						if (artifact.bytes) extractPayloadArchive(artifact.bytes, 5 * runtime.config.maxArtifactBytes);
+					}
+				}),
+			);
+			const published = await runtime.store.getPublicVersion(pluginId, version);
 			if (!published) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
 			return { pluginId, version: versionDetail(pluginId, published, runtime.config.publicBaseUrl) };
 		}
 
-		deprecate(
+		async deprecate(
 			pluginId: string,
 			version: string,
 			authorization: string | undefined,
-		): { pluginId: string; version: string; status: "deprecated" } {
+		): Promise<{ pluginId: string; version: string; status: "deprecated" }> {
 			validatePluginId(pluginId);
-			requirePluginMember(runtime, authorization, pluginId);
-			mapStoreErrors(() => runtime.store.deprecateVersion(pluginId, version));
+			await requirePluginMember(runtime, authorization, pluginId);
+			await mapStoreErrors(() => runtime.store.deprecateVersion(pluginId, version));
 			return { pluginId, version, status: "deprecated" };
 		}
 
-		deleteDraft(pluginId: string, version: string, authorization: string | undefined): void {
+		async deleteDraft(pluginId: string, version: string, authorization: string | undefined): Promise<void> {
 			validatePluginId(pluginId);
-			requirePluginMember(runtime, authorization, pluginId);
-			mapStoreErrors(() => runtime.store.deleteDraftVersion(pluginId, version));
+			await requirePluginMember(runtime, authorization, pluginId);
+			await mapStoreErrors(() => runtime.store.deleteDraftVersion(pluginId, version));
 		}
 	}
 
@@ -200,16 +208,16 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 	return [PublishController];
 }
 
-function requirePluginMember(
+async function requirePluginMember(
 	runtime: MarketplaceHttpRuntime,
 	authorization: string | undefined,
 	pluginId: string,
-): void {
-	const principal = requirePrincipal(runtime, authorization);
+): Promise<void> {
+	const principal = await requirePrincipal(runtime, authorization);
 	if (principal.kind === "admin") return;
-	const publisherId = runtime.store.getPluginPublisherId(pluginId);
+	const publisherId = await runtime.store.getPluginPublisherId(pluginId);
 	if (publisherId === undefined) throw notFound("PLUGIN_NOT_FOUND", `Plugin not found: ${pluginId}`);
-	if (!runtime.store.isPublisherMember(principal.userId, publisherId)) {
+	if (!(await runtime.store.isPublisherMember(principal.userId, publisherId))) {
 		throw forbidden("PUBLISHER_MEMBERSHIP_REQUIRED", "You are not a member of this plugin's publisher");
 	}
 }

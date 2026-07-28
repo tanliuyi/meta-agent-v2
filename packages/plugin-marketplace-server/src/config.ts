@@ -9,7 +9,7 @@ export interface MarketplaceServerConfig {
 	artifactOrigins: string[];
 	signingPrivateKey: KeyObject;
 	ephemeralSigningKey: boolean;
-	dataDir?: string;
+	databaseUrl: string;
 	adminToken?: string;
 	maxArtifactBytes: number;
 	allowRegistration: boolean;
@@ -49,10 +49,13 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 	assertPublicBasePath(publicBaseUrl, basePath);
 	const marketplaceId = normalizeMarketplaceId(env.MARKETPLACE_ID?.trim() || "meta-agent-development");
 	const artifactOrigins = parseArtifactOrigins(env.MARKETPLACE_ARTIFACT_ORIGINS, publicBaseUrl);
-	const dataDir = env.MARKETPLACE_DATA_DIR?.trim() || undefined;
-	if (dataDir && ephemeralSigningKey) {
-		throw new Error("MARKETPLACE_DATA_DIR requires a pinned MARKETPLACE_SIGNING_PRIVATE_KEY");
+
+	const databaseUrl = env.MARKETPLACE_DATABASE_URL?.trim();
+	if (!databaseUrl) {
+		throw new Error("MARKETPLACE_DATABASE_URL is required (postgresql://...)");
 	}
+	validateDatabaseUrl(databaseUrl);
+
 	const adminToken = env.MARKETPLACE_ADMIN_TOKEN?.trim() || undefined;
 	if (adminToken !== undefined && adminToken.length < 16) {
 		throw new Error("MARKETPLACE_ADMIN_TOKEN must be at least 16 characters");
@@ -74,12 +77,34 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 		artifactOrigins,
 		signingPrivateKey,
 		ephemeralSigningKey,
-		...(dataDir ? { dataDir } : {}),
+		databaseUrl,
 		...(adminToken ? { adminToken } : {}),
 		maxArtifactBytes,
 		allowRegistration,
 		maxLoginFailures,
 	};
+}
+
+function validateDatabaseUrl(url: string): void {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new Error("MARKETPLACE_DATABASE_URL must be a valid URL");
+	}
+	if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
+		throw new Error("MARKETPLACE_DATABASE_URL must use postgresql:// protocol");
+	}
+	if (!parsed.hostname) {
+		throw new Error("MARKETPLACE_DATABASE_URL must include a host");
+	}
+	if (!parsed.pathname || parsed.pathname === "/") {
+		throw new Error("MARKETPLACE_DATABASE_URL must include a database name");
+	}
+	const dbName = parsed.pathname.slice(1);
+	if (!/^[a-z_][a-z0-9_]*$/.test(dbName)) {
+		throw new Error("MARKETPLACE_DATABASE_URL database name is invalid");
+	}
 }
 
 function parseMaxArtifactBytes(value: string | undefined): number {

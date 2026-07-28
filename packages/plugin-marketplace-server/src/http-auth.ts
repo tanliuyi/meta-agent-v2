@@ -68,7 +68,7 @@ export function createAuthControllers(runtime: MarketplaceHttpRuntime): Type<unk
 			}
 			const password = bodyString(record, "password", 128, 8);
 			const passwordHash = await hashPassword(password);
-			const user = mapStoreErrors(() => runtime.store.createUser(username, passwordHash));
+			const user = await mapStoreErrors(() => runtime.store.createUser(username, passwordHash));
 			return issueSession(runtime, user.id, user.username, user.createdAt);
 		}
 
@@ -78,7 +78,7 @@ export function createAuthControllers(runtime: MarketplaceHttpRuntime): Type<unk
 			const password = bodyString(record, "password", 128);
 			const clientKey = request.ip ?? "unknown";
 			assertLoginAllowed(clientKey);
-			const user = runtime.store.getUserByUsername(username);
+			const user = await runtime.store.getUserByUsername(username);
 			// Verify against a dummy hash for unknown usernames so the timing matches known ones.
 			const passwordValid = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
 			if (!user || !passwordValid) {
@@ -89,18 +89,18 @@ export function createAuthControllers(runtime: MarketplaceHttpRuntime): Type<unk
 			return issueSession(runtime, user.id, user.username, user.createdAt);
 		}
 
-		logout(authorization: string | undefined): void {
+		async logout(authorization: string | undefined): Promise<void> {
 			if (authorization === undefined) throw unauthorized("AUTH_REQUIRED", "Authorization is required");
-			runtime.store.deleteSession(hashToken(bearerToken(authorization)));
+			await runtime.store.deleteSession(hashToken(bearerToken(authorization)));
 		}
 
-		me(authorization: string | undefined): AuthMeResponse {
-			const principal = requirePrincipal(runtime, authorization);
+		async me(authorization: string | undefined): Promise<AuthMeResponse> {
+			const principal = await requirePrincipal(runtime, authorization);
 			if (principal.kind === "admin") return { admin: true, publisherIds: [] };
 			return {
 				admin: false,
 				user: { username: principal.username, createdAt: principal.createdAt },
-				publisherIds: runtime.store.publisherIdsForUser(principal.userId),
+				publisherIds: await runtime.store.publisherIdsForUser(principal.userId),
 			};
 		}
 	}
@@ -121,14 +121,14 @@ export function createAuthControllers(runtime: MarketplaceHttpRuntime): Type<unk
 	return [AuthController];
 }
 
-function issueSession(
+async function issueSession(
 	runtime: MarketplaceHttpRuntime,
 	userId: number,
 	username: string,
 	createdAt: number,
-): AuthSessionResponse {
+): Promise<AuthSessionResponse> {
 	const { token, tokenHash } = generateSessionToken();
 	const expiresAt = Math.trunc(runtime.clock()) + SESSION_TTL_MS;
-	runtime.store.createSession(tokenHash, userId, expiresAt);
+	await runtime.store.createSession(tokenHash, userId, expiresAt);
 	return { token, expiresAt, user: { username, createdAt } };
 }

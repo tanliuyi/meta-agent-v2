@@ -7,6 +7,13 @@ DEPLOY_HOST="${MARKETPLACE_DEPLOY_HOST:-100.91.230.10}"
 DEPLOY_USER="${MARKETPLACE_DEPLOY_USER:-root}"
 DEPLOY_ROOT="${MARKETPLACE_DEPLOY_ROOT:-/opt/meta-agent-plugin-marketplace}"
 PUBLIC_URL="${MARKETPLACE_PUBLIC_BASE_URL:-http://100.91.230.10:4317}"
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/.env"
+  set +a
+fi
+DATABASE_URL="${MARKETPLACE_DATABASE_URL:-}"
 IMAGE_TAG="${MARKETPLACE_IMAGE_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
 IMAGE="meta-agent-plugin-marketplace:${IMAGE_TAG}"
 REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
@@ -48,12 +55,25 @@ rsync -az -e "$RSYNC_SHELL" \
 rsync -az --delete -e "$RSYNC_SHELL" \
   --exclude node_modules \
   --exclude dist \
+  --exclude .env \
   --exclude .env.production \
   "$SCRIPT_DIR/" \
   "$REMOTE:$DEPLOY_ROOT/repo/packages/plugin-marketplace-server/"
 
 ENV_PATH="$DEPLOY_ROOT/repo/packages/plugin-marketplace-server/.env.production"
-if ! remote "test -f '$ENV_PATH'"; then
+if remote "test -f '$ENV_PATH'"; then
+  if ! remote "grep -q '^MARKETPLACE_DATABASE_URL=' '$ENV_PATH'"; then
+    if [[ -z "$DATABASE_URL" ]]; then
+      echo "ERROR: Existing $ENV_PATH is missing MARKETPLACE_DATABASE_URL and no local value is configured" >&2
+      exit 1
+    fi
+    printf 'MARKETPLACE_DATABASE_URL=%s\n' "$DATABASE_URL" | remote "umask 077; cat >> '$ENV_PATH'"
+  fi
+else
+  if [[ -z "$DATABASE_URL" ]]; then
+    echo "ERROR: MARKETPLACE_DATABASE_URL is required in $SCRIPT_DIR/.env or the shell environment" >&2
+    exit 1
+  fi
   SIGNING_KEY="$({
     node --input-type=module -e '
       import { generateKeyPairSync } from "node:crypto";
@@ -77,10 +97,13 @@ if ! remote "test -f '$ENV_PATH'"; then
     printf 'MARKETPLACE_SIGNING_PRIVATE_KEY=%s\n' "$SIGNING_KEY"
     printf 'MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY=false\n'
     printf 'MARKETPLACE_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
+    printf 'MARKETPLACE_DATABASE_URL=%s\n' "$DATABASE_URL"
   } | remote "umask 077; cat > '$ENV_PATH'"
   unset SIGNING_KEY
   unset ADMIN_TOKEN
 fi
+unset DATABASE_URL
+unset MARKETPLACE_DATABASE_URL
 
 remote "set -eu; chmod 600 '$ENV_PATH'; cd '$COMPOSE_DIR'; current=\$(docker compose ps -q plugin-marketplace); if [ -n \"\$current\" ]; then docker inspect --format='{{.Config.Image}}' \"\$current\" > .previous-image; fi; MARKETPLACE_IMAGE='$IMAGE' docker compose up -d --build --remove-orphans"
 

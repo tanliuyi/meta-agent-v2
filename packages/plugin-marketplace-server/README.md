@@ -2,14 +2,41 @@
 
 NestJS backend for the Meta Agent Desktop plugin marketplace protocol. It is a standalone workspace package and does not use Pi's npm/git package distribution.
 
+## Prerequisites
+
+- Node.js >= 22.19.0
+- A PostgreSQL 15+ database (local or remote)
+- The `pg` driver (bundled in `node_modules`)
+
 ## Development
 
 ```bash
 npm install --ignore-scripts
+# packages/plugin-marketplace-server/.env has been created locally and is ignored by Git.
 npm --prefix packages/plugin-marketplace-server run dev
 ```
 
-The development script always uses an in-memory ephemeral signing key and ignores `MARKETPLACE_SIGNING_PRIVATE_KEY` inherited from the shell. The default development server listens on `127.0.0.1:4317`. It still reads other settings from the process environment and does not load `.env` files implicitly. `MARKETPLACE_DATA_DIR` cannot be used with this ephemeral development mode. Production startup and deployments must provide `MARKETPLACE_SIGNING_PRIVATE_KEY` as a base64-encoded PKCS#8 PEM value.
+The development script always uses an ephemeral signing key and ignores `MARKETPLACE_SIGNING_PRIVATE_KEY` from the shell. It loads configuration from `packages/plugin-marketplace-server/.env` if present (this file is git-ignored). The development server listens on `127.0.0.1:4317` by default.
+
+### Environment variables (development `.env`)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `MARKETPLACE_DATABASE_URL` | Yes | — | PostgreSQL connection URL, e.g. `postgresql://user:password@host:5432/database` |
+| `MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY` | No | `true` in dev | Generate a fresh signing key on each start (dev only) |
+| `MARKETPLACE_ADMIN_TOKEN` | No | — | Static admin bearer token; generate one locally for development |
+| `MARKETPLACE_HOST` | No | `127.0.0.1` | HTTP listen address |
+| `MARKETPLACE_PORT` | No | `4317` | HTTP listen port |
+| `MARKETPLACE_BASE_PATH` | No | — | URL path prefix for reverse-proxy deployments |
+| `MARKETPLACE_PUBLIC_BASE_URL` | No | `http://{host}:{port}{basePath}` | Externally visible base URL |
+| `MARKETPLACE_ID` | No | `meta-agent-development` | Marketplace identifier |
+| `MARKETPLACE_SIGNING_PRIVATE_KEY` | No (dev) | — | Base64-encoded PKCS#8 Ed25519 private key |
+| `MARKETPLACE_MAX_ARTIFACT_BYTES` | No | 33554432 | Maximum uploaded artifact size in bytes |
+| `MARKETPLACE_ALLOW_REGISTRATION` | No | `true` | Whether new user accounts can self-register |
+| `MARKETPLACE_MAX_LOGIN_FAILURES` | No | `10` | Failed login attempts before rate-limiting; `0` disables |
+| `MARKETPLACE_ARTIFACT_ORIGINS` | No | — | Comma-separated HTTP(S) origins allowed for artifact hosting |
+
+The development script (`scripts/dev.mjs`) loads `.env` if it exists. The startup entry point (`main.ts`) reads environment variables directly and does not load `.env` automatically; production environments set variables through Docker Compose or systemd.
 
 ## Endpoints
 
@@ -63,9 +90,19 @@ Administration (`MARKETPLACE_ADMIN_TOKEN` bearer token):
 
 ## Storage and accounts
 
-State lives in SQLite through the Node built-in `node:sqlite` module (no native dependencies). When `MARKETPLACE_DATA_DIR` is unset the store is in-memory and reseeded from `catalog/plugins.json` on every start, which preserves the previous stateless development behavior. When `MARKETPLACE_DATA_DIR` is set, `marketplace.db` is created there, the catalog seeds only an empty database, and a pinned `MARKETPLACE_SIGNING_PRIVATE_KEY` is required so stored artifact signatures stay verifiable across restarts.
+State lives in a PostgreSQL database via the `pg` driver (no native SQLite dependencies). When the database is empty on first startup, the server creates all required tables and seeds the catalog from `catalog/plugins.json`. A PostgreSQL advisory transaction lock prevents concurrent seeding.
 
 Accounts are username/password (scrypt-hashed) with 30-day bearer session tokens. The admin surface uses the static `MARKETPLACE_ADMIN_TOKEN` instead of a user account; admins create publishers and grant publish rights by adding usernames as publisher members. Failed logins are throttled per client IP: after `MARKETPLACE_MAX_LOGIN_FAILURES` failures (default 10) within a 15-minute window, further login attempts return `429 AUTH_RATE_LIMITED` until the window expires. A successful login resets the counter; `0` disables throttling.
+
+### Database setup
+
+The server expects the target database to already exist. It creates tables and indexes automatically on startup. To create the database:
+
+```sql
+CREATE DATABASE plugin_marketplace;
+```
+
+The connecting user must have `CREATE` privileges on the public schema (or a dedicated schema set via `search_path`).
 
 ## Publishing workflow
 
@@ -103,9 +140,9 @@ Defaults:
 - Host binding: `100.91.230.10:4317`
 - Marketplace ID: `meta-agent-development`
 
-On the first deployment, the script generates an Ed25519 key and an admin token locally and writes them to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file so the marketplace fingerprint remains stable. Back up `.env.production` separately; deleting it creates a new marketplace identity that Desktop clients must confirm again. Deployments that predate the admin API keep working with admin endpoints disabled until `MARKETPLACE_ADMIN_TOKEN` is added to `.env.production`.
+On the first deployment, the script generates an Ed25519 key and an admin token locally and writes them to the remote `.env.production` with mode `0600`. It reads `MARKETPLACE_DATABASE_URL` from the shell or the ignored local `.env`; the connection URL is never stored in the tracked deployment script. Subsequent deployments preserve the remote file so the marketplace fingerprint remains stable. Back up `.env.production` separately; deleting it creates a new marketplace identity that Desktop clients must confirm again.
 
-The container persists SQLite state in the `marketplace-data` named volume mounted at `/data` (`MARKETPLACE_DATA_DIR=/data` is set by Compose). Back up the volume alongside `.env.production`; removing it discards accounts, published plugins, ratings, and download counters, after which the catalog seed repopulates an empty database.
+The container does not persist state locally; all data lives in the configured PostgreSQL database. Back up the database with standard PostgreSQL tools (`pg_dump`, WAL archival, or replication).
 
 Override the SSH destination or remote root without editing tracked files:
 
@@ -139,7 +176,24 @@ ssh root@100.91.230.10 '
 
 ```bash
 npm --prefix packages/plugin-marketplace-server run typecheck
-npm --prefix packages/plugin-marketplace-server test
+# Integration tests require MARKETPLACE_TEST_DATABASE_URL
+MARKETPLACE_TEST_DATABASE_URL=postgresql://user:password@host:5432/test_db npm --prefix packages/plugin-marketplace-server test
 bash -n packages/plugin-marketplace-server/deploy.sh
 docker compose -f packages/plugin-marketplace-server/compose.yaml config
 ```
+
+## Backup and restore
+
+The database is the single source of truth for accounts, published plugins, ratings, and download counters. Use standard PostgreSQL backup procedures:
+
+```bash
+pg_dump -h 100.91.230.10 -U root -d plugin_marketplace > marketplace_backup.sql
+```
+
+To restore:
+
+```bash
+psql -h 100.91.230.10 -U root -d plugin_marketplace < marketplace_backup.sql
+```
+
+Also back up `.env.production` separately; it contains the signing private key and admin token.

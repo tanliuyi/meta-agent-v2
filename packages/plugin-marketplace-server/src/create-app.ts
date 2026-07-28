@@ -1,6 +1,4 @@
 import "reflect-metadata";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { MarketplaceServerConfig } from "./config.ts";
@@ -18,13 +16,8 @@ export interface CreateMarketplaceAppOptions {
 export async function createMarketplaceApp(options: CreateMarketplaceAppOptions): Promise<INestApplication> {
 	const clock = options.clock ?? Date.now;
 	const signing = new MarketplaceSigningService(options.config.signingPrivateKey);
-	let databasePath: string | undefined;
-	if (options.config.dataDir) {
-		mkdirSync(options.config.dataDir, { recursive: true });
-		databasePath = join(options.config.dataDir, "marketplace.db");
-	}
 	const store = await MarketplaceStore.open({
-		...(databasePath ? { databasePath } : {}),
+		databaseUrl: options.config.databaseUrl,
 		...(options.catalogPath ? { catalogPath: options.catalogPath } : {}),
 		signing,
 		marketplaceId: options.config.marketplaceId,
@@ -44,7 +37,7 @@ export async function createMarketplaceApp(options: CreateMarketplaceAppOptions)
 		app.enableShutdownHooks();
 		return app;
 	} catch (error) {
-		store.close();
+		await store.close();
 		throw error;
 	}
 }
