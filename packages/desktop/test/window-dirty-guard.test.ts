@@ -4,12 +4,23 @@ import { describe, expect, test, vi } from "vitest";
 import { WindowDirtyGuard } from "../src/main/window-dirty-guard.ts";
 
 class FakeWebContents extends EventEmitter {
-  readonly id: number;
+  private readonly webContentsId: number;
+  private destroyed = false;
   reload = vi.fn();
 
   constructor(id: number) {
     super();
-    this.id = id;
+    this.webContentsId = id;
+  }
+
+  get id(): number {
+    if (this.destroyed) throw new Error("Object has been destroyed");
+    return this.webContentsId;
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.emit("destroyed");
   }
 }
 
@@ -106,7 +117,7 @@ describe("WindowDirtyGuard", () => {
     guard.attach(asBrowserWindow(second));
     guard.setDirty(4, true);
     expect(guard.hasDirtyWindows([asBrowserWindow(first), asBrowserWindow(second)])).toBe(true);
-    first.webContents.emit("destroyed");
+    first.webContents.destroy();
     expect(guard.isDirty(4)).toBe(false);
     expect(guard.hasDirtyWindows([asBrowserWindow(second)])).toBe(false);
   });

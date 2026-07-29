@@ -43,6 +43,7 @@ export function Select({ options, placeholder, tooltip, className, ...props }: S
       {tooltip ? (
         <Tooltip
           open={tooltipOpen && !selectOpen}
+          delayDuration={1000}
           onOpenChange={(open) => {
             setTooltipOpen(selectOpen ? false : open);
           }}

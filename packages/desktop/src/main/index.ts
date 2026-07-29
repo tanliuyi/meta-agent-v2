@@ -31,7 +31,7 @@ import { MarketplaceRevocationService } from "./plugins/marketplace-revocation-s
 import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
-import { locateManagedBash } from "./sidecar/managed-shell-locator.ts";
+import { locateGitForWindowsBash, locateManagedBash } from "./sidecar/managed-shell-locator.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
 import { NodeRuntimeInstaller } from "./sidecar/node-runtime-installer.ts";
 import {
@@ -45,6 +45,8 @@ import {
   ShellRuntimeInstaller,
   shellRuntimeInstallUrl,
 } from "./sidecar/shell-runtime-installer.ts";
+import { saveShellRuntimePath } from "./sidecar/shell-runtime-settings.ts";
+import { validateBashRuntime } from "./sidecar/shell-runtime-validator.ts";
 import { SidecarLog } from "./sidecar/sidecar-log.ts";
 import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
@@ -226,9 +228,10 @@ app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   Menu.setApplicationMenu(null);
   const userDataDir = app.getPath("userData");
+  const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi-desk", "agent");
   if (runtimeSetupSelection) {
     try {
-      await runRuntimeSetup(userDataDir, runtimeSetupSelection);
+      await runRuntimeSetup(userDataDir, agentDir, runtimeSetupSelection);
       app.exit(0);
     } catch (error) {
       console.error("Runtime setup failed:", error);
@@ -236,15 +239,14 @@ app.whenReady().then(async () => {
     }
     return;
   }
-  const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi-desk", "agent");
   const shellInstaller = new ShellRuntimeInstaller(userDataDir, () => undefined);
-  const managedBashPath =
-    shellInstaller.activeBashPath() ??
-    locateManagedBash({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      appDir,
-    });
+  const managedBashPath = locateManagedBash({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir,
+  });
+  const installedBashPath = shellInstaller.installedBashPath();
+  const desktopBashPath = managedBashPath ?? installedBashPath ?? locateGitForWindowsBash();
   const generalWorkspaceCwd = join(userDataDir, "workspaces", "general");
   const projects = new ProjectStore(
     join(userDataDir, "desktop-state.json"),
@@ -367,28 +369,32 @@ app.whenReady().then(async () => {
     (scope, text) => sidecarLog?.write(scope, text),
     marketplaceGenerationReferences,
   );
+  const metadataClient = metadata;
   // supervisor 在两个 registry 之后才能构造（循环依赖）；回调必须容忍赋值前被触发，避免 TDZ 崩溃或 ack 饿死。
   let supervisor: SessionSupervisor | undefined;
-  subagents = new SubagentWorkerRegistry({
+  let subagentRegistry: SubagentWorkerRegistry | undefined;
+  subagentRegistry = new SubagentWorkerRegistry({
     manifest: runtimeManifest,
     agentDir,
-    ...(managedBashPath ? { shellPath: managedBashPath } : {}),
+    ...(desktopBashPath ? { shellPath: desktopBashPath } : {}),
     log: (scope, text) => sidecarLog?.write(scope, text),
     catalogChanged: broadcastThreadCatalogUpdate,
     persistSession: (projectId, sessionFile, thread) =>
-      metadata!.registerExternal(projectId, projects.getCwd(projectId), sessionFile, thread),
+      metadataClient.registerExternal(projectId, projects.getCwd(projectId), sessionFile, thread),
     push: (payload, workerInstanceId, sidecarSequence) => {
       if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
-      else subagents?.acknowledge(workerInstanceId, sidecarSequence);
+      else subagentRegistry?.acknowledge(workerInstanceId, sidecarSequence);
     },
     resync: (projectId, threadId, reason) => supervisor?.resyncRequired(projectId, threadId, reason),
   });
+  const activeSubagents = subagentRegistry;
+  subagents = activeSubagents;
   const workers = new ThreadWorkerRegistry({
     manifest: runtimeManifest,
-    metadata,
+    metadata: metadataClient,
     userDataDir,
     agentDir,
-    ...(managedBashPath ? { shellPath: managedBashPath } : {}),
+    ...(desktopBashPath ? { shellPath: desktopBashPath } : {}),
     extensionSourcePolicy,
     generationReferences: marketplaceGenerationReferences,
     extensionApplyJournal: marketplaceApplyJournal,
@@ -403,13 +409,13 @@ app.whenReady().then(async () => {
     },
     resync: (projectId, threadId, reason) => supervisor?.resyncRequired(projectId, threadId, reason),
     log: (scope, text) => sidecarLog?.write(scope, text),
-    handleHostRequest: (request, emit) => subagents!.handleHostRequest(request, emit),
-    hostWorkerFailed: (projectId, threadId) => subagents!.cancelThread(projectId, threadId),
-    listSubagentThreads: (projectId) => subagents!.listThreads(projectId),
-    isActiveSubagentThread: (projectId, threadId) => subagents!.isActiveThread(projectId, threadId),
-    attachSubagent: (projectId, threadId) => subagents!.attach(projectId, threadId),
+    handleHostRequest: (request, emit) => activeSubagents.handleHostRequest(request, emit),
+    hostWorkerFailed: (projectId, threadId) => activeSubagents.cancelThread(projectId, threadId),
+    listSubagentThreads: (projectId) => activeSubagents.listThreads(projectId),
+    isActiveSubagentThread: (projectId, threadId) => activeSubagents.isActiveThread(projectId, threadId),
+    attachSubagent: (projectId, threadId) => activeSubagents.attach(projectId, threadId),
     acknowledgeSubagent: (workerInstanceId, sidecarSequence) =>
-      subagents!.acknowledge(workerInstanceId, sidecarSequence),
+      activeSubagents.acknowledge(workerInstanceId, sidecarSequence),
   });
   const startedSupervisor = new SessionSupervisor(projects, workers, {
     log: (scope, text) => sidecarLog?.write(scope, text),
@@ -419,7 +425,7 @@ app.whenReady().then(async () => {
   terminals = new TerminalSupervisor(
     projects,
     broadcastTerminalEvent,
-    createTerminalShellResolver(agentDir, managedBashPath),
+    createTerminalShellResolver(agentDir, desktopBashPath),
   );
   const providers = new ProvidersConfigService(models, auth, authModelRuntime);
   let modelConfigurationGeneration = 0;
@@ -463,7 +469,7 @@ app.whenReady().then(async () => {
         const revision = { generation: modelConfigurationGeneration };
         const results = await Promise.allSettled([
           workers.refreshAllModels(revision),
-          subagents!.refreshAllModels(revision),
+          activeSubagents.refreshAllModels(revision),
         ]);
         const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
         if (failures.length > 0) {
@@ -475,24 +481,54 @@ app.whenReady().then(async () => {
           const activeProject = await projects.getActive();
           const cwd = activeProject?.cwd ?? process.cwd();
           const configuredShellPath = SettingsManager.create(cwd, agentDir).getShellPath();
+          const shellPath = configuredShellPath ?? desktopBashPath;
+          if (!shellPath) {
+            return {
+              state: "missing" as const,
+              message: "未找到 Git for Windows；WSL bash 不作为 Desktop 默认 shell",
+              installUrl: shellRuntimeInstallUrl(),
+            };
+          }
           try {
-            const shell = getShellConfig(configuredShellPath).shell;
+            const shell = getShellConfig(shellPath).shell;
+            const runtime = await validateBashRuntime(shell);
             return {
               state: "ready" as const,
-              path: shell,
-              ...(shell === shellInstaller.activeBashPath() ? { version: SHELL_RUNTIME_VERSION } : {}),
-              message: `已找到 Git Bash: ${shell}`,
+              path: runtime.path,
+              version: shell === shellInstaller.installedBashPath() ? SHELL_RUNTIME_VERSION : runtime.version,
+              message: `Git Bash ${runtime.version} 可用`,
               installUrl: shellRuntimeInstallUrl(),
             };
           } catch (error) {
             return {
               state: configuredShellPath ? ("invalid" as const) : ("missing" as const),
+              path: shellPath,
               message: error instanceof Error ? error.message : String(error),
               installUrl: shellRuntimeInstallUrl(),
             };
           }
         },
-        install: () => shellInstaller.install(),
+        install: async () => {
+          const activeProject = await projects.getActive();
+          const cwd = activeProject?.cwd ?? process.cwd();
+          const status = await shellInstaller.install();
+          if (!status.path) throw new Error("Git Bash 安装完成但未返回可执行文件路径");
+          await saveShellRuntimePath(cwd, agentDir, status.path);
+          return status;
+        },
+        use: async (path) => {
+          const activeProject = await projects.getActive();
+          const cwd = activeProject?.cwd ?? process.cwd();
+          const runtime = await validateBashRuntime(path);
+          await saveShellRuntimePath(cwd, agentDir, runtime.path);
+          return {
+            state: "ready" as const,
+            path: runtime.path,
+            version: runtime.version,
+            message: `Git Bash ${runtime.version} 可用`,
+            installUrl: shellRuntimeInstallUrl(),
+          };
+        },
         onProgress: (listener) => shellInstaller.onProgress(listener),
       },
     },

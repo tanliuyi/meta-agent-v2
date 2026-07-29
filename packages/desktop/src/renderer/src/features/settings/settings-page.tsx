@@ -3,6 +3,7 @@ import { settingsReturnSession } from "@renderer/state/settings-navigation";
 import { Link, Outlet, useSearch } from "@tanstack/react-router";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
 import Bot from "lucide-react/dist/esm/icons/bot.mjs";
+import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Server from "lucide-react/dist/esm/icons/server.mjs";
@@ -48,6 +49,10 @@ export function SettingsPage() {
       <Link to="/settings/subagents" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
         <Bot aria-hidden="true" />
         <span>子智能体</span>
+      </Link>
+      <Link to="/settings/dependencies" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
+        <Boxes aria-hidden="true" />
+        <span>依赖项</span>
       </Link>
       <Link to="/settings/about" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
         <Info aria-hidden="true" />

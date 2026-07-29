@@ -234,6 +234,7 @@ const desktopApi: DesktopApi = {
   shellRuntime: {
     getStatus: () => ipcRenderer.invoke(CHANNELS.shellRuntimeStatus),
     install: () => ipcRenderer.invoke(CHANNELS.shellRuntimeInstall),
+    choose: () => ipcRenderer.invoke(CHANNELS.shellRuntimeChoose),
     onProgress(listener) {
       const handler = (_event: Electron.IpcRendererEvent, progress: ShellRuntimeProgress) => listener(progress);
       ipcRenderer.on(CHANNELS.shellRuntimeProgress, handler);

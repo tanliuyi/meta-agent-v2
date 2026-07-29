@@ -813,3 +813,97 @@
     display: none;
   }
 }
+
+.dependency-page-heading {
+  align-items: center;
+}
+
+.dependency-page-heading > div {
+  min-width: 0;
+}
+
+.dependency-row {
+  min-height: 64px;
+}
+
+.dependency-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 550;
+}
+
+.dependency-name svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: hsl(var(--destructive));
+}
+
+.dependency-name[data-ready] svg {
+  color: hsl(var(--success));
+}
+
+.dependency-error {
+  color: hsl(var(--destructive));
+}
+
+.dependency-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.dependency-progress {
+  display: grid;
+  width: min(320px, 100%);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-caption);
+}
+
+.dependency-progress progress {
+  width: 100%;
+  height: 6px;
+  accent-color: hsl(var(--primary));
+}
+
+.dependency-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.dependency-spin {
+  animation: dependency-spin 900ms linear infinite;
+}
+
+@keyframes dependency-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .dependency-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    padding-block: 10px;
+  }
+
+  .dependency-actions,
+  .dependency-footer {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dependency-spin {
+    animation: none;
+  }
+}

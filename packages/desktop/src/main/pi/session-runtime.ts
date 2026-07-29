@@ -129,8 +129,7 @@ export class SessionRuntime {
     const extensionSet = options.extensionSet ?? builtinOnlyExtensionSet(options.projectId);
     const agentDir = options.agentDir ?? getAgentDir();
     const settingsManager = SettingsManager.create(options.cwd, agentDir);
-    if (!settingsManager.getShellPath() && options.shellPath)
-      settingsManager.applyOverrides({ shellPath: options.shellPath });
+    if (options.shellPath) settingsManager.applyDefaults({ shellPath: options.shellPath });
     const modelRuntime = await ModelRuntime.create({
       credentials: new FileCredentialStore(join(agentDir, "auth.json")),
       modelsPath: join(agentDir, "models.json"),

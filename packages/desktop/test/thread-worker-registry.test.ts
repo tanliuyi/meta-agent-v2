@@ -19,6 +19,7 @@ import {
   type SessionPushPayload,
   type Thread,
 } from "../src/shared/contracts.ts";
+import type { ResolvedExtensionSet } from "../src/shared/desktop-extension-contracts.ts";
 import {
   SIDECAR_PROTOCOL_VERSION,
   type SidecarCommand,
@@ -977,6 +978,7 @@ function createHarness(
   const resolveExtensions = vi.fn(async (projectId: string) => extensionSet(projectId));
   const extensionSourcePolicy = {
     resolve: resolveExtensions,
+    hydrateRuntimeConfigurations: vi.fn(async (set: ResolvedExtensionSet) => set),
   } as unknown as DesktopExtensionSourcePolicy;
   const resync = vi.fn();
   const options: ThreadWorkerRegistryOptions = {

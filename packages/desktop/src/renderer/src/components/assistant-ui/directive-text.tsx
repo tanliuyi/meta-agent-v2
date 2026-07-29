@@ -6,6 +6,7 @@ import {
   unstable_defaultDirectiveFormatter,
 } from "@assistant-ui/react";
 import { memo } from "react";
+import { DirectiveIcon } from "./directive-icon.tsx";
 
 const LEGACY_PI_FILE_REFERENCE_RE = /(^|\s)@([^\s@]+)/gu;
 
@@ -65,6 +66,7 @@ export const DirectiveText: TextMessagePartComponent = memo(function DirectiveTe
             aria-label={`${segment.type}: ${displayLabel}`}
             className="aui-directive-chip mx-0.5 inline-flex items-baseline gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-(length:--type-size-ui) leading-none text-primary [&_svg]:size-3 [&_svg]:shrink-0 [&_svg]:self-center"
           >
+            <DirectiveIcon type={segment.type} />
             {displayLabel}
           </span>
         );

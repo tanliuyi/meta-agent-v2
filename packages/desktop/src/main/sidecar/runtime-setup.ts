@@ -1,8 +1,11 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { NodeRuntimeProgress } from "../../shared/desktop-api.ts";
 import { NodeRuntimeInstaller } from "./node-runtime-installer.ts";
 import { ShellRuntimeInstaller } from "./shell-runtime-installer.ts";
+import { saveShellRuntimePath } from "./shell-runtime-settings.ts";
+import { type BashRuntimeDetails, validateBashRuntime } from "./shell-runtime-validator.ts";
 
 export type RuntimeSetupComponent = "node" | "shell";
 
@@ -20,7 +23,11 @@ export function parseRuntimeSetupSelection(argv: readonly string[]): RuntimeSetu
   return selection;
 }
 
-export async function runRuntimeSetup(userDataDir: string, selection: readonly RuntimeSetupComponent[]): Promise<void> {
+export async function runRuntimeSetup(
+  userDataDir: string,
+  agentDir: string,
+  selection: readonly RuntimeSetupComponent[],
+): Promise<void> {
   mkdirSync(userDataDir, { recursive: true });
   const logPath = join(userDataDir, "runtime-setup.log");
   const log = (component: RuntimeSetupComponent, progress: NodeRuntimeProgress): void => {
@@ -29,6 +36,31 @@ export async function runRuntimeSetup(userDataDir: string, selection: readonly R
   if (selection.includes("node"))
     await new NodeRuntimeInstaller(userDataDir, (progress) => log("node", progress)).install();
   if (selection.includes("shell")) {
-    await new ShellRuntimeInstaller(userDataDir, (progress) => log("shell", progress)).install();
+    const configured = await findConfiguredShellRuntime(userDataDir, agentDir);
+    if (configured) {
+      log("shell", {
+        phase: "ready",
+        percent: 100,
+        message: `保留已配置的 Git Bash ${configured.version}`,
+      });
+    } else {
+      const status = await new ShellRuntimeInstaller(userDataDir, (progress) => log("shell", progress)).install();
+      if (!status.path) throw new Error("Git Bash 安装完成但未返回可执行文件路径");
+      await saveShellRuntimePath(userDataDir, agentDir, status.path);
+    }
+  }
+}
+
+export async function findConfiguredShellRuntime(
+  cwd: string,
+  agentDir: string,
+  validate: (path: string) => Promise<BashRuntimeDetails> = validateBashRuntime,
+): Promise<BashRuntimeDetails | undefined> {
+  const configuredPath = SettingsManager.create(cwd, agentDir).getShellPath();
+  if (!configuredPath) return undefined;
+  try {
+    return await validate(configuredPath);
+  } catch {
+    return undefined;
   }
 }

@@ -7,7 +7,7 @@ import { UserMessageContent } from "./user-message-content.tsx";
 
 export function UserMessage() {
   const isEditing = useAuiState((state) => state.message.composer.isEditing);
-  const hasAttachments = useAuiState((state) => state.message.attachments.length > 0);
+  const hasAttachments = useAuiState((state) => (state.message.attachments?.length ?? 0) > 0);
   if (isEditing) return <EditComposer />;
 
   return (

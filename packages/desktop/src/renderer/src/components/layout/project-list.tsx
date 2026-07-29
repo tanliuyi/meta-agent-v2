@@ -18,9 +18,15 @@ export const ProjectList = memo(function ProjectList({
 }: ProjectListProps) {
   const projects = useDesktopSelector(selectProjects);
 
+  const userProjects = projects.filter(isUserProject);
+
+  if (userProjects.length === 0) {
+    return <p className="px-3 py-6 text-center text-sm text-muted-foreground">没有项目</p>;
+  }
+
   return (
     <ul className="m-0 list-none p-0">
-      {projects.filter(isUserProject).map((project) => (
+      {userProjects.map((project) => (
         <ProjectItem
           key={project.id}
           project={project}

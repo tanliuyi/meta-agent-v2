@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
-import { SettingsManager } from "../src/core/settings-manager.ts";
+import { FileSettingsStorage, SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("SettingsManager", () => {
 	const testDir = join(process.cwd(), "test-settings-tmp");
@@ -26,6 +26,25 @@ describe("SettingsManager", () => {
 	});
 
 	describe("preserves externally added settings", () => {
+		it("should re-read a settings file created before the first-write lock is acquired", () => {
+			const settingsPath = join(agentDir, "settings.json");
+			const storage = new FileSettingsStorage(projectDir, agentDir);
+			let callbackCalls = 0;
+
+			storage.withLock("global", (current) => {
+				callbackCalls += 1;
+				const settings = current ? JSON.parse(current) : {};
+				if (callbackCalls === 1) writeFileSync(settingsPath, JSON.stringify({ theme: "external" }));
+				return JSON.stringify({ ...settings, defaultModel: "local" });
+			});
+
+			expect(callbackCalls).toBe(2);
+			expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).toEqual({
+				theme: "external",
+				defaultModel: "local",
+			});
+		});
+
 		it("should preserve enabledModels when changing thinking level", async () => {
 			// Create initial settings file
 			const settingsPath = join(agentDir, "settings.json");
@@ -183,6 +202,30 @@ describe("SettingsManager", () => {
 			expect(manager.getTheme()).toBe("light");
 			expect(manager.getExtensionPaths()).toEqual(["/after.ts"]);
 			expect(manager.getDefaultModel()).toBe("claude-sonnet");
+		});
+
+		it("should keep runtime defaults across reloads without overriding persisted settings", async () => {
+			const settingsPath = join(agentDir, "settings.json");
+			const managedShell = join(testDir, "managed", "bash");
+			const userShell = join(testDir, "user", "bash");
+			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			manager.applyDefaults({ shellPath: managedShell });
+			expect(manager.getShellPath()).toBe(managedShell);
+
+			writeFileSync(settingsPath, JSON.stringify({ theme: "light", shellPath: userShell }));
+			await manager.reload();
+			expect(manager.getShellPath()).toBe(userShell);
+
+			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
+			await manager.reload();
+			expect(manager.getShellPath()).toBe(managedShell);
+
+			manager.setTheme("light");
+			await manager.flush();
+			expect(manager.getShellPath()).toBe(managedShell);
+			expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).not.toHaveProperty("shellPath");
 		});
 
 		it("should keep previous settings when file is invalid", async () => {
@@ -491,6 +534,24 @@ describe("SettingsManager", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: "/bin/zsh" }));
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getShellPath()).toBe("/bin/zsh");
+		});
+
+		it("should persist a project shellPath without replacing the global shellPath", async () => {
+			const globalPath = "/global/bin/bash";
+			const projectPath = "/project/bin/bash";
+			const replacementPath = "/replacement/bin/bash";
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: globalPath }));
+			writeFileSync(join(projectDir, ".pi-desk", "settings.json"), JSON.stringify({ shellPath: projectPath }));
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			manager.setProjectShellPath(replacementPath);
+			await manager.flush();
+
+			expect(manager.getShellPath()).toBe(replacementPath);
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).shellPath).toBe(globalPath);
+			expect(JSON.parse(readFileSync(join(projectDir, ".pi-desk", "settings.json"), "utf-8")).shellPath).toBe(
+				replacementPath,
+			);
 		});
 
 		it("should expand ~ in shellPath", () => {

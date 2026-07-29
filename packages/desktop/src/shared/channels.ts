@@ -55,6 +55,7 @@ export const CHANNELS = {
   nodeRuntimeProgress: "desktop:node-runtime:progress",
   shellRuntimeStatus: "desktop:shell-runtime:status",
   shellRuntimeInstall: "desktop:shell-runtime:install",
+  shellRuntimeChoose: "desktop:shell-runtime:choose",
   shellRuntimeProgress: "desktop:shell-runtime:progress",
   runtimeRestart: "desktop:runtime:restart",
   authGetConfig: "desktop:auth:get-config",

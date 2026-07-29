@@ -58,6 +58,7 @@ export function ModelSelect({
     >
       <Tooltip
         open={tooltipOpen && !selectorOpen}
+        delayDuration={1000}
         onOpenChange={(open) => {
           setTooltipOpen(selectorOpen ? false : open);
         }}

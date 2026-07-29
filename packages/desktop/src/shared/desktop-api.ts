@@ -120,6 +120,7 @@ export interface DesktopApi {
   shellRuntime: {
     getStatus(): Promise<ShellRuntimeStatus>;
     install(): Promise<ShellRuntimeStatus>;
+    choose(): Promise<ShellRuntimeStatus | null>;
     onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
   };
   runtime: {

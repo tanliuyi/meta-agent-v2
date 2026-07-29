@@ -116,7 +116,7 @@ export const Sidebar = memo(function Sidebar() {
             </Button>
           </nav>
 
-          <section className="sidebar-project-section">
+          <section className="sidebar-project-section mt-3">
             <div className="sidebar-section-heading">
               <span>项目</span>
               <TooltipIconButton

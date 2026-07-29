@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell } from "electron";
 import type {
   AuthOauthLoginInput,
   AuthOauthLoginResponse,
@@ -97,6 +97,7 @@ export function registerIpc(
     shell?: {
       getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
       install(): Promise<ShellRuntimeStatus>;
+      use(path: string): Promise<ShellRuntimeStatus>;
       onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
     };
   },
@@ -574,6 +575,17 @@ export function registerIpc(
   if (nodeRuntime.shell) {
     ipcMain.handle(CHANNELS.shellRuntimeStatus, () => nodeRuntime.shell?.getStatus());
     ipcMain.handle(CHANNELS.shellRuntimeInstall, () => nodeRuntime.shell?.install());
+    ipcMain.handle(CHANNELS.shellRuntimeChoose, async (event) => {
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options: OpenDialogOptions = {
+        title: "选择 Git Bash 可执行文件",
+        properties: ["openFile"],
+        filters: [{ name: "Bash executable", extensions: ["exe"] }],
+      };
+      const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+      const path = result.filePaths[0];
+      return result.canceled || !path ? null : nodeRuntime.shell?.use(path);
+    });
   }
   if (updater) {
     ipcMain.handle(CHANNELS.updaterGetState, () => updater.getState());

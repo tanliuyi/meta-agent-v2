@@ -180,9 +180,7 @@ export class SubagentWorkerService implements SidecarService {
     ];
     const extensionSet = childExtensionSet(request, extensionFactories);
     const settingsManager = SettingsManager.create(request.cwd, this.binding.agentDir);
-    if (!settingsManager.getShellPath() && this.binding.shellPath) {
-      settingsManager.applyOverrides({ shellPath: this.binding.shellPath });
-    }
+    if (this.binding.shellPath) settingsManager.applyDefaults({ shellPath: this.binding.shellPath });
     const modelRuntime = await ModelRuntime.create({
       credentials: new FileCredentialStore(join(this.binding.agentDir, "auth.json")),
       modelsPath: join(this.binding.agentDir, "models.json"),

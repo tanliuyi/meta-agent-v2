@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   createAgentSessionServices: vi.fn(),
   createSessionManager: vi.fn(() => ({})),
   createModelRuntime: vi.fn(async () => ({})),
-  createSettingsManager: vi.fn(() => ({ getShellPath: () => undefined, applyOverrides: vi.fn() })),
+  createSettingsManager: vi.fn(() => ({ getShellPath: () => undefined, applyDefaults: vi.fn() })),
   resolveSelection: vi.fn(),
   resolveResumeSelection: vi.fn(),
 }));
@@ -65,9 +65,9 @@ describe("SessionRuntime Pi-native commands", () => {
     mocks.createAgentSessionServices.mockResolvedValue(createServices());
   });
 
-  it("injects the managed shell fallback only when settings have no user shellPath", async () => {
-    const applyOverrides = vi.fn();
-    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => undefined, applyOverrides });
+  it("registers the managed shell as a low-priority runtime default", async () => {
+    const applyDefaults = vi.fn();
+    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => undefined, applyDefaults });
     mocks.createAgentSessionFromServices.mockResolvedValue({ session: createSession() });
 
     const runtime = await SessionRuntime.create({
@@ -78,13 +78,13 @@ describe("SessionRuntime Pi-native commands", () => {
       onSummaryChanged: () => {},
     });
 
-    expect(applyOverrides).toHaveBeenCalledWith({ shellPath: "/managed/bin/bash" });
+    expect(applyDefaults).toHaveBeenCalledWith({ shellPath: "/managed/bin/bash" });
     await runtime.dispose();
   });
 
-  it("preserves a user-configured shellPath over the managed fallback", async () => {
-    const applyOverrides = vi.fn();
-    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => "/user/bin/bash", applyOverrides });
+  it("keeps the managed fallback available when the user has configured shellPath", async () => {
+    const applyDefaults = vi.fn();
+    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => "/user/bin/bash", applyDefaults });
     mocks.createAgentSessionFromServices.mockResolvedValue({ session: createSession() });
 
     const runtime = await SessionRuntime.create({
@@ -95,7 +95,7 @@ describe("SessionRuntime Pi-native commands", () => {
       onSummaryChanged: () => {},
     });
 
-    expect(applyOverrides).not.toHaveBeenCalled();
+    expect(applyDefaults).toHaveBeenCalledWith({ shellPath: "/managed/bin/bash" });
     await runtime.dispose();
   });
 
