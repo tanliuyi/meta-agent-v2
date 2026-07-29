@@ -9,6 +9,7 @@
     "build": "tsgo -p tsconfig.build.json",
     "dev": "node scripts/dev.mjs",
     "migrate:sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts",
+    "postgres:state": "tsx scripts/postgres-state.ts",
     "start": "node dist/main.js",
     "test": "vitest --run",
     "typecheck": "tsgo --noEmit -p tsconfig.build.json"

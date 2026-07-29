@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { classifyMarketplacePostgresState, MARKETPLACE_TABLES } from "../scripts/postgres-state.ts";
 import { versionCompatible } from "../src/catalog-query.ts";
 import { loadMarketplaceServerConfig } from "../src/config.ts";
 import type { PluginStatus, StoredPluginVersion } from "../src/contracts.ts";
@@ -94,6 +95,23 @@ describe("marketplace server config", () => {
 			MARKETPLACE_PUBLIC_BASE_URL: "http://market.example.com",
 		});
 		expect(config.publicBaseUrl).toBe("http://market.example.com");
+	});
+});
+
+describe("PostgreSQL deployment state", () => {
+	it("distinguishes empty, complete, and partial marketplace databases", () => {
+		expect(classifyMarketplacePostgresState(new Set(), new Map())).toBe("empty");
+		const tables = new Set<string>(MARKETPLACE_TABLES);
+		expect(classifyMarketplacePostgresState(tables, new Map(MARKETPLACE_TABLES.map((table) => [table, 0])))).toBe(
+			"empty",
+		);
+		const populated = new Map<string, number>(MARKETPLACE_TABLES.map((table) => [table, 0]));
+		for (const table of ["meta", "publishers", "plugins", "plugin_versions", "plugin_artifacts"]) {
+			populated.set(table, 1);
+		}
+		expect(classifyMarketplacePostgresState(tables, populated)).toBe("populated");
+		expect(classifyMarketplacePostgresState(new Set(["meta"]), new Map([["meta", 1]]))).toBe("inconsistent");
+		expect(classifyMarketplacePostgresState(tables, new Map([["meta", 1]]))).toBe("inconsistent");
 	});
 });
 

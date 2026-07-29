@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: Deploy selected commit
         shell: bash
+        env:
+          MARKETPLACE_DATABASE_URL: ${{ secrets.MARKETPLACE_DATABASE_URL }}
         run: |
           set -euo pipefail
           source_dir="$(mktemp -d /var/tmp/meta-agent-marketplace-deploy.XXXXXX)"

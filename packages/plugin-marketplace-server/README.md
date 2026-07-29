@@ -82,7 +82,7 @@ MARKETPLACE_DATABASE_URL='postgres://root:<password>@100.91.230.10:5432/plugin_m
   npm --prefix packages/plugin-marketplace-server run migrate:sqlite -- /path/to/marketplace.db
 ```
 
-The command copies catalog state, accounts, sessions, publishers, memberships, plugin versions and artifacts, ratings, and download counters in one PostgreSQL transaction, then advances the users sequence. After it succeeds, add `MARKETPLACE_DATABASE_URL` to `.env.production` and start the PostgreSQL-backed server. Deployment scripts refuse to modify an existing SQLite-era environment automatically. The server does not automatically import SQLite files.
+The command copies catalog state, accounts, sessions, publishers, memberships, plugin versions and artifacts, ratings, and download counters in one PostgreSQL transaction, then advances the users sequence. After it succeeds, add `MARKETPLACE_DATABASE_URL` to `.env.production` and start the PostgreSQL-backed server. Both direct SSH and Gitea deployments require the database migration to be completed first. The server itself does not automatically import SQLite files.
 
 Accounts are username/password (scrypt-hashed) with 30-day bearer session tokens. The admin surface uses the static `MARKETPLACE_ADMIN_TOKEN` instead of a user account; admins create publishers and grant publish rights by adding usernames as publisher members. Failed logins are throttled per client IP: after `MARKETPLACE_MAX_LOGIN_FAILURES` failures (default 10) within a 15-minute window, further login attempts return `429 AUTH_RATE_LIMITED` until the window expires. A successful login resets the counter; `0` disables throttling.
 
@@ -122,7 +122,7 @@ Defaults:
 - Host binding: `100.91.230.10:4317`
 - Marketplace ID: `meta-agent-development`
 
-On the first deployment, set `MARKETPLACE_DATABASE_URL` in the deploy command environment. The script generates an admin token locally and writes both values to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file. Deployments upgrading from SQLite must run the migration command above and add the URL to `.env.production` before deployment; the scripts deliberately stop when an existing environment has no database URL.
+On the first deployment, set `MARKETPLACE_DATABASE_URL` in the deploy command environment. The script generates an admin token locally and writes both values to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file. When using the direct SSH deployment script to upgrade from SQLite, run the migration command above and add the URL to `.env.production` before deployment.
 
 The Compose file temporarily retains the legacy `marketplace-data` volume and `MARKETPLACE_DATA_DIR=/data` so rollback to the previous SQLite image remains possible during the migration window and PostgreSQL rows with legacy `object_key` artifacts remain downloadable. New PostgreSQL uploads use `BYTEA`. Remove the legacy volume only after all object-key artifacts have been backfilled or retired and the rollback path has been verified.
 
@@ -144,7 +144,7 @@ Each deployment builds `meta-agent-plugin-marketplace:<UTC timestamp>` and recor
 
 The repository includes `.gitea/workflows/deploy-marketplace.yml` for the `marketplace-deploy` host runner. It is intentionally manual-only: pushing a branch does not build or deploy production. Open the workflow in Gitea, select the committed ref to deploy, and run it with `workflow_dispatch`.
 
-The runner clones the selected commit from the local Gitea bare repository and runs `scripts/deploy-plugin-marketplace-local.sh`. Configure `MARKETPLACE_DATABASE_URL` in the runner environment before the first PostgreSQL deployment; the script stores it in the server's mode-`0600` `.env.production`. Validation and both application builds run in Docker, so the CentOS host does not need a working Node.js installation. The script deploys the server on port 4317 and the Web console on port 4318, verifies both health endpoints, and rolls back to the previous self-contained image after a failed replacement.
+The runner clones the selected commit from the local Gitea bare repository and runs `scripts/deploy-plugin-marketplace-local.sh`. Configure the repository Actions secret `MARKETPLACE_DATABASE_URL` before the first PostgreSQL deployment; the workflow passes it only to the deployment process. When `.env.production` is still SQLite-era, the script adopts the configured PostgreSQL database only after verifying all marketplace tables and a complete catalog dataset. Empty or partial databases are rejected and must be migrated manually with the command above. During the first cutover, a failed replacement is not rolled back to writable SQLite, preventing the two databases from diverging; rerunning a corrected PostgreSQL deployment is required. Validation and both application builds run in Docker, so the CentOS host does not need a working Node.js installation. The script deploys the server on port 4317 and the Web console on port 4318, verifies both health endpoints, and rolls back later PostgreSQL deployments to the previous PostgreSQL image after a failed replacement.
 
 After deployment, the script requires both `/health` and `/.well-known/meta-agent-marketplace.json` to succeed. Operational checks:
 
