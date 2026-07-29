@@ -67,15 +67,34 @@ describe("DraftComposerThread", () => {
 
   it("模型列表为空时仍允许展开以触发刷新", () => {
     const markup = renderToStaticMarkup(
-      <ModelSelect availableModels={[]} model={undefined} onOpen={vi.fn()} onValueChange={vi.fn()} />,
+      <TooltipProvider>
+        <ModelSelect availableModels={[]} model={undefined} onOpen={vi.fn()} onValueChange={vi.fn()} />
+      </TooltipProvider>,
     );
 
     expect(markup).not.toContain(' disabled=""');
+    expect(markup).toContain('aria-label="选择模型"');
+  });
+
+  it("已有模型时后台刷新不替换当前模型标签", () => {
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <ModelSelect availableModels={config.models} model={config.model} loading onValueChange={vi.fn()} />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain('aria-label="选择模型"');
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).not.toContain(' disabled=""');
+    expect(markup).toContain("GPT");
+    expect(markup).not.toContain("加载模型");
   });
 
   it("模型列表加载时显示进度并禁用选择器", () => {
     const markup = renderToStaticMarkup(
-      <ModelSelect availableModels={[]} model={undefined} loading onValueChange={vi.fn()} />,
+      <TooltipProvider>
+        <ModelSelect availableModels={[]} model={undefined} loading onValueChange={vi.fn()} />
+      </TooltipProvider>,
     );
 
     expect(markup).toContain('aria-label="正在加载模型"');

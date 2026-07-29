@@ -1,0 +1,61 @@
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { saveShellRuntimePath } from "../src/main/sidecar/shell-runtime-settings.ts";
+
+describe("shell runtime settings", () => {
+  let root: string;
+  let agentDir: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "desktop-shell-settings-"));
+    agentDir = join(root, "agent");
+    cwd = join(root, "workspace");
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("persists an installed Bash path in the sidecar user settings", async () => {
+    const shellPath = join(root, "shell-runtime", "bin", "bash.exe");
+
+    await saveShellRuntimePath(cwd, agentDir, shellPath);
+
+    expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"))).toMatchObject({ shellPath });
+    expect(SettingsManager.create(cwd, agentDir).getShellPath()).toBe(shellPath);
+  });
+
+  it("updates a project shell override in its effective scope", async () => {
+    const globalShellPath = join(root, "global", "bash.exe");
+    const projectShellPath = join(root, "project", "bash.exe");
+    const replacementShellPath = join(root, "replacement", "bash.exe");
+    const projectSettingsDir = join(cwd, ".pi-desk");
+    mkdirSync(projectSettingsDir, { recursive: true });
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: globalShellPath }));
+    writeFileSync(join(projectSettingsDir, "settings.json"), JSON.stringify({ shellPath: projectShellPath }));
+
+    await saveShellRuntimePath(cwd, agentDir, replacementShellPath);
+
+    expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).shellPath).toBe(globalShellPath);
+    expect(JSON.parse(readFileSync(join(projectSettingsDir, "settings.json"), "utf8")).shellPath).toBe(
+      replacementShellPath,
+    );
+    expect(SettingsManager.create(cwd, agentDir).getShellPath()).toBe(replacementShellPath);
+  });
+
+  it("rejects a shell selection when settings cannot be loaded", async () => {
+    const settingsPath = join(agentDir, "settings.json");
+    writeFileSync(settingsPath, "{ invalid json");
+
+    await expect(saveShellRuntimePath(cwd, agentDir, join(root, "bash.exe"))).rejects.toThrow(
+      "无法保存 Git Bash 路径: global",
+    );
+    expect(readFileSync(settingsPath, "utf8")).toBe("{ invalid json");
+  });
+});

@@ -14,6 +14,7 @@ import type {
   InstalledMarketplacePluginSummary,
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
+import { PluginConfigurationForm } from "./plugin-configuration-form.tsx";
 import {
   cardState,
   formatDate,
@@ -204,6 +205,8 @@ export function PluginDetailDialog({
               <span className="plugin-marketplace-detail-muted">未提供能力声明</span>
             )}
           </section>
+
+          {installed?.configurable ? <PluginConfigurationForm pluginId={installed.id} /> : null}
 
           {installed ? (
             <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-detail-local-state">

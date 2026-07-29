@@ -25,7 +25,7 @@ export function ModelSelectorItem({ model, className, children, onSelect, ...pro
         onSelect?.(selectedValue);
       }}
       className={cn(
-        "relative mx-1 items-start gap-1.5 rounded-md py-1.5 ps-2 pe-7 [&_svg:not([class*='size-'])]:size-3.5",
+        "relative mx-1.5 min-h-8 items-center gap-2 rounded-md px-2 py-1.5 pe-8 text-[length:var(--type-size-ui)] data-[selected=true]:bg-accent/80 [&_svg:not([class*='size-'])]:size-3.5",
         className,
       )}
       {...props}
@@ -35,15 +35,12 @@ export function ModelSelectorItem({ model, className, children, onSelect, ...pro
           {model.icon ? <ModelIcon>{model.icon}</ModelIcon> : null}
           <span className="flex min-w-0 flex-col leading-tight">
             <span className="truncate font-medium">{model.name}</span>
-            {model.description ? (
-              <span className="truncate text-(length:--type-size-meta) text-muted-foreground">{model.description}</span>
-            ) : null}
           </span>
         </>
       )}
       {isSelected ? (
-        <span className="absolute end-2 top-2 flex size-3.5 items-center justify-center">
-          <Check className="size-4" aria-hidden="true" />
+        <span className="absolute end-2 top-1/2 flex size-4 -translate-y-1/2 items-center justify-center text-muted-foreground">
+          <Check className="size-3.5" aria-hidden="true" />
         </span>
       ) : null}
     </CommandItem>

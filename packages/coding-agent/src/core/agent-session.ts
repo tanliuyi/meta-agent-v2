@@ -2605,6 +2605,7 @@ export class AgentSession {
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		await this._resourceLoader.reload();
+		this._extensionRunner.invalidate();
 		this._buildRuntime({
 			activeToolNames: this.getActiveToolNames(),
 			flagValues: previousFlagValues,

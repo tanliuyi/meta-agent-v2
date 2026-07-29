@@ -1,9 +1,12 @@
-import * as Tabs from "@radix-ui/react-tabs";
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
+import { Tabs } from "@renderer/shared/ui/tabs";
+import { TabsContent } from "@renderer/shared/ui/tabs-content";
+import { TabsList } from "@renderer/shared/ui/tabs-list";
+import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
 import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
 import Globe from "lucide-react/dist/esm/icons/globe.mjs";
 import KeyRound from "lucide-react/dist/esm/icons/key-round.mjs";
@@ -174,31 +177,31 @@ export function ProviderEditDialog({
           </div>
         </div>
 
-        <Tabs.Root className="settings-tabs" value={activeTab} onValueChange={setActiveTab}>
-          <Tabs.List className="settings-tab-list" aria-label="Provider 配置">
-            <Tabs.Trigger value="connection">
+        <Tabs className="settings-tabs" value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="settings-tab-list" aria-label="Provider 配置">
+            <TabsTrigger value="connection">
               <Globe aria-hidden="true" />
               连接
-            </Tabs.Trigger>
-            <Tabs.Trigger value="credentials">
+            </TabsTrigger>
+            <TabsTrigger value="credentials">
               <KeyRound aria-hidden="true" />
               凭据
-            </Tabs.Trigger>
-            <Tabs.Trigger value="models">
+            </TabsTrigger>
+            <TabsTrigger value="models">
               <Boxes aria-hidden="true" />
               模型
-            </Tabs.Trigger>
-            <Tabs.Trigger value="overrides">
+            </TabsTrigger>
+            <TabsTrigger value="overrides">
               <SlidersHorizontal aria-hidden="true" />
               覆盖
-            </Tabs.Trigger>
-            <Tabs.Trigger value="compat">
+            </TabsTrigger>
+            <TabsTrigger value="compat">
               <Wrench aria-hidden="true" />
               兼容性
-            </Tabs.Trigger>
-          </Tabs.List>
+            </TabsTrigger>
+          </TabsList>
 
-          <Tabs.Content value="connection" className="settings-tab-content">
+          <TabsContent value="connection" className="settings-tab-content">
             <div className="settings-tab-scroll">
               <div className="settings-tab-scroll-content">
                 <ProviderConnectionForm
@@ -210,9 +213,9 @@ export function ProviderEditDialog({
                 />
               </div>
             </div>
-          </Tabs.Content>
+          </TabsContent>
 
-          <Tabs.Content value="credentials" className="settings-tab-content">
+          <TabsContent value="credentials" className="settings-tab-content">
             <div className="settings-tab-scroll">
               <div className="settings-tab-scroll-content">
                 <ProviderCredentialsForm
@@ -226,9 +229,9 @@ export function ProviderEditDialog({
                 />
               </div>
             </div>
-          </Tabs.Content>
+          </TabsContent>
 
-          <Tabs.Content value="models" className="settings-tab-content">
+          <TabsContent value="models" className="settings-tab-content">
             {modelsProvider || builtIn ? (
               <ProviderModelsTab
                 provider={modelsProvider}
@@ -243,9 +246,9 @@ export function ProviderEditDialog({
                 </div>
               </div>
             )}
-          </Tabs.Content>
+          </TabsContent>
 
-          <Tabs.Content value="overrides" className="settings-tab-content">
+          <TabsContent value="overrides" className="settings-tab-content">
             <div className="settings-tab-scroll">
               <div className="settings-tab-scroll-content">
                 {modelsProvider || builtIn ? (
@@ -260,16 +263,16 @@ export function ProviderEditDialog({
                 )}
               </div>
             </div>
-          </Tabs.Content>
+          </TabsContent>
 
-          <Tabs.Content value="compat" className="settings-tab-content">
+          <TabsContent value="compat" className="settings-tab-content">
             <div className="settings-tab-scroll">
               <div className="settings-tab-scroll-content">
                 <ProviderCompatTab provider={modelsProvider} entryKey={entry.key} onChange={updateModelsProvider} />
               </div>
             </div>
-          </Tabs.Content>
-        </Tabs.Root>
+          </TabsContent>
+        </Tabs>
 
         <DialogFooter className="providers-editor-footer flex-row justify-between sm:justify-between">
           <Button variant="ghost" className="providers-editor-delete" onClick={() => setDeleteConfirmationOpen(true)}>

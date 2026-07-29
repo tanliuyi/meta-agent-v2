@@ -43,6 +43,12 @@ function parseField(value: unknown): PluginConfigurationField {
 		) {
 			throw new Error(`configuration default is outside its range: ${base.key}`);
 		}
+		if (defaultValue !== undefined && step !== undefined) {
+			const quotient = (defaultValue - (minimum ?? 0)) / step;
+			if (Math.abs(quotient - Math.round(quotient)) > 1e-9) {
+				throw new Error(`configuration default does not match its step: ${base.key}`);
+			}
+		}
 		return { ...base, type: "number", ...defined({ defaultValue, minimum, maximum, step }) };
 	}
 	if (value.type === "select") {

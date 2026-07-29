@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withRuntimeLock } from "../src/main/sidecar/runtime-lock.ts";
-import { parseRuntimeSetupSelection } from "../src/main/sidecar/runtime-setup.ts";
+import { findConfiguredShellRuntime, parseRuntimeSetupSelection } from "../src/main/sidecar/runtime-setup.ts";
 import { ShellRuntimeInstaller } from "../src/main/sidecar/shell-runtime-installer.ts";
 
 describe("Desktop runtime setup", () => {
@@ -62,20 +62,33 @@ describe("Desktop runtime setup", () => {
     expect(order).toEqual(["first-start", "first-end", "second"]);
   });
 
-  it("resolves only a complete active managed shell", () => {
-    const installer = new ShellRuntimeInstaller(userDataDir, () => undefined, { validate: () => true });
-    expect(installer.activeBashPath()).toBeUndefined();
+  it("preserves a configured shell that passes runtime validation", async () => {
+    const agentDir = join(userDataDir, "agent");
+    const shellPath = join(userDataDir, "custom", "bash.exe");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath }));
+    const validate = vi.fn(async (path: string) => ({ path, version: "5.2.37" }));
 
-    const root = join(userDataDir, "shell-runtime", "portable-git-test");
+    await expect(findConfiguredShellRuntime(userDataDir, agentDir, validate)).resolves.toEqual({
+      path: shellPath,
+      version: "5.2.37",
+    });
+    expect(validate).toHaveBeenCalledWith(shellPath);
+  });
+
+  it("resolves only a complete installed managed shell without an active-state file", () => {
+    const installer = new ShellRuntimeInstaller(userDataDir, () => undefined, { validate: () => true });
+    expect(installer.installedBashPath()).toBeUndefined();
+
+    const root = join(userDataDir, "shell-runtime", `portable-git-2.53.0.3-${process.platform}-${process.arch}`);
     mkdirSync(join(root, "bin"), { recursive: true });
-    writeFileSync(join(userDataDir, "shell-runtime", "active.json"), `${JSON.stringify({ root })}\n`);
-    expect(installer.activeBashPath()).toBeUndefined();
+    expect(installer.installedBashPath()).toBeUndefined();
 
     const bashPath = join(root, "bin", "bash.exe");
     writeFileSync(bashPath, "");
-    expect(installer.activeBashPath()).toBe(bashPath);
+    expect(installer.installedBashPath()).toBe(bashPath);
     expect(
-      new ShellRuntimeInstaller(userDataDir, () => undefined, { validate: () => false }).activeBashPath(),
+      new ShellRuntimeInstaller(userDataDir, () => undefined, { validate: () => false }).installedBashPath(),
     ).toBeUndefined();
   });
 });

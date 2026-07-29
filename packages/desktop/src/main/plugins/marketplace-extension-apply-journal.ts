@@ -301,6 +301,7 @@ function isResolvedExtensionSet(value: unknown): value is ResolvedExtensionSet {
         typeof entry.displayName === "string" &&
         typeof entry.source === "string" &&
         (entry.entryPath === undefined || typeof entry.entryPath === "string") &&
+        entry.configuration === undefined &&
         Array.isArray(entry.capabilities),
     ) &&
     Array.isArray(value.diagnostics) &&
@@ -315,7 +316,10 @@ function cloneRecord(record: MarketplaceExtensionApplyRecord): MarketplaceExtens
 function cloneSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
   return {
     ...set,
-    entries: set.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+    entries: set.entries.map(({ configuration: _configuration, ...entry }) => ({
+      ...entry,
+      capabilities: [...entry.capabilities],
+    })),
     diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
   };
 }

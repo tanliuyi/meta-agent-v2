@@ -15,7 +15,13 @@ import {
 	loadExtensionFromFactory,
 	loadExtensionsCached,
 } from "./extensions/loader.ts";
-import type { Extension, ExtensionRuntime, InlineExtension, LoadExtensionsResult } from "./extensions/types.ts";
+import type {
+	Extension,
+	ExtensionConfiguration,
+	ExtensionRuntime,
+	InlineExtension,
+	LoadExtensionsResult,
+} from "./extensions/types.ts";
 import { DefaultPackageManager, type PathMetadata, type ResolvedResource } from "./package-manager.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import { loadPromptTemplates } from "./prompt-templates.ts";
@@ -132,6 +138,7 @@ export interface DefaultResourceLoaderOptions {
 	additionalPromptTemplatePaths?: string[];
 	additionalThemePaths?: string[];
 	extensionFactories?: InlineExtension[];
+	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>;
 	noExtensions?: boolean;
 	noSkills?: boolean;
 	noPromptTemplates?: boolean;
@@ -170,6 +177,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private additionalPromptTemplatePaths: string[];
 	private additionalThemePaths: string[];
 	private extensionFactories: InlineExtension[];
+	private extensionConfigurations: Readonly<Record<string, ExtensionConfiguration>>;
 	private noExtensions: boolean;
 	private noSkills: boolean;
 	private noPromptTemplates: boolean;
@@ -229,6 +237,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.additionalPromptTemplatePaths = options.additionalPromptTemplatePaths ?? [];
 		this.additionalThemePaths = options.additionalThemePaths ?? [];
 		this.extensionFactories = options.extensionFactories ?? [];
+		this.extensionConfigurations = options.extensionConfigurations ?? {};
 		this.noExtensions = options.noExtensions ?? false;
 		this.noSkills = options.noSkills ?? false;
 		this.noPromptTemplates = options.noPromptTemplates ?? false;
@@ -502,7 +511,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const extensionPaths = this.noExtensions
 			? cliEnabledExtensions
 			: this.mergePaths(cliEnabledExtensions, enabledExtensions);
-		const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
+		const extensionsResult = await loadExtensionsCached(
+			extensionPaths,
+			this.cwd,
+			this.eventBus,
+			undefined,
+			this.extensionConfigurations,
+		);
 		if (!options.includeInlineFactories) {
 			return extensionsResult;
 		}
@@ -522,7 +537,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 		preTrustExtensions: LoadExtensionsResult | undefined,
 	): Promise<LoadExtensionsResult> {
 		if (!preTrustExtensions) {
-			const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
+			const extensionsResult = await loadExtensionsCached(
+				extensionPaths,
+				this.cwd,
+				this.eventBus,
+				undefined,
+				this.extensionConfigurations,
+			);
 			const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
 			extensionsResult.extensions.push(...inlineExtensions.extensions);
 			extensionsResult.errors.push(...inlineExtensions.errors);
@@ -547,6 +568,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			this.cwd,
 			this.eventBus,
 			preTrustExtensions.runtime,
+			this.extensionConfigurations,
 		);
 		const loadedByPath = new Map(preloadedByPath);
 		for (const extension of remainingExtensions.extensions) {

@@ -241,10 +241,15 @@ export class FileSettingsStorage implements SettingsStorage {
 				if (!existsSync(dir)) {
 					mkdirSync(dir, { recursive: true });
 				}
+				let lockedNext: string | undefined = next;
 				if (!release) {
 					release = this.acquireLockSyncWithRetry(path);
+					// Another process may have created the file between the optimistic read and lock acquisition.
+					if (existsSync(path)) {
+						lockedNext = fn(readFileSync(path, "utf-8"));
+					}
 				}
-				writeFileSync(path, next, "utf-8");
+				if (lockedNext !== undefined) writeFileSync(path, lockedNext, "utf-8");
 			}
 		} finally {
 			if (release) {
@@ -275,6 +280,7 @@ export class SettingsManager {
 	private storage: SettingsStorage;
 	private globalSettings: Settings;
 	private projectSettings: Settings;
+	private defaults: Settings = {};
 	private settings: Settings;
 	private projectTrusted: boolean;
 	private modifiedFields = new Set<keyof Settings>(); // Track global fields modified during session
@@ -303,6 +309,10 @@ export class SettingsManager {
 		this.projectSettingsLoadError = projectLoadError;
 		this.errors = [...initialErrors];
 		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+	}
+
+	private rebuildSettings(): void {
+		this.settings = deepMergeSettings(this.defaults, deepMergeSettings(this.globalSettings, this.projectSettings));
 	}
 
 	/** Create a SettingsManager that loads from files */
@@ -463,7 +473,7 @@ export class SettingsManager {
 		if (!trusted) {
 			this.projectSettings = {};
 			this.projectSettingsLoadError = null;
-			this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+			this.rebuildSettings();
 			return;
 		}
 
@@ -473,7 +483,7 @@ export class SettingsManager {
 		if (projectLoad.error) {
 			this.recordError("project", projectLoad.error);
 		}
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.rebuildSettings();
 	}
 
 	async reload(): Promise<void> {
@@ -501,7 +511,13 @@ export class SettingsManager {
 			this.recordError("project", projectLoad.error);
 		}
 
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.rebuildSettings();
+	}
+
+	/** Apply low-priority runtime defaults that survive reloads without being persisted. */
+	applyDefaults(defaults: Partial<Settings>): void {
+		this.defaults = deepMergeSettings(this.defaults, defaults);
+		this.rebuildSettings();
 	}
 
 	/** Apply additional overrides on top of current settings */
@@ -607,7 +623,7 @@ export class SettingsManager {
 	}
 
 	private save(): void {
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.rebuildSettings();
 
 		if (this.globalSettingsLoadError) {
 			return;
@@ -625,7 +641,7 @@ export class SettingsManager {
 	private saveProjectSettings(settings: Settings): void {
 		this.assertProjectTrustedForWrite();
 		this.projectSettings = structuredClone(settings);
-		this.settings = deepMergeSettings(this.globalSettings, this.projectSettings);
+		this.rebuildSettings();
 
 		if (this.projectSettingsLoadError) {
 			return;
@@ -884,6 +900,12 @@ export class SettingsManager {
 		this.globalSettings.shellPath = path;
 		this.markModified("shellPath");
 		this.save();
+	}
+
+	setProjectShellPath(path: string | undefined): void {
+		this.updateProjectSettings("shellPath", (settings) => {
+			settings.shellPath = path;
+		});
 	}
 
 	getQuietStartup(): boolean {

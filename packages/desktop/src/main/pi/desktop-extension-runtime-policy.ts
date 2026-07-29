@@ -23,6 +23,14 @@ export async function validateResolvedExtensionSet(
     if (entry.hostProfileVersion !== DESKTOP_EXTENSION_HOST_PROFILE_VERSION) {
       throw new Error(`Unsupported Desktop extension host profile for ${entry.id}`);
     }
+    if (
+      entry.configuration &&
+      Object.values(entry.configuration).some(
+        (value) => typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean",
+      )
+    ) {
+      throw new Error(`Extension ${entry.id} configuration is invalid`);
+    }
     if (entry.source === "builtin") {
       if (entry.entryPath) throw new Error(`Built-in extension ${entry.id} must use an inline factory`);
       continue;
@@ -57,6 +65,7 @@ export async function validateResolvedExtensionSet(
       ...entry,
       ...(entry.entryPath ? { entryPath: resolve(entry.entryPath) } : {}),
       capabilities: [...entry.capabilities],
+      ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
     })),
     diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
   };
@@ -70,6 +79,11 @@ export function controlledResourceLoaderOptions(
   return {
     noExtensions: true,
     additionalExtensionPaths: set.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
+    extensionConfigurations: Object.fromEntries(
+      set.entries.flatMap((entry) =>
+        entry.entryPath && entry.configuration ? [[resolve(entry.entryPath), { ...entry.configuration }]] : [],
+      ),
+    ),
     additionalSkillPaths:
       options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))],
     extensionFactories,

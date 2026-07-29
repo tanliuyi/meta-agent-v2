@@ -201,6 +201,8 @@ const desktopApi: DesktopApi = {
     saveEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSaveEndpoint, input),
     listPlugins: (input = {}) => ipcRenderer.invoke(CHANNELS.marketplaceListPlugins, input),
     getInstalled: () => ipcRenderer.invoke(CHANNELS.marketplaceGetInstalled),
+    getPluginConfiguration: (pluginId) => ipcRenderer.invoke(CHANNELS.marketplaceGetPluginConfiguration, pluginId),
+    savePluginConfiguration: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSavePluginConfiguration, input),
     installPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceInstallPlugin, input),
     updatePlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUpdatePlugin, input),
     uninstallPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUninstallPlugin, input),
@@ -232,6 +234,7 @@ const desktopApi: DesktopApi = {
   shellRuntime: {
     getStatus: () => ipcRenderer.invoke(CHANNELS.shellRuntimeStatus),
     install: () => ipcRenderer.invoke(CHANNELS.shellRuntimeInstall),
+    choose: () => ipcRenderer.invoke(CHANNELS.shellRuntimeChoose),
     onProgress(listener) {
       const handler = (_event: Electron.IpcRendererEvent, progress: ShellRuntimeProgress) => listener(progress);
       ipcRenderer.on(CHANNELS.shellRuntimeProgress, handler);
@@ -319,6 +322,7 @@ const desktopApi: DesktopApi = {
     prompt: (input) => ipcRenderer.invoke(CHANNELS.sessionsPrompt, input),
     edit: (input) => ipcRenderer.invoke(CHANNELS.sessionsEdit, input),
     reload: (input) => ipcRenderer.invoke(CHANNELS.sessionsReload, input),
+    reloadResources: (input) => ipcRenderer.invoke(CHANNELS.sessionsReloadResources, input),
     branch: (input) => ipcRenderer.invoke(CHANNELS.sessionsBranch, input),
     cancel: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsCancel, projectId, threadId),
     clearQueue: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsClearQueue, projectId, threadId),

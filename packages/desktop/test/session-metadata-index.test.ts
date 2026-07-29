@@ -1,8 +1,8 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Thread } from "../src/shared/contracts.ts";
+import { GENERAL_WORKSPACE_ID, type Thread } from "../src/shared/contracts.ts";
 
 const mocks = vi.hoisted(() => ({
   listAllSessions: vi.fn(),
@@ -30,6 +30,111 @@ describe("SessionMetadataIndex", () => {
 
   afterEach(() => {
     rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  it("uses a short fixed session directory for the general workspace", async () => {
+    const agentDir = join(userDataDir, "agent");
+    const sessionDirectory = join(agentDir, "sessions", "--general--");
+
+    await expect(new SessionMetadataIndex(userDataDir, agentDir).list(GENERAL_WORKSPACE_ID, cwd)).resolves.toEqual([]);
+
+    expect(mocks.listSessions).toHaveBeenCalledWith(cwd, sessionDirectory);
+  });
+
+  it("migrates legacy general sessions before indexing the short directory", async () => {
+    const agentDir = join(userDataDir, "agent");
+    const legacyName = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+    const legacyDirectory = join(agentDir, "sessions", legacyName);
+    const sessionDirectory = join(agentDir, "sessions", "--general--");
+    const legacyFile = join(legacyDirectory, "legacy.jsonl");
+    const legacyBranchFile = join(legacyDirectory, "branch.jsonl");
+    const migratedFile = join(sessionDirectory, "legacy.jsonl");
+    const migratedBranchFile = join(sessionDirectory, "branch.jsonl");
+    mkdirSync(legacyDirectory, { recursive: true });
+    writeFileSync(legacyFile, '{"type":"session","id":"legacy"}\n');
+    writeFileSync(
+      legacyBranchFile,
+      `${JSON.stringify({ type: "session", id: "branch", parentSession: legacyFile })}\n`,
+    );
+    mocks.listSessions.mockImplementation(async (_cwd: string, requestedDirectory?: string) =>
+      requestedDirectory === sessionDirectory ? [sessionInfo("legacy", migratedFile, "Legacy", 2)] : [],
+    );
+
+    await expect(new SessionMetadataIndex(userDataDir, agentDir).list(GENERAL_WORKSPACE_ID, cwd)).resolves.toEqual([
+      expect.objectContaining({ id: "legacy", title: "Legacy" }),
+    ]);
+
+    expect(existsSync(legacyDirectory)).toBe(false);
+    expect(existsSync(migratedFile)).toBe(true);
+    const migratedBranchHeader = JSON.parse(readFileSync(migratedBranchFile, "utf8"));
+    expect(migratedBranchHeader.parentSession).toBe(migratedFile);
+    expect(mocks.listSessions).toHaveBeenCalledWith(cwd, sessionDirectory);
+  });
+
+  it("re-backfills nested sessions when migrating a persisted general workspace index", async () => {
+    const agentDir = join(userDataDir, "agent");
+    const legacyName = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+    const legacyDirectory = join(agentDir, "sessions", legacyName);
+    const sessionDirectory = join(agentDir, "sessions", "--general--");
+    const parentFile = join(legacyDirectory, "parent.jsonl");
+    const childDirectory = join(legacyDirectory, "parent", "abcdef12", "run-0");
+    mkdirSync(childDirectory, { recursive: true });
+    writeFileSync(parentFile, '{"type":"session","id":"parent"}\n');
+    writeFileSync(join(childDirectory, "session.jsonl"), '{"type":"session","id":"child"}\n');
+    writeFileSync(
+      join(userDataDir, "session-metadata-index.json"),
+      `${JSON.stringify({
+        version: 4,
+        projects: {
+          [GENERAL_WORKSPACE_ID]: {
+            cwd,
+            sessionDirectory: legacyDirectory,
+            directoryFingerprint: "stale",
+            backfillComplete: true,
+            explicitSessions: [
+              {
+                session: {
+                  id: "child",
+                  projectId: GENERAL_WORKSPACE_ID,
+                  title: "Child",
+                  createdAt: 1,
+                  updatedAt: 3,
+                  messageCount: 0,
+                  preview: "",
+                  archived: false,
+                  running: false,
+                  parentThreadId: "parent",
+                  origin: "subagent",
+                  agentName: "reviewer",
+                  path: join(childDirectory, "session.jsonl"),
+                },
+                fileFingerprint: "stale",
+              },
+            ],
+            sessions: [],
+          },
+        },
+      })}\n`,
+    );
+    const migratedParentFile = join(sessionDirectory, "parent.jsonl");
+    const migratedChildDirectory = join(sessionDirectory, "parent", "abcdef12", "run-0");
+    const migratedChildFile = join(migratedChildDirectory, "session.jsonl");
+    mocks.listSessions.mockResolvedValue([sessionInfo("parent", migratedParentFile, "Parent", 2)]);
+    mocks.listAllSessions.mockImplementation(async (requestedDirectory: string) =>
+      requestedDirectory === migratedChildDirectory ? [sessionInfo("child", migratedChildFile, "Child", 3)] : [],
+    );
+
+    await expect(new SessionMetadataIndex(userDataDir, agentDir).list(GENERAL_WORKSPACE_ID, cwd)).resolves.toEqual([
+      expect.objectContaining({
+        id: "child",
+        parentThreadId: "parent",
+        origin: "subagent",
+        agentName: "reviewer",
+      }),
+      expect.objectContaining({ id: "parent" }),
+    ]);
+
+    expect(mocks.listAllSessions).toHaveBeenCalledWith(migratedChildDirectory);
   });
 
   it("serves a validated persisted index without scanning session files again", async () => {

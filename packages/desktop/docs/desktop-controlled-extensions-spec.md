@@ -82,7 +82,7 @@ Desktop Extension Host Profile
 
 - Pi runtime 继续是 session、queue、agent loop 和 extension event 的唯一语义源。
 - Desktop 不模拟 TUI component、theme 或 terminal behavior。
-- 未批准的 `~/.pi/agent/extensions` 和项目 `.pi/extensions` 不会意外进入 Desktop。
+- 未批准的 `~/.pi-desk/agent/extensions` 和项目 `.pi-desk/extensions` 不会意外进入 Desktop。
 - draft 中显示的 extension commands 与 live worker 实际加载集合一致。
 - extension source、版本和 worker generation 可诊断。
 - extension 失败不会在 Electron main 或 renderer 执行任意代码。
@@ -347,6 +347,7 @@ metadata worker 将 load diagnostics 放入 draft response。metadata worker 进
 | Capability | Pi surface | v1 |
 |---|---|---|
 | `events.subscribe` | `pi.on(...)` | 支持 |
+| `configuration.read` | `pi.getConfig()` | 支持；仅返回当前 extension 的宿主配置快照 |
 | `tools.register` | `pi.registerTool(...)` | 支持 |
 | `commands.register` | `pi.registerCommand(...)` | 支持 |
 | `providers.register` | `pi.registerProvider(...)` | 仅内建/精选 extension |
@@ -404,6 +405,14 @@ interface DesktopExtensionCompatibilityError {
 - 吞掉 component widget 并假装成功。
 
 Developer Mode extension 同样使用该 Host Profile。其 UI API 不因“开发模式”而扩大。
+
+### 8.4 声明式插件配置
+
+Marketplace artifact 可以在已签名 `market-manifest.json` 中声明版本化的 `configuration` schema。Desktop 只接受受限字段联合，不接受任意 renderer 组件或可执行 JSON Schema 扩展。v1 支持 `text`、`textarea`、`path`、`number`、`boolean`、`select` 和 `secret` 字段，并限制字段数、文本长度、选项数、默认值及数值范围。
+
+配置由 Desktop main 进程验证并按插件 ID 独立持久化。普通值写入 owner-only 文件；`secret` 值使用 Electron `safeStorage` 加密，renderer snapshot 只包含是否已配置，不包含明文。保存使用 request ID、revision/CAS、文件锁和原子替换。
+
+main 在解析 `ResolvedExtensionSet` 时读取并验证配置，将配置 revision 纳入 generation fingerprint，并把已解密的运行时快照发送到对应 worker。Pi loader 按 entry path 绑定配置，插件 factory 通过 `pi.getConfig()` 读取冻结快照。配置不写入 session timeline、LLM context、diagnostics 或进程环境。配置变化对新 worker 生效；运行中的 worker 继续使用不可变旧快照，直到执行现有 replacement/apply 流程。
 
 ## 9. DesktopExtensionHost
 

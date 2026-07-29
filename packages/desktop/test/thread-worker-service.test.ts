@@ -2,18 +2,21 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GENERAL_WORKSPACE_ID } from "../src/shared/contracts.ts";
 import type { ThreadWorkerBinding } from "../src/shared/sidecar-contracts.ts";
 
 const mocks = vi.hoisted(() => ({
+  createSession: vi.fn(),
   listSessions: vi.fn(),
+  openSession: vi.fn(),
   runtimeCreate: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: {
     list: mocks.listSessions,
-    create: vi.fn(),
-    open: vi.fn(),
+    create: mocks.createSession,
+    open: mocks.openSession,
   },
 }));
 
@@ -21,19 +24,108 @@ vi.mock("../src/main/pi/session-runtime.ts", () => ({
   SessionRuntime: { create: mocks.runtimeCreate },
 }));
 
+import { resolveDesktopSessionDirectory } from "../src/sidecar/desktop-session-directory.ts";
 import { ThreadWorkerService } from "../src/sidecar/thread-worker-service.ts";
 
-describe("ThreadWorkerService open validation", () => {
+describe("ThreadWorkerService", () => {
   let root: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "thread-worker-service-"));
+    mocks.createSession.mockReset();
     mocks.listSessions.mockReset();
+    mocks.openSession.mockReset();
     mocks.runtimeCreate.mockReset();
   });
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it("leaves ordinary project session directories on the Pi default", () => {
+    expect(resolveDesktopSessionDirectory("project", join(root, "agent"))).toBeUndefined();
+  });
+
+  it("creates general workspace sessions in the short fixed directory", async () => {
+    const cwd = join(root, "workspaces", "general");
+    const agentDir = join(root, "agent");
+    const sessionId = "general-thread";
+    const sessionFile = join(agentDir, "sessions", "--general--", `${sessionId}.jsonl`);
+    const bootstrap = { threadId: sessionId };
+    mocks.createSession.mockReturnValue({ getSessionFile: () => sessionFile });
+    mocks.runtimeCreate.mockResolvedValue({
+      id: sessionId,
+      bootstrap: vi.fn().mockReturnValue(bootstrap),
+      dispose: vi.fn(),
+    });
+    const binding: ThreadWorkerBinding = {
+      mode: "create",
+      projectId: GENERAL_WORKSPACE_ID,
+      cwd,
+      agentDir,
+      sessionId,
+      createInput: {
+        projectId: GENERAL_WORKSPACE_ID,
+        createRequestId: "request",
+        extensionSetGeneration: "extensions-generation",
+        model: { provider: "provider", id: "model" },
+        thinkingLevel: "off",
+      },
+      extensionSet: {
+        generation: "extensions-generation",
+        projectId: GENERAL_WORKSPACE_ID,
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
+    };
+
+    const result = await ThreadWorkerService.create(
+      { role: "thread", value: binding },
+      { emit: () => undefined, requestHost: async () => undefined, flushEvents: async () => undefined },
+    );
+
+    expect(mocks.createSession).toHaveBeenCalledWith(cwd, join(agentDir, "sessions", "--general--"), {
+      id: sessionId,
+    });
+    expect(result.readyResult).toBe(bootstrap);
+  });
+
+  it("opens general workspace sessions with the short directory and original cwd", async () => {
+    const cwd = join(root, "workspaces", "general");
+    const agentDir = join(root, "agent");
+    const sessionId = "general-thread";
+    const sessionFile = join(agentDir, "sessions", "--general--", `${sessionId}.jsonl`);
+    mkdirSync(join(agentDir, "sessions", "--general--"), { recursive: true });
+    writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: sessionId, cwd })}\n`);
+    mocks.openSession.mockReturnValue({});
+    mocks.runtimeCreate.mockResolvedValue({
+      id: sessionId,
+      bootstrap: vi.fn().mockReturnValue({ threadId: sessionId }),
+      dispose: vi.fn(),
+    });
+    const binding: ThreadWorkerBinding = {
+      mode: "open",
+      projectId: GENERAL_WORKSPACE_ID,
+      cwd,
+      agentDir,
+      threadId: sessionId,
+      sessionFile,
+      extensionSet: {
+        generation: "extensions-generation",
+        projectId: GENERAL_WORKSPACE_ID,
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
+    };
+
+    await ThreadWorkerService.create(
+      { role: "thread", value: binding },
+      { emit: () => undefined, requestHost: async () => undefined, flushEvents: async () => undefined },
+    );
+
+    expect(mocks.openSession).toHaveBeenCalledWith(sessionFile, join(agentDir, "sessions", "--general--"), cwd);
   });
 
   it("rejects a session identity mismatch before opening or migrating the file", async () => {

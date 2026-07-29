@@ -25,6 +25,7 @@ import type {
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
+  SessionResourceReloadInput,
   TerminalEvent,
   TerminalSnapshot,
   TextFile,
@@ -40,6 +41,11 @@ import type {
   SaveDesktopExtensionSettingsResult,
 } from "./desktop-extension-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
+import type {
+  PluginConfigurationSnapshot,
+  SavePluginConfigurationInput,
+  SavePluginConfigurationResult,
+} from "./plugin-configuration-contracts.ts";
 import type {
   InstalledMarketplacePluginsSnapshot,
   InstallMarketplacePluginInput,
@@ -114,6 +120,7 @@ export interface DesktopApi {
   shellRuntime: {
     getStatus(): Promise<ShellRuntimeStatus>;
     install(): Promise<ShellRuntimeStatus>;
+    choose(): Promise<ShellRuntimeStatus | null>;
     onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
   };
   runtime: {
@@ -162,6 +169,8 @@ export interface DesktopApi {
     saveEndpoint(input: SaveMarketplaceEndpointInput): Promise<SaveMarketplaceEndpointResult>;
     listPlugins(input?: ListMarketplacePluginsInput): Promise<MarketplacePluginPage>;
     getInstalled(): Promise<InstalledMarketplacePluginsSnapshot>;
+    getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
+    savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
     installPlugin(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult>;
     updatePlugin(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult>;
     uninstallPlugin(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult>;
@@ -199,6 +208,7 @@ export interface DesktopApi {
     prompt(input: SessionPromptInput): Promise<SessionCommandResult>;
     edit(input: SessionEditInput): Promise<SessionCommandResult>;
     reload(input: SessionReloadInput): Promise<SessionCommandResult>;
+    reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult>;
     branch(input: SessionBranchInput): Promise<SessionBranchResult>;
     cancel(projectId: string, threadId: string): Promise<void>;
     clearQueue(projectId: string, threadId: string): Promise<ClearedQueue>;

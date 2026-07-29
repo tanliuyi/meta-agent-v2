@@ -17,6 +17,7 @@ import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
+import { Route as SettingsDependenciesRouteImport } from './routes/settings.dependencies'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
@@ -62,6 +63,11 @@ const SettingsAuthRoute = SettingsAuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsDependenciesRoute = SettingsDependenciesRouteImport.update({
+  id: '/dependencies',
+  path: '/dependencies',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
   id: '/extensions',
   path: '/extensions',
@@ -96,6 +102,7 @@ export interface FileRoutesByFullPath {
   '/plugins': typeof ChatPluginsRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   '/plugins': typeof ChatPluginsRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/_chat/plugins': typeof ChatPluginsRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/plugins'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
@@ -153,6 +163,7 @@ export interface FileRouteTypes {
     | '/plugins'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '/_chat/plugins'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/models'
     | '/settings/personalization'
@@ -240,6 +252,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAuthRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/dependencies': {
+      id: '/settings/dependencies'
+      path: '/dependencies'
+      fullPath: '/settings/dependencies'
+      preLoaderRoute: typeof SettingsDependenciesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/extensions': {
       id: '/settings/extensions'
       path: '/extensions'
@@ -298,6 +317,7 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 interface SettingsRouteChildren {
   SettingsAboutRoute: typeof SettingsAboutRoute
   SettingsAuthRoute: typeof SettingsAuthRoute
+  SettingsDependenciesRoute: typeof SettingsDependenciesRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
@@ -308,6 +328,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAboutRoute: SettingsAboutRoute,
   SettingsAuthRoute: SettingsAuthRoute,
+  SettingsDependenciesRoute: SettingsDependenciesRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,

@@ -1,6 +1,9 @@
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ModelOption } from "../../../../shared/contracts.ts";
+import { Tooltip } from "../../shared/ui/tooltip.tsx";
+import { TooltipContent } from "../../shared/ui/tooltip-content.tsx";
+import { TooltipTrigger } from "../../shared/ui/tooltip-trigger.tsx";
 import { ModelSelectorContent } from "../assistant-ui/model-selector/model-selector-content.tsx";
 import { ModelSelectorEmpty } from "../assistant-ui/model-selector/model-selector-empty.tsx";
 import { ModelSelectorGroup } from "../assistant-ui/model-selector/model-selector-group.tsx";
@@ -30,38 +33,58 @@ export function ModelSelect({
   onOpen,
   onValueChange,
 }: ModelSelectProps) {
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const { models, groups, modelByKey } = useMemo(() => createModelSelectorState(availableModels), [availableModels]);
   const value = model ? composerModelKey(model.provider, model.id) : undefined;
+  const showLoading = loading && !model;
 
   return (
     <ModelSelectorRoot
       models={models}
       value={value}
+      open={selectorOpen}
       onOpenChange={(open) => {
-        if (open) onOpen?.();
+        setSelectorOpen(open);
+        if (open) {
+          setTooltipOpen(false);
+          onOpen?.();
+        }
       }}
       onValueChange={(nextValue) => {
         const selected = modelByKey.get(nextValue);
         if (selected) onValueChange(selected.provider, selected.id);
       }}
     >
-      <ModelSelectorTrigger
-        variant="ghost"
-        size="sm"
-        aria-label={loading ? "正在加载模型" : "选择模型"}
-        aria-busy={loading || undefined}
-        disabled={disabled || loading}
+      <Tooltip
+        open={tooltipOpen && !selectorOpen}
+        delayDuration={1000}
+        onOpenChange={(open) => {
+          setTooltipOpen(selectorOpen ? false : open);
+        }}
       >
-        {loading ? (
-          <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground" role="status">
-            <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-            <span>加载模型</span>
-          </span>
-        ) : (
-          <ModelSelectorValue showEffort={false} />
-        )}
-      </ModelSelectorTrigger>
-      <ModelSelectorContent align="end">
+        <TooltipTrigger asChild>
+          <ModelSelectorTrigger
+            variant="ghost"
+            size="sm"
+            aria-label={showLoading ? "正在加载模型" : "选择模型"}
+            aria-busy={loading || undefined}
+            disabled={disabled || showLoading}
+            className="max-w-44 rounded-md px-2.5 text-[length:var(--type-size-ui)] font-medium data-[state=open]:bg-muted data-[state=open]:text-foreground"
+          >
+            {showLoading ? (
+              <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground" role="status">
+                <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+                <span>加载模型</span>
+              </span>
+            ) : (
+              <ModelSelectorValue showEffort={false} />
+            )}
+          </ModelSelectorTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top">选择模型</TooltipContent>
+      </Tooltip>
+      <ModelSelectorContent align="end" sideOffset={8}>
         <ModelSelectorSearch placeholder="搜索模型..." />
         <ModelSelectorList>
           <ModelSelectorEmpty />

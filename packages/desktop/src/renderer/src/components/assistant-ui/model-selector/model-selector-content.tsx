@@ -26,12 +26,12 @@ export function ModelSelectorContent({
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "w-64 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-lg bg-popover/95 p-0 shadow-(--elevation-popover) backdrop-blur-sm",
+        "flex max-h-(--radix-popover-content-available-height) w-72 max-w-[calc(100vw-1rem)] min-w-(--radix-popover-trigger-width) flex-col overflow-hidden rounded-lg bg-popover p-0 shadow-(--elevation-popover) [&_[data-slot=command-input-wrapper]]:h-9 [&_[data-slot=command-input-wrapper]]:gap-2.5 [&_[data-slot=command-input-wrapper]]:border-border/70 [&_[data-slot=command-input-wrapper]]:px-3 [&_[data-slot=command-input-wrapper]_svg]:size-4",
         className,
       )}
       {...props}
     >
-      <Command shouldFilter={!unfiltered} {...(value !== undefined ? { defaultValue: value } : {})}>
+      <Command className="min-h-0" shouldFilter={!unfiltered} {...(value !== undefined ? { defaultValue: value } : {})}>
         {unfiltered ? <ModelSelectorFocusAnchor /> : null}
         {children ?? (
           <>

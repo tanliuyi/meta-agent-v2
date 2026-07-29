@@ -7,7 +7,7 @@
 
 在 Desktop 设置中新增“模型”菜单和 `#/settings/models` 子路由，用结构化界面编辑 Pi CLI 与 Desktop 共同使用的 `models.json`。
 
-本规范中的文件名统一指 `models.json`。默认路径是 `~/.pi/agent/models.json`，但实现必须使用 Desktop main 已解析的 `agentDir`，完整支持 `PI_CODING_AGENT_DIR`，不得在 renderer 中拼接 home 路径。
+本规范中的文件名统一指 `models.json`。默认路径是 `~/.pi-desk/agent/models.json`，但实现必须使用 Desktop main 已解析的 `agentDir`，完整支持 `PI_CODING_AGENT_DIR`，不得在 renderer 中拼接 home 路径。
 
 最终能力包括：
 
@@ -33,7 +33,7 @@
 - `defaultProvider`、`defaultModel`、`defaultThinkingLevel` 或 `enabledModels`；
 - 保存后热刷新已经启动的 thread worker；
 - 在 renderer 中提供完整 raw source 编辑器；
-- 项目级 `.pi/models.json`，因为 Pi 当前不存在该配置层。
+- 项目级 `.pi-desk/models.json`，因为 Pi 当前不存在该配置层。
 
 ## 3. 现有边界
 

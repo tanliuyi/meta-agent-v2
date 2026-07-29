@@ -1173,7 +1173,14 @@ function shouldPruneDiscoveryDir(rootDir: string, dir: string, dirName: string):
 	return path.resolve(dir) !== path.resolve(rootDir) && isDiscoveryNestedProjectRoot(dir);
 }
 
-function listFilesRecursive(dir: string, predicate: (fileName: string) => boolean, rootDir = dir): string[] {
+type DiscoveryDirPruner = (rootDir: string, dir: string, dirName: string) => boolean;
+
+function listFilesRecursive(
+	dir: string,
+	predicate: (fileName: string) => boolean,
+	rootDir = dir,
+	additionalPruner?: DiscoveryDirPruner,
+): string[] {
 	const files: string[] = [];
 	if (!fs.existsSync(dir)) return files;
 
@@ -1187,8 +1194,8 @@ function listFilesRecursive(dir: string, predicate: (fileName: string) => boolea
 	for (const entry of entries) {
 		const filePath = path.join(dir, entry.name);
 		if (entry.isDirectory()) {
-			if (!shouldPruneDiscoveryDir(rootDir, filePath, entry.name)) {
-				files.push(...listFilesRecursive(filePath, predicate, rootDir));
+			if (!shouldPruneDiscoveryDir(rootDir, filePath, entry.name) && !additionalPruner?.(rootDir, filePath, entry.name)) {
+				files.push(...listFilesRecursive(filePath, predicate, rootDir, additionalPruner));
 			}
 			continue;
 		}
@@ -1221,10 +1228,19 @@ function parseAgentAcceptanceFrontmatter(raw: string | undefined, agentName: str
 	return parsed as AcceptanceInput;
 }
 
-function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig[] {
+function shouldPruneUserAgentsMetadataDir(rootDir: string, dir: string, dirName: string): boolean {
+	return dirName.toLowerCase() === "projects" && path.resolve(path.dirname(dir)) === path.resolve(rootDir);
+}
+
+function loadAgentsFromDir(dir: string, source: AgentSource, additionalPruner?: DiscoveryDirPruner): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
-	for (const filePath of listFilesRecursive(dir, (fileName) => fileName.endsWith(".md") && !fileName.endsWith(".chain.md"))) {
+	for (const filePath of listFilesRecursive(
+		dir,
+		(fileName) => fileName.endsWith(".md") && !fileName.endsWith(".chain.md"),
+		dir,
+		additionalPruner,
+	)) {
 		if (isLegacyAgentSkillPath(dir, filePath)) {
 			continue;
 		}
@@ -1479,7 +1495,7 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 
 	const userAgentsExtra = scope === "project" ? [] : extraUserAgentDirs().flatMap((dir) => loadAgentsFromDir(dir, "user"));
 	const userAgentsOld = scope === "project" ? [] : loadAgentsFromDir(userDirOld, "user");
-	const userAgentsNew = scope === "project" ? [] : loadAgentsFromDir(userDirNew, "user");
+	const userAgentsNew = scope === "project" ? [] : loadAgentsFromDir(userDirNew, "user", shouldPruneUserAgentsMetadataDir);
 	const userAgents = applyCustomAgentOverrides(
 		applySubagentDefaultModel([...userAgentsExtra, ...userAgentsOld, ...userAgentsNew], defaultModel),
 		userSettings,
@@ -1508,7 +1524,7 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	return { agents, projectAgentsDir, modelScope };
 }
 
-export function discoverAgentsAll(cwd: string): {
+export function discoverAgentsAll(cwd: string, scope: AgentScope | "system" = "both"): {
 	builtin: AgentConfig[];
 	package: AgentConfig[];
 	user: AgentConfig[];
@@ -1525,14 +1541,19 @@ export function discoverAgentsAll(cwd: string): {
 	const userDirOld = path.join(getAgentDir(), "agents");
 	const userDirNew = path.join(os.homedir(), ".agents");
 	const userChainDir = getUserChainDir();
-	const { readDirs: projectDirs, preferredDir: projectDir } = resolveNearestProjectAgentDirs(cwd);
-	const { readDirs: projectChainDirs, preferredDir: projectChainDir } = resolveNearestProjectChainDirs(cwd);
+	const projectAgentDirs = scope === "user" || scope === "system" ? { readDirs: [], preferredDir: null } : resolveNearestProjectAgentDirs(cwd);
+	const { readDirs: projectDirs, preferredDir: projectDir } = projectAgentDirs;
+	const projectChainDirResolution = scope === "user" || scope === "system" ? { readDirs: [], preferredDir: null } : resolveNearestProjectChainDirs(cwd);
+	const { readDirs: projectChainDirs, preferredDir: projectChainDir } = projectChainDirResolution;
 	const userSettingsPath = getUserAgentSettingsPath();
-	const projectSettingsPath = getProjectAgentSettingsPath(cwd);
-	const userSettings = readSubagentSettings(userSettingsPath);
-	const projectSettings = readSubagentSettings(projectSettingsPath);
+	const projectSettingsPath = scope === "user" || scope === "system" ? null : getProjectAgentSettingsPath(cwd);
+	const userSettings = scope === "project" || scope === "system" ? EMPTY_SUBAGENT_SETTINGS : readSubagentSettings(userSettingsPath);
+	const projectSettings = projectSettingsPath ? readSubagentSettings(projectSettingsPath) : EMPTY_SUBAGENT_SETTINGS;
 	const defaultModel = resolveSubagentDefaultModel(userSettings, projectSettings, userSettingsPath, projectSettingsPath);
-	const packageSubagentPaths = collectPackageSubagentPaths(cwd);
+	const packageSubagentPaths = collectPackageSubagentPaths(cwd, {
+		includeUser: scope !== "project",
+		includeProject: scope === "project" || scope === "both",
+	});
 
 	const builtin = applyBuiltinOverrides(
 		applySubagentDefaultModel(loadAgentsFromDir(builtinAgentsDir, "builtin"), defaultModel),
@@ -1542,10 +1563,10 @@ export function discoverAgentsAll(cwd: string): {
 		projectSettingsPath,
 	);
 	const user = applyCustomAgentOverrides(
-		applySubagentDefaultModel([
+		applySubagentDefaultModel(scope === "project" || scope === "system" ? [] : [
 			...extraUserAgentDirs().flatMap((dir) => loadAgentsFromDir(dir, "user")),
 			...loadAgentsFromDir(userDirOld, "user"),
-			...loadAgentsFromDir(userDirNew, "user"),
+			...loadAgentsFromDir(userDirNew, "user", shouldPruneUserAgentsMetadataDir),
 		], defaultModel),
 		userSettings,
 		projectSettings,
@@ -1597,7 +1618,9 @@ export function discoverAgentsAll(cwd: string): {
 			chainMap.set(chain.name, chain);
 		}
 	}
-	const userChains = loadChainsFromDir(userChainDir, "user");
+	const userChains = scope === "project" || scope === "system"
+		? { chains: [], diagnostics: [] }
+		: loadChainsFromDir(userChainDir, "user");
 	const chains = [
 		...Array.from(packageChainMap.values()),
 		...userChains.chains,

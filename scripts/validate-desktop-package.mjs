@@ -21,6 +21,7 @@ export default async function validateDesktopPackage(context) {
   );
 
   assertTargetRuntime(context, manifest);
+  assertBundledPiDocumentation(resources);
   validateHermesMemorySqliteRuntime(nodePath);
 
   if (context.electronPlatformName === "darwin") {
@@ -129,6 +130,28 @@ export function assertTargetRuntime(context, manifest) {
       `Desktop sidecar runtime target mismatch: package=${platform}/${architecture}, ` +
         `runtime=${String(compatibility?.platform)}/${String(compatibility?.arch)}`,
     );
+  }
+}
+
+export function assertBundledPiDocumentation(resources) {
+  const packageRoot = join(
+    resources,
+    "app.asar.unpacked",
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+  );
+  for (const relativePath of [
+    "README.md",
+    "docs/extensions.md",
+    "docs/sdk.md",
+    "examples/extensions/README.md",
+    "examples/sdk/01-minimal.ts",
+  ]) {
+    const path = join(packageRoot, relativePath);
+    if (!existsSync(path) || !statSync(path).isFile()) {
+      throw new Error(`Bundled Pi documentation is missing from package: ${path}`);
+    }
   }
 }
 

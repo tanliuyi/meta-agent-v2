@@ -15,6 +15,7 @@ import type {
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
+  SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
 import type {
@@ -157,6 +158,7 @@ export class ThreadWorkerRegistry {
   >();
   private readonly subagentAttachments = new Map<string, number>();
   private readonly operationTails = new Map<string, Promise<void>>();
+  private readonly exclusiveThreads = new Set<string>();
   private readonly drainingThreads = new Set<string>();
   private readonly extensionApplyCompletions = new Map<string, Promise<void>>();
   private readonly blockedDevelopmentSets = new Map<string, string>();
@@ -367,9 +369,6 @@ export class ThreadWorkerRegistry {
   }
 
   async prompt(input: SessionPromptInput): Promise<SessionCommandResult> {
-    if (input.text.trim() === "/reload" && input.images.length === 0) {
-      return this.reloadResources(input.projectId, input.threadId, input.requestId);
-    }
     return this.use(input.projectId, input.threadId, (record) =>
       record.client.request({ type: "prompt", input }, null),
     );
@@ -385,7 +384,8 @@ export class ThreadWorkerRegistry {
     );
   }
 
-  private reloadResources(projectId: string, threadId: string, requestId: string): Promise<SessionCommandResult> {
+  async reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult> {
+    const { projectId, threadId, requestId } = input;
     const requestKey = `${workerKey(projectId, threadId)}\0${requestId}`;
     const existing = this.resourceReloadRequests.get(requestKey);
     if (existing) return existing.promise;
@@ -404,7 +404,7 @@ export class ThreadWorkerRegistry {
   private async reloadResourcesOnce(
     projectId: string,
     threadId: string,
-    _requestId: string,
+    requestId: string,
   ): Promise<SessionCommandResult> {
     const desired = await this.options.extensionSourcePolicy.resolve(projectId);
     try {
@@ -412,10 +412,29 @@ export class ThreadWorkerRegistry {
       if (result.status === "rolled-back") {
         return { accepted: false, queued: false, error: result.error };
       }
+      if (result.status === "unchanged") {
+        return await this.runExclusive(projectId, threadId, (record) =>
+          record.client.request<SessionCommandResult>(
+            {
+              type: "reloadResources",
+              input: {
+                requestId,
+                projectId,
+                threadId,
+              },
+            },
+            null,
+          ),
+        );
+      }
       return { accepted: true, queued: false };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("commands are in flight") || message.includes("confirm abort")) {
+      if (
+        message.includes("commands are in flight") ||
+        message.includes("confirm abort") ||
+        message.includes("Cannot reload resources")
+      ) {
         return { accepted: false, queued: false, error: message };
       }
       throw error;
@@ -761,10 +780,45 @@ export class ThreadWorkerRegistry {
     if (failure?.status === "rejected") throw failure.reason;
     this.records.clear();
     this.subagentAttachments.clear();
+    this.exclusiveThreads.clear();
     for (const request of this.resourceReloadRequests.values()) {
       if (request.timer) clearTimeout(request.timer);
     }
     this.resourceReloadRequests.clear();
+  }
+
+  private async runExclusive<T>(
+    projectId: string,
+    threadId: string,
+    operation: (record: WorkerRecord) => Promise<T>,
+  ): Promise<T> {
+    this.assertNotActiveSubagent(projectId, threadId);
+    const key = workerKey(projectId, threadId);
+    let record!: WorkerRecord;
+    await this.withThreadLock(key, async () => {
+      if (this.drainingThreads.has(key) || this.exclusiveThreads.has(key)) {
+        throw new Error(`Cannot reload resources while thread ${projectId}/${threadId} is busy`);
+      }
+      record = await this.requireUnlocked(projectId, threadId);
+      if (record.inFlight > 0 || record.summary?.running) {
+        throw new Error(`Cannot reload resources while thread ${projectId}/${threadId} is busy`);
+      }
+      this.exclusiveThreads.add(key);
+      record.lastActivityAt = Date.now();
+      record.inFlight += 1;
+    });
+    try {
+      return await operation(record);
+    } catch (error) {
+      if (isUnknownOutcome(error)) this.retireAfterUnknown(key, record, error);
+      throw error;
+    } finally {
+      await this.withThreadLock(key, async () => {
+        record.inFlight -= 1;
+        record.lastActivityAt = Date.now();
+        this.exclusiveThreads.delete(key);
+      });
+    }
   }
 
   private async use<T>(
@@ -775,6 +829,9 @@ export class ThreadWorkerRegistry {
   ): Promise<T> {
     this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
+    if (this.exclusiveThreads.has(key)) {
+      throw new Error(`Thread ${projectId}/${threadId} is reloading resources`);
+    }
     if (!waitForExtensionApply && this.drainingThreads.has(key)) {
       throw new Error(`Thread ${projectId}/${threadId} is applying extensions`);
     }
@@ -784,6 +841,9 @@ export class ThreadWorkerRegistry {
       await this.withThreadLock(key, async () => {
         applyCompletion = this.extensionApplyCompletions.get(key);
         if (waitForExtensionApply && applyCompletion) return;
+        if (this.exclusiveThreads.has(key)) {
+          throw new Error(`Thread ${projectId}/${threadId} is reloading resources`);
+        }
         if (this.drainingThreads.has(key)) {
           throw new Error(`Thread ${projectId}/${threadId} is applying extensions`);
         }
@@ -853,8 +913,9 @@ export class ThreadWorkerRegistry {
     const session = await this.options.metadata.resolve(projectId, cwd, threadId);
     const applyJournal = this.options.extensionApplyJournal;
     const rollbackOverride = applyJournal?.getRollbackOverride(projectId, threadId);
-    const extensionSet =
-      rollbackOverride?.extensionSet ?? (await this.options.extensionSourcePolicy.resolve(projectId));
+    const extensionSet = rollbackOverride
+      ? await this.options.extensionSourcePolicy.hydrateRuntimeConfigurations(rollbackOverride.extensionSet)
+      : await this.options.extensionSourcePolicy.resolve(projectId);
     const record = await this.spawn(
       {
         mode: "open",
@@ -1162,7 +1223,7 @@ export class ThreadWorkerRegistry {
   }
 
   private async ensureCapacity(): Promise<void> {
-    const maximum = this.options.maxLiveWorkers ?? 12;
+    const maximum = this.options.maxLiveWorkers ?? 24;
     if (this.records.size + this.reservedWorkerSlots < maximum) return;
     const candidate = [...this.records.entries()]
       .filter(
@@ -1390,7 +1451,11 @@ async function waitForIdleSummary(record: WorkerRecord): Promise<void> {
 function cloneExtensionSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
   return {
     ...set,
-    entries: set.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+    entries: set.entries.map((entry) => ({
+      ...entry,
+      capabilities: [...entry.capabilities],
+      ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
+    })),
     diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
   };
 }

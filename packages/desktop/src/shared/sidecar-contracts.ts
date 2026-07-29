@@ -12,6 +12,7 @@ import type {
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
+  SessionResourceReloadInput,
   Thread,
 } from "./contracts.ts";
 import type { ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
@@ -225,6 +226,7 @@ export type ThreadSidecarCommand =
   | { type: "prompt"; input: SessionPromptInput }
   | { type: "edit"; input: SessionEditInput }
   | { type: "reload"; input: SessionReloadInput }
+  | { type: "reloadResources"; input: SessionResourceReloadInput }
   | { type: "cancel" }
   | { type: "clearQueue" }
   | { type: "compact" }

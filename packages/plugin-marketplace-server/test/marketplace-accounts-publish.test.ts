@@ -8,12 +8,14 @@ import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "../src/auth.t
 import type { MarketplaceServerConfig } from "../src/config.ts";
 import { createMarketplaceApp } from "../src/create-app.ts";
 import { canonicalJson } from "../src/signing-service.ts";
+import { MemoryArtifactStorage } from "../src/storage/artifact-storage.ts";
 import { dropTestSchema, testDatabaseUrl } from "./postgres-harness.ts";
 
 const TEST_DB_URL = process.env.MARKETPLACE_TEST_DATABASE_URL;
 const ACCOUNTS_SCHEMA = `accounts_${randomUUID().replaceAll("-", "")}`;
 const TEST_SCHEMAS = new Set([ACCOUNTS_SCHEMA]);
 const ACCOUNTS_DB_URL = TEST_DB_URL ? testDatabaseUrl(TEST_DB_URL, ACCOUNTS_SCHEMA) : undefined;
+const artifactStorage = new MemoryArtifactStorage();
 
 if (!TEST_DB_URL) {
 	describe.skip("marketplace accounts and publishing (requires MARKETPLACE_TEST_DATABASE_URL)", () => {
@@ -65,6 +67,7 @@ if (!TEST_DB_URL) {
 			config,
 			clock: () => 1_800_000_000_000,
 			logger: false,
+			artifactStorage,
 		});
 		await app.init();
 		aliceToken = await register("alice");
@@ -193,6 +196,7 @@ if (!TEST_DB_URL) {
 				config: { ...config, maxLoginFailures: 2 },
 				clock: () => now,
 				logger: false,
+				artifactStorage,
 			});
 			await limited.init();
 			try {
@@ -337,6 +341,17 @@ if (!TEST_DB_URL) {
 				.expect(400);
 			expect(rejectedNativeDeclaration.body).toMatchObject({
 				error: { code: "NATIVE_ARTIFACT_UNSUPPORTED" },
+			});
+
+			const missingConfigurationCapability = versionDeclaration("0.9.1");
+			missingConfigurationCapability.capabilities = ["tools.register"];
+			const rejectedConfigurationCapability = await request(app.getHttpServer())
+				.post(`/v1/publish/plugins/${PLUGIN_ID}/versions`)
+				.set("authorization", `Bearer ${aliceToken}`)
+				.send(missingConfigurationCapability)
+				.expect(400);
+			expect(rejectedConfigurationCapability.body).toMatchObject({
+				error: { code: "BODY_INVALID", message: "configuration requires the configuration.read capability" },
 			});
 
 			const draft = await request(app.getHttpServer())
@@ -503,6 +518,18 @@ if (!TEST_DB_URL) {
 				artifactId: ARTIFACT_ID,
 				plugin: { id: PLUGIN_ID, name: "Acme Tools", version: "1.0.0", publisherId: "acme" },
 				pi: { entry: "payload/index.ts" },
+				configuration: {
+					version: 1,
+					fields: [
+						{
+							key: "endpoint",
+							label: "Endpoint",
+							type: "text",
+							required: true,
+							defaultValue: "https://example.test",
+						},
+					],
+				},
 				files: {
 					"payload/index.ts": {
 						sha256: createHash("sha256").update(strToU8(ENTRY_SOURCE)).digest("hex"),
@@ -695,6 +722,7 @@ if (!TEST_DB_URL) {
 				config: persistentConfig,
 				clock: () => 1_800_000_000_000,
 				logger: false,
+				artifactStorage,
 			});
 			await first.init();
 			const token = await registerOn(first, "carol");
@@ -744,6 +772,7 @@ if (!TEST_DB_URL) {
 				config: persistentConfig,
 				clock: () => 1_800_000_100_000,
 				logger: false,
+				artifactStorage,
 			});
 			await second.init();
 			try {
@@ -808,7 +837,19 @@ if (!TEST_DB_URL) {
 			version,
 			changelog: "Test release",
 			desktop: { hostProfileVersion: 1 },
-			capabilities: ["tools.register"],
+			capabilities: ["tools.register", "configuration.read"],
+			configuration: {
+				version: 1,
+				fields: [
+					{
+						key: "endpoint",
+						label: "Endpoint",
+						type: "text",
+						required: true,
+						defaultValue: "https://example.test",
+					},
+				],
+			},
 			artifacts: [
 				{
 					id: ARTIFACT_ID,

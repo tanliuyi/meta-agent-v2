@@ -273,6 +273,10 @@ function parsePublishVersionRequest(body: unknown): PublishVersionRequest {
 	} catch (error) {
 		throw badRequest("BODY_INVALID", error instanceof Error ? error.message : "configuration is invalid");
 	}
+	const capabilities = bodyStringArray(record, "capabilities", 32, 64);
+	if (configuration && !capabilities.includes("configuration.read")) {
+		throw badRequest("BODY_INVALID", "configuration requires the configuration.read capability");
+	}
 	return {
 		version,
 		changelog: bodyString(record, "changelog", 4000),
@@ -282,7 +286,7 @@ function parsePublishVersionRequest(body: unknown): PublishVersionRequest {
 			...(maxVersionExclusive === undefined ? {} : { maxVersionExclusive }),
 		},
 		...(configuration ? { configuration } : {}),
-		capabilities: bodyStringArray(record, "capabilities", 32, 64),
+		capabilities,
 		artifacts,
 	};
 }

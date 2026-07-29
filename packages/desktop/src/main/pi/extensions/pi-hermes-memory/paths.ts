@@ -6,7 +6,7 @@ export const AGENT_ROOT = resolveAgentRoot();
 
 export function resolveAgentRoot(env: Record<string, string | undefined> = process.env): string {
   const configured = env.PI_CODING_AGENT_DIR?.trim();
-  return configured ? path.resolve(expandHome(configured)) : path.join(os.homedir(), ".pi", "agent");
+  return configured ? path.resolve(expandHome(configured)) : path.join(os.homedir(), ".pi-desk", "agent");
 }
 
 export function expandHome(input: string): string {

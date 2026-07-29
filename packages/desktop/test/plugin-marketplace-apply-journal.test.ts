@@ -22,6 +22,8 @@ describe("MarketplaceExtensionApplyJournal", () => {
       previousWorkerInstanceId: "worker-one",
     });
 
+    expect(record.beforeSet.entries[0]).not.toHaveProperty("configuration");
+    expect(JSON.stringify(await harness.journal.list())).not.toContain("journal-secret");
     expect(harness.retain).toHaveBeenCalledWith("apply:apply-one", expect.objectContaining({ generation: "before" }));
     await harness.journal.validated(record);
 
@@ -176,6 +178,7 @@ function extensionSet(generation: string): ResolvedExtensionSet {
         source: "builtin",
         hostProfileVersion: 1,
         capabilities: [],
+        configuration: { token: "journal-secret" },
       },
     ],
     diagnostics: [],

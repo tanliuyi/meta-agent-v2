@@ -104,9 +104,7 @@ export function ComposerCommandTrigger({ commands, onOpenChange }: ComposerComma
                 .map(({ source, label, icon: Icon, items: groupItems }) => (
                   <div key={source} className="composer-command-group" role="group" aria-label={label}>
                     <div className="composer-command-group-label" aria-hidden="true">
-                      <Icon size={12} />
-                      <span>{label}</span>
-                      <span className="composer-command-group-count">{groupItems.length}</span>
+                      {label}
                     </div>
                     {groupItems.map((item) => (
                       <ComposerPrimitive.Unstable_TriggerPopoverItem

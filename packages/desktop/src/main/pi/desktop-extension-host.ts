@@ -127,6 +127,18 @@ export class DesktopExtensionHost {
     this.changed();
   }
 
+  reset(): void {
+    this.assertActive("ui.dialog");
+    const error = new Error("Desktop extension host request became stale after reload");
+    for (const item of this.pending.values()) {
+      if (item.timer) clearTimeout(item.timer);
+      item.reject(error);
+    }
+    this.pending.clear();
+    this.state = EMPTY_HOST_STATE;
+    this.changed();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

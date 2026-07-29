@@ -36,6 +36,7 @@ interface DesktopThreadListItemProps {
   isDeletePending: boolean;
   depth: number;
   childCount: number;
+  runningChildCount: number;
   expanded: boolean;
   ancestorContinuations: readonly boolean[];
   isLastChild: boolean;
@@ -161,9 +162,12 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             <span data-slot="thread-title" className="min-w-0 flex-1 truncate" title={thread.title || "新会话"}>
               {thread.title || "新会话"}
             </span>
-            {!props.expanded && props.childCount > 0 ? (
-              <span className="text-muted-foreground shrink-0 text-xs" aria-label={`${props.childCount} 个子会话`}>
-                {props.childCount}
+            {!props.expanded && props.runningChildCount > 0 ? (
+              <span
+                className="text-muted-foreground shrink-0 text-xs"
+                aria-label={`${props.runningChildCount} 个子会话正在运行`}
+              >
+                {props.runningChildCount}
               </span>
             ) : null}
             {thread.running ? (

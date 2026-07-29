@@ -27,7 +27,7 @@ interface SubagentAgentDialogProps {
   builtin?: boolean;
   models: SubagentModelOption[];
   skills: SubagentSkillOption[];
-  projectScopeAvailable: boolean;
+  scope: SubagentSettingsScope;
   saving: boolean;
   onClose(): void;
   onSave(scope: SubagentSettingsScope, config: SubagentAgentConfigInput): Promise<boolean>;
@@ -66,12 +66,12 @@ export function SubagentAgentDialog({
   builtin = false,
   models,
   skills,
-  projectScopeAvailable,
+  scope,
   saving,
   onClose,
   onSave,
 }: SubagentAgentDialogProps) {
-  const draft = useRef<AgentDraft>(createDraft(agent));
+  const draft = useRef<AgentDraft>(createDraft(agent, scope));
   const updateDraft = useCallback((change: Partial<AgentDraft>) => {
     draft.current = { ...draft.current, ...change };
   }, []);
@@ -143,21 +143,7 @@ export function SubagentAgentDialog({
               />
             </SubagentFormField>
             <SubagentFormField label="作用域">
-              <SelectRoot
-                disabled={(!builtin && Boolean(agent)) || (builtin && agent?.overridden)}
-                defaultValue={draft.current.scope}
-                onValueChange={(value) => updateDraft({ scope: value as SubagentSettingsScope })}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">用户</SelectItem>
-                  <SelectItem value="project" disabled={!projectScopeAvailable}>
-                    项目
-                  </SelectItem>
-                </SelectContent>
-              </SelectRoot>
+              <Input disabled value={scope === "user" ? "个人" : "项目"} />
             </SubagentFormField>
           </div>
 
@@ -443,11 +429,11 @@ export function SubagentAgentDialog({
   );
 }
 
-function createDraft(agent?: AgentSummary): AgentDraft {
+function createDraft(agent: AgentSummary | undefined, scope: SubagentSettingsScope): AgentDraft {
   return {
     name: agent?.localName ?? agent?.name ?? "",
     description: agent?.description ?? "",
-    scope: agent?.overrideScope ?? (agent?.source === "project" ? "project" : "user"),
+    scope,
     model: agent?.model ?? "",
     fallbackModels: agent?.fallbackModels?.join(", ") ?? "",
     thinking: agent?.thinking === false ? "off" : (agent?.thinking ?? "inherit"),

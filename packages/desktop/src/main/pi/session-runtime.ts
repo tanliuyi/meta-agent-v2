@@ -102,7 +102,11 @@ export class SessionRuntime {
     this.subagentRuntime = subagentRuntime;
     this.extensionSet = {
       ...extensionSet,
-      entries: extensionSet.entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+      entries: extensionSet.entries.map((entry) => ({
+        ...entry,
+        capabilities: [...entry.capabilities],
+        ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
+      })),
       diagnostics: extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     };
     this.extensionDiagnostics = extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic }));
@@ -125,8 +129,7 @@ export class SessionRuntime {
     const extensionSet = options.extensionSet ?? builtinOnlyExtensionSet(options.projectId);
     const agentDir = options.agentDir ?? getAgentDir();
     const settingsManager = SettingsManager.create(options.cwd, agentDir);
-    if (!settingsManager.getShellPath() && options.shellPath)
-      settingsManager.applyOverrides({ shellPath: options.shellPath });
+    if (options.shellPath) settingsManager.applyDefaults({ shellPath: options.shellPath });
     const modelRuntime = await ModelRuntime.create({
       credentials: new FileCredentialStore(join(agentDir, "auth.json")),
       modelsPath: join(agentDir, "models.json"),
@@ -347,6 +350,44 @@ export class SessionRuntime {
 
   async compact(): Promise<void> {
     await this.compatibility.compact();
+  }
+
+  async reloadResources(): Promise<SessionCommandResult> {
+    this.assertTimelineAvailable();
+    const phase = this.projector.snapshot().phase;
+    if (phase !== "idle") {
+      return { accepted: false, queued: false, error: `Pi ${phase} 阶段不支持资源重新加载` };
+    }
+
+    this.extensionDiagnostics = [];
+    this.extensionPhase = "start";
+    this.lastError = undefined;
+    this.extensionHost.reset();
+    try {
+      await this.session.reload();
+      const lifecycleDiagnostics = this.extensionDiagnostics;
+      this.extensionDiagnostics = [
+        ...extensionLoadDiagnostics(this.extensionSet, this.session.resourceLoader.getExtensions()).map(
+          (diagnostic) => ({ ...diagnostic, threadId: this.id }),
+        ),
+        ...lifecycleDiagnostics,
+      ];
+      this.lastError = joinRuntimeDiagnostics(
+        undefined,
+        this.extensionDiagnostics.map(({ extensionId, message }) => `扩展加载失败 ${extensionId}: ${message}`),
+        resourceErrorMessages("Skill", this.session.resourceLoader.getSkills().diagnostics),
+        resourceErrorMessages("Prompt", this.session.resourceLoader.getPrompts().diagnostics),
+      );
+      return this.lastError
+        ? { accepted: false, queued: false, error: this.lastError }
+        : { accepted: true, queued: false };
+    } catch (error) {
+      this.lastError = errorMessage(error);
+      return { accepted: false, queued: false, error: this.lastError };
+    } finally {
+      this.extensionPhase = "runtime";
+      this.publishControl();
+    }
   }
 
   async refreshModels(): Promise<void> {
@@ -630,6 +671,17 @@ function createSummary(session: AgentSession): Omit<Thread, "projectId" | "archi
 function contentText(content: string | Array<{ type: string; text?: string }>): string {
   if (typeof content === "string") return content;
   return content.flatMap((part) => (part.type === "text" && part.text ? [part.text] : [])).join("\n");
+}
+
+function resourceErrorMessages(
+  label: string,
+  diagnostics: Array<{ type: string; message: string; path?: string }>,
+): string[] {
+  return diagnostics.flatMap((diagnostic) =>
+    diagnostic.type === "error"
+      ? [`${label} 加载失败${diagnostic.path ? ` ${diagnostic.path}` : ""}: ${diagnostic.message}`]
+      : [],
+  );
 }
 
 function joinRuntimeDiagnostics(primary: string | undefined, ...groups: string[][]): string | undefined {

@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { SessionCacheHost } from "../../components/session-cache-host.tsx";
+import { SessionRoutePending } from "../../components/session-route-pending.tsx";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import type { DesktopState } from "../../state/desktop-model.ts";
 import { useDesktopStore } from "../../state/desktop-store-context.tsx";
@@ -55,20 +56,14 @@ function SessionRoute() {
     }
 
     let current = true;
-    setValidation("loading");
-    void actions
-      .activateProject(projectId)
-      .then(() => {
-        if (!current) return;
-        const record = cache.ensure({ projectId, threadId });
-        cache.setActiveKey(record.key);
-        setValidation("ready");
-      })
-      .catch(() => {
-        if (!current) return;
-        cache.setActiveKey(null);
-        setValidation("invalid");
-      });
+    const record = cache.ensure({ projectId, threadId });
+    cache.setActiveKey(record.key);
+    setValidation("ready");
+    void actions.activateProject(projectId).catch(() => {
+      if (!current) return;
+      cache.setActiveKey(null);
+      setValidation("invalid");
+    });
     return () => {
       current = false;
     };
@@ -97,5 +92,5 @@ function SessionRoute() {
     (record) => record.identity.projectId === projectId && record.identity.threadId === threadId,
   );
   const activeKey = validation === "ready" && routeRecord?.key === snapshot.activeKey ? snapshot.activeKey : null;
-  return <SessionCacheHost records={snapshot.records} activeKey={activeKey} />;
+  return activeKey ? <SessionCacheHost records={snapshot.records} activeKey={activeKey} /> : <SessionRoutePending />;
 }

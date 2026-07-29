@@ -1,11 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShellRuntimeProgress, ShellRuntimeStatus } from "../../shared/desktop-api.ts";
 import { downloadRuntimeArchive } from "./runtime-download.ts";
-import { activateRuntime, withRuntimeLock } from "./runtime-lock.ts";
+import { withRuntimeLock } from "./runtime-lock.ts";
 
 export const SHELL_RUNTIME_VERSION = "2.53.0.3";
 const RELEASE = "v2.53.0.windows.3";
@@ -45,17 +45,9 @@ export class ShellRuntimeInstaller {
     return () => this.listeners.delete(listener);
   }
 
-  activeBashPath(): string | undefined {
-    const runtimeRoot = join(this.userDataDir, "shell-runtime");
-    const activePath = join(runtimeRoot, "active.json");
-    if (!existsSync(activePath)) return undefined;
-    try {
-      const active = JSON.parse(readFileSync(activePath, "utf8")) as { root?: string };
-      const executable = join(active.root ?? "", "bin", "bash.exe");
-      return existsSync(executable) && this.validate(executable) ? executable : undefined;
-    } catch {
-      return undefined;
-    }
+  installedBashPath(): string | undefined {
+    const executable = join(installedRuntimeRoot(this.userDataDir), "bin", "bash.exe");
+    return existsSync(executable) && this.validate(executable) ? executable : undefined;
   }
 
   async install(): Promise<ShellRuntimeStatus> {
@@ -72,19 +64,19 @@ export class ShellRuntimeInstaller {
   }
 
   private async installLocked(runtimeRoot: string): Promise<ShellRuntimeStatus> {
-    const activePath = this.activeBashPath();
-    if (activePath) {
+    const installedPath = this.installedBashPath();
+    if (installedPath) {
       try {
-        await run(activePath, ["--noprofile", "--norc", "-c", "command -v git >/dev/null"]);
+        await run(installedPath, ["--noprofile", "--norc", "-c", "command -v git >/dev/null"]);
         return {
           state: "ready",
-          path: activePath,
+          path: installedPath,
           version: SHELL_RUNTIME_VERSION,
           message: `PortableGit ${SHELL_RUNTIME_VERSION} 已安装`,
           installUrl: shellRuntimeInstallUrl(),
         };
       } catch {
-        // Replace an incomplete active runtime from the verified archive below.
+        // Replace an incomplete installed runtime from the verified archive below.
       }
     }
     const key = `${process.platform}-${process.arch}`;
@@ -93,7 +85,7 @@ export class ShellRuntimeInstaller {
     const cacheRoot = join(runtimeRoot, "cache");
     const cachePath = join(cacheRoot, artifact.filename);
     const stagingRoot = join(runtimeRoot, `.staging-${process.pid}-${Date.now()}`);
-    const finalRoot = join(runtimeRoot, `portable-git-${SHELL_RUNTIME_VERSION}-${key}`);
+    const finalRoot = installedRuntimeRoot(this.userDataDir);
     const url = shellRuntimeInstallUrl();
     this.emit({ phase: "checking", percent: 0, message: "准备 Git Bash 安装目录" });
     await mkdir(cacheRoot, { recursive: true });
@@ -119,7 +111,6 @@ export class ShellRuntimeInstaller {
       await run(executable, ["--noprofile", "--norc", "-c", "command -v git >/dev/null"]);
       rmSync(finalRoot, { recursive: true, force: true });
       renameSync(stagingRoot, finalRoot);
-      activateRuntime(runtimeRoot, finalRoot);
       const path = join(finalRoot, "bin", "bash.exe");
       this.emit({ phase: "ready", percent: 100, message: `PortableGit ${SHELL_RUNTIME_VERSION} 安装完成` });
       return {
@@ -143,6 +134,11 @@ export function shellRuntimeInstallUrl(): string {
   return artifact
     ? `https://github.com/git-for-windows/git/releases/download/${RELEASE}/${artifact.filename}`
     : "https://gitforwindows.org/";
+}
+
+function installedRuntimeRoot(userDataDir: string): string {
+  const key = `${process.platform}-${process.arch}`;
+  return join(userDataDir, "shell-runtime", `portable-git-${SHELL_RUNTIME_VERSION}-${key}`);
 }
 
 function validateBash(path: string): boolean {

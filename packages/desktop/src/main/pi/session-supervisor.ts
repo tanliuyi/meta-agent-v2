@@ -16,6 +16,7 @@ import type {
   SessionPush,
   SessionPushPayload,
   SessionReloadInput,
+  SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
 import type { ThreadWorkerRegistry } from "../sidecar/thread-worker-registry.ts";
@@ -166,6 +167,10 @@ export class SessionSupervisor {
 
   reload(input: SessionReloadInput): Promise<SessionCommandResult> {
     return this.workers.reload(input);
+  }
+
+  reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult> {
+    return this.workers.reloadResources(input);
   }
 
   branch(input: SessionBranchInput): Promise<SessionBranchResult> {

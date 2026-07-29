@@ -1,4 +1,19 @@
-.subagent-settings {
+.subagent-scope-tabs {
+  min-width: 0;
+}
+
+.subagent-scope-tab-list {
+  margin: 0 0 20px;
+}
+
+.subagent-scope-tab-list [role="tab"][aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.subagent-scope-tab-content {
+  min-width: 0;
+  outline: none;
 }
 
 .subagent-page-heading {
@@ -60,6 +75,52 @@
 
 .subagent-section-heading {
   gap: 16px;
+}
+
+.subagent-collapsible-header {
+  padding: 0;
+}
+
+.subagent-collapsible-title {
+  width: 100%;
+}
+
+.subagent-collapsible-heading {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.subagent-collapsible-heading:hover {
+  background: hsl(var(--foreground) / 0.025);
+}
+
+.subagent-collapsible-heading:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+
+.subagent-collapsible-heading svg {
+  width: 16px;
+  height: 16px;
+  color: hsl(var(--muted-foreground));
+  transform: rotate(-90deg);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.subagent-collapsible-heading[data-state="open"] svg {
+  transform: rotate(0deg);
 }
 
 .subagent-row {

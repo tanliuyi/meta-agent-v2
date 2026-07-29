@@ -155,11 +155,11 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
   };
 
   // Keep project memory available for users upgrading from the old
-  // ~/.pi/agent/<project>/ layout. This is non-destructive: legacy folders
+  // ~/.pi-desk/agent/<project>/ layout. This is non-destructive: legacy folders
   // remain in place while entries are copied/merged into projects-memory/.
   migrateLegacyProjectMemoryDirs(agentRoot, config.projectsMemoryDir);
   // Detect project from cwd using shared helper
-  // Project-scoped store: ~/.pi/agent/<projectsMemoryDir>/<project_name>/
+  // Project-scoped store: ~/.pi-desk/agent/<projectsMemoryDir>/<project_name>/
   const projectConfig = project.memoryDir
     ? { ...config, memoryCharLimit: config.projectCharLimit, memoryDir: project.memoryDir }
     : { ...config, memoryDir: undefined };

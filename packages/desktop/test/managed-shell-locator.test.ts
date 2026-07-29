@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepareDesktopManagedShell } from "../../../scripts/prepare-desktop-managed-shell.mjs";
-import { locateManagedBash } from "../src/main/sidecar/managed-shell-locator.ts";
+import { locateGitForWindowsBash, locateManagedBash } from "../src/main/sidecar/managed-shell-locator.ts";
 
 describe("Desktop managed Bash locator", () => {
   let root: string;
@@ -43,6 +43,37 @@ describe("Desktop managed Bash locator", () => {
     ).toBeUndefined();
     expect(
       locateManagedBash({ isPackaged: true, resourcesPath: root, appDir: root, platform: "win32" }),
+    ).toBeUndefined();
+  });
+
+  it("locates Git for Windows without accepting an arbitrary bash.exe on PATH", () => {
+    const checked: string[] = [];
+    const shellPath = "C:\\Users\\test\\AppData\\Local\\Programs\\Git\\bin\\bash.exe";
+
+    expect(
+      locateGitForWindowsBash({
+        platform: "win32",
+        env: {
+          ProgramFiles: "C:\\Program Files",
+          LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local",
+          PATH: "C:\\Windows\\System32",
+        },
+        exists: (path) => {
+          checked.push(path);
+          return path === shellPath;
+        },
+      }),
+    ).toBe(shellPath);
+    expect(checked).toEqual(["C:\\Program Files\\Git\\bin\\bash.exe", shellPath]);
+  });
+
+  it("does not resolve Git for Windows outside Windows", () => {
+    expect(
+      locateGitForWindowsBash({
+        platform: "linux",
+        env: { ProgramFiles: "C:\\Program Files" },
+        exists: () => true,
+      }),
     ).toBeUndefined();
   });
 

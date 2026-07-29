@@ -4,26 +4,37 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { discoverAgents } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
 import { SubagentSettingsConfigService } from "../src/main/subagents/subagent-settings-config-service.ts";
 
 let root = "";
 let agentDir = "";
 let projectDir = "";
 let previousAgentDir: string | undefined;
+let previousHome: string | undefined;
+let previousUserProfile: string | undefined;
 const sourceBuiltinAgentsDir = fileURLToPath(new URL("../src/main/pi/extensions/pi-subagents/agents", import.meta.url));
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "desktop-subagent-settings-"));
   agentDir = join(root, "agent");
   projectDir = join(root, "project");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(projectDir, ".pi"), { recursive: true })]);
+  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(projectDir, ".pi-desk"), { recursive: true })]);
   previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  previousHome = process.env.HOME;
+  previousUserProfile = process.env.USERPROFILE;
   process.env.PI_CODING_AGENT_DIR = agentDir;
+  process.env.HOME = root;
+  process.env.USERPROFILE = root;
 });
 
 afterEach(async () => {
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
+  if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = previousUserProfile;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -37,11 +48,105 @@ async function createService(builtinAgentsDir = sourceBuiltinAgentsDir): Promise
     builtinAgentsDir,
     modelRuntime,
     getProjectCwd: () => projectDir,
-    getActiveProject: async () => ({ id: "project", cwd: projectDir }),
   });
 }
 
 describe("SubagentSettingsConfigService", () => {
+  test("defaults to the user scope instead of the active project", async () => {
+    const snapshot = await (await createService()).getSnapshot();
+
+    expect(snapshot.projectId).toBeUndefined();
+    expect(snapshot.projectAgents).toEqual([]);
+  });
+
+  test("excludes project memory files from user agent discovery", async () => {
+    const modernUserDir = join(root, ".agents");
+    await mkdir(join(modernUserDir, "projects", "example", "memory"), { recursive: true });
+    await writeFile(
+      join(modernUserDir, "personal-helper.md"),
+      "---\nname: personal-helper\ndescription: Real personal agent\n---\n\nHelp with personal tasks.\n",
+      "utf8",
+    );
+    await writeFile(
+      join(modernUserDir, "projects", "example", "memory", "preference.md"),
+      "---\nname: remembered-preference\ndescription: A memory entry, not an agent\n---\n\nRemember this preference.\n",
+      "utf8",
+    );
+
+    const snapshot = await (await createService()).getSnapshot();
+
+    expect(snapshot.userAgents.map((agent) => agent.name)).toContain("personal-helper");
+    expect(snapshot.userAgents.map((agent) => agent.name)).not.toContain("remembered-preference");
+  });
+
+  test("excludes project memory files from runtime user agent discovery", async () => {
+    const modernUserDir = join(root, ".agents");
+    await Promise.all([
+      mkdir(join(modernUserDir, "projects", "example", "memory"), { recursive: true }),
+      mkdir(join(projectDir, ".pi-desk", "agents"), { recursive: true }),
+    ]);
+    await Promise.all([
+      writeFile(
+        join(modernUserDir, "personal-helper.md"),
+        "---\nname: personal-helper\ndescription: Real personal agent\n---\n\nHelp with personal tasks.\n",
+        "utf8",
+      ),
+      writeFile(
+        join(modernUserDir, "projects", "example", "memory", "preference.md"),
+        "---\nname: remembered-preference\ndescription: A memory entry, not an agent\n---\n\nRemember this preference.\n",
+        "utf8",
+      ),
+      writeFile(
+        join(projectDir, ".pi-desk", "agents", "project-helper.md"),
+        "---\nname: project-helper\ndescription: Real project agent\n---\n\nHelp with project tasks.\n",
+        "utf8",
+      ),
+    ]);
+    await createService();
+
+    const discovered = discoverAgents(projectDir, "both");
+    const names = discovered.agents.map((agent) => agent.name);
+
+    expect(names).toContain("personal-helper");
+    expect(names).toContain("project-helper");
+    expect(names).not.toContain("remembered-preference");
+  });
+
+  test("returns pristine builtins for the system scope", async () => {
+    await writeFile(
+      join(agentDir, "settings.json"),
+      '{"subagents":{"agentOverrides":{"reviewer":{"model":"openai/user-reviewer"}}}}\n',
+      "utf8",
+    );
+    const service = await createService();
+
+    const userSnapshot = await service.getSnapshot();
+    const systemSnapshot = await service.getSnapshot({ settingsScope: "system" });
+
+    expect(userSnapshot.builtinAgents.find((agent) => agent.name === "reviewer")).toMatchObject({
+      model: "openai/user-reviewer",
+      overridden: true,
+      overrideScope: "user",
+    });
+    expect(systemSnapshot.builtinAgents.find((agent) => agent.name === "reviewer")).not.toHaveProperty("overridden");
+    expect(systemSnapshot.userAgents).toEqual([]);
+    expect(systemSnapshot.projectAgents).toEqual([]);
+  });
+
+  test("rejects scoped agent mutations from the system view", async () => {
+    const service = await createService();
+    const snapshot = await service.getSnapshot({ settingsScope: "system" });
+
+    await expect(
+      service.saveConfig({
+        requestId: "system-agent-mutation",
+        settingsScope: "system",
+        expectedSnapshotRevision: snapshot.revision,
+        mutation: { type: "set-agent-enabled", agent: "reviewer", disabled: true, scope: "user" },
+      }),
+    ).rejects.toThrow("only allow extension configuration updates");
+  });
+
   test("discovers bundled agents and exposes extension defaults", async () => {
     const snapshot = await (await createService()).getSnapshot({ projectId: "project" });
 
@@ -297,7 +402,7 @@ describe("SubagentSettingsConfigService", () => {
       overrideScope: "project",
       disabled: true,
     });
-    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi", "settings.json"), "utf8"));
+    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi-desk", "settings.json"), "utf8"));
     expect(projectSettings.subagents.agentOverrides.reviewer).toMatchObject({
       model: "openai/project-reviewer",
       disabled: true,

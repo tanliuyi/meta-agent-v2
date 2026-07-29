@@ -54,11 +54,7 @@ Function RuntimePageCreate
   StrCpy $0 ""
   IfFileExists "$PROGRAMFILES64\Git\bin\bash.exe" shell_found
   IfFileExists "$PROGRAMFILES32\Git\bin\bash.exe" shell_found
-  SearchPath $0 "bash.exe"
-  ${If} $0 != ""
-    Goto shell_found
-  ${EndIf}
-  IfFileExists "$APPDATA\Meta Agent\shell-runtime\active.json" shell_found shell_detection_done
+  IfFileExists "$LOCALAPPDATA\Programs\Git\bin\bash.exe" shell_found shell_detection_done
 
   shell_found:
   ${NSD_Uncheck} $RuntimeShellCheckbox

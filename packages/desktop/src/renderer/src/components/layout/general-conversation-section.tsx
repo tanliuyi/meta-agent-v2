@@ -105,16 +105,16 @@ export function GeneralConversationSection({
       >
         {expanded ? (
           catalogLoading ? (
-            <div className="flex h-8 items-center gap-2 px-4 text-xs text-muted-foreground" role="status">
+            <div className="flex h-8 items-center gap-2 px-4 text-sm text-muted-foreground" role="status">
               <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
               <span>加载中</span>
             </div>
           ) : !generalAvailable ? (
-            <div className="flex h-8 items-center gap-2 px-4 text-xs text-destructive" role="status">
+            <div className="flex h-8 items-center gap-2 px-4 text-sm text-destructive" role="status">
               <span>不可用</span>
             </div>
           ) : loadState.failed ? (
-            <div className="flex h-8 items-center justify-between gap-2 px-2 text-xs text-destructive" role="status">
+            <div className="flex h-8 items-center justify-between gap-2 px-2 text-sm text-destructive" role="status">
               <span>加载失败</span>
               <TooltipIconButton
                 variant="ghost"
@@ -128,14 +128,14 @@ export function GeneralConversationSection({
               </TooltipIconButton>
             </div>
           ) : generalThreads === undefined ? (
-            <div className="flex h-8 items-center gap-2 px-4 text-xs text-muted-foreground" role="status">
+            <div className="flex h-8 items-center gap-2 px-4 text-sm text-muted-foreground" role="status">
               <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
               <span>加载中</span>
             </div>
           ) : generalThreads.length > 0 && generalProject ? (
             <DesktopThreadList project={generalProject} threads={generalThreads} compactRoot />
           ) : (
-            <div className="flex h-8 items-center gap-2 px-2 text-xs text-muted-foreground" role="status">
+            <div className="flex h-8 items-center gap-2 px-2 text-sm text-muted-foreground" role="status">
               <span>没有会话</span>
             </div>
           )

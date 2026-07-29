@@ -14,7 +14,7 @@ export function ModelSelectorList({ className, children, ...props }: ModelSelect
     <CommandList
       data-slot="model-selector-list"
       className={cn(
-        "max-h-64 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "min-h-0 max-h-80 flex-1 scroll-py-1 py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className,
       )}
       {...props}

@@ -5,8 +5,9 @@ import { ProjectItem } from "../src/renderer/src/components/layout/project-item.
 import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
 import type { DesktopActions } from "../src/renderer/src/state/desktop-actions.ts";
 import { DesktopActionsContext } from "../src/renderer/src/state/desktop-context.tsx";
+import { INITIAL_STATE } from "../src/renderer/src/state/desktop-model.ts";
 import { DesktopStoreProvider } from "../src/renderer/src/state/desktop-store-context.tsx";
-import type { Project } from "../src/shared/contracts.ts";
+import type { Project, Thread } from "../src/shared/contracts.ts";
 
 const project: Project = {
   id: "project",
@@ -42,11 +43,51 @@ describe("ProjectItem", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("收起时用 loading 标记项目中正在运行的任务", () => {
+    const markup = renderProjectItem(false, [runningThread]);
+
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-label="Project 中有任务正在运行"');
+    expect(markup).toContain("lucide-loader-circle");
+    expect(markup).toContain("group-hover:w-12");
+    expect(markup).toContain('aria-label="在 Project 中新建任务"');
+    expect(markup.indexOf('aria-label="Project 中有任务正在运行"')).toBeLessThan(
+      markup.indexOf('aria-label="在 Project 中新建任务"'),
+    );
+    expect(markup).toContain("group-hover:opacity-100");
+  });
+
+  it("收起但没有运行中任务时不展示 loading", () => {
+    const markup = renderProjectItem(false, [{ ...runningThread, running: false }]);
+
+    expect(markup).not.toContain('aria-label="Project 中有任务正在运行"');
+  });
+
+  it("收起时忽略已归档的运行中任务", () => {
+    const markup = renderProjectItem(false, [{ ...runningThread, archived: true }]);
+
+    expect(markup).not.toContain('aria-label="Project 中有任务正在运行"');
+  });
 });
 
-function renderProjectItem(active: boolean): string {
+const runningThread: Thread = {
+  id: "thread",
+  projectId: project.id,
+  title: "Running thread",
+  createdAt: 1,
+  updatedAt: 1,
+  messageCount: 1,
+  preview: "",
+  archived: false,
+  running: true,
+};
+
+function renderProjectItem(active: boolean, threads?: Thread[]): string {
   return renderToStaticMarkup(
-    <DesktopStoreProvider>
+    <DesktopStoreProvider
+      initialState={threads ? { ...INITIAL_STATE, threadCatalogs: { [project.id]: threads } } : undefined}
+    >
       <DesktopActionsContext.Provider value={desktopActions()}>
         <TooltipProvider>
           <ProjectItem project={project} active={active} newTaskDisabled={false} onNewTask={vi.fn()} />

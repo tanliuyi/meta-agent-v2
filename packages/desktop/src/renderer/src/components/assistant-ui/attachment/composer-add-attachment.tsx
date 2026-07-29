@@ -14,7 +14,7 @@ export function ComposerAddAttachment({ disabled }: { disabled?: boolean }) {
         aria-label="Add Attachment"
         disabled={disabled}
       >
-        <PlusIcon className="aui-attachment-add-icon size-4.5 stroke-[1.5px]" />
+        <PlusIcon className="aui-attachment-add-icon size-4! stroke-[1.5px]" />
       </TooltipIconButton>
     </ComposerPrimitive.AddAttachment>
   );

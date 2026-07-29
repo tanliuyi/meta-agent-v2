@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assertTargetRuntime } from "../../../scripts/validate-desktop-package.mjs";
+import { assertBundledPiDocumentation, assertTargetRuntime } from "../../../scripts/validate-desktop-package.mjs";
 
 const manifest = (platform: string, arch: string) => ({ compatibility: { platform, arch } });
 
@@ -24,9 +25,46 @@ describe("packaged Desktop target validation", () => {
     );
   });
 
+  it("requires the Pi documentation paths advertised to the Desktop agent", () => {
+    const config = readFileSync(resolve(import.meta.dirname, "../electron-builder.yml"), "utf8");
+    expect(config).toContain("from: ../coding-agent/README.md");
+    expect(config).toContain("from: ../coding-agent/docs");
+    expect(config).toContain("from: ../coding-agent/examples");
+
+    const root = mkdtempSync(join(tmpdir(), "desktop-pi-docs-"));
+    const packageRoot = join(root, "app.asar.unpacked", "node_modules", "@earendil-works", "pi-coding-agent");
+    const required = [
+      "README.md",
+      "docs/extensions.md",
+      "docs/sdk.md",
+      "examples/extensions/README.md",
+      "examples/sdk/01-minimal.ts",
+    ];
+    try {
+      for (const relativePath of required) {
+        const path = join(packageRoot, relativePath);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, relativePath);
+      }
+
+      expect(() => assertBundledPiDocumentation(root)).not.toThrow();
+      rmSync(join(packageRoot, "README.md"));
+      expect(() => assertBundledPiDocumentation(root)).toThrow("Bundled Pi documentation is missing");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps PortableGit out of the standard Windows package", () => {
     const config = readFileSync(resolve(import.meta.dirname, "../electron-builder.yml"), "utf8");
     expect(config).toContain("include: build/installer.nsh");
     expect(config).not.toContain("output/managed-shell");
+  });
+
+  it("does not treat WSL or another bash.exe on PATH as Git Bash", () => {
+    const installer = readFileSync(resolve(import.meta.dirname, "../build/installer.nsh"), "utf8");
+    expect(installer).toContain("$LOCALAPPDATA\\Programs\\Git\\bin\\bash.exe");
+    expect(installer).not.toContain('SearchPath $0 "bash.exe"');
+    expect(installer).not.toContain("shell-runtime\\active.json");
   });
 });

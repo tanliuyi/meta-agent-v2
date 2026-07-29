@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell } from "electron";
 import type {
   AuthOauthLoginInput,
   AuthOauthLoginResponse,
@@ -18,6 +18,7 @@ import type {
   SessionEditInput,
   SessionPromptInput,
   SessionReloadInput,
+  SessionResourceReloadInput,
   TerminalEvent,
   Thread,
   WorkbenchState,
@@ -35,6 +36,10 @@ import type {
   SaveDesktopExtensionSettingsInput,
 } from "../shared/desktop-extension-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
+import type {
+  SavePluginConfigurationInput,
+  SavePluginConfigurationResult,
+} from "../shared/plugin-configuration-contracts.ts";
 import type {
   InstallMarketplacePluginInput,
   InstallMarketplacePluginResult,
@@ -61,6 +66,7 @@ import type { MarketplaceMutationApplyCoordinator } from "./plugins/marketplace-
 import type { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
 import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
 import type { MarketplaceRevocationService } from "./plugins/marketplace-revocation-service.ts";
+import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
 import type { ProjectStore } from "./store/project-store.ts";
@@ -91,6 +97,7 @@ export function registerIpc(
     shell?: {
       getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
       install(): Promise<ShellRuntimeStatus>;
+      use(path: string): Promise<ShellRuntimeStatus>;
       onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
     };
   },
@@ -104,6 +111,7 @@ export function registerIpc(
   marketplaceMutationApply?: MarketplaceMutationApplyCoordinator,
   marketplaceApplyJournal?: MarketplaceExtensionApplyJournal,
   marketplaceRevocations?: MarketplaceRevocationService,
+  pluginConfigurations?: PluginConfigurationService,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -214,6 +222,19 @@ export function registerIpc(
         const snapshot = await marketplaceRegistry.getSnapshot();
         return marketplaceRevocations ? marketplaceRevocations.decorateSnapshot(snapshot) : snapshot;
       });
+      ipcMain.handle(CHANNELS.marketplaceGetPluginConfiguration, (_event, pluginId: string) => {
+        if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
+        return pluginConfigurations.getConfig(pluginId);
+      });
+      ipcMain.handle(
+        CHANNELS.marketplaceSavePluginConfiguration,
+        async (_event, input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult> => {
+          if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
+          const result = await pluginConfigurations.saveConfig(input);
+          if (result.status === "saved") await sessions.extensionSettingsChanged();
+          return result;
+        },
+      );
       ipcMain.handle(CHANNELS.marketplaceInstallPlugin, async (_event, input: InstallMarketplacePluginInput) => {
         assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
         const result = await marketplaceInstaller.install(input);
@@ -483,6 +504,9 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsPrompt, (_event, input: SessionPromptInput) => sessions.prompt(input));
   ipcMain.handle(CHANNELS.sessionsEdit, (_event, input: SessionEditInput) => sessions.edit(input));
   ipcMain.handle(CHANNELS.sessionsReload, (_event, input: SessionReloadInput) => sessions.reload(input));
+  ipcMain.handle(CHANNELS.sessionsReloadResources, (_event, input: SessionResourceReloadInput) =>
+    sessions.reloadResources(input),
+  );
   ipcMain.handle(
     CHANNELS.sessionsBranch,
     (_event, input: SessionBranchInput): Promise<SessionBranchResult> => sessions.branch(input),
@@ -551,6 +575,17 @@ export function registerIpc(
   if (nodeRuntime.shell) {
     ipcMain.handle(CHANNELS.shellRuntimeStatus, () => nodeRuntime.shell?.getStatus());
     ipcMain.handle(CHANNELS.shellRuntimeInstall, () => nodeRuntime.shell?.install());
+    ipcMain.handle(CHANNELS.shellRuntimeChoose, async (event) => {
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const options: OpenDialogOptions = {
+        title: "选择 Git Bash 可执行文件",
+        properties: ["openFile"],
+        filters: [{ name: "Bash executable", extensions: ["exe"] }],
+      };
+      const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+      const path = result.filePaths[0];
+      return result.canceled || !path ? null : nodeRuntime.shell?.use(path);
+    });
   }
   if (updater) {
     ipcMain.handle(CHANNELS.updaterGetState, () => updater.getState());

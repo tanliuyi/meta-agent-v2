@@ -40,6 +40,7 @@ describe("plugin marketplace IPC", () => {
   const mutationApply = { rollback: vi.fn(), complete: vi.fn() };
   const applyJournal = { hasMutationOperation: vi.fn() };
   const revocations = { decorateSnapshot: vi.fn() };
+  const pluginConfigurations = { getConfig: vi.fn(), saveConfig: vi.fn() };
 
   beforeEach(() => {
     electron.handles.clear();
@@ -70,6 +71,7 @@ describe("plugin marketplace IPC", () => {
       mutationApply as never,
       applyJournal as never,
       revocations as never,
+      pluginConfigurations as never,
     );
   });
 
@@ -103,6 +105,37 @@ describe("plugin marketplace IPC", () => {
     await expect(electron.handles.get(CHANNELS.marketplaceGetInstalled)?.({})).resolves.toBe(decorated);
 
     expect(revocations.decorateSnapshot).toHaveBeenCalledWith(snapshot);
+  });
+
+  it("reads and saves validated plugin configuration through main-owned services", async () => {
+    const snapshot = {
+      pluginId: "dev.meta-agent.plugin",
+      revision: "config-one",
+      schema: { version: 1, fields: [] },
+      values: {},
+      secrets: {},
+      secretStorageAvailable: true,
+    };
+    const input = {
+      requestId: "config-save",
+      pluginId: "dev.meta-agent.plugin",
+      expectedRevision: "config-one",
+      values: {},
+    };
+    pluginConfigurations.getConfig.mockResolvedValue(snapshot);
+    pluginConfigurations.saveConfig.mockResolvedValue({ status: "saved", snapshot });
+
+    await expect(
+      electron.handles.get(CHANNELS.marketplaceGetPluginConfiguration)?.({}, "dev.meta-agent.plugin"),
+    ).resolves.toBe(snapshot);
+    await expect(electron.handles.get(CHANNELS.marketplaceSavePluginConfiguration)?.({}, input)).resolves.toEqual({
+      status: "saved",
+      snapshot,
+    });
+
+    expect(pluginConfigurations.getConfig).toHaveBeenCalledWith("dev.meta-agent.plugin");
+    expect(pluginConfigurations.saveConfig).toHaveBeenCalledWith(input);
+    expect(sessions.extensionSettingsChanged).toHaveBeenCalledOnce();
   });
 
   it("invalidates worker extension generations after an installation", async () => {

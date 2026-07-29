@@ -50,7 +50,7 @@ export interface SubagentResumeRequest extends SubagentRunRequest {
 
 /** Preserve Pi runtime event names end to end so upstream progress and transcript consumers share one protocol. */
 export type SubagentRunEvent =
-  | { type: "started"; runId: string; workerInstanceId?: string; sessionFile?: string }
+  | { type: "started"; runId: string; threadId?: string; workerInstanceId?: string; sessionFile?: string }
   | { type: "message_update"; message: JsonValue; assistantMessageEvent: JsonValue }
   | { type: "message_end"; message: JsonValue }
   | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: JsonValue }
@@ -289,16 +289,18 @@ export type SubagentSettingsMutation =
   | { type: "delete-chain"; chain: string; scope: SubagentSettingsScope }
   | { type: "update-extension-config"; config: Partial<SubagentExtensionConfig> };
 
-export interface GetSubagentSettingsInput {
-  projectId?: string;
-}
+export type SubagentSettingsTarget =
+  | { settingsScope?: "user"; projectId?: undefined }
+  | { settingsScope?: "project"; projectId: string }
+  | { settingsScope: "system"; projectId?: undefined };
 
-export interface SaveSubagentSettingsInput {
+export type GetSubagentSettingsInput = SubagentSettingsTarget;
+
+export type SaveSubagentSettingsInput = SubagentSettingsTarget & {
   requestId: string;
-  projectId?: string;
   expectedSnapshotRevision: string;
   mutation: SubagentSettingsMutation;
-}
+};
 
 export type SaveSubagentSettingsResult =
   | { status: "saved"; snapshot: SubagentSettingsSnapshot }

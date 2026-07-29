@@ -30,6 +30,7 @@ export interface VisibleThreadTreeItem {
   thread: Thread;
   depth: number;
   childCount: number;
+  runningChildCount: number;
   expanded: boolean;
   ancestorContinuations: boolean[];
   isLastChild: boolean;
@@ -93,6 +94,7 @@ export function flattenVisibleThreadTree(
         thread: node.thread,
         depth,
         childCount: node.children.length,
+        runningChildCount: node.children.filter(({ thread }) => thread.running).length,
         expanded,
         ancestorContinuations,
         isLastChild,

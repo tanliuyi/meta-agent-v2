@@ -99,7 +99,25 @@ The caller must be a member of `publisherId` or use the static admin token. Plug
     "minVersion": "0.0.31",
     "maxVersionExclusive": "0.1.0"
   },
-  "capabilities": ["tools.register", "events.subscribe"],
+  "capabilities": ["tools.register", "events.subscribe", "configuration.read"],
+  "configuration": {
+    "version": 1,
+    "fields": [
+      {
+        "key": "endpoint",
+        "label": "API Endpoint",
+        "type": "text",
+        "required": true,
+        "defaultValue": "https://api.example.com"
+      },
+      {
+        "key": "apiKey",
+        "label": "API Key",
+        "type": "secret",
+        "required": true
+      }
+    ]
+  },
   "artifacts": [
     {
       "id": "universal",
@@ -116,6 +134,8 @@ The caller must be a member of `publisherId` or use the static admin token. Plug
 ```
 
 `version` and optional Desktop bounds must be valid semver. Artifact IDs must be unique. `entry` is relative to the uploaded payload ZIP root.
+
+`configuration` is optional signed metadata for Desktop's host-rendered plugin settings form. It must use schema `version: 1`, contain at most 64 unique fields, and may use `text`, `textarea`, `path`, `number`, `boolean`, `select`, or `secret`. Each field requires a stable `key` and user-facing `label`; type-specific defaults and constraints are validated by the marketplace before the draft is created. Plugins read the immutable runtime values through `pi.getConfig()`. Declare `configuration.read` when configuration is used. Secret values are supplied by users after installation and must never be included in the schema as defaults.
 
 Target fields supported by protocol v1:
 

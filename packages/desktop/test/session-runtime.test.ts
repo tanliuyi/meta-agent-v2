@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   createAgentSessionServices: vi.fn(),
   createSessionManager: vi.fn(() => ({})),
   createModelRuntime: vi.fn(async () => ({})),
-  createSettingsManager: vi.fn(() => ({ getShellPath: () => undefined, applyOverrides: vi.fn() })),
+  createSettingsManager: vi.fn(() => ({ getShellPath: () => undefined, applyDefaults: vi.fn() })),
   resolveSelection: vi.fn(),
   resolveResumeSelection: vi.fn(),
 }));
@@ -47,6 +47,8 @@ vi.mock("../src/main/pi/desktop-extension-host.ts", () => ({
 
     respond() {}
 
+    reset() {}
+
     dispose() {}
   },
 }));
@@ -63,9 +65,9 @@ describe("SessionRuntime Pi-native commands", () => {
     mocks.createAgentSessionServices.mockResolvedValue(createServices());
   });
 
-  it("injects the managed shell fallback only when settings have no user shellPath", async () => {
-    const applyOverrides = vi.fn();
-    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => undefined, applyOverrides });
+  it("registers the managed shell as a low-priority runtime default", async () => {
+    const applyDefaults = vi.fn();
+    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => undefined, applyDefaults });
     mocks.createAgentSessionFromServices.mockResolvedValue({ session: createSession() });
 
     const runtime = await SessionRuntime.create({
@@ -76,13 +78,13 @@ describe("SessionRuntime Pi-native commands", () => {
       onSummaryChanged: () => {},
     });
 
-    expect(applyOverrides).toHaveBeenCalledWith({ shellPath: "/managed/bin/bash" });
+    expect(applyDefaults).toHaveBeenCalledWith({ shellPath: "/managed/bin/bash" });
     await runtime.dispose();
   });
 
-  it("preserves a user-configured shellPath over the managed fallback", async () => {
-    const applyOverrides = vi.fn();
-    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => "/user/bin/bash", applyOverrides });
+  it("keeps the managed fallback available when the user has configured shellPath", async () => {
+    const applyDefaults = vi.fn();
+    mocks.createSettingsManager.mockReturnValueOnce({ getShellPath: () => "/user/bin/bash", applyDefaults });
     mocks.createAgentSessionFromServices.mockResolvedValue({ session: createSession() });
 
     const runtime = await SessionRuntime.create({
@@ -93,7 +95,7 @@ describe("SessionRuntime Pi-native commands", () => {
       onSummaryChanged: () => {},
     });
 
-    expect(applyOverrides).not.toHaveBeenCalled();
+    expect(applyDefaults).toHaveBeenCalledWith({ shellPath: "/managed/bin/bash" });
     await runtime.dispose();
   });
 
@@ -537,6 +539,76 @@ describe("SessionRuntime Pi-native commands", () => {
     await runtime.dispose();
   });
 
+  it("reloadResources 调用 Pi reload 并发布刷新后的 commands", async () => {
+    const session = createSession();
+    const push = vi.fn();
+    const skills: ReturnType<AgentSession["resourceLoader"]["getSkills"]>["skills"] = [];
+    session.resourceLoader.getSkills = () => ({ skills, diagnostics: [] });
+    session.reload.mockImplementationOnce(async () => {
+      skills.push({
+        name: "fresh-skill",
+        description: "Fresh skill",
+        filePath: "/skills/fresh-skill/SKILL.md",
+        baseDir: "/skills/fresh-skill",
+        sourceInfo: {
+          path: "/skills/fresh-skill/SKILL.md",
+          source: "test",
+          scope: "user",
+          origin: "top-level",
+        },
+        disableModelInvocation: false,
+      });
+    });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push,
+      onSummaryChanged: () => {},
+    });
+    push.mockClear();
+
+    await expect(runtime.reloadResources()).resolves.toEqual({ accepted: true, queued: false });
+
+    expect(session.reload).toHaveBeenCalledOnce();
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "control",
+        projectId: "project",
+        threadId: "thread",
+        control: expect.objectContaining({
+          commands: expect.arrayContaining([
+            expect.objectContaining({ name: "skill:fresh-skill", description: "Fresh skill", source: "skill" }),
+          ]),
+        }),
+      }),
+    );
+    await runtime.dispose();
+  });
+
+  it("reloadResources 将 skill diagnostics 返回为失败结果", async () => {
+    const session = createSession();
+    session.resourceLoader.getSkills = () => ({
+      skills: [],
+      diagnostics: [{ type: "error", message: "invalid frontmatter", path: "/skills/broken/SKILL.md" }],
+    });
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    await expect(runtime.reloadResources()).resolves.toEqual({
+      accepted: false,
+      queued: false,
+      error: "Skill 加载失败 /skills/broken/SKILL.md: invalid frontmatter",
+    });
+    await runtime.dispose();
+  });
+
   it("配置 queue 后的 running prompt 仍走 prompt streamingBehavior", async () => {
     const session = createSession(true);
     mocks.createAgentSessionFromServices.mockResolvedValue({ session });
@@ -650,7 +722,8 @@ function createSession(streaming = false): AgentSession & {
     promptTemplates: [],
     resourceLoader: {
       getExtensions: () => ({ extensions: [], errors: [] }),
-      getSkills: () => ({ skills: [] }),
+      getSkills: () => ({ skills: [], diagnostics: [] }),
+      getPrompts: () => ({ prompts: [], diagnostics: [] }),
     },
     sessionManager: {
       getLeafId: () => null,

@@ -205,7 +205,7 @@ For persistent tweaks, edit `subagents.agentOverrides` in user or project settin
 
 Model ids do not have to be exact. Separator variations (`claude-haiku-4.5` vs `claude-haiku-4-5`), case (`Claude-Sonnet-4`), and optional trailing date stamps (`claude-haiku-4-5-20251001`) all resolve to the same registry model. Exact `provider/id` wins; a qualified `provider/model` never switches providers. To constrain subagents to a budget or compliance profile, set `subagents.modelScope: { enforce: true, allow: ["anthropic/*", "openai/gpt-5-*"] }` in user or project settings. Out-of-scope models you pass explicitly error and abort; models inherited from frontmatter, `subagents.defaultModel`, agent frontmatter, or the parent session only warn.
 
-For model fleets, use the profile commands instead of hand-editing repeated overrides: `/subagents-refresh-provider-models <provider>`, `/subagents-generate-profiles <provider>`, `/subagents-load-profile <name>`, and `/subagents-check-profile <name>`. Profiles live under `~/.pi/agent/profiles/pi-subagents/` and replace only `settings.subagents` when loaded.
+For model fleets, use the profile commands instead of hand-editing repeated overrides: `/subagents-refresh-provider-models <provider>`, `/subagents-generate-profiles <provider>`, `/subagents-load-profile <name>`, and `/subagents-check-profile <name>`. Profiles live under `~/.pi-desk/agent/profiles/pi-subagents/` and replace only `settings.subagents` when loaded.
 
 ## Prompting role subagents
 
@@ -225,8 +225,8 @@ Avoid carrying over old prompt habits that over-specify every step. Use `must`, 
 For implementation handoffs, name the approved scope and success criteria more clearly than the process. Good prompts say what to change, what not to change, where the evidence lives, how to validate, and when to escalate. They should not ask the child to create another subagent plan or continue the parent conversation.
 
 Settings locations:
-- User scope: `~/.pi/agent/settings.json`
-- Project scope: `.pi/settings.json`
+- User scope: `~/.pi-desk/agent/settings.json`
+- Project scope: `.pi-desk/settings.json`
 
 Direct settings example:
 
@@ -256,18 +256,18 @@ If a provider rejects model IDs with thinking suffixes, use
 builtin thinking defaults globally. A higher-precedence per-agent `thinking`
 override can opt one builtin back in.
 
-Tool description modes live in `~/.pi/agent/extensions/subagent/config.json`, not `subagents` settings. Set `toolDescriptionMode` to `compact` to reduce tool-description prompt cost while keeping the execution, async/`subagent_wait`, child-safety, one-writer, management/action, and artifact/status guardrails. Set it to `custom` to read `subagent-tool-description.md` from the project config dir or agent dir; invalid custom files fall back to full mode and the safety guidance is still appended.
+Tool description modes live in `~/.pi-desk/agent/extensions/subagent/config.json`, not `subagents` settings. Set `toolDescriptionMode` to `compact` to reduce tool-description prompt cost while keeping the execution, async/`subagent_wait`, child-safety, one-writer, management/action, and artifact/status guardrails. Set it to `custom` to read `subagent-tool-description.md` from the project config dir or agent dir; invalid custom files fall back to full mode and the safety guidance is still appended.
 
 ## Discovery and Scope Rules
 
 Agent files can live in:
-- `~/.pi/agent/agents/**/*.md` — user scope
-- `.pi/agents/**/*.md` — canonical project scope
-- legacy `.agents/**/*.md` — still read for compatibility, but `.pi/agents/` wins on conflicts
+- `~/.pi-desk/agent/agents/**/*.md` — user scope
+- `.pi-desk/agents/**/*.md` — canonical project scope
+- legacy `.agents/**/*.md` — still read for compatibility, but `.pi-desk/agents/` wins on conflicts
 
 Chains live in:
-- `~/.pi/agent/chains/**/*.chain.md` and `~/.pi/agent/chains/**/*.chain.json` — user scope
-- `.pi/chains/**/*.chain.md` and `.pi/chains/**/*.chain.json` — project scope
+- `~/.pi-desk/agent/chains/**/*.chain.md` and `~/.pi-desk/agent/chains/**/*.chain.json` — user scope
+- `.pi-desk/chains/**/*.chain.md` and `.pi-desk/chains/**/*.chain.json` — project scope
 
 Discovery is recursive. `.chain.md` files do not define agents. Use `.chain.md` for simple saved chains and `.chain.json` for dynamic fanout or inline schema objects. Agents and chains can set optional frontmatter/package metadata; `name: scout` plus `package: code-analysis` registers as runtime name `code-analysis.scout` while serialization keeps `name` and `package` separate.
 
@@ -420,7 +420,7 @@ subagent({ action: "doctor" })
 
 ### Scheduled subagent runs
 
-Scheduled runs defer a subagent launch until a future time. They are opt-in and require `{ "scheduledRuns": { "enabled": true } }` in `~/.pi/agent/extensions/subagent/config.json`. Only schedule explicit delayed runs the user asked for; do not schedule runs speculatively.
+Scheduled runs defer a subagent launch until a future time. They are opt-in and require `{ "scheduledRuns": { "enabled": true } }` in `~/.pi-desk/agent/extensions/subagent/config.json`. Only schedule explicit delayed runs the user asked for; do not schedule runs speculatively.
 
 ```typescript
 // Launch a reviewer in 30 minutes

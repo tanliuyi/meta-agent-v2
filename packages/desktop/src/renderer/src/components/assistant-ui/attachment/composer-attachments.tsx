@@ -6,7 +6,7 @@ export function ComposerAttachments({ disabled }: { disabled?: boolean }) {
   if (!hasAttachments) return null;
 
   return (
-    <div className="aui-composer-attachments flex w-full flex-row items-center gap-2 overflow-x-auto">
+    <div className="aui-composer-attachments flex w-full flex-row items-center gap-2 px-1 pt-1">
       <ComposerPrimitive.Attachments>{() => <AttachmentUI disabled={disabled} />}</ComposerPrimitive.Attachments>
     </div>
   );

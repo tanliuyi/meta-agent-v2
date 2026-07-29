@@ -46,8 +46,9 @@ export class WindowDirtyGuard {
   }
 
   attach(window: BrowserWindow): void {
+    const webContentsId = window.webContents.id;
     window.on("close", (event) => this.handleCloseEvent(window, event));
-    window.webContents.once("destroyed", () => this.remove(window.webContents.id));
+    window.webContents.once("destroyed", () => this.remove(webContentsId));
   }
 
   handleCloseEvent(window: BrowserWindow, event: PreventableEvent): void {

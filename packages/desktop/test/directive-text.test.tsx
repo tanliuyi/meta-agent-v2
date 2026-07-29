@@ -23,6 +23,8 @@ describe("DirectiveText", () => {
     expect(markup).toContain('data-slot="directive-text-chip"');
     expect(markup).toContain('data-directive-type="file"');
     expect(markup).toContain('data-directive-id="directive-text"');
+    expect(markup).toContain('class="lucide lucide-file');
+    expect(markup).toContain('aria-hidden="true"');
     expect(markup).toContain(">directive-text.tsx</span>");
     expect(markup).not.toContain(":file[packages/desktop");
   });
@@ -40,6 +42,7 @@ describe("DirectiveText", () => {
       'data-directive-id="packages/desktop/src/renderer/src/components/assistant-ui/directive-text.tsx"',
     );
     expect(markup).toContain('class="inline-flex items-baseline px-1"');
+    expect(markup).toContain('class="lucide lucide-file');
     expect(markup).toContain('aria-label="directive-text.tsx"');
     expect(markup).toContain(">directive-text.tsx</span>");
   });
@@ -48,6 +51,13 @@ describe("DirectiveText", () => {
     expect(directiveDisplayLabel("command", "packages/desktop/src/renderer/src/components/assistant-ui")).toBe(
       "packages/desktop/src/renderer/src/components/assistant-ui",
     );
+  });
+
+  it("does not render a file icon for other directive types", () => {
+    const markup = renderToStaticMarkup(createElement(RenderDirectiveText, { text: "Run :command[test]{name=test}." }));
+
+    expect(markup).toContain('data-directive-type="command"');
+    expect(markup).not.toContain('class="lucide lucide-file');
   });
 
   it("renders legacy Pi composer @path file references", () => {

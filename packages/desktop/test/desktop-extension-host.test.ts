@@ -118,6 +118,23 @@ describe("DesktopExtensionHost", () => {
     });
   });
 
+  it("rejects pending host requests and clears state on reset", async () => {
+    const host = new DesktopExtensionHost(
+      () => undefined,
+      () => [],
+    );
+    const ui = host.createContext();
+    ui.setStatus("reload", "pending");
+    const pending = ui.confirm("Confirm", "Continue?");
+
+    host.reset();
+
+    await expect(pending).rejects.toThrow("became stale after reload");
+    expect(host.requests).toEqual([]);
+    expect(host.hostState).toEqual({ statuses: {}, widgets: [] });
+    expect(() => ui.notify("current runtime remains usable")).not.toThrow();
+  });
+
   it("cancels timed-out dialogs and rejects pending work after dispose", async () => {
     vi.useFakeTimers();
     const host = new DesktopExtensionHost(

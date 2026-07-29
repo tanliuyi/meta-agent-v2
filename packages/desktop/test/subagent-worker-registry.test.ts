@@ -288,6 +288,62 @@ describe("SubagentWorkerRegistry", () => {
     expect(client?.shutdownCount).toBe(1);
   });
 
+  it("projects a running child immediately from its started thread identity", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const summaries: Array<{ id: string; parentThreadId?: string; running: boolean }> = [];
+    const persisted: boolean[] = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      catalogChanged: (summary) => summaries.push(summary),
+      persistSession: async (_projectId, _sessionFile, summary) => {
+        persisted.push(summary.running);
+      },
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+    const run = registry.handleHostRequest(
+      {
+        type: "subagent.run",
+        request: { ...runRequest(), parentSessionId: "direct-parent-thread" },
+      },
+      () => undefined,
+    );
+    await expect.poll(() => client).toBeDefined();
+
+    client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1", threadId: "live-child" }));
+
+    expect(summaries).toEqual([
+      expect.objectContaining({ id: "live-child", parentThreadId: "direct-parent-thread", running: true }),
+    ]);
+    expect(registry.listThreads("project")).toEqual([
+      expect.objectContaining({ id: "live-child", parentThreadId: "direct-parent-thread", running: true }),
+    ]);
+
+    client?.emitSidecarEvent(
+      event(client.instanceId, 2, {
+        type: "started",
+        runId: "run-1",
+        threadId: "live-child",
+        sessionFile: "/tmp/live-child.jsonl",
+      }),
+    );
+    await expect.poll(() => persisted).toEqual([true]);
+
+    client?.emitSidecarEvent(event(client.instanceId, 3, { type: "completed", runId: "run-1" }));
+    expect(summaries.at(-1)).toMatchObject({ id: "live-child", running: false });
+    await expect.poll(() => persisted).toEqual([true, false]);
+    release();
+    await run;
+  });
+
   it("projects persisted fork events into live thread catalog summaries", async () => {
     const directory = mkdtempSync(join(tmpdir(), "subagent-catalog-"));
     const parentSessionFile = join(directory, "parent.jsonl");

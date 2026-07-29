@@ -13,6 +13,13 @@ asarUnpack:
 extraResources:
   - from: output/pi-sidecar/runtime-manifest.json
     to: pi-sidecar/runtime-manifest.json
+  # electron-builder excludes top-level README.md and examples/ from dependencies by default.
+  - from: ../coding-agent/README.md
+    to: app.asar.unpacked/node_modules/@earendil-works/pi-coding-agent/README.md
+  - from: ../coding-agent/docs
+    to: app.asar.unpacked/node_modules/@earendil-works/pi-coding-agent/docs
+  - from: ../coding-agent/examples
+    to: app.asar.unpacked/node_modules/@earendil-works/pi-coding-agent/examples
   - from: src/main/pi/extensions/pi-hermes-memory/LICENSE
     to: licenses/pi-hermes-memory.LICENSE
   - from: src/main/pi/extensions/pi-subagents/LICENSE
