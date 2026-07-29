@@ -87,14 +87,15 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       const current = state.threadCatalogs[action.thread.projectId];
       if (!current) return state;
       const index = current.findIndex(({ id }) => id === action.thread.id);
-      if (index !== -1 && equalThread(current[index]!, action.thread)) return state;
+      const thread = index === -1 ? action.thread : mergeCatalogThread(current[index]!, action.thread);
+      if (index !== -1 && equalThread(current[index]!, thread)) return state;
       const next = [...current];
-      if (index === -1) next.push(action.thread);
-      else next[index] = action.thread;
+      if (index === -1) next.push(thread);
+      else next[index] = thread;
       next.sort((left, right) => right.updatedAt - left.updatedAt);
       return {
         ...state,
-        threadCatalogs: { ...state.threadCatalogs, [action.thread.projectId]: next },
+        threadCatalogs: { ...state.threadCatalogs, [thread.projectId]: next },
       };
     }
     case "project-removed": {
@@ -129,10 +130,7 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       const index = threads.findIndex(({ id }) => id === action.threadId);
       const current = threads[index];
       if (!current) return state;
-      const title =
-        current.origin === "subagent" && action.title.trimStart().startsWith("[Read from:")
-          ? current.title
-          : action.title;
+      const title = liveThreadTitle(current, action.title);
       if (current.title === title && current.updatedAt === action.updatedAt && current.running === action.running) {
         return state;
       }
@@ -198,6 +196,25 @@ function reuseThreadCatalog(previous: Thread[] | undefined, next: Thread[]): Thr
   return previous.length === stable.length && previous.every((thread, index) => equalThread(thread, stable[index]))
     ? previous
     : stable;
+}
+
+function mergeCatalogThread(current: Thread, update: Thread): Thread {
+  const parentThreadId = update.parentThreadId ?? current.parentThreadId;
+  const origin = update.origin ?? current.origin;
+  const agentName = update.agentName ?? current.agentName;
+  return {
+    ...update,
+    title: liveThreadTitle(current, update.title),
+    preview: current.parentThreadId ? current.preview : update.preview,
+    archived: current.archived,
+    ...(parentThreadId ? { parentThreadId } : {}),
+    ...(origin ? { origin } : {}),
+    ...(agentName !== undefined ? { agentName } : {}),
+  };
+}
+
+function liveThreadTitle(current: Thread, title: string): string {
+  return current.origin === "subagent" && title.trimStart().startsWith("[Read from:") ? current.title : title;
 }
 
 function equalThread(left: Thread, right: Thread | undefined): boolean {

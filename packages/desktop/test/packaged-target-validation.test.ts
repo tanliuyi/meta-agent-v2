@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertBundledPiDocumentation,
   assertEmbeddedRuntimeManifest,
+  assertHiddenMacSidecarHelper,
   assertTargetRuntime,
   resolvePackagedExecutable,
 } from "../../../scripts/validate-desktop-package.mjs";
@@ -38,6 +39,23 @@ describe("packaged Desktop target validation", () => {
         packager: { appInfo: { productFilename: "Meta Agent" }, executableName: "Meta Agent" },
       }),
     ).toBe(join("C:\\artifact", "Meta Agent.exe"));
+  });
+
+  it("requires the packaged macOS sidecar Helper to be executable and hidden from the Dock", () => {
+    const root = mkdtempSync(join(tmpdir(), "desktop-helper-validation-"));
+    const contents = join(root, "Meta Agent Helper.app", "Contents");
+    const executable = join(contents, "MacOS", "Meta Agent Helper");
+    try {
+      mkdirSync(dirname(executable), { recursive: true });
+      writeFileSync(executable, "", { mode: 0o755 });
+      writeFileSync(join(contents, "Info.plist"), "<plist><dict><key>LSUIElement</key><true/></dict></plist>");
+      expect(() => assertHiddenMacSidecarHelper(executable)).not.toThrow();
+
+      writeFileSync(join(contents, "Info.plist"), "<plist><dict></dict></plist>");
+      expect(() => assertHiddenMacSidecarHelper(executable)).toThrow("does not set LSUIElement=true");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("rejects legacy or bundled external Node runtime contracts", () => {

@@ -88,6 +88,26 @@ describe("MarketplacePluginInstaller", () => {
     expect(repeated.status).toBe("already-installed");
   });
 
+  it("omits empty runtime compatibility values from artifact requests", async () => {
+    const harness = await createHarness({ runtimeCompatibility: { ...runtime, toolchain: "" } });
+    const initial = await harness.registry.getSnapshot();
+
+    await expect(
+      harness.installer.install({
+        requestId: "install-empty-toolchain",
+        expectedRevision: initial.revision,
+        pluginId: "dev.meta-agent.example-tools",
+        version: "1.0.0",
+        confirmFullTrust: true,
+      }),
+    ).resolves.toMatchObject({ status: "installed" });
+
+    const artifactRequest = harness.fetchImpl.mock.calls
+      .map(([input]) => new URL(input instanceof Request ? input.url : input.toString()))
+      .find((url) => url.pathname.endsWith("/artifacts"));
+    expect(artifactRequest?.searchParams.has("toolchain")).toBe(false);
+  });
+
   it("rejects a configurable artifact without configuration.read", async () => {
     const harness = await createHarness({ omitConfigurationCapability: true });
     const initial = await harness.registry.getSnapshot();
@@ -518,6 +538,7 @@ async function createHarness(
     writeUnknownRootOnJournalFailure?: boolean;
     artifactResponse?(archive: Uint8Array, init?: RequestInit): Response;
     artifactKey?: string;
+    runtimeCompatibility?: RuntimeCompatibility;
   } = {},
 ) {
   const root = join(tmpdir(), `plugin-marketplace-installer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -525,7 +546,8 @@ async function createHarness(
   const userDataDir = join(root, "user-data");
   const agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
-  const target = { platform: "universal", arch: "universal", piVersion: runtime.piVersion };
+  const harnessRuntime = options.runtimeCompatibility ?? runtime;
+  const target = { platform: "universal", arch: "universal", piVersion: harnessRuntime.piVersion };
   const buildArtifact = (version: string) => {
     const artifactId = `example-tools-${version}-universal`;
     const payload = Buffer.from(
@@ -666,7 +688,7 @@ async function createHarness(
     transactionApi as MarketplacePluginTransactionStore,
     agentDir,
     "0.0.31",
-    runtime,
+    harnessRuntime,
     {
       fetch: fetchImpl as typeof fetch,
       createId: () => "staging",

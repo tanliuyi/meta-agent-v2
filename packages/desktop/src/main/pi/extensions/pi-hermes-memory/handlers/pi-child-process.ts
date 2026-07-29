@@ -43,7 +43,6 @@ export interface ChildPiInvocation {
 }
 
 interface ResolveChildPiInvocationOptions {
-  platform?: NodeJS.Platform;
   execPath?: string;
   argv?: string[];
   piCliPath?: string | null;
@@ -281,53 +280,14 @@ function resolvedPiCliPath(options: ResolveChildPiInvocationOptions): string | u
   return resolvedInstalledPiCliPath();
 }
 
-function resolvedWindowsPiInvocation(args: string[], execPath: string): ChildPiInvocation | undefined {
-  const pathEntries = (process.env.PATH ?? process.env.Path ?? "")
-    .split(";")
-    .map((entry) => entry.trim().replace(/^"|"$/g, ""))
-    .filter(Boolean);
-
-  for (const directory of pathEntries) {
-    for (const executableName of ["pi.exe", "pi.com"]) {
-      const executablePath = join(directory, executableName);
-      if (existsSync(executablePath)) {
-        return { command: executablePath, args };
-      }
-    }
-
-    if (!existsSync(join(directory, "pi.cmd")) && !existsSync(join(directory, "pi.bat"))) {
-      continue;
-    }
-
-    for (const cliPath of [
-      join(directory, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"),
-      join(directory, "node_modules", "@earendil-works", "pi-coding-agent", "cli.js"),
-    ]) {
-      if (existsSync(cliPath)) {
-        return { command: execPath, args: [cliPath, ...args] };
-      }
-    }
-  }
-
-  return undefined;
-}
-
 export function resolveChildPiInvocation(
   args: string[],
   options: ResolveChildPiInvocationOptions = {},
 ): ChildPiInvocation {
-  const platform = options.platform ?? process.platform;
   const execPath = options.execPath ?? process.execPath;
   const piCliPath = resolvedPiCliPath(options);
-  if (piCliPath) {
-    return { command: execPath, args: [piCliPath, ...args] };
-  }
-  if (platform !== "win32") return { command: "pi", args };
-
-  const fallback = resolvedWindowsPiInvocation(args, execPath);
-  if (fallback) return fallback;
-
-  throw new Error("Unable to resolve the packaged Pi CLI");
+  if (!piCliPath) throw new Error("Unable to resolve the bundled Pi CLI");
+  return { command: execPath, args: [piCliPath, ...args] };
 }
 
 export function resolveWatchedChildPiInvocation(

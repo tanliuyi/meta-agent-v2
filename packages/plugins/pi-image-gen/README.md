@@ -30,7 +30,7 @@ The extension also supports host configuration through `pi.getConfig()` for futu
 1. Open **Settings > Extensions**.
 2. Enable **Developer Mode**.
 3. Choose **Add local extension** and approve this exact file:
-   `G:\meta-agent-v2\.pi-desk\extensions\pi-image-gen\index.ts`.
+   `<repo>/packages/plugins/pi-image-gen/index.ts`.
 4. Apply the extension set. Desktop replaces the session worker; it does not hot-reload the entry in place.
 5. Run `/image-gen list` to verify the selected model and credential state.
 
@@ -39,6 +39,6 @@ Developer Mode extensions are full-trust Node code. This plugin can read local r
 ## Validation
 
 ```sh
-npx tsc -p .pi-desk/extensions/pi-image-gen/tsconfig.json
-node node_modules/vitest/dist/cli.js --run .pi-desk/extensions/pi-image-gen/test/plugin.test.ts
+npx tsc -p packages/plugins/pi-image-gen/tsconfig.json
+node node_modules/vitest/dist/cli.js --run packages/plugins/pi-image-gen/test/plugin.test.ts
 ```

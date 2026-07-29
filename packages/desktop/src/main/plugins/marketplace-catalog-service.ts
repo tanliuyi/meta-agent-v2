@@ -6,7 +6,7 @@ import type {
 } from "../../shared/plugin-marketplace-contracts.ts";
 import type { RuntimeCompatibility } from "../../shared/sidecar-contracts.ts";
 import type { MarketplaceEndpointSettingsService } from "./marketplace-endpoint-settings-service.ts";
-import { readBoundedJsonResponse } from "./marketplace-http.ts";
+import { appendMarketplaceRuntimeQuery, readBoundedJsonResponse } from "./marketplace-http.ts";
 
 interface MarketplaceCatalogServiceOptions {
   fetch?: typeof fetch;
@@ -58,19 +58,7 @@ export class MarketplaceCatalogService {
     if (normalized.cursor) url.searchParams.set("cursor", normalized.cursor);
     url.searchParams.set("limit", String(normalized.limit));
     if (this.desktopVersion) url.searchParams.set("desktopVersion", this.desktopVersion);
-    if (this.runtimeCompatibility) {
-      const runtime = this.runtimeCompatibility;
-      url.searchParams.set("piVersion", runtime.piVersion);
-      url.searchParams.set("nodeVersion", runtime.nodeVersion);
-      url.searchParams.set("platform", runtime.platform);
-      url.searchParams.set("arch", runtime.arch);
-      url.searchParams.set("modulesAbi", runtime.modulesAbi);
-      url.searchParams.set("napi", runtime.napi);
-      url.searchParams.set("osRelease", runtime.osRelease);
-      url.searchParams.set("libc", runtime.libc);
-      url.searchParams.set("toolchain", runtime.toolchain);
-      url.searchParams.set("runtimeCompatibilityId", runtime.runtimeCompatibilityId);
-    }
+    if (this.runtimeCompatibility) appendMarketplaceRuntimeQuery(url, this.runtimeCompatibility);
     try {
       const response = await this.fetchCatalog(url);
       const page: MarketplacePluginPage = {

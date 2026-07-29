@@ -1,3 +1,11 @@
+import type { RuntimeCompatibility } from "../../shared/sidecar-contracts.ts";
+
+export function appendMarketplaceRuntimeQuery(url: URL, runtime: RuntimeCompatibility): void {
+  for (const [key, value] of Object.entries(runtime)) {
+    if (value) url.searchParams.set(key, value);
+  }
+}
+
 export async function readBoundedJsonResponse(
   response: Response,
   maxBytes: number,

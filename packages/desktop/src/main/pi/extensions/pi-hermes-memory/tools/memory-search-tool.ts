@@ -2,7 +2,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { DatabaseManager } from "../store/db.ts";
-import { getMemoryStats, searchMemories } from "../store/sqlite-memory-store.ts";
+import { hasMemories, searchMemories } from "../store/sqlite-memory-store.ts";
 import type { MemoryCategory } from "../types.ts";
 
 interface SearchResult {
@@ -12,7 +12,7 @@ interface SearchResult {
   output?: string;
 }
 
-export function registerMemorySearchTool(pi: ExtensionAPI, dbManager: DatabaseManager): void {
+export function registerMemorySearchTool(pi: Pick<ExtensionAPI, "registerTool">, dbManager: DatabaseManager): void {
   pi.registerTool({
     name: "memory_search",
     label: "Memory Search",
@@ -29,50 +29,80 @@ Returns matching memory entries with project context and dates.`,
     promptGuidelines: [
       "Use memory_search when you need context beyond what is in the system prompt.",
       "Use memory_search to find project-specific memories or user preferences.",
-      "Use memory_search with category filter to find specific types of memories (failure, correction, insight, etc.).",
+      "Use memory_search with category only for categorized failure/lesson memories.",
     ],
     parameters: Type.Object({
-      query: Type.String({ description: "Search query. Use natural language or specific terms." }),
+      query: Type.String({
+        minLength: 1,
+        pattern: "\\S",
+        description: "Search query. Use natural language or specific terms.",
+      }),
       project: Type.Optional(
-        Type.String({ description: "Filter by project name. Pass null for global memories only." }),
+        Type.Union([Type.String({ minLength: 1 }), Type.Null()], {
+          description: "Filter by project name. Omit for all scopes; pass null for global memories only.",
+        }),
       ),
       target: Type.Optional(
         StringEnum(["memory", "user", "failure"] as const, {
-          description: "Filter by target type (memory, user, or failure).",
+          description: "Filter by target type. Categorized entries use the failure target.",
         }),
       ),
       category: Type.Optional(
         StringEnum(["failure", "correction", "insight", "preference", "convention", "tool-quirk"] as const, {
-          description: "Filter by memory category.",
+          description: "Filter categorized failure/lesson memories only.",
         }),
       ),
-      limit: Type.Optional(Type.Number({ description: "Maximum results to return (default: 10, max: 20)." })),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 20, description: "Maximum results to return (default: 10)." }),
+      ),
     }),
     execute: async (
       _id: string,
-      args: { query: string; project?: string; target?: string; category?: string; limit?: number },
+      args: { query: string; project?: string | null; target?: string; category?: string; limit?: number },
     ) => {
       const query = args.query;
-      const project = args.project;
+      const project = args.project === null ? null : args.project?.trim();
       const target = args.target;
       const category = args.category as MemoryCategory | undefined;
-      const limit = Math.min(args.limit || 10, 20);
+      const effectiveTarget = category ? "failure" : target;
+      const requestedLimit = args.limit;
+      const limit =
+        typeof requestedLimit === "number" && Number.isFinite(requestedLimit)
+          ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 20)
+          : 10;
 
       if (!query || query.trim().length === 0) {
         const result: SearchResult = { success: false, message: "query is required" };
         return { content: [{ type: "text" as const, text: result.message! }], details: result };
       }
 
-      const stats = getMemoryStats(dbManager);
-      if (stats.total === 0) {
+      if (args.project !== undefined && args.project !== null && project?.length === 0) {
+        const result: SearchResult = { success: false, message: "project must not be empty" };
+        return { content: [{ type: "text" as const, text: result.message! }], details: result };
+      }
+
+      if (category && target && target !== "failure") {
+        const result: SearchResult = {
+          success: false,
+          message: `category only applies to target="failure"; omit category to search target="${target}"`,
+        };
+        return { content: [{ type: "text" as const, text: result.message! }], details: result };
+      }
+
+      const results = searchMemories(dbManager, query, {
+        project,
+        target: effectiveTarget,
+        category,
+        limit,
+      });
+
+      if (results.length === 0 && !hasMemories(dbManager)) {
         const result: SearchResult = {
           success: false,
           message: "No memories in extended store yet. Use the memory tool with add action to store memories.",
         };
         return { content: [{ type: "text" as const, text: result.message! }], details: result };
       }
-
-      const results = searchMemories(dbManager, query, { project, target, category, limit });
 
       if (results.length === 0) {
         const result: SearchResult = {

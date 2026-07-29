@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveElectronSidecarExecutable } from "../../../scripts/desktop-sidecar-executable.mjs";
 import {
   createGuiSmokeDesktopState,
   createMinimalGuiEnvironment,
@@ -57,6 +58,32 @@ describe("packaged Desktop GUI smoke contract", () => {
     expect(locateDesktopExecutable(app, "darwin")).toBe(executable);
   });
 
+  it("locates the hidden macOS Electron Helper executable for sidecars", () => {
+    const executable = "/Applications/Meta Agent.app/Contents/MacOS/Meta Agent";
+    const helper =
+      "/Applications/Meta Agent.app/Contents/Frameworks/Meta Agent Helper.app/Contents/MacOS/Meta Agent Helper";
+
+    expect(
+      resolveElectronSidecarExecutable(executable, {
+        platform: "darwin",
+        fileExists: (path) => path === helper,
+      }),
+    ).toBe(helper);
+    expect(
+      resolveElectronSidecarExecutable(executable, {
+        platform: "darwin",
+        fileExists: () => false,
+      }),
+    ).toBe(executable);
+    expect(() =>
+      resolveElectronSidecarExecutable(executable, {
+        platform: "darwin",
+        fileExists: () => false,
+        requireHelper: true,
+      }),
+    ).toThrow("sidecar Helper is missing");
+  });
+
   it("builds a minimal GUI environment and strips Electron Node mode", () => {
     const environment = createMinimalGuiEnvironment(
       {
@@ -103,7 +130,8 @@ describe("packaged Desktop GUI smoke contract", () => {
       reason: "GUI became reachable but no Electron metadata sidecar was observed",
     });
 
-    const executable = "/Applications/Meta Agent.app/Contents/MacOS/Meta Agent";
+    const executable =
+      "/Applications/Meta Agent.app/Contents/Frameworks/Meta Agent Helper.app/Contents/MacOS/Meta Agent Helper";
     const processes = [
       {
         pid: 42,

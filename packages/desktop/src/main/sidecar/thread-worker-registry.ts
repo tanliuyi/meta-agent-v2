@@ -82,6 +82,7 @@ export interface ThreadWorkerRegistryOptions {
   push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
   failed(projectId: string, threadId: string, error: Error): void;
   resync(projectId: string, threadId: string, reason: string): void;
+  catalogChanged?(thread: Thread): void;
   log?(scope: string, text: string): void;
   handleHostRequest?(request: SubagentHostRequest, emit: (event: SubagentRunEvent) => void): Promise<unknown>;
   hostWorkerFailed?(projectId: string, threadId: string): Promise<void>;
@@ -1030,6 +1031,7 @@ export class ThreadWorkerRegistry {
       this.options.push(payload, event.workerInstanceId, event.sequence);
     } else if (event.event.type === "summary-changed") {
       record.summary = event.event.summary;
+      if (record.attachments === 0) this.options.catalogChanged?.({ ...record.summary });
       if (!record.summary.running) this.requestCapacityTrim();
       if (!record.sessionFile) {
         record.client.acknowledge(event.sequence);

@@ -208,6 +208,24 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("broadcasts detached worker completion to the thread catalog", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+
+    client.emit({ type: "summary-changed", summary: { ...thread("thread"), running: true } });
+    expect(harness.catalogChanged).not.toHaveBeenCalled();
+
+    registry.detach("project", "thread");
+    client.emit({ type: "summary-changed", summary: thread("thread") }, 2);
+
+    expect(harness.catalogChanged).toHaveBeenCalledOnce();
+    expect(harness.catalogChanged).toHaveBeenCalledWith(expect.objectContaining({ running: false }));
+    await registry.dispose();
+  });
+
   it("shrinks temporary overflow as soon as a detached running worker becomes idle", async () => {
     const harness = createHarness(userDataDir, { maxLiveWorkers: 2 });
     const registry = new ThreadWorkerRegistry(harness.options);
@@ -827,6 +845,7 @@ interface Harness {
   clients: FakeWorkerClient[];
   push: ReturnType<typeof vi.fn>;
   failed: ReturnType<typeof vi.fn>;
+  catalogChanged: ReturnType<typeof vi.fn>;
   metadataRenameCold: ReturnType<typeof vi.fn>;
   resolveExtensions: ReturnType<typeof vi.fn>;
   resync: ReturnType<typeof vi.fn>;
@@ -847,6 +866,7 @@ function createHarness(
   const clients: FakeWorkerClient[] = [];
   const push = vi.fn<(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number) => void>();
   const failed = vi.fn<(projectId: string, threadId: string, error: Error) => void>();
+  const catalogChanged = vi.fn<(thread: Thread) => void>();
   const metadataRenameCold = vi.fn(async () => {});
   const metadata = {
     list: vi.fn(async () => []),
@@ -885,6 +905,7 @@ function createHarness(
     push,
     failed,
     resync,
+    catalogChanged,
     createWorkerClient: (clientOptions) => {
       const client = new FakeWorkerClient(
         clientOptions,
@@ -899,7 +920,7 @@ function createHarness(
     idleTtlMs: overrides?.idleTtlMs,
     maxLiveWorkers: overrides?.maxLiveWorkers,
   };
-  return { options, clients, push, failed, metadataRenameCold, resolveExtensions, resync };
+  return { options, clients, push, failed, catalogChanged, metadataRenameCold, resolveExtensions, resync };
 }
 
 class FakeWorkerClient implements ThreadWorkerClient {

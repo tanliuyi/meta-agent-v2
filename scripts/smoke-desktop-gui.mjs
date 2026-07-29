@@ -6,6 +6,7 @@ import { extname, join, parse, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createDesktopGuiSmokeEnvironment } from "./desktop-smoke-environment.mjs";
+import { resolveElectronSidecarExecutable } from "./desktop-sidecar-executable.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const QUIT_TIMEOUT_MS = 15_000;
@@ -176,7 +177,13 @@ async function runScenario(executable, mode, options) {
       stderr = `${stderr}${chunk}`.slice(-16_384);
     });
     child.stdout?.resume();
-    const initialChildren = await waitForSidecar(child, port, options.timeoutMs, () => stderr, executable);
+    const initialChildren = await waitForSidecar(
+      child,
+      port,
+      options.timeoutMs,
+      () => stderr,
+      resolveElectronSidecarExecutable(executable, { requireHelper: process.platform === "darwin" }),
+    );
     const targetUrl = initialChildren.targetUrl;
     const sidecarCommand = initialChildren.sidecarCommand;
     if (mode === "normal") {
@@ -254,7 +261,7 @@ export function inspectGuiSidecarReadiness(version, targets, processes, expected
     throw new Error(`Metadata sidecar entry is not visibly unpacked: ${sidecar.command}`);
   }
   if (!sidecar.command.includes(expectedExecutable)) {
-    throw new Error(`Metadata sidecar did not use the packaged Electron executable: ${sidecar.command}`);
+    throw new Error(`Metadata sidecar did not use the packaged Electron sidecar executable: ${sidecar.command}`);
   }
   if (/--type=(?:renderer|gpu-process)/.test(sidecar.command)) {
     throw new Error(`Metadata sidecar launched as an Electron GUI process: ${sidecar.command}`);

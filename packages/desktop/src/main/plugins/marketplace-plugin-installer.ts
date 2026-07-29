@@ -19,7 +19,7 @@ import {
   targetMatchesRuntime,
 } from "./marketplace-artifact-manifest.ts";
 import type { MarketplaceEndpointSettingsService } from "./marketplace-endpoint-settings-service.ts";
-import { readBoundedJsonResponse } from "./marketplace-http.ts";
+import { appendMarketplaceRuntimeQuery, readBoundedJsonResponse } from "./marketplace-http.ts";
 import {
   markMarketplaceVersionInactive,
   removeMarketplaceVersionIfOwned,
@@ -488,9 +488,7 @@ export class MarketplacePluginInstaller {
       apiRoot,
     );
     url.searchParams.set("desktopVersion", this.desktopVersion);
-    for (const [key, value] of Object.entries(this.runtime)) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
-    }
+    appendMarketplaceRuntimeQuery(url, this.runtime);
     const artifacts = parseArtifacts(await this.requestJson(url, "Marketplace artifacts response"));
     const compatible = artifacts.filter(
       (artifact) => artifact.preferred && targetMatchesRuntime(artifact.target, this.runtime),

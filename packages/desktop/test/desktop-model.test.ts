@@ -163,10 +163,13 @@ describe("desktop catalog reducer", () => {
       ...thread,
       id: "subagent",
       title: "检查改动",
+      preview: "检查改动",
       updatedAt: 5,
+      archived: true,
       running: true,
       parentThreadId: thread.id,
       origin: "subagent",
+      agentName: "reviewer",
     };
 
     expect(desktopReducer(INITIAL_STATE, { type: "thread-catalog-upserted", thread: subagent })).toBe(INITIAL_STATE);
@@ -179,14 +182,25 @@ describe("desktop catalog reducer", () => {
     state = desktopReducer(state, { type: "thread-catalog-upserted", thread: subagent });
     state = desktopReducer(state, {
       type: "thread-catalog-upserted",
-      thread: { ...subagent, updatedAt: 6, running: false },
+      thread: {
+        ...thread,
+        id: subagent.id,
+        title: "[Read from: plan.md]",
+        preview: "[Read from: plan.md]",
+        updatedAt: 6,
+        running: false,
+      },
     });
 
     expect(state.threadCatalogs[project.id]).toHaveLength(2);
     expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({
       id: "subagent",
+      title: "检查改动",
+      preview: "检查改动",
+      archived: true,
       parentThreadId: thread.id,
       origin: "subagent",
+      agentName: "reviewer",
       updatedAt: 6,
       running: false,
     });

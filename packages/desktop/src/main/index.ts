@@ -328,6 +328,7 @@ app.whenReady().then(async () => {
       supervisor?.workerFailed(projectId, threadId, error);
     },
     resync: (projectId, threadId, reason) => supervisor?.resyncRequired(projectId, threadId, reason),
+    catalogChanged: broadcastThreadCatalogUpdate,
     log: (scope, text) => sidecarLog?.write(scope, text),
     handleHostRequest: (request, emit) => activeSubagents.handleHostRequest(request, emit),
     hostWorkerFailed: (projectId, threadId) => activeSubagents.cancelThread(projectId, threadId),

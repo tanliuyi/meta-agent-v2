@@ -18,8 +18,9 @@ Extension 来源由 [`desktop-controlled-extensions-spec.md`](./desktop-controll
 sidecar 只使用当前 Electron executable 内嵌的 Node。main 通过以下固定方式启动所有 role entry：
 
 ```ts
+const sidecarExecutable = resolveSidecarExecutable(process.execPath);
 fork(entry, [], {
-  execPath: process.execPath,
+  execPath: sidecarExecutable,
   env: { ...filteredEnvironment, ELECTRON_RUN_AS_NODE: "1" },
   stdio: ["ignore", "ignore", "pipe", "ipc"],
   serialization: "json",
@@ -28,7 +29,9 @@ fork(entry, [], {
 });
 ```
 
-不探测系统 Node，不读取 PATH 或 runtime override，不下载 managed Node，也不使用 `utilityProcess`。`ELECTRON_RUN_AS_NODE` 只设置在 sidecar child environment，不能污染 Electron GUI main process。
+macOS 的 `resolveSidecarExecutable` 优先使用同一 bundle 内的 `Meta Agent Helper.app` 可执行文件；该 Helper 与主程序使用相同 Electron embedded Node runtime，并在 `Info.plist` 中预置 `LSUIElement=true`，避免 sidecar 被 Launch Services 注册到 Dock。Helper 缺失时回退主可执行文件。Windows 和 Linux 继续直接使用主可执行文件。
+
+不探测系统 Node，不读取 PATH 或 runtime override，不下载 managed Node，也不使用 `utilityProcess`。Hermes 子进程只执行 bundle 内 `@earendil-works/pi-coding-agent/cli.js`，不得回退到 PATH 中的 `pi`、`pi.exe`、`pi.cmd` 或 `pi.bat`。`ELECTRON_RUN_AS_NODE` 只设置在 sidecar child environment，不能污染 Electron GUI main process。
 
 `runtime-manifest.json` 只包含 role entry、entry/runtime asset hashes 和 runtime compatibility。开发及打包 manifest 都通过安装的 Electron executable 在 `ELECTRON_RUN_AS_NODE=1` 下探测 compatibility。main 在启动 worker 前将 manifest compatibility 与当前 Electron main process 核对。
 
@@ -56,7 +59,7 @@ Renderer -> preload -> Electron main
 
 metadata worker 只处理 catalog、draft 配置和 cold session metadata。live rename/remove 必须路由给对应 thread worker 并串行化。
 
-sidecar descendants that launch `process.execPath` inherit `ELECTRON_RUN_AS_NODE=1` through the normal Node child-process environment. Desktop-owned spawn boundaries must not replace that environment. Third-party code that replaces its complete environment is outside Desktop's spawn contract.
+sidecar descendants that launch `process.execPath` inherit the selected Electron sidecar executable (the hidden Helper on macOS) and `ELECTRON_RUN_AS_NODE=1` through the normal Node child-process environment. This includes the `pi-hermes-memory` watchdog and its child Pi CLI used by background review, correction detection, flush, and consolidation. Desktop-owned spawn boundaries must not replace that environment. Third-party code that replaces its complete environment is outside Desktop's spawn contract.
 
 ## 5. Extension loading
 
@@ -104,7 +107,7 @@ npm --prefix packages/desktop run smoke:gui -- --artifact <app> --mode both
 验收必须确认：
 
 - manifest compatibility 等于 packaged Electron embedded Node；
-- 所有 worker 使用 packaged Electron executable 和 unpacked role entry；
+- 所有 worker 及 `pi-hermes-memory` watchdog/child Pi 使用 packaged Electron sidecar executable（macOS 为隐藏的 Helper）和 unpacked role entry；
 - manifest 和安装包均不包含 external/managed Node 或 npm CLI；
 - RunAsNode、`node:sqlite`、protocol ready/ping/shutdown 和 no-orphan checks 通过；
 - Git Bash install/select/custom path 行为保持；

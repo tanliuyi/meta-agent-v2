@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createDesktopSidecarSmokeEnvironment } from "./desktop-smoke-environment.mjs";
+import { resolveElectronSidecarExecutable } from "./desktop-sidecar-executable.mjs";
 import { locateDesktopExecutable } from "./smoke-desktop-gui.mjs";
 import { assertEmbeddedRuntimeManifest } from "./validate-desktop-package.mjs";
 
@@ -12,7 +13,10 @@ const artifact = parseArtifact(process.argv.slice(2));
 const manifestPath = findManifest(artifact);
 const root = dirname(manifestPath);
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-const executable = locateDesktopExecutable(artifact);
+const desktopExecutable = locateDesktopExecutable(artifact);
+const executable = resolveElectronSidecarExecutable(desktopExecutable, {
+  requireHelper: process.platform === "darwin",
+});
 const resources = dirname(root);
 
 assertEmbeddedRuntimeManifest(resources, manifest);

@@ -372,7 +372,7 @@ describe("MarketplaceCatalogService", () => {
         arch: "arm64",
         osRelease: "darwin-24",
         libc: "none",
-        toolchain: "apple-clang",
+        toolchain: "",
         piVersion: "0.80.7",
         runtimeCompatibilityId: "fixture",
       },
@@ -393,6 +393,7 @@ describe("MarketplaceCatalogService", () => {
     expect(requestedUrl).toContain("desktopVersion=1.2.3");
     expect(requestedUrl).toContain("platform=darwin");
     expect(requestedUrl).toContain("modulesAbi=137");
+    expect(new URL(requestedUrl).searchParams.has("toolchain")).toBe(false);
   });
 
   it("does not fetch without a saved active endpoint", async () => {

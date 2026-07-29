@@ -560,7 +560,7 @@ export function replaceSyncedMemories(
   const normalizedOldText = normalizeMemoryLookupText(oldText);
   if (!normalizedOldText) return { matched: 0, updated: 0, entries: [] };
   const params: unknown[] = [];
-  const conditions = buildScopeConditions(params, updates.target, updates.project ?? undefined);
+  const conditions = buildScopeConditions(params, updates.target, updates.project);
   conditions.push(`content LIKE ? ESCAPE '\\'`);
   params.push(`%${escapeLikePattern(normalizedOldText)}%`);
 
@@ -633,7 +633,7 @@ export function removeSyncedMemories(
   const normalizedOldText = normalizeMemoryLookupText(oldText);
   if (!normalizedOldText) return { matched: 0, removed: 0 };
   const params: unknown[] = [];
-  const conditions = buildScopeConditions(params, options.target, options.project ?? undefined);
+  const conditions = buildScopeConditions(params, options.target, options.project);
   conditions.push(`content LIKE ? ESCAPE '\\'`);
   params.push(`%${escapeLikePattern(normalizedOldText)}%`);
 
@@ -671,7 +671,7 @@ export function removeExactSyncedMemories(
 ): SqliteMemoryRemoveResult {
   const db = dbManager.getDb();
   const params: unknown[] = [];
-  const conditions = buildScopeConditions(params, options.target, options.project ?? undefined);
+  const conditions = buildScopeConditions(params, options.target, options.project);
   conditions.push("content = ?");
   params.push(content.trim());
 
@@ -703,7 +703,7 @@ export function removeExactSyncedMemories(
 export function searchMemories(
   dbManager: DatabaseManager,
   query: string,
-  options: { project?: string; target?: string; category?: MemoryCategory; limit?: number } = {},
+  options: { project?: string | null; target?: string; category?: MemoryCategory; limit?: number } = {},
 ): SqliteMemoryEntry[] {
   if (query.trim().length === 0) {
     return [];
@@ -914,6 +914,11 @@ export function getRecentFailures(
 export function touchMemory(dbManager: DatabaseManager, id: number): void {
   const db = dbManager.getDb();
   db.prepare("UPDATE memories SET last_referenced = ? WHERE id = ?").run(today(), id);
+}
+
+/** Return whether the memory mirror contains at least one entry. */
+export function hasMemories(dbManager: DatabaseManager): boolean {
+  return dbManager.getDb().prepare("SELECT 1 FROM memories LIMIT 1").get() !== undefined;
 }
 
 /**

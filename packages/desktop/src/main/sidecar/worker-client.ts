@@ -1,5 +1,7 @@
 import { type ChildProcess, fork, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { JsonValue } from "../../shared/contracts.ts";
 import {
   type ParentToSidecarMessage,
@@ -96,7 +98,7 @@ export class SidecarWorkerClient {
       this.rejectReady = reject;
     });
     this.child = fork(entry, [], {
-      execPath: process.execPath,
+      execPath: resolveSidecarExecutable(),
       cwd: options.binding.role === "thread" ? options.binding.value.cwd : undefined,
       env: createSidecarEnvironment(
         options.manifest.compatibility.runtimeCompatibilityId,
@@ -493,6 +495,25 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
   } catch {
     child.kill(signal);
   }
+}
+
+export function resolveSidecarExecutable(
+  executable = process.execPath,
+  platform = process.platform,
+  fileExists: (path: string) => boolean = existsSync,
+): string {
+  if (platform !== "darwin") return executable;
+  const executableName = basename(executable);
+  const helperName = `${executableName} Helper`;
+  const helperExecutable = join(
+    dirname(dirname(executable)),
+    "Frameworks",
+    `${helperName}.app`,
+    "Contents",
+    "MacOS",
+    helperName,
+  );
+  return fileExists(helperExecutable) ? helperExecutable : executable;
 }
 
 export function createSidecarEnvironment(

@@ -23,7 +23,7 @@ export function ConsoleShell({
   return (
     <SidebarProvider>
       <AppSidebar pathname={pathname} username={username} onNavigate={onNavigate} onSignOut={onSignOut} />
-      <SidebarInset className="min-w-0 md:peer-data-[state=expanded]:ml-(--sidebar-width) md:peer-data-[state=collapsed]:ml-(--sidebar-width-icon)">
+      <SidebarInset className="min-w-0">
         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />

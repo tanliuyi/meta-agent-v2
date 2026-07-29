@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createDesktopSidecarSmokeEnvironment } from "./desktop-smoke-environment.mjs";
+import { resolveElectronSidecarExecutable } from "./desktop-sidecar-executable.mjs";
 
 export default async function validateDesktopPackage(context) {
   const resources = context.electronPlatformName === "darwin"
@@ -14,6 +15,7 @@ export default async function validateDesktopPackage(context) {
   const root = dirname(manifestPath);
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const executable = resolvePackagedExecutable(context);
+  const isMac = context.electronPlatformName === "darwin" || context.electronPlatformName === "mas";
   const entries = Object.fromEntries(
     Object.entries(manifest.entries).map(([role, entry]) => [role, resolve(root, entry)]),
   );
@@ -24,9 +26,14 @@ export default async function validateDesktopPackage(context) {
   if (!existsSync(executable) || !statSync(executable).isFile()) {
     throw new Error(`Packaged Electron executable is missing: ${executable}`);
   }
-  validateHermesMemorySqliteRuntime(executable);
+  const sidecarExecutable = resolveElectronSidecarExecutable(executable, {
+    platform: isMac ? "darwin" : context.electronPlatformName,
+    requireHelper: isMac,
+  });
+  if (isMac) assertHiddenMacSidecarHelper(sidecarExecutable);
+  validateHermesMemorySqliteRuntime(sidecarExecutable);
 
-  if (context.electronPlatformName === "darwin") {
+  if (isMac) {
     const spawnHelper = join(
       resources,
       "app.asar.unpacked",
@@ -48,9 +55,9 @@ export default async function validateDesktopPackage(context) {
     if (!existsSync(entry) || !statSync(entry).isFile()) throw new Error(`Sidecar entry is missing: ${entry}`);
     if (!entry.includes("app.asar.unpacked")) throw new Error(`Sidecar entry is not unpacked: ${entry}`);
     assertHash(entry, manifest.integrity.entries[role], `${role} sidecar entry`);
-    execFileSync(executable, ["--check", entry], {
+    execFileSync(sidecarExecutable, ["--check", entry], {
       stdio: "inherit",
-      env: createDesktopSidecarSmokeEnvironment(process.env, executable),
+      env: createDesktopSidecarSmokeEnvironment(process.env, sidecarExecutable),
     });
   }
   for (const [path, expectedHash] of Object.entries(manifest.integrity.files)) {
@@ -59,12 +66,12 @@ export default async function validateDesktopPackage(context) {
 
   const actualRuntime = JSON.parse(
     execFileSync(
-      executable,
+      sidecarExecutable,
       [
         "-p",
         `(() => { const variables = process.config.variables; const osRelease = process.platform === "darwin" ? "darwin-23+" : process.platform === "win32" ? "windows-10+" : process.platform === "linux" ? "linux-kernel-4.18+" : "unsupported"; const libc = process.platform === "darwin" ? "libSystem" : process.platform === "win32" ? "ucrt" : process.platform === "linux" ? "glibc-2.28+" : "unknown"; return JSON.stringify({ nodeVersion: process.version, modulesAbi: process.versions.modules, napi: process.versions.napi, platform: process.platform, arch: process.arch, osRelease, libc, toolchain: [variables.host_arch, variables.target_arch, variables.v8_target_arch].filter((value) => value !== undefined).join(":") }); })()`,
       ],
-      { encoding: "utf8", env: createDesktopSidecarSmokeEnvironment(process.env, executable) },
+      { encoding: "utf8", env: createDesktopSidecarSmokeEnvironment(process.env, sidecarExecutable) },
     ),
   );
   for (const field of ["nodeVersion", "modulesAbi", "napi", "platform", "arch", "osRelease", "libc", "toolchain"]) {
@@ -75,8 +82,8 @@ export default async function validateDesktopPackage(context) {
     }
   }
 
-  if (context.electronPlatformName === "darwin") {
-    execFileSync("otool", ["-L", executable], { stdio: "inherit" });
+  if (isMac) {
+    execFileSync("otool", ["-L", sidecarExecutable], { stdio: "inherit" });
   } else if (context.electronPlatformName === "linux") {
     const libraries = execFileSync("ldd", [executable], { encoding: "utf8" });
     if (libraries.includes("not found")) throw new Error(`Packaged Electron has unresolved libraries:\n${libraries}`);
@@ -84,8 +91,8 @@ export default async function validateDesktopPackage(context) {
   const agentDir = await mkdtemp(join(tmpdir(), "desktop-package-agent-"));
   const userDataDir = await mkdtemp(join(tmpdir(), "desktop-package-user-data-"));
   try {
-    await smokeSubagentWorker(executable, entries.subagent, manifest.compatibility, agentDir);
-    await smokeMetadataWorker(executable, entries.metadata, manifest.compatibility, agentDir, userDataDir);
+    await smokeSubagentWorker(sidecarExecutable, entries.subagent, manifest.compatibility, agentDir);
+    await smokeMetadataWorker(sidecarExecutable, entries.metadata, manifest.compatibility, agentDir, userDataDir);
   } finally {
     await Promise.all([
       rm(agentDir, { recursive: true, force: true }),
@@ -93,6 +100,23 @@ export default async function validateDesktopPackage(context) {
     ]);
   }
   console.log(`Validated packaged Electron embedded Node sidecar runtime at ${resources}`);
+}
+
+export function assertHiddenMacSidecarHelper(executable) {
+  if (!existsSync(executable) || !statSync(executable).isFile()) {
+    throw new Error(`Packaged macOS Electron sidecar Helper is missing: ${executable}`);
+  }
+  if ((statSync(executable).mode & 0o111) === 0) {
+    throw new Error(`Packaged macOS Electron sidecar Helper is not executable: ${executable}`);
+  }
+  const infoPlist = join(dirname(dirname(executable)), "Info.plist");
+  if (!existsSync(infoPlist) || !statSync(infoPlist).isFile()) {
+    throw new Error(`Packaged macOS Electron sidecar Helper Info.plist is missing: ${infoPlist}`);
+  }
+  const contents = readFileSync(infoPlist, "utf8");
+  if (!/<key>LSUIElement<\/key>\s*<true\s*\/>/.test(contents)) {
+    throw new Error(`Packaged macOS Electron sidecar Helper does not set LSUIElement=true: ${infoPlist}`);
+  }
 }
 
 export function resolvePackagedExecutable(context) {

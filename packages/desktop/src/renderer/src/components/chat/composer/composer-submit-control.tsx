@@ -50,7 +50,7 @@ export function ComposerSubmitControl({
     );
   }
   if (isRunning) {
-    if (!hasText) {
+    if (!hasText || escapeCancelPending) {
       return (
         <TooltipIconButton
           type="button"

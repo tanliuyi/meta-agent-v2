@@ -9,9 +9,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { MEMORY_TOOL_DESCRIPTION } from "../constants.ts";
 import type { DatabaseManager } from "../store/db.ts";
+import { normalizeMemoryLookupText } from "../store/memory-lookup.ts";
 import type { MemoryStore } from "../store/memory-store.ts";
 import {
   formatFailureMemoryContent,
+  parseMarkdownMemoryEntry,
   reconcileMarkdownFailureScopes,
   reconcileMarkdownMemoryScope,
   removeExactSyncedMemories,
@@ -116,6 +118,8 @@ async function syncReplaceToSqlite(
   rawTarget: "memory" | "user" | "project" | "failure",
   oldText: string,
   newContent: string,
+  category: MemoryCategory | undefined,
+  failureReason: string | undefined,
   dbManager: DatabaseManager | null,
   projectName?: string | null,
 ): Promise<string | null> {
@@ -128,6 +132,8 @@ async function syncReplaceToSqlite(
       content: newContent,
       target: sqliteTarget,
       project: sqliteProject,
+      category: rawTarget === "failure" ? (category ?? "failure") : undefined,
+      failureReason: rawTarget === "failure" ? failureReason : undefined,
     });
 
     if (syncResult.matched === 0) {
@@ -324,7 +330,7 @@ export function registerMemoryTool(
           }
           break;
 
-        case "replace":
+        case "replace": {
           if (!old_text) {
             return {
               content: [
@@ -353,10 +359,37 @@ export function registerMemoryTool(
               details: {},
             };
           }
-          result = await store_.replace(target, old_text, content);
+          const existingFailure =
+            rawTarget === "failure"
+              ? store_
+                  .getRawEntriesForSync("failure")
+                  .map((entry) => parseMarkdownMemoryEntry(entry, "failure"))
+                  .find((entry) => entry.content.includes(normalizeMemoryLookupText(old_text)))
+              : undefined;
+          const replacementCategory = category as MemoryCategory | undefined;
+          const replacementFailureReason = failure_reason?.trim() || undefined;
+          const replacementContent =
+            rawTarget === "failure"
+              ? formatFailureMemoryContent(content, {
+                  category: replacementCategory ?? existingFailure?.category ?? "failure",
+                  failureReason: replacementFailureReason ?? existingFailure?.failureReason,
+                  toolState: existingFailure?.toolState,
+                  correctedTo: existingFailure?.correctedTo,
+                })
+              : content;
+          result = await store_.replace(target, old_text, replacementContent);
           if (result.success && !syncHandled)
-            syncWarning = await syncReplaceToSqlite(rawTarget, old_text, content, dbManager, projectName);
+            syncWarning = await syncReplaceToSqlite(
+              rawTarget,
+              old_text,
+              replacementContent,
+              replacementCategory ?? existingFailure?.category ?? undefined,
+              replacementFailureReason ?? existingFailure?.failureReason ?? undefined,
+              dbManager,
+              projectName,
+            );
           break;
+        }
 
         case "remove":
           if (!old_text) {

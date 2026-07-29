@@ -1,7 +1,11 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
-import { createSidecarEnvironment, SidecarWorkerClient } from "../src/main/sidecar/worker-client.ts";
+import {
+  createSidecarEnvironment,
+  resolveSidecarExecutable,
+  SidecarWorkerClient,
+} from "../src/main/sidecar/worker-client.ts";
 
 describe("SidecarWorkerClient lifecycle", () => {
   it("removes inherited subagent lineage variables from worker environments", () => {
@@ -26,6 +30,16 @@ describe("SidecarWorkerClient lifecycle", () => {
     expect(environment.PI_DESKTOP_RUNTIME_COMPATIBILITY_ID).toBe("runtime");
     expect(environment.PI_DESKTOP_STALE_RUNTIME).toBeUndefined();
     expect(environment.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  it("uses the macOS Electron Helper executable for sidecars", () => {
+    const executable = "/Applications/Meta Agent.app/Contents/MacOS/Meta Agent";
+    const helper =
+      "/Applications/Meta Agent.app/Contents/Frameworks/Meta Agent Helper.app/Contents/MacOS/Meta Agent Helper";
+
+    expect(resolveSidecarExecutable(executable, "darwin", (path) => path === helper)).toBe(helper);
+    expect(resolveSidecarExecutable(executable, "darwin", () => false)).toBe(executable);
+    expect(resolveSidecarExecutable(executable, "linux", () => true)).toBe(executable);
   });
 
   it("passes Electron Node mode through an inherited nested fork", async () => {

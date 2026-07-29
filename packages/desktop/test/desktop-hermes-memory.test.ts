@@ -16,11 +16,19 @@ describe("Desktop Hermes Memory process adaptation", () => {
   it("uses the sidecar executable with the resolved Pi CLI on every platform", () => {
     expect(
       resolveChildPiInvocation(promptArgs, {
-        platform: "linux",
         execPath: "/runtime/node",
         piCliPath: "/app/pi/cli.js",
       }),
     ).toEqual({ command: "/runtime/node", args: ["/app/pi/cli.js", ...promptArgs] });
+  });
+
+  it("rejects a missing bundled Pi CLI instead of using a system installation", () => {
+    expect(() =>
+      resolveChildPiInvocation(promptArgs, {
+        execPath: "/runtime/node",
+        piCliPath: null,
+      }),
+    ).toThrow("Unable to resolve the bundled Pi CLI");
   });
 
   it("disables every Hermes CLI fallback in a programmatic subagent profile", async () => {
