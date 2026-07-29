@@ -1,5 +1,5 @@
 import { rcompare } from "semver";
-import type { PluginAggregates } from "./catalog-query.ts";
+import type { PluginAggregates } from "../catalog-query.ts";
 import type {
 	MarketplaceArtifactMetadata,
 	MarketplacePluginDetail,
@@ -7,7 +7,7 @@ import type {
 	StoredArtifact,
 	StoredPlugin,
 	StoredPluginVersion,
-} from "./contracts.ts";
+} from "../contracts.ts";
 
 export function pluginDetail(
 	plugin: StoredPlugin,

@@ -9,6 +9,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MarketplaceServerConfig } from "../src/config.ts";
 import { createMarketplaceApp } from "../src/create-app.ts";
+import { createTestPool, destroyTestPool, type TestPoolHandle } from "./pg-mem-helper.ts";
 
 interface ErrorBody {
 	error: { code: string; message: string };
@@ -26,11 +27,14 @@ const config: MarketplaceServerConfig = {
 };
 
 let app: INestApplication;
+let poolHandle: TestPoolHandle;
 const clockNow = 1_800_000_000_000;
 
 beforeAll(async () => {
+	poolHandle = createTestPool();
 	app = await createMarketplaceApp({
 		config,
+		pool: poolHandle.pool,
 		clock: () => clockNow,
 		logger: false,
 	});
@@ -39,6 +43,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await app.close();
+	await destroyTestPool(poolHandle);
 });
 
 describe("plugin marketplace HTTP API", () => {
@@ -105,10 +110,13 @@ describe("plugin marketplace HTTP API", () => {
 		const directory = await mkdtemp(join(tmpdir(), "marketplace-status-http-"));
 		const catalogPath = join(directory, "plugins.json");
 		let statusApp: INestApplication | undefined;
+		let statusHandle: TestPoolHandle | undefined;
 		try {
 			await writeFile(catalogPath, JSON.stringify(statusCatalog()), "utf8");
+			statusHandle = createTestPool();
 			statusApp = await createMarketplaceApp({
 				config,
+				pool: statusHandle.pool,
 				catalogPath: pathToFileURL(catalogPath),
 				clock: () => 1_800_000_000_000,
 				logger: false,
@@ -129,6 +137,7 @@ describe("plugin marketplace HTTP API", () => {
 			await request(server).get("/market/v1/plugins/status.plugin/versions/1.0.0/artifacts").expect(200);
 		} finally {
 			await statusApp?.close();
+			if (statusHandle) await destroyTestPool(statusHandle);
 			await rm(directory, { recursive: true, force: true });
 		}
 	});

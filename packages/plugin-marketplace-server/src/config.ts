@@ -5,6 +5,7 @@ export interface MarketplaceServerConfig {
 	publicBaseUrl: string;
 	marketplaceId: string;
 	dataDir?: string;
+	databaseUrl?: string;
 	adminToken?: string;
 	maxArtifactBytes: number;
 	allowRegistration: boolean;
@@ -20,6 +21,7 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 	assertPublicBasePath(publicBaseUrl, basePath);
 	const marketplaceId = normalizeMarketplaceId(env.MARKETPLACE_ID?.trim() || "meta-agent-development");
 	const dataDir = env.MARKETPLACE_DATA_DIR?.trim() || undefined;
+	const databaseUrl = parseDatabaseUrl(env.MARKETPLACE_DATABASE_URL);
 	const adminToken = env.MARKETPLACE_ADMIN_TOKEN?.trim() || undefined;
 	if (adminToken !== undefined && adminToken.length < 16) {
 		throw new Error("MARKETPLACE_ADMIN_TOKEN must be at least 16 characters");
@@ -39,11 +41,27 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 		publicBaseUrl,
 		marketplaceId,
 		...(dataDir ? { dataDir } : {}),
+		...(databaseUrl ? { databaseUrl } : {}),
 		...(adminToken ? { adminToken } : {}),
 		maxArtifactBytes,
 		allowRegistration,
 		maxLoginFailures,
 	};
+}
+
+function parseDatabaseUrl(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed) return undefined;
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		throw new Error("MARKETPLACE_DATABASE_URL must be a valid PostgreSQL URL");
+	}
+	if ((url.protocol !== "postgres:" && url.protocol !== "postgresql:") || !url.hostname || !url.pathname.slice(1)) {
+		throw new Error("MARKETPLACE_DATABASE_URL must be a valid PostgreSQL URL");
+	}
+	return trimmed;
 }
 
 function parseMaxArtifactBytes(value: string | undefined): number {

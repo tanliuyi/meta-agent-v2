@@ -1,14 +1,14 @@
 import "reflect-metadata";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import type { Pool } from "pg";
 import type { MarketplaceServerConfig } from "./config.ts";
-import { createMarketplaceHttpModule } from "./http-module.ts";
-import { MarketplaceStore } from "./store.ts";
+import { MarketplaceStore } from "./database/store.ts";
+import { createMarketplaceHttpModule } from "./http/http-module.ts";
 
 export interface CreateMarketplaceAppOptions {
 	config: MarketplaceServerConfig;
+	pool?: Pool;
 	catalogPath?: URL;
 	clock?(): number;
 	logger?: false | Array<"error" | "warn" | "log" | "debug" | "verbose" | "fatal">;
@@ -16,13 +16,10 @@ export interface CreateMarketplaceAppOptions {
 
 export async function createMarketplaceApp(options: CreateMarketplaceAppOptions): Promise<INestApplication> {
 	const clock = options.clock ?? Date.now;
-	let databasePath: string | undefined;
-	if (options.config.dataDir) {
-		mkdirSync(options.config.dataDir, { recursive: true });
-		databasePath = join(options.config.dataDir, "marketplace.db");
-	}
 	const store = await MarketplaceStore.open({
-		...(databasePath ? { databasePath } : {}),
+		pool: options.pool,
+		databaseUrl: options.config.databaseUrl,
+		artifactDirectory: options.config.dataDir,
 		...(options.catalogPath ? { catalogPath: options.catalogPath } : {}),
 		marketplaceId: options.config.marketplaceId,
 		clock,
@@ -40,7 +37,7 @@ export async function createMarketplaceApp(options: CreateMarketplaceAppOptions)
 		app.enableShutdownHooks();
 		return app;
 	} catch (error) {
-		store.close();
+		await store.close();
 		throw error;
 	}
 }

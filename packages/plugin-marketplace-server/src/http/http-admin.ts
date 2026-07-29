@@ -1,5 +1,5 @@
 import { Body, Headers, Param, type Type } from "@nestjs/common";
-import type { PublisherAdminView } from "./contracts.ts";
+import type { PublisherAdminView } from "../contracts.ts";
 import { applyController, applyHttpCode, applyParameter, applyRoute } from "./http-decorators.ts";
 import {
 	badRequest,
@@ -7,7 +7,7 @@ import {
 	bodyObject,
 	bodyString,
 	type MarketplaceHttpRuntime,
-	mapStoreErrors,
+	mapStoreErrorsAsync,
 	PUBLISHER_ID_PATTERN,
 	requireAdmin,
 	USERNAME_PATTERN,
@@ -15,36 +15,38 @@ import {
 
 export function createAdminControllers(runtime: MarketplaceHttpRuntime): Type<unknown>[] {
 	class AdminController {
-		publishers(authorization: string | undefined): { publishers: PublisherAdminView[] } {
-			requireAdmin(runtime, authorization);
-			return { publishers: runtime.store.listPublishers() };
+		async publishers(authorization: string | undefined): Promise<{ publishers: PublisherAdminView[] }> {
+			await requireAdmin(runtime, authorization);
+			const list = await runtime.store.listPublishers();
+			return { publishers: list };
 		}
 
-		upsertPublisher(
+		async upsertPublisher(
 			publisherId: string,
 			body: unknown,
 			authorization: string | undefined,
-		): { publisher: PublisherAdminView } {
-			requireAdmin(runtime, authorization);
+		): Promise<{ publisher: PublisherAdminView }> {
+			await requireAdmin(runtime, authorization);
 			if (!PUBLISHER_ID_PATTERN.test(publisherId)) {
 				throw badRequest("PUBLISHER_ID_INVALID", "Publisher ID must be a lowercase identifier");
 			}
 			const record = bodyObject(body);
 			const displayName = bodyString(record, "displayName", 120);
 			const verified = bodyBoolean(record, "verified");
-			return { publisher: runtime.store.upsertPublisher(publisherId, displayName, verified) };
+			const publisher = await runtime.store.upsertPublisher(publisherId, displayName, verified);
+			return { publisher };
 		}
 
-		addMember(publisherId: string, username: string, authorization: string | undefined): void {
-			requireAdmin(runtime, authorization);
+		async addMember(publisherId: string, username: string, authorization: string | undefined): Promise<void> {
+			await requireAdmin(runtime, authorization);
 			validateMemberPath(publisherId, username);
-			mapStoreErrors(() => runtime.store.addPublisherMember(publisherId, username));
+			await mapStoreErrorsAsync(() => runtime.store.addPublisherMember(publisherId, username));
 		}
 
-		removeMember(publisherId: string, username: string, authorization: string | undefined): void {
-			requireAdmin(runtime, authorization);
+		async removeMember(publisherId: string, username: string, authorization: string | undefined): Promise<void> {
+			await requireAdmin(runtime, authorization);
 			validateMemberPath(publisherId, username);
-			mapStoreErrors(() => runtime.store.removePublisherMember(publisherId, username));
+			await mapStoreErrorsAsync(() => runtime.store.removePublisherMember(publisherId, username));
 		}
 	}
 

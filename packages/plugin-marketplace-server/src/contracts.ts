@@ -265,6 +265,33 @@ export interface AuthMeResponse {
 	publisherIds: string[];
 }
 
+export interface ArtifactUploadContext {
+	pluginName: string;
+	publisherId: string;
+	desktop: CatalogPluginVersion["desktop"];
+	configuration?: PluginConfigurationSchema;
+	capabilities: string[];
+	artifact: { id: string; target: ArtifactTarget; entry: string };
+}
+
+export interface ArtifactContentInput {
+	bytes: Uint8Array;
+	sha256: string;
+	size: number;
+}
+
+export interface ArtifactContent {
+	bytes: Uint8Array;
+	sha256: string;
+	size: number;
+}
+
+export interface PublishArtifactAuditContent {
+	artifactId: string;
+	containsNativeCode: boolean;
+	bytes?: Uint8Array;
+}
+
 export interface PublisherAdminView extends PublisherRecord {
 	members: string[];
 }

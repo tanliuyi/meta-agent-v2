@@ -10,6 +10,7 @@ services:
     environment:
       MARKETPLACE_HOST: 0.0.0.0
       MARKETPLACE_PORT: "4317"
+      # Retained temporarily so an old SQLite image can be restored during migration rollback.
       MARKETPLACE_DATA_DIR: /data
     volumes:
       - marketplace-data:/data

@@ -1,12 +1,12 @@
 import { Body, Headers, Param, type Type } from "@nestjs/common";
-import type { PluginRatingAggregate, PluginRatingsResponse, PluginStatsResponse } from "./contracts.ts";
+import type { PluginRatingAggregate, PluginRatingsResponse, PluginStatsResponse } from "../contracts.ts";
 import { applyController, applyHttpCode, applyParameter, applyRoute } from "./http-decorators.ts";
 import {
 	bodyInteger,
 	bodyObject,
 	bodyOptionalString,
 	type MarketplaceHttpRuntime,
-	mapStoreErrors,
+	mapStoreErrorsAsync,
 	notFound,
 	requireUser,
 } from "./http-util.ts";
@@ -15,36 +15,43 @@ const RATINGS_PAGE_SIZE = 50;
 
 export function createCommunityControllers(runtime: MarketplaceHttpRuntime): Type<unknown>[] {
 	class CommunityController {
-		ratings(pluginId: string): PluginRatingsResponse {
-			requirePublicPlugin(runtime, pluginId);
-			return {
-				rating: runtime.store.ratingAggregate(pluginId),
-				histogram: runtime.store.ratingHistogram(pluginId),
-				ratings: runtime.store.ratingsFor(pluginId, RATINGS_PAGE_SIZE),
-			};
+		async ratings(pluginId: string): Promise<PluginRatingsResponse> {
+			await requirePublicPlugin(runtime, pluginId);
+			const [rating, histogram, ratings] = await Promise.all([
+				runtime.store.ratingAggregate(pluginId),
+				runtime.store.ratingHistogram(pluginId),
+				runtime.store.ratingsFor(pluginId, RATINGS_PAGE_SIZE),
+			]);
+			return { rating, histogram, ratings };
 		}
 
-		rate(pluginId: string, body: unknown, authorization: string | undefined): { rating: PluginRatingAggregate } {
-			const principal = requireUser(runtime, authorization);
+		async rate(
+			pluginId: string,
+			body: unknown,
+			authorization: string | undefined,
+		): Promise<{ rating: PluginRatingAggregate }> {
+			const principal = await requireUser(runtime, authorization);
 			const record = bodyObject(body);
 			const stars = bodyInteger(record, "stars", 1, 5);
 			const review = bodyOptionalString(record, "review", 2000);
-			mapStoreErrors(() => runtime.store.upsertRating(pluginId, principal.userId, stars, review));
-			return { rating: runtime.store.ratingAggregate(pluginId) };
+			await mapStoreErrorsAsync(() => runtime.store.upsertRating(pluginId, principal.userId, stars, review));
+			const rating = await runtime.store.ratingAggregate(pluginId);
+			return { rating };
 		}
 
-		unrate(pluginId: string, authorization: string | undefined): void {
-			const principal = requireUser(runtime, authorization);
-			mapStoreErrors(() => runtime.store.deleteRating(pluginId, principal.userId));
+		async unrate(pluginId: string, authorization: string | undefined): Promise<void> {
+			const principal = await requireUser(runtime, authorization);
+			await mapStoreErrorsAsync(() => runtime.store.deleteRating(pluginId, principal.userId));
 		}
 
-		stats(pluginId: string): PluginStatsResponse {
-			requirePublicPlugin(runtime, pluginId);
-			return {
-				downloadCount: runtime.store.downloadTotal(pluginId),
-				downloadsByVersion: runtime.store.downloadsByVersion(pluginId),
-				rating: runtime.store.ratingAggregate(pluginId),
-			};
+		async stats(pluginId: string): Promise<PluginStatsResponse> {
+			await requirePublicPlugin(runtime, pluginId);
+			const [downloadCount, downloadsByVersion, rating] = await Promise.all([
+				runtime.store.downloadTotal(pluginId),
+				runtime.store.downloadsByVersion(pluginId),
+				runtime.store.ratingAggregate(pluginId),
+			]);
+			return { downloadCount, downloadsByVersion, rating };
 		}
 	}
 
@@ -65,8 +72,9 @@ export function createCommunityControllers(runtime: MarketplaceHttpRuntime): Typ
 	return [CommunityController];
 }
 
-function requirePublicPlugin(runtime: MarketplaceHttpRuntime, pluginId: string): void {
-	if (!runtime.store.hasPublicPlugin(pluginId)) {
+async function requirePublicPlugin(runtime: MarketplaceHttpRuntime, pluginId: string): Promise<void> {
+	const exists = await runtime.store.hasPublicPlugin(pluginId);
+	if (!exists) {
 		throw notFound("PLUGIN_NOT_FOUND", `Plugin not found: ${pluginId}`);
 	}
 }

@@ -6,10 +6,18 @@ NestJS backend for the Meta Agent Desktop plugin marketplace protocol. It is a s
 
 ```bash
 npm install --ignore-scripts
-npm --prefix packages/plugin-marketplace-server run dev
+MARKETPLACE_DATABASE_URL='postgres://root:<password>@100.91.230.10:5432/plugin_marketplace' \
+  npm --prefix packages/plugin-marketplace-server run dev
 ```
 
-The default development server listens on `127.0.0.1:4317`. It reads settings from the process environment and does not load `.env` files implicitly.
+The default development server listens on `127.0.0.1:4317`. It reads settings from the process environment and does not load `.env` files implicitly. `MARKETPLACE_DATABASE_URL` must point to a PostgreSQL database unless a pool is injected by a test.
+
+## Architecture
+
+- `src/database/` owns the PostgreSQL pool, schema, catalog seed, transaction boundaries, and focused user, publisher, plugin, rating, and download stores.
+- `src/http/` owns NestJS controller factories, HTTP validation/error mapping, and API response mapping.
+- Root `src/` modules contain application assembly, protocol contracts, catalog validation/querying, authentication primitives, and artifact building.
+- `scripts/` contains development and one-time operational commands; `test/pg-mem-helper.ts` provides isolated PostgreSQL-compatible test databases.
 
 ## Endpoints
 
@@ -61,7 +69,20 @@ Administration (`MARKETPLACE_ADMIN_TOKEN` bearer token):
 
 ## Storage and accounts
 
-State lives in SQLite through the Node built-in `node:sqlite` module (no native dependencies). When `MARKETPLACE_DATA_DIR` is unset the store is in-memory and reseeded from `catalog/plugins.json` on every start. When `MARKETPLACE_DATA_DIR` is set, `marketplace.db` is created there and the catalog seeds only an empty database.
+State lives in PostgreSQL through the `pg` connection pool configured by `MARKETPLACE_DATABASE_URL`. Startup creates missing tables and seeds `catalog/plugins.json` only when the database has not previously been seeded. A transaction-scoped PostgreSQL advisory lock serializes schema seeding across concurrent server instances.
+
+Artifact archives from new uploads are stored in `BYTEA`; accounts, sessions, publisher memberships, ratings, and download counters are stored in relational tables. For compatibility with the already deployed PostgreSQL schema, rows that have an `object_key` but no `bytes` are read from the path beneath `MARKETPLACE_DATA_DIR`; path traversal and SHA-256/size mismatches are rejected. Tests inject isolated pg-mem pools and never use the configured production database.
+
+### Migrating an existing SQLite database
+
+Stop the marketplace server and back up both the SQLite file and PostgreSQL database. The destination PostgreSQL database must be empty; the migration aborts if any marketplace table already contains rows.
+
+```bash
+MARKETPLACE_DATABASE_URL='postgres://root:<password>@100.91.230.10:5432/plugin_marketplace' \
+  npm --prefix packages/plugin-marketplace-server run migrate:sqlite -- /path/to/marketplace.db
+```
+
+The command copies catalog state, accounts, sessions, publishers, memberships, plugin versions and artifacts, ratings, and download counters in one PostgreSQL transaction, then advances the users sequence. After it succeeds, add `MARKETPLACE_DATABASE_URL` to `.env.production` and start the PostgreSQL-backed server. Deployment scripts refuse to modify an existing SQLite-era environment automatically. The server does not automatically import SQLite files.
 
 Accounts are username/password (scrypt-hashed) with 30-day bearer session tokens. The admin surface uses the static `MARKETPLACE_ADMIN_TOKEN` instead of a user account; admins create publishers and grant publish rights by adding usernames as publisher members. Failed logins are throttled per client IP: after `MARKETPLACE_MAX_LOGIN_FAILURES` failures (default 10) within a 15-minute window, further login attempts return `429 AUTH_RATE_LIMITED` until the window expires. A successful login resets the counter; `0` disables throttling.
 
@@ -101,13 +122,16 @@ Defaults:
 - Host binding: `100.91.230.10:4317`
 - Marketplace ID: `meta-agent-development`
 
-On the first deployment, the script generates an admin token locally and writes it to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file. Back up `.env.production` separately; deleting it resets the admin token. Deployments that predate the admin API keep working with admin endpoints disabled until `MARKETPLACE_ADMIN_TOKEN` is added to `.env.production`.
+On the first deployment, set `MARKETPLACE_DATABASE_URL` in the deploy command environment. The script generates an admin token locally and writes both values to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file. Deployments upgrading from SQLite must run the migration command above and add the URL to `.env.production` before deployment; the scripts deliberately stop when an existing environment has no database URL.
 
-The container persists SQLite state in the `marketplace-data` named volume mounted at `/data` (`MARKETPLACE_DATA_DIR=/data` is set by Compose). Back up the volume alongside `.env.production`; removing it discards accounts, published plugins, ratings, and download counters, after which the catalog seed repopulates an empty database.
+The Compose file temporarily retains the legacy `marketplace-data` volume and `MARKETPLACE_DATA_DIR=/data` so rollback to the previous SQLite image remains possible during the migration window and PostgreSQL rows with legacy `object_key` artifacts remain downloadable. New PostgreSQL uploads use `BYTEA`. Remove the legacy volume only after all object-key artifacts have been backfilled or retired and the rollback path has been verified.
+
+Back up the PostgreSQL database and `.env.production` independently. Deleting `.env.production` resets the admin token and removes the server's database connection configuration.
 
 Override the SSH destination or remote root without editing tracked files:
 
 ```bash
+MARKETPLACE_DATABASE_URL='postgres://root:<password>@100.91.230.10:5432/plugin_marketplace' \
 MARKETPLACE_DEPLOY_HOST=100.91.230.10 \
 MARKETPLACE_DEPLOY_USER=root \
 MARKETPLACE_DEPLOY_ROOT=/opt/meta-agent-plugin-marketplace \
@@ -120,7 +144,7 @@ Each deployment builds `meta-agent-plugin-marketplace:<UTC timestamp>` and recor
 
 The repository includes `.gitea/workflows/deploy-marketplace.yml` for the `marketplace-deploy` host runner. It is intentionally manual-only: pushing a branch does not build or deploy production. Open the workflow in Gitea, select the committed ref to deploy, and run it with `workflow_dispatch`.
 
-The runner clones the selected commit from the local Gitea bare repository and runs `scripts/deploy-plugin-marketplace-local.sh`. Validation and both application builds run in Docker, so the CentOS host does not need a working Node.js installation. The script deploys the server on port 4317 and the Web console on port 4318, verifies both health endpoints, and rolls back to the previous self-contained image after a failed replacement.
+The runner clones the selected commit from the local Gitea bare repository and runs `scripts/deploy-plugin-marketplace-local.sh`. Configure `MARKETPLACE_DATABASE_URL` in the runner environment before the first PostgreSQL deployment; the script stores it in the server's mode-`0600` `.env.production`. Validation and both application builds run in Docker, so the CentOS host does not need a working Node.js installation. The script deploys the server on port 4317 and the Web console on port 4318, verifies both health endpoints, and rolls back to the previous self-contained image after a failed replacement.
 
 After deployment, the script requires both `/health` and `/.well-known/meta-agent-marketplace.json` to succeed. Operational checks:
 

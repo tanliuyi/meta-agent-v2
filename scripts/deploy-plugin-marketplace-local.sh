@@ -61,6 +61,10 @@ rsync -a --delete \
 
 ENV_PATH="$SERVER_DIR/.env.production"
 if [[ ! -f "$ENV_PATH" ]]; then
+  if [[ -z "${MARKETPLACE_DATABASE_URL:-}" ]]; then
+    echo "MARKETPLACE_DATABASE_URL is required for the initial PostgreSQL deployment" >&2
+    exit 1
+  fi
   ADMIN_TOKEN="$(openssl rand -hex 32)"
   umask 077
   {
@@ -69,6 +73,7 @@ if [[ ! -f "$ENV_PATH" ]]; then
     printf 'MARKETPLACE_BASE_PATH=\n'
     printf 'MARKETPLACE_PUBLIC_BASE_URL=%s\n' "$PUBLIC_URL"
     printf 'MARKETPLACE_ID=meta-agent-development\n'
+    printf 'MARKETPLACE_DATABASE_URL=%s\n' "$MARKETPLACE_DATABASE_URL"
     printf 'MARKETPLACE_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
   } > "$ENV_PATH"
   unset ADMIN_TOKEN
@@ -78,6 +83,11 @@ else
     -e '/^MARKETPLACE_SIGNING_PRIVATE_KEY=/d' \
     -e '/^MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY=/d' \
     "$ENV_PATH"
+  if ! grep -q '^MARKETPLACE_DATABASE_URL=' "$ENV_PATH"; then
+    echo "Existing SQLite deployment must be migrated before MARKETPLACE_DATABASE_URL is added" >&2
+    echo "See packages/plugin-marketplace-server/README.md#migrating-an-existing-sqlite-database" >&2
+    exit 1
+  fi
 fi
 chmod 600 "$ENV_PATH"
 

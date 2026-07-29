@@ -8,10 +8,10 @@ import {
 	UnauthorizedException,
 	UnsupportedMediaTypeException,
 } from "@nestjs/common";
-import { hashToken, tokenEquals } from "./auth.ts";
-import type { MarketplaceServerConfig } from "./config.ts";
-import type { MarketplaceErrorBody } from "./contracts.ts";
-import type { MarketplaceStore } from "./store.ts";
+import { hashToken, tokenEquals } from "../auth.ts";
+import type { MarketplaceServerConfig } from "../config.ts";
+import type { MarketplaceErrorBody } from "../contracts.ts";
+import type { MarketplaceStore } from "../database/store.ts";
 
 export type MarketplacePrincipal =
 	| { kind: "admin" }
@@ -120,16 +120,24 @@ export function mapStoreErrors<T>(work: () => T): T {
 	}
 }
 
+export async function mapStoreErrorsAsync<T>(work: () => Promise<T>): Promise<T> {
+	try {
+		return await work();
+	} catch (error) {
+		throw storeErrorToHttp(error) ?? error;
+	}
+}
+
 // --- authentication ---
 
-export function authenticate(
+export async function authenticate(
 	runtime: AuthRuntime,
 	authorization: string | undefined,
-): MarketplacePrincipal | undefined {
+): Promise<MarketplacePrincipal | undefined> {
 	if (authorization === undefined) return undefined;
 	const token = bearerToken(authorization);
 	if (runtime.config.adminToken && tokenEquals(token, runtime.config.adminToken)) return { kind: "admin" };
-	const session = runtime.store.getSessionUser(hashToken(token));
+	const session = await runtime.store.getSessionUser(hashToken(token));
 	if (!session) throw unauthorized("AUTH_INVALID", "Authorization token is invalid or expired");
 	return { kind: "user", userId: session.userId, username: session.username, createdAt: session.createdAt };
 }
@@ -145,28 +153,31 @@ export function bearerToken(authorization: string): string {
 	return token;
 }
 
-export function requirePrincipal(runtime: AuthRuntime, authorization: string | undefined): MarketplacePrincipal {
-	const principal = authenticate(runtime, authorization);
+export async function requirePrincipal(
+	runtime: AuthRuntime,
+	authorization: string | undefined,
+): Promise<MarketplacePrincipal> {
+	const principal = await authenticate(runtime, authorization);
 	if (!principal) throw unauthorized("AUTH_REQUIRED", "Authorization is required");
 	return principal;
 }
 
-export function requireUser(
+export async function requireUser(
 	runtime: AuthRuntime,
 	authorization: string | undefined,
-): Extract<MarketplacePrincipal, { kind: "user" }> {
-	const principal = requirePrincipal(runtime, authorization);
+): Promise<Extract<MarketplacePrincipal, { kind: "user" }>> {
+	const principal = await requirePrincipal(runtime, authorization);
 	if (principal.kind !== "user") {
 		throw forbidden("USER_ACCOUNT_REQUIRED", "This operation requires a user account token");
 	}
 	return principal;
 }
 
-export function requireAdmin(runtime: AuthRuntime, authorization: string | undefined): void {
+export async function requireAdmin(runtime: AuthRuntime, authorization: string | undefined): Promise<void> {
 	if (!runtime.config.adminToken) {
 		throw forbidden("ADMIN_DISABLED", "MARKETPLACE_ADMIN_TOKEN is not configured");
 	}
-	const principal = requirePrincipal(runtime, authorization);
+	const principal = await requirePrincipal(runtime, authorization);
 	if (principal.kind !== "admin") {
 		throw forbidden("ADMIN_REQUIRED", "This operation requires the marketplace admin token");
 	}

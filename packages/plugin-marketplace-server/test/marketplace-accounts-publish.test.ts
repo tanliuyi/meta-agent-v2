@@ -1,7 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { INestApplication } from "@nestjs/common";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import request from "supertest";
@@ -10,6 +7,7 @@ import { assertNoNativePayload } from "../src/artifact-builder.ts";
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "../src/auth.ts";
 import type { MarketplaceServerConfig } from "../src/config.ts";
 import { createMarketplaceApp } from "../src/create-app.ts";
+import { createTestPool, destroyTestPool, type TestPoolHandle } from "./pg-mem-helper.ts";
 
 const ADMIN_TOKEN = "test-admin-token-0123456789abcdef";
 const config: MarketplaceServerConfig = {
@@ -32,9 +30,11 @@ const HELPER_SOURCE = "export const helper = true;\n";
 let app: INestApplication;
 let aliceToken = "";
 let bobToken = "";
+let poolHandle: TestPoolHandle;
 
 beforeAll(async () => {
-	app = await createMarketplaceApp({ config, clock: () => 1_800_000_000_000, logger: false });
+	poolHandle = createTestPool();
+	app = await createMarketplaceApp({ config, pool: poolHandle.pool, clock: () => 1_800_000_000_000, logger: false });
 	await app.init();
 	aliceToken = await register("alice");
 	bobToken = await register("bob");
@@ -42,6 +42,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await app.close();
+	await destroyTestPool(poolHandle);
 });
 
 describe("accounts and sessions", () => {
@@ -111,8 +112,10 @@ describe("accounts and sessions", () => {
 
 	it("throttles failed logins per client and resets on success", async () => {
 		let now = 1_800_000_000_000;
+		const limitedHandle = createTestPool();
 		const limited = await createMarketplaceApp({
 			config: { ...config, maxLoginFailures: 2 },
+			pool: limitedHandle.pool,
 			clock: () => now,
 			logger: false,
 		});
@@ -137,6 +140,7 @@ describe("accounts and sessions", () => {
 			await request(limited.getHttpServer()).post("/v1/auth/login").send(right).expect(429);
 		} finally {
 			await limited.close();
+			await destroyTestPool(limitedHandle);
 		}
 	});
 });
@@ -572,12 +576,13 @@ describe("ratings", () => {
 });
 
 describe("persistence", () => {
-	it("retains accounts, plugins, ratings, and stats across restarts", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "marketplace-persist-"));
-		const persistentConfig: MarketplaceServerConfig = { ...config, dataDir: join(directory, "data") };
+	it("retains accounts, plugins, ratings, and stats across store close/reopen", async () => {
+		// Use a single pg-mem database that persists data between open/close cycles.
+		const handle = createTestPool();
 		try {
 			const first = await createMarketplaceApp({
-				config: persistentConfig,
+				config,
+				pool: handle.pool,
 				clock: () => 1_800_000_000_000,
 				logger: false,
 			});
@@ -597,7 +602,7 @@ describe("persistence", () => {
 				.set("authorization", `Bearer ${token}`)
 				.send({
 					name: "Persistence Demo",
-					description: "Plugin stored in SQLite",
+					description: "Plugin stored in PostgreSQL",
 					publisherId: "persist-pub",
 					categories: ["test"],
 				})
@@ -625,8 +630,10 @@ describe("persistence", () => {
 			await request(first.getHttpServer()).get(`/v1/artifacts/dev.persist.demo/2.0.0/${ARTIFACT_ID}`).expect(200);
 			await first.close();
 
+			// Reopen with the same pg-mem pool — data survives in the in-memory DB.
 			const second = await createMarketplaceApp({
-				config: persistentConfig,
+				config,
+				pool: handle.pool,
 				clock: () => 1_800_000_100_000,
 				logger: false,
 			});
@@ -655,7 +662,7 @@ describe("persistence", () => {
 				await second.close();
 			}
 		} finally {
-			await rm(directory, { recursive: true, force: true });
+			await destroyTestPool(handle);
 		}
 	});
 });
@@ -715,8 +722,6 @@ function versionDeclaration(version: string) {
 }
 
 function payloadArchive(): Uint8Array {
-	// The zero-length "lib/" entry mirrors the directory entries written by zip -r,
-	// Finder, Windows Explorer, and shutil.make_archive; uploads must tolerate them.
 	return zipSync({
 		"index.ts": strToU8(ENTRY_SOURCE),
 		"lib/": new Uint8Array(0),

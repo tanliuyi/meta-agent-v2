@@ -54,6 +54,10 @@ rsync -az --delete -e "$RSYNC_SHELL" \
 
 ENV_PATH="$DEPLOY_ROOT/repo/packages/plugin-marketplace-server/.env.production"
 if ! remote "test -f '$ENV_PATH'"; then
+  if [[ -z "${MARKETPLACE_DATABASE_URL:-}" ]]; then
+    echo "MARKETPLACE_DATABASE_URL is required for the initial PostgreSQL deployment" >&2
+    exit 1
+  fi
   ADMIN_TOKEN="$({
     node --input-type=module -e '
       import { randomBytes } from "node:crypto";
@@ -66,9 +70,14 @@ if ! remote "test -f '$ENV_PATH'"; then
     printf 'MARKETPLACE_BASE_PATH=\n'
     printf 'MARKETPLACE_PUBLIC_BASE_URL=%s\n' "$PUBLIC_URL"
     printf 'MARKETPLACE_ID=meta-agent-development\n'
+    printf 'MARKETPLACE_DATABASE_URL=%s\n' "$MARKETPLACE_DATABASE_URL"
     printf 'MARKETPLACE_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
   } | remote "umask 077; cat > '$ENV_PATH'"
   unset ADMIN_TOKEN
+elif ! remote "grep -q '^MARKETPLACE_DATABASE_URL=' '$ENV_PATH'"; then
+  echo "Existing SQLite deployment must be migrated before MARKETPLACE_DATABASE_URL is added" >&2
+  echo "See packages/plugin-marketplace-server/README.md#migrating-an-existing-sqlite-database" >&2
+  exit 1
 fi
 
 remote "set -eu; chmod 600 '$ENV_PATH'; cd '$COMPOSE_DIR'; current=\$(docker compose ps -q plugin-marketplace); if [ -n \"\$current\" ]; then docker inspect --format='{{.Config.Image}}' \"\$current\" > .previous-image; fi; MARKETPLACE_IMAGE='$IMAGE' docker compose up -d --build --remove-orphans"
