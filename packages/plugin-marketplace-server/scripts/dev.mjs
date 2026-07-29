@@ -8,9 +8,12 @@ const env = {
 };
 delete env.MARKETPLACE_SIGNING_PRIVATE_KEY;
 
-// Load .env file if it exists
-const envPath = fileURLToPath(new URL("../.env", import.meta.url));
-if (existsSync(envPath)) {
+// Prefer the tracked development configuration, while preserving the legacy local .env fallback.
+const packageDirectory = new URL("..", import.meta.url);
+const envPath = [".env.develop", ".env"]
+  .map((fileName) => fileURLToPath(new URL(fileName, packageDirectory)))
+  .find((candidate) => existsSync(candidate));
+if (envPath) {
   // Use process.loadEnvFile if available (Node 21.7+)
   if (typeof process.loadEnvFile === "function") {
     try {

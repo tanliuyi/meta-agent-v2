@@ -12,17 +12,22 @@ NestJS backend for the Meta Agent Desktop plugin marketplace protocol. It is a s
 
 ```bash
 npm install --ignore-scripts
-# packages/plugin-marketplace-server/.env has been created locally and is ignored by Git.
+# `packages/plugin-marketplace-server/.env.develop` contains the development configuration.
 npm --prefix packages/plugin-marketplace-server run dev
 ```
 
-The development script always uses an ephemeral signing key and ignores `MARKETPLACE_SIGNING_PRIVATE_KEY` from the shell. It loads configuration from `packages/plugin-marketplace-server/.env` if present (this file is git-ignored). The development server listens on `127.0.0.1:4317` by default.
+The development script always uses an ephemeral signing key and ignores `MARKETPLACE_SIGNING_PRIVATE_KEY` from the shell. It loads `packages/plugin-marketplace-server/.env.develop` when present, falling back to the git-ignored `.env` used by older checkouts. The development server listens on `127.0.0.1:4317` by default.
 
-### Environment variables (development `.env`)
+### Environment variables (development `.env.develop`)
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `MARKETPLACE_DATABASE_URL` | Yes | — | PostgreSQL connection URL, e.g. `postgresql://user:password@host:5432/database` |
+| `MARKETPLACE_MINIO_ENDPOINT` | Yes | — | MinIO S3 API origin, e.g. `http://127.0.0.1:9000` (not the console on port 9001) |
+| `MARKETPLACE_MINIO_ACCESS_KEY` | Yes | — | MinIO access key |
+| `MARKETPLACE_MINIO_SECRET_KEY` | Yes | — | MinIO secret key |
+| `MARKETPLACE_MINIO_BUCKET` | No | `meta-agent-plugins` | Bucket used for plugin artifacts |
+| `MARKETPLACE_MINIO_REGION` | No | `us-east-1` | MinIO bucket region |
 | `MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY` | No | `true` in dev | Generate a fresh signing key on each start (dev only) |
 | `MARKETPLACE_ADMIN_TOKEN` | No | — | Static admin bearer token; generate one locally for development |
 | `MARKETPLACE_HOST` | No | `127.0.0.1` | HTTP listen address |
@@ -36,7 +41,7 @@ The development script always uses an ephemeral signing key and ignores `MARKETP
 | `MARKETPLACE_MAX_LOGIN_FAILURES` | No | `10` | Failed login attempts before rate-limiting; `0` disables |
 | `MARKETPLACE_ARTIFACT_ORIGINS` | No | — | Comma-separated HTTP(S) origins allowed for artifact hosting |
 
-The development script (`scripts/dev.mjs`) loads `.env` if it exists. The startup entry point (`main.ts`) reads environment variables directly and does not load `.env` automatically; production environments set variables through Docker Compose or systemd.
+The development script (`scripts/dev.mjs`) loads `.env.develop` when it exists and otherwise falls back to `.env`. The startup entry point (`main.ts`) reads environment variables directly and does not load an environment file automatically; production environments set variables through Docker Compose or systemd.
 
 ## Endpoints
 
@@ -140,7 +145,7 @@ Defaults:
 - Host binding: `100.91.230.10:4317`
 - Marketplace ID: `meta-agent-development`
 
-On the first deployment, the script generates an Ed25519 key and an admin token locally and writes them to the remote `.env.production` with mode `0600`. It reads `MARKETPLACE_DATABASE_URL` from the shell or the ignored local `.env`; the connection URL is never stored in the tracked deployment script. Subsequent deployments preserve the remote file so the marketplace fingerprint remains stable. Back up `.env.production` separately; deleting it creates a new marketplace identity that Desktop clients must confirm again.
+On the first deployment, the script generates an Ed25519 key and an admin token locally and writes them to the remote `.env.production` with mode `0600`. It reads `MARKETPLACE_DATABASE_URL` from the shell or the development environment file; the connection URL is never stored in the tracked deployment script. Subsequent deployments preserve the remote file so the marketplace fingerprint remains stable. Back up `.env.production` separately; deleting it creates a new marketplace identity that Desktop clients must confirm again.
 
 The container does not persist state locally; all data lives in the configured PostgreSQL database. Back up the database with standard PostgreSQL tools (`pg_dump`, WAL archival, or replication).
 

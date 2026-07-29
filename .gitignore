@@ -51,3 +51,4 @@ collect.sh
 .pi-subagents/
 nul
 .tmp-npm*/
+packages/plugin-marketplace-server/.env.develop
