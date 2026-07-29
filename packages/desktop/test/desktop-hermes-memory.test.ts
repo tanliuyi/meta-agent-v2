@@ -13,7 +13,7 @@ import { NodeSqliteDatabase } from "../src/main/pi/extensions/pi-hermes-memory/s
 const promptArgs = ["-p", "--no-session", "prompt"];
 
 describe("Desktop Hermes Memory process adaptation", () => {
-  it("uses the sidecar Node executable with the resolved Pi CLI on every platform", () => {
+  it("uses the sidecar executable with the resolved Pi CLI on every platform", () => {
     expect(
       resolveChildPiInvocation(promptArgs, {
         platform: "linux",

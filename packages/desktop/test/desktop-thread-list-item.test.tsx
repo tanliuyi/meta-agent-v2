@@ -48,13 +48,20 @@ function renderThread(
 }
 
 describe("DesktopThreadListItem", () => {
-  it("renders the subagent name separately from the task title", () => {
+  it("renders the localized built-in subagent name separately from the task title", () => {
     const markup = renderThread(baseThread);
 
     expect(markup).toContain('data-slot="subagent-name"');
-    expect(markup).toContain(">reviewer</span>");
+    expect(markup).toContain('title="reviewer"');
+    expect(markup).toContain(">审查员</span>");
     expect(markup).toContain('data-slot="thread-title"');
     expect(markup).toContain(">Inspect the renderer tree</span>");
+  });
+
+  it("keeps custom subagent names unchanged", () => {
+    const markup = renderThread({ ...baseThread, agentName: "security-review" });
+
+    expect(markup).toContain(">security-review</span>");
   });
 
   it("keeps legacy subagent sessions readable without an agent name", () => {

@@ -84,7 +84,7 @@ describe("SessionMetadataIndex", () => {
     writeFileSync(
       join(userDataDir, "session-metadata-index.json"),
       `${JSON.stringify({
-        version: 4,
+        version: 5,
         projects: {
           [GENERAL_WORKSPACE_ID]: {
             cwd,
@@ -108,7 +108,6 @@ describe("SessionMetadataIndex", () => {
                   agentName: "reviewer",
                   path: join(childDirectory, "session.jsonl"),
                 },
-                fileFingerprint: "stale",
               },
             ],
             sessions: [],
@@ -346,87 +345,6 @@ describe("SessionMetadataIndex", () => {
     expect(mocks.listSessions).not.toHaveBeenCalled();
   });
 
-  it("refreshes explicit worktree metadata when the child file changes or is recreated with the same ID", async () => {
-    const sessionDirectory = join(userDataDir, "sessions");
-    const parentFile = join(sessionDirectory, "parent.jsonl");
-    const childDirectory = join(sessionDirectory, "parent", "abc12345", "run-0");
-    const childFile = join(childDirectory, "session.jsonl");
-    mkdirSync(sessionDirectory, { recursive: true });
-    writeFileSync(parentFile, '{"type":"session","id":"parent"}\n');
-    mocks.listSessions.mockResolvedValue([sessionInfo("parent", parentFile, "Parent", 2)]);
-    const index = new SessionMetadataIndex(userDataDir);
-    await index.list("project", cwd);
-    await index.list("project", cwd);
-
-    mkdirSync(childDirectory, { recursive: true });
-    const worktreeCwd = join(userDataDir, "project.worktrees", "review");
-    writeFileSync(
-      childFile,
-      `${JSON.stringify({
-        type: "session",
-        version: 3,
-        id: "child",
-        timestamp: "1970-01-01T00:00:00.010Z",
-        cwd: worktreeCwd,
-      })}\n` +
-        '{"type":"message","timestamp":"1970-01-01T00:00:00.020Z","message":{"role":"user","timestamp":20,"content":[{"type":"text","text":"Initial task"}]}}\n',
-    );
-    index.registerExternalSession("project", cwd, childFile, {
-      ...thread("child", "Initial task"),
-      preview: "Initial task",
-      parentThreadId: "parent",
-      origin: "subagent",
-    });
-
-    appendFileSync(
-      childFile,
-      '{"type":"session_info","timestamp":"1970-01-01T00:00:00.030Z","name":"Renamed externally"}\n',
-    );
-    let childInfo = sessionInfo("child", childFile, "Renamed externally", 30, {
-      created: 10,
-      firstMessage: "Initial task",
-      messageCount: 2,
-    });
-    mocks.listSessions.mockResolvedValue([sessionInfo("parent", parentFile, "Parent", 2)]);
-    mocks.listAllSessions.mockImplementation(async (requestedDirectory: string) =>
-      requestedDirectory === childDirectory ? [childInfo] : [],
-    );
-    await expect(index.list("project", cwd)).resolves.toContainEqual(
-      expect.objectContaining({ id: "child", title: "Renamed externally", updatedAt: 30, messageCount: 2 }),
-    );
-
-    expect(mocks.listAllSessions).toHaveBeenLastCalledWith(childDirectory);
-
-    rmSync(childFile);
-    writeFileSync(
-      childFile,
-      `${JSON.stringify({
-        type: "session",
-        version: 3,
-        id: "child",
-        timestamp: "1970-01-01T00:00:00.100Z",
-        cwd: worktreeCwd,
-      })}\n` +
-        '{"type":"message","timestamp":"1970-01-01T00:00:00.110Z","message":{"role":"user","timestamp":110,"content":[{"type":"text","text":"Replacement task"}]}}\n',
-    );
-    childInfo = sessionInfo("child", childFile, "", 110, {
-      created: 100,
-      firstMessage: "Replacement task",
-      messageCount: 1,
-    });
-    await expect(index.list("project", cwd)).resolves.toContainEqual(
-      expect.objectContaining({
-        id: "child",
-        title: "Replacement task",
-        createdAt: 100,
-        updatedAt: 110,
-        messageCount: 1,
-      }),
-    );
-    expect(mocks.listAllSessions).toHaveBeenCalledTimes(2);
-    expect(mocks.listAllSessions).toHaveBeenLastCalledWith(childDirectory);
-  });
-
   it("retries an incomplete nested-session backfill instead of marking it complete", async () => {
     const sessionDirectory = join(userDataDir, "sessions");
     const parentFile = join(sessionDirectory, "parent.jsonl");
@@ -517,24 +435,22 @@ describe("SessionMetadataIndex", () => {
     expect(mocks.listAllSessions).not.toHaveBeenCalled();
   });
 
-  it("rejects external session header mismatches and duplicate IDs at different paths", async () => {
+  it("trusts projected external session IDs and rejects duplicate IDs at different paths", async () => {
     const sessionFile = join(userDataDir, "child.jsonl");
     const duplicateFile = join(userDataDir, "duplicate.jsonl");
     writeFileSync(sessionFile, '{"type":"session","id":"actual"}\n');
     writeFileSync(duplicateFile, '{"type":"session","id":"actual"}\n');
     const index = new SessionMetadataIndex(userDataDir);
-    expect(() => index.registerExternalSession("project", cwd, sessionFile, thread("expected", "Expected"))).toThrow(
-      "Invalid external Pi session",
-    );
-    index.registerExternalSession("project", cwd, sessionFile, thread("actual", "Actual"));
-    expect(() => index.registerExternalSession("project", cwd, duplicateFile, thread("actual", "Duplicate"))).toThrow(
-      "already registered at another path",
-    );
-    expect(() => index.upsert("project", cwd, duplicateFile, thread("actual", "Duplicate"))).toThrow(
+    index.registerExternalSession("project", cwd, sessionFile, thread("projected", "Actual"));
+    await expect(index.resolve("project", cwd, "projected")).resolves.toEqual({ id: "projected", path: sessionFile });
+    expect(() =>
+      index.registerExternalSession("project", cwd, duplicateFile, thread("projected", "Duplicate")),
+    ).toThrow("already registered at another path");
+    expect(() => index.upsert("project", cwd, duplicateFile, thread("projected", "Duplicate"))).toThrow(
       "already registered at another path",
     );
 
-    mocks.listSessions.mockResolvedValue([sessionInfo("actual", duplicateFile, "Duplicate", 3)]);
+    mocks.listSessions.mockResolvedValue([sessionInfo("projected", duplicateFile, "Duplicate", 3)]);
     await expect(index.rebuild("project", cwd)).rejects.toThrow("already registered at another path");
   });
 

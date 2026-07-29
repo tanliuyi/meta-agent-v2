@@ -239,7 +239,7 @@ export function formatAsyncStartedMessage(headline: string, interactive: boolean
 	return [headline, "", ...guidance].join("\n");
 }
 
-/** Check whether Desktop injected an absolute, existing Node runtime. */
+/** Desktop programmatic mode does not expose the legacy detached CLI runner. */
 export function isAsyncAvailable(): boolean {
 	return false;
 }

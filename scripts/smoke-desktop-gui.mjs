@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { extname, join, parse, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { createDesktopSmokeEnvironment } from "./desktop-smoke-environment.mjs";
+import { createDesktopGuiSmokeEnvironment } from "./desktop-smoke-environment.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const QUIT_TIMEOUT_MS = 15_000;
@@ -103,8 +103,8 @@ export function locateDesktopExecutable(input, platform = process.platform) {
   return executable;
 }
 
-export function createMinimalGuiEnvironment(baseEnvironment, nodePath, paths) {
-  return createDesktopSmokeEnvironment(baseEnvironment, nodePath, {
+export function createMinimalGuiEnvironment(baseEnvironment, executable, paths) {
+  return createDesktopGuiSmokeEnvironment(baseEnvironment, executable, {
     PI_CODING_AGENT_DIR: paths.agentDir,
   });
 }
@@ -160,8 +160,7 @@ async function runScenario(executable, mode, options) {
   let stderr = "";
   try {
     const port = await reservePort();
-    const nodePath = process.env.PI_DESKTOP_NODE_EXEC_PATH ?? process.execPath;
-    const environment = createMinimalGuiEnvironment(process.env, nodePath, paths);
+    const environment = createMinimalGuiEnvironment(process.env, executable, paths);
     child = spawn(
       executable,
       [`--user-data-dir=${userDataDir}`, `--remote-debugging-port=${port}`],
@@ -177,7 +176,7 @@ async function runScenario(executable, mode, options) {
       stderr = `${stderr}${chunk}`.slice(-16_384);
     });
     child.stdout?.resume();
-    const initialChildren = await waitForSidecar(child, port, options.timeoutMs, () => stderr, nodePath);
+    const initialChildren = await waitForSidecar(child, port, options.timeoutMs, () => stderr, executable);
     const targetUrl = initialChildren.targetUrl;
     const sidecarCommand = initialChildren.sidecarCommand;
     if (mode === "normal") {
@@ -200,7 +199,7 @@ async function runScenario(executable, mode, options) {
   }
 }
 
-async function waitForSidecar(child, port, timeoutMs, readStderr, expectedNodePath) {
+async function waitForSidecar(child, port, timeoutMs, readStderr, expectedExecutable) {
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
   while (Date.now() < deadline) {
@@ -224,7 +223,7 @@ async function waitForSidecar(child, port, timeoutMs, readStderr, expectedNodePa
       version,
       targets,
       snapshotProcessTree(child.pid),
-      expectedNodePath,
+      expectedExecutable,
     );
     if (readiness.status === "ready") return readiness.result;
     lastError = readiness.reason;
@@ -233,7 +232,7 @@ async function waitForSidecar(child, port, timeoutMs, readStderr, expectedNodePa
   throw new Error(`Timed out waiting for packaged GUI readiness: ${lastError}`);
 }
 
-export function inspectGuiSidecarReadiness(version, targets, processes, expectedNodePath) {
+export function inspectGuiSidecarReadiness(version, targets, processes, expectedExecutable) {
   const target = Array.isArray(targets)
     ? targets.find((item) => item?.type === "page" && isDesktopTarget(item.url))
     : undefined;
@@ -241,12 +240,12 @@ export function inspectGuiSidecarReadiness(version, targets, processes, expected
     return { status: "pending", reason: "DevTools endpoint is up but no renderer page is ready" };
   }
 
-  const sidecar = processes.find(
-    (item) =>
-      /(?:^|[\\/])node(?:\.exe)?(?:\s|$)/i.test(item.command) && /metadata-worker-main\.js/.test(item.command),
-  );
+  const sidecar = processes.find((item) => /metadata-worker-main\.js/.test(item.command));
   if (!sidecar) {
-    return { status: "pending", reason: "GUI became reachable but no Node metadata sidecar was observed" };
+    return { status: "pending", reason: "GUI became reachable but no Electron metadata sidecar was observed" };
+  }
+  if (/(?:^|[\\/])node(?:\.exe)?(?:\s|$)/i.test(sidecar.command) || /[\\/]node-runtime[\\/]/i.test(sidecar.command)) {
+    throw new Error(`Metadata sidecar used an external Node runtime: ${sidecar.command}`);
   }
   if (/app\.asar[\\/]/i.test(sidecar.command) && !/app\.asar\.unpacked[\\/]/i.test(sidecar.command)) {
     throw new Error(`Metadata sidecar was launched from app.asar: ${sidecar.command}`);
@@ -254,11 +253,11 @@ export function inspectGuiSidecarReadiness(version, targets, processes, expected
   if (!/app\.asar\.unpacked[\\/]/i.test(sidecar.command)) {
     throw new Error(`Metadata sidecar entry is not visibly unpacked: ${sidecar.command}`);
   }
-  if (/ELECTRON_RUN_AS_NODE=1/.test(sidecar.command)) {
-    throw new Error("Metadata sidecar was launched with ELECTRON_RUN_AS_NODE=1");
+  if (!sidecar.command.includes(expectedExecutable)) {
+    throw new Error(`Metadata sidecar did not use the packaged Electron executable: ${sidecar.command}`);
   }
-  if (!sidecar.command.includes("node-runtime") && !sidecar.command.includes(expectedNodePath)) {
-    throw new Error(`Metadata sidecar did not use the selected Node runtime: ${sidecar.command}`);
+  if (/--type=(?:renderer|gpu-process)/.test(sidecar.command)) {
+    throw new Error(`Metadata sidecar launched as an Electron GUI process: ${sidecar.command}`);
   }
   return {
     status: "ready",

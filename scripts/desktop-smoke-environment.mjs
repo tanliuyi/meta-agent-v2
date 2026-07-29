@@ -26,7 +26,20 @@ const SAFE_ENVIRONMENT_NAMES = new Set([
   "XDG_SESSION_TYPE",
 ]);
 
-export function createDesktopSmokeEnvironment(baseEnvironment, nodePath, overrides = {}) {
+export function createDesktopGuiSmokeEnvironment(baseEnvironment, executable, overrides = {}) {
+  const environment = createBaseEnvironment(baseEnvironment, executable, overrides);
+  delete environment.ELECTRON_RUN_AS_NODE;
+  return environment;
+}
+
+export function createDesktopSidecarSmokeEnvironment(baseEnvironment, executable, overrides = {}) {
+  return createBaseEnvironment(baseEnvironment, executable, {
+    ...overrides,
+    ELECTRON_RUN_AS_NODE: "1",
+  });
+}
+
+function createBaseEnvironment(baseEnvironment, executable, overrides) {
   const environment = Object.fromEntries(
     Object.entries(baseEnvironment).filter(([name, value]) => {
       if (value === undefined) return false;
@@ -34,13 +47,12 @@ export function createDesktopSmokeEnvironment(baseEnvironment, nodePath, overrid
     }),
   );
   const systemRoot = environment.SystemRoot ?? "C:\\Windows";
-  const systemPath = process.platform === "win32"
-    ? [join(systemRoot, "System32"), systemRoot]
-    : ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
-  environment.PATH = [dirname(nodePath), ...systemPath].join(delimiter);
+  const systemPath =
+    process.platform === "win32"
+      ? [join(systemRoot, "System32"), systemRoot]
+      : ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  environment.PATH = [dirname(executable), ...systemPath].join(delimiter);
   Object.assign(environment, overrides);
-  delete environment.ELECTRON_RUN_AS_NODE;
   delete environment.ELECTRON_RENDERER_URL;
-  delete environment.PI_DESKTOP_NODE_EXEC_PATH;
   return environment;
 }

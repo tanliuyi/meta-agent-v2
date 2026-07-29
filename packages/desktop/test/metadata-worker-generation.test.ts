@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import type { ResolvedExtensionSet } from "../src/shared/desktop-extension-contracts.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -79,10 +79,8 @@ function extensionSet(generation: string): ResolvedExtensionSet {
   return { generation, projectId: "project", entries: [], diagnostics: [], resolvedAt: 0 };
 }
 
-function manifest(): NodeRuntimeManifest {
+function manifest(): SidecarRuntimeManifest {
   return {
-    nodePath: process.execPath,
-    npmCliPath: process.execPath,
     entries: { thread: "", metadata: "", subagent: "" },
     compatibility: {
       nodeVersion: process.version,
@@ -97,8 +95,6 @@ function manifest(): NodeRuntimeManifest {
       runtimeCompatibilityId: "test",
     },
     integrity: {
-      nodePath: "",
-      npmCliPath: "",
       entries: { thread: "", metadata: "", subagent: "" },
       files: {},
     },

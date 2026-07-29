@@ -33,12 +33,6 @@ import { ProvidersConfigService } from "./providers/providers-config-service.ts"
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { locateGitForWindowsBash, locateManagedBash } from "./sidecar/managed-shell-locator.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
-import { NodeRuntimeInstaller } from "./sidecar/node-runtime-installer.ts";
-import {
-  detectNodeRuntime,
-  loadNodeRuntimeManifest,
-  type NodeRuntimeManifest,
-} from "./sidecar/node-runtime-locator.ts";
 import { parseRuntimeSetupSelection, runRuntimeSetup } from "./sidecar/runtime-setup.ts";
 import {
   SHELL_RUNTIME_VERSION,
@@ -48,6 +42,7 @@ import {
 import { saveShellRuntimePath } from "./sidecar/shell-runtime-settings.ts";
 import { validateBashRuntime } from "./sidecar/shell-runtime-validator.ts";
 import { SidecarLog } from "./sidecar/sidecar-log.ts";
+import { loadSidecarRuntimeManifest } from "./sidecar/sidecar-runtime-manifest.ts";
 import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
 import { ProjectStore } from "./store/project-store.ts";
@@ -321,28 +316,11 @@ app.whenReady().then(async () => {
     curatedRoot: app.isPackaged ? join(process.resourcesPath, "extensions") : join(appDir, "../extensions"),
   });
   const updater = new AutoUpdateService({ app });
-  const installer = new NodeRuntimeInstaller(userDataDir, () => undefined);
-  const configuredNode = detectNodeRuntime();
-  const installedNode =
-    configuredNode.state === "ready" ? configuredNode : detectNodeRuntime(installer.activeNodePath());
-  let runtimeManifest: NodeRuntimeManifest;
-  try {
-    runtimeManifest = loadNodeRuntimeManifest({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      appDir,
-      nodePathOverride: installedNode.path,
-      allowUnavailable: installedNode.state !== "ready",
-    });
-  } catch (error) {
-    console.error("Node runtime is unavailable:", error);
-    runtimeManifest = loadNodeRuntimeManifest({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      appDir,
-      allowUnavailable: true,
-    });
-  }
+  const runtimeManifest = loadSidecarRuntimeManifest({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir,
+  });
   const marketplaceCatalog = new MarketplaceCatalogService(marketplaceEndpoints, {
     desktopVersion: app.getVersion(),
     runtimeCompatibility: runtimeManifest.compatibility,
@@ -458,12 +436,6 @@ app.whenReady().then(async () => {
     settings,
     dirtyGuard,
     {
-      getStatus: () => {
-        const system = detectNodeRuntime();
-        return system.state === "ready" ? system : detectNodeRuntime(installer.activeNodePath());
-      },
-      install: () => installer.install(),
-      onProgress: (listener) => installer.onProgress(listener),
       refreshActiveModelRuntimes: async () => {
         modelConfigurationGeneration += 1;
         const revision = { generation: modelConfigurationGeneration };

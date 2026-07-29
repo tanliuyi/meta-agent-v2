@@ -1,14 +1,12 @@
 import { rm } from "node:fs/promises";
-import { setTimeout as delay } from "node:timers/promises";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
 import { loadDraftSessionConfig } from "../main/pi/session-configuration.ts";
 import type { MetadataSidecarCommand, SidecarBinding, SidecarCommand } from "../shared/sidecar-contracts.ts";
-import { InvalidExternalSessionError, SessionMetadataIndex } from "./session-metadata-index.ts";
+import { SessionMetadataIndex } from "./session-metadata-index.ts";
 import type { SidecarService } from "./sidecar-host.ts";
 
 const CREATION_RESERVATION_GRACE_MS = 30_000;
-const EXTERNAL_SESSION_RETRY_DELAYS_MS = [10, 25, 50, 100, 200] as const;
 
 export class MetadataWorkerService implements SidecarService {
   private readonly consumedColdLeaseNonces = new Map<string, number>();
@@ -45,7 +43,7 @@ export class MetadataWorkerService implements SidecarService {
         this.index.upsert(command.projectId, command.cwd, command.sessionFile, command.thread);
         return null;
       case "registerExternalSession":
-        await registerExternalSessionWithRetry(this.index, command);
+        this.index.registerExternalSession(command.projectId, command.cwd, command.sessionFile, command.thread);
         return null;
       case "renameColdSession": {
         assertColdLease(command.projectId, command.threadId, "rename", command.lease, this.consumedColdLeaseNonces);
@@ -85,22 +83,6 @@ export class MetadataWorkerService implements SidecarService {
         return null;
       case "ping":
         return { pong: true };
-    }
-  }
-}
-
-async function registerExternalSessionWithRetry(
-  index: SessionMetadataIndex,
-  command: Extract<MetadataSidecarCommand, { type: "registerExternalSession" }>,
-): Promise<void> {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      index.registerExternalSession(command.projectId, command.cwd, command.sessionFile, command.thread);
-      return;
-    } catch (error) {
-      const retryDelay = EXTERNAL_SESSION_RETRY_DELAYS_MS[attempt];
-      if (!(error instanceof InvalidExternalSessionError) || retryDelay === undefined) throw error;
-      await delay(retryDelay);
     }
   }
 }

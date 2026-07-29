@@ -8,7 +8,7 @@ import type {
   SubagentRunRequest,
   SubagentWorkerBinding,
 } from "../../shared/subagent-contracts.ts";
-import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 import { SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
 
 export interface SubagentWorkerClient {
@@ -38,7 +38,7 @@ interface SubagentWorkerRecord {
 }
 
 export interface SubagentWorkerRegistryOptions {
-  manifest: NodeRuntimeManifest;
+  manifest: SidecarRuntimeManifest;
   agentDir: string;
   shellPath?: string;
   log?(scope: string, text: string): void;

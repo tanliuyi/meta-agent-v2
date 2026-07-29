@@ -24,7 +24,7 @@ import {
   toJsonValue,
 } from "../../shared/sidecar-wire.ts";
 import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
-import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 
 interface PendingRequest {
   resolve(value: JsonValue | undefined): void;
@@ -47,7 +47,7 @@ export class SidecarRequestError extends Error {
 }
 
 export interface WorkerClientOptions {
-  manifest: NodeRuntimeManifest;
+  manifest: SidecarRuntimeManifest;
   binding: SidecarBinding;
   onEvent?(event: SidecarEvent): void;
   onFailure?(error: Error): void;
@@ -96,17 +96,15 @@ export class SidecarWorkerClient {
       this.rejectReady = reject;
     });
     this.child = fork(entry, [], {
-      execPath: options.manifest.nodePath,
+      execPath: process.execPath,
       cwd: options.binding.role === "thread" ? options.binding.value.cwd : undefined,
       env: createSidecarEnvironment(
         options.manifest.compatibility.runtimeCompatibilityId,
         options.binding.value.agentDir,
-        options.manifest.nodePath,
       ),
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       serialization: "json",
       detached: process.platform !== "win32",
-      windowsHide: true,
     });
     this.child.stderr?.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
@@ -500,7 +498,6 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
 export function createSidecarEnvironment(
   runtimeCompatibilityId: string,
   agentDir: string,
-  nodeExecPath: string,
   sourceEnvironment: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const allowed = Object.fromEntries(
@@ -510,15 +507,19 @@ export function createSidecarEnvironment(
   );
   return {
     ...allowed,
+    ELECTRON_RUN_AS_NODE: "1",
     PI_CODING_AGENT_DIR: agentDir,
     PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: runtimeCompatibilityId,
-    PI_DESKTOP_NODE_EXEC_PATH: nodeExecPath,
   };
 }
 
 function isReservedDesktopRuntimeVariable(name: string): boolean {
   const normalized = name.toUpperCase();
-  return normalized.startsWith("PI_DESKTOP_") || normalized.startsWith("PI_SUBAGENT_");
+  return (
+    normalized === "ELECTRON_RUN_AS_NODE" ||
+    normalized.startsWith("PI_DESKTOP_") ||
+    normalized.startsWith("PI_SUBAGENT_")
+  );
 }
 
 function isAllowedSidecarEnvironmentVariable(name: string): boolean {

@@ -20,6 +20,7 @@ import type {
   SubagentSettingsMutation,
   SubagentSettingsScope,
 } from "../../../../shared/subagent-contracts.ts";
+import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { SubagentAgentDialog } from "./subagent-agent-dialog.tsx";
 import { SubagentAgentSection } from "./subagent-agent-section.tsx";
 import { SubagentChainDialog } from "./subagent-chain-dialog.tsx";
@@ -78,16 +79,17 @@ export function SubagentSettingsPage() {
   }, [activeTab, selectedTab, selectTab]);
 
   const filtered = useMemo(() => {
-    const matches = (value: { name: string; description: string }) =>
-      !query.trim() || `${value.name} ${value.description}`.toLowerCase().includes(query.trim().toLowerCase());
+    const normalizedQuery = query.trim().toLowerCase();
+    const matches = (value: { name: string; description: string }, localizedName = value.name) =>
+      !normalizedQuery || `${value.name} ${localizedName} ${value.description}`.toLowerCase().includes(normalizedQuery);
     const customAgents = snapshot ? (scope === "project" ? snapshot.projectAgents : snapshot.userAgents) : [];
     const chains = snapshot?.chains.filter((chain) => chain.source === scope) ?? [];
     return snapshot
       ? {
-          builtin: snapshot.builtinAgents.filter(matches),
-          package: snapshot.packageAgents.filter(matches),
-          custom: customAgents.filter(matches),
-          chains: chains.filter(matches),
+          builtin: snapshot.builtinAgents.filter((agent) => matches(agent, builtinSubagentDisplayName(agent.name))),
+          package: snapshot.packageAgents.filter((agent) => matches(agent)),
+          custom: customAgents.filter((agent) => matches(agent)),
+          chains: chains.filter((chain) => matches(chain)),
         }
       : { builtin: [], package: [], custom: [], chains: [] };
   }, [query, scope, snapshot]);

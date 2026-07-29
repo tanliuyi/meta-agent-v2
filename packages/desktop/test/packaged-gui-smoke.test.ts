@@ -1,6 +1,6 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createGuiSmokeDesktopState,
@@ -29,7 +29,7 @@ describe("packaged Desktop GUI smoke contract", () => {
         "--keep-temp",
       ]),
     ).toEqual({
-      artifact: "/tmp/Meta Agent 安装.app",
+      artifact: resolve("/tmp/Meta Agent 安装.app"),
       help: false,
       keepTemp: true,
       mode: "normal",
@@ -57,7 +57,7 @@ describe("packaged Desktop GUI smoke contract", () => {
     expect(locateDesktopExecutable(app, "darwin")).toBe(executable);
   });
 
-  it("places the selected Node before a minimal system PATH and strips shell overrides", () => {
+  it("builds a minimal GUI environment and strips Electron Node mode", () => {
     const environment = createMinimalGuiEnvironment(
       {
         ELECTRON_RUN_AS_NODE: "1",
@@ -65,12 +65,12 @@ describe("packaged Desktop GUI smoke contract", () => {
         OPENAI_API_KEY: "must-not-leak",
         PATH: "/untrusted/user/path",
       },
-      "/usr/local/bin/node",
+      "/opt/Meta Agent/Meta Agent",
       { agentDir: "/tmp/agent", cwd: "/tmp/cwd", root: "/tmp", userDataDir: "/tmp/user-data" },
     );
 
     expect(environment).toMatchObject({ HOME: "/tmp/home", PI_CODING_AGENT_DIR: "/tmp/agent" });
-    expect(environment.PATH.startsWith("/usr/local/bin")).toBe(true);
+    expect(environment.PATH.startsWith("/opt/Meta Agent")).toBe(true);
     expect(environment.PATH).not.toContain("/untrusted/user/path");
     expect(environment.ELECTRON_RUN_AS_NODE).toBeUndefined();
     expect(environment.OPENAI_API_KEY).toBeUndefined();
@@ -96,20 +96,22 @@ describe("packaged Desktop GUI smoke contract", () => {
   it("keeps polling after renderer readiness until the metadata sidecar appears", () => {
     const version = { Browser: "Chrome/1" };
     const targets = [{ type: "page", url: "file:///Applications/Meta Agent.app/renderer/index.html" }];
-    expect(inspectGuiSidecarReadiness(version, targets, [], "/usr/local/bin/node")).toEqual({
+    expect(
+      inspectGuiSidecarReadiness(version, targets, [], "/Applications/Meta Agent.app/Contents/MacOS/Meta Agent"),
+    ).toEqual({
       status: "pending",
-      reason: "GUI became reachable but no Node metadata sidecar was observed",
+      reason: "GUI became reachable but no Electron metadata sidecar was observed",
     });
 
+    const executable = "/Applications/Meta Agent.app/Contents/MacOS/Meta Agent";
     const processes = [
       {
         pid: 42,
         ppid: 41,
-        command:
-          "/usr/local/bin/node /Applications/Meta Agent.app/Contents/Resources/app.asar.unpacked/out/sidecar/metadata-worker-main.js",
+        command: `${executable} /Applications/Meta Agent.app/Contents/Resources/app.asar.unpacked/out/sidecar/metadata-worker-main.js`,
       },
     ];
-    expect(inspectGuiSidecarReadiness(version, targets, processes, "/usr/local/bin/node")).toEqual({
+    expect(inspectGuiSidecarReadiness(version, targets, processes, executable)).toEqual({
       status: "ready",
       result: {
         processes,
@@ -119,13 +121,29 @@ describe("packaged Desktop GUI smoke contract", () => {
     });
   });
 
-  it("locates an executable in an unpacked Linux artifact directory", () => {
+  it("rejects metadata workers launched through external Node", () => {
+    const version = { Browser: "Chrome/1" };
+    const targets = [{ type: "page", url: "file:///Applications/Meta Agent.app/renderer/index.html" }];
+    const processes = [
+      {
+        pid: 42,
+        ppid: 41,
+        command:
+          "/usr/local/bin/node /Applications/Meta Agent.app/Contents/Resources/app.asar.unpacked/out/sidecar/metadata-worker-main.js",
+      },
+    ];
+
+    expect(() =>
+      inspectGuiSidecarReadiness(version, targets, processes, "/Applications/Meta Agent.app/Contents/MacOS/Meta Agent"),
+    ).toThrow("external Node runtime");
+  });
+
+  it("locates a Linux AppImage artifact", () => {
     const root = mkdtempSync(join(tmpdir(), "desktop-gui-smoke-fixture-"));
     temporaryDirectories.push(root);
-    const executable = join(root, "Meta Agent");
+    const executable = join(root, "Meta Agent.AppImage");
     writeFileSync(executable, "placeholder");
-    chmodSync(executable, 0o755);
 
-    expect(locateDesktopExecutable(root, "linux")).toBe(executable);
+    expect(locateDesktopExecutable(executable, "linux")).toBe(executable);
   });
 });

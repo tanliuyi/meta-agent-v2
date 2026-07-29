@@ -23,12 +23,7 @@ import type {
   Thread,
   WorkbenchState,
 } from "../shared/contracts.ts";
-import type {
-  NodeRuntimeProgress,
-  NodeRuntimeStatus,
-  ShellRuntimeProgress,
-  ShellRuntimeStatus,
-} from "../shared/desktop-api.ts";
+import type { ShellRuntimeProgress, ShellRuntimeStatus } from "../shared/desktop-api.ts";
 import type {
   ApplyDesktopExtensionSetInput,
   ApplyDesktopExtensionSetResult,
@@ -89,10 +84,7 @@ export function registerIpc(
   providers: ProvidersConfigService,
   settings: SettingsConfigService,
   dirtyGuard: WindowDirtyGuard,
-  nodeRuntime: {
-    getStatus(): NodeRuntimeStatus;
-    install(): Promise<NodeRuntimeStatus>;
-    onProgress(listener: (progress: NodeRuntimeProgress) => void): () => void;
+  runtimeDependencies: {
     refreshActiveModelRuntimes?(): Promise<void>;
     shell?: {
       getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
@@ -141,8 +133,8 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.modelsGetConfigRevision, () => models.getConfigRevision());
   ipcMain.handle(CHANNELS.modelsSaveConfig, async (_event, input: SaveModelsConfigInput) => {
     const result = await models.saveConfig(input);
-    if (result.status !== "saved" || !nodeRuntime.refreshActiveModelRuntimes) return result;
-    const activeSessionsRefreshed = await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+    if (result.status !== "saved" || !runtimeDependencies.refreshActiveModelRuntimes) return result;
+    const activeSessionsRefreshed = await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
     return { ...result, snapshot: { ...result.snapshot, activeSessionsRefreshed } };
   });
   ipcMain.handle(CHANNELS.modelsOpenConfigExternally, async () => openPath(await models.getExternalOpenTarget()));
@@ -150,8 +142,8 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.authGetConfigRevision, () => auth.getConfigRevision());
   ipcMain.handle(CHANNELS.authSaveConfig, async (_event, input: SaveAuthConfigInput) => {
     const result = await auth.saveConfig(input);
-    if (result.status === "saved" && nodeRuntime.refreshActiveModelRuntimes) {
-      await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+    if (result.status === "saved" && runtimeDependencies.refreshActiveModelRuntimes) {
+      await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
     }
     return result;
   });
@@ -175,8 +167,8 @@ export function registerIpc(
         openOauthUrl,
       )
       .then(async (snapshot) => {
-        if (nodeRuntime.refreshActiveModelRuntimes) {
-          await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+        if (runtimeDependencies.refreshActiveModelRuntimes) {
+          await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
         }
         return snapshot;
       });
@@ -190,8 +182,8 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.providersGetConfig, () => providers.getConfig());
   ipcMain.handle(CHANNELS.providersSaveConfig, async (_event, input) => {
     const result = await providers.saveConfig(input);
-    if (result.status === "saved" && nodeRuntime.refreshActiveModelRuntimes) {
-      await refreshActiveModelRuntimes(nodeRuntime.refreshActiveModelRuntimes);
+    if (result.status === "saved" && runtimeDependencies.refreshActiveModelRuntimes) {
+      await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
     }
     return result;
   });
@@ -572,11 +564,9 @@ export function registerIpc(
     projects.getWorkbench(projectId, threadId),
   );
   ipcMain.handle(CHANNELS.workbenchUpdate, (_event, state: WorkbenchState) => projects.setWorkbench(state));
-  ipcMain.handle(CHANNELS.nodeRuntimeStatus, () => nodeRuntime.getStatus());
-  ipcMain.handle(CHANNELS.nodeRuntimeInstall, () => nodeRuntime.install());
-  if (nodeRuntime.shell) {
-    ipcMain.handle(CHANNELS.shellRuntimeStatus, () => nodeRuntime.shell?.getStatus());
-    ipcMain.handle(CHANNELS.shellRuntimeInstall, () => nodeRuntime.shell?.install());
+  if (runtimeDependencies.shell) {
+    ipcMain.handle(CHANNELS.shellRuntimeStatus, () => runtimeDependencies.shell?.getStatus());
+    ipcMain.handle(CHANNELS.shellRuntimeInstall, () => runtimeDependencies.shell?.install());
     ipcMain.handle(CHANNELS.shellRuntimeChoose, async (event) => {
       const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
       const options: OpenDialogOptions = {
@@ -586,7 +576,7 @@ export function registerIpc(
       };
       const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
       const path = result.filePaths[0];
-      return result.canceled || !path ? null : nodeRuntime.shell?.use(path);
+      return result.canceled || !path ? null : runtimeDependencies.shell?.use(path);
     });
   }
   if (updater) {
@@ -605,12 +595,7 @@ export function registerIpc(
       }
     });
   }
-  nodeRuntime.onProgress((progress) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send(CHANNELS.nodeRuntimeProgress, progress);
-    }
-  });
-  nodeRuntime.shell?.onProgress((progress) => {
+  runtimeDependencies.shell?.onProgress((progress) => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) window.webContents.send(CHANNELS.shellRuntimeProgress, progress);
     }

@@ -494,7 +494,7 @@
   max-width: 100%;
 }
 .composer-suggestions .composer-file-item {
-  grid-template-columns: 16px minmax(0, 30%) minmax(0, 1fr);
+  grid-template-columns: 16px fit-content(30%) minmax(0, 1fr);
 }
 .composer-command-item strong,
 .composer-file-item strong {

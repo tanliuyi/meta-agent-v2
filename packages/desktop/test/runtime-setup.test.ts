@@ -17,11 +17,8 @@ describe("Desktop runtime setup", () => {
     rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  it("parses and de-duplicates installer runtime selections", () => {
-    expect(parseRuntimeSetupSelection(["Meta Agent.exe", "--runtime-setup=node,shell,node"])).toEqual([
-      "node",
-      "shell",
-    ]);
+  it("parses and de-duplicates shell setup selections", () => {
+    expect(parseRuntimeSetupSelection(["Meta Agent.exe", "--runtime-setup=shell,shell"])).toEqual(["shell"]);
     expect(parseRuntimeSetupSelection(["Meta Agent.exe"])).toBeUndefined();
   });
 
@@ -29,7 +26,10 @@ describe("Desktop runtime setup", () => {
     expect(() => parseRuntimeSetupSelection(["--runtime-setup="])).toThrow(
       "Runtime setup requires at least one component",
     );
-    expect(() => parseRuntimeSetupSelection(["--runtime-setup=node,git"])).toThrow(
+    expect(() => parseRuntimeSetupSelection(["--runtime-setup=node"])).toThrow(
+      "Unsupported runtime setup component: node",
+    );
+    expect(() => parseRuntimeSetupSelection(["--runtime-setup=shell,git"])).toThrow(
       "Unsupported runtime setup component: git",
     );
   });

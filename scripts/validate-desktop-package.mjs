@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { createDesktopSmokeEnvironment } from "./desktop-smoke-environment.mjs";
+import { createDesktopSidecarSmokeEnvironment } from "./desktop-smoke-environment.mjs";
 
 export default async function validateDesktopPackage(context) {
   const resources = context.electronPlatformName === "darwin"
@@ -13,16 +13,18 @@ export default async function validateDesktopPackage(context) {
   const manifestPath = join(resources, "pi-sidecar", "runtime-manifest.json");
   const root = dirname(manifestPath);
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  const usesSystemNode = manifest.nodePath === "system";
-  const nodePath = usesSystemNode ? resolve(process.env.PI_DESKTOP_NODE_EXEC_PATH ?? process.execPath) : resolve(root, manifest.nodePath);
-  const npmCliPath = manifest.npmCliPath ? resolve(root, manifest.npmCliPath) : undefined;
+  const executable = resolvePackagedExecutable(context);
   const entries = Object.fromEntries(
     Object.entries(manifest.entries).map(([role, entry]) => [role, resolve(root, entry)]),
   );
 
   assertTargetRuntime(context, manifest);
+  assertEmbeddedRuntimeManifest(resources, manifest);
   assertBundledPiDocumentation(resources);
-  validateHermesMemorySqliteRuntime(nodePath);
+  if (!existsSync(executable) || !statSync(executable).isFile()) {
+    throw new Error(`Packaged Electron executable is missing: ${executable}`);
+  }
+  validateHermesMemorySqliteRuntime(executable);
 
   if (context.electronPlatformName === "darwin") {
     const spawnHelper = join(
@@ -42,19 +44,14 @@ export default async function validateDesktopPackage(context) {
     }
   }
 
-  for (const [description, path, expectedHash] of [
-    ["Node executable", nodePath, usesSystemNode ? "" : manifest.integrity.nodePath],
-    ...(npmCliPath ? [["npm CLI", npmCliPath, manifest.integrity.npmCliPath]] : []),
-  ]) {
-    if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`${description} is missing from package: ${path}`);
-    if (/[\\/]app\.asar(?:[\\/]|$)/i.test(path)) throw new Error(`${description} is inside app.asar`);
-    assertHash(path, expectedHash, description);
-  }
   for (const [role, entry] of Object.entries(entries)) {
     if (!existsSync(entry) || !statSync(entry).isFile()) throw new Error(`Sidecar entry is missing: ${entry}`);
     if (!entry.includes("app.asar.unpacked")) throw new Error(`Sidecar entry is not unpacked: ${entry}`);
     assertHash(entry, manifest.integrity.entries[role], `${role} sidecar entry`);
-    execFileSync(nodePath, ["--check", entry], { stdio: "inherit" });
+    execFileSync(executable, ["--check", entry], {
+      stdio: "inherit",
+      env: createDesktopSidecarSmokeEnvironment(process.env, executable),
+    });
   }
   for (const [path, expectedHash] of Object.entries(manifest.integrity.files)) {
     assertHash(resolve(root, path), expectedHash, `Sidecar runtime file ${path}`);
@@ -62,48 +59,68 @@ export default async function validateDesktopPackage(context) {
 
   const actualRuntime = JSON.parse(
     execFileSync(
-      nodePath,
+      executable,
       [
         "-p",
         `(() => { const variables = process.config.variables; const osRelease = process.platform === "darwin" ? "darwin-23+" : process.platform === "win32" ? "windows-10+" : process.platform === "linux" ? "linux-kernel-4.18+" : "unsupported"; const libc = process.platform === "darwin" ? "libSystem" : process.platform === "win32" ? "ucrt" : process.platform === "linux" ? "glibc-2.28+" : "unknown"; return JSON.stringify({ nodeVersion: process.version, modulesAbi: process.versions.modules, napi: process.versions.napi, platform: process.platform, arch: process.arch, osRelease, libc, toolchain: [variables.host_arch, variables.target_arch, variables.v8_target_arch].filter((value) => value !== undefined).join(":") }); })()`,
       ],
-      { encoding: "utf8", env: withoutElectronRunAsNode() },
+      { encoding: "utf8", env: createDesktopSidecarSmokeEnvironment(process.env, executable) },
     ),
   );
   for (const field of ["nodeVersion", "modulesAbi", "napi", "platform", "arch", "osRelease", "libc", "toolchain"]) {
     if (String(actualRuntime[field]) !== String(manifest.compatibility[field])) {
-      throw new Error(`Packaged Node ${field} mismatch: ${actualRuntime[field]} != ${manifest.compatibility[field]}`);
+      throw new Error(
+        `Packaged Electron ${field} mismatch: ${actualRuntime[field]} != ${manifest.compatibility[field]}`,
+      );
     }
   }
 
   if (context.electronPlatformName === "darwin") {
-    execFileSync("otool", ["-L", nodePath], { stdio: "inherit" });
-  } else if (context.electronPlatformName === "win32") {
-    if (!usesSystemNode) throw new Error("Windows bundled Node is no longer supported; use the configured system Node");
+    execFileSync("otool", ["-L", executable], { stdio: "inherit" });
   } else if (context.electronPlatformName === "linux") {
-    const libraries = execFileSync("ldd", [nodePath], { encoding: "utf8" });
-    if (libraries.includes("not found")) throw new Error(`Packaged Node has unresolved libraries:\n${libraries}`);
+    const libraries = execFileSync("ldd", [executable], { encoding: "utf8" });
+    if (libraries.includes("not found")) throw new Error(`Packaged Electron has unresolved libraries:\n${libraries}`);
   }
   const agentDir = await mkdtemp(join(tmpdir(), "desktop-package-agent-"));
   const userDataDir = await mkdtemp(join(tmpdir(), "desktop-package-user-data-"));
   try {
-    await smokeSubagentWorker(nodePath, entries.subagent, manifest.compatibility, agentDir);
-    await smokeMetadataWorker(nodePath, entries.metadata, manifest.compatibility, agentDir, userDataDir);
+    await smokeSubagentWorker(executable, entries.subagent, manifest.compatibility, agentDir);
+    await smokeMetadataWorker(executable, entries.metadata, manifest.compatibility, agentDir, userDataDir);
   } finally {
     await Promise.all([
       rm(agentDir, { recursive: true, force: true }),
       rm(userDataDir, { recursive: true, force: true }),
     ]);
   }
-  console.log(`Validated packaged ordinary Node sidecar runtime at ${resources}`);
+  console.log(`Validated packaged Electron embedded Node sidecar runtime at ${resources}`);
 }
 
-/**
- * The runtime is selected before electron-builder starts.  Reject a package
- * when the selected runtime describes a different target than the one being
- * assembled; otherwise a cross-target build can produce a seemingly valid
- * artifact containing a host-platform Node executable.
- */
+export function resolvePackagedExecutable(context) {
+  const productFilename = context.packager.appInfo.productFilename;
+  if (context.electronPlatformName === "darwin") {
+    return join(context.appOutDir, `${productFilename}.app`, "Contents", "MacOS", productFilename);
+  }
+  const executableName = context.packager.executableName ?? productFilename;
+  return join(context.appOutDir, context.electronPlatformName === "win32" ? `${executableName}.exe` : executableName);
+}
+
+export function assertEmbeddedRuntimeManifest(resources, manifest) {
+  if ("nodePath" in manifest || "npmCliPath" in manifest) {
+    throw new Error("Packaged sidecar manifest contains legacy external Node fields");
+  }
+  if ("nodePath" in (manifest.integrity ?? {}) || "npmCliPath" in (manifest.integrity ?? {})) {
+    throw new Error("Packaged sidecar manifest contains legacy external Node integrity fields");
+  }
+  for (const path of [
+    join(resources, "node-runtime"),
+    join(resources, "app.asar.unpacked", "node-runtime"),
+    join(dirname(resources), "node-runtime"),
+  ]) {
+    if (existsSync(path)) throw new Error(`Packaged Desktop contains an external Node runtime: ${path}`);
+  }
+}
+
+/** Reject cross-target packages because the manifest is generated from the installed Electron binary. */
 export function assertTargetRuntime(context, manifest) {
   const platform = {
     darwin: "darwin",
@@ -155,14 +172,14 @@ export function assertBundledPiDocumentation(resources) {
   }
 }
 
-function validateHermesMemorySqliteRuntime(nodePath) {
+function validateHermesMemorySqliteRuntime(executable) {
   execFileSync(
-    nodePath,
+    executable,
     [
       "-e",
       "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(':memory:');db.exec('SELECT 1');db.close();",
     ],
-    { stdio: "inherit", env: withoutElectronRunAsNode() },
+    { stdio: "inherit", env: createDesktopSidecarSmokeEnvironment(process.env, executable) },
   );
 }
 
@@ -175,14 +192,10 @@ function assertHash(path, expectedHash, description) {
   }
 }
 
-function withoutElectronRunAsNode() {
-  return Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== "ELECTRON_RUN_AS_NODE"));
-}
-
-async function smokeSubagentWorker(nodePath, entry, compatibility, agentDir) {
+async function smokeSubagentWorker(executable, entry, compatibility, agentDir) {
   const worker = fork(entry, [], {
-    execPath: nodePath,
-    env: createDesktopSmokeEnvironment(process.env, nodePath, {
+    execPath: executable,
+    env: createDesktopSidecarSmokeEnvironment(process.env, executable, {
       PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: compatibility.runtimeCompatibilityId,
     }),
     stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -251,10 +264,10 @@ async function smokeSubagentWorker(nodePath, entry, compatibility, agentDir) {
   }
 }
 
-async function smokeMetadataWorker(nodePath, entry, compatibility, agentDir, userDataDir) {
+async function smokeMetadataWorker(executable, entry, compatibility, agentDir, userDataDir) {
   const worker = fork(entry, [], {
-    execPath: nodePath,
-    env: createDesktopSmokeEnvironment(process.env, nodePath, {
+    execPath: executable,
+    env: createDesktopSidecarSmokeEnvironment(process.env, executable, {
       PI_CODING_AGENT_DIR: agentDir,
       PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: compatibility.runtimeCompatibilityId,
     }),

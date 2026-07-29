@@ -1,9 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { VERSION } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MetadataWorkerClient } from "../src/main/sidecar/metadata-worker-client.ts";
-import { loadNodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
+import { currentRuntimeCompatibility } from "../src/shared/sidecar-wire.ts";
 
 describe("MetadataWorkerClient", () => {
   let tempDir: string;
@@ -51,12 +53,19 @@ describe("MetadataWorkerClient", () => {
   });
 });
 
-function loadManifest() {
-  return loadNodeRuntimeManifest({
-    isPackaged: false,
-    resourcesPath: "",
-    appDir: resolve(import.meta.dirname, "../out/main"),
-  });
+function loadManifest(): SidecarRuntimeManifest {
+  return {
+    entries: {
+      thread: "",
+      metadata: resolve(import.meta.dirname, "../out/sidecar/sidecar/metadata-worker-main.js"),
+      subagent: "",
+    },
+    compatibility: currentRuntimeCompatibility(VERSION, "test"),
+    integrity: {
+      entries: { thread: "", metadata: "", subagent: "" },
+      files: {},
+    },
+  };
 }
 
 async function waitForExit(pid: number): Promise<void> {

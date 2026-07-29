@@ -7,11 +7,11 @@ import type {
   MetadataSidecarCommand,
 } from "../../shared/sidecar-contracts.ts";
 import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
-import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 import { SidecarWorkerClient } from "./worker-client.ts";
 
 export class MetadataWorkerClient {
-  private readonly manifest: NodeRuntimeManifest;
+  private readonly manifest: SidecarRuntimeManifest;
   private readonly agentDir: string;
   private readonly userDataDir: string;
   private readonly log?: (scope: string, text: string) => void;
@@ -24,7 +24,7 @@ export class MetadataWorkerClient {
   private disposePromise?: Promise<void>;
 
   constructor(
-    manifest: NodeRuntimeManifest,
+    manifest: SidecarRuntimeManifest,
     agentDir: string,
     userDataDir: string,
     log?: (scope: string, text: string) => void,

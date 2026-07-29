@@ -18,7 +18,7 @@ src/
   main.tsx                 renderer 挂载入口，不包含路由或业务状态
   app/                     route、provider 与窗口级静态组合
   features/                独立页面或窗口级功能
-    node-runtime/          Node runtime 阻断与安装
+    shell-runtime/         Windows Git Bash 阻断、选择与安装
     settings/              设置路由和设置内容
   components/
     assistant-ui/          assistant-ui/Radix 的产品适配组件

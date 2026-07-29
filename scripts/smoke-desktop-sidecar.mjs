@@ -4,49 +4,51 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { createDesktopSmokeEnvironment } from "./desktop-smoke-environment.mjs";
+import { createDesktopSidecarSmokeEnvironment } from "./desktop-smoke-environment.mjs";
+import { locateDesktopExecutable } from "./smoke-desktop-gui.mjs";
+import { assertEmbeddedRuntimeManifest } from "./validate-desktop-package.mjs";
 
 const artifact = parseArtifact(process.argv.slice(2));
 const manifestPath = findManifest(artifact);
 const root = dirname(manifestPath);
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-const nodePath = manifest.nodePath === "system"
-  ? resolve(process.env.PI_DESKTOP_NODE_EXEC_PATH ?? process.execPath)
-  : resolve(root, manifest.nodePath);
-const npmCliPath = manifest.npmCliPath ? resolve(root, manifest.npmCliPath) : undefined;
+const executable = locateDesktopExecutable(artifact);
+const resources = dirname(root);
 
-assertFile(nodePath, manifest.nodePath === "system" ? "" : manifest.integrity.nodePath, "Node executable");
-if (npmCliPath) assertFile(npmCliPath, manifest.integrity.npmCliPath, "npm CLI");
-if (/[\\/]app\.asar(?:[\\/]|$)/i.test(nodePath) || (npmCliPath && /[\\/]app\.asar(?:[\\/]|$)/i.test(npmCliPath))) {
-  throw new Error("Node and npm must be outside app.asar");
-}
+assertEmbeddedRuntimeManifest(resources, manifest);
 for (const [role, relativeEntry] of Object.entries(manifest.entries)) {
   const entry = resolve(root, relativeEntry);
   assertFile(entry, manifest.integrity.entries[role], `${role} sidecar entry`);
   if (/[\\/]app\.asar(?:[\\/]|$)/i.test(entry)) throw new Error(`${role} sidecar entry is inside app.asar`);
-  execFileSync(nodePath, ["--check", entry], { stdio: "inherit" });
+  execFileSync(executable, ["--check", entry], {
+    stdio: "inherit",
+    env: createDesktopSidecarSmokeEnvironment(process.env, executable),
+  });
 }
 for (const [relativePath, expectedHash] of Object.entries(manifest.integrity.files ?? {})) {
   assertFile(resolve(root, relativePath), expectedHash, `sidecar runtime file ${relativePath}`);
 }
 
-const actualVersion = execFileSync(nodePath, ["--version"], { encoding: "utf8" }).trim();
+const actualVersion = execFileSync(executable, ["--version"], {
+  encoding: "utf8",
+  env: createDesktopSidecarSmokeEnvironment(process.env, executable),
+}).trim();
 if (actualVersion !== manifest.compatibility.nodeVersion) {
-  throw new Error(`Bundled Node version mismatch: ${actualVersion} != ${manifest.compatibility.nodeVersion}`);
+  throw new Error(`Embedded Electron Node version mismatch: ${actualVersion} != ${manifest.compatibility.nodeVersion}`);
 }
 const actualAbi = JSON.parse(
   execFileSync(
-    nodePath,
+    executable,
     [
       "-p",
       `(() => { const variables = process.config.variables; const osRelease = process.platform === "darwin" ? "darwin-23+" : process.platform === "win32" ? "windows-10+" : process.platform === "linux" ? "linux-kernel-4.18+" : "unsupported"; const libc = process.platform === "darwin" ? "libSystem" : process.platform === "win32" ? "ucrt" : process.platform === "linux" ? "glibc-2.28+" : "unknown"; return JSON.stringify({ nodeVersion: process.version, modulesAbi: process.versions.modules, napi: process.versions.napi ?? "unknown", platform: process.platform, arch: process.arch, osRelease, libc, toolchain: [variables.host_arch, variables.target_arch, variables.v8_target_arch].filter((value) => value !== undefined).join(":") }); })()`,
     ],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: createDesktopSidecarSmokeEnvironment(process.env, executable) },
   ),
 );
 for (const field of ["nodeVersion", "modulesAbi", "napi", "platform", "arch", "osRelease", "libc", "toolchain"]) {
   if (String(actualAbi[field]) !== String(manifest.compatibility[field])) {
-    throw new Error(`Bundled Node ${field} mismatch: ${actualAbi[field]} != ${manifest.compatibility[field]}`);
+    throw new Error(`Embedded Electron Node ${field} mismatch: ${actualAbi[field]} != ${manifest.compatibility[field]}`);
   }
 }
 
@@ -54,12 +56,12 @@ const agentDir = process.env.PI_CODING_AGENT_DIR ?? (await mkdtemp(join(tmpdir()
 const userDataDir = await mkdtemp(join(tmpdir(), "desktop-sidecar-user-data-"));
 try {
   await smokeSubagentWorker(
-    nodePath,
+    executable,
     resolve(root, manifest.entries.subagent),
     manifest.compatibility,
     agentDir,
   );
-  await smokeMetadataWorker(nodePath, resolve(root, manifest.entries.metadata), manifest.compatibility, agentDir, userDataDir);
+  await smokeMetadataWorker(executable, resolve(root, manifest.entries.metadata), manifest.compatibility, agentDir, userDataDir);
 } finally {
   if (!process.env.PI_CODING_AGENT_DIR) await rm(agentDir, { recursive: true, force: true });
   await rm(userDataDir, { recursive: true, force: true });
@@ -103,10 +105,10 @@ function assertFile(path, expectedHash, description) {
   if (expectedHash && actualHash !== expectedHash) throw new Error(`${description} integrity mismatch: ${path}`);
 }
 
-async function smokeSubagentWorker(nodePath, entry, compatibility, agentDir) {
+async function smokeSubagentWorker(executable, entry, compatibility, agentDir) {
   const worker = fork(entry, [], {
-    execPath: nodePath,
-    env: createDesktopSmokeEnvironment(process.env, nodePath, {
+    execPath: executable,
+    env: createDesktopSidecarSmokeEnvironment(process.env, executable, {
       PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: compatibility.runtimeCompatibilityId,
     }),
     stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -175,10 +177,10 @@ async function smokeSubagentWorker(nodePath, entry, compatibility, agentDir) {
   }
 }
 
-async function smokeMetadataWorker(nodePath, entry, compatibility, agentDir, userDataDir) {
+async function smokeMetadataWorker(executable, entry, compatibility, agentDir, userDataDir) {
   const worker = fork(entry, [], {
-    execPath: nodePath,
-    env: createDesktopSmokeEnvironment(process.env, nodePath, {
+    execPath: executable,
+    env: createDesktopSidecarSmokeEnvironment(process.env, executable, {
       PI_CODING_AGENT_DIR: agentDir,
       PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: compatibility.runtimeCompatibilityId,
     }),

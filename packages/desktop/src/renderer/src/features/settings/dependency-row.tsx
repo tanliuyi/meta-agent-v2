@@ -1,14 +1,14 @@
-import { Button } from "@renderer/shared/ui/button";
 import CircleCheck from "lucide-react/dist/esm/icons/circle-check.mjs";
 import CircleX from "lucide-react/dist/esm/icons/circle-x.mjs";
 import Download from "lucide-react/dist/esm/icons/download.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
-import type { NodeRuntimeProgress, NodeRuntimeStatus, ShellRuntimeStatus } from "../../../../shared/desktop-api.ts";
+import type { ShellRuntimeProgress, ShellRuntimeStatus } from "../../../../shared/desktop-api.ts";
+import { Button } from "../../shared/ui/button.tsx";
 
 interface DependencyRowProps {
   label: string;
-  status: NodeRuntimeStatus | ShellRuntimeStatus | null;
-  progress: NodeRuntimeProgress | null;
+  status: ShellRuntimeStatus | null;
+  progress: ShellRuntimeProgress | null;
   installing: boolean;
   choosing?: boolean;
   busy: boolean;

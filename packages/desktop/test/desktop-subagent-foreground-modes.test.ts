@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
 import { executeChain } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/chain-execution.ts";
 import { runSync } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/execution.ts";
+import { createStructuredOutputRuntime } from "../src/main/pi/extensions/pi-subagents/src/runs/shared/structured-output.ts";
 import type {
   SubagentRuntime,
   SubagentRuntimeRunRequest,
@@ -261,6 +262,58 @@ describe("Desktop foreground programmatic modes", () => {
     expect(result.error).toBe(largeError);
     expect(updateSizes.length).toBeGreaterThan(0);
     expect(Math.max(...updateSizes)).toBeLessThan(128 * 1024);
+  });
+
+  it("projects validated structured output through inline and saved output modes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "desktop-subagent-structured-projection-"));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const value = { ok: true, count: 8 };
+    const expected = JSON.stringify(value);
+
+    for (const testCase of [
+      { name: "inline", outputMode: "inline" as const },
+      { name: "saved-inline", outputMode: "inline" as const, outputPath: join(root, "saved-inline.json") },
+      { name: "file-only", outputMode: "file-only" as const, outputPath: join(root, "file-only.json") },
+    ]) {
+      const structuredOutput = createStructuredOutputRuntime(
+        {
+          type: "object",
+          properties: {
+            ok: { type: "boolean", const: true },
+            count: { type: "integer", const: 8 },
+          },
+          required: ["ok", "count"],
+          additionalProperties: false,
+        },
+        join(root, testCase.name),
+      );
+      const runtime = new RecordingRuntime(
+        1,
+        (request) => {
+          if (!request.structuredOutput) throw new Error("structured output request was not forwarded");
+          writeFileSync(request.structuredOutput.outputPath, expected);
+        },
+        () => "prose must not replace the structured contract",
+      );
+
+      const result = await runSync(root, agents, "first", "return structured output", {
+        subagentRuntime: runtime,
+        runId: `structured-${testCase.name}`,
+        structuredOutput,
+        outputMode: testCase.outputMode,
+        outputPath: testCase.outputPath,
+        acceptance: false,
+      });
+
+      expect(result).toMatchObject({ exitCode: 0, structuredOutput: value });
+      if (testCase.outputPath) expect(readFileSync(testCase.outputPath, "utf8")).toBe(expected);
+      if (testCase.outputMode === "file-only") {
+        expect(result.finalOutput).toContain(`Output saved to: ${testCase.outputPath}`);
+        expect(result.outputReference).toMatchObject({ path: testCase.outputPath, bytes: expected.length, lines: 1 });
+      } else {
+        expect(result.finalOutput).toBe(expected);
+      }
+    }
   });
 
   it("persists canonical programmatic events in the upstream child transcript", async () => {

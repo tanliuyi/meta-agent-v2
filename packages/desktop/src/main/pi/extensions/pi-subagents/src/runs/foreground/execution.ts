@@ -582,7 +582,10 @@ async function runProgrammaticSingleAttempt(
 	progress.durationMs = Date.now() - startedAt;
 	if (result.error) progress.error = result.error;
 	result.progressSummary = { toolCount: progress.toolCount, tokens: progress.tokens, durationMs: progress.durationMs };
-	let fullOutput = stripAcceptanceReport(getFinalOutput(result.messages));
+	const acceptanceOutput = result.structuredOutput !== undefined
+		? JSON.stringify(result.structuredOutput)
+		: getFinalOutput(result.messages);
+	let fullOutput = stripAcceptanceReport(acceptanceOutput);
 	if (result.timedOut) {
 		const timeoutMessage = formatTimeoutMessage(options.timeoutMs ?? 0);
 		fullOutput = fullOutput.trim()
@@ -634,7 +637,7 @@ async function runProgrammaticSingleAttempt(
 		if (resolvedOutput.savedPath) result.outputReference = formatSavedOutputReference(resolvedOutput.savedPath, fullOutput);
 	}
 	artifactOutputByResult.set(result, fullOutput);
-	acceptanceOutputByResult.set(result, getFinalOutput(result.messages));
+	acceptanceOutputByResult.set(result, acceptanceOutput);
 	result.outputMode = options.outputMode ?? "inline";
 	result.finalOutput = options.outputMode === "file-only" && result.outputReference
 		? result.outputReference.message

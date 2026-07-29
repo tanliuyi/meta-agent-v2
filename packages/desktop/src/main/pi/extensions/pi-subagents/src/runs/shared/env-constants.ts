@@ -5,7 +5,6 @@
  * CLI child processes. In Desktop programmatic mode they default to undefined.
  */
 
-export const PI_DESKTOP_NODE_EXEC_PATH_ENV = "PI_DESKTOP_NODE_EXEC_PATH";
 export const PI_DESKTOP_CHILD_EXTENSION_PATH_ENV = "PI_DESKTOP_CHILD_EXTENSION_PATH";
 export const SUBAGENT_CHILD_ENV = "PI_SUBAGENT_CHILD";
 export const SUBAGENT_ORCHESTRATOR_TARGET_ENV = "PI_SUBAGENT_ORCHESTRATOR_TARGET";

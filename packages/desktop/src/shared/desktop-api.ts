@@ -78,16 +78,7 @@ import type { UpdaterApi } from "./updater-contracts.ts";
 
 export type DesktopPlatform = "win32" | "darwin" | "linux";
 
-export interface NodeRuntimeStatus {
-  state: "ready" | "missing" | "invalid";
-  path?: string;
-  version?: string;
-  requiredVersion: string;
-  message: string;
-  installUrl: string;
-}
-
-export interface NodeRuntimeProgress {
+export interface ShellRuntimeProgress {
   phase: "checking" | "downloading" | "verifying" | "extracting" | "ready" | "error";
   percent: number;
   message: string;
@@ -102,8 +93,6 @@ export interface ShellRuntimeStatus {
   installUrl: string;
 }
 
-export type ShellRuntimeProgress = NodeRuntimeProgress;
-
 /** Renderer 可以调用的最小 Desktop API。 */
 export interface DesktopApi {
   platform: DesktopPlatform;
@@ -111,11 +100,6 @@ export interface DesktopApi {
     electron: string;
     chrome: string;
     node: string;
-  };
-  nodeRuntime: {
-    getStatus(): Promise<NodeRuntimeStatus>;
-    install(): Promise<NodeRuntimeStatus>;
-    onProgress(listener: (progress: NodeRuntimeProgress) => void): () => void;
   };
   shellRuntime: {
     getStatus(): Promise<ShellRuntimeStatus>;

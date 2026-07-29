@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assertBundledPiDocumentation, assertTargetRuntime } from "../../../scripts/validate-desktop-package.mjs";
+import {
+  assertBundledPiDocumentation,
+  assertEmbeddedRuntimeManifest,
+  assertTargetRuntime,
+  resolvePackagedExecutable,
+} from "../../../scripts/validate-desktop-package.mjs";
 
 const manifest = (platform: string, arch: string) => ({ compatibility: { platform, arch } });
 
@@ -23,6 +28,32 @@ describe("packaged Desktop target validation", () => {
     expect(() => assertTargetRuntime({ electronPlatformName: "darwin", arch: 4 }, manifest("darwin", "arm64"))).toThrow(
       "Universal Desktop packaging requires per-architecture sidecar runtimes",
     );
+  });
+
+  it("resolves the packaged Electron executable for the target layout", () => {
+    expect(
+      resolvePackagedExecutable({
+        appOutDir: "C:\\artifact",
+        electronPlatformName: "win32",
+        packager: { appInfo: { productFilename: "Meta Agent" }, executableName: "Meta Agent" },
+      }),
+    ).toBe(join("C:\\artifact", "Meta Agent.exe"));
+  });
+
+  it("rejects legacy or bundled external Node runtime contracts", () => {
+    const resources = mkdtempSync(join(tmpdir(), "desktop-embedded-runtime-"));
+    try {
+      expect(() => assertEmbeddedRuntimeManifest(resources, { entries: {}, integrity: {} })).not.toThrow();
+      expect(() =>
+        assertEmbeddedRuntimeManifest(resources, { nodePath: "system", entries: {}, integrity: {} }),
+      ).toThrow("legacy external Node fields");
+      mkdirSync(join(resources, "node-runtime"));
+      expect(() => assertEmbeddedRuntimeManifest(resources, { entries: {}, integrity: {} })).toThrow(
+        "external Node runtime",
+      );
+    } finally {
+      rmSync(resources, { recursive: true, force: true });
+    }
   });
 
   it("requires the Pi documentation paths advertised to the Desktop agent", () => {
@@ -55,10 +86,14 @@ describe("packaged Desktop target validation", () => {
     }
   });
 
-  it("keeps PortableGit out of the standard Windows package", () => {
+  it("keeps the installer shell-only and PortableGit out of the standard Windows package", () => {
     const config = readFileSync(resolve(import.meta.dirname, "../electron-builder.yml"), "utf8");
+    const installer = readFileSync(resolve(import.meta.dirname, "../build/installer.nsh"), "utf8");
     expect(config).toContain("include: build/installer.nsh");
     expect(config).not.toContain("output/managed-shell");
+    expect(installer).toContain("--runtime-setup=$RuntimeComponents");
+    expect(installer).not.toContain("RuntimeNodeCheckbox");
+    expect(installer).not.toContain("node-runtime");
   });
 
   it("does not treat WSL or another bash.exe on PATH as Git Bash", () => {

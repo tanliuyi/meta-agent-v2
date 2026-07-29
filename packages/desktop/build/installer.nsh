@@ -5,7 +5,6 @@
 !ifndef BUILD_UNINSTALLER
 
 Var RuntimeComponents
-Var RuntimeNodeCheckbox
 Var RuntimeShellCheckbox
 
 !macro customInit
@@ -35,20 +34,10 @@ Function RuntimePageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 24u "选择 Meta Agent 使用的运行环境。已有兼容环境时可以取消选择，之后仍可在应用内安装。"
+  ${NSD_CreateLabel} 0 0 100% 24u "选择 Meta Agent 使用的 Git Bash。已有兼容环境时可以取消选择，之后仍可在应用内安装。"
   Pop $0
 
-  ${NSD_CreateCheckbox} 0 34u 100% 14u "下载 Node.js 24.15.0（约 32 MB）"
-  Pop $RuntimeNodeCheckbox
-  ${NSD_Check} $RuntimeNodeCheckbox
-  SearchPath $0 "node.exe"
-  ${If} $0 != ""
-    ${NSD_Uncheck} $RuntimeNodeCheckbox
-  ${ElseIf} ${FileExists} "$APPDATA\Meta Agent\node-runtime\active.json"
-    ${NSD_Uncheck} $RuntimeNodeCheckbox
-  ${EndIf}
-
-  ${NSD_CreateCheckbox} 0 56u 100% 14u "下载 Git Bash / PortableGit 2.53.0.3（约 56 MB）"
+  ${NSD_CreateCheckbox} 0 34u 100% 14u "下载 Git Bash / PortableGit 2.53.0.3（约 56 MB）"
   Pop $RuntimeShellCheckbox
   ${NSD_Check} $RuntimeShellCheckbox
   StrCpy $0 ""
@@ -60,7 +49,7 @@ Function RuntimePageCreate
   ${NSD_Uncheck} $RuntimeShellCheckbox
 
   shell_detection_done:
-  ${NSD_CreateLabel} 0 82u 100% 30u "运行时安装在当前用户目录，不修改系统 PATH，不注册为系统 Node.js 或 Git。下载文件会进行 SHA-256 校验。"
+  ${NSD_CreateLabel} 0 60u 100% 30u "Git Bash 安装在当前用户目录，不修改系统 PATH，也不注册为系统 Git。下载文件会进行 SHA-256 校验。"
   Pop $0
 
   nsDialogs::Show
@@ -68,17 +57,9 @@ FunctionEnd
 
 Function RuntimePageLeave
   StrCpy $RuntimeComponents ""
-  ${NSD_GetState} $RuntimeNodeCheckbox $0
-  ${If} $0 == ${BST_CHECKED}
-    StrCpy $RuntimeComponents "node"
-  ${EndIf}
   ${NSD_GetState} $RuntimeShellCheckbox $0
   ${If} $0 == ${BST_CHECKED}
-    ${If} $RuntimeComponents == ""
-      StrCpy $RuntimeComponents "shell"
-    ${Else}
-      StrCpy $RuntimeComponents "$RuntimeComponents,shell"
-    ${EndIf}
+    StrCpy $RuntimeComponents "shell"
   ${EndIf}
 FunctionEnd
 !macroend

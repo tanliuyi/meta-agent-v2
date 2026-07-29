@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { Sidebar } from "../../components/layout/sidebar.tsx";
-import { NodeRuntimeGate } from "../../features/node-runtime/node-runtime-gate.tsx";
+import { ShellRuntimeGate } from "../../features/shell-runtime/shell-runtime-gate.tsx";
 import { ToastProvider } from "../../shared/ui/toast-provider.tsx";
 import { DesktopCatalogProvider } from "../../state/desktop-catalog-provider.tsx";
 import { DesktopErrorToast } from "../desktop-error-toast.tsx";
@@ -15,7 +15,7 @@ export function ChatLayout() {
       <DesktopWindowTitle />
       <div className="app-shell">
         <DesktopCatalogProvider>
-          <NodeRuntimeGate />
+          <ShellRuntimeGate />
           <Sidebar />
           <DesktopErrorToast />
           <section className="workspace">

@@ -10,7 +10,7 @@ describe("session route pending surface", () => {
     expect(markup).toContain("workspace-row");
     expect(markup).toContain("session-bootstrap-composer");
     expect(markup).toContain('aria-busy="true"');
-    expect(markup).not.toContain("node-runtime-overlay");
+    expect(markup).not.toContain("shell-runtime-overlay");
     expect(markup).not.toContain('role="dialog"');
   });
 });

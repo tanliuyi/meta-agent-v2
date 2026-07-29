@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import { SidecarWorkerClient } from "../src/main/sidecar/worker-client.ts";
 import type { SidecarEvent } from "../src/shared/sidecar-contracts.ts";
 import { currentRuntimeCompatibility } from "../src/shared/sidecar-wire.ts";
@@ -47,11 +47,9 @@ describe("sidecar event backpressure", () => {
   }, 15_000);
 });
 
-function manifest(): NodeRuntimeManifest {
+function manifest(): SidecarRuntimeManifest {
   const compatibility = currentRuntimeCompatibility("test", "test");
   return {
-    nodePath: process.execPath,
-    npmCliPath: process.execPath,
     entries: {
       thread: "",
       metadata: resolve(import.meta.dirname, "fixtures/overflow-sidecar.mjs"),
@@ -59,8 +57,6 @@ function manifest(): NodeRuntimeManifest {
     },
     compatibility,
     integrity: {
-      nodePath: "",
-      npmCliPath: "",
       entries: { thread: "", metadata: "", subagent: "" },
       files: {},
     },

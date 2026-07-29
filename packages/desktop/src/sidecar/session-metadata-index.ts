@@ -1,15 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync,
   createReadStream,
   type Dirent,
   existsSync,
-  lstatSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
-  readSync,
   renameSync,
   statSync,
   writeFileSync,
@@ -24,15 +20,8 @@ import {
   resolveDesktopSessionDirectory,
 } from "./desktop-session-directory.ts";
 
-const INDEX_VERSION = 4;
+const INDEX_VERSION = 5;
 const INDEX_FILE_NAME = "session-metadata-index.json";
-
-export class InvalidExternalSessionError extends Error {
-  constructor(sessionFile: string) {
-    super(`Invalid external Pi session: ${sessionFile}`);
-    this.name = "InvalidExternalSessionError";
-  }
-}
 
 interface IndexedSession extends Thread {
   path: string;
@@ -40,7 +29,6 @@ interface IndexedSession extends Thread {
 
 interface ExplicitIndexedSession {
   session: IndexedSession;
-  fileFingerprint: string;
 }
 
 interface IndexedProject {
@@ -106,10 +94,7 @@ export class SessionMetadataIndex {
     else sessions[index] = next;
     sessions.sort((left, right) => right.updatedAt - left.updatedAt);
     if (explicitIndex !== -1) {
-      explicitSessions[explicitIndex] = {
-        session: next,
-        fileFingerprint: requireExplicitSessionFingerprint(sessionFile, thread.id),
-      };
+      explicitSessions[explicitIndex] = { session: next };
     }
     data.projects[projectId] = {
       cwd,
@@ -123,7 +108,6 @@ export class SessionMetadataIndex {
   }
 
   registerExternalSession(projectId: string, cwd: string, sessionFile: string, thread: Thread): void {
-    const fileFingerprint = requireExplicitSessionFingerprint(sessionFile, thread.id);
     const data = this.load();
     const currentProject = data.projects[projectId]?.cwd === cwd ? data.projects[projectId] : undefined;
     const sessions = [...(currentProject?.sessions ?? [])];
@@ -138,7 +122,7 @@ export class SessionMetadataIndex {
     sessions.sort((left, right) => right.updatedAt - left.updatedAt);
     const explicitSessions = [...(currentProject?.explicitSessions ?? [])];
     const explicitIndex = explicitSessions.findIndex(({ session }) => session.id === thread.id);
-    const explicit = { session: next, fileFingerprint };
+    const explicit = { session: next };
     if (explicitIndex === -1) explicitSessions.push(explicit);
     else explicitSessions[explicitIndex] = explicit;
     data.projects[projectId] = {
@@ -163,7 +147,6 @@ export class SessionMetadataIndex {
     const explicit = project.explicitSessions.find(({ session: candidate }) => candidate.id === threadId);
     if (explicit) {
       explicit.session = { ...session };
-      explicit.fileFingerprint = requireExplicitSessionFingerprint(session.path, session.id);
     } else {
       project.directoryFingerprint = null;
     }
@@ -218,15 +201,7 @@ export class SessionMetadataIndex {
         : sessionDirectory
           ? await listNestedSessionInfos(sessionDirectory)
           : { sessions: [], complete: false };
-    const validExplicitSessions = (
-      await Promise.all(
-        currentExplicitSessions.map(async (explicit) => {
-          const fileFingerprint = explicitSessionFingerprint(explicit.session.path, explicit.session.id);
-          if (!fileFingerprint) return undefined;
-          return refreshExplicitSession(projectId, explicit, fileFingerprint);
-        }),
-      )
-    ).filter((explicit): explicit is ExplicitIndexedSession => explicit !== undefined);
+    const validExplicitSessions = currentExplicitSessions.filter(({ session }) => existsSync(session.path));
     const candidates: Array<{ session: SessionInfo; originHint?: ForkDescriptor["origin"] }> = [
       ...rootSessions.map((session) => ({ session })),
       ...backfill.sessions.map((session) => ({ session, originHint: "subagent" })),
@@ -268,8 +243,7 @@ export class SessionMetadataIndex {
     );
     for (const session of rebuiltSessions.slice(rootSessions.length)) {
       if (rootIds.has(session.id) || explicitById.has(session.id)) continue;
-      const fileFingerprint = explicitSessionFingerprint(session.path, session.id);
-      if (fileFingerprint) explicitById.set(session.id, { session, fileFingerprint });
+      explicitById.set(session.id, { session });
     }
     const explicitSessions = [...explicitById.values()];
     const sessionsById = new Map(
@@ -308,9 +282,7 @@ export class SessionMetadataIndex {
       project.backfillComplete &&
       project.directoryFingerprint !== null &&
       fingerprintSessionDirectory(project.sessionDirectory) === project.directoryFingerprint &&
-      project.explicitSessions.every(
-        ({ session, fileFingerprint }) => explicitSessionFingerprint(session.path, session.id) === fileFingerprint,
-      )
+      project.explicitSessions.every(({ session }) => existsSync(session.path))
     );
   }
 
@@ -374,7 +346,7 @@ function isIndexedSession(value: unknown): value is IndexedSession {
 }
 
 function isExplicitIndexedSession(value: unknown): value is ExplicitIndexedSession {
-  return isRecord(value) && isIndexedSession(value.session) && typeof value.fileFingerprint === "string";
+  return isRecord(value) && isIndexedSession(value.session);
 }
 
 function hasAutomaticSessionTitle(thread: Thread): boolean {
@@ -414,37 +386,6 @@ function registerSessionIdentity(paths: Map<string, string>, sessionId: string, 
     throw new Error(`Pi session ID ${sessionId} is already registered at another path`);
   }
   paths.set(sessionId, path);
-}
-
-async function refreshExplicitSession(
-  projectId: string,
-  explicit: ExplicitIndexedSession,
-  fileFingerprint: string,
-): Promise<ExplicitIndexedSession> {
-  if (fileFingerprint === explicit.fileFingerprint) {
-    return { session: { ...explicit.session, running: false }, fileFingerprint };
-  }
-  const listed = await SessionManager.listAll(dirname(explicit.session.path));
-  const session = listed.find(
-    ({ id, path }) => id === explicit.session.id && resolve(path) === resolve(explicit.session.path),
-  );
-  if (!session) throw new Error(`Unable to refresh external Pi session: ${explicit.session.path}`);
-  const fork = explicit.session.origin ? await readForkDescriptor(session, explicit.session.origin) : undefined;
-  return {
-    session: {
-      ...explicit.session,
-      id: session.id,
-      projectId,
-      title: fork?.title || session.name || session.firstMessage || "新会话",
-      createdAt: session.created.getTime(),
-      updatedAt: session.modified.getTime(),
-      messageCount: session.messageCount,
-      preview: fork?.title || session.firstMessage,
-      running: false,
-      path: session.path,
-    },
-    fileFingerprint,
-  };
 }
 
 interface ForkDescriptor {
@@ -602,42 +543,6 @@ function inferNestedParentSessionPath(sessionDirectory: string, sessionFile: str
   }
   const parentSessionPath = join(sessionDirectory, `${parts[0]}.jsonl`);
   return existsSync(parentSessionPath) ? parentSessionPath : undefined;
-}
-
-function requireExplicitSessionFingerprint(sessionFile: string, expectedId: string): string {
-  const fingerprint = explicitSessionFingerprint(sessionFile, expectedId);
-  if (!fingerprint) throw new InvalidExternalSessionError(sessionFile);
-  return fingerprint;
-}
-
-function explicitSessionFingerprint(sessionFile: string, expectedId: string): string | null {
-  let descriptor: number | undefined;
-  try {
-    const stats = lstatSync(sessionFile, { bigint: true });
-    if (!stats.isFile()) return null;
-    descriptor = openSync(sessionFile, "r");
-    const buffer = Buffer.alloc(8 * 1024);
-    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
-    const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
-    if (!firstLine) return null;
-    const header: unknown = JSON.parse(firstLine);
-    if (!isRecord(header) || header.type !== "session" || header.id !== expectedId) return null;
-    const hash = createHash("sha256");
-    hash.update(stats.dev.toString());
-    hash.update("\0");
-    hash.update(stats.ino.toString());
-    hash.update("\0");
-    hash.update(stats.size.toString());
-    hash.update("\0");
-    hash.update(stats.mtimeNs.toString());
-    hash.update("\0");
-    hash.update(stats.ctimeNs.toString());
-    return hash.digest("hex");
-  } catch {
-    return null;
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-  }
 }
 
 function fingerprintSessionDirectory(directory: string | null): string | null {

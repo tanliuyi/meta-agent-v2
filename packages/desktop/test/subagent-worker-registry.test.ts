@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
-import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import { type SubagentWorkerClient, SubagentWorkerRegistry } from "../src/main/sidecar/subagent-worker-registry.ts";
 import { assertHostRequestIdentity } from "../src/main/sidecar/thread-worker-registry.ts";
 import type { WorkerClientOptions } from "../src/main/sidecar/worker-client.ts";
@@ -83,15 +83,11 @@ function subagentBootstrap(threadId: string): SessionBootstrap {
   };
 }
 
-function manifest(): NodeRuntimeManifest {
+function manifest(): SidecarRuntimeManifest {
   return {
-    nodePath: process.execPath,
-    npmCliPath: process.execPath,
     entries: { thread: "", metadata: "", subagent: "" },
     compatibility,
     integrity: {
-      nodePath: "",
-      npmCliPath: "",
       entries: { thread: "", metadata: "", subagent: "" },
       files: {},
     },

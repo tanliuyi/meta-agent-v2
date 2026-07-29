@@ -8,6 +8,7 @@ import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { memo, useEffect, useState } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
+import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 
 const TREE_GUIDE_START = 16;
 const TREE_LEVEL_INDENT = 16;
@@ -51,6 +52,7 @@ interface DesktopThreadListItemProps {
 /** 使用语义化 list、link 和 ContextMenu 实现的可访问性等效项。 */
 export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   const { thread } = props;
+  const subagentDisplayName = thread.agentName ? builtinSubagentDisplayName(thread.agentName) : undefined;
   const isPending = props.isSwitching || props.isRenamingPending || props.isArchivePending || props.isDeletePending;
   const contentIndent =
     props.compactRoot && props.depth === 0 && props.childCount === 0 ? 8 : 32 + props.depth * TREE_LEVEL_INDENT;
@@ -143,13 +145,13 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             ) : thread.origin === "branch" ? (
               <GitBranch className="text-muted-foreground size-3.5 shrink-0" aria-label="分支会话" />
             ) : null}
-            {thread.origin === "subagent" && thread.agentName ? (
+            {thread.origin === "subagent" && thread.agentName && subagentDisplayName ? (
               <span
                 data-slot="subagent-name"
                 className="text-foreground/75 max-w-20 shrink-0 truncate text-xs font-medium"
                 title={thread.agentName}
               >
-                {thread.agentName}
+                {subagentDisplayName}
               </span>
             ) : null}
             <span data-slot="thread-title" className="min-w-0 flex-1 truncate" title={thread.title || "新会话"}>

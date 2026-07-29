@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesktopExtensionSourcePolicy } from "../src/main/extensions/desktop-extension-source-policy.ts";
 import type { MetadataWorkerClient } from "../src/main/sidecar/metadata-worker-client.ts";
-import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import {
   type ThreadWorkerClient,
   ThreadWorkerRegistry,
@@ -1250,10 +1250,8 @@ function sessionPush(threadId: string): SidecarEventBody {
   };
 }
 
-function manifest(): NodeRuntimeManifest {
+function manifest(): SidecarRuntimeManifest {
   return {
-    nodePath: process.execPath,
-    npmCliPath: process.execPath,
     entries: { thread: "", metadata: "", subagent: "" },
     compatibility: {
       nodeVersion: process.version,
@@ -1268,8 +1266,6 @@ function manifest(): NodeRuntimeManifest {
       runtimeCompatibilityId: "test",
     },
     integrity: {
-      nodePath: "",
-      npmCliPath: "",
       entries: { thread: "", metadata: "", subagent: "" },
       files: {},
     },

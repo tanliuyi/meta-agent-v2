@@ -7,6 +7,7 @@ import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import type { AgentSummary } from "../../../../shared/subagent-contracts.ts";
+import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 
 interface SubagentAgentSectionProps {
   title: string;
@@ -35,41 +36,44 @@ export function SubagentAgentSection({
 }: SubagentAgentSectionProps) {
   const headingId = `subagent-${title.replace(/\s+/g, "-").toLowerCase()}`;
   const content = agents.length ? (
-    agents.map((agent) => (
-      <div className="settings-row subagent-row" key={`${agent.source}:${agent.filePath}`}>
-        <div className="subagent-identity">
-          <div className="subagent-title-line">
-            <strong>{agent.name}</strong>
-            <span className="subagent-scope-badge">{agent.source}</span>
-            {agent.overridden ? <span className="subagent-scope-badge">{agent.overrideScope} override</span> : null}
+    agents.map((agent) => {
+      const displayName = builtin ? builtinSubagentDisplayName(agent.name) : agent.name;
+      return (
+        <div className="settings-row subagent-row" key={`${agent.source}:${agent.filePath}`}>
+          <div className="subagent-identity">
+            <div className="subagent-title-line">
+              <strong title={builtin && displayName !== agent.name ? agent.name : undefined}>{displayName}</strong>
+              <span className="subagent-scope-badge">{agent.source}</span>
+              {agent.overridden ? <span className="subagent-scope-badge">{agent.overrideScope} override</span> : null}
+            </div>
+            <p>{agent.description}</p>
+            <span className="subagent-model-label">{agent.model || "继承当前会话模型"}</span>
           </div>
-          <p>{agent.description}</p>
-          <span className="subagent-model-label">{agent.model || "继承当前会话模型"}</span>
+          <div className="subagent-row-actions">
+            {builtin ? (
+              <Switch
+                aria-label={`${agent.name} 启用状态`}
+                checked={!agent.disabled}
+                disabled={mutating}
+                onCheckedChange={(checked) => void onToggle?.(agent, !checked)}
+              />
+            ) : null}
+            {!readOnly ? (
+              <Button variant="ghost" size="sm" disabled={mutating} onClick={() => onEdit?.(agent)}>
+                <Pencil />
+                编辑
+              </Button>
+            ) : null}
+            {builtin ? (
+              <Button variant="ghost" size="sm" disabled={mutating} onClick={() => void onEject?.(agent)}>
+                <Copy />
+                {copyLabel}
+              </Button>
+            ) : null}
+          </div>
         </div>
-        <div className="subagent-row-actions">
-          {builtin ? (
-            <Switch
-              aria-label={`${agent.name} 启用状态`}
-              checked={!agent.disabled}
-              disabled={mutating}
-              onCheckedChange={(checked) => void onToggle?.(agent, !checked)}
-            />
-          ) : null}
-          {!readOnly ? (
-            <Button variant="ghost" size="sm" disabled={mutating} onClick={() => onEdit?.(agent)}>
-              <Pencil />
-              编辑
-            </Button>
-          ) : null}
-          {builtin ? (
-            <Button variant="ghost" size="sm" disabled={mutating} onClick={() => void onEject?.(agent)}>
-              <Copy />
-              {copyLabel}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-    ))
+      );
+    })
   ) : (
     <div className="settings-row subagent-empty-row">没有匹配的 Agent</div>
   );

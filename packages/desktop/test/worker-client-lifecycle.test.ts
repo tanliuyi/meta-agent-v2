@@ -1,16 +1,18 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import { createSidecarEnvironment, SidecarWorkerClient } from "../src/main/sidecar/worker-client.ts";
 
 describe("SidecarWorkerClient lifecycle", () => {
   it("removes inherited subagent lineage variables from worker environments", () => {
-    const environment = createSidecarEnvironment("runtime", "/agent", process.execPath, {
+    const environment = createSidecarEnvironment("runtime", "/agent", {
       PATH: process.env.PATH,
       ProgramFiles: "C:\\Program Files",
       "ProgramFiles(x86)": "C:\\Program Files (x86)",
       PI_SUBAGENT_DEPTH: "4",
       pi_subagent_max_depth: "7",
+      ELECTRON_RUN_AS_NODE: "hostile",
+      PI_DESKTOP_STALE_RUNTIME: "discarded",
       PI_CUSTOM_PROVIDER_SETTING: "kept",
       ANTHROPIC_API_KEY: "secret",
     });
@@ -22,6 +24,26 @@ describe("SidecarWorkerClient lifecycle", () => {
     expect(environment.PI_CUSTOM_PROVIDER_SETTING).toBe("kept");
     expect(environment.ANTHROPIC_API_KEY).toBe("secret");
     expect(environment.PI_DESKTOP_RUNTIME_COMPATIBILITY_ID).toBe("runtime");
+    expect(environment.PI_DESKTOP_STALE_RUNTIME).toBeUndefined();
+    expect(environment.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  it("passes Electron Node mode through an inherited nested fork", async () => {
+    const client = new SidecarWorkerClient({
+      manifest: manifest(resolve(import.meta.dirname, "fixtures/nested-fork-sidecar.mjs")),
+      binding: { role: "metadata", value: { agentDir: "/tmp", userDataDir: "/tmp" } },
+    });
+    try {
+      await expect(client.ready()).resolves.toMatchObject({
+        result: {
+          execPath: process.execPath,
+          electronRunAsNode: "1",
+          nested: { execPath: process.execPath, electronRunAsNode: "1" },
+        },
+      });
+    } finally {
+      await client.shutdown();
+    }
   });
 
   it("consumes a late host-call completion after the IPC channel closes", async () => {
@@ -78,10 +100,10 @@ describe("SidecarWorkerClient lifecycle", () => {
   }, 5_000);
 });
 
-function manifest(metadataEntry = resolve(import.meta.dirname, "fixtures/stubborn-sidecar.mjs")): NodeRuntimeManifest {
+function manifest(
+  metadataEntry = resolve(import.meta.dirname, "fixtures/stubborn-sidecar.mjs"),
+): SidecarRuntimeManifest {
   return {
-    nodePath: process.execPath,
-    npmCliPath: process.execPath,
     entries: {
       thread: "",
       metadata: metadataEntry,
@@ -100,8 +122,6 @@ function manifest(metadataEntry = resolve(import.meta.dirname, "fixtures/stubbor
       runtimeCompatibilityId: "test",
     },
     integrity: {
-      nodePath: "",
-      npmCliPath: "",
       entries: { thread: "", metadata: "", subagent: "" },
       files: {},
     },

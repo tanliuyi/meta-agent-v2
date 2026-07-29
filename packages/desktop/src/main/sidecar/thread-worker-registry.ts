@@ -38,7 +38,7 @@ import type {
 } from "../plugins/marketplace-extension-apply-journal.ts";
 import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
-import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
+import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
 
 const DEFAULT_IDLE_TTL_MS = 5 * 60_000;
@@ -75,7 +75,7 @@ interface WorkerRecord {
 }
 
 export interface ThreadWorkerRegistryOptions {
-  manifest: NodeRuntimeManifest;
+  manifest: SidecarRuntimeManifest;
   metadata: MetadataWorkerClient;
   userDataDir: string;
   agentDir: string;
