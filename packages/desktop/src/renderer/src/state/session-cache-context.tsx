@@ -21,6 +21,7 @@ export interface SessionCacheController {
   retireProject(projectId: string): Promise<void>;
   touch(key: string): void;
   getActiveKey(): string | null;
+  activate(identity: SessionIdentity): void;
   setActiveKey(key: string | null): void;
   setDraftMaterializing(materializing: boolean): void;
   getAllRecords(): CachedSessionRecord[];
@@ -48,6 +49,13 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
   const recordsRef = useRef(new Map<string, CachedSessionRecord>());
   const activeKeyRef = useRef<string | null>(null);
   const draftMaterializingRef = useRef(false);
+  const activateKey = (key: string | null): void => {
+    const previousKey = activeKeyRef.current;
+    if (previousKey === key) return;
+    activeKeyRef.current = key;
+    if (previousKey) void transportManager.detach(previousKey);
+    forceRender((n) => n + 1);
+  };
 
   if (!controllerRef.current) {
     controllerRef.current = {
@@ -60,8 +68,9 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
           recordsRef.current.set(key, created);
           forceRender((n) => n + 1);
         }
-        void transportManager.ensure(record).catch(() => {
-          if (recordsRef.current.get(key) !== record) return;
+        void transportManager.ensure(record).catch((error: unknown) => {
+          if (recordsRef.current.get(key) !== record || transportManager.getConnectionState(key) === null) return;
+          console.error(`Session attach failed for ${identity.projectId}/${identity.threadId}`, error);
           record.stores.connection.setState("error");
           record.stores.summary.set({ connectionState: "error" });
         });
@@ -130,10 +139,12 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
         return activeKeyRef.current;
       },
 
+      activate(identity: SessionIdentity) {
+        activateKey(sessionRecordKey(identity.projectId, identity.threadId));
+      },
+
       setActiveKey(key: string | null) {
-        if (activeKeyRef.current === key) return;
-        activeKeyRef.current = key;
-        forceRender((n) => n + 1);
+        activateKey(key);
       },
 
       setDraftMaterializing(materializing: boolean) {

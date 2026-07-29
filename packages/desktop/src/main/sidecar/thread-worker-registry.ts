@@ -41,6 +41,9 @@ import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
 import type { NodeRuntimeManifest } from "./node-runtime-locator.ts";
 import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
 
+const DEFAULT_IDLE_TTL_MS = 5 * 60_000;
+const DEFAULT_MAX_LIVE_WORKERS = 4;
+
 export interface ThreadWorkerClient {
   readonly instanceId: string;
   readonly available?: boolean;
@@ -172,7 +175,7 @@ export class ThreadWorkerRegistry {
 
   constructor(options: ThreadWorkerRegistryOptions) {
     this.options = options;
-    const intervalMs = Math.max(1_000, Math.min(options.idleTtlMs ?? 30 * 60_000, 60_000));
+    const intervalMs = Math.max(1_000, Math.min(options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS, 60_000));
     this.idleTimer = setInterval(() => void this.evictIdle(), intervalMs);
     this.idleTimer.unref();
   }
@@ -365,7 +368,10 @@ export class ThreadWorkerRegistry {
       else this.subagentAttachments.set(key, subagentAttachmentCount - 1);
       return;
     }
-    if (record && record.attachments > 0) record.attachments -= 1;
+    if (record && record.attachments > 0) {
+      record.attachments -= 1;
+      if (record.attachments === 0) this.requestCapacityTrim();
+    }
   }
 
   async prompt(input: SessionPromptInput): Promise<SessionCommandResult> {
@@ -1154,6 +1160,7 @@ export class ThreadWorkerRegistry {
       this.options.push(payload, event.workerInstanceId, event.sequence);
     } else if (event.event.type === "summary-changed") {
       record.summary = event.event.summary;
+      if (!record.summary.running) this.requestCapacityTrim();
       if (!record.sessionFile) {
         record.client.acknowledge(event.sequence);
         return;
@@ -1220,18 +1227,40 @@ export class ThreadWorkerRegistry {
     await this.withCapacityLock(async () => {
       this.reservedWorkerSlots -= 1;
     });
+    this.requestCapacityTrim();
   }
 
   private async ensureCapacity(): Promise<void> {
-    const maximum = this.options.maxLiveWorkers ?? 24;
+    const maximum = this.options.maxLiveWorkers ?? DEFAULT_MAX_LIVE_WORKERS;
     if (this.records.size + this.reservedWorkerSlots < maximum) return;
+    await this.evictLeastRecentlyUsedIdle();
+  }
+
+  private async trimToCapacity(): Promise<void> {
+    await this.withCapacityLock(async () => {
+      const maximum = this.options.maxLiveWorkers ?? DEFAULT_MAX_LIVE_WORKERS;
+      while (this.records.size > maximum) {
+        if (!(await this.evictLeastRecentlyUsedIdle())) return;
+      }
+    });
+  }
+
+  private requestCapacityTrim(): void {
+    if (this.disposing) return;
+    void this.trimToCapacity().catch((error: unknown) =>
+      this.options.log?.("thread-capacity", error instanceof Error ? error.message : String(error)),
+    );
+  }
+
+  private async evictLeastRecentlyUsedIdle(): Promise<boolean> {
     const candidate = [...this.records.entries()]
       .filter(
         ([, record]) =>
           !record.retired && !record.summary?.running && record.inFlight === 0 && record.attachments === 0,
       )
       .sort((left, right) => left[1].lastActivityAt - right[1].lastActivityAt)[0];
-    if (!candidate) throw new Error(`All ${maximum} Desktop thread workers are busy`);
+    if (!candidate) return false;
+    let evicted = false;
     await this.withThreadLock(candidate[0], async () => {
       if (
         this.records.get(candidate[0]) !== candidate[1] ||
@@ -1244,17 +1273,17 @@ export class ThreadWorkerRegistry {
       candidate[1].retired = true;
       await this.awaitRecordShutdown(candidate[1]);
       if (this.records.get(candidate[0]) === candidate[1]) this.records.delete(candidate[0]);
+      evicted = true;
     });
-    if (this.records.size + this.reservedWorkerSlots >= maximum) {
-      throw new Error(`All ${maximum} Desktop thread workers are busy`);
-    }
+    return evicted;
   }
 
   private async evictIdle(): Promise<void> {
     if (this.evictionRunning) return;
     this.evictionRunning = true;
     try {
-      const cutoff = Date.now() - (this.options.idleTtlMs ?? 30 * 60_000);
+      await this.trimToCapacity();
+      const cutoff = Date.now() - (this.options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS);
       const candidates = [...this.records.entries()].filter(
         ([, record]) =>
           !record.retired &&

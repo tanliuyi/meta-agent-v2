@@ -19,6 +19,16 @@ interface KeyState {
   tombstoned: boolean;
 }
 
+const INITIAL_ATTACH_RETRY_DELAY_MS = 100;
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Window-level owner of every renderer attachment lease.
  * A key's lifecycle is serialized without coupling independent cached sessions.
@@ -64,6 +74,25 @@ export class SessionTransportManager {
       if (state.pending) return state.pending;
     }
     return this.startAttach(state, state.committed?.attachmentId);
+  }
+
+  async detach(key: string): Promise<void> {
+    const state = this.keyStates.get(key);
+    if (!state) return;
+    state.tombstoned = true;
+    state.resyncAfterPending = false;
+    state.record.generation += 1;
+    state.record.stores.connection.setState("attaching");
+    state.record.stores.summary.set({ connectionState: "attaching" });
+    const attachmentId = state.committed?.attachmentId;
+    state.committed = null;
+    this.keyStates.delete(key);
+    if (attachmentId) window.desktop.sessions.detach(attachmentId);
+    try {
+      await state.pending;
+    } catch {
+      // Detaching intentionally invalidates any in-flight attach.
+    }
   }
 
   async retire(key: string): Promise<void> {
@@ -118,21 +147,49 @@ export class SessionTransportManager {
     const generation = record.generation;
     record.stores.connection.setState(replaceAttachmentId ? "recovering" : "attaching");
     record.stores.summary.set({ connectionState: replaceAttachmentId ? "recovering" : "attaching" });
-    const requestId = crypto.randomUUID();
     let attachmentId: string | null = null;
     const pending = (async () => {
       try {
-        const attachment = await window.desktop.sessions.attach(
-          {
-            projectId: record.identity.projectId,
-            threadId: record.identity.threadId,
-            requestId,
-            ...(replaceAttachmentId ? { replaceAttachmentId } : {}),
-          },
-          (update) => {
-            if (attachmentId) this.handlePush(record.key, record, generation, attachmentId, update);
-          },
-        );
+        let attachment: SessionAttachment | undefined;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const requestId = crypto.randomUUID();
+          try {
+            attachment = await window.desktop.sessions.attach(
+              {
+                projectId: record.identity.projectId,
+                threadId: record.identity.threadId,
+                requestId,
+                ...(replaceAttachmentId ? { replaceAttachmentId } : {}),
+              },
+              (update) => {
+                if (attachmentId) this.handlePush(record.key, record, generation, attachmentId, update);
+              },
+            );
+            break;
+          } catch (error) {
+            const retryInitialAttach =
+              attempt === 0 &&
+              !replaceAttachmentId &&
+              !isAbortError(error) &&
+              !state.tombstoned &&
+              this.keyStates.get(record.key) === state &&
+              state.record === record &&
+              record.generation === generation;
+            if (!retryInitialAttach) throw error;
+            record.stores.connection.setState("recovering");
+            record.stores.summary.set({ connectionState: "recovering" });
+            await delay(INITIAL_ATTACH_RETRY_DELAY_MS);
+            if (
+              state.tombstoned ||
+              this.keyStates.get(record.key) !== state ||
+              state.record !== record ||
+              record.generation !== generation
+            ) {
+              throw new DOMException("Session attach superseded during retry", "AbortError");
+            }
+          }
+        }
+        if (!attachment) throw new Error(`Session attach produced no attachment: ${record.key}`);
         attachmentId = attachment.attachmentId;
         if (
           state.tombstoned ||

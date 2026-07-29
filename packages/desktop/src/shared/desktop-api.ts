@@ -190,6 +190,8 @@ export interface DesktopApi {
     list(): Promise<Project[]>;
     choose(): Promise<Project | null>;
     open(projectId: string): Promise<Project>;
+    rename(projectId: string, name: string): Promise<Project>;
+    openExternally(projectId: string): Promise<void>;
     remove(projectId: string): Promise<void>;
     getActive(): Promise<Project | null>;
   };

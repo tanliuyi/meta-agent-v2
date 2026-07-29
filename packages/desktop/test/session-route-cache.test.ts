@@ -200,7 +200,7 @@ describe("SessionTransportManager", () => {
     expect(manager.getConnectionState("unknown")).toBeNull();
   });
 
-  it("首次 attach 失败后 ensure 可以重试同一个 cache record", async () => {
+  it("首次 attach 瞬时失败会在同一次 ensure 内恢复", async () => {
     const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
     const attach = vi
       .fn()
@@ -239,12 +239,86 @@ describe("SessionTransportManager", () => {
       },
     });
     const manager = new SessionTransportManager();
+    const connectionStates: string[] = [];
+    const unsubscribe = record.stores.connection.subscribe(() => {
+      connectionStates.push(record.stores.connection.getSnapshot());
+    });
 
-    await expect(manager.ensure(record)).rejects.toThrow("renderer reload race");
     await expect(manager.ensure(record)).resolves.toMatchObject({ attachmentId: "replacement" });
+    unsubscribe();
 
     expect(attach).toHaveBeenCalledTimes(2);
+    expect(connectionStates).toContain("recovering");
+    expect(connectionStates).not.toContain("error");
     expect(manager.getConnectionState(record.key)).toBe("ready");
+  });
+
+  it("首次 attach 连续失败后停止重试并进入 error", async () => {
+    const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
+    const attach = vi.fn().mockRejectedValue(new Error("worker unavailable"));
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          attach,
+          flush: vi.fn(() => ({ state: "flushed" })),
+          detach: vi.fn(),
+        },
+        workbench: { get: vi.fn(async () => workbenchState()) },
+      },
+    });
+    const manager = new SessionTransportManager();
+
+    await expect(manager.ensure(record)).rejects.toThrow("worker unavailable");
+
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(manager.getConnectionState(record.key)).toBe("error");
+  });
+
+  it("首次 attach 的序列化 AbortError 不会重试", async () => {
+    const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
+    const abortError = Object.assign(new Error("attach superseded"), { name: "AbortError" });
+    const attach = vi.fn().mockRejectedValue(abortError);
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          attach,
+          flush: vi.fn(() => ({ state: "flushed" })),
+          detach: vi.fn(),
+        },
+        workbench: { get: vi.fn(async () => workbenchState()) },
+      },
+    });
+    const manager = new SessionTransportManager();
+
+    await expect(manager.ensure(record)).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(manager.getConnectionState(record.key)).toBe("error");
+  });
+
+  it("首次 attach 重试等待期间 detach 不会启动第二个 lease", async () => {
+    const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
+    const attach = vi.fn().mockRejectedValueOnce(new Error("renderer reload race"));
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: {
+          attach,
+          flush: vi.fn(() => ({ state: "flushed" })),
+          detach: vi.fn(),
+        },
+        workbench: { get: vi.fn(async () => workbenchState()) },
+      },
+    });
+    const manager = new SessionTransportManager();
+
+    const attaching = manager.ensure(record);
+    const rejected = expect(attaching).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
+    await manager.detach(record.key);
+    await rejected;
+
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(manager.getConnectionState(record.key)).toBeNull();
   });
 
   it("attach flush 请求 recovery 时会在 pending attach 完成后执行 replacement attach", async () => {
@@ -273,6 +347,34 @@ describe("SessionTransportManager", () => {
     expect(flush).toHaveBeenCalledTimes(2);
     expect(manager.getCommittedAttachmentId(record)).toBe("replacement");
     expect(manager.getConnectionState(record.key)).toBe("ready");
+  });
+
+  it("detaches an inactive lease while preserving the cached record for reattach", async () => {
+    const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
+    const attach = vi
+      .fn()
+      .mockResolvedValueOnce(attachmentFor(record, "initial"))
+      .mockResolvedValueOnce(attachmentFor(record, "replacement"));
+    const detach = vi.fn();
+    vi.stubGlobal("window", {
+      desktop: {
+        sessions: { attach, flush: vi.fn(() => ({ state: "flushed" })), detach },
+        workbench: { get: vi.fn(async () => workbenchState()) },
+      },
+    });
+    const manager = new SessionTransportManager();
+    record.stores.composerDraft.setText("preserved draft");
+
+    await manager.ensure(record);
+    await manager.detach(record.key);
+
+    expect(detach).toHaveBeenCalledWith("initial");
+    expect(manager.hasCommittedLease(record)).toBe(false);
+    expect(record.stores.composerDraft.getText()).toBe("preserved draft");
+
+    await expect(manager.ensure(record)).resolves.toMatchObject({ attachmentId: "replacement" });
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(manager.getCommittedAttachmentId(record)).toBe("replacement");
   });
 
   it("replacement attach 后读取 Workbench 失败会释放新旧 lease 并允许 fresh retry", async () => {

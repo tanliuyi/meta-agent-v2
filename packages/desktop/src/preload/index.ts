@@ -258,6 +258,8 @@ const desktopApi: DesktopApi = {
     list: () => ipcRenderer.invoke(CHANNELS.projectsList),
     choose: () => ipcRenderer.invoke(CHANNELS.projectsChoose),
     open: (projectId) => ipcRenderer.invoke(CHANNELS.projectsOpen, projectId),
+    rename: (projectId, name) => ipcRenderer.invoke(CHANNELS.projectsRename, projectId, name),
+    openExternally: (projectId) => ipcRenderer.invoke(CHANNELS.projectsOpenExternally, projectId),
     remove: (projectId) => ipcRenderer.invoke(CHANNELS.projectsRemove, projectId),
     getActive: () => ipcRenderer.invoke(CHANNELS.projectsActive),
   },

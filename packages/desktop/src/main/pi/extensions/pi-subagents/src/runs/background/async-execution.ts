@@ -24,6 +24,11 @@ import { resolveExpectedWorktreeAgentCwd } from "../shared/worktree.ts";
 import { buildWorkflowGraphSnapshot } from "../shared/workflow-graph.ts";
 import { ChainOutputValidationError, outputEntryFromAsyncResult, resolveOutputReferences, validateChainOutputBindings } from "../shared/chain-outputs.ts";
 import { createStructuredOutputRuntime } from "../shared/structured-output.ts";
+import {
+	appendRunnerStepsToStatus,
+	consumeChainAppendRequests,
+	countPendingChainAppendRequests,
+} from "./chain-append.ts";
 import { resolveEffectiveAcceptance } from "../shared/acceptance.ts";
 import {
 	type AcceptanceInput,
@@ -673,6 +678,7 @@ export function executeAsyncChain(
 			sessionId: ctx.currentSessionId,
 			mode: resultMode,
 			state: "running",
+			acceptingAppends: true,
 			startedAt: now,
 			lastUpdate: now,
 			asyncDir,
@@ -1489,11 +1495,69 @@ async function consumeAsyncChainRun(
 		onInterrupt: () => cancel("paused"),
 	};
 	const pollPromise = runControlPollLoop(asyncDir, control.signal, controlHandlers);
+	const consumePendingAppendRequests = (): number => {
+		const requests = consumeChainAppendRequests(asyncDir);
+		const pendingAppends = countPendingChainAppendRequests(asyncDir);
+		if (requests.length === 0) {
+			const status = readStatus(asyncDir);
+			if (status && (status.pendingAppends ?? 0) !== pendingAppends) {
+				writeProgrammaticStatus(asyncDir, { pendingAppends, lastUpdate: Date.now() });
+			}
+			return 0;
+		}
+		const appendedSteps = requests.flatMap((request) => request.steps);
+		steps.push(...appendedSteps);
+		const status = readStatus(asyncDir);
+		const now = Date.now();
+		if (status) {
+			appendRunnerStepsToStatus({ status, steps: appendedSteps, now, pendingAppends });
+			writeAtomicJson(path.join(asyncDir, "status.json"), status);
+		}
+		for (const request of requests) {
+			appendJsonl(eventsPath, JSON.stringify({
+				type: "subagent.chain.append.accepted",
+				ts: now,
+				runId: id,
+				requestId: request.id,
+				stepCount: request.steps.length,
+				pendingAppends,
+			}));
+		}
+		return requests.length;
+	};
+	const closeAppendQueue = (reason: string): void => {
+		const now = Date.now();
+		writeProgrammaticStatus(asyncDir, { acceptingAppends: false, lastUpdate: now });
+		const cancelled = consumeChainAppendRequests(asyncDir);
+		writeProgrammaticStatus(asyncDir, { pendingAppends: 0, acceptingAppends: false, lastUpdate: now });
+		for (const request of cancelled) {
+			appendJsonl(eventsPath, JSON.stringify({
+				type: "subagent.chain.append.cancelled",
+				ts: now,
+				runId: id,
+				requestId: request.id,
+				stepCount: request.steps.length,
+				reason,
+				pendingAppends: 0,
+			}));
+		}
+	};
 
 	try {
-		for (let logicalIndex = 0; logicalIndex < steps.length; logicalIndex += 1) {
+		let logicalIndex = 0;
+		while (true) {
 			runControlPollOnce(asyncDir, controlHandlers);
-			if (control.signal.aborted) break;
+			if (control.signal.aborted) {
+				closeAppendQueue(stopRequested ? "Async run stopped." : "Async run interrupted.");
+				break;
+			}
+			consumePendingAppendRequests();
+			if (logicalIndex >= steps.length) {
+				writeProgrammaticStatus(asyncDir, { acceptingAppends: false, lastUpdate: Date.now() });
+				if (consumePendingAppendRequests() === 0) break;
+				writeProgrammaticStatus(asyncDir, { acceptingAppends: true, lastUpdate: Date.now() });
+				continue;
+			}
 			const step = steps[logicalIndex]!;
 			let stepResults: ProgrammaticLeafResult[];
 			if (isDynamicRunnerGroup(step)) {
@@ -1589,8 +1653,12 @@ async function consumeAsyncChainRun(
 				previousOutput = leaf?.output ?? "";
 			}
 			results.push(...stepResults);
+			logicalIndex += 1;
 			writeProgrammaticStatus(asyncDir, { currentStep: results.length, lastUpdate: Date.now() });
-			if (stepResults.some((result) => !result.success)) break;
+			if (stepResults.some((result) => !result.success)) {
+				closeAppendQueue("The active chain step failed before appended steps became eligible.");
+				break;
+			}
 		}
 
 		const endedAt = Date.now();
@@ -1639,6 +1707,7 @@ async function consumeAsyncChainRun(
 			endedAt,
 		});
 	} catch (error) {
+		closeAppendQueue("The async chain failed before appended steps became eligible.");
 		const endedAt = Date.now();
 		const message = error instanceof Error ? error.message : String(error);
 		writeProgrammaticStatus(asyncDir, { state: "failed", error: message, endedAt, lastUpdate: endedAt });

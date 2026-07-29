@@ -13,6 +13,8 @@ export const CHANNELS = {
   projectsList: "desktop:projects:list",
   projectsChoose: "desktop:projects:choose",
   projectsOpen: "desktop:projects:open",
+  projectsRename: "desktop:projects:rename",
+  projectsOpenExternally: "desktop:projects:open-externally",
   projectsRemove: "desktop:projects:remove",
   projectsActive: "desktop:projects:active",
   sessionsList: "desktop:sessions:list",

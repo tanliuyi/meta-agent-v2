@@ -224,19 +224,46 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
-  it("reserves capacity while a worker is still starting", async () => {
+  it("allows temporary overflow when every capacity slot is busy", async () => {
     const readyGate = deferred<void>();
     const harness = createHarness(userDataDir, { readyGate, maxLiveWorkers: 1 });
     const registry = new ThreadWorkerRegistry(harness.options);
     const firstAttach = registry.attach("project", "first");
     await waitFor(() => harness.clients.length === 1);
-
-    await expect(registry.attach("project", "second")).rejects.toThrow("All 1 Desktop thread workers are busy");
-    expect(harness.clients).toHaveLength(1);
+    const secondAttach = registry.attach("project", "second");
+    await waitFor(() => harness.clients.length === 2);
 
     readyGate.resolve();
-    await firstAttach;
+    await Promise.all([firstAttach, secondAttach]);
+    expect(harness.clients).toHaveLength(2);
+
     registry.detach("project", "first");
+    registry.detach("project", "second");
+    await registry.dispose();
+  });
+
+  it("shrinks temporary overflow as soon as a detached running worker becomes idle", async () => {
+    const harness = createHarness(userDataDir, { maxLiveWorkers: 2 });
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await registry.attach("project", "first");
+    harness.clients[0]?.emit({ type: "summary-changed", summary: { ...thread("first"), running: true } });
+    registry.detach("project", "first");
+
+    await registry.attach("project", "second");
+    harness.clients[1]?.emit({ type: "summary-changed", summary: { ...thread("second"), running: true } });
+    registry.detach("project", "second");
+
+    await registry.attach("project", "third");
+    expect(harness.clients).toHaveLength(3);
+    expect(harness.clients.every((client) => client.shutdownCount === 0)).toBe(true);
+
+    harness.clients[0]?.emit({ type: "summary-changed", summary: thread("first") });
+    await waitFor(() => harness.clients[0]?.shutdownCount === 1);
+
+    expect(harness.clients[1]?.shutdownCount).toBe(0);
+    expect(harness.clients[2]?.shutdownCount).toBe(0);
+    registry.detach("project", "third");
     await registry.dispose();
   });
 
@@ -300,6 +327,44 @@ describe("ThreadWorkerRegistry", () => {
     registry.detach("project", "thread");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(client.shutdownCount).toBe(1);
+    await registry.dispose();
+  });
+
+  it("uses a five-minute default idle TTL", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    registry.detach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(client.shutdownCount).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(client.shutdownCount).toBe(1);
+    await registry.dispose();
+  });
+
+  it("caps live workers at four and evicts the least recently used idle worker", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    for (let index = 0; index < 4; index += 1) {
+      const threadId = `thread-${index}`;
+      await registry.attach("project", threadId);
+      registry.detach("project", threadId);
+      await vi.advanceTimersByTimeAsync(1);
+    }
+
+    await registry.attach("project", "thread-4");
+
+    expect(harness.clients).toHaveLength(5);
+    expect(harness.clients[0]?.shutdownCount).toBe(1);
+    expect(harness.clients.slice(1, 4).every((client) => client.shutdownCount === 0)).toBe(true);
+    registry.detach("project", "thread-4");
     await registry.dispose();
   });
 

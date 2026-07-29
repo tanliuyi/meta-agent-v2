@@ -5,9 +5,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
 import {
+  buildAsyncRunnerSteps,
   executeAsyncChain,
   executeAsyncSingle,
 } from "../src/main/pi/extensions/pi-subagents/src/runs/background/async-execution.ts";
+import { enqueueChainAppendRequest } from "../src/main/pi/extensions/pi-subagents/src/runs/background/chain-append.ts";
 import {
   consumeSteerAcks,
   requestAsyncInterrupt,
@@ -63,6 +65,55 @@ class CompletingRuntime implements SubagentRuntime {
   }
 
   async cancel() {}
+  async steer() {}
+  resume(request: SubagentRuntimeRunRequest) {
+    return this.run(request);
+  }
+  async dispose() {}
+}
+
+class AppendableRuntime implements SubagentRuntime {
+  readonly requests: SubagentRuntimeRunRequest[] = [];
+  readonly started: Promise<void>;
+  private markStarted: () => void;
+  private release?: () => void;
+  private readonly failFirst: boolean;
+
+  constructor(failFirst = false) {
+    this.failFirst = failFirst;
+    let markStarted!: () => void;
+    this.started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    this.markStarted = markStarted;
+  }
+
+  async *run(request: SubagentRuntimeRunRequest) {
+    const first = this.requests.length === 0;
+    this.requests.push(request);
+    if (first) {
+      this.markStarted();
+      await new Promise<void>((resolve) => {
+        this.release = resolve;
+      });
+      if (this.failFirst) {
+        yield { type: "failed" as const, runId: request.runId, error: "first step failed" };
+        return;
+      }
+    }
+    yield {
+      type: "message_end" as const,
+      message: { role: "assistant", content: [{ type: "text", text: `output-${request.childIndex}` }] },
+    };
+    yield { type: "completed" as const, runId: request.runId };
+  }
+
+  finishFirst() {
+    this.release?.();
+  }
+  async cancel() {
+    this.release?.();
+  }
   async steer() {}
   resume(request: SubagentRuntimeRunRequest) {
     return this.run(request);
@@ -468,6 +519,117 @@ describe("Desktop programmatic async modes", () => {
     expect(result).toMatchObject({ sessionId: "parent-session", state: "complete", summary: "second output" });
     expect(status).toMatchObject({ state: "complete", currentStep: 2, turnCount: 2 });
     expect(status.steps).toHaveLength(2);
+  });
+
+  it("executes a step appended while the final queued chain step is still running", async () => {
+    const id = `desktop-async-append-${Date.now()}`;
+    const { asyncDir, resultPath } = paths(id);
+    const runtime = new AppendableRuntime();
+
+    executeAsyncChain(id, {
+      chain: [{ agent: "worker", task: "first", acceptance: false }],
+      agents: [agent],
+      ctx: context(),
+      subagentRuntime: runtime,
+      artifactConfig: { enabled: false } as never,
+      shareEnabled: false,
+      maxSubagentDepth: 1,
+    });
+    await runtime.started;
+
+    const appended = buildAsyncRunnerSteps(id, {
+      chain: [{ agent: "worker", task: "append {previous}", acceptance: false }],
+      agents: [agent],
+      ctx: context(),
+      maxSubagentDepth: 1,
+      asyncDir,
+      validateOutputBindings: false,
+    });
+    expect(appended).not.toHaveProperty("error");
+    if ("error" in appended) throw new Error(appended.error);
+    enqueueChainAppendRequest({ asyncDir, runId: id, steps: appended.steps });
+    const statusBeforeConsumption = JSON.parse(readFileSync(`${asyncDir}/status.json`, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(statusBeforeConsumption).toMatchObject({ chainStepCount: 1 });
+    expect(statusBeforeConsumption).not.toHaveProperty("pendingAppends");
+    runtime.finishFirst();
+
+    const result = await readResult(resultPath);
+    const status = JSON.parse(readFileSync(`${asyncDir}/status.json`, "utf8")) as Record<string, unknown>;
+    expect(runtime.requests).toHaveLength(2);
+    expect(runtime.requests[1]?.task).toContain("append output-0");
+    expect(result).toMatchObject({ state: "complete", success: true });
+    expect(status).toMatchObject({
+      state: "complete",
+      chainStepCount: 2,
+      pendingAppends: 0,
+      acceptingAppends: false,
+    });
+    expect(status.steps).toHaveLength(2);
+  });
+
+  it("cancels queued append requests when the active chain step fails", async () => {
+    const id = `desktop-async-append-failure-${Date.now()}`;
+    const { asyncDir, resultPath } = paths(id);
+    const runtime = new AppendableRuntime(true);
+
+    executeAsyncChain(id, {
+      chain: [{ agent: "worker", task: "first", acceptance: false }],
+      agents: [agent],
+      ctx: context(),
+      subagentRuntime: runtime,
+      artifactConfig: { enabled: false } as never,
+      shareEnabled: false,
+      maxSubagentDepth: 1,
+    });
+    await runtime.started;
+
+    const appended = buildAsyncRunnerSteps(id, {
+      chain: [{ agent: "worker", task: "must not execute", acceptance: false }],
+      agents: [agent],
+      ctx: context(),
+      maxSubagentDepth: 1,
+      asyncDir,
+      validateOutputBindings: false,
+    });
+    if ("error" in appended) throw new Error(appended.error);
+    enqueueChainAppendRequest({ asyncDir, runId: id, steps: appended.steps });
+    runtime.finishFirst();
+
+    const result = await readResult(resultPath);
+    const status = JSON.parse(readFileSync(`${asyncDir}/status.json`, "utf8")) as Record<string, unknown>;
+    const events = readFileSync(`${asyncDir}/events.jsonl`, "utf8");
+    expect(runtime.requests).toHaveLength(1);
+    expect(result).toMatchObject({ state: "failed", success: false, error: "first step failed" });
+    expect(status).toMatchObject({ state: "failed", pendingAppends: 0, acceptingAppends: false });
+    expect(events).toContain('"type":"subagent.chain.append.cancelled"');
+    expect(events).toContain("active chain step failed");
+  });
+
+  it("rejects append publication after the runner closes its final drain", () => {
+    const id = `desktop-async-append-closing-${Date.now()}`;
+    const { asyncDir } = paths(id);
+    mkdirSync(asyncDir, { recursive: true });
+    writeFileSync(
+      `${asyncDir}/status.json`,
+      JSON.stringify({
+        runId: id,
+        mode: "chain",
+        state: "running",
+        acceptingAppends: false,
+        steps: [{ agent: "worker", status: "running" }],
+      }),
+    );
+
+    expect(() =>
+      enqueueChainAppendRequest({
+        asyncDir,
+        runId: id,
+        steps: [],
+      }),
+    ).toThrow("closing and no longer accepts appended steps");
   });
 
   it("passes the shared deadline and turn budget to every programmatic chain leaf", async () => {

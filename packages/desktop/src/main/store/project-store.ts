@@ -178,18 +178,23 @@ export class ProjectStore {
     return { ...result, lastOpenedAt: Date.parse(now) };
   }
 
+  async rename(projectId: string, name: string): Promise<Project> {
+    const project = this.requireStored(projectId);
+    const normalizedName = name.trim();
+    if (!normalizedName) throw new Error("Project 名称不能为空");
+    project.name = normalizedName;
+    project.updatedAt = new Date().toISOString();
+    await this.saveProjects();
+    return this.toProject(project);
+  }
+
   async remove(projectId: string): Promise<void> {
     if (projectId === GENERAL_WORKSPACE_ID) {
       throw new Error("不能删除内置通用工作区");
     }
     this.requireStored(projectId);
     this.projectMetadata.projects = this.projectMetadata.projects.filter(({ projectId: id }) => id !== projectId);
-    delete this.desktopState.archivedThreads[projectId];
-    for (const key of Object.keys(this.desktopState.workbenches)) {
-      if (key.startsWith(`${projectId}:`)) delete this.desktopState.workbenches[key];
-    }
-    if (this.desktopState.activeProjectId === projectId) this.desktopState.activeProjectId = undefined;
-    await Promise.all([this.saveProjects(), this.saveDesktop()]);
+    await this.saveProjects();
   }
 
   getCwd(projectId: string): string {

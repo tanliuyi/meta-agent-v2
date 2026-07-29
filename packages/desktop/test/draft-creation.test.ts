@@ -17,7 +17,7 @@ describe("draft creation request", () => {
     expect(ensureDraftCreateRequestId(requestIds, "project", createId)).toBe("second");
   });
 
-  it("按 create、attach、activate、prompt 顺序提交", async () => {
+  it("按 deactivate、create、activate、attach、prompt 顺序提交", async () => {
     const harness = createHarness();
 
     await expect(materializeDraftSession(input(), harness.dependencies)).resolves.toEqual({
@@ -25,7 +25,7 @@ describe("draft creation request", () => {
       outcome: "accepted",
     });
 
-    expect(harness.order).toEqual(["create", "attach", "activate", "prompt", "catalog"]);
+    expect(harness.order).toEqual(["deactivate", "create", "activate", "attach", "prompt", "catalog"]);
     expect(harness.onMaterialized).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread" }));
   });
 
@@ -82,7 +82,7 @@ function createHarness(promptResult: SessionCommandResult = { accepted: true, qu
     order.push("attach");
     return createSessionRecord({ projectId: "project", threadId: "thread" });
   });
-  const setActiveKey = vi.fn(() => order.push("activate"));
+  const setActiveKey = vi.fn((key: string | null) => order.push(key ? "activate" : "deactivate"));
   const prompt = vi.fn(async () => {
     order.push("prompt");
     return promptResult;

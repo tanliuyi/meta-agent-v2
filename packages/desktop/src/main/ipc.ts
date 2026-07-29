@@ -447,11 +447,13 @@ export function registerIpc(
     return result.canceled || !result.filePaths[0] ? null : projects.add(result.filePaths[0]);
   });
   ipcMain.handle(CHANNELS.projectsOpen, (_event, projectId: string) => projects.open(projectId));
-  ipcMain.handle(CHANNELS.projectsRemove, async (_event, projectId: string) => {
-    await sessions.removeProject(projectId);
-    terminals.disposeProject(projectId);
-    await projects.remove(projectId);
+  ipcMain.handle(CHANNELS.projectsRename, (_event, projectId: string, name: string) =>
+    projects.rename(projectId, name),
+  );
+  ipcMain.handle(CHANNELS.projectsOpenExternally, async (_event, projectId: string) => {
+    await openPath(projects.getCwd(projectId));
   });
+  ipcMain.handle(CHANNELS.projectsRemove, (_event, projectId: string) => projects.remove(projectId));
 
   ipcMain.handle(CHANNELS.sessionsList, (_event, projectId: string, includeArchived?: boolean) =>
     sessions.list(projectId, includeArchived),

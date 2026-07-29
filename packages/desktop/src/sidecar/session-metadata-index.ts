@@ -27,6 +27,13 @@ import {
 const INDEX_VERSION = 4;
 const INDEX_FILE_NAME = "session-metadata-index.json";
 
+export class InvalidExternalSessionError extends Error {
+  constructor(sessionFile: string) {
+    super(`Invalid external Pi session: ${sessionFile}`);
+    this.name = "InvalidExternalSessionError";
+  }
+}
+
 interface IndexedSession extends Thread {
   path: string;
 }
@@ -599,7 +606,7 @@ function inferNestedParentSessionPath(sessionDirectory: string, sessionFile: str
 
 function requireExplicitSessionFingerprint(sessionFile: string, expectedId: string): string {
   const fingerprint = explicitSessionFingerprint(sessionFile, expectedId);
-  if (!fingerprint) throw new Error(`Invalid external Pi session: ${sessionFile}`);
+  if (!fingerprint) throw new InvalidExternalSessionError(sessionFile);
   return fingerprint;
 }
 

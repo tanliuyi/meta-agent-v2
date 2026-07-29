@@ -3,6 +3,8 @@ export interface DesktopActions {
   loadProjectThreads(projectId: string): Promise<void>;
   refreshProjectThreads(projectId: string): Promise<void>;
   activateProject(projectId: string): Promise<void>;
+  renameProject(projectId: string, name: string): Promise<void>;
+  openProjectExternally(projectId: string): Promise<void>;
   removeProject(projectId: string): Promise<void>;
   prewarmThread(projectId: string, threadId: string): void;
   renameThread(projectId: string, threadId: string, title: string): Promise<void>;

@@ -3521,6 +3521,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 							orchestratorTarget,
 							sessionError,
 							expandTilde: deps.expandTilde,
+							...(deps.subagentRuntime
+								? { deps: { isAsyncAvailable: () => true } }
+								: {}),
 						}),
 					}],
 					details: { mode: "management", results: [], spawnBudget },

@@ -46,7 +46,6 @@ interface DesktopThreadListItemProps {
   onOpen(thread: Thread): void;
   onArchive(thread: Thread, archived: boolean): void;
   onDelete(thread: Thread): void;
-  onPrewarm(thread: Thread): void;
 }
 
 /** 使用语义化 list、link 和 ContextMenu 实现的可访问性等效项。 */
@@ -71,12 +70,6 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           data-active={props.active || undefined}
           data-pending={isPending || undefined}
           data-depth={props.depth}
-          onMouseEnter={() => {
-            if (!props.active && !props.isSwitching) props.onPrewarm(thread);
-          }}
-          onFocus={() => {
-            if (!props.active && !props.isSwitching) props.onPrewarm(thread);
-          }}
         >
           {props.depth > 0 ? (
             <span aria-hidden="true" className="pointer-events-none absolute inset-0">

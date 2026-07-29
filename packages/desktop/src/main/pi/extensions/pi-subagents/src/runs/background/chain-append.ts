@@ -74,7 +74,11 @@ export function enqueueChainAppendRequest(input: {
 	if (status.runId !== input.runId) throw new Error(`Async run id mismatch: expected '${input.runId}', found '${status.runId}'.`);
 	if (status.mode !== "chain") throw new Error(`Run '${input.runId}' is ${status.mode}; only active chain runs accept appended steps.`);
 	if (status.state !== "running") throw new Error(`Run '${input.runId}' is ${status.state}; only running chain runs accept appended steps.`);
-	const stillInProgress = (status.steps ?? []).some((step) => step.status === "running" || step.status === "pending") || (status.pendingAppends ?? 0) > 0;
+	if ((status as AsyncStatus & { acceptingAppends?: boolean }).acceptingAppends === false) {
+		throw new Error(`Run '${input.runId}' is closing and no longer accepts appended steps.`);
+	}
+	const pendingBefore = countPendingChainAppendRequests(input.asyncDir);
+	const stillInProgress = (status.steps ?? []).some((step) => step.status === "running" || step.status === "pending") || pendingBefore > 0;
 	if (!stillInProgress) throw new Error(`Run '${input.runId}' has no running or pending chain steps left; append-step must target an in-progress chain.`);
 	if (input.steps.length === 0) throw new Error("append-step requires one chain step.");
 
@@ -84,11 +88,25 @@ export function enqueueChainAppendRequest(input: {
 		steps: input.steps,
 	};
 	fs.mkdirSync(appendDir(input.asyncDir), { recursive: true });
-	writeAtomicJson(appendRequestPath(input.asyncDir, request), request);
+	const requestPath = appendRequestPath(input.asyncDir, request);
+	writeAtomicJson(requestPath, request);
+	const latestStatus = readStatus(input.asyncDir);
+	if (latestStatus && (
+		latestStatus.state !== "running"
+		|| (latestStatus as AsyncStatus & { acceptingAppends?: boolean }).acceptingAppends === false
+	)) {
+		let withdrawn = false;
+		try {
+			fs.unlinkSync(requestPath);
+			withdrawn = true;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		if (withdrawn) throw new Error(`Run '${input.runId}' stopped accepting appended steps before the request was claimed.`);
+	}
 	const pendingCount = countPendingChainAppendRequests(input.asyncDir);
-	const statusPath = path.join(input.asyncDir, "status.json");
-	const updatedStatus = { ...status, pendingAppends: pendingCount, lastUpdate: request.createdAt };
-	writeAtomicJson(statusPath, updatedStatus);
+	// The append producer does not rewrite status.json from its stale snapshot;
+	// the runner projects requests after claiming them.
 	appendJsonl(path.join(input.asyncDir, "events.jsonl"), JSON.stringify({
 		type: "subagent.chain.append.requested",
 		ts: request.createdAt,

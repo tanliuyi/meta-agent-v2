@@ -91,11 +91,6 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     [navigate, project.id],
   );
 
-  const prewarmThread = useCallback(
-    (thread: Thread) => actions.prewarmThread(project.id, thread.id),
-    [actions, project.id],
-  );
-
   const toggleThread = useCallback((threadId: string) => {
     setExpandedThreadIds((current) => {
       const next = new Set(current);
@@ -149,7 +144,6 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               onOpen={openThread}
               onArchive={archiveThread}
               onDelete={setPendingDelete}
-              onPrewarm={prewarmThread}
             />
             {siblingExpansions?.map((siblingExpansion) => (
               <div
@@ -257,7 +251,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
       <ConfirmDialog
         open={pendingDelete !== null}
         title="删除会话"
-        description={`永久删除 Pi 会话"${pendingDelete?.title ?? ""}"及其本地会话文件。`}
+        description="永久删除此会话及其本地会话文件。"
         onOpenChange={(open) => {
           if (!open) setPendingDelete(null);
         }}

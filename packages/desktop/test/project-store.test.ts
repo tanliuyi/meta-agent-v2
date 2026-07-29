@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,6 +61,26 @@ describe("ProjectStore", () => {
     expect(desktopState.archivedThreads).toEqual({ [project.id]: ["thread-1"] });
     expect(projectMetadata.projects[0]).toMatchObject({ projectId: project.id, path: project.cwd });
     expect(projectMetadata.projects[0]).not.toHaveProperty("cwd");
+  });
+
+  it("重命名与移除只修改 projects.json 中的项目配置", async () => {
+    const { file, project, store } = await createStore();
+    await store.setArchived(project.id, "thread-1", true);
+    await store.setWorkbench({ ...store.getWorkbench(project.id, "thread-1"), panelOpen: true });
+
+    const renamed = await store.rename(project.id, "  Renamed Project  ");
+    expect(renamed).toMatchObject({ id: project.id, name: "Renamed Project", cwd: project.cwd });
+    let projectMetadata = JSON.parse(await readFile(join(rootDirectory(file), "projects.json"), "utf8"));
+    expect(projectMetadata.projects[0]).toMatchObject({ name: "Renamed Project", path: project.cwd });
+
+    await store.remove(project.id);
+
+    projectMetadata = JSON.parse(await readFile(join(rootDirectory(file), "projects.json"), "utf8"));
+    const desktopState = JSON.parse(await readFile(file, "utf8"));
+    expect(projectMetadata.projects).toEqual([]);
+    expect(desktopState.archivedThreads).toEqual({ [project.id]: ["thread-1"] });
+    expect(desktopState.workbenches[`${project.id}:thread-1`]).toMatchObject({ panelOpen: true });
+    expect((await stat(project.cwd)).isDirectory()).toBe(true);
   });
 
   it("迁移旧 desktop-state 中嵌套的项目记录", async () => {

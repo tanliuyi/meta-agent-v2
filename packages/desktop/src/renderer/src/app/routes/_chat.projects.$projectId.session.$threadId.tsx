@@ -56,8 +56,8 @@ function SessionRoute() {
     }
 
     let current = true;
+    cache.activate({ projectId, threadId });
     const record = cache.ensure({ projectId, threadId });
-    cache.setActiveKey(record.key);
     setValidation("ready");
     void actions.activateProject(projectId).catch(() => {
       if (!current) return;

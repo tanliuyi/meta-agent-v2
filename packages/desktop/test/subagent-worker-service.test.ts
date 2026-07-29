@@ -138,13 +138,108 @@ describe("SubagentWorkerService", () => {
     expect(subagentEvents.map(({ type }) => type)).toEqual(
       expect.arrayContaining(["started", "message_update", "message_end", "completed"]),
     );
-    expect(subagentEvents.find((event) => event.type === "started")).toMatchObject({
+    const startedEvents = subagentEvents.filter((event) => event.type === "started");
+    expect(startedEvents[0]).toEqual(
+      expect.objectContaining({
+        runId: "run-1",
+        threadId: expect.any(String),
+      }),
+    );
+    expect(startedEvents[0]).not.toHaveProperty("sessionFile");
+    expect(startedEvents.find((event) => event.type === "started" && event.sessionFile)).toMatchObject({
       sessionFile: join(root, "child", "session.jsonl"),
     });
     expect(existsSync(markerPath)).toBe(false);
     expect(
       subagentEvents.some(
         (event) => event.type === "message_end" && JSON.stringify(event.message).includes("worker complete"),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps structured_output available when the agent declares an explicit tool allowlist", async () => {
+    const root = join(tmpdir(), `desktop-subagent-structured-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root, { recursive: true });
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const outputPath = join(root, "structured-output.json");
+    const faux = registerFauxProvider({ models: [{ id: "structured-model", reasoning: false }] });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("structured_output", { value: { ok: true } }), {
+        stopReason: "toolUse",
+      }),
+    ]);
+    cleanups.push(() => faux.unregister());
+    const model = faux.getModel();
+    const events: SidecarEventBody[] = [];
+    const created = await SubagentWorkerService.create(
+      {
+        role: "subagent",
+        value: {
+          projectId: "project",
+          parentThreadId: "thread",
+          runId: "run-1",
+          childIndex: 0,
+          agentDir: root,
+        },
+      },
+      {
+        emit: (event) => events.push(event),
+        requestHost: async () => undefined,
+        flushEvents: async () => undefined,
+      },
+      {
+        extensionFactories: [
+          (api) => {
+            api.registerProvider(model.provider, {
+              baseUrl: model.baseUrl,
+              apiKey: "faux-key",
+              api: faux.api,
+              models: faux.models.map((registeredModel) => ({
+                id: registeredModel.id,
+                name: registeredModel.name,
+                api: registeredModel.api,
+                reasoning: registeredModel.reasoning,
+                input: registeredModel.input,
+                cost: registeredModel.cost,
+                contextWindow: registeredModel.contextWindow,
+                maxTokens: registeredModel.maxTokens,
+              })),
+            });
+          },
+        ],
+      },
+    );
+    cleanups.push(() => created.service.dispose());
+
+    await expect(
+      created.service.command({
+        type: "subagentRun",
+        request: {
+          ...baseRequest(),
+          cwd: root,
+          model: `${model.provider}/${model.id}`,
+          tools: ["read"],
+          structuredOutput: {
+            schema: {
+              type: "object",
+              $defs: { flag: { type: "boolean", const: true } },
+              properties: { ok: { $ref: "#/$defs/flag" } },
+              required: ["ok"],
+              additionalProperties: false,
+            },
+            outputPath,
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ status: "completed" });
+
+    expect(JSON.parse(readFileSync(outputPath, "utf8"))).toEqual({ ok: true });
+    expect(
+      events.some(
+        (event) =>
+          event.type === "subagent-event" &&
+          event.event.type === "tool_execution_start" &&
+          event.event.toolName === "structured_output",
       ),
     ).toBe(true);
   });

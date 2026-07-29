@@ -1,8 +1,19 @@
+import * as ContextMenu from "@radix-ui/react-context-menu";
+import { Button } from "@renderer/shared/ui/button";
+import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
+import { Dialog } from "@renderer/shared/ui/dialog";
+import { DialogClose } from "@renderer/shared/ui/dialog-close";
+import { DialogContent } from "@renderer/shared/ui/dialog-content";
+import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogTitle } from "@renderer/shared/ui/dialog-title";
+import { Input } from "@renderer/shared/ui/input";
 import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
+import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
-import { memo, useEffect, useRef, useState } from "react";
+import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import { type FormEvent, memo, useEffect, useRef, useState } from "react";
 import type { Project } from "../../../../shared/contracts.ts";
 import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
 import { selectProjectThreads } from "../../state/desktop-selectors.ts";
@@ -28,6 +39,9 @@ export const ProjectItem = memo(function ProjectItem({
   const threads = useDesktopSelector((state) => selectProjectThreads(state, project.id));
   const [expanded, setExpanded] = useState(() => readStoredProjectExpanded(project.id, active));
   const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState(false);
+  const [renameName, setRenameName] = useState<string | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
   const wasActive = useRef(active);
   const threadListId = `project-threads-${project.id}`;
   const showRunningIndicator = !expanded && threads?.some(({ archived, running }) => !archived && running) === true;
@@ -61,50 +75,104 @@ export const ProjectItem = memo(function ProjectItem({
     writeStoredProjectExpanded(project.id, next);
   };
 
+  const runProjectAction = (action: () => Promise<void>) => {
+    if (pendingAction) return;
+    setPendingAction(true);
+    void action()
+      .catch(() => undefined)
+      .finally(() => setPendingAction(false));
+  };
+
+  const commitRename = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = renameName?.trim();
+    if (!name || name === project.name) {
+      setRenameName(null);
+      return;
+    }
+    setRenameName(null);
+    runProjectAction(() => actions.renameProject(project.id, name));
+  };
+
+  const confirmDelete = () => {
+    setDeletePending(false);
+    runProjectAction(() => actions.removeProject(project.id));
+  };
+
   return (
     <li className="project-group" data-project-id={project.id}>
-      <div
-        className="project-row group hover:bg-muted grid h-8 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md pe-1.5 transition-colors"
-        data-active={active || undefined}
-      >
-        <button
-          type="button"
-          className="focus-visible:ring-ring/50 flex h-8 min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm outline-none focus-visible:ring-[3px]"
-          aria-expanded={expanded}
-          aria-controls={threadListId}
-          onClick={toggleExpanded}
-        >
-          {expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
-          <span className="min-w-0 flex-1 select-none truncate font-medium">{project.name}</span>
-          {project.available ? null : <span className="project-warning">不可用</span>}
-        </button>
-        <div
-          className={
-            showRunningIndicator
-              ? "flex h-6 w-6 shrink-0 overflow-hidden transition-[width] group-hover:w-12 group-has-focus-visible:w-12"
-              : "size-6 shrink-0"
-          }
-        >
-          {showRunningIndicator ? (
-            <span
-              className="text-muted-foreground/60 grid size-6 shrink-0 place-items-center"
-              aria-label={`${project.name} 中有任务正在运行`}
-            >
-              <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-            </span>
-          ) : null}
-          <TooltipIconButton
-            tooltip="新建任务"
-            side="right"
-            disabled={!project.available || newTaskDisabled}
-            className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 disabled:opacity-0"
-            aria-label={`在 ${project.name} 中新建任务`}
-            onClick={() => onNewTask(project.id)}
+      <ContextMenu.Root>
+        <ContextMenu.Trigger asChild>
+          <div
+            className="project-row group hover:bg-muted data-[state=open]:bg-muted grid h-8 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md pe-1.5 transition-colors"
+            data-active={active || undefined}
+            data-pending={pendingAction || undefined}
           >
-            <Plus className="size-3.5" />
-          </TooltipIconButton>
-        </div>
-      </div>
+            <button
+              type="button"
+              className="focus-visible:ring-ring/50 flex h-8 min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm outline-none focus-visible:ring-[3px]"
+              aria-expanded={expanded}
+              aria-controls={threadListId}
+              onClick={toggleExpanded}
+            >
+              {expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
+              <span className="min-w-0 flex-1 select-none truncate font-medium">{project.name}</span>
+              {project.available ? null : <span className="project-warning">不可用</span>}
+            </button>
+            <div
+              className={
+                showRunningIndicator
+                  ? "flex h-6 w-6 shrink-0 overflow-hidden transition-[width] group-hover:w-12 group-has-focus-visible:w-12"
+                  : "size-6 shrink-0"
+              }
+            >
+              {showRunningIndicator ? (
+                <span
+                  className="text-muted-foreground/60 grid size-6 shrink-0 place-items-center"
+                  aria-label={`${project.name} 中有任务正在运行`}
+                >
+                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+                </span>
+              ) : null}
+              <TooltipIconButton
+                tooltip="新建任务"
+                side="right"
+                disabled={!project.available || newTaskDisabled}
+                className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 disabled:opacity-0"
+                aria-label={`在 ${project.name} 中新建任务`}
+                onClick={() => onNewTask(project.id)}
+              >
+                <Plus className="size-3.5" />
+              </TooltipIconButton>
+            </div>
+          </div>
+        </ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Content className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-44 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm">
+            <ContextMenu.Item
+              className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
+              disabled={pendingAction}
+              onSelect={() => setRenameName(project.name)}
+            >
+              <Pencil size={14} /> 重命名
+            </ContextMenu.Item>
+            <ContextMenu.Item
+              className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
+              disabled={pendingAction}
+              onSelect={() => runProjectAction(() => actions.openProjectExternally(project.id))}
+            >
+              <FolderOpen size={14} /> 在资源管理器中打开
+            </ContextMenu.Item>
+            <ContextMenu.Item
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
+              disabled={pendingAction}
+              onSelect={() => setDeletePending(true)}
+            >
+              <Trash2 size={14} /> 删除
+            </ContextMenu.Item>
+          </ContextMenu.Content>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
       <div id={threadListId} hidden={!expanded}>
         {expanded && threads ? (
           threads.length > 0 ? (
@@ -121,6 +189,41 @@ export const ProjectItem = memo(function ProjectItem({
           </div>
         ) : null}
       </div>
+      <Dialog
+        open={renameName !== null}
+        onOpenChange={(open) => {
+          if (!open) setRenameName(null);
+        }}
+      >
+        <DialogContent className="gap-3 sm:max-w-md">
+          <DialogTitle>重命名项目</DialogTitle>
+          <DialogDescription>仅修改项目列表中的名称，不会重命名实际项目目录。</DialogDescription>
+          <form className="mt-2 space-y-4" onSubmit={commitRename}>
+            <Input
+              autoFocus
+              aria-label="项目名称"
+              value={renameName ?? ""}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => setRenameName(event.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <DialogClose asChild>
+                <Button variant="ghost">取消</Button>
+              </DialogClose>
+              <Button type="submit" disabled={!renameName?.trim()}>
+                保存
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={deletePending}
+        title="删除项目"
+        description={`仅从项目列表移除“${project.name}”。对应的会话、项目目录及其中的文件都会保留。`}
+        onOpenChange={setDeletePending}
+        onConfirm={confirmDelete}
+      />
     </li>
   );
 });

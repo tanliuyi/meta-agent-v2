@@ -106,6 +106,7 @@ export class SidecarWorkerClient {
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       serialization: "json",
       detached: process.platform !== "win32",
+      windowsHide: true,
     });
     this.child.stderr?.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();

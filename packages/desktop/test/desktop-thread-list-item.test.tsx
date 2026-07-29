@@ -43,7 +43,6 @@ function renderThread(
       onOpen={vi.fn()}
       onArchive={vi.fn()}
       onDelete={vi.fn()}
-      onPrewarm={vi.fn()}
     />,
   );
 }

@@ -131,6 +131,23 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
           throw error;
         }
       },
+      async renameProject(projectId, name) {
+        try {
+          const project = await window.desktop.projects.rename(projectId, name);
+          dispatchDesktop(store, { type: "project-renamed", project });
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
+      async openProjectExternally(projectId) {
+        try {
+          await window.desktop.projects.openExternally(projectId);
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
       async removeProject(projectId) {
         const restore = cache.quiesceProject(projectId);
         try {

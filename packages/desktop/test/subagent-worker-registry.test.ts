@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import type { NodeRuntimeManifest } from "../src/main/sidecar/node-runtime-locator.ts";
 import { type SubagentWorkerClient, SubagentWorkerRegistry } from "../src/main/sidecar/subagent-worker-registry.ts";
@@ -548,6 +549,69 @@ describe("SubagentWorkerRegistry", () => {
       await registry.dispose();
       expect(registry.isActiveThread("project", "blocked-child")).toBe(false);
     } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("handles active metadata rejection immediately and recovers after terminal persistence", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "subagent-active-metadata-recovery-"));
+    const sessionFile = join(directory, "child.jsonl");
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "recovering-child",
+        timestamp: "2026-01-02T03:04:05.000Z",
+        cwd: process.cwd(),
+      })}\n`,
+    );
+    let releaseWorker!: () => void;
+    const workerPending = new Promise<void>((resolve) => {
+      releaseWorker = resolve;
+    });
+    let client: FakeClient | undefined;
+    let persistenceCount = 0;
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      persistSession: async () => {
+        persistenceCount += 1;
+        if (persistenceCount === 1) throw new Error("metadata temporarily unavailable");
+      },
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = workerPending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+
+    try {
+      const run = registry.handleHostRequest(
+        { type: "subagent.run", request: { ...runRequest(), persistSession: true, sessionFile } },
+        () => undefined,
+      );
+      await expect.poll(() => client).toBeDefined();
+      client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1" }));
+      await expect.poll(() => persistenceCount).toBe(1);
+      await delay(0);
+      expect(unhandledRejections).toEqual([]);
+
+      client?.emitSidecarEvent(event(client.instanceId, 2, { type: "completed", runId: "run-1", sessionFile }));
+      releaseWorker();
+
+      await expect(run).resolves.toEqual({ status: "completed" });
+      expect(persistenceCount).toBe(2);
+      expect(client?.acknowledgements).toEqual([1, 2]);
+    } finally {
+      releaseWorker();
+      process.off("unhandledRejection", onUnhandledRejection);
+      await registry.dispose();
       rmSync(directory, { recursive: true, force: true });
     }
   });

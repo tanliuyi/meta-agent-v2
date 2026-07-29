@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -19,7 +19,10 @@ import { DesktopBuiltinProviderRegistry } from "../main/pi/desktop-builtin-provi
 import { DesktopExtensionHost } from "../main/pi/desktop-extension-host.ts";
 import { controlledResourceLoaderOptions } from "../main/pi/desktop-extension-runtime-policy.ts";
 import registerFanoutChildSubagentExtension from "../main/pi/extensions/pi-subagents/src/extension/fanout-child.ts";
-import { validateStructuredOutputValue } from "../main/pi/extensions/pi-subagents/src/runs/shared/structured-output.ts";
+import {
+  createStructuredOutputToolParameters,
+  validateStructuredOutputValue,
+} from "../main/pi/extensions/pi-subagents/src/runs/shared/structured-output.ts";
 import {
   shouldBlockToolForBudget,
   toolBudgetBlockedMessage,
@@ -226,7 +229,11 @@ export class SubagentWorkerService implements SidecarService {
       sessionManager,
       ...(model ? { model } : {}),
       ...(request.thinking ? { thinkingLevel: request.thinking as ThinkingLevel } : {}),
-      ...(request.tools ? { tools: request.tools } : {}),
+      ...(request.tools
+        ? {
+            tools: [...new Set([...request.tools, ...(request.structuredOutput ? ["structured_output"] : [])])],
+          }
+        : {}),
       sessionStartEvent: {
         type: "session_start",
         reason: request.sessionFile && existsSync(request.sessionFile) ? "resume" : "new",
@@ -303,7 +310,7 @@ export class SubagentWorkerService implements SidecarService {
       extensionSet: { generation: extensionSet.generation, diagnostics: [], reloadRequired: false },
       extensionHost: this.extensionHost.hostState,
     };
-    let announcedSessionFile = created.session.sessionFile;
+    let announcedSessionFile = materializedSessionFile(created.session.sessionFile, created.session.sessionId);
     this.context.emit({
       type: "subagent-event",
       event: {
@@ -318,7 +325,7 @@ export class SubagentWorkerService implements SidecarService {
     const unsubscribe = created.session.subscribe((event) => {
       this.projectSessionEvent(event);
       if (!announcedSessionFile) {
-        const materialized = created.session.sessionFile;
+        const materialized = materializedSessionFile(created.session.sessionFile, created.session.sessionId);
         if (materialized) {
           // Persisted session files materialize lazily, so announce the path as soon as it exists.
           announcedSessionFile = materialized;
@@ -547,6 +554,31 @@ function subagentSessionTitle(task: string): string {
   return (firstLine ?? "子智能体会话").replace(/\s+/g, " ").slice(0, 48);
 }
 
+function materializedSessionFile(sessionFile: string | undefined, expectedId: string): string | undefined {
+  if (!sessionFile) return undefined;
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(sessionFile, "r");
+    const buffer = Buffer.alloc(8 * 1024);
+    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+    const firstLine = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0];
+    if (!firstLine) return undefined;
+    const header: unknown = JSON.parse(firstLine);
+    return typeof header === "object" &&
+      header !== null &&
+      "type" in header &&
+      header.type === "session" &&
+      "id" in header &&
+      header.id === expectedId
+      ? sessionFile
+      : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 function createSessionManager(request: SubagentRunRequest): SessionManager {
   if (!request.persistSession) return SessionManager.inMemory(request.cwd);
   if (request.sessionFile) return SessionManager.open(request.sessionFile, dirname(request.sessionFile), request.cwd);
@@ -621,12 +653,7 @@ function registerStructuredOutput(api: ExtensionAPI, request: SubagentRunRequest
     name: "structured_output",
     label: "Structured Output",
     description: "Submit the required final structured output for this subagent step.",
-    parameters: {
-      type: "object",
-      properties: { value: structured.schema },
-      required: ["value"],
-      additionalProperties: false,
-    } as never,
+    parameters: createStructuredOutputToolParameters(structured.schema) as never,
     async execute(_id, params: { value: unknown }) {
       const validation = await validateStructuredOutputValue(structured.schema, params.value);
       if (validation.status === "invalid")

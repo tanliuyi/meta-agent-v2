@@ -351,7 +351,7 @@ export class SubagentWorkerRegistry {
   private queueMetadataPersistence(record: SubagentWorkerRecord, sessionFile: string, thread: Thread): Promise<void> {
     const persistSession = this.options.persistSession;
     if (!persistSession) return record.metadataTail;
-    record.metadataTail = record.metadataTail
+    const persistence = record.metadataTail
       .catch(() => undefined)
       .then(async () => {
         try {
@@ -367,7 +367,11 @@ export class SubagentWorkerRegistry {
           throw failure;
         }
       });
-    return record.metadataTail;
+    record.metadataTail = persistence;
+    // Active-session persistence has no acknowledgement waiter, so mark the
+    // rejection handled immediately while preserving it for barriers below.
+    void persistence.catch(() => undefined);
+    return persistence;
   }
 
   private finalizeRecord(record: SubagentWorkerRecord, reason?: string, shutdownTimeout?: number): Promise<void> {

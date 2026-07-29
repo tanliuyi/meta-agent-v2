@@ -41,6 +41,7 @@ export async function materializeDraftSession(
   dependencies: DraftMaterializationDependencies,
 ): Promise<DraftMaterializationResult> {
   const createRequestId = ensureDraftCreateRequestId(dependencies.requestIds, input.projectId);
+  dependencies.cache.setActiveKey(null);
   const bootstrap = await dependencies.sessions.create({
     projectId: input.projectId,
     createRequestId,
@@ -52,9 +53,9 @@ export async function materializeDraftSession(
 
   const target = { projectId: input.projectId, threadId: bootstrap.threadId };
   const recordKey = sessionRecordKey(target.projectId, target.threadId);
+  dependencies.cache.setActiveKey(recordKey);
   try {
-    const record = await dependencies.cache.ensureAttached(target);
-    dependencies.cache.setActiveKey(record.key);
+    await dependencies.cache.ensureAttached(target);
   } catch (error) {
     await cleanupMaterializedSession(dependencies, target, recordKey);
     throw error;
