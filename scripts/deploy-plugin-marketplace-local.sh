@@ -37,7 +37,7 @@ if [[ "${MARKETPLACE_SKIP_CHECK:-false}" != "true" ]]; then
     -v "$REPO_ROOT:/workspace" \
     -w /workspace \
     node:22.22.1-bookworm \
-    bash -lc 'npm ci --ignore-scripts && npm run check && cd packages/plugin-marketplace-server && node ../../node_modules/vitest/dist/cli.js --run test/config-and-catalog.test.ts test/marketplace-http.test.ts test/marketplace-accounts-publish.test.ts'
+    bash -lc 'npm ci --ignore-scripts && npm --prefix packages/plugin-marketplace-server run typecheck && cd packages/plugin-marketplace-server && node ../../node_modules/vitest/dist/cli.js --run test/config-and-catalog.test.ts test/marketplace-http.test.ts test/marketplace-accounts-publish.test.ts && cd ../plugin-marketplace-web && npx tsc --noEmit -p tsconfig.app.json && npx tsc --noEmit -p tsconfig.node.json'
 fi
 
 mkdir -p "$SERVER_DIR" "$WEB_DIR"
