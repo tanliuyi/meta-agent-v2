@@ -433,7 +433,7 @@
 }
 .composer-suggestions button {
   display: grid;
-  grid-template-columns: 16px minmax(0, 48%) minmax(0, 1fr);
+  grid-template-columns: 16px fit-content(32%) minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
   width: 100%;
