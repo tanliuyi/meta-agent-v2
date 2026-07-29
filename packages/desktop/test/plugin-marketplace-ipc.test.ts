@@ -34,22 +34,13 @@ describe("plugin marketplace IPC", () => {
     install: vi.fn(),
     update: vi.fn(),
     uninstall: vi.fn(),
-    getPendingApplyTransaction: vi.fn(),
-    clearCompletedMutation: vi.fn(),
   };
-  const mutationApply = { rollback: vi.fn(), complete: vi.fn() };
-  const applyJournal = { hasMutationOperation: vi.fn() };
-  const revocations = { decorateSnapshot: vi.fn() };
   const pluginConfigurations = { getConfig: vi.fn(), saveConfig: vi.fn() };
 
   beforeEach(() => {
     electron.handles.clear();
     electron.listeners.clear();
     vi.clearAllMocks();
-    revocations.decorateSnapshot.mockImplementation(async (snapshot) => ({
-      ...snapshot,
-      revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
-    }));
     registerIpc(
       { list: vi.fn(), getActive: vi.fn() } as never,
       sessions as never,
@@ -68,9 +59,6 @@ describe("plugin marketplace IPC", () => {
       catalog as never,
       registry as never,
       installer as never,
-      mutationApply as never,
-      applyJournal as never,
-      revocations as never,
       pluginConfigurations as never,
     );
   });
@@ -94,17 +82,6 @@ describe("plugin marketplace IPC", () => {
     expect(endpoints.saveEndpoint).toHaveBeenCalledWith(saveInput);
     expect(catalog.list).toHaveBeenCalledWith(listInput);
     expect(saveInput).not.toHaveProperty("artifactUrl");
-  });
-
-  it("decorates installed snapshots with verified revocation status", async () => {
-    const snapshot = { revision: "one", plugins: [] };
-    const decorated = { revision: "one", plugins: [{ id: "plugin", revocation: { status: "blocked" } }] };
-    registry.getSnapshot.mockResolvedValue(snapshot);
-    revocations.decorateSnapshot.mockResolvedValue(decorated);
-
-    await expect(electron.handles.get(CHANNELS.marketplaceGetInstalled)?.({})).resolves.toBe(decorated);
-
-    expect(revocations.decorateSnapshot).toHaveBeenCalledWith(snapshot);
   });
 
   it("reads and saves validated plugin configuration through main-owned services", async () => {
@@ -156,13 +133,12 @@ describe("plugin marketplace IPC", () => {
       expect.objectContaining({
         snapshot: expect.objectContaining({
           revision: "two",
-          revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
         }),
       }),
     );
   });
 
-  it("applies an installation to the requested current session without exposing the mutation journal", async () => {
+  it("applies an installation directly to the requested current session", async () => {
     const input = {
       requestId: "install-apply",
       expectedRevision: "one",
@@ -172,31 +148,22 @@ describe("plugin marketplace IPC", () => {
       applyToCurrentSession: { projectId: "project", threadId: "thread", abortRunning: true },
     };
     installer.install.mockResolvedValue({ status: "installed", snapshot: { revision: "two", plugins: [] } });
-    installer.getPendingApplyTransaction.mockResolvedValue({ operationId: "internal-operation" });
     sessions.getExtensionState.mockResolvedValue({ desiredGeneration: "generation-two" });
     sessions.applyExtensionSet.mockResolvedValue({ status: "applied", generation: "generation-two" });
 
     const result = await electron.handles.get(CHANNELS.marketplaceInstallPlugin)?.({}, input);
 
-    expect(sessions.applyExtensionSet).toHaveBeenCalledWith(
-      "project",
-      "thread",
-      "generation-two",
-      true,
-      "internal-operation",
-    );
+    expect(sessions.applyExtensionSet).toHaveBeenCalledWith("project", "thread", "generation-two", true);
     expect(result).toEqual(
       expect.objectContaining({
-        snapshot: expect.objectContaining({
-          revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
-        }),
+        snapshot: expect.objectContaining({}),
         application: { status: "applied", generation: "generation-two" },
       }),
     );
     expect(result).not.toHaveProperty("operationId");
   });
 
-  it("clears a stale request cache after mutation apply rolls back", async () => {
+  it("keeps the installed version when current-session apply rolls back", async () => {
     const input = {
       requestId: "install-rolled-back",
       expectedRevision: "one",
@@ -206,96 +173,25 @@ describe("plugin marketplace IPC", () => {
       applyToCurrentSession: { projectId: "project", threadId: "thread" },
     };
     installer.install.mockResolvedValue({ status: "installed", snapshot: { revision: "two", plugins: [] } });
-    installer.getPendingApplyTransaction.mockResolvedValue({ operationId: "internal-operation" });
     sessions.getExtensionState.mockResolvedValue({ desiredGeneration: "generation-two" });
     sessions.applyExtensionSet.mockResolvedValue({
       status: "rolled-back",
       generation: "generation-one",
       error: "/private/user/path/plugin.ts failed",
     });
-    applyJournal.hasMutationOperation.mockResolvedValue(false);
-    const restoredSnapshot = { revision: "restored", plugins: [] };
-    const decoratedRestoredSnapshot = {
-      ...restoredSnapshot,
-      revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
-    };
-    registry.getSnapshot.mockResolvedValue(restoredSnapshot);
-    revocations.decorateSnapshot.mockResolvedValue(decoratedRestoredSnapshot);
 
     const result = await electron.handles.get(CHANNELS.marketplaceInstallPlugin)?.({}, input);
 
-    expect(installer.clearCompletedMutation).toHaveBeenCalledWith("install-rolled-back");
     expect(result).toEqual(
       expect.objectContaining({
-        snapshot: decoratedRestoredSnapshot,
+        snapshot: expect.objectContaining({ revision: "two" }),
         application: expect.objectContaining({
           status: "rolled-back",
           error: "插件 worker 启动失败，当前会话已恢复之前的扩展集合",
         }),
       }),
     );
-    expect(revocations.decorateSnapshot).toHaveBeenCalledTimes(1);
-    expect(revocations.decorateSnapshot).toHaveBeenCalledWith(restoredSnapshot);
     expect(JSON.stringify(result)).not.toContain("/private/user/path");
-  });
-
-  it("completes the committed mutation when apply fails before its durable journal handoff", async () => {
-    const input = {
-      requestId: "install-pre-journal-failure",
-      expectedRevision: "one",
-      pluginId: "dev.meta-agent.plugin",
-      version: "1.0.0",
-      confirmFullTrust: true,
-      applyToCurrentSession: { projectId: "project", threadId: "thread" },
-    };
-    installer.install.mockResolvedValue({ status: "installed", snapshot: { revision: "two", plugins: [] } });
-    installer.getPendingApplyTransaction.mockResolvedValue({ operationId: "internal-operation" });
-    sessions.getExtensionState.mockResolvedValue({ desiredGeneration: "generation-two" });
-    sessions.applyExtensionSet.mockRejectedValue(new Error("confirm abort"));
-    applyJournal.hasMutationOperation.mockResolvedValue(false);
-
-    await expect(electron.handles.get(CHANNELS.marketplaceInstallPlugin)?.({}, input)).resolves.toEqual(
-      expect.objectContaining({ status: "installed", applicationError: "confirm abort" }),
-    );
-
-    expect(mutationApply.complete).toHaveBeenCalledWith("internal-operation");
-  });
-
-  it("rolls back a linked mutation when a cold session cannot complete initial startup", async () => {
-    const input = {
-      requestId: "install-cold-startup-failure",
-      expectedRevision: "one",
-      pluginId: "dev.meta-agent.plugin",
-      version: "1.0.0",
-      confirmFullTrust: true,
-      applyToCurrentSession: { projectId: "project", threadId: "cold-thread" },
-    };
-    installer.install.mockResolvedValue({ status: "installed", snapshot: { revision: "two", plugins: [] } });
-    installer.getPendingApplyTransaction.mockResolvedValue({ operationId: "internal-operation" });
-    sessions.getExtensionState
-      .mockResolvedValueOnce({ desiredGeneration: "generation-two" })
-      .mockResolvedValueOnce({ desiredGeneration: "generation-one" });
-    sessions.applyExtensionSet.mockRejectedValue(
-      Object.assign(new Error("cold worker failed"), { code: "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED" }),
-    );
-    applyJournal.hasMutationOperation.mockResolvedValue(false);
-    const restoredSnapshot = { revision: "restored", plugins: [] };
-    registry.getSnapshot.mockResolvedValue(restoredSnapshot);
-
-    const result = await electron.handles.get(CHANNELS.marketplaceInstallPlugin)?.({}, input);
-
-    expect(mutationApply.rollback).toHaveBeenCalledWith("internal-operation");
-    expect(mutationApply.complete).toHaveBeenCalledWith("internal-operation");
-    expect(sessions.extensionSettingsChanged).toHaveBeenCalledTimes(2);
-    expect(result).toEqual(
-      expect.objectContaining({
-        snapshot: expect.objectContaining({
-          revision: "restored",
-          revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
-        }),
-        application: expect.objectContaining({ status: "rolled-back", generation: "generation-one" }),
-      }),
-    );
   });
 
   it("decorates a recovery-pending installation without starting session apply", async () => {
@@ -318,38 +214,10 @@ describe("plugin marketplace IPC", () => {
     expect(result).toEqual(
       expect.objectContaining({
         recoveryPending: true,
-        snapshot: expect.objectContaining({
-          revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
-        }),
+        snapshot: expect.objectContaining({}),
       }),
     );
-    expect(installer.getPendingApplyTransaction).not.toHaveBeenCalled();
     expect(sessions.applyExtensionSet).not.toHaveBeenCalled();
-  });
-
-  it("keeps the mutation pending when apply already crossed the durable journal handoff", async () => {
-    const input = {
-      requestId: "install-post-journal-failure",
-      expectedRevision: "one",
-      pluginId: "dev.meta-agent.plugin",
-      version: "1.0.0",
-      confirmFullTrust: true,
-      applyToCurrentSession: { projectId: "project", threadId: "thread" },
-    };
-    installer.install.mockResolvedValue({ status: "installed", snapshot: { revision: "two", plugins: [] } });
-    installer.getPendingApplyTransaction.mockResolvedValue({ operationId: "internal-operation" });
-    sessions.getExtensionState.mockResolvedValue({ desiredGeneration: "generation-two" });
-    applyJournal.hasMutationOperation.mockResolvedValue(true);
-
-    await expect(electron.handles.get(CHANNELS.marketplaceInstallPlugin)?.({}, input)).resolves.toEqual(
-      expect.objectContaining({
-        status: "installed",
-        applicationError: expect.stringContaining("recovery is pending"),
-      }),
-    );
-
-    expect(sessions.applyExtensionSet).not.toHaveBeenCalled();
-    expect(mutationApply.complete).not.toHaveBeenCalled();
   });
 
   it("invalidates worker extension generations after an update", async () => {
@@ -372,15 +240,12 @@ describe("plugin marketplace IPC", () => {
     expect(sessions.extensionSettingsChanged).toHaveBeenCalledOnce();
     expect(result).toEqual(
       expect.objectContaining({
-        snapshot: expect.objectContaining({
-          revision: "three",
-          revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
-        }),
+        snapshot: expect.objectContaining({ revision: "three" }),
       }),
     );
   });
 
-  it("decorates an update conflict current snapshot without invalidating extensions", async () => {
+  it("returns an update conflict without invalidating extensions", async () => {
     const input = {
       requestId: "update-conflict",
       expectedRevision: "two",
@@ -400,7 +265,6 @@ describe("plugin marketplace IPC", () => {
       current: {
         revision: "current",
         plugins: [],
-        revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
       },
     });
     expect(sessions.extensionSettingsChanged).not.toHaveBeenCalled();
@@ -425,15 +289,12 @@ describe("plugin marketplace IPC", () => {
     expect(sessions.extensionSettingsChanged).toHaveBeenCalledOnce();
     expect(result).toEqual(
       expect.objectContaining({
-        snapshot: expect.objectContaining({
-          revision: "three",
-          revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
-        }),
+        snapshot: expect.objectContaining({ revision: "three" }),
       }),
     );
   });
 
-  it("decorates an uninstall not-installed snapshot without invalidating extensions", async () => {
+  it("returns an uninstall not-installed snapshot without invalidating extensions", async () => {
     const input = {
       requestId: "uninstall-not-installed",
       expectedRevision: "three",
@@ -452,7 +313,6 @@ describe("plugin marketplace IPC", () => {
       snapshot: {
         revision: "three",
         plugins: [],
-        revocationChecks: [{ marketplaceId: "test.market", status: "fresh" }],
       },
     });
     expect(sessions.extensionSettingsChanged).not.toHaveBeenCalled();

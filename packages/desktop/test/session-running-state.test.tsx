@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createSessionRecord } from "../src/renderer/src/runtime/pi-session-store.ts";
 import { SessionTransportManager } from "../src/renderer/src/runtime/session-transport-manager.ts";
 import { usePiSessionRuntime } from "../src/renderer/src/runtime/use-pi-session-runtime.ts";
+import { ToastProvider } from "../src/renderer/src/shared/ui/toast-provider.tsx";
 import { desktopReducer, INITIAL_STATE } from "../src/renderer/src/state/desktop-model.ts";
 import type { SessionControlState, Thread } from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
@@ -25,7 +26,7 @@ describe("session route running state", () => {
       return null;
     }
 
-    renderToStaticMarkup(createElement(RuntimeProbe));
+    renderToStaticMarkup(createElement(ToastProvider, null, createElement(RuntimeProbe)));
 
     expect(runtime?.thread.getState().isRunning).toBe(true);
   });

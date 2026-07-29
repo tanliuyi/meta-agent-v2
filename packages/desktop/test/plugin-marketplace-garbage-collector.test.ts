@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { lstat, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -94,7 +93,7 @@ describe("MarketplacePluginGarbageCollector", () => {
     await expect(restartedCollector.run()).resolves.toMatchObject({ removedVersions: [inactive] });
   });
 
-  it("preserves an unreferenced version whose signed files were modified", async () => {
+  it("collects an unreferenced version without rechecking its files", async () => {
     const harness = await createHarness("plugin.modified-old-version");
     const activeHash = "1".repeat(64);
     const modifiedHash = "2".repeat(64);
@@ -116,9 +115,9 @@ describe("MarketplacePluginGarbageCollector", () => {
 
     const result = await collector.run();
 
-    expect(result.removedVersions).toEqual([]);
-    expect(result.preservedModifiedRoots).toEqual([harness.pluginRoot]);
-    await expect(directoryExists(modified)).resolves.toBe(true);
+    expect(result.removedVersions).toEqual([modified]);
+    expect(result.preservedModifiedRoots).toEqual([]);
+    await expect(directoryExists(modified)).resolves.toBe(false);
   });
 
   it("removes an expired uninstalled root only after all references are released", async () => {
@@ -127,7 +126,7 @@ describe("MarketplacePluginGarbageCollector", () => {
     const versionRoot = await createVersion(harness.pluginRoot, artifactHash);
     const record = installedRecord(harness.pluginRoot, artifactHash, join(versionRoot, "payload", "index.ts"));
     await writeMarketplaceProjection(record);
-    await writeMarketplaceUninstallTombstone(record, "uninstall", 1, false);
+    await writeMarketplaceUninstallTombstone(record, "uninstall", 1);
     let referenced = true;
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
@@ -188,7 +187,7 @@ describe("MarketplacePluginGarbageCollector", () => {
       artifactHash,
       join(harness.pluginRoot, ".versions", artifactHash, "payload", "index.ts"),
     );
-    await writeMarketplaceUninstallTombstone(record, "uninstall", 1, false);
+    await writeMarketplaceUninstallTombstone(record, "uninstall", 1);
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
       harness.transactions,
@@ -201,27 +200,6 @@ describe("MarketplacePluginGarbageCollector", () => {
 
     expect(result.removedRoots).toEqual([harness.pluginRoot]);
     await expect(directoryExists(harness.pluginRoot)).resolves.toBe(false);
-  });
-
-  it("never collects a tombstone that preserves user-modified files", async () => {
-    const harness = await createHarness("plugin.modified");
-    const artifactHash = "e".repeat(64);
-    const versionRoot = await createVersion(harness.pluginRoot, artifactHash);
-    const record = installedRecord(harness.pluginRoot, artifactHash, join(versionRoot, "payload", "index.ts"));
-    await writeMarketplaceProjection(record);
-    await writeMarketplaceUninstallTombstone(record, "uninstall", 1, true);
-    const collector = new MarketplacePluginGarbageCollector(
-      harness.registry,
-      harness.transactions,
-      { isReferenced: () => false },
-      harness.agentDir,
-      { now: () => 10_000, retentionMs: 0 },
-    );
-
-    const result = await collector.run();
-
-    expect(result.preservedModifiedRoots).toEqual([harness.pluginRoot]);
-    await expect(directoryExists(versionRoot)).resolves.toBe(true);
   });
 });
 
@@ -270,13 +248,6 @@ function installedRecord(
     installedAt: 1,
     entryPath,
     rootPath: pluginRoot,
-    verifiedFiles: [
-      {
-        path: "payload/index.ts",
-        sha256: createHash("sha256").update(pluginSource).digest("hex"),
-        size: Buffer.byteLength(pluginSource),
-      },
-    ],
   };
 }
 

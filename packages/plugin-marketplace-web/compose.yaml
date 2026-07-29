@@ -1,0 +1,24 @@
+name: plugin-marketplace-web
+
+services:
+  web:
+    image: ${MARKETPLACE_WEB_IMAGE:-meta-agent-plugin-marketplace-web:local}
+    build:
+      context: ../..
+      dockerfile: packages/plugin-marketplace-web/Dockerfile
+    container_name: plugin-marketplace-web
+    restart: unless-stopped
+    environment:
+      MARKETPLACE_API_UPSTREAM: http://100.91.230.10:4317
+    ports:
+      - "4318:8080"
+    read_only: true
+    tmpfs:
+      - /data:size=8m,mode=0755
+      - /config:size=8m,mode=0755
+      - /tmp:size=8m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

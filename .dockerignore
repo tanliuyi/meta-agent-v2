@@ -13,3 +13,14 @@ packages/plugin-marketplace-server/*
 !packages/plugin-marketplace-server/src/*
 !packages/plugin-marketplace-server/catalog/
 !packages/plugin-marketplace-server/catalog/*
+!packages/plugin-marketplace-web/
+packages/plugin-marketplace-web/*
+!packages/plugin-marketplace-web/package.json
+!packages/plugin-marketplace-web/Caddyfile
+!packages/plugin-marketplace-web/tsconfig.app.json
+!packages/plugin-marketplace-web/tsconfig.node.json
+!packages/plugin-marketplace-web/tsr.config.json
+!packages/plugin-marketplace-web/vite.config.ts
+!packages/plugin-marketplace-web/index.html
+!packages/plugin-marketplace-web/src/
+!packages/plugin-marketplace-web/src/**

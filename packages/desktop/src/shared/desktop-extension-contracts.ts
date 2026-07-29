@@ -57,7 +57,6 @@ export interface ResolvedExtensionEntry {
   displayName: string;
   source: DesktopExtensionSource;
   entryPath?: string;
-  contentHash?: string;
   hostProfileVersion: typeof DESKTOP_EXTENSION_HOST_PROFILE_VERSION;
   capabilities: DesktopExtensionCapability[];
   configuration?: Record<string, PluginConfigurationValue>;

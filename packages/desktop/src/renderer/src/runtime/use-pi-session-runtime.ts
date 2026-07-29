@@ -1,5 +1,6 @@
 import {
   type AssistantRuntime,
+  type Attachment,
   type ExternalStoreAdapter,
   type ExternalThreadQueueAdapter,
   type ThreadMessage,
@@ -7,7 +8,7 @@ import {
 } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useToast } from "../shared/ui/use-toast.ts";
-import { imageAttachmentAdapter } from "./image-attachments.ts";
+import { imageAttachmentAdapter, restoreComposerAttachments } from "./image-attachments.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
 import type { CachedSessionRecord } from "./pi-session-store.ts";
@@ -104,7 +105,7 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
       queue,
       onEdit: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.edit : undefined,
       onReload: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.reload : undefined,
-      onCancel: hasCommandTarget && isCancelable ? coordinator.cancel : undefined,
+      onCancel: hasCommandTarget && isCancelable ? () => coordinator.cancel(snapshotRef.current.queue) : undefined,
       adapters: { attachments: !isSendDisabled ? imageAttachmentAdapter : undefined },
       unstable_enableToolInvocations: false,
     }),
@@ -123,19 +124,67 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
   );
   const runtime = useExternalStoreRuntime<ThreadMessage>(runtimeAdapter);
   const composer = runtime.thread.composer;
+  const restoredDraftRef = useRef<{
+    composer: typeof composer;
+    store: typeof stores.composerDraft;
+    savedAttachments: readonly Attachment[];
+    restoredAttachments: Set<Attachment>;
+    restorePromise: Promise<void> | null;
+    complete: boolean;
+  } | null>(null);
   runtimeRef.current = runtime;
 
   useEffect(() => {
-    const savedText = stores.composerDraft.getText();
-    if (savedText) composer.setText(savedText);
+    const savedDraft = stores.composerDraft.getSnapshot();
+    let restoreState = restoredDraftRef.current;
+    if (restoreState?.composer !== composer || restoreState.store !== stores.composerDraft) {
+      restoreState = {
+        composer,
+        store: stores.composerDraft,
+        savedAttachments: savedDraft.attachments,
+        restoredAttachments: new Set(),
+        restorePromise: null,
+        complete: savedDraft.attachments.length === 0,
+      };
+      restoredDraftRef.current = restoreState;
+    }
+    composer.setText(savedDraft.text);
 
     const syncDraft = () => {
-      stores.composerDraft.setText(composer.getState().text);
+      const state = composer.getState();
+      stores.composerDraft.setSnapshot({
+        text: state.text,
+        attachments: restoreState.complete ? state.attachments : restoreState.savedAttachments,
+      });
     };
     const unsubscribe = composer.subscribe(syncDraft);
     syncDraft();
-    return unsubscribe;
-  }, [composer, stores.composerDraft]);
+
+    if (!isSendDisabled && !restoreState.complete && !restoreState.restorePromise) {
+      const currentRestore = restoreState;
+      currentRestore.restorePromise = restoreComposerAttachments(
+        (attachment) => composer.addAttachment(attachment),
+        currentRestore.savedAttachments,
+        currentRestore.restoredAttachments,
+      );
+      void currentRestore.restorePromise.then(
+        () => {
+          currentRestore.complete = true;
+          currentRestore.restorePromise = null;
+          if (restoredDraftRef.current === currentRestore) syncDraft();
+        },
+        (error: unknown) => {
+          currentRestore.restorePromise = null;
+          console.error("Unable to restore composer attachments", error);
+        },
+      );
+    }
+
+    return () => {
+      unsubscribe();
+      syncDraft();
+    };
+  }, [composer, isSendDisabled, stores.composerDraft]);
 
   const clearQueue = useCallback(() => coordinator.clearQueue(snapshotRef.current.queue), [coordinator]);
   return useMemo(() => ({ runtime, clearQueue }), [clearQueue, runtime]);

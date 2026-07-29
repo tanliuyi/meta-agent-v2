@@ -65,6 +65,20 @@ function createService(
 }
 
 describe("ProvidersConfigService", () => {
+  test("classifies dynamic core providers as AI built-ins", async () => {
+    const { service } = createService(modelsSnapshot("m0"), authSnapshot("a0"));
+
+    const snapshot = await service.getConfig();
+
+    expect(snapshot.providers).toContainEqual(
+      expect.objectContaining({
+        key: "radius",
+        source: "ai-builtin",
+        builtInModelCount: 0,
+      }),
+    );
+  });
+
   test("includes custom providers that exist only in auth.json", async () => {
     const credential = { key: "auth-only-test-provider", apiKey: { key: "secret" } } satisfies AuthProviderDraft;
     const { service } = createService(modelsSnapshot("m0"), authSnapshot("a0", [credential]));

@@ -17,7 +17,7 @@ export function MarketplaceSettingsDialog({ open, onOpenChange, onSaved }: Marke
       <DialogContent className="plugin-marketplace-settings-dialog">
         <DialogHeader>
           <DialogTitle>插件中心设置</DialogTitle>
-          <DialogDescription>配置插件市场服务地址和签名密钥。</DialogDescription>
+          <DialogDescription>配置插件市场服务地址。</DialogDescription>
         </DialogHeader>
         <MarketplaceEndpointSettings onSaved={onSaved} />
       </DialogContent>

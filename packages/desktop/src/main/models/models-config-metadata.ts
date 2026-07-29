@@ -5,7 +5,8 @@
  * Uses @earendil-works/pi-ai public API; does not depend on coding-agent.
  */
 
-import { type Api, type BuiltinProvider, getModels, getProviders, type Model } from "@earendil-works/pi-ai/compat";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { ModelsConfigMetadata } from "../../shared/models-config-contracts.ts";
 
 // Built-in provider display names inlined from coding-agent's former
@@ -51,15 +52,15 @@ const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   "xiaomi-token-plan-sgp": "Xiaomi MiMo Token Plan (Singapore)",
 };
 
-/** Generate editor metadata from public pi-ai compat API. */
+/** Generate editor metadata from the complete public pi-ai provider registry. */
 export function getModelsConfigMetadata(): ModelsConfigMetadata {
-  const builtInProviders = getProviders().map((provider) => {
-    const displayName = BUILT_IN_PROVIDER_DISPLAY_NAMES[provider] ?? provider;
-    const models = getModels(provider as BuiltinProvider).map(toBuiltInModelMetadata);
+  const builtInProviders = builtinProviders().map((provider) => {
+    const displayName = BUILT_IN_PROVIDER_DISPLAY_NAMES[provider.id] ?? provider.name;
+    const models = provider.getModels().map(toBuiltInModelMetadata);
     const baseUrls = new Set(models.map((model) => model.baseUrl));
     const apis = new Set(models.map((model) => model.api));
     return {
-      id: provider,
+      id: provider.id,
       displayName,
       defaultConfig: {
         name: displayName,

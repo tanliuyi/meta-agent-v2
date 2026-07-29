@@ -1,14 +1,9 @@
-import { createPrivateKey, generateKeyPairSync, type KeyObject } from "node:crypto";
-
 export interface MarketplaceServerConfig {
 	host: string;
 	port: number;
 	basePath: string;
 	publicBaseUrl: string;
 	marketplaceId: string;
-	artifactOrigins: string[];
-	signingPrivateKey: KeyObject;
-	ephemeralSigningKey: boolean;
 	dataDir?: string;
 	adminToken?: string;
 	maxArtifactBytes: number;
@@ -17,30 +12,6 @@ export interface MarketplaceServerConfig {
 }
 
 export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env): MarketplaceServerConfig {
-	const allowEphemeral = env.MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY === "true";
-	const encodedKey = env.MARKETPLACE_SIGNING_PRIVATE_KEY?.trim();
-	let signingPrivateKey: KeyObject;
-	let ephemeralSigningKey = false;
-	if (encodedKey) {
-		const source = Buffer.from(encodedKey, "base64").toString("utf8");
-		try {
-			signingPrivateKey = createPrivateKey(source);
-		} catch (error) {
-			throw new Error(`MARKETPLACE_SIGNING_PRIVATE_KEY is invalid: ${errorMessage(error)}`);
-		}
-		if (signingPrivateKey.asymmetricKeyType !== "ed25519") {
-			throw new Error("MARKETPLACE_SIGNING_PRIVATE_KEY must contain an Ed25519 private key");
-		}
-	} else {
-		if (!allowEphemeral) {
-			throw new Error(
-				"MARKETPLACE_SIGNING_PRIVATE_KEY is required unless MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY=true",
-			);
-		}
-		signingPrivateKey = generateKeyPairSync("ed25519").privateKey;
-		ephemeralSigningKey = true;
-	}
-
 	const host = env.MARKETPLACE_HOST?.trim() || "127.0.0.1";
 	const port = parsePort(env.MARKETPLACE_PORT);
 	const basePath = normalizeBasePath(env.MARKETPLACE_BASE_PATH);
@@ -48,11 +19,7 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 	const publicBaseUrl = normalizePublicBaseUrl(env.MARKETPLACE_PUBLIC_BASE_URL?.trim() || fallbackUrl);
 	assertPublicBasePath(publicBaseUrl, basePath);
 	const marketplaceId = normalizeMarketplaceId(env.MARKETPLACE_ID?.trim() || "meta-agent-development");
-	const artifactOrigins = parseArtifactOrigins(env.MARKETPLACE_ARTIFACT_ORIGINS, publicBaseUrl);
 	const dataDir = env.MARKETPLACE_DATA_DIR?.trim() || undefined;
-	if (dataDir && ephemeralSigningKey) {
-		throw new Error("MARKETPLACE_DATA_DIR requires a pinned MARKETPLACE_SIGNING_PRIVATE_KEY");
-	}
 	const adminToken = env.MARKETPLACE_ADMIN_TOKEN?.trim() || undefined;
 	if (adminToken !== undefined && adminToken.length < 16) {
 		throw new Error("MARKETPLACE_ADMIN_TOKEN must be at least 16 characters");
@@ -71,9 +38,6 @@ export function loadMarketplaceServerConfig(env: NodeJS.ProcessEnv = process.env
 		basePath,
 		publicBaseUrl,
 		marketplaceId,
-		artifactOrigins,
-		signingPrivateKey,
-		ephemeralSigningKey,
 		...(dataDir ? { dataDir } : {}),
 		...(adminToken ? { adminToken } : {}),
 		maxArtifactBytes,
@@ -152,29 +116,6 @@ function normalizeMarketplaceId(value: string): string {
 	return value;
 }
 
-function parseArtifactOrigins(value: string | undefined, publicBaseUrl: string): string[] {
-	const sources = (value ?? "")
-		.split(",")
-		.map((entry) => entry.trim())
-		.filter(Boolean);
-	const origins = [new URL(publicBaseUrl).origin, ...sources].map((source) => {
-		const url = new URL(source);
-		if (
-			(url.protocol !== "https:" && url.protocol !== "http:") ||
-			url.username ||
-			url.password ||
-			url.search ||
-			url.hash ||
-			url.pathname !== "/"
-		) {
-			throw new Error("MARKETPLACE_ARTIFACT_ORIGINS entries must be HTTP(S) origins without paths or credentials");
-		}
-		assertSafeUrlPath(source, url.pathname, "MARKETPLACE_ARTIFACT_ORIGINS");
-		return url.origin;
-	});
-	return [...new Set(origins)];
-}
-
 function assertSafeUrlPath(source: string, pathname: string, label: string): void {
 	if (source !== source.trim() || /\\|[\u0000-\u001f\u007f]/.test(source)) {
 		throw new Error(`${label} contains an unsafe path`);
@@ -200,8 +141,4 @@ function assertSafeUrlPath(source: string, pathname: string, label: string): voi
 			}
 		}
 	}
-}
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
 }

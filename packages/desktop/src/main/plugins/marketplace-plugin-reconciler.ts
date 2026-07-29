@@ -76,7 +76,7 @@ export class MarketplacePluginReconciler {
       }
       const uninstalledAt = this.now();
       await markMarketplaceVersionInactive(after, uninstalledAt);
-      await writeMarketplaceUninstallTombstone(after, transaction.operationId, uninstalledAt, false);
+      await writeMarketplaceUninstallTombstone(after, transaction.operationId, uninstalledAt);
       await this.cleanupInstallFiles(transaction);
       await this.transactions.complete(transaction);
       this.log(`Rolled back marketplace install transaction ${transaction.operationId}`);
@@ -181,12 +181,7 @@ export class MarketplacePluginReconciler {
     }
     const uninstalledAt = this.now();
     await markMarketplaceVersionInactive(before, uninstalledAt);
-    await writeMarketplaceUninstallTombstone(
-      before,
-      transaction.operationId,
-      uninstalledAt,
-      transaction.preserveFiles ?? false,
-    );
+    await writeMarketplaceUninstallTombstone(before, transaction.operationId, uninstalledAt);
     const projected = await this.transactions.setPhase(transaction, "projection-committed");
     await this.transactions.complete(projected);
     this.log(`Completed marketplace uninstall transaction ${transaction.operationId}`);

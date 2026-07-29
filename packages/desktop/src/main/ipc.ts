@@ -37,14 +37,11 @@ import type {
 } from "../shared/plugin-configuration-contracts.ts";
 import type {
   InstallMarketplacePluginInput,
-  InstallMarketplacePluginResult,
   ListMarketplacePluginsInput,
   SaveMarketplaceEndpointInput,
   TestMarketplaceEndpointInput,
   UninstallMarketplacePluginInput,
-  UninstallMarketplacePluginResult,
   UpdateMarketplacePluginInput,
-  UpdateMarketplacePluginResult,
 } from "../shared/plugin-marketplace-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
@@ -56,11 +53,8 @@ import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
 import type { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
 import type { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
-import type { MarketplaceExtensionApplyJournal } from "./plugins/marketplace-extension-apply-journal.ts";
-import type { MarketplaceMutationApplyCoordinator } from "./plugins/marketplace-mutation-apply-coordinator.ts";
 import type { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
 import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
-import type { MarketplaceRevocationService } from "./plugins/marketplace-revocation-service.ts";
 import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
@@ -100,9 +94,6 @@ export function registerIpc(
   marketplaceCatalog?: MarketplaceCatalogService,
   marketplaceRegistry?: MarketplacePluginRegistry,
   marketplaceInstaller?: MarketplacePluginInstaller,
-  marketplaceMutationApply?: MarketplaceMutationApplyCoordinator,
-  marketplaceApplyJournal?: MarketplaceExtensionApplyJournal,
-  marketplaceRevocations?: MarketplaceRevocationService,
   pluginConfigurations?: PluginConfigurationService,
 ): void {
   const subscribedWebContents = new Set<number>();
@@ -210,10 +201,7 @@ export function registerIpc(
       marketplaceCatalog.list(input),
     );
     if (marketplaceRegistry && marketplaceInstaller) {
-      ipcMain.handle(CHANNELS.marketplaceGetInstalled, async () => {
-        const snapshot = await marketplaceRegistry.getSnapshot();
-        return marketplaceRevocations ? marketplaceRevocations.decorateSnapshot(snapshot) : snapshot;
-      });
+      ipcMain.handle(CHANNELS.marketplaceGetInstalled, () => marketplaceRegistry.getSnapshot());
       ipcMain.handle(CHANNELS.marketplaceGetPluginConfiguration, (_event, pluginId: string) => {
         if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
         return pluginConfigurations.getConfig(pluginId);
@@ -228,107 +216,37 @@ export function registerIpc(
         },
       );
       ipcMain.handle(CHANNELS.marketplaceInstallPlugin, async (_event, input: InstallMarketplacePluginInput) => {
-        assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
         const result = await marketplaceInstaller.install(input);
-        if (result.status !== "installed") {
-          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        }
+        if (result.status !== "installed") return result;
         await sessions.extensionSettingsChanged();
-        if (!input.applyToCurrentSession || result.recoveryPending || !marketplaceMutationApply) {
-          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        }
-        const transaction = await marketplaceInstaller.getPendingApplyTransaction(input.requestId);
-        if (!transaction) return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        let application: ApplyDesktopExtensionSetResult;
-        try {
-          application = await applyMarketplaceMutation(
-            sessions,
-            marketplaceMutationApply,
-            marketplaceApplyJournal,
-            input.applyToCurrentSession,
-            transaction.operationId,
-          );
-        } catch (error) {
-          // 安装已提交；应用失败不能让 renderer 把整个 mutation 当作失败。
-          return decorateMarketplaceMutationResult(
-            { ...result, applicationError: error instanceof Error ? error.message : String(error) },
-            marketplaceRevocations,
-          );
-        }
-        if (application.status === "rolled-back") {
-          marketplaceInstaller.clearCompletedMutation(input.requestId);
-          const snapshot = await marketplaceRegistry.getSnapshot();
-          return decorateMarketplaceMutationResult({ ...result, snapshot, application }, marketplaceRevocations);
-        }
-        return decorateMarketplaceMutationResult({ ...result, application }, marketplaceRevocations);
+        const application = await applyMarketplaceMutation(
+          sessions,
+          input.applyToCurrentSession,
+          result.recoveryPending,
+        );
+        return { ...result, ...application };
       });
       ipcMain.handle(CHANNELS.marketplaceUpdatePlugin, async (_event, input: UpdateMarketplacePluginInput) => {
-        assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
         const result = await marketplaceInstaller.update(input);
-        if (result.status !== "updated") {
-          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        }
+        if (result.status !== "updated") return result;
         await sessions.extensionSettingsChanged();
-        if (!input.applyToCurrentSession || result.recoveryPending || !marketplaceMutationApply) {
-          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        }
-        const transaction = await marketplaceInstaller.getPendingApplyTransaction(input.requestId);
-        if (!transaction) return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        let application: ApplyDesktopExtensionSetResult;
-        try {
-          application = await applyMarketplaceMutation(
-            sessions,
-            marketplaceMutationApply,
-            marketplaceApplyJournal,
-            input.applyToCurrentSession,
-            transaction.operationId,
-          );
-        } catch (error) {
-          return decorateMarketplaceMutationResult(
-            { ...result, applicationError: error instanceof Error ? error.message : String(error) },
-            marketplaceRevocations,
-          );
-        }
-        if (application.status === "rolled-back") {
-          marketplaceInstaller.clearCompletedMutation(input.requestId);
-          const snapshot = await marketplaceRegistry.getSnapshot();
-          return decorateMarketplaceMutationResult({ ...result, snapshot, application }, marketplaceRevocations);
-        }
-        return decorateMarketplaceMutationResult({ ...result, application }, marketplaceRevocations);
+        const application = await applyMarketplaceMutation(
+          sessions,
+          input.applyToCurrentSession,
+          result.recoveryPending,
+        );
+        return { ...result, ...application };
       });
       ipcMain.handle(CHANNELS.marketplaceUninstallPlugin, async (_event, input: UninstallMarketplacePluginInput) => {
-        assertMarketplaceApplyAvailable(input.applyToCurrentSession, marketplaceMutationApply, marketplaceApplyJournal);
         const result = await marketplaceInstaller.uninstall(input);
-        if (result.status !== "uninstalled") {
-          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        }
+        if (result.status !== "uninstalled") return result;
         await sessions.extensionSettingsChanged();
-        if (!input.applyToCurrentSession || result.recoveryPending || !marketplaceMutationApply) {
-          return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        }
-        const transaction = await marketplaceInstaller.getPendingApplyTransaction(input.requestId);
-        if (!transaction) return decorateMarketplaceMutationResult(result, marketplaceRevocations);
-        let application: ApplyDesktopExtensionSetResult;
-        try {
-          application = await applyMarketplaceMutation(
-            sessions,
-            marketplaceMutationApply,
-            marketplaceApplyJournal,
-            input.applyToCurrentSession,
-            transaction.operationId,
-          );
-        } catch (error) {
-          return decorateMarketplaceMutationResult(
-            { ...result, applicationError: error instanceof Error ? error.message : String(error) },
-            marketplaceRevocations,
-          );
-        }
-        if (application.status === "rolled-back") {
-          marketplaceInstaller.clearCompletedMutation(input.requestId);
-          const snapshot = await marketplaceRegistry.getSnapshot();
-          return decorateMarketplaceMutationResult({ ...result, snapshot, application }, marketplaceRevocations);
-        }
-        return decorateMarketplaceMutationResult({ ...result, application }, marketplaceRevocations);
+        const application = await applyMarketplaceMutation(
+          sessions,
+          input.applyToCurrentSession,
+          result.recoveryPending,
+        );
+        return { ...result, ...application };
       });
     }
   }
@@ -602,82 +520,24 @@ export function registerIpc(
   });
 }
 
-function decorateMarketplaceMutationResult(
-  result: InstallMarketplacePluginResult,
-  revocations: MarketplaceRevocationService | undefined,
-): Promise<InstallMarketplacePluginResult>;
-function decorateMarketplaceMutationResult(
-  result: UpdateMarketplacePluginResult,
-  revocations: MarketplaceRevocationService | undefined,
-): Promise<UpdateMarketplacePluginResult>;
-function decorateMarketplaceMutationResult(
-  result: UninstallMarketplacePluginResult,
-  revocations: MarketplaceRevocationService | undefined,
-): Promise<UninstallMarketplacePluginResult>;
-async function decorateMarketplaceMutationResult(
-  result: InstallMarketplacePluginResult | UpdateMarketplacePluginResult | UninstallMarketplacePluginResult,
-  revocations: MarketplaceRevocationService | undefined,
-): Promise<InstallMarketplacePluginResult | UpdateMarketplacePluginResult | UninstallMarketplacePluginResult> {
-  if (!revocations) return result;
-  if ("current" in result) {
-    return { ...result, current: await revocations.decorateSnapshot(result.current) };
-  }
-  return { ...result, snapshot: await revocations.decorateSnapshot(result.snapshot) };
-}
-
-function assertMarketplaceApplyAvailable(
-  target: { projectId: string; threadId: string } | undefined,
-  mutationApply: MarketplaceMutationApplyCoordinator | undefined,
-  applyJournal: MarketplaceExtensionApplyJournal | undefined,
-): void {
-  if (target && (!mutationApply || !applyJournal)) {
-    throw new Error("Marketplace extension apply recovery is unavailable");
-  }
-}
-
 async function applyMarketplaceMutation(
   sessions: SessionSupervisor,
-  mutationApply: MarketplaceMutationApplyCoordinator,
-  applyJournal: MarketplaceExtensionApplyJournal | undefined,
-  target: { projectId: string; threadId: string; abortRunning?: boolean },
-  operationId: string,
-): Promise<ApplyDesktopExtensionSetResult> {
+  target: { projectId: string; threadId: string; abortRunning?: boolean } | undefined,
+  recoveryPending: boolean | undefined,
+): Promise<{ application?: ApplyDesktopExtensionSetResult; applicationError?: string }> {
+  if (!target || recoveryPending) return {};
   try {
-    if (await applyJournal?.hasMutationOperation(operationId)) {
-      throw new Error("Marketplace extension apply recovery is pending; restart Desktop before retrying");
-    }
     const state = await sessions.getExtensionState(target.projectId, target.threadId);
     const application = await sessions.applyExtensionSet(
       target.projectId,
       target.threadId,
       state.desiredGeneration,
       target.abortRunning,
-      operationId,
     );
-    if (application.status === "unchanged") await mutationApply.complete(operationId);
-    return publicMarketplaceApplication(application);
+    return { application: publicMarketplaceApplication(application) };
   } catch (error) {
-    if (await applyJournal?.hasMutationOperation(operationId)) throw error;
-    if (isColdExtensionSetApplyStartupError(error)) {
-      await mutationApply.rollback(operationId);
-      await mutationApply.complete(operationId);
-      await sessions.extensionSettingsChanged();
-      const restored = await sessions.getExtensionState(target.projectId, target.threadId);
-      return publicMarketplaceApplication({
-        status: "rolled-back",
-        generation: restored.desiredGeneration,
-        error: error.message,
-      });
-    }
-    await mutationApply.complete(operationId);
-    throw error;
+    return { applicationError: error instanceof Error ? error.message : String(error) };
   }
-}
-
-function isColdExtensionSetApplyStartupError(
-  error: unknown,
-): error is Error & { code: "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED" } {
-  return error instanceof Error && "code" in error && error.code === "COLD_EXTENSION_SET_APPLY_STARTUP_FAILED";
 }
 
 async function refreshActiveModelRuntimes(refresh: () => Promise<void>): Promise<boolean> {

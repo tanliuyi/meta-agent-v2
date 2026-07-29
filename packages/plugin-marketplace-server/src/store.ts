@@ -1,13 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { compare as compareSemver } from "semver";
-import { buildSignedArtifact, referencePayloadFiles } from "./artifact-builder.ts";
+import { buildArtifact, referencePayloadFiles } from "./artifact-builder.ts";
 import { type ListPluginsInput, listPluginPage, type PluginAggregates } from "./catalog-query.ts";
 import { parseCatalogDocument } from "./catalog-validation.ts";
 import type {
 	ArtifactTarget,
 	CatalogDocument,
-	CatalogRevocation,
 	MarketplacePluginPage,
 	PluginRatingEntry,
 	PluginStatus,
@@ -21,12 +20,10 @@ import type {
 	StoredPlugin,
 	StoredPluginVersion,
 } from "./contracts.ts";
-import { canonicalJson, type MarketplaceSigningService } from "./signing-service.ts";
 
 export interface MarketplaceStoreOptions {
 	databasePath?: string;
 	catalogPath?: URL;
-	signing: MarketplaceSigningService;
 	marketplaceId: string;
 	clock(): number;
 }
@@ -57,8 +54,6 @@ export interface ArtifactContentInput {
 	bytes: Uint8Array;
 	sha256: string;
 	size: number;
-	manifestJson: string;
-	signatureJson: string;
 }
 
 export interface ArtifactContent {
@@ -133,8 +128,6 @@ CREATE TABLE IF NOT EXISTS plugin_artifacts (
 	sha256 TEXT,
 	size INTEGER,
 	bytes BLOB,
-	manifest TEXT,
-	signature TEXT,
 	PRIMARY KEY (plugin_id, version, artifact_id),
 	FOREIGN KEY (plugin_id, version) REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
 );
@@ -153,16 +146,6 @@ CREATE TABLE IF NOT EXISTS downloads (
 	count INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (plugin_id, version, artifact_id),
 	FOREIGN KEY (plugin_id, version) REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS revocations (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	plugin_id TEXT NOT NULL,
-	version TEXT NOT NULL,
-	artifact_ids TEXT,
-	status TEXT NOT NULL,
-	reason_code TEXT NOT NULL,
-	message TEXT NOT NULL,
-	replacement_version TEXT
 );
 `;
 
@@ -200,6 +183,7 @@ interface ArtifactRow {
 	entry: string;
 	sha256: string | null;
 	size: number | null;
+	uploaded: number;
 }
 
 export class MarketplaceStore {
@@ -229,7 +213,7 @@ export class MarketplaceStore {
 			db.exec(SCHEMA);
 			ensurePluginConfigurationColumn(db);
 			const store = new MarketplaceStore(db, options.clock);
-			store.seedIfEmpty(catalog, options.signing, options.marketplaceId);
+			store.seedIfEmpty(catalog, options.marketplaceId);
 			return store;
 		} catch (error) {
 			db.close();
@@ -243,7 +227,7 @@ export class MarketplaceStore {
 		this.db.close();
 	}
 
-	private seedIfEmpty(catalog: CatalogDocument, signing: MarketplaceSigningService, marketplaceId: string): void {
+	private seedIfEmpty(catalog: CatalogDocument, marketplaceId: string): void {
 		const seeded = this.db.prepare("SELECT value FROM meta WHERE key = 'seeded'").get();
 		if (seeded) return;
 		this.transaction(() => {
@@ -281,7 +265,7 @@ export class MarketplaceStore {
 					for (const artifact of version.artifacts) {
 						const files = referencePayloadFiles();
 						const entry = [...files.keys()][0]!;
-						const built = buildSignedArtifact(signing, {
+						const built = buildArtifact({
 							marketplaceId,
 							artifactId: artifact.id,
 							plugin: {
@@ -299,7 +283,7 @@ export class MarketplaceStore {
 						});
 						this.db
 							.prepare(
-								"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry, sha256, size, bytes, manifest, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+								"INSERT INTO plugin_artifacts (plugin_id, version, artifact_id, target, contains_native_code, preferred, entry, sha256, size, bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 							)
 							.run(
 								plugin.id,
@@ -312,14 +296,9 @@ export class MarketplaceStore {
 								built.sha256,
 								built.size,
 								built.bytes,
-								canonicalJson(built.manifest),
-								JSON.stringify(built.signature),
 							);
 					}
 				}
-			}
-			for (const revocation of catalog.revocations) {
-				this.insertRevocationRow(revocation);
 			}
 			this.db.prepare("INSERT INTO meta (key, value) VALUES ('seeded', '1')").run();
 		});
@@ -360,36 +339,11 @@ export class MarketplaceStore {
 	getArtifactContent(pluginId: string, version: string, artifactId: string): ArtifactContent | undefined {
 		const row = this.db
 			.prepare(
-				"SELECT a.bytes AS bytes, a.sha256 AS sha256, a.size AS size FROM plugin_artifacts a JOIN plugin_versions v ON v.plugin_id = a.plugin_id AND v.version = a.version WHERE a.plugin_id = ? AND a.version = ? AND a.artifact_id = ? AND v.draft = 0 AND a.sha256 IS NOT NULL",
+				"SELECT a.bytes AS bytes, a.sha256 AS sha256, a.size AS size FROM plugin_artifacts a JOIN plugin_versions v ON v.plugin_id = a.plugin_id AND v.version = a.version WHERE a.plugin_id = ? AND a.version = ? AND a.artifact_id = ? AND v.draft = 0 AND a.bytes IS NOT NULL",
 			)
 			.get(pluginId, version, artifactId) as { bytes: Uint8Array; sha256: string; size: number } | undefined;
 		if (!row) return undefined;
 		return { bytes: row.bytes, sha256: row.sha256, size: row.size };
-	}
-
-	getRevocations(): CatalogRevocation[] {
-		const rows = this.db
-			.prepare(
-				"SELECT plugin_id, version, artifact_ids, status, reason_code, message, replacement_version FROM revocations ORDER BY id",
-			)
-			.all() as unknown as Array<{
-			plugin_id: string;
-			version: string;
-			artifact_ids: string | null;
-			status: string;
-			reason_code: string;
-			message: string;
-			replacement_version: string | null;
-		}>;
-		return rows.map((row) => ({
-			pluginId: row.plugin_id,
-			version: row.version,
-			...(row.artifact_ids ? { artifactIds: JSON.parse(row.artifact_ids) as string[] } : {}),
-			status: row.status as "withdrawn" | "blocked",
-			reasonCode: row.reason_code,
-			message: row.message,
-			...(row.replacement_version ? { replacementVersion: row.replacement_version } : {}),
-		}));
 	}
 
 	// --- users and sessions ---
@@ -605,18 +559,9 @@ export class MarketplaceStore {
 		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
 		const result = this.db
 			.prepare(
-				"UPDATE plugin_artifacts SET sha256 = ?, size = ?, bytes = ?, manifest = ?, signature = ? WHERE plugin_id = ? AND version = ? AND artifact_id = ?",
+				"UPDATE plugin_artifacts SET sha256 = ?, size = ?, bytes = ? WHERE plugin_id = ? AND version = ? AND artifact_id = ?",
 			)
-			.run(
-				content.sha256,
-				content.size,
-				content.bytes,
-				content.manifestJson,
-				content.signatureJson,
-				pluginId,
-				version,
-				artifactId,
-			);
+			.run(content.sha256, content.size, content.bytes, pluginId, version, artifactId);
 		if (result.changes === 0) throw new Error("PLUGIN_ARTIFACT_NOT_FOUND");
 	}
 
@@ -644,7 +589,7 @@ export class MarketplaceStore {
 		if (versionRow.draft === 0) throw new Error("PLUGIN_VERSION_NOT_DRAFT");
 		const pending = this.db
 			.prepare(
-				"SELECT COUNT(*) AS pending FROM plugin_artifacts WHERE plugin_id = ? AND version = ? AND sha256 IS NULL",
+				"SELECT COUNT(*) AS pending FROM plugin_artifacts WHERE plugin_id = ? AND version = ? AND bytes IS NULL",
 			)
 			.get(pluginId, version) as { pending: number };
 		if (pending.pending > 0) throw new Error("PLUGIN_VERSION_INCOMPLETE");
@@ -674,22 +619,6 @@ export class MarketplaceStore {
 				.prepare("UPDATE plugin_versions SET status = 'deprecated' WHERE plugin_id = ? AND version = ?")
 				.run(pluginId, version);
 			this.db.prepare("UPDATE plugins SET updated_at = ? WHERE id = ?").run(now, pluginId);
-		});
-	}
-
-	applyRevocation(revocation: CatalogRevocation): void {
-		const versionRow = this.requireVersionRow(revocation.pluginId, revocation.version);
-		if (versionRow.draft !== 0) throw new Error("PLUGIN_VERSION_NOT_FOUND");
-		if (versionRow.status === "withdrawn" || versionRow.status === "blocked") {
-			throw new Error("PLUGIN_VERSION_STATUS_INVALID");
-		}
-		const now = Math.trunc(this.clock());
-		this.transaction(() => {
-			this.db
-				.prepare("UPDATE plugin_versions SET status = ? WHERE plugin_id = ? AND version = ?")
-				.run(revocation.status, revocation.pluginId, revocation.version);
-			this.insertRevocationRow(revocation);
-			this.db.prepare("UPDATE plugins SET updated_at = ? WHERE id = ?").run(now, revocation.pluginId);
 		});
 	}
 
@@ -828,7 +757,7 @@ export class MarketplaceStore {
 				draft: version.draft,
 				artifacts: version.artifacts.map((artifact) => ({
 					id: artifact.id,
-					uploaded: artifact.sha256 !== null,
+					uploaded: artifact.uploaded,
 				})),
 			})),
 		};
@@ -863,22 +792,6 @@ export class MarketplaceStore {
 			.run(publisherId, displayName, verified ? 1 : 0);
 	}
 
-	private insertRevocationRow(revocation: CatalogRevocation): void {
-		this.db
-			.prepare(
-				"INSERT INTO revocations (plugin_id, version, artifact_ids, status, reason_code, message, replacement_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			)
-			.run(
-				revocation.pluginId,
-				revocation.version,
-				revocation.artifactIds ? JSON.stringify(revocation.artifactIds) : null,
-				revocation.status,
-				revocation.reasonCode,
-				revocation.message,
-				revocation.replacementVersion ?? null,
-			);
-	}
-
 	private loadPlugins(pluginId: string | undefined, includeDrafts: boolean): StoredPlugin[] {
 		const pluginQuery =
 			"SELECT p.id AS id, p.name AS name, p.description AS description, p.publisher_id AS publisher_id, b.display_name AS publisher_display_name, b.verified AS publisher_verified, p.categories AS categories, p.icon_asset_id AS icon_asset_id, p.published_at AS published_at, p.updated_at AS updated_at FROM plugins p JOIN publishers b ON b.id = p.publisher_id";
@@ -901,7 +814,7 @@ export class MarketplaceStore {
 			if (versionRows.length === 0 && !includeDrafts) continue;
 			const artifactRows = this.db
 				.prepare(
-					"SELECT version, artifact_id, target, contains_native_code, preferred, entry, sha256, size FROM plugin_artifacts WHERE plugin_id = ? ORDER BY version, artifact_id",
+					"SELECT version, artifact_id, target, contains_native_code, preferred, entry, sha256, size, bytes IS NOT NULL AS uploaded FROM plugin_artifacts WHERE plugin_id = ? ORDER BY version, artifact_id",
 				)
 				.all(row.id) as unknown as ArtifactRow[];
 			const artifactsByVersion = new Map<string, StoredArtifact[]>();
@@ -915,6 +828,7 @@ export class MarketplaceStore {
 					entry: artifactRow.entry,
 					sha256: artifactRow.sha256,
 					size: artifactRow.size,
+					uploaded: artifactRow.uploaded !== 0,
 				});
 				artifactsByVersion.set(artifactRow.version, list);
 			}

@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type {
   DesktopExtensionDefinition,
@@ -8,11 +8,7 @@ import type {
   ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
-import type { MarketplacePluginRevocation } from "../../shared/plugin-marketplace-contracts.ts";
-import {
-  validateInstalledMarketplacePlugin,
-  validateMarketplaceOwnershipAndProjection,
-} from "../plugins/marketplace-installed-plugin.ts";
+import { validateInstalledMarketplacePlugin } from "../plugins/marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
 import type { DesktopExtensionSettingsService } from "./desktop-extension-settings-service.ts";
@@ -23,7 +19,6 @@ interface DesktopExtensionSourcePolicyOptions {
   getCuratedDefinitions(): DesktopExtensionDefinition[];
   getMarketplaceExtensions?(): Promise<{ revision: string; plugins: InstalledMarketplacePluginRecord[] }>;
   pluginConfigurations?: Pick<PluginConfigurationService, "getRuntimeConfiguration">;
-  getMarketplaceRevocation?(plugin: InstalledMarketplacePluginRecord): Promise<MarketplacePluginRevocation | undefined>;
   marketplaceRoot?: string;
   curatedRoot?: string;
   createGeneration?(): string;
@@ -55,9 +50,8 @@ export class DesktopExtensionSourcePolicy {
       if (!(settings.curatedEnabled[definition.id] ?? true)) continue;
       if (!definition.entryPath) throw new Error(`Curated extension ${definition.id} has no entry path`);
       const entryPath = await validateCuratedEntry(definition.id, definition.entryPath, this.options.curatedRoot);
-      const contentHash = await hashFile(entryPath);
-      fingerprintParts.push(`${definition.id}:${entryPath}:${contentHash}`);
-      pathEntries.push({ ...definition, entryPath, contentHash, capabilities: [...definition.capabilities] });
+      fingerprintParts.push(`${definition.id}:${entryPath}`);
+      pathEntries.push({ ...definition, entryPath, capabilities: [...definition.capabilities] });
     }
     if (this.options.getMarketplaceExtensions) {
       const marketplace = await this.options.getMarketplaceExtensions();
@@ -65,35 +59,18 @@ export class DesktopExtensionSourcePolicy {
       for (const plugin of marketplace.plugins) {
         if (!plugin.enabled || plugin.state !== "installed") continue;
         try {
-          const revocation = await this.options.getMarketplaceRevocation?.(plugin);
-          if (revocation?.status === "blocked") {
-            fingerprintParts.push(`${plugin.id}:blocked:${revocation.reasonCode}:${revocation.checkedAt}`);
-            diagnostics.push({
-              extensionId: plugin.id,
-              source: "marketplace",
-              phase: "resolve",
-              code: "DESKTOP_EXTENSION_BLOCKED",
-              message: `Marketplace extension is blocked: ${plugin.displayName} (${revocation.reasonCode})`,
-            });
-            continue;
-          }
           if (!this.options.marketplaceRoot) throw new Error(`Marketplace extension root is unavailable: ${plugin.id}`);
           const entryPath = await validateInstalledMarketplacePlugin(plugin, this.options.marketplaceRoot);
-          await validateMarketplaceOwnershipAndProjection(plugin);
-          const contentHash = await hashFile(entryPath);
           const configuration =
             plugin.configurationSchema && plugin.capabilities.includes("configuration.read")
               ? await this.options.pluginConfigurations?.getRuntimeConfiguration(plugin.id)
               : undefined;
-          fingerprintParts.push(
-            `${plugin.id}:${plugin.artifactHash}:${contentHash}:${configuration?.revision ?? "unconfigured"}`,
-          );
+          fingerprintParts.push(`${plugin.id}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`);
           pathEntries.push({
             id: plugin.id,
             displayName: plugin.displayName,
             source: "marketplace",
             entryPath,
-            contentHash,
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [...plugin.capabilities],
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
@@ -117,14 +94,12 @@ export class DesktopExtensionSourcePolicy {
           const info = await lstat(entry.entryPath);
           if (!info.isFile() || info.isSymbolicLink()) throw new Error("entry is not a regular non-symlink file");
           const entryPath = await realpath(entry.entryPath);
-          const contentHash = await hashFile(entryPath);
-          fingerprintParts.push(`${entry.id}:${entryPath}:${contentHash}`);
+          fingerprintParts.push(`${entry.id}:${entryPath}`);
           pathEntries.push({
             id: entry.id,
             displayName: entry.displayName,
             source: "development",
             entryPath,
-            contentHash,
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [],
           });
@@ -169,31 +144,6 @@ export class DesktopExtensionSourcePolicy {
     return cloneSet(set);
   }
 
-  async hydrateRuntimeConfigurations(set: ResolvedExtensionSet): Promise<ResolvedExtensionSet> {
-    const pluginConfigurations = this.options.pluginConfigurations;
-    if (!this.options.getMarketplaceExtensions || !pluginConfigurations) return cloneSet(set);
-    const marketplace = await this.options.getMarketplaceExtensions();
-    const plugins = new Map(marketplace.plugins.map((plugin) => [plugin.id, plugin]));
-    const entries = await Promise.all(
-      set.entries.map(async (entry) => {
-        if (
-          entry.source !== "marketplace" ||
-          !entry.capabilities.includes("configuration.read") ||
-          !plugins.get(entry.id)?.configurationSchema
-        ) {
-          return { ...entry, capabilities: [...entry.capabilities] };
-        }
-        const configuration = await pluginConfigurations.getRuntimeConfiguration(entry.id);
-        return { ...entry, capabilities: [...entry.capabilities], configuration: { ...configuration.values } };
-      }),
-    );
-    return {
-      ...set,
-      entries,
-      diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-    };
-  }
-
   invalidate(projectId?: string): void {
     if (projectId) this.cache.delete(projectId);
     else this.cache.clear();
@@ -223,12 +173,6 @@ async function validateCuratedEntry(id: string, entryPath: string, curatedRoot: 
     throw new Error(`Curated extension escapes bundled root: ${id}`);
   }
   return resolve(canonicalEntry);
-}
-
-async function hashFile(path: string): Promise<string> {
-  return createHash("sha256")
-    .update(await readFile(path))
-    .digest("hex");
 }
 
 function assertUniqueIds(entries: ResolvedExtensionEntry[]): void {

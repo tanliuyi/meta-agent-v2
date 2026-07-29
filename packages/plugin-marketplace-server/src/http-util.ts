@@ -11,7 +11,6 @@ import {
 import { hashToken, tokenEquals } from "./auth.ts";
 import type { MarketplaceServerConfig } from "./config.ts";
 import type { MarketplaceErrorBody } from "./contracts.ts";
-import type { MarketplaceSigningService } from "./signing-service.ts";
 import type { MarketplaceStore } from "./store.ts";
 
 export type MarketplacePrincipal =
@@ -24,7 +23,6 @@ export interface AuthRuntime {
 }
 
 export interface MarketplaceHttpRuntime extends AuthRuntime {
-	signing: MarketplaceSigningService;
 	clock(): number;
 }
 

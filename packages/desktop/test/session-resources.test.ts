@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,7 +125,7 @@ describe("desktop controlled Pi resources", () => {
     expect(isolatedServices.resourceLoader.getSkills().skills).toEqual([]);
   });
 
-  it("rejects path-backed bytes changed after generation resolution", async () => {
+  it("accepts path-backed bytes changed after generation resolution", async () => {
     const root = join(tmpdir(), `desktop-extension-hash-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const entryPath = join(root, "approved.ts");
     tempDirs.push(root);
@@ -142,7 +141,6 @@ describe("desktop controlled Pi resources", () => {
           displayName: "approved.ts",
           source: "development" as const,
           entryPath,
-          contentHash: createHash("sha256").update(original).digest("hex"),
           hostProfileVersion: 1 as const,
           capabilities: [],
         },
@@ -154,7 +152,7 @@ describe("desktop controlled Pi resources", () => {
 
     await writeFile(entryPath, "export default function changed() {}\n");
 
-    await expect(validateResolvedExtensionSet("project", set)).rejects.toThrow("changed after its set was resolved");
+    await expect(validateResolvedExtensionSet("project", set)).resolves.toMatchObject({ generation: "generation" });
   });
 
   it("keeps controlled source identity on Pi loader failures", () => {

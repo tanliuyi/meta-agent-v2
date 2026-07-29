@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { InlineExtension, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
@@ -38,16 +37,9 @@ export async function validateResolvedExtensionSet(
     if (!entry.entryPath || !isAbsolute(entry.entryPath)) {
       throw new Error(`Extension ${entry.id} requires an absolute approved entry path`);
     }
-    if (!entry.contentHash) throw new Error(`Extension ${entry.id} requires a resolved content hash`);
     const info = await lstat(entry.entryPath);
     if (!info.isFile() || info.isSymbolicLink()) {
       throw new Error(`Extension ${entry.id} entry is not a regular non-symlink file`);
-    }
-    const currentHash = createHash("sha256")
-      .update(await readFile(entry.entryPath))
-      .digest("hex");
-    if (currentHash !== entry.contentHash) {
-      throw new Error(`Extension ${entry.id} changed after its set was resolved`);
     }
     if (entry.source === "curated") {
       if (!set.curatedRoot) throw new Error(`Curated extension root is unavailable for ${entry.id}`);

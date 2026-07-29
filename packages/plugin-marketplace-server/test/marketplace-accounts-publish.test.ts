@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, generateKeyPairSync, type KeyObject, verify } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,19 +10,14 @@ import { assertNoNativePayload } from "../src/artifact-builder.ts";
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "../src/auth.ts";
 import type { MarketplaceServerConfig } from "../src/config.ts";
 import { createMarketplaceApp } from "../src/create-app.ts";
-import { canonicalJson } from "../src/signing-service.ts";
 
 const ADMIN_TOKEN = "test-admin-token-0123456789abcdef";
-const privateKey = generateKeyPairSync("ed25519").privateKey;
 const config: MarketplaceServerConfig = {
 	host: "127.0.0.1",
 	port: 4317,
 	basePath: "",
 	publicBaseUrl: "https://market.example.com",
 	marketplaceId: "test-marketplace",
-	artifactOrigins: [],
-	signingPrivateKey: privateKey,
-	ephemeralSigningKey: false,
 	adminToken: ADMIN_TOKEN,
 	maxArtifactBytes: 1024 * 1024,
 	allowRegistration: true,
@@ -392,7 +387,7 @@ describe("publishing", () => {
 		});
 	});
 
-	it("serves uploaded artifacts with verifiable marketplace signatures", async () => {
+	it("serves uploaded artifacts and tracks download counts", async () => {
 		const download = await request(app.getHttpServer())
 			.get(`/v1/plugins/${PLUGIN_ID}/versions/1.0.0/artifacts/${ARTIFACT_ID}/download`)
 			.expect(200);
@@ -418,7 +413,6 @@ describe("publishing", () => {
 			"market-manifest.json",
 			"payload/index.ts",
 			"payload/lib/helper.ts",
-			"signature.json",
 		]);
 		expect(strFromU8(archive["payload/index.ts"]!)).toBe(ENTRY_SOURCE);
 		const manifest = JSON.parse(strFromU8(archive["market-manifest.json"]!)) as Record<string, unknown>;
@@ -442,21 +436,10 @@ describe("publishing", () => {
 			},
 			files: {
 				"payload/index.ts": {
-					sha256: createHash("sha256").update(strToU8(ENTRY_SOURCE)).digest("hex"),
-					size: strToU8(ENTRY_SOURCE).byteLength,
 					mode: "0644",
 				},
 			},
 		});
-		const signature = JSON.parse(strFromU8(archive["signature.json"]!)) as { value: string };
-		expect(
-			verify(
-				null,
-				Buffer.from(canonicalJson(manifest), "utf8"),
-				await marketplacePublicKey(),
-				Buffer.from(signature.value, "base64"),
-			),
-		).toBe(true);
 
 		const stats = await request(app.getHttpServer()).get(`/v1/plugins/${PLUGIN_ID}/stats`).expect(200);
 		expect(stats.body).toEqual({
@@ -588,38 +571,6 @@ describe("ratings", () => {
 	});
 });
 
-describe("admin revocations", () => {
-	it("blocks versions and serves them in the signed revocation list", async () => {
-		await request(app.getHttpServer())
-			.post("/v1/admin/revocations")
-			.set("authorization", `Bearer ${aliceToken}`)
-			.send(revocationRequest())
-			.expect(403);
-		await request(app.getHttpServer())
-			.post("/v1/admin/revocations")
-			.set("authorization", `Bearer ${ADMIN_TOKEN}`)
-			.send(revocationRequest())
-			.expect(201);
-		await request(app.getHttpServer())
-			.post("/v1/admin/revocations")
-			.set("authorization", `Bearer ${ADMIN_TOKEN}`)
-			.send(revocationRequest())
-			.expect(409);
-
-		await request(app.getHttpServer()).get(`/v1/plugins/${PLUGIN_ID}/versions/1.0.0/artifacts`).expect(410);
-		const revocations = await request(app.getHttpServer()).get("/v1/revocations").expect(200);
-		expect((revocations.body as { data: { pluginVersions: unknown[] } }).data.pluginVersions).toEqual([
-			{
-				pluginId: PLUGIN_ID,
-				version: "1.0.0",
-				status: "blocked",
-				reasonCode: "security-incident",
-				message: "Blocked by test administrator",
-			},
-		]);
-	});
-});
-
 describe("persistence", () => {
 	it("retains accounts, plugins, ratings, and stats across restarts", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "marketplace-persist-"));
@@ -724,12 +675,6 @@ async function registerOn(target: INestApplication, username: string): Promise<s
 	return body.token;
 }
 
-async function marketplacePublicKey(): Promise<KeyObject> {
-	const discovery = await request(app.getHttpServer()).get("/.well-known/meta-agent-marketplace.json").expect(200);
-	const publicKey = (discovery.body as { data: { signing: { publicKey: string } } }).data.signing.publicKey;
-	return createPublicKey({ key: Buffer.from(publicKey, "base64"), format: "der", type: "spki" });
-}
-
 function pluginMetadata() {
 	return {
 		name: "Acme Tools",
@@ -777,14 +722,4 @@ function payloadArchive(): Uint8Array {
 		"lib/": new Uint8Array(0),
 		"lib/helper.ts": strToU8(HELPER_SOURCE),
 	});
-}
-
-function revocationRequest() {
-	return {
-		pluginId: PLUGIN_ID,
-		version: "1.0.0",
-		status: "blocked",
-		reasonCode: "security-incident",
-		message: "Blocked by test administrator",
-	};
 }

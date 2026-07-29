@@ -14,7 +14,7 @@ export interface MarketplaceEndpointSettingsController {
   reload(): Promise<void>;
   resetTest(): void;
   test(baseUrl: string): Promise<void>;
-  save(baseUrl: string, trustFingerprint: boolean): Promise<SaveMarketplaceEndpointResult | undefined>;
+  save(baseUrl: string): Promise<SaveMarketplaceEndpointResult | undefined>;
 }
 
 export function useMarketplaceEndpointSettings(): MarketplaceEndpointSettingsController {
@@ -71,25 +71,20 @@ export function useMarketplaceEndpointSettings(): MarketplaceEndpointSettingsCon
   );
 
   const save = useCallback(
-    async (baseUrl: string, trustFingerprint: boolean) => {
+    async (baseUrl: string) => {
       if (!snapshot || pending) return undefined;
       setPending(true);
       setError(undefined);
       try {
-        const confirmationToken =
-          trustFingerprint && testResult?.status === "ready" ? testResult.confirmationToken : undefined;
         const result = await window.desktop.marketplace.saveEndpoint({
           requestId: crypto.randomUUID(),
           expectedRevision: snapshot.revision,
           baseUrl,
-          ...(confirmationToken ? { confirmationToken } : {}),
         });
         if (!mounted.current) return result;
         if (result.status === "conflict") {
           setSnapshot(result.current);
           setError("市场设置已在其他窗口中更新，请重新操作。");
-        } else if (result.status === "confirmation-required") {
-          setTestResult(result.testResult);
         } else {
           setSnapshot(result.snapshot);
           setTestResult(undefined);
@@ -102,7 +97,7 @@ export function useMarketplaceEndpointSettings(): MarketplaceEndpointSettingsCon
         if (mounted.current) setPending(false);
       }
     },
-    [pending, snapshot, testResult],
+    [pending, snapshot],
   );
 
   return { snapshot, loading, pending, error, testResult, reload, resetTest, test, save };

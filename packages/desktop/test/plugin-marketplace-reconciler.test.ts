@@ -1,11 +1,9 @@
-import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   readMarketplaceVersionOwner,
-  validateMarketplaceOwnershipAndProjection,
   writeMarketplaceProjection,
 } from "../src/main/plugins/marketplace-installed-plugin.ts";
 import { MarketplacePluginReconciler } from "../src/main/plugins/marketplace-plugin-reconciler.ts";
@@ -112,7 +110,6 @@ describe("MarketplacePluginReconciler", () => {
       pluginId: harness.record.id,
       artifactHash: harness.record.artifactHash,
       uninstalledAt: 200,
-      preserveFiles: false,
     });
     await expect(readMarketplaceVersionOwner(harness.record.rootPath, harness.record.artifactHash)).resolves.toEqual({
       record: harness.record,
@@ -242,7 +239,7 @@ describe("MarketplacePluginReconciler", () => {
     await expect(harness.transactions.list()).resolves.toEqual([]);
   });
 
-  it("marks an installed plugin broken when committed files cannot be verified", async () => {
+  it("keeps a committed plugin active when its entry bytes change", async () => {
     const harness = await createHarness();
     await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
     await writeMarketplaceProjection(harness.record);
@@ -262,11 +259,10 @@ describe("MarketplacePluginReconciler", () => {
     const snapshot = await harness.registry.getInternalSnapshot();
     expect(snapshot).toEqual(
       expect.objectContaining({
-        plugins: [expect.objectContaining({ id: harness.record.id, state: "broken", enabled: false })],
+        plugins: [expect.objectContaining({ id: harness.record.id, state: "installed", enabled: true })],
       }),
     );
-    await expect(validateMarketplaceOwnershipAndProjection(snapshot.plugins[0]!)).resolves.toBeUndefined();
-    await expect(pathExists(join(harness.record.rootPath, "index.ts"))).resolves.toBe(false);
+    await expect(pathExists(join(harness.record.rootPath, "index.ts"))).resolves.toBe(true);
     await expect(harness.transactions.list()).resolves.toEqual([]);
   });
 });
@@ -297,13 +293,6 @@ async function createHarness() {
     installedAt: 1,
     entryPath,
     rootPath: pluginRoot,
-    verifiedFiles: [
-      {
-        path: "payload/index.ts",
-        sha256: createHash("sha256").update(source).digest("hex"),
-        size: Buffer.byteLength(source),
-      },
-    ],
   };
   let operation = 0;
   const registry = new MarketplacePluginRegistry(userDataDir);
@@ -330,13 +319,6 @@ async function createUpdatedRecord(harness: {
     artifactHash,
     entryPath,
     installedAt: 2,
-    verifiedFiles: [
-      {
-        path: "payload/index.ts",
-        sha256: createHash("sha256").update(source).digest("hex"),
-        size: Buffer.byteLength(source),
-      },
-    ],
   };
 }
 

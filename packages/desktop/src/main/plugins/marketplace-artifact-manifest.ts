@@ -1,4 +1,3 @@
-import { createPublicKey, verify } from "node:crypto";
 import { chmod, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { gte, lt, valid } from "semver";
@@ -11,7 +10,6 @@ import {
 } from "../../shared/plugin-configuration-contracts.ts";
 import type { RuntimeCompatibility } from "../../shared/sidecar-contracts.ts";
 import type { ExtractedMarketplaceArchive } from "./marketplace-artifact-archive.ts";
-import type { TrustedMarketplaceEndpoint } from "./marketplace-endpoint-settings-service.ts";
 
 export interface MarketplaceArtifactTarget {
   platform: string;
@@ -26,13 +24,12 @@ export interface MarketplaceArtifactTarget {
   runtimeCompatibilityId?: string;
 }
 
-export interface VerifiedMarketplaceArtifact {
+export interface MarketplaceArtifactManifestResult {
   displayName: string;
   entryPath: string;
   capabilities: DesktopExtensionCapability[];
   containsNativeCode: boolean;
   configurationSchema?: PluginConfigurationSchema;
-  verifiedFiles: Array<{ path: string; sha256: string; size: number }>;
 }
 
 interface Manifest {
@@ -50,10 +47,9 @@ interface Manifest {
     abi: { kind: "node"; modulesAbi: string } | { kind: "napi"; minimumNapi: string };
   }>;
   executables: Array<{ path: string; osRelease?: string; libc?: string }>;
-  files: Record<string, { sha256: string; size: number; mode: "0644" | "0755" }>;
+  files: Record<string, { mode?: "0644" | "0755" }>;
 }
 
-const SHA256 = /^[a-f0-9]{64}$/;
 const CAPABILITIES = new Set<DesktopExtensionCapability>([
   "events.subscribe",
   "configuration.read",
@@ -82,79 +78,44 @@ const CAPABILITIES = new Set<DesktopExtensionCapability>([
   "ui.terminal.input",
 ]);
 
-export async function verifyMarketplaceArtifact(input: {
+export async function readMarketplaceArtifactManifest(input: {
   stagingRoot: string;
   archive: ExtractedMarketplaceArchive;
-  endpoint: TrustedMarketplaceEndpoint;
   pluginId: string;
   version: string;
   artifactId: string;
-  artifactTarget: MarketplaceArtifactTarget;
   runtime: RuntimeCompatibility;
   desktopVersion: string;
-}): Promise<VerifiedMarketplaceArtifact> {
+  marketplaceId: string;
+}): Promise<MarketplaceArtifactManifestResult> {
   const manifestFile = input.archive.files.get("market-manifest.json");
-  const signatureFile = input.archive.files.get("signature.json");
-  if (!manifestFile || !signatureFile) throw new Error("Marketplace artifact metadata files are missing");
-  const manifestBytes = await readFile(join(input.stagingRoot, manifestFile.path));
-  const signatureBytes = await readFile(join(input.stagingRoot, signatureFile.path));
-  const manifest = parseManifest(manifestBytes);
-  const signature = parseSignature(signatureBytes);
-  if (canonicalize(manifest) !== manifestBytes.toString("utf8")) {
-    throw new Error("market-manifest.json is not canonical JSON");
-  }
-  if (signature.keyId !== input.endpoint.signing.keyId) throw new Error("Marketplace signing key ID changed");
-  const publicKey = createPublicKey({
-    key: Buffer.from(input.endpoint.signing.publicKey, "base64"),
-    format: "der",
-    type: "spki",
-  });
-  if (!verify(null, manifestBytes, publicKey, Buffer.from(signature.value, "base64"))) {
-    throw new Error("Marketplace artifact signature is invalid");
-  }
+  if (!manifestFile) throw new Error("Marketplace artifact manifest is missing");
+  const manifest = parseManifest(await readFile(join(input.stagingRoot, manifestFile.path)));
   if (
-    manifest.marketplaceId !== input.endpoint.marketplaceId ||
+    manifest.marketplaceId !== input.marketplaceId ||
     manifest.plugin.id !== input.pluginId ||
     manifest.plugin.version !== input.version ||
     manifest.artifactId !== input.artifactId
-  )
+  ) {
     throw new Error("Marketplace artifact identity does not match the request");
+  }
   if (manifest.desktop.hostProfileVersion !== DESKTOP_EXTENSION_HOST_PROFILE_VERSION) {
     throw new Error("Marketplace artifact host profile is incompatible");
   }
   if (!desktopVersionMatches(manifest.desktop, input.desktopVersion)) {
     throw new Error("Marketplace artifact Desktop version is incompatible");
   }
-  if (!targetsEqual(manifest.target, input.artifactTarget) || !targetMatchesRuntime(manifest.target, input.runtime)) {
+  if (!targetMatchesRuntime(manifest.target, input.runtime)) {
     throw new Error("Marketplace artifact target is incompatible");
   }
   if (manifest.configuration && !manifest.capabilities.includes("configuration.read")) {
     throw new Error("Marketplace artifact configuration requires configuration.read capability");
   }
-  const expectedFiles = new Set(["market-manifest.json", "signature.json", ...Object.keys(manifest.files)]);
-  if (
-    expectedFiles.size !== input.archive.files.size ||
-    [...input.archive.files.keys()].some((path) => !expectedFiles.has(path))
-  ) {
-    throw new Error("Marketplace artifact contains undeclared files");
-  }
-  for (const [path, expected] of Object.entries(manifest.files)) {
-    if (!path.startsWith("payload/") || path === "payload/")
-      throw new Error(`Marketplace payload path is invalid: ${path}`);
-    if (!SHA256.test(expected.sha256) || !Number.isSafeInteger(expected.size) || expected.size < 0) {
-      throw new Error(`Marketplace payload metadata is invalid: ${path}`);
-    }
-    const actual = input.archive.files.get(path);
-    if (!actual || actual.sha256 !== expected.sha256 || actual.size !== expected.size) {
-      throw new Error(`Marketplace payload verification failed: ${path}`);
-    }
-  }
-  if (!Object.hasOwn(manifest.files, manifest.pi.entry) || !manifest.pi.entry.startsWith("payload/")) {
-    throw new Error("Marketplace entry is not a declared payload file");
+  if (!manifest.pi.entry.startsWith("payload/") || !input.archive.files.has(manifest.pi.entry)) {
+    throw new Error("Marketplace entry is not present in the payload");
   }
   for (const item of [...manifest.nativeModules, ...manifest.executables]) {
-    if (!Object.hasOwn(manifest.files, item.path))
-      throw new Error(`Marketplace native file is undeclared: ${item.path}`);
+    if (!input.archive.files.has(item.path)) throw new Error(`Marketplace native file is missing: ${item.path}`);
   }
   for (const item of manifest.nativeModules) {
     const compatible =
@@ -171,8 +132,10 @@ export async function verifyMarketplaceArtifact(input: {
       throw new Error(`Marketplace executable target is incompatible: ${executable.path}`);
     }
   }
-  for (const [path, expected] of Object.entries(manifest.files)) {
-    await chmod(join(input.stagingRoot, ...path.split("/")), expected.mode === "0755" ? 0o755 : 0o644);
+  for (const [path, metadata] of Object.entries(manifest.files)) {
+    if (metadata.mode === "0755" && input.archive.files.has(path)) {
+      await chmod(join(input.stagingRoot, ...path.split("/")), 0o755);
+    }
   }
   return {
     displayName: manifest.plugin.name,
@@ -180,7 +143,6 @@ export async function verifyMarketplaceArtifact(input: {
     capabilities: [...manifest.capabilities],
     containsNativeCode: manifest.nativeModules.length > 0 || manifest.executables.length > 0,
     ...(manifest.configuration ? { configurationSchema: clonePluginConfigurationSchema(manifest.configuration) } : {}),
-    verifiedFiles: [...input.archive.files.values()].map(({ path, sha256, size }) => ({ path, sha256, size })),
   };
 }
 
@@ -231,54 +193,27 @@ function parseManifest(bytes: Buffer): Manifest {
     !Array.isArray(value.nativeModules) ||
     !value.nativeModules.every(isNativeModule) ||
     !Array.isArray(value.executables) ||
-    !value.executables.every(isExecutable) ||
-    !isObject(value.files)
-  )
+    !value.executables.every(isExecutable)
+  ) {
     throw new Error("market-manifest.json is invalid");
+  }
   const files: Manifest["files"] = {};
-  for (const [path, metadata] of Object.entries(value.files)) {
-    if (
-      !isObject(metadata) ||
-      typeof metadata.sha256 !== "string" ||
-      typeof metadata.size !== "number" ||
-      (metadata.mode !== "0644" && metadata.mode !== "0755")
-    )
-      throw new Error(`Marketplace file metadata is invalid: ${path}`);
-    files[path] = { sha256: metadata.sha256, size: metadata.size, mode: metadata.mode };
+  if (value.files !== undefined) {
+    if (!isObject(value.files)) throw new Error("Marketplace file metadata is invalid");
+    for (const [path, metadata] of Object.entries(value.files)) {
+      if (
+        !isObject(metadata) ||
+        (metadata.mode !== undefined && metadata.mode !== "0644" && metadata.mode !== "0755")
+      ) {
+        throw new Error(`Marketplace file metadata is invalid: ${path}`);
+      }
+      files[path] = metadata.mode === undefined ? {} : { mode: metadata.mode };
+    }
   }
   const configuration = parsePluginConfigurationSchema(value.configuration);
   return { ...value, ...(configuration ? { configuration } : {}), files } as Manifest;
 }
 
-function parseSignature(bytes: Buffer): { algorithm: "ed25519"; keyId: string; value: string } {
-  const value = parseObject(bytes, "signature.json");
-  if (value.algorithm !== "ed25519" || typeof value.keyId !== "string" || typeof value.value !== "string") {
-    throw new Error("signature.json is invalid");
-  }
-  const decoded = Buffer.from(value.value, "base64");
-  if (decoded.length !== 64 || decoded.toString("base64") !== value.value)
-    throw new Error("signature.json signature is invalid");
-  return { algorithm: "ed25519", keyId: value.keyId, value: value.value };
-}
-
-function canonicalize(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error("Canonical JSON contains a non-finite number");
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
-  if (isObject(value))
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalize(value[key])}`)
-      .join(",")}}`;
-  throw new Error("Canonical JSON contains an unsupported value");
-}
-
-function targetsEqual(left: MarketplaceArtifactTarget, right: MarketplaceArtifactTarget): boolean {
-  return canonicalize(left) === canonicalize(right);
-}
 function desktopVersionMatches(desktop: Manifest["desktop"], desktopVersion: string): boolean {
   if (!valid(desktopVersion)) return false;
   if (desktop.minVersion !== undefined && (!valid(desktop.minVersion) || !gte(desktopVersion, desktop.minVersion))) {
@@ -292,12 +227,14 @@ function desktopVersionMatches(desktop: Manifest["desktop"], desktopVersion: str
   }
   return true;
 }
+
 function minimumNapiMatches(minimumNapi: string, actualNapi: string): boolean {
   if (!/^[1-9]\d*$/.test(minimumNapi) || !/^[1-9]\d*$/.test(actualNapi)) return false;
   const minimum = Number(minimumNapi);
   const actual = Number(actualNapi);
   return Number.isSafeInteger(minimum) && Number.isSafeInteger(actual) && actual >= minimum;
 }
+
 function isArtifactTarget(value: unknown): value is MarketplaceArtifactTarget {
   if (!isObject(value) || typeof value.platform !== "string" || typeof value.arch !== "string") return false;
   return [
@@ -311,20 +248,24 @@ function isArtifactTarget(value: unknown): value is MarketplaceArtifactTarget {
     value.runtimeCompatibilityId,
   ].every(optionalString);
 }
+
 function isNativeModule(value: unknown): value is Manifest["nativeModules"][number] {
   if (!isObject(value) || typeof value.path !== "string" || !isObject(value.abi)) return false;
   return value.abi.kind === "node"
     ? typeof value.abi.modulesAbi === "string"
     : value.abi.kind === "napi" && typeof value.abi.minimumNapi === "string";
 }
+
 function isExecutable(value: unknown): value is Manifest["executables"][number] {
   return (
     isObject(value) && typeof value.path === "string" && optionalString(value.osRelease) && optionalString(value.libc)
   );
 }
+
 function optionalString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === "string";
 }
+
 function parseObject(bytes: Buffer, label: string): Record<string, unknown> {
   let value: unknown;
   try {
@@ -335,6 +276,7 @@ function parseObject(bytes: Buffer, label: string): Record<string, unknown> {
   if (!isObject(value)) throw new Error(`${label} must be an object`);
   return value;
 }
+
 function isObject(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);

@@ -196,7 +196,7 @@ export interface DesktopApi {
     reload(input: SessionReloadInput): Promise<SessionCommandResult>;
     reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult>;
     branch(input: SessionBranchInput): Promise<SessionBranchResult>;
-    cancel(projectId: string, threadId: string): Promise<void>;
+    cancel(projectId: string, threadId: string): Promise<ClearedQueue>;
     clearQueue(projectId: string, threadId: string): Promise<ClearedQueue>;
     compact(projectId: string, threadId: string): Promise<void>;
     refreshModels(projectId: string, threadId: string): Promise<void>;

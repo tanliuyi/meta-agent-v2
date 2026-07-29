@@ -1,5 +1,4 @@
 import { Button } from "@renderer/shared/ui/button";
-import { Checkbox } from "@renderer/shared/ui/checkbox";
 import { Input } from "@renderer/shared/ui/input";
 import RotateCw from "lucide-react/dist/esm/icons/rotate-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
@@ -15,7 +14,6 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
   const controller = useMarketplaceEndpointSettings();
   const [baseUrl, setBaseUrl] = useState("");
   const [dirty, setDirty] = useState(false);
-  const [trustFingerprint, setTrustFingerprint] = useState(false);
   const active = controller.snapshot?.endpoints.find(
     (endpoint) => endpoint.marketplaceId === controller.snapshot?.activeMarketplaceId,
   );
@@ -26,17 +24,14 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
   }, [active, dirty]);
 
   const ready = controller.testResult?.status === "ready" ? controller.testResult : undefined;
-  const canSave =
-    !controller.pending &&
-    baseUrl.trim().length > 0 &&
-    (!ready?.confirmationRequired || (trustFingerprint && Boolean(ready.confirmationToken)));
+  const canSave = !controller.pending && baseUrl.trim().length > 0;
 
   return (
     <section className="marketplace-endpoint-settings" aria-labelledby="marketplace-endpoint-heading">
       <div className="marketplace-endpoint-heading">
         <div>
           <h3 id="marketplace-endpoint-heading">插件市场</h3>
-          <span>{active ? `${active.marketplaceId} · ${active.signing.fingerprint}` : "未配置市场 API"}</span>
+          <span>{active ? active.marketplaceId : "未配置市场 API"}</span>
         </div>
         <Button
           variant="ghost"
@@ -46,7 +41,6 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
           title="重新载入"
           onClick={() => {
             setDirty(false);
-            setTrustFingerprint(false);
             controller.resetTest();
             void controller.reload();
           }}
@@ -68,7 +62,6 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
           onChange={(event) => {
             setBaseUrl(event.currentTarget.value);
             setDirty(true);
-            setTrustFingerprint(false);
             controller.resetTest();
           }}
         />
@@ -84,7 +77,7 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
           <Button
             disabled={!canSave}
             onClick={() =>
-              void controller.save(baseUrl, trustFingerprint).then((result) => {
+              void controller.save(baseUrl).then((result) => {
                 if (result?.status === "saved") {
                   setDirty(false);
                   onSaved?.();
@@ -101,18 +94,7 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
       {ready ? (
         <div className="marketplace-endpoint-result" data-tone="info" role="status">
           <strong>{ready.endpoint.marketplaceId}</strong>
-          <span>{ready.endpoint.signing.fingerprint}</span>
-          {ready.confirmationRequired ? (
-            <label className="marketplace-endpoint-trust">
-              <Checkbox
-                checked={trustFingerprint}
-                onCheckedChange={(checked) => setTrustFingerprint(checked === true)}
-              />
-              <span>信任此市场签名密钥</span>
-            </label>
-          ) : (
-            <span>签名密钥已信任</span>
-          )}
+          <span>{ready.endpoint.apiRoot}</span>
         </div>
       ) : null}
       {controller.error ? (

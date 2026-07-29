@@ -1,6 +1,6 @@
 import { Body, Headers, Param, Req, type Type } from "@nestjs/common";
 import { valid as validSemver } from "semver";
-import { buildSignedArtifact, extractPayloadArchive, validatePayloadPath } from "./artifact-builder.ts";
+import { buildArtifact, extractPayloadArchive, validatePayloadPath } from "./artifact-builder.ts";
 import { ARTIFACT_ID, PLUGIN_ID, parseTarget } from "./catalog-validation.ts";
 import { parsePluginConfigurationSchema } from "./configuration-schema.ts";
 import type {
@@ -30,7 +30,6 @@ import {
 	readUploadBody,
 	requirePrincipal,
 } from "./http-util.ts";
-import { canonicalJson } from "./signing-service.ts";
 
 export interface ArtifactUploadResponse {
 	pluginId: string;
@@ -92,7 +91,7 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 			const bytes = await readUploadBody(request, runtime.config.maxArtifactBytes);
 			const built = mapStoreErrors(() => {
 				const files = extractPayloadArchive(bytes, 4 * runtime.config.maxArtifactBytes);
-				return buildSignedArtifact(runtime.signing, {
+				return buildArtifact({
 					marketplaceId: runtime.config.marketplaceId,
 					artifactId: context.artifact.id,
 					plugin: {
@@ -114,8 +113,6 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 					bytes: built.bytes,
 					sha256: built.sha256,
 					size: built.size,
-					manifestJson: canonicalJson(built.manifest),
-					signatureJson: JSON.stringify(built.signature),
 				}),
 			);
 			return { pluginId, version, artifactId, sha256: built.sha256, size: built.size };
@@ -298,7 +295,7 @@ function parsePublishArtifact(value: unknown, path: string): PublishVersionArtif
 	if (containsNativeCode) {
 		throw badRequest(
 			"NATIVE_ARTIFACT_UNSUPPORTED",
-			`${path}.containsNativeCode cannot be enabled until signed native metadata is supported`,
+			`${path}.containsNativeCode cannot be enabled until native metadata is supported`,
 		);
 	}
 	return {

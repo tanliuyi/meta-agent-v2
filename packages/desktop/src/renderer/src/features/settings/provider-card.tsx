@@ -9,8 +9,6 @@ interface ProviderCardProps {
 
 /** A single provider row in the unified provider list. */
 export const ProviderCard = memo(function ProviderCard({ entry, onEdit }: ProviderCardProps) {
-  const sourceLabel =
-    entry.source === "ai-builtin" ? "内置" : entry.source === "desktop-builtin" ? "内置(desktop)" : "自定义";
   const credLabel =
     entry.credentialStatus === "configured"
       ? "凭据已配置"
@@ -18,7 +16,11 @@ export const ProviderCard = memo(function ProviderCard({ entry, onEdit }: Provid
         ? "环境变量可用"
         : "未配置凭据";
   const modelLabel =
-    entry.builtInModelCount > 0 ? `${entry.builtInModelCount}+ 内置模型` : `${entry.models.length} 个自定义模型`;
+    entry.builtInModelCount > 0
+      ? `${entry.builtInModelCount} 个内置模型`
+      : entry.source === "ai-builtin"
+        ? "动态模型目录"
+        : `${entry.models.length} 个自定义模型`;
 
   return (
     <button type="button" className="providers-row" onClick={() => onEdit(entry.key)}>
@@ -26,7 +28,6 @@ export const ProviderCard = memo(function ProviderCard({ entry, onEdit }: Provid
       <div className="providers-row-body">
         <div className="providers-row-heading">
           <span className="providers-row-name">{entry.displayName}</span>
-          <span className={`providers-source-badge providers-source-badge--${entry.source}`}>{sourceLabel}</span>
         </div>
         <div className="providers-row-meta">
           <span>{entry.key}</span>

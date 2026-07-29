@@ -1,7 +1,7 @@
 import Cpu from "lucide-react/dist/esm/icons/cpu.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import type { PiThreadPhase, SessionControlState } from "../../../../shared/contracts.ts";
-import { getThinkingLevelLabel } from "./composer/composer-control-model.ts";
+import { getThinkingLevelLabel } from "../../shared/lib/thinking-level-label.ts";
 
 const SUBAGENT_PHASE_LABELS: Record<Exclude<PiThreadPhase, "idle">, string> = {
   running: "子智能体运行中",

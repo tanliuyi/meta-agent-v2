@@ -6,7 +6,6 @@ import type {
 	CatalogDocument,
 	CatalogPlugin,
 	CatalogPluginVersion,
-	CatalogRevocation,
 	PluginStatus,
 	PublisherRecord,
 } from "./contracts.ts";
@@ -14,7 +13,7 @@ import type {
 export const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
 export const ARTIFACT_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const STATUSES = new Set<PluginStatus>(["available", "deprecated", "withdrawn", "blocked"]);
+const STATUSES = new Set<PluginStatus>(["available", "deprecated"]);
 
 export function parseCatalogDocument(value: unknown): CatalogDocument {
 	const root = objectValue(value, "catalog");
@@ -22,14 +21,11 @@ export function parseCatalogDocument(value: unknown): CatalogDocument {
 	const plugins = arrayValue(root.plugins, "catalog.plugins").map((plugin, index) =>
 		parsePlugin(plugin, `catalog.plugins[${index}]`),
 	);
-	const revocations = arrayValue(root.revocations, "catalog.revocations").map((revocation, index) =>
-		parseRevocation(revocation, `catalog.revocations[${index}]`),
-	);
 	assertUnique(
 		plugins.map(({ id }) => id),
 		"plugin IDs",
 	);
-	return { schemaVersion: 1, plugins, revocations };
+	return { schemaVersion: 1, plugins };
 }
 
 function parsePlugin(value: unknown, path: string): CatalogPlugin {
@@ -151,25 +147,6 @@ export function parseTarget(value: unknown, path: string): ArtifactTarget {
 			"piVersion",
 			"runtimeCompatibilityId",
 		]),
-	};
-}
-
-function parseRevocation(value: unknown, path: string): CatalogRevocation {
-	const record = objectValue(value, path);
-	const status = stringValue(record.status, `${path}.status`);
-	if (status !== "withdrawn" && status !== "blocked") throw new Error(`${path}.status is invalid`);
-	return {
-		pluginId: stringValue(record.pluginId, `${path}.pluginId`),
-		version: stringValue(record.version, `${path}.version`),
-		...(record.artifactIds === undefined
-			? {}
-			: { artifactIds: stringArray(record.artifactIds, `${path}.artifactIds`) }),
-		status,
-		reasonCode: stringValue(record.reasonCode, `${path}.reasonCode`),
-		message: stringValue(record.message, `${path}.message`),
-		...(record.replacementVersion === undefined
-			? {}
-			: { replacementVersion: stringValue(record.replacementVersion, `${path}.replacementVersion`) }),
 	};
 }
 

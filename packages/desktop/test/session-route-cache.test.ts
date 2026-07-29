@@ -1,4 +1,9 @@
+import type { Attachment, CreateAttachment } from "@assistant-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  restoreComposerAttachments,
+  toComposerAttachmentInput,
+} from "../src/renderer/src/runtime/image-attachments.ts";
 import {
   createSessionRecord,
   parseSessionRecordKey,
@@ -80,15 +85,62 @@ describe("CachedSessionRecord", () => {
     expect(r2.key).not.toBe(r3.key);
   });
 
-  it("为每个 cached record 隔离保存未发送的 composer 文本", () => {
+  it("为每个 cached record 隔离保存未发送的 composer prompt", () => {
     const first = createSessionRecord({ projectId: "p1", threadId: "t1" });
     const second = createSessionRecord({ projectId: "p1", threadId: "t2" });
+    const attachment = completeAttachment("first-image");
 
-    first.stores.composerDraft.setText("first draft");
-    second.stores.composerDraft.setText("second draft");
+    first.stores.composerDraft.setSnapshot({ text: "first draft", attachments: [attachment] });
+    second.stores.composerDraft.setSnapshot({ text: "second draft", attachments: [] });
 
-    expect(first.stores.composerDraft.getText()).toBe("first draft");
-    expect(second.stores.composerDraft.getText()).toBe("second draft");
+    expect(first.stores.composerDraft.getSnapshot()).toEqual({
+      text: "first draft",
+      attachments: [attachment],
+    });
+    expect(second.stores.composerDraft.getSnapshot()).toEqual({ text: "second draft", attachments: [] });
+  });
+
+  it("按附件状态生成可重新加入 Composer 的输入", () => {
+    const file = new File(["image"], "pending.png", { type: "image/png" });
+    const pending: Attachment = {
+      id: "pending-image",
+      type: "image",
+      name: file.name,
+      contentType: file.type,
+      file,
+      status: { type: "requires-action", reason: "composer-send" },
+    };
+    const complete = completeAttachment("complete-image");
+
+    expect(toComposerAttachmentInput(pending)).toBe(file);
+    expect(toComposerAttachmentInput(complete)).toEqual({
+      id: "complete-image",
+      type: "image",
+      name: "complete-image.png",
+      contentType: "image/png",
+      content: complete.content,
+    });
+  });
+
+  it("部分附件恢复失败后只重试失败项", async () => {
+    const first = completeAttachment("first-image");
+    const second = completeAttachment("second-image");
+    const restored = new Set<Attachment>();
+    const addAttachment = vi.fn<(attachment: File | CreateAttachment) => Promise<void>>();
+    addAttachment.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("restore failed"));
+
+    await expect(restoreComposerAttachments(addAttachment, [first, second], restored)).rejects.toThrow(
+      "restore failed",
+    );
+    expect(restored).toEqual(new Set([first]));
+
+    addAttachment.mockResolvedValueOnce(undefined);
+    await expect(restoreComposerAttachments(addAttachment, [first, second], restored)).resolves.toBeUndefined();
+    expect(addAttachment.mock.calls.map(([attachment]) => attachment.name)).toEqual([
+      "first-image.png",
+      "second-image.png",
+      "second-image.png",
+    ]);
   });
 });
 
@@ -363,14 +415,18 @@ describe("SessionTransportManager", () => {
       },
     });
     const manager = new SessionTransportManager();
-    record.stores.composerDraft.setText("preserved draft");
+    const cachedAttachment = completeAttachment("preserved-image");
+    record.stores.composerDraft.setSnapshot({ text: "preserved draft", attachments: [cachedAttachment] });
 
     await manager.ensure(record);
     await manager.detach(record.key);
 
     expect(detach).toHaveBeenCalledWith("initial");
     expect(manager.hasCommittedLease(record)).toBe(false);
-    expect(record.stores.composerDraft.getText()).toBe("preserved draft");
+    expect(record.stores.composerDraft.getSnapshot()).toEqual({
+      text: "preserved draft",
+      attachments: [cachedAttachment],
+    });
 
     await expect(manager.ensure(record)).resolves.toMatchObject({ attachmentId: "replacement" });
     expect(attach).toHaveBeenCalledTimes(2);
@@ -429,6 +485,17 @@ describe("session-navigation", () => {
     expect("/settings/personalization").toBe("/settings/personalization");
   });
 });
+
+function completeAttachment(id: string): Attachment {
+  return {
+    id,
+    type: "image",
+    name: `${id}.png`,
+    contentType: "image/png",
+    content: [{ type: "image", image: "data:image/png;base64,aW1hZ2U=" }],
+    status: { type: "complete" },
+  };
+}
 
 function attachmentFor(record: ReturnType<typeof createSessionRecord>, attachmentId: string): SessionAttachment {
   return {

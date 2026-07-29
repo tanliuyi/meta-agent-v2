@@ -50,7 +50,7 @@ export function listPluginPage(
 }
 
 export function versionCompatible(version: StoredPluginVersion, runtime: MarketplaceRuntimeQuery): boolean {
-	if (version.draft || version.status === "blocked" || version.status === "withdrawn") return false;
+	if (version.draft) return false;
 	if (runtime.desktopVersion !== undefined && !validSemver(runtime.desktopVersion)) return false;
 	if (
 		version.desktop.minVersion &&
@@ -91,7 +91,7 @@ function summarize(
 		...(plugin.iconAssetId ? { iconAssetId: plugin.iconAssetId } : {}),
 		...(latest ? { latestVersion: latest.version } : {}),
 		...(compatible ? { compatibleVersion: compatible.version } : {}),
-		status: (compatible ?? latest)?.status ?? "blocked",
+		status: (compatible ?? latest)?.status ?? "deprecated",
 		capabilities: [...((compatible ?? latest)?.capabilities ?? [])],
 		containsNativeCode:
 			(compatible ?? latest)?.artifacts.some(({ containsNativeCode }) => containsNativeCode) ?? false,

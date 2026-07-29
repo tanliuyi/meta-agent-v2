@@ -131,6 +131,9 @@ describe("Pi coding-agent 0.82.1 public compatibility", () => {
     const sourceModels = getProviders().flatMap((provider) => getModels(provider as BuiltinProvider));
     expect(metadata.builtInProviders.find(({ id }) => id === "google-vertex")?.displayName).toBe("Google Vertex AI");
     expect(metadata.builtInProviders.find(({ id }) => id === "opencode")?.displayName).toBe("OpenCode Zen");
+    expect(metadata.builtInProviders.find(({ id }) => id === "radius")).toEqual(
+      expect.objectContaining({ displayName: "Radius", models: [] }),
+    );
     for (const field of ["thinkingLevelMap", "headers", "compat"] as const) {
       const sourceModel = sourceModels.find((model) => model[field] !== undefined);
       expect(sourceModel, `missing built-in model fixture for ${field}`).toBeDefined();

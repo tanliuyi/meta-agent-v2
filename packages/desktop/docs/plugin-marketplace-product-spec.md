@@ -4,6 +4,10 @@
 最后更新：2026-07-26
 适用范围：`packages/desktop`、Desktop 市场服务与标准 Pi Extension 集成
 
+> 实现简化决策：Desktop 插件市场按受信任远端版本源处理，不再提供 artifact/manifest 签名验证、payload 文件 hash、endpoint fingerprint confirmation、signed revocation、artifact origin allowlist、运行时文件 hash、managed-directory ownership 深校验或 durable apply journal。后文与这些机制冲突的条款、测试要求和验收项均由本决策取代。
+>
+> 当前客户端只保留版本分发所需链路：endpoint 与 catalog、runtime target 选择、受大小限制且不能逃逸 staging 的 ZIP 解包、manifest 入口/兼容信息、registry/projection 原子切换、旧 generation 版本引用和失败时的进程内 worker rollback。`artifactHash` 字段仅作为 immutable version 目录的服务端 artifact key 使用，客户端不校验下载内容 hash。
+
 ## 1. 摘要
 
 Meta Agent Desktop 新增联网插件市场，为用户提供插件发现、详情查看、安装、启用、禁用、更新、卸载和撤销提示。

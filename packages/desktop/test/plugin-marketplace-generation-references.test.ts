@@ -52,7 +52,6 @@ function extensionSet(generation: string): ResolvedExtensionSet {
         displayName: "Plugin One",
         source: "marketplace",
         entryPath: join(versionRoot, "payload", "index.ts"),
-        contentHash: "hash",
         hostProfileVersion: 1,
         capabilities: [],
       },

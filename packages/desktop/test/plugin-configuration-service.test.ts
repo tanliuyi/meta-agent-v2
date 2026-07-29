@@ -46,7 +46,6 @@ function record(root: string): InstalledMarketplacePluginRecord {
     installedAt: 1,
     entryPath: join(root, "index.js"),
     rootPath: root,
-    verifiedFiles: [],
   };
 }
 

@@ -73,19 +73,24 @@ export class PiCompatibilityAdapter {
     return { branchThreadId: header.id, branchSessionFile };
   }
 
-  async cancel(): Promise<void> {
+  async cancel(): Promise<ClearedQueue> {
     const phase = this.projector.snapshot().phase;
     if (phase === "compacting") {
       this.session.abortCompaction();
-      return;
+      return { steering: [], followUp: [] };
     }
     if (phase === "tree-navigation") {
       this.session.abortBranchSummary();
-      return;
+      return { steering: [], followUp: [] };
     }
-    if (phase === "running" || phase === "retrying") {
+    if (phase === "running") {
+      const cleared = this.clearQueue();
       await this.session.abort();
-      return;
+      return cleared;
+    }
+    if (phase === "retrying") {
+      await this.session.abort();
+      return { steering: [], followUp: [] };
     }
     throw new Error("Pi session 当前没有可取消操作");
   }

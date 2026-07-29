@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { mkdir, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,16 +30,14 @@ describe("DesktopExtensionSourcePolicy", () => {
     expect(first.entries[1]?.entryPath).toBeUndefined();
   });
 
-  it("changes generation when extension bytes change even if size and mtime are preserved", async () => {
+  it("keeps the generation stable when extension bytes change", async () => {
     const harness = await createHarness();
     const first = await harness.policy.resolve("project");
-    const before = await stat(harness.curatedPath);
     await writeFile(harness.curatedPath, "export deFault function () {}\n", "utf8");
-    await utimes(harness.curatedPath, before.atime, before.mtime);
 
     const second = await harness.policy.resolve("project");
 
-    expect(second.generation).not.toBe(first.generation);
+    expect(second.generation).toBe(first.generation);
   });
 
   it("loads development entries only after explicit approval and Developer Mode enablement", async () => {
@@ -134,13 +131,6 @@ describe("DesktopExtensionSourcePolicy", () => {
       installedAt: 1,
       entryPath: marketplaceEntry,
       rootPath: marketplaceRoot,
-      verifiedFiles: [
-        {
-          path: "payload/index.ts",
-          sha256: createHash("sha256").update(marketplaceSource).digest("hex"),
-          size: Buffer.byteLength(marketplaceSource),
-        },
-      ],
     };
     await writeMarketplaceProjection(plugin);
     harness.policy = new DesktopExtensionSourcePolicy({
@@ -169,41 +159,10 @@ describe("DesktopExtensionSourcePolicy", () => {
         configuration: { endpoint: "https://configured.test" },
       }),
     );
-    const restored = await harness.policy.hydrateRuntimeConfigurations({
-      ...resolved,
-      entries: resolved.entries.map(({ configuration: _configuration, ...entry }) => entry),
-    });
-    expect(restored.entries[1]).toEqual(
-      expect.objectContaining({ configuration: { endpoint: "https://configured.test" } }),
-    );
-
-    const blockedPolicy = new DesktopExtensionSourcePolicy({
-      settings: harness.settings,
-      getBuiltinDefinitions: () => harness.builtin,
-      getCuratedDefinitions: () => harness.curated,
-      getMarketplaceExtensions: async () => ({ revision: "market-1", plugins: [plugin] }),
-      getMarketplaceRevocation: async () => ({
-        status: "blocked",
-        reasonCode: "SECURITY",
-        message: "Blocked by signed snapshot",
-        checkedAt: 2,
-        stale: false,
-      }),
-      marketplaceRoot: join(harness.root, "marketplace"),
-      curatedRoot: harness.curatedRoot,
-    });
-    const blocked = await blockedPolicy.resolve("project");
-    expect(blocked.entries.some((entry) => entry.source === "marketplace")).toBe(false);
-    expect(blocked.diagnostics).toEqual([
-      expect.objectContaining({ extensionId: "publisher.plugin", code: "DESKTOP_EXTENSION_BLOCKED" }),
-    ]);
-
     await writeFile(marketplaceEntry, "export default function modified() {}\n", "utf8");
     const modified = await harness.policy.resolve("project");
-    expect(modified.entries.some((entry) => entry.source === "marketplace")).toBe(false);
-    expect(modified.diagnostics).toEqual([
-      expect.objectContaining({ extensionId: "publisher.plugin", code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE" }),
-    ]);
+    expect(modified.entries.some((entry) => entry.source === "marketplace")).toBe(true);
+    expect(modified.diagnostics).toEqual([]);
   });
 
   it("does not load a marketplace registry entry outside the managed extension root", async () => {
@@ -228,7 +187,6 @@ describe("DesktopExtensionSourcePolicy", () => {
       installedAt: 1,
       entryPath: outsideEntry,
       rootPath: outsideRoot,
-      verifiedFiles: [],
     };
     harness.policy = new DesktopExtensionSourcePolicy({
       settings: harness.settings,

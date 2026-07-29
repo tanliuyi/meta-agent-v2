@@ -340,8 +340,8 @@ export class SessionRuntime {
     }
   }
 
-  async cancel(): Promise<void> {
-    await this.compatibility.cancel();
+  async cancel(): Promise<ClearedQueue> {
+    return this.compatibility.cancel();
   }
 
   clearQueue(): ClearedQueue {

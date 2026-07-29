@@ -1,0 +1,20 @@
+name: Deploy plugin marketplace
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: marketplace-deploy
+    timeout-minutes: 30
+    steps:
+      - name: Deploy selected commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$(mktemp -d /var/tmp/meta-agent-marketplace-deploy.XXXXXX)"
+          trap 'rm -rf "$source_dir"' EXIT
+          git clone --no-checkout /data/gitea/data/git/repositories/admin/meta-agent-v2.git "$source_dir"
+          cd "$source_dir"
+          git checkout --detach "$GITHUB_SHA"
+          bash scripts/deploy-plugin-marketplace-local.sh

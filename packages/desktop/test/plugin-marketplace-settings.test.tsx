@@ -10,18 +10,10 @@ vi.mock("../src/renderer/src/features/plugins/use-marketplace-endpoint-settings.
     pending: false,
     testResult: {
       status: "ready",
-      confirmationRequired: true,
-      confirmationToken: "confirm",
       endpoint: {
         marketplaceId: "example.market",
         baseUrl: "https://market.example/",
         apiRoot: "https://market.example/v1/",
-        artifactOrigins: ["https://artifacts.example"],
-        signing: {
-          algorithm: "ed25519",
-          keyId: "key",
-          fingerprint: "sha256:1234",
-        },
         active: true,
       },
     },
@@ -33,12 +25,11 @@ vi.mock("../src/renderer/src/features/plugins/use-marketplace-endpoint-settings.
 }));
 
 describe("marketplace endpoint settings", () => {
-  it("renders URL testing and explicit signing fingerprint trust", () => {
+  it("renders endpoint URL testing and resolved API metadata", () => {
     const markup = renderToStaticMarkup(<MarketplaceEndpointSettings />);
     expect(markup).toContain("Marketplace API URL");
     expect(markup).toContain('type="url"');
     expect(markup).toContain("测试连接");
-    expect(markup).toContain("sha256:1234");
-    expect(markup).toContain("信任此市场签名密钥");
+    expect(markup).toContain("https://market.example/v1/");
   });
 });

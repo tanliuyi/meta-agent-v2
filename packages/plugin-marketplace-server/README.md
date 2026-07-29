@@ -9,7 +9,7 @@ npm install --ignore-scripts
 npm --prefix packages/plugin-marketplace-server run dev
 ```
 
-The development script always uses an in-memory ephemeral signing key and ignores `MARKETPLACE_SIGNING_PRIVATE_KEY` inherited from the shell. The default development server listens on `127.0.0.1:4317`. It still reads other settings from the process environment and does not load `.env` files implicitly. `MARKETPLACE_DATA_DIR` cannot be used with this ephemeral development mode. Production startup and deployments must provide `MARKETPLACE_SIGNING_PRIVATE_KEY` as a base64-encoded PKCS#8 PEM value.
+The default development server listens on `127.0.0.1:4317`. It reads settings from the process environment and does not load `.env` files implicitly.
 
 ## Endpoints
 
@@ -26,7 +26,6 @@ Public read API:
 - `GET /v1/plugins/:pluginId/ratings`
 - `GET /v1/plugins/:pluginId/stats`
 - `GET /v1/artifacts/:pluginId/:version/:artifactId`
-- `GET /v1/revocations`
 
 Accounts (`Authorization: Bearer <token>` where noted):
 
@@ -57,13 +56,12 @@ Administration (`MARKETPLACE_ADMIN_TOKEN` bearer token):
 - `PUT /v1/admin/publishers/:publisherId` — `{ displayName, verified }`
 - `PUT /v1/admin/publishers/:publisherId/members/:username`
 - `DELETE /v1/admin/publishers/:publisherId/members/:username`
-- `POST /v1/admin/revocations` — `{ pluginId, version, status: withdrawn|blocked, reasonCode, message, artifactIds?, replacementVersion? }`
 
-`MARKETPLACE_BASE_PATH` prefixes every endpoint for reverse-proxy deployments. `MARKETPLACE_PUBLIC_BASE_URL` is the externally visible HTTP or HTTPS base URL returned in discovery metadata. `MARKETPLACE_ARTIFACT_ORIGINS` is a comma-separated HTTP(S) allowlist added to the server's own public origin. HTTP is supported for internal deployments regardless of signing-key policy; operators remain responsible for the confidentiality and integrity properties of their transport network.
+`MARKETPLACE_BASE_PATH` prefixes every endpoint for reverse-proxy deployments. `MARKETPLACE_PUBLIC_BASE_URL` is the externally visible HTTP or HTTPS base URL returned in discovery metadata.
 
 ## Storage and accounts
 
-State lives in SQLite through the Node built-in `node:sqlite` module (no native dependencies). When `MARKETPLACE_DATA_DIR` is unset the store is in-memory and reseeded from `catalog/plugins.json` on every start, which preserves the previous stateless development behavior. When `MARKETPLACE_DATA_DIR` is set, `marketplace.db` is created there, the catalog seeds only an empty database, and a pinned `MARKETPLACE_SIGNING_PRIVATE_KEY` is required so stored artifact signatures stay verifiable across restarts.
+State lives in SQLite through the Node built-in `node:sqlite` module (no native dependencies). When `MARKETPLACE_DATA_DIR` is unset the store is in-memory and reseeded from `catalog/plugins.json` on every start. When `MARKETPLACE_DATA_DIR` is set, `marketplace.db` is created there and the catalog seeds only an empty database.
 
 Accounts are username/password (scrypt-hashed) with 30-day bearer session tokens. The admin surface uses the static `MARKETPLACE_ADMIN_TOKEN` instead of a user account; admins create publishers and grant publish rights by adding usernames as publisher members. Failed logins are throttled per client IP: after `MARKETPLACE_MAX_LOGIN_FAILURES` failures (default 10) within a 15-minute window, further login attempts return `429 AUTH_RATE_LIMITED` until the window expires. A successful login resets the counter; `0` disables throttling.
 
@@ -72,10 +70,10 @@ Accounts are username/password (scrypt-hashed) with 30-day bearer session tokens
 1. Admin: `PUT /v1/admin/publishers/acme` then `PUT /v1/admin/publishers/acme/members/alice`.
 2. Publisher: `PUT /v1/publish/plugins/com.acme.tools` with name, description, categories, and `publisherId`.
 3. Declare a draft version with changelog, Desktop compatibility, capabilities, and artifact metadata including each artifact's `entry` (payload-relative) and target.
-4. Upload each artifact as a zip of payload files. The server validates the archive (path safety, duplicate case-normalized paths, file-count and size limits), builds the canonical `market-manifest.json`, signs it with the marketplace key, and repacks a deterministic `.meta-plugin` archive containing `market-manifest.json`, `signature.json`, and `payload/**`.
-5. `POST .../publish` makes the version publicly listed; drafts are invisible to the read API. Publishers can deprecate published versions; withdrawing or blocking goes through `POST /v1/admin/revocations`, which also feeds the signed `/v1/revocations` list.
+4. Upload each artifact as a zip of payload files. The server validates the archive (path safety, duplicate case-normalized paths, file-count and size limits), builds the canonical `market-manifest.json`, and repacks a deterministic `.meta-plugin` archive containing `market-manifest.json` and `payload/**`.
+5. `POST .../publish` makes the version publicly listed; drafts are invisible to the read API. Publishers can deprecate published versions.
 
-Uploads are capped by `MARKETPLACE_MAX_ARTIFACT_BYTES` (default 32 MiB). The download metadata always reports the final signed archive SHA-256 and byte size, and `/v1/artifacts/...` serves the stored bytes; catalog-supplied local paths are never served.
+Uploads are capped by `MARKETPLACE_MAX_ARTIFACT_BYTES` (default 32 MiB). The download metadata reports the final archive SHA-256 as an opaque artifact key plus the byte size, and `/v1/artifacts/...` serves the stored bytes; catalog-supplied local paths are never served.
 
 ## Ratings and download statistics
 
@@ -103,7 +101,7 @@ Defaults:
 - Host binding: `100.91.230.10:4317`
 - Marketplace ID: `meta-agent-development`
 
-On the first deployment, the script generates an Ed25519 key and an admin token locally and writes them to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file so the marketplace fingerprint remains stable. Back up `.env.production` separately; deleting it creates a new marketplace identity that Desktop clients must confirm again. Deployments that predate the admin API keep working with admin endpoints disabled until `MARKETPLACE_ADMIN_TOKEN` is added to `.env.production`.
+On the first deployment, the script generates an admin token locally and writes it to the remote `.env.production` with mode `0600`. Subsequent deployments preserve that file. Back up `.env.production` separately; deleting it resets the admin token. Deployments that predate the admin API keep working with admin endpoints disabled until `MARKETPLACE_ADMIN_TOKEN` is added to `.env.production`.
 
 The container persists SQLite state in the `marketplace-data` named volume mounted at `/data` (`MARKETPLACE_DATA_DIR=/data` is set by Compose). Back up the volume alongside `.env.production`; removing it discards accounts, published plugins, ratings, and download counters, after which the catalog seed repopulates an empty database.
 
@@ -116,7 +114,13 @@ MARKETPLACE_DEPLOY_ROOT=/opt/meta-agent-plugin-marketplace \
 packages/plugin-marketplace-server/deploy.sh
 ```
 
-Each deployment builds `meta-agent-plugin-marketplace:<UTC timestamp>` and records `.current-image` and `.previous-image` beside the Compose file. If the new service does not pass `/health`, the script recreates the service from `.previous-image` without rebuilding. The signing environment is preserved across image rollback.
+Each deployment builds `meta-agent-plugin-marketplace:<UTC timestamp>` and records `.current-image` and `.previous-image` beside the Compose file. If the new service does not pass `/health`, the script recreates the service from `.previous-image` without rebuilding.
+
+### Gitea Actions deployment
+
+The repository includes `.gitea/workflows/deploy-marketplace.yml` for the `marketplace-deploy` host runner. It is intentionally manual-only: pushing a branch does not build or deploy production. Open the workflow in Gitea, select the committed ref to deploy, and run it with `workflow_dispatch`.
+
+The runner clones the selected commit from the local Gitea bare repository and runs `scripts/deploy-plugin-marketplace-local.sh`. Validation and both application builds run in Docker, so the CentOS host does not need a working Node.js installation. The script deploys the server on port 4317 and the Web console on port 4318, verifies both health endpoints, and rolls back to the previous self-contained image after a failed replacement.
 
 After deployment, the script requires both `/health` and `/.well-known/meta-agent-marketplace.json` to succeed. Operational checks:
 

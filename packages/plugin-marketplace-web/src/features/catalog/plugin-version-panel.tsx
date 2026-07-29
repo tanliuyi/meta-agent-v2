@@ -113,9 +113,7 @@ export function PluginVersionPanel({
                     variant="outline"
                     size="icon"
                     type="button"
-                    disabled={
-                      downloading === artifact.id || version.status === "blocked" || version.status === "withdrawn"
-                    }
+                    disabled={downloading === artifact.id}
                     onClick={() => downloadArtifact(artifact.id)}
                     aria-label={`下载 ${artifact.id}`}
                     title="下载插件包"

@@ -5,7 +5,7 @@ import type {
   PendingAttachment,
   ThreadComposerState,
 } from "@assistant-ui/react";
-import { imageAttachmentAdapter } from "./image-attachments.ts";
+import { imageAttachmentAdapter, toComposerAttachmentInput } from "./image-attachments.ts";
 
 export interface ComposerReseed {
   text: string;
@@ -65,13 +65,7 @@ export async function prepareDraftSubmission(
       isCompleteAttachment(attachment) ? Promise.resolve(attachment) : completeAttachment(attachment),
     ),
   );
-  const reseedAttachments = attachments.map<CreateAttachment>(({ id, type, name, contentType, content }) => ({
-    id,
-    type,
-    name,
-    ...(contentType !== undefined ? { contentType } : {}),
-    content,
-  }));
+  const reseedAttachments = attachments.map((attachment) => toComposerAttachmentInput(attachment));
   return {
     message: {
       role: state.role,

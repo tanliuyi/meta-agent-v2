@@ -25,8 +25,6 @@ export interface MarketplacePluginTransaction {
   stagingPath?: string;
   removeVersionOnRollback?: boolean;
   removeRootOnRollback?: boolean;
-  preserveFiles?: boolean;
-  applyTarget?: { projectId: string; threadId: string };
   createdAt: number;
   updatedAt: number;
 }
@@ -180,11 +178,6 @@ function assertTransaction(value: unknown): asserts value is MarketplacePluginTr
     (value.stagingPath !== undefined && typeof value.stagingPath !== "string") ||
     (value.removeVersionOnRollback !== undefined && typeof value.removeVersionOnRollback !== "boolean") ||
     (value.removeRootOnRollback !== undefined && typeof value.removeRootOnRollback !== "boolean") ||
-    (value.preserveFiles !== undefined && typeof value.preserveFiles !== "boolean") ||
-    (value.applyTarget !== undefined &&
-      (!isObject(value.applyTarget) ||
-        typeof value.applyTarget.projectId !== "string" ||
-        typeof value.applyTarget.threadId !== "string")) ||
     typeof value.createdAt !== "number" ||
     typeof value.updatedAt !== "number" ||
     (value.before !== undefined && !isInstalledRecord(value.before)) ||
@@ -213,15 +206,7 @@ function isInstalledRecord(value: unknown): value is InstalledMarketplacePluginR
     value.capabilities.every((item) => typeof item === "string") &&
     typeof value.containsNativeCode === "boolean" &&
     (value.state === "installed" || value.state === "broken") &&
-    typeof value.installedAt === "number" &&
-    Array.isArray(value.verifiedFiles) &&
-    value.verifiedFiles.every(
-      (file) =>
-        isObject(file) &&
-        typeof file.path === "string" &&
-        typeof file.sha256 === "string" &&
-        typeof file.size === "number",
-    )
+    typeof value.installedAt === "number"
   );
 }
 
@@ -237,7 +222,6 @@ function cloneRecord(record: InstalledMarketplacePluginRecord): InstalledMarketp
   return {
     ...record,
     capabilities: [...record.capabilities],
-    verifiedFiles: record.verifiedFiles.map((file) => ({ ...file })),
   };
 }
 

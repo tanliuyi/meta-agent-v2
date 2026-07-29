@@ -160,7 +160,6 @@ export function usePluginMarketplace(enabled = true): PluginMarketplaceControlle
           expectedRevision: installed.revision,
           pluginId,
           confirmRemoval: true,
-          confirmPreserveModifiedFiles: true,
         });
         if (!mounted.current) return;
         installedSnapshotEpoch.current += 1;

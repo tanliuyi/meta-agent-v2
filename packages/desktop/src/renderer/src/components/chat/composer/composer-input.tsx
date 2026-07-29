@@ -49,6 +49,7 @@ interface ComposerInputProps {
   materializing: boolean;
   onSubmit(): void;
   onSubmitRunning(): void;
+  onEscapeCancelPendingChange(pending: boolean): void;
 }
 
 /**
@@ -64,6 +65,7 @@ export function ComposerInput({
   materializing,
   onSubmit,
   onSubmitRunning,
+  onEscapeCancelPendingChange,
 }: ComposerInputProps) {
   const aui = useAui();
   const editorRef = useRef<HTMLDivElement>(null);
@@ -76,10 +78,10 @@ export function ComposerInput({
   const [commandTriggerOpen, setCommandTriggerOpen] = useState(false);
 
   const clearEscapeCancelTimer = useCallback(() => {
-    if (escapeCancelTimer.current === undefined) return;
-    window.clearTimeout(escapeCancelTimer.current);
+    if (escapeCancelTimer.current !== undefined) window.clearTimeout(escapeCancelTimer.current);
     escapeCancelTimer.current = undefined;
-  }, []);
+    onEscapeCancelPendingChange(false);
+  }, [onEscapeCancelPendingChange]);
 
   useEffect(() => {
     if (!isCancelable) clearEscapeCancelTimer();
@@ -153,7 +155,9 @@ export function ComposerInput({
 
     escapeCancelTimer.current = window.setTimeout(() => {
       escapeCancelTimer.current = undefined;
+      onEscapeCancelPendingChange(false);
     }, ESCAPE_CANCEL_WINDOW_MS);
+    onEscapeCancelPendingChange(true);
   };
 
   const handleInputPaste = (event: ClipboardEvent<HTMLDivElement>) => {

@@ -44,6 +44,40 @@ describe("PiCompatibilityAdapter", () => {
     expect(projector.endQueueClear).toHaveBeenCalledOnce();
   });
 
+  it("运行中 cancel 按原生顺序清空队列后再 abort", async () => {
+    const operations: string[] = [];
+    const session = createSession({
+      clearQueue: vi.fn(() => {
+        operations.push("clearQueue");
+        return { steering: ["s"], followUp: ["f"] };
+      }),
+      abort: vi.fn(async () => {
+        operations.push("abort");
+      }),
+    });
+    const projector = createProjector();
+    vi.spyOn(projector, "snapshot").mockReturnValue({ phase: "running" } as ReturnType<PiThreadProjector["snapshot"]>);
+    const adapter = new PiCompatibilityAdapter({ session, projector });
+
+    await expect(adapter.cancel()).resolves.toEqual({ steering: ["s"], followUp: ["f"] });
+
+    expect(operations).toEqual(["clearQueue", "abort"]);
+    expect(projector.beginQueueClear).toHaveBeenCalledOnce();
+    expect(projector.endQueueClear).toHaveBeenCalledOnce();
+  });
+
+  it("retrying cancel 保留队列并只终止当前操作", async () => {
+    const session = createSession({ abort: vi.fn() });
+    const projector = createProjector();
+    vi.spyOn(projector, "snapshot").mockReturnValue({ phase: "retrying" } as ReturnType<PiThreadProjector["snapshot"]>);
+    const adapter = new PiCompatibilityAdapter({ session, projector });
+
+    await expect(adapter.cancel()).resolves.toEqual({ steering: [], followUp: [] });
+
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(session.clearQueue).not.toHaveBeenCalled();
+  });
+
   it("fork 使用独立 SessionManager，避免改写 source worker identity", async () => {
     const sourceCreateBranch = vi.fn();
     const session = createSession({
@@ -87,7 +121,7 @@ describe("PiCompatibilityAdapter", () => {
     } as unknown as AgentSession;
 
     expect(() => new PiCompatibilityAdapter({ session, projector: createProjector() })).toThrow(
-      /不兼容的 pi-coding-agent 0\.80\.7: 缺少 isStreaming, sessionManager/,
+      /不兼容的 pi-coding-agent 0\.82\.1: 缺少 isStreaming, sessionManager/,
     );
   });
 

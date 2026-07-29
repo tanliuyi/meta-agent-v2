@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, generateKeyPairSync, verify } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,42 +9,24 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MarketplaceServerConfig } from "../src/config.ts";
 import { createMarketplaceApp } from "../src/create-app.ts";
-import { canonicalJson } from "../src/signing-service.ts";
-
-interface EnvelopeBody {
-	data: Record<string, unknown>;
-	signature: { algorithm: string; keyId: string; value: string };
-}
-
-interface DiscoveryBody {
-	protocolVersion: number;
-	marketplaceId: string;
-	apiRoot: string;
-	artifactOrigins: string[];
-	signing: { algorithm: string; keyId: string; fingerprint: string; publicKey: string };
-}
 
 interface ErrorBody {
 	error: { code: string; message: string };
 }
 
-const privateKey = generateKeyPairSync("ed25519").privateKey;
 const config: MarketplaceServerConfig = {
 	host: "127.0.0.1",
 	port: 4317,
 	basePath: "/market",
 	publicBaseUrl: "https://market.example.com/market",
 	marketplaceId: "test-marketplace",
-	artifactOrigins: ["https://artifacts.example.com"],
-	signingPrivateKey: privateKey,
-	ephemeralSigningKey: false,
 	maxArtifactBytes: 32 * 1024 * 1024,
 	allowRegistration: true,
 	maxLoginFailures: 10,
 };
 
 let app: INestApplication;
-let clockNow = 1_800_000_000_000;
+const clockNow = 1_800_000_000_000;
 
 beforeAll(async () => {
 	app = await createMarketplaceApp({
@@ -60,32 +42,20 @@ afterAll(async () => {
 });
 
 describe("plugin marketplace HTTP API", () => {
-	it("serves health and trust-bootstrap discovery beneath the configured base path", async () => {
+	it("serves health and plain discovery beneath the configured base path", async () => {
 		await request(app.getHttpServer()).get("/market/health").expect(200, {
 			status: "ok",
 			marketplaceId: "test-marketplace",
-			ephemeralSigningKey: false,
 		});
 
 		const response = await request(app.getHttpServer())
 			.get("/market/.well-known/meta-agent-marketplace.json")
 			.expect(200);
-		const envelope = response.body as EnvelopeBody;
-		const discovery = envelope.data as unknown as DiscoveryBody;
-		expect(discovery).toMatchObject({
+		expect(response.body).toEqual({
 			protocolVersion: 1,
 			marketplaceId: "test-marketplace",
 			apiRoot: "https://market.example.com/market/v1",
-			artifactOrigins: ["https://market.example.com", "https://artifacts.example.com"],
-			signing: { algorithm: "ed25519" },
 		});
-		const publicKey = createPublicKey({
-			key: Buffer.from(discovery.signing.publicKey, "base64"),
-			format: "der",
-			type: "spki",
-		});
-		expect(publicKey.asymmetricKeyType).toBe("ed25519");
-		expect(signatureValid(envelope, publicKey)).toBe(true);
 	});
 
 	it("lists and searches compatible plugins with bounded query validation", async () => {
@@ -131,7 +101,7 @@ describe("plugin marketplace HTTP API", () => {
 		});
 	});
 
-	it("keeps deprecated versions installable while refusing withdrawn and blocked artifacts", async () => {
+	it("keeps deprecated versions installable", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "marketplace-status-http-"));
 		const catalogPath = join(directory, "plugins.json");
 		let statusApp: INestApplication | undefined;
@@ -150,22 +120,13 @@ describe("plugin marketplace HTTP API", () => {
 				plugins: [
 					{
 						id: "status.plugin",
-						latestVersion: "3.0.0",
+						latestVersion: "1.0.0",
 						compatibleVersion: "1.0.0",
 						status: "deprecated",
 					},
 				],
 			});
 			await request(server).get("/market/v1/plugins/status.plugin/versions/1.0.0/artifacts").expect(200);
-			for (const version of ["2.0.0", "3.0.0"]) {
-				const unavailable = await request(server)
-					.get(`/market/v1/plugins/status.plugin/versions/${version}/artifacts`)
-					.expect(410);
-				expect(unavailable.body as ErrorBody).toMatchObject({
-					error: { code: "PLUGIN_VERSION_UNAVAILABLE" },
-				});
-				await request(server).get(`/market/v1/artifacts/status.plugin/${version}/status-${version}`).expect(410);
-			}
 		} finally {
 			await statusApp?.close();
 			await rm(directory, { recursive: true, force: true });
@@ -244,13 +205,8 @@ describe("plugin marketplace HTTP API", () => {
 		expect(bytes.byteLength).toBe(download.body.size);
 		expect(createHash("sha256").update(bytes).digest("hex")).toBe(download.body.sha256);
 		const archive = unzipSync(bytes);
-		expect(Object.keys(archive).sort()).toEqual(["market-manifest.json", "payload/index.ts", "signature.json"]);
+		expect(Object.keys(archive).sort()).toEqual(["market-manifest.json", "payload/index.ts"]);
 		const manifest = JSON.parse(strFromU8(archive["market-manifest.json"]!)) as Record<string, unknown>;
-		const signature = JSON.parse(strFromU8(archive["signature.json"]!)) as {
-			algorithm: string;
-			keyId: string;
-			value: string;
-		};
 		expect(manifest).toMatchObject({
 			schemaVersion: 1,
 			marketplaceId: "test-marketplace",
@@ -260,14 +216,6 @@ describe("plugin marketplace HTTP API", () => {
 			nativeModules: [],
 			executables: [],
 		});
-		expect(
-			verify(
-				null,
-				Buffer.from(canonicalJson(manifest), "utf8"),
-				createPublicKey(privateKey),
-				Buffer.from(signature.value, "base64"),
-			),
-		).toBe(true);
 	});
 
 	it("returns stable not-found errors", async () => {
@@ -276,58 +224,9 @@ describe("plugin marketplace HTTP API", () => {
 			error: { code: "PLUGIN_NOT_FOUND", message: "Plugin not found: missing.plugin" },
 		});
 	});
-
-	it("serves fresh signed revocation snapshots with restart-safe monotonic sequences", async () => {
-		const response = await request(app.getHttpServer()).get("/market/v1/revocations").expect(200);
-		const envelope = response.body as EnvelopeBody;
-		expect(envelope.data).toEqual({
-			marketplaceId: "test-marketplace",
-			sequence: 1_800_000_000_000,
-			issuedAt: 1_800_000_000_000,
-			nextUpdateAt: 1_800_014_400_000,
-			revokedKeys: [],
-			pluginVersions: [],
-		});
-		expect(signatureValid(envelope)).toBe(true);
-
-		clockNow += 1_000;
-		const refreshed = await request(app.getHttpServer()).get("/market/v1/revocations").expect(200);
-		expect(refreshed.body.data).toMatchObject({
-			sequence: 1_800_000_001_000,
-			issuedAt: 1_800_000_001_000,
-			nextUpdateAt: 1_800_014_401_000,
-		});
-		expect(signatureValid(refreshed.body as EnvelopeBody)).toBe(true);
-
-		clockNow += 1_000;
-		const restarted = await createMarketplaceApp({ config, clock: () => clockNow, logger: false });
-		try {
-			await restarted.init();
-			const afterRestart = await request(restarted.getHttpServer()).get("/market/v1/revocations").expect(200);
-			expect((afterRestart.body as EnvelopeBody).data.sequence).toBeGreaterThan(
-				(refreshed.body as EnvelopeBody).data.sequence as number,
-			);
-		} finally {
-			await restarted.close();
-		}
-	});
 });
 
-function signatureValid(envelope: EnvelopeBody, publicKey = createPublicKey(privateKey)): boolean {
-	return verify(
-		null,
-		Buffer.from(canonicalJson(envelope.data), "utf8"),
-		publicKey,
-		Buffer.from(envelope.signature.value, "base64"),
-	);
-}
-
 function statusCatalog() {
-	const versions = [
-		{ version: "1.0.0", status: "deprecated" },
-		{ version: "2.0.0", status: "withdrawn" },
-		{ version: "3.0.0", status: "blocked" },
-	] as const;
 	return {
 		schemaVersion: 1,
 		plugins: [
@@ -338,28 +237,29 @@ function statusCatalog() {
 				publisher: { id: "publisher", displayName: "Publisher", verified: true },
 				categories: ["test"],
 				publishedAt: 1,
-				updatedAt: 3,
-				versions: versions.map(({ version, status }, index) => ({
-					version,
-					status,
-					changelog: status,
-					publishedAt: index + 1,
-					desktop: { hostProfileVersion: 1 },
-					capabilities: [],
-					artifacts: [
-						{
-							id: `status-${version}`,
-							target: { platform: "universal", arch: "universal" },
-							sha256: String(index).repeat(64),
-							size: 1,
-							downloadPath: `/status-${version}`,
-							containsNativeCode: false,
-							preferred: true,
-						},
-					],
-				})),
+				updatedAt: 1,
+				versions: [
+					{
+						version: "1.0.0",
+						status: "deprecated",
+						changelog: "deprecated",
+						publishedAt: 1,
+						desktop: { hostProfileVersion: 1 },
+						capabilities: [],
+						artifacts: [
+							{
+								id: "status-1.0.0",
+								target: { platform: "universal", arch: "universal" },
+								sha256: "0".repeat(64),
+								size: 1,
+								downloadPath: "/status-1.0.0",
+								containsNativeCode: false,
+								preferred: true,
+							},
+						],
+					},
+				],
 			},
 		],
-		revocations: [],
 	};
 }

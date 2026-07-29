@@ -45,7 +45,7 @@ describe("extractMarketplaceArchive", () => {
     await expect(readFile(join(root, "escape.ts"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("rejects case-insensitive path collisions", async () => {
+  it("does not overwrite case-insensitive path collisions", async () => {
     const root = createRoot();
     const staging = join(root, "staging");
     await mkdir(staging, { recursive: true });
@@ -54,7 +54,7 @@ describe("extractMarketplaceArchive", () => {
       "Payload/index.ts": new Uint8Array([2]),
     });
 
-    await expect(extractMarketplaceArchive(chunks(archive), staging)).rejects.toThrow("duplicate path");
+    await expect(extractMarketplaceArchive(chunks(archive), staging)).rejects.toThrow();
   });
 
   it("rejects paths beyond the configured UTF-8 byte limit", async () => {

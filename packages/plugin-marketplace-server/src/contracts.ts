@@ -1,4 +1,4 @@
-export type PluginStatus = "available" | "deprecated" | "withdrawn" | "blocked";
+export type PluginStatus = "available" | "deprecated";
 
 export interface PublisherRecord {
 	id: string;
@@ -95,17 +95,9 @@ export interface MarketplaceArtifactManifest {
 	files: Record<
 		string,
 		{
-			sha256: string;
-			size: number;
 			mode: "0644" | "0755";
 		}
 	>;
-}
-
-export interface MarketplaceArtifactSignature {
-	algorithm: "ed25519";
-	keyId: string;
-	value: string;
 }
 
 export interface CatalogArtifact {
@@ -145,20 +137,9 @@ export interface CatalogPlugin {
 	versions: CatalogPluginVersion[];
 }
 
-export interface CatalogRevocation {
-	pluginId: string;
-	version: string;
-	artifactIds?: string[];
-	status: "withdrawn" | "blocked";
-	reasonCode: string;
-	message: string;
-	replacementVersion?: string;
-}
-
 export interface CatalogDocument {
 	schemaVersion: 1;
 	plugins: CatalogPlugin[];
-	revocations: CatalogRevocation[];
 }
 
 export interface MarketplaceRuntimeQuery {
@@ -240,6 +221,7 @@ export interface StoredArtifact {
 	entry: string;
 	sha256: string | null;
 	size: number | null;
+	uploaded: boolean;
 }
 
 export interface StoredPluginVersion {
@@ -353,31 +335,10 @@ export interface PluginStatsResponse {
 	rating: PluginRatingAggregate;
 }
 
-export interface SignedEnvelope<T> {
-	data: T;
-	signature: MarketplaceArtifactSignature;
-}
-
 export interface WellKnownMarketplaceData {
 	protocolVersion: 1;
 	marketplaceId: string;
 	apiRoot: string;
-	artifactOrigins: string[];
-	signing: {
-		algorithm: "ed25519";
-		keyId: string;
-		fingerprint: string;
-		publicKey: string;
-	};
-}
-
-export interface MarketplaceRevocationData {
-	marketplaceId: string;
-	sequence: number;
-	issuedAt: number;
-	nextUpdateAt: number;
-	revokedKeys: Array<{ keyId: string; reasonCode: string }>;
-	pluginVersions: CatalogRevocation[];
 }
 
 export interface MarketplaceErrorBody {

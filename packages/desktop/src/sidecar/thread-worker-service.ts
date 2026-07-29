@@ -108,8 +108,7 @@ export class ThreadWorkerService implements SidecarService {
       case "branch":
         return this.runtime.branch(command.input);
       case "cancel":
-        await this.runtime.cancel();
-        return null;
+        return this.runtime.cancel();
       case "clearQueue":
         return this.runtime.clearQueue();
       case "compact":

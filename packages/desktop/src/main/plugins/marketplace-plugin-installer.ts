@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, open, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { valid } from "semver";
 import type {
@@ -15,16 +15,15 @@ import type { RuntimeCompatibility } from "../../shared/sidecar-contracts.ts";
 import { durablyFlushMarketplaceArchive, extractMarketplaceArchive } from "./marketplace-artifact-archive.ts";
 import {
   type MarketplaceArtifactTarget,
+  readMarketplaceArtifactManifest,
   targetMatchesRuntime,
-  verifyMarketplaceArtifact,
-} from "./marketplace-artifact-verifier.ts";
+} from "./marketplace-artifact-manifest.ts";
 import type { MarketplaceEndpointSettingsService } from "./marketplace-endpoint-settings-service.ts";
 import { readBoundedJsonResponse } from "./marketplace-http.ts";
 import {
   markMarketplaceVersionInactive,
   removeMarketplaceVersionIfOwned,
   validateInstalledMarketplacePlugin,
-  validateMarketplaceOwnershipAndProjection,
   writeMarketplaceProjection,
   writeMarketplaceUninstallTombstone,
 } from "./marketplace-installed-plugin.ts";
@@ -33,7 +32,6 @@ import type {
   MarketplacePluginTransaction,
   MarketplacePluginTransactionStore,
 } from "./marketplace-plugin-transaction-store.ts";
-import type { MarketplaceRevocationService } from "./marketplace-revocation-service.ts";
 
 interface ArtifactMetadata {
   id: string;
@@ -49,7 +47,6 @@ interface DownloadMetadata {
   version: string;
   artifactId: string;
   url: string;
-  sha256: string;
   size: number;
 }
 interface InstallerOptions {
@@ -60,13 +57,12 @@ interface InstallerOptions {
   downloadTimeoutMs?: number;
   maxArtifactBytes?: number;
   reservedExtensionIds?: ReadonlySet<string>;
-  revocations?: Pick<MarketplaceRevocationService, "assertArtifactAllowed">;
 }
 
 const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
 const REQUEST_ID = /^[a-zA-Z0-9._-]{1,128}$/;
-const SHA256 = /^[a-f0-9]{64}$/;
 const MAX_METADATA_BYTES = 2 * 1024 * 1024;
+const MAX_COMPLETED_MUTATIONS = 256;
 
 export class MarketplacePluginInstaller {
   private readonly endpoints: MarketplaceEndpointSettingsService;
@@ -82,11 +78,9 @@ export class MarketplacePluginInstaller {
   private readonly downloadTimeoutMs: number;
   private readonly maxArtifactBytes: number;
   private readonly reservedExtensionIds: ReadonlySet<string>;
-  private readonly revocations?: Pick<MarketplaceRevocationService, "assertArtifactAllowed">;
-  private mutationTail: Promise<void> = Promise.resolve();
-  private readonly completedInstalls = new Map<string, InstallMarketplacePluginResult>();
-  private readonly completedUpdates = new Map<string, UpdateMarketplacePluginResult>();
-  private readonly completedUninstalls = new Map<string, UninstallMarketplacePluginResult>();
+  private readonly completedInstalls = new CompletedMutationMap<InstallMarketplacePluginResult>();
+  private readonly completedUpdates = new CompletedMutationMap<UpdateMarketplacePluginResult>();
+  private readonly completedUninstalls = new CompletedMutationMap<UninstallMarketplacePluginResult>();
 
   constructor(
     endpoints: MarketplaceEndpointSettingsService,
@@ -110,43 +104,24 @@ export class MarketplacePluginInstaller {
     this.downloadTimeoutMs = options.downloadTimeoutMs ?? 120_000;
     this.maxArtifactBytes = options.maxArtifactBytes ?? 128 * 1024 * 1024;
     this.reservedExtensionIds = options.reservedExtensionIds ?? new Set();
-    this.revocations = options.revocations;
   }
 
   install(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult> {
-    return this.enqueue(() => this.transactions.withPluginLock(input.pluginId, () => this.installSerialized(input)));
+    return this.transactions.withPluginLock(input.pluginId, () => this.installSerialized(input));
   }
 
   update(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult> {
-    return this.enqueue(() => this.transactions.withPluginLock(input.pluginId, () => this.updateSerialized(input)));
+    return this.transactions.withPluginLock(input.pluginId, () => this.updateSerialized(input));
   }
 
   uninstall(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult> {
-    return this.enqueue(() => this.transactions.withPluginLock(input.pluginId, () => this.uninstallSerialized(input)));
+    return this.transactions.withPluginLock(input.pluginId, () => this.uninstallSerialized(input));
   }
 
   clearCompletedMutation(requestId: string): void {
     this.completedInstalls.delete(requestId);
     this.completedUpdates.delete(requestId);
     this.completedUninstalls.delete(requestId);
-  }
-
-  async getPendingApplyTransaction(requestId: string): Promise<MarketplacePluginTransaction | undefined> {
-    if (!REQUEST_ID.test(requestId)) throw new Error("Marketplace request ID is invalid");
-    const matches = (await this.transactions.list()).filter(
-      (transaction) => transaction.requestId === requestId && transaction.applyTarget !== undefined,
-    );
-    if (matches.length > 1) throw new Error(`Multiple marketplace transactions use request ${requestId}`);
-    return matches[0];
-  }
-
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.mutationTail.then(operation);
-    this.mutationTail = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
   }
 
   private async installSerialized(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult> {
@@ -174,11 +149,10 @@ export class MarketplacePluginInstaller {
       return result;
     }
 
-    const endpoint = await this.endpoints.getActiveTrustedEndpoint();
+    const endpoint = await this.endpoints.getActiveEndpoint();
     const artifact = await this.selectArtifact(endpoint.apiRoot, input.pluginId, input.version);
-    await this.revocations?.assertArtifactAllowed(endpoint.marketplaceId, input.pluginId, input.version, artifact.id);
     const download = await this.getDownloadMetadata(endpoint.apiRoot, artifact, input.pluginId, input.version);
-    const artifactUrl = validateArtifactUrl(download.url, endpoint.artifactOrigins);
+    const artifactUrl = validateArtifactUrl(download.url);
     const rootPath = join(this.agentDir, "extensions", input.pluginId);
     const versionPath = join(rootPath, ".versions", artifact.sha256);
     const stagingPath = createStagingPath(this.agentDir, input.pluginId, this.createId());
@@ -190,19 +164,18 @@ export class MarketplacePluginInstaller {
       const archive = await this.downloadAndExtract(artifactUrl, artifact, stagingPath);
       if (archive.compressedBytes !== artifact.size)
         throw new Error("Marketplace artifact size does not match metadata");
-      const verified = await verifyMarketplaceArtifact({
+      const verified = await readMarketplaceArtifactManifest({
         stagingRoot: stagingPath,
         archive,
-        endpoint,
+        marketplaceId: endpoint.marketplaceId,
         pluginId: input.pluginId,
         version: input.version,
         artifactId: artifact.id,
-        artifactTarget: artifact.target,
         runtime: this.runtime,
         desktopVersion: this.desktopVersion,
       });
       await durablyFlushMarketplaceArchive(stagingPath);
-      rootCreated = await prepareInstallRoot(rootPath, input.pluginId, endpoint.marketplaceId);
+      rootCreated = await prepareInstallRoot(rootPath);
       const entryRelative = relative(stagingPath, verified.entryPath);
       const entryPath = resolve(versionPath, entryRelative);
       const record: InstalledMarketplacePluginRecord = {
@@ -220,7 +193,6 @@ export class MarketplacePluginInstaller {
         installedAt: this.now(),
         entryPath,
         rootPath,
-        verifiedFiles: verified.verifiedFiles.map((file) => ({ ...file })),
       };
       const versionExists = await pathExists(versionPath);
       if (versionExists) await validateInstalledMarketplacePlugin(record, join(this.agentDir, "extensions"));
@@ -234,7 +206,6 @@ export class MarketplacePluginInstaller {
         stagingPath,
         removeVersionOnRollback: !versionExists,
         removeRootOnRollback: rootCreated,
-        ...transactionApplyTarget(input.applyToCurrentSession),
       });
       await mkdir(rootPath, { recursive: true, mode: 0o700 });
       await mkdir(dirname(versionPath), { recursive: true, mode: 0o700 });
@@ -258,7 +229,7 @@ export class MarketplacePluginInstaller {
       transaction = await this.transactions.setPhase(transaction, "registry-committed");
       await writeMarketplaceProjection(record);
       transaction = await this.transactions.setPhase(transaction, "projection-committed");
-      if (!input.applyToCurrentSession) await this.transactions.complete(transaction);
+      await this.transactions.complete(transaction);
       const result: InstallMarketplacePluginResult = { status: "installed", snapshot: saved.snapshot };
       this.completedInstalls.set(input.requestId, result);
       return result;
@@ -316,13 +287,10 @@ export class MarketplacePluginInstaller {
       this.completedUpdates.set(input.requestId, result);
       return result;
     }
-    await validateMarketplaceOwnershipAndProjection(before);
-    await validateInstalledMarketplacePlugin(before, join(this.agentDir, "extensions"));
-    const endpoint = await this.endpoints.getTrustedEndpoint(before.marketplaceId);
+    const endpoint = await this.endpoints.getEndpoint(before.marketplaceId);
     const artifact = await this.selectArtifact(endpoint.apiRoot, input.pluginId, input.version);
-    await this.revocations?.assertArtifactAllowed(endpoint.marketplaceId, input.pluginId, input.version, artifact.id);
     const download = await this.getDownloadMetadata(endpoint.apiRoot, artifact, input.pluginId, input.version);
-    const artifactUrl = validateArtifactUrl(download.url, endpoint.artifactOrigins);
+    const artifactUrl = validateArtifactUrl(download.url);
     const rootPath = before.rootPath;
     const versionPath = join(rootPath, ".versions", artifact.sha256);
     const stagingPath = createStagingPath(this.agentDir, input.pluginId, this.createId());
@@ -334,14 +302,13 @@ export class MarketplacePluginInstaller {
       if (archive.compressedBytes !== artifact.size) {
         throw new Error("Marketplace artifact size does not match metadata");
       }
-      const verified = await verifyMarketplaceArtifact({
+      const verified = await readMarketplaceArtifactManifest({
         stagingRoot: stagingPath,
         archive,
-        endpoint,
+        marketplaceId: endpoint.marketplaceId,
         pluginId: input.pluginId,
         version: input.version,
         artifactId: artifact.id,
-        artifactTarget: artifact.target,
         runtime: this.runtime,
         desktopVersion: this.desktopVersion,
       });
@@ -360,7 +327,6 @@ export class MarketplacePluginInstaller {
         enabled: true,
         installedAt: this.now(),
         entryPath: resolve(versionPath, entryRelative),
-        verifiedFiles: verified.verifiedFiles.map((file) => ({ ...file })),
       };
       const versionExists = await pathExists(versionPath);
       if (versionExists) await validateInstalledMarketplacePlugin(after, join(this.agentDir, "extensions"));
@@ -375,7 +341,6 @@ export class MarketplacePluginInstaller {
         stagingPath,
         removeVersionOnRollback: !versionExists,
         removeRootOnRollback: false,
-        ...transactionApplyTarget(input.applyToCurrentSession),
       });
       if (versionExists) await rm(stagingPath, { recursive: true, force: true });
       else await rename(stagingPath, versionPath);
@@ -398,7 +363,7 @@ export class MarketplacePluginInstaller {
       await markMarketplaceVersionInactive(before, this.now());
       await writeMarketplaceProjection(after);
       transaction = await this.transactions.setPhase(transaction, "projection-committed");
-      if (!input.applyToCurrentSession) await this.transactions.complete(transaction);
+      await this.transactions.complete(transaction);
       const result = { status: "updated", snapshot: saved.snapshot, reloadRequired: true } as const;
       this.completedUpdates.set(input.requestId, result);
       return result;
@@ -449,14 +414,6 @@ export class MarketplacePluginInstaller {
       this.completedUninstalls.set(input.requestId, result);
       return result;
     }
-    await validateMarketplaceOwnershipAndProjection(record);
-    let preserveFiles = false;
-    try {
-      await validateInstalledMarketplacePlugin(record, join(this.agentDir, "extensions"));
-    } catch (error) {
-      if (input.confirmPreserveModifiedFiles !== true) throw error;
-      preserveFiles = true;
-    }
     let transaction = await this.transactions.prepare({
       requestId: input.requestId,
       operation: "uninstall",
@@ -464,8 +421,6 @@ export class MarketplacePluginInstaller {
       before: record,
       rootPath: record.rootPath,
       versionPath: join(record.rootPath, ".versions", record.artifactHash),
-      preserveFiles,
-      ...transactionApplyTarget(input.applyToCurrentSession),
     });
     let saved: Awaited<ReturnType<MarketplacePluginRegistry["commitUninstall"]>>;
     try {
@@ -497,9 +452,9 @@ export class MarketplacePluginInstaller {
       transaction = await this.transactions.setPhase(transaction, "registry-committed");
       const uninstalledAt = this.now();
       await markMarketplaceVersionInactive(record, uninstalledAt);
-      await writeMarketplaceUninstallTombstone(record, transaction.operationId, uninstalledAt, preserveFiles);
+      await writeMarketplaceUninstallTombstone(record, transaction.operationId, uninstalledAt);
       transaction = await this.transactions.setPhase(transaction, "projection-committed");
-      if (!input.applyToCurrentSession) await this.transactions.complete(transaction);
+      await this.transactions.complete(transaction);
     } catch {
       const result = {
         status: "uninstalled",
@@ -557,7 +512,6 @@ export class MarketplacePluginInstaller {
       value.pluginId !== pluginId ||
       value.version !== version ||
       value.artifactId !== artifact.id ||
-      value.sha256 !== artifact.sha256 ||
       value.size !== artifact.size
     ) {
       throw new Error("Marketplace download metadata does not match the selected artifact");
@@ -594,7 +548,7 @@ export class MarketplacePluginInstaller {
       });
       if (!response.ok) throw new Error(`Marketplace artifact request failed with HTTP ${response.status}`);
       if (!response.body) throw new Error("Marketplace artifact response has no body");
-      const stream = verifiedDownload(response.body, artifact.sha256, artifact.size, this.maxArtifactBytes);
+      const stream = boundedDownload(response.body, artifact.size, this.maxArtifactBytes);
       return await extractMarketplaceArchive(stream, stagingPath, {
         maxFiles: 2_000,
         maxCompressedBytes: Math.min(this.maxArtifactBytes, artifact.size),
@@ -609,10 +563,20 @@ export class MarketplacePluginInstaller {
   }
 }
 
-async function* verifiedDownload(body: ReadableStream<Uint8Array>, sha256: string, size: number, maximum: number) {
-  if (!SHA256.test(sha256) || !Number.isSafeInteger(size) || size < 1 || size > maximum)
+class CompletedMutationMap<Result> extends Map<string, Result> {
+  override set(requestId: string, result: Result): this {
+    if (!this.has(requestId) && this.size >= MAX_COMPLETED_MUTATIONS) {
+      const oldest = this.keys().next().value;
+      if (typeof oldest === "string") this.delete(oldest);
+    }
+    return super.set(requestId, result);
+  }
+}
+
+async function* boundedDownload(body: ReadableStream<Uint8Array>, size: number, maximum: number) {
+  if (!Number.isSafeInteger(size) || size < 1 || size > maximum) {
     throw new Error("Marketplace artifact metadata is invalid");
-  const hash = createHash("sha256");
+  }
   const reader = body.getReader();
   let received = 0;
   try {
@@ -621,14 +585,12 @@ async function* verifiedDownload(body: ReadableStream<Uint8Array>, sha256: strin
       if (result.done) break;
       received += result.value.byteLength;
       if (received > size || received > maximum) throw new Error("Marketplace artifact exceeds its declared size");
-      hash.update(result.value);
       yield result.value;
     }
   } finally {
     reader.releaseLock();
   }
-  if (received !== size || hash.digest("hex") !== sha256)
-    throw new Error("Marketplace artifact hash or size verification failed");
+  if (received !== size) throw new Error("Marketplace artifact size does not match metadata");
 }
 
 function parseArtifacts(value: unknown): ArtifactMetadata[] {
@@ -642,6 +604,7 @@ function parseArtifacts(value: unknown): ArtifactMetadata[] {
       typeof item.target.platform !== "string" ||
       typeof item.target.arch !== "string" ||
       typeof item.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(item.sha256) ||
       typeof item.size !== "number" ||
       typeof item.containsNativeCode !== "boolean" ||
       typeof item.preferred !== "boolean" ||
@@ -659,7 +622,6 @@ function parseDownload(value: unknown): DownloadMetadata {
     typeof value.version !== "string" ||
     typeof value.artifactId !== "string" ||
     typeof value.url !== "string" ||
-    typeof value.sha256 !== "string" ||
     typeof value.size !== "number"
   )
     throw new Error("Marketplace download metadata is invalid");
@@ -681,20 +643,14 @@ function validateApiUrl(value: string, apiRoot: string): URL {
   }
   return url;
 }
-function validateArtifactUrl(value: string, origins: string[]): URL {
+function validateArtifactUrl(value: string): URL {
   const url = new URL(value);
-  if (
-    (url.protocol !== "https:" && url.protocol !== "http:") ||
-    url.username ||
-    url.password ||
-    url.hash ||
-    !origins.includes(url.origin)
-  ) {
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) {
     throw new Error("Marketplace artifact URL origin is not trusted");
   }
   return url;
 }
-async function prepareInstallRoot(root: string, pluginId: string, marketplaceId: string): Promise<boolean> {
+async function prepareInstallRoot(root: string): Promise<boolean> {
   try {
     const info = await lstat(root);
     if (!info.isDirectory() || info.isSymbolicLink()) {
@@ -706,34 +662,6 @@ async function prepareInstallRoot(root: string, pluginId: string, marketplaceId:
   }
   if (await pathExists(join(root, "index.ts"))) {
     throw new Error("Marketplace plugin destination still has an active projection");
-  }
-  const ownershipPath = join(root, ".meta-agent-market.json");
-  let ownershipInfo: Awaited<ReturnType<typeof lstat>>;
-  try {
-    ownershipInfo = await lstat(ownershipPath);
-  } catch (error) {
-    if (!isNodeError(error, "ENOENT")) throw error;
-    // 中断的 GC 根拆除可能先移除 tombstone 后崩溃；空根目录可安全重新占用，非空则属于未知所有者。
-    if ((await readdir(root)).length === 0) return true;
-    throw new Error("Marketplace plugin destination has no valid ownership tombstone");
-  }
-  if (!ownershipInfo.isFile() || ownershipInfo.isSymbolicLink()) {
-    throw new Error("Marketplace plugin destination has no valid ownership tombstone");
-  }
-  let ownership: unknown;
-  try {
-    ownership = JSON.parse(await readFile(ownershipPath, "utf8"));
-  } catch {
-    throw new Error("Marketplace plugin ownership tombstone is invalid");
-  }
-  if (
-    !isObject(ownership) ||
-    ownership.version !== 1 ||
-    ownership.state !== "uninstalled" ||
-    ownership.pluginId !== pluginId ||
-    ownership.marketplaceId !== marketplaceId
-  ) {
-    throw new Error("Marketplace plugin ownership tombstone does not match the requested plugin");
   }
   return false;
 }
@@ -782,10 +710,6 @@ function isApplyTarget(value: unknown): value is ApplyMarketplaceMutationTarget 
       value.threadId.length <= 200 &&
       (value.abortRunning === undefined || typeof value.abortRunning === "boolean"))
   );
-}
-
-function transactionApplyTarget(value: ApplyMarketplaceMutationTarget | undefined) {
-  return value ? { applyTarget: { projectId: value.projectId, threadId: value.threadId } } : ({} as const);
 }
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {

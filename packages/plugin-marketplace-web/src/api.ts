@@ -1,4 +1,4 @@
-export type PluginStatus = "available" | "deprecated" | "withdrawn" | "blocked";
+export type PluginStatus = "available" | "deprecated";
 
 export interface PublisherRecord {
   id: string;

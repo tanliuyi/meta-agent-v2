@@ -1,7 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import type { InstalledMarketplacePluginRecord } from "./marketplace-plugin-registry.ts";
 
 export async function validateInstalledMarketplacePlugin(
@@ -31,31 +30,6 @@ export async function validateInstalledMarketplacePlugin(
   if (versionRoot !== expectedVersionRoot) {
     throw new Error(`Marketplace extension version root was redirected: ${plugin.id}`);
   }
-  const expectedFiles = new Map(plugin.verifiedFiles.map((file) => [file.path, file]));
-  const actualFiles = await listManagedFiles(versionRoot);
-  if (
-    expectedFiles.size === 0 ||
-    actualFiles.length !== expectedFiles.size ||
-    actualFiles.some((path) => !expectedFiles.has(path))
-  ) {
-    throw new Error(`Marketplace extension file set was modified: ${plugin.id}`);
-  }
-  let entryVerified = false;
-  for (const [path, expected] of expectedFiles) {
-    if (!isManagedRelativePath(path)) throw new Error(`Marketplace extension file path is invalid: ${plugin.id}`);
-    const filePath = resolve(versionRoot, ...path.split("/"));
-    const info = await lstat(filePath);
-    if (
-      !info.isFile() ||
-      info.isSymbolicLink() ||
-      info.size !== expected.size ||
-      (await hashFile(filePath)) !== expected.sha256
-    ) {
-      throw new Error(`Marketplace extension file integrity failed: ${plugin.id}`);
-    }
-    if ((await realpath(filePath)) === canonicalEntry) entryVerified = true;
-  }
-  if (!entryVerified) throw new Error(`Marketplace extension entry is not in its verified file set: ${plugin.id}`);
   return resolve(canonicalEntry);
 }
 
@@ -90,7 +64,6 @@ export async function readMarketplaceVersionOwner(
     value.record.rootPath !== rootPath ||
     typeof value.record.id !== "string" ||
     typeof value.record.entryPath !== "string" ||
-    !Array.isArray(value.record.verifiedFiles) ||
     (value.inactiveAt !== undefined && (!Number.isSafeInteger(value.inactiveAt) || (value.inactiveAt as number) < 0))
   ) {
     return undefined;
@@ -112,46 +85,6 @@ export async function removeMarketplaceVersionIfOwned(
   }
   await rm(resolve(record.rootPath, ".versions", record.artifactHash), { recursive: true, force: true });
   return true;
-}
-
-export async function validateMarketplaceOwnershipAndProjection(
-  record: InstalledMarketplacePluginRecord,
-): Promise<void> {
-  const ownershipPath = resolve(record.rootPath, ".meta-agent-market.json");
-  const projectionPath = resolve(record.rootPath, "index.ts");
-  const ownershipInfo = await lstat(ownershipPath);
-  if (!ownershipInfo.isFile() || ownershipInfo.isSymbolicLink()) {
-    throw new Error(`Marketplace extension ownership is unavailable: ${record.id}`);
-  }
-  let ownership: unknown;
-  try {
-    ownership = JSON.parse(await readFile(ownershipPath, "utf8"));
-  } catch {
-    throw new Error(`Marketplace extension ownership is invalid: ${record.id}`);
-  }
-  if (
-    !isObject(ownership) ||
-    ownership.version !== 1 ||
-    ownership.state !== record.state ||
-    !isDeepStrictEqual(ownership.record, record)
-  ) {
-    throw new Error(`Marketplace extension ownership does not match the registry: ${record.id}`);
-  }
-  if (record.state === "broken") {
-    if (await pathExists(projectionPath)) {
-      throw new Error(`Broken marketplace extension still has a projection: ${record.id}`);
-    }
-    return;
-  }
-  const projectionInfo = await lstat(projectionPath);
-  if (!projectionInfo.isFile() || projectionInfo.isSymbolicLink()) {
-    throw new Error(`Marketplace extension projection is unavailable: ${record.id}`);
-  }
-  const target = relative(record.rootPath, record.entryPath).split("\\").join("/");
-  const expectedProjection = `export { default } from ${JSON.stringify(`./${target}`)};\n`;
-  if ((await readFile(projectionPath, "utf8")) !== expectedProjection) {
-    throw new Error(`Marketplace extension projection was modified: ${record.id}`);
-  }
 }
 
 export async function writeMarketplaceBrokenMarker(record: InstalledMarketplacePluginRecord): Promise<void> {
@@ -210,7 +143,6 @@ export async function writeMarketplaceUninstallTombstone(
   record: InstalledMarketplacePluginRecord,
   operationId: string,
   uninstalledAt: number,
-  preserveFiles = false,
 ): Promise<void> {
   await removeMarketplaceProjection(record.rootPath);
   await atomicWrite(
@@ -224,7 +156,6 @@ export async function writeMarketplaceUninstallTombstone(
         marketplaceId: record.marketplaceId,
         artifactHash: record.artifactHash,
         uninstalledAt,
-        preserveFiles,
       },
       null,
       2,
@@ -236,43 +167,6 @@ export async function writeMarketplaceUninstallTombstone(
 export async function removeMarketplaceProjection(rootPath: string): Promise<void> {
   await rm(resolve(rootPath, "index.ts"), { force: true });
   await syncDirectory(rootPath);
-}
-
-async function listManagedFiles(root: string, prefix = ""): Promise<string[]> {
-  const files: string[] = [];
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isSymbolicLink()) throw new Error(`Marketplace extension contains a symlink: ${path}`);
-    if (entry.isDirectory()) files.push(...(await listManagedFiles(resolve(root, entry.name), path)));
-    else if (entry.isFile()) files.push(path);
-    else throw new Error(`Marketplace extension contains a special file: ${path}`);
-  }
-  return files;
-}
-
-function isManagedRelativePath(path: string): boolean {
-  return (
-    path.length > 0 &&
-    !path.includes("\\") &&
-    !path.startsWith("/") &&
-    path.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..")
-  );
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-async function hashFile(path: string): Promise<string> {
-  return createHash("sha256")
-    .update(await readFile(path))
-    .digest("hex");
 }
 
 async function atomicWrite(path: string, content: string): Promise<void> {

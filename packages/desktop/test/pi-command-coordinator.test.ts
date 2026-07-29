@@ -11,6 +11,7 @@ describe("PiCommandCoordinator", () => {
   const edit = vi.fn();
   const reload = vi.fn();
   const reloadResources = vi.fn();
+  const cancel = vi.fn();
   const clearQueue = vi.fn();
   const setText = vi.fn();
   const addAttachment = vi.fn();
@@ -27,12 +28,13 @@ describe("PiCommandCoordinator", () => {
     edit.mockResolvedValue({ accepted: true, queued: false });
     reload.mockResolvedValue({ accepted: true, queued: false });
     reloadResources.mockResolvedValue({ accepted: true, queued: false });
+    cancel.mockResolvedValue({ steering: [], followUp: [] });
     addAttachment.mockResolvedValue(undefined);
     getState.mockReturnValue({ text: "current draft" });
     phase = "idle";
     resolveReloadTarget.mockImplementation((parentId: string | null) => parentId);
     vi.stubGlobal("window", {
-      desktop: { sessions: { prompt, edit, reload, reloadResources, clearQueue } },
+      desktop: { sessions: { prompt, edit, reload, reloadResources, cancel, clearQueue } },
     });
   });
 
@@ -219,6 +221,33 @@ describe("PiCommandCoordinator", () => {
     expect(addAttachment).toHaveBeenCalledWith(
       expect.objectContaining({ id: "image", content: [{ type: "image", image: "data:image/png;base64,aW1hZ2U=" }] }),
     );
+  });
+
+  it("取消运行时恢复 Pi 原子清除的队列与 Desktop 附件", async () => {
+    phase = "running";
+    const coordinator = createCoordinator();
+    prompt.mockResolvedValueOnce({ accepted: true, queued: true });
+    coordinator.enqueue({ ...userMessage("queued"), attachments: [imageAttachment()] }, { steer: false });
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    const input = prompt.mock.calls[0]?.[0] as SessionPromptInput | undefined;
+    if (!input) throw new Error("prompt input missing");
+    const item = {
+      id: `queue:${input.requestId}`,
+      mode: "followUp" as const,
+      prompt: "queued",
+      source: "desktop" as const,
+      requestId: input.requestId,
+    };
+    cancel.mockImplementationOnce(async () => {
+      coordinator.observeQueue([]);
+      return { steering: [], followUp: ["queued"] };
+    });
+
+    await coordinator.cancel([item]);
+
+    expect(cancel).toHaveBeenCalledWith("project", "thread");
+    expect(setText).toHaveBeenCalledWith("queued\n\ncurrent draft");
+    expect(addAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: "image" }));
   });
 
   it("queue item 被消费后释放原始图片输入", async () => {

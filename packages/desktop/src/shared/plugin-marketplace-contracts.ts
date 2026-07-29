@@ -2,18 +2,10 @@ import type { ApplyDesktopExtensionSetResult, DesktopExtensionCapability } from 
 
 export const MARKETPLACE_PROTOCOL_VERSION = 1 as const;
 
-export interface MarketplaceSigningIdentity {
-  algorithm: "ed25519";
-  keyId: string;
-  fingerprint: string;
-}
-
 export interface MarketplaceEndpointRecord {
   marketplaceId: string;
   baseUrl: string;
   apiRoot: string;
-  artifactOrigins: string[];
-  signing: MarketplaceSigningIdentity;
   active: boolean;
 }
 
@@ -31,8 +23,6 @@ export type TestMarketplaceEndpointResult =
   | {
       status: "ready";
       endpoint: MarketplaceEndpointRecord;
-      confirmationRequired: boolean;
-      confirmationToken?: string;
     }
   | { status: "invalid"; code: string; message: string };
 
@@ -40,13 +30,11 @@ export interface SaveMarketplaceEndpointInput {
   requestId: string;
   expectedRevision: string;
   baseUrl: string;
-  confirmationToken?: string;
 }
 
 export type SaveMarketplaceEndpointResult =
   | { status: "saved"; snapshot: MarketplaceEndpointSettingsSnapshot }
-  | { status: "conflict"; current: MarketplaceEndpointSettingsSnapshot }
-  | { status: "confirmation-required"; testResult: Extract<TestMarketplaceEndpointResult, { status: "ready" }> };
+  | { status: "conflict"; current: MarketplaceEndpointSettingsSnapshot };
 
 export interface ListMarketplacePluginsInput {
   query?: string;
@@ -72,7 +60,7 @@ export interface MarketplacePluginSummary {
   compatibleVersion?: string;
   containsNativeCode: boolean;
   capabilities?: string[];
-  status: "available" | "deprecated" | "withdrawn" | "blocked";
+  status: "available" | "deprecated";
   publishedAt: number;
   updatedAt: number;
 }
@@ -84,15 +72,6 @@ export interface MarketplacePluginPage {
   source: "network" | "cache";
   stale: boolean;
   fetchedAt: number;
-}
-
-export interface MarketplacePluginRevocation {
-  status: "withdrawn" | "blocked";
-  reasonCode: string;
-  message: string;
-  replacementVersion?: string;
-  checkedAt: number;
-  stale: boolean;
 }
 
 export interface InstalledMarketplacePluginSummary {
@@ -107,19 +86,11 @@ export interface InstalledMarketplacePluginSummary {
   configurable: boolean;
   state: "installed" | "broken";
   installedAt: number;
-  revocation?: MarketplacePluginRevocation;
-}
-
-export interface MarketplaceRevocationCheck {
-  marketplaceId: string;
-  status: "fresh" | "stale" | "missing";
-  checkedAt?: number;
 }
 
 export interface InstalledMarketplacePluginsSnapshot {
   revision: string;
   plugins: InstalledMarketplacePluginSummary[];
-  revocationChecks?: MarketplaceRevocationCheck[];
 }
 
 export interface ApplyMarketplaceMutationTarget {
@@ -176,7 +147,6 @@ export interface UninstallMarketplacePluginInput {
   expectedRevision: string;
   pluginId: string;
   confirmRemoval: true;
-  confirmPreserveModifiedFiles?: true;
   applyToCurrentSession?: ApplyMarketplaceMutationTarget;
 }
 

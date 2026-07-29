@@ -54,13 +54,6 @@ rsync -az --delete -e "$RSYNC_SHELL" \
 
 ENV_PATH="$DEPLOY_ROOT/repo/packages/plugin-marketplace-server/.env.production"
 if ! remote "test -f '$ENV_PATH'"; then
-  SIGNING_KEY="$({
-    node --input-type=module -e '
-      import { generateKeyPairSync } from "node:crypto";
-      const pem = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" });
-      process.stdout.write(Buffer.from(pem).toString("base64"));
-    '
-  })"
   ADMIN_TOKEN="$({
     node --input-type=module -e '
       import { randomBytes } from "node:crypto";
@@ -73,12 +66,8 @@ if ! remote "test -f '$ENV_PATH'"; then
     printf 'MARKETPLACE_BASE_PATH=\n'
     printf 'MARKETPLACE_PUBLIC_BASE_URL=%s\n' "$PUBLIC_URL"
     printf 'MARKETPLACE_ID=meta-agent-development\n'
-    printf 'MARKETPLACE_ARTIFACT_ORIGINS=\n'
-    printf 'MARKETPLACE_SIGNING_PRIVATE_KEY=%s\n' "$SIGNING_KEY"
-    printf 'MARKETPLACE_ALLOW_EPHEMERAL_SIGNING_KEY=false\n'
     printf 'MARKETPLACE_ADMIN_TOKEN=%s\n' "$ADMIN_TOKEN"
   } | remote "umask 077; cat > '$ENV_PATH'"
-  unset SIGNING_KEY
   unset ADMIN_TOKEN
 fi
 

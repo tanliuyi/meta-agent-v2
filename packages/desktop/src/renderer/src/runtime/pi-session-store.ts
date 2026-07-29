@@ -1,3 +1,4 @@
+import type { Attachment } from "@assistant-ui/react";
 import type { PiThreadSnapshot, SessionControlState, WorkbenchState } from "../../../shared/contracts.ts";
 import { PiThreadStore } from "./pi-thread-store.ts";
 
@@ -28,10 +29,15 @@ export interface WorkbenchStore {
   subscribe(listener: () => void): () => void;
 }
 
-/** Keeps unsent composer text while the session React subtree is unmounted. */
+/** Keeps the unsent prompt while the session React subtree is unmounted. */
+export interface SessionComposerDraft {
+  text: string;
+  attachments: readonly Attachment[];
+}
+
 export interface SessionComposerDraftStore {
-  getText(): string;
-  setText(text: string): void;
+  getSnapshot(): SessionComposerDraft;
+  setSnapshot(draft: SessionComposerDraft): void;
 }
 
 export interface SessionSummaryStore {
@@ -117,14 +123,14 @@ export function createSessionRecordStores(): SessionRecordStores {
 }
 
 function createComposerDraftStore(): SessionComposerDraftStore {
-  let text = "";
+  let draft: SessionComposerDraft = { text: "", attachments: [] };
 
   return {
-    getText() {
-      return text;
+    getSnapshot() {
+      return draft;
     },
-    setText(value) {
-      text = value;
+    setSnapshot(value) {
+      draft = { text: value.text, attachments: [...value.attachments] };
     },
   };
 }

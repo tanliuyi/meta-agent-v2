@@ -177,7 +177,7 @@ export class SessionSupervisor {
     return this.workers.branch(input);
   }
 
-  cancel(projectId: string, threadId: string): Promise<void> {
+  cancel(projectId: string, threadId: string): Promise<ClearedQueue> {
     return this.workers.cancel(projectId, threadId);
   }
 
@@ -201,20 +201,8 @@ export class SessionSupervisor {
     return this.workers.setThinking(projectId, threadId, level);
   }
 
-  applyExtensionSet(
-    projectId: string,
-    threadId: string,
-    expectedDesiredGeneration: string,
-    abortRunning = false,
-    mutationOperationId?: string,
-  ) {
-    return this.workers.applyExtensionSet(
-      projectId,
-      threadId,
-      expectedDesiredGeneration,
-      abortRunning,
-      mutationOperationId,
-    );
+  applyExtensionSet(projectId: string, threadId: string, expectedDesiredGeneration: string, abortRunning = false) {
+    return this.workers.applyExtensionSet(projectId, threadId, expectedDesiredGeneration, abortRunning);
   }
 
   rename(projectId: string, threadId: string, title: string): Promise<void> {

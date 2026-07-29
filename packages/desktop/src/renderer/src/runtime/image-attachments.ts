@@ -1,4 +1,9 @@
-import { type Attachment, SimpleImageAttachmentAdapter } from "@assistant-ui/react";
+import {
+  type Attachment,
+  type CompleteAttachment,
+  type CreateAttachment,
+  SimpleImageAttachmentAdapter,
+} from "@assistant-ui/react";
 import type { ImageInput } from "../../../shared/contracts.ts";
 
 class PiImageAttachmentAdapter extends SimpleImageAttachmentAdapter {
@@ -32,6 +37,35 @@ export async function toPiImageInputs(
       part.type === "image" ? [parseImageDataUrl(part.image, part.filename ?? attachment.name)] : [],
     ),
   );
+}
+
+export function toComposerAttachmentInput(attachment: CompleteAttachment): CreateAttachment;
+export function toComposerAttachmentInput(attachment: Attachment): File | CreateAttachment;
+export function toComposerAttachmentInput(attachment: Attachment): File | CreateAttachment {
+  if (!isCompleteAttachment(attachment)) return attachment.file;
+  return {
+    id: attachment.id,
+    type: attachment.type,
+    name: attachment.name,
+    ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
+    content: attachment.content,
+  };
+}
+
+export async function restoreComposerAttachments(
+  addAttachment: (attachment: File | CreateAttachment) => Promise<void>,
+  attachments: readonly Attachment[],
+  restored: Set<Attachment>,
+): Promise<void> {
+  for (const attachment of attachments) {
+    if (restored.has(attachment)) continue;
+    await addAttachment(toComposerAttachmentInput(attachment));
+    restored.add(attachment);
+  }
+}
+
+function isCompleteAttachment(attachment: Attachment): attachment is CompleteAttachment {
+  return attachment.status.type === "complete";
 }
 
 function isPendingImageAttachment(attachment: ComposerAttachment): attachment is PendingImageAttachment {

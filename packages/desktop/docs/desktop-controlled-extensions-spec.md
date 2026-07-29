@@ -6,7 +6,7 @@
 >
 > 目标版本：Desktop Extension Host Profile v1
 >
-> 部分废止说明：[`plugin-marketplace-product-spec.md`](./plugin-marketplace-product-spec.md) 已接受并取代本文中“不建设在线 packages center”、不提供下载/签名/更新/撤销、source 仅限 `builtin/curated/development`、marketplace provider 不受支持，以及不复制预构建依赖/native artifact 的相关条款。Pi runner、受控 entry set、Host Profile、immutable worker generation、single-writer replacement 和 Developer Mode 边界继续有效。
+> 部分废止说明：[`plugin-marketplace-product-spec.md`](./plugin-marketplace-product-spec.md) 已接受并取代本文中“不建设在线 packages center”、不提供下载/签名/更新/撤销、source 仅限 `builtin/curated/development`、marketplace provider 不受支持，以及不复制预构建依赖/native artifact 的相关条款。Pi runner、受控 entry set、Host Profile、immutable worker generation、single-writer replacement 和 Developer Mode 边界继续有效。当前实现也不再为 path-backed entry 计算或校验内容 hash；generation 由设置 revision、marketplace artifact key、入口路径和配置 revision 决定。
 
 ## 1. 摘要
 

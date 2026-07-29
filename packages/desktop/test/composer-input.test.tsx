@@ -1,15 +1,16 @@
 import React, { type KeyboardEvent } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const captured = vi.hoisted(() => ({
+  cancel: vi.fn(),
   onKeyDownCapture: undefined as ((event: KeyboardEvent<HTMLDivElement>) => void) | undefined,
 }));
 
 vi.mock("@assistant-ui/react", () => ({
   unstable_useTriggerPopoverAriaProps: () => ({}),
   useAui: () => ({
-    composer: () => ({ cancel: vi.fn() }),
+    composer: () => ({ cancel: captured.cancel }),
     thread: () => ({ getState: () => ({ capabilities: { attachments: false } }) }),
   }),
   useAuiState: (
@@ -31,19 +32,28 @@ vi.mock("@assistant-ui/react-lexical", () => ({
   },
 }));
 
-vi.mock("../src/renderer/src/components/chat/composer-command-trigger.tsx", () => ({
+vi.mock("../src/renderer/src/components/chat/composer/composer-command-trigger.tsx", () => ({
   ComposerCommandTrigger: () => null,
 }));
 
-vi.mock("../src/renderer/src/components/chat/composer-file-trigger.tsx", () => ({
+vi.mock("../src/renderer/src/components/chat/composer/composer-file-trigger.tsx", () => ({
   ComposerFileTrigger: () => null,
 }));
 
-import { ComposerInput, syncFocusedComposerInput } from "../src/renderer/src/components/chat/composer-input.tsx";
+import {
+  ComposerInput,
+  syncFocusedComposerInput,
+} from "../src/renderer/src/components/chat/composer/composer-input.tsx";
 
 describe("ComposerInput", () => {
   beforeEach(() => {
+    captured.cancel.mockClear();
     captured.onKeyDownCapture = undefined;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("同步 ARIA 和禁用状态到实际可聚焦的 contenteditable", () => {
@@ -92,6 +102,7 @@ describe("ComposerInput", () => {
         materializing={false}
         onSubmit={onSubmit}
         onSubmitRunning={onSubmitRunning}
+        onEscapeCancelPendingChange={() => undefined}
       />,
     );
 
@@ -117,5 +128,48 @@ describe("ComposerInput", () => {
     expect(stopImmediatePropagation).toHaveBeenCalledOnce();
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmitRunning).not.toHaveBeenCalled();
+  });
+
+  it("仅在一秒内连续按两次 Escape 时取消运行", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", globalThis);
+    const onEscapeCancelPendingChange = vi.fn();
+    renderToStaticMarkup(
+      <ComposerInput
+        projectId={undefined}
+        commands={[]}
+        mode="session"
+        isRunning={true}
+        isCancelable={true}
+        materializing={false}
+        onSubmit={() => undefined}
+        onSubmitRunning={() => undefined}
+        onEscapeCancelPendingChange={onEscapeCancelPendingChange}
+      />,
+    );
+
+    const handler = captured.onKeyDownCapture;
+    if (!handler) throw new Error("Composer input key handler was not rendered");
+    const pressEscape = () =>
+      handler({
+        key: "Escape",
+        repeat: false,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        nativeEvent: { isComposing: false },
+      } as unknown as KeyboardEvent<HTMLDivElement>);
+
+    pressEscape();
+    expect(onEscapeCancelPendingChange).toHaveBeenLastCalledWith(true);
+    expect(captured.cancel).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1_000);
+    expect(onEscapeCancelPendingChange).toHaveBeenLastCalledWith(false);
+    expect(captured.cancel).not.toHaveBeenCalled();
+
+    pressEscape();
+    pressEscape();
+    expect(onEscapeCancelPendingChange).toHaveBeenLastCalledWith(false);
+    expect(captured.cancel).toHaveBeenCalledOnce();
   });
 });

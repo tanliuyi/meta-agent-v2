@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
@@ -14,12 +14,9 @@ import { MARKETPLACE_PROTOCOL_VERSION } from "../../shared/plugin-marketplace-co
 import { readBoundedJsonResponse } from "./marketplace-http.ts";
 
 export const MISSING_MARKETPLACE_ENDPOINT_REVISION = "missing:marketplace-endpoints-v1";
+export type MarketplaceEndpoint = MarketplaceEndpointRecord;
 
-export interface TrustedMarketplaceEndpoint extends Omit<MarketplaceEndpointRecord, "signing"> {
-  signing: MarketplaceEndpointRecord["signing"] & { publicKey: string };
-}
-
-type StoredMarketplaceEndpointRecord = TrustedMarketplaceEndpoint;
+type StoredMarketplaceEndpointRecord = MarketplaceEndpointRecord;
 
 interface MarketplaceEndpointFileData {
   version?: number;
@@ -31,75 +28,47 @@ interface MarketplaceEndpointFileData {
 interface CurrentEndpointSource {
   revision: string;
   data: MarketplaceEndpointFileData;
-  /** Set when the compiled-in default endpoint was injected in memory rather than loaded from disk. */
   injectedMarketplaceId?: string;
-}
-
-interface MarketplaceSignedEnvelope {
-  data: unknown;
-  signature: {
-    algorithm: string;
-    keyId: string;
-    value: string;
-  };
 }
 
 interface MarketplaceWellKnown {
   protocolVersion: number;
   marketplaceId: string;
   apiRoot: string;
-  artifactOrigins: string[];
-  signing: {
-    algorithm: string;
-    keyId: string;
-    publicKey: string;
-    fingerprint?: string;
-  };
-}
-
-interface ConfirmationRecord {
-  expectedRevision: string;
-  endpoint: StoredMarketplaceEndpointRecord;
-  expiresAt: number;
 }
 
 interface MarketplaceEndpointSettingsServiceOptions {
   createId?(): string;
-  now?(): number;
   fetch?: typeof fetch;
   timeoutMs?: number;
   maxResponseBytes?: number;
-  defaultEndpoint?: TrustedMarketplaceEndpoint;
+  defaultEndpoint?: MarketplaceEndpoint;
 }
 
-const CONFIRMATION_TTL_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
+const MAX_REQUEST_RESULTS = 256;
 
-/** Owns marketplace endpoint trust bootstrap and file-backed settings. */
+/** Stores the selected marketplace endpoint and resolves its API metadata. */
 export class MarketplaceEndpointSettingsService {
   readonly path: string;
   private saveTail: Promise<void> = Promise.resolve();
   private readonly createId: () => string;
-  private readonly now: () => number;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly maxResponseBytes: number;
-  private readonly defaultEndpoint?: TrustedMarketplaceEndpoint;
-  private readonly confirmations = new Map<string, ConfirmationRecord>();
+  private readonly defaultEndpoint?: MarketplaceEndpoint;
   private readonly requestResults = new Map<string, SaveMarketplaceEndpointResult>();
 
   constructor(userDataDir: string, options: MarketplaceEndpointSettingsServiceOptions = {}) {
     this.path = join(userDataDir, "plugins", "marketplace-endpoints.json");
     this.createId = options.createId ?? randomUUID;
-    this.now = options.now ?? Date.now;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
     if (options.defaultEndpoint) {
       assertEndpointRecord(options.defaultEndpoint);
-      assertTrustedEndpointKey(options.defaultEndpoint);
-      assertTrustedEndpointUrls(options.defaultEndpoint);
+      assertEndpointUrls(options.defaultEndpoint);
       if (!options.defaultEndpoint.active) throw new Error("Default marketplace endpoint must be active");
       this.defaultEndpoint = cloneEndpoint(options.defaultEndpoint);
     }
@@ -109,50 +78,27 @@ export class MarketplaceEndpointSettingsService {
     return snapshotFromCurrent(await this.readCurrent());
   }
 
-  async getTrustedEndpoint(marketplaceId: string): Promise<TrustedMarketplaceEndpoint> {
+  async getEndpoint(marketplaceId: string): Promise<MarketplaceEndpoint> {
     const current = await this.readCurrent();
     const endpoint = current.data.endpoints?.find((entry) => entry.marketplaceId === marketplaceId);
-    if (!endpoint) throw new Error(`Marketplace trust record is unavailable: ${marketplaceId}`);
-    return {
-      ...endpoint,
-      artifactOrigins: [...endpoint.artifactOrigins],
-      signing: { ...endpoint.signing },
-    };
+    if (!endpoint) throw new Error(`Marketplace endpoint is unavailable: ${marketplaceId}`);
+    return cloneEndpoint(endpoint);
   }
 
-  async getActiveTrustedEndpoint(): Promise<TrustedMarketplaceEndpoint> {
+  async getActiveEndpoint(): Promise<MarketplaceEndpoint> {
     const current = await this.readCurrent();
     const active = current.data.endpoints?.find(
       (endpoint) => endpoint.marketplaceId === current.data.activeMarketplaceId && endpoint.active,
     );
     if (!active) throw new Error("Marketplace API URL is not configured");
-    return {
-      ...active,
-      artifactOrigins: [...active.artifactOrigins],
-      signing: { ...active.signing },
-    };
+    return cloneEndpoint(active);
   }
 
   async testEndpoint(input: TestMarketplaceEndpointInput): Promise<TestMarketplaceEndpointResult> {
     assertTestInput(input);
     try {
-      const baseUrl = normalizeBaseUrl(input.baseUrl);
-      const endpoint = await this.discover(baseUrl);
-      const current = await this.readCurrent();
-      const trusted = current.data.endpoints?.find((entry) => sameEndpointIdentity(entry, endpoint));
-      if (trusted) return { status: "ready", endpoint: endpointSnapshot(endpoint), confirmationRequired: false };
-      const confirmationToken = this.createId();
-      this.confirmations.set(confirmationToken, {
-        expectedRevision: current.revision,
-        endpoint,
-        expiresAt: this.now() + CONFIRMATION_TTL_MS,
-      });
-      return {
-        status: "ready",
-        endpoint: endpointSnapshot(endpoint),
-        confirmationRequired: true,
-        confirmationToken,
-      };
+      const endpoint = await this.discover(normalizeBaseUrl(input.baseUrl));
+      return { status: "ready", endpoint: endpointSnapshot(endpoint) };
     } catch (error) {
       return {
         status: "invalid",
@@ -187,31 +133,12 @@ export class MarketplaceEndpointSettingsService {
       if (cached) return cached;
       const current = await this.readCurrent();
       if (current.revision !== input.expectedRevision) {
-        const result: SaveMarketplaceEndpointResult = {
+        return this.cacheResult(input.requestId, {
           status: "conflict",
           current: snapshotFromCurrent(current),
-        };
-        this.requestResults.set(input.requestId, result);
-        return result;
+        });
       }
       const endpoint = await this.discover(baseUrl);
-      const existing = current.data.endpoints?.find((entry) => sameEndpointIdentity(entry, endpoint));
-      if (!existing) {
-        const confirmation = input.confirmationToken ? this.confirmations.get(input.confirmationToken) : undefined;
-        if (
-          !confirmation ||
-          confirmation.expiresAt < this.now() ||
-          confirmation.expectedRevision !== current.revision ||
-          !sameEndpointIdentity(confirmation.endpoint, endpoint)
-        ) {
-          const testResult = await this.testEndpoint({ baseUrl });
-          if (testResult.status !== "ready") throw new Error(testResult.message);
-          const result: SaveMarketplaceEndpointResult = { status: "confirmation-required", testResult };
-          this.requestResults.set(input.requestId, result);
-          return result;
-        }
-        this.confirmations.delete(input.confirmationToken!);
-      }
       const endpoints = (current.data.endpoints ?? [])
         .filter(
           (entry) =>
@@ -225,12 +152,10 @@ export class MarketplaceEndpointSettingsService {
         activeMarketplaceId: endpoint.marketplaceId,
         endpoints,
       });
-      const result: SaveMarketplaceEndpointResult = {
+      return this.cacheResult(input.requestId, {
         status: "saved",
         snapshot: snapshotFromCurrent(await this.readCurrent()),
-      };
-      this.requestResults.set(input.requestId, result);
-      return result;
+      });
     } finally {
       await release();
     }
@@ -239,43 +164,11 @@ export class MarketplaceEndpointSettingsService {
   private async discover(baseUrl: string): Promise<StoredMarketplaceEndpointRecord> {
     const wellKnownUrl = new URL(".well-known/meta-agent-marketplace.json", baseUrl);
     const value = await this.fetchJson(wellKnownUrl, this.maxResponseBytes);
-    const envelope = parseSignedEnvelope(value);
-    const document = parseWellKnown(envelope.data);
-    const publicKeyBytes = decodeBase64(document.signing.publicKey);
-    let publicKey: ReturnType<typeof createPublicKey>;
-    try {
-      publicKey = createPublicKey({ key: publicKeyBytes, format: "der", type: "spki" });
-    } catch {
-      throw new Error("Marketplace signing public key is not valid Ed25519 SPKI");
-    }
-    if (publicKey.asymmetricKeyType !== "ed25519") {
-      throw new Error("Marketplace signing public key must use Ed25519");
-    }
-    const canonicalPublicKey = publicKey.export({ type: "spki", format: "der" });
-    const fingerprint = `sha256:${createHash("sha256").update(canonicalPublicKey).digest("hex")}`;
-    if (document.signing.fingerprint !== undefined && document.signing.fingerprint !== fingerprint) {
-      throw new Error("Marketplace signing key fingerprint does not match its public key");
-    }
-    if (
-      envelope.signature.algorithm !== "ed25519" ||
-      envelope.signature.keyId !== document.signing.keyId ||
-      !verify(null, Buffer.from(canonicalJson(document), "utf8"), publicKey, decodeBase64(envelope.signature.value))
-    ) {
-      throw new Error("Marketplace well-known signature is invalid");
-    }
-    const apiRoot = normalizeDiscoveredUrl(document.apiRoot, baseUrl, false);
-    const artifactOrigins = document.artifactOrigins.map((origin) => normalizeDiscoveredUrl(origin, baseUrl, true));
+    const document = parseWellKnown(unwrapEnvelope(value));
     return {
       marketplaceId: document.marketplaceId,
       baseUrl,
-      apiRoot,
-      artifactOrigins,
-      signing: {
-        algorithm: "ed25519",
-        keyId: document.signing.keyId,
-        publicKey: document.signing.publicKey,
-        fingerprint,
-      },
+      apiRoot: normalizeDiscoveredUrl(document.apiRoot, baseUrl),
       active: true,
     };
   }
@@ -321,6 +214,15 @@ export class MarketplaceEndpointSettingsService {
     return { revision: hashBytes(bytes), ...withDefaultEndpoint(value, this.defaultEndpoint) };
   }
 
+  private cacheResult(requestId: string, result: SaveMarketplaceEndpointResult): SaveMarketplaceEndpointResult {
+    if (this.requestResults.size >= MAX_REQUEST_RESULTS) {
+      const oldest = this.requestResults.keys().next().value;
+      if (typeof oldest === "string") this.requestResults.delete(oldest);
+    }
+    this.requestResults.set(requestId, result);
+    return result;
+  }
+
   private async atomicWrite(data: MarketplaceEndpointFileData): Promise<void> {
     const directory = dirname(this.path);
     const tempPath = join(directory, `.marketplace-endpoints.${process.pid}.${this.createId()}.tmp`);
@@ -352,7 +254,7 @@ export class MarketplaceEndpointSettingsService {
 
 function withDefaultEndpoint(
   data: MarketplaceEndpointFileData,
-  defaultEndpoint: TrustedMarketplaceEndpoint | undefined,
+  defaultEndpoint: MarketplaceEndpoint | undefined,
 ): { data: MarketplaceEndpointFileData; injectedMarketplaceId?: string } {
   if (!defaultEndpoint) return { data };
   const active = data.endpoints?.find(
@@ -380,12 +282,8 @@ function withDefaultEndpoint(
   };
 }
 
-function cloneEndpoint(endpoint: TrustedMarketplaceEndpoint): TrustedMarketplaceEndpoint {
-  return {
-    ...endpoint,
-    artifactOrigins: [...endpoint.artifactOrigins],
-    signing: { ...endpoint.signing },
-  };
+function cloneEndpoint(endpoint: MarketplaceEndpoint): MarketplaceEndpoint {
+  return { ...endpoint };
 }
 
 function normalizeBaseUrl(input: string): string {
@@ -406,7 +304,7 @@ function normalizeBaseUrl(input: string): string {
   return url.href;
 }
 
-function normalizeDiscoveredUrl(value: string, baseUrl: string, originOnly: boolean): string {
+function normalizeDiscoveredUrl(value: string, baseUrl: string): string {
   const url = new URL(value, baseUrl);
   if (url.username || url.password || url.search || url.hash) {
     throw new Error("Marketplace metadata contains an unsafe URL");
@@ -415,39 +313,16 @@ function normalizeDiscoveredUrl(value: string, baseUrl: string, originOnly: bool
     throw new Error("Marketplace metadata URL must use HTTP or HTTPS");
   }
   assertSafeUrlPath(value, url.pathname, "Marketplace metadata URL");
-  if (originOnly && url.pathname !== "/") throw new Error("Marketplace artifact origin must not contain a path");
-  if (!originOnly && !url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
-  return originOnly ? url.origin : url.href;
+  if (!url.pathname.endsWith("/")) url.pathname = `${url.pathname}/`;
+  return url.href;
 }
 
-function assertTrustedEndpointKey(endpoint: TrustedMarketplaceEndpoint): void {
-  let publicKey: ReturnType<typeof createPublicKey>;
-  try {
-    publicKey = createPublicKey({ key: decodeBase64(endpoint.signing.publicKey), format: "der", type: "spki" });
-  } catch {
-    throw new Error("Default marketplace signing public key is not valid Ed25519 SPKI");
-  }
-  if (publicKey.asymmetricKeyType !== "ed25519") {
-    throw new Error("Default marketplace signing public key must use Ed25519");
-  }
-  const bytes = publicKey.export({ type: "spki", format: "der" });
-  const hash = createHash("sha256").update(bytes).digest("hex");
-  if (endpoint.signing.fingerprint !== `sha256:${hash}` || endpoint.signing.keyId !== `ed25519:${hash.slice(0, 16)}`) {
-    throw new Error("Default marketplace signing identity does not match its public key");
-  }
-}
-
-function assertTrustedEndpointUrls(endpoint: TrustedMarketplaceEndpoint): void {
+function assertEndpointUrls(endpoint: MarketplaceEndpoint): void {
   if (normalizeBaseUrl(endpoint.baseUrl) !== endpoint.baseUrl) {
     throw new Error("Default marketplace base URL is not normalized");
   }
-  if (normalizeDiscoveredUrl(endpoint.apiRoot, endpoint.baseUrl, false) !== endpoint.apiRoot) {
+  if (normalizeDiscoveredUrl(endpoint.apiRoot, endpoint.baseUrl) !== endpoint.apiRoot) {
     throw new Error("Default marketplace API root is not normalized");
-  }
-  for (const origin of endpoint.artifactOrigins) {
-    if (normalizeDiscoveredUrl(origin, endpoint.baseUrl, true) !== origin) {
-      throw new Error("Default marketplace artifact origin is not normalized");
-    }
   }
 }
 
@@ -459,25 +334,8 @@ function snapshotFromCurrent(current: CurrentEndpointSource): MarketplaceEndpoin
   };
 }
 
-function parseSignedEnvelope(value: unknown): MarketplaceSignedEnvelope {
-  if (
-    !isPlainObject(value) ||
-    !("data" in value) ||
-    !isPlainObject(value.signature) ||
-    typeof value.signature.algorithm !== "string" ||
-    typeof value.signature.keyId !== "string" ||
-    typeof value.signature.value !== "string"
-  ) {
-    throw new Error("Marketplace well-known signature envelope is invalid");
-  }
-  return {
-    data: value.data,
-    signature: {
-      algorithm: value.signature.algorithm,
-      keyId: value.signature.keyId,
-      value: value.signature.value,
-    },
-  };
+function unwrapEnvelope(value: unknown): unknown {
+  return isPlainObject(value) && "data" in value ? value.data : value;
 }
 
 function parseWellKnown(value: unknown): MarketplaceWellKnown {
@@ -488,14 +346,7 @@ function parseWellKnown(value: unknown): MarketplaceWellKnown {
   if (
     typeof value.marketplaceId !== "string" ||
     !/^[a-z0-9][a-z0-9._-]{2,127}$/.test(value.marketplaceId) ||
-    typeof value.apiRoot !== "string" ||
-    !Array.isArray(value.artifactOrigins) ||
-    !value.artifactOrigins.every((entry) => typeof entry === "string") ||
-    !isPlainObject(value.signing) ||
-    value.signing.algorithm !== "ed25519" ||
-    typeof value.signing.keyId !== "string" ||
-    typeof value.signing.publicKey !== "string" ||
-    (value.signing.fingerprint !== undefined && typeof value.signing.fingerprint !== "string")
+    typeof value.apiRoot !== "string"
   ) {
     throw new Error("Marketplace well-known document is invalid");
   }
@@ -522,13 +373,6 @@ function assertEndpointRecord(value: unknown): asserts value is StoredMarketplac
     typeof value.marketplaceId !== "string" ||
     typeof value.baseUrl !== "string" ||
     typeof value.apiRoot !== "string" ||
-    !Array.isArray(value.artifactOrigins) ||
-    !value.artifactOrigins.every((entry) => typeof entry === "string") ||
-    !isPlainObject(value.signing) ||
-    value.signing.algorithm !== "ed25519" ||
-    typeof value.signing.keyId !== "string" ||
-    typeof value.signing.publicKey !== "string" ||
-    typeof value.signing.fingerprint !== "string" ||
     typeof value.active !== "boolean"
   ) {
     throw new Error("marketplace-endpoints.json endpoint is invalid");
@@ -547,68 +391,20 @@ function assertSaveInput(input: SaveMarketplaceEndpointInput): void {
     typeof input !== "object" ||
     typeof input.requestId !== "string" ||
     typeof input.expectedRevision !== "string" ||
-    typeof input.baseUrl !== "string" ||
-    (input.confirmationToken !== undefined && typeof input.confirmationToken !== "string")
+    typeof input.baseUrl !== "string"
   ) {
     throw new TypeError("Invalid marketplace endpoint save input");
   }
 }
 
-function decodeBase64(value: string): Buffer {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw new Error("Marketplace signing public key is not valid base64");
-  }
-  const bytes = Buffer.from(value, "base64");
-  if (bytes.length === 0) throw new Error("Marketplace signing public key is empty");
-  return bytes;
-}
-
 function endpointSnapshot(endpoint: StoredMarketplaceEndpointRecord): MarketplaceEndpointRecord {
-  return {
-    ...endpoint,
-    artifactOrigins: [...endpoint.artifactOrigins],
-    signing: {
-      algorithm: endpoint.signing.algorithm,
-      keyId: endpoint.signing.keyId,
-      fingerprint: endpoint.signing.fingerprint,
-    },
-  };
-}
-
-function sameEndpointIdentity(left: StoredMarketplaceEndpointRecord, right: StoredMarketplaceEndpointRecord): boolean {
-  return (
-    left.marketplaceId === right.marketplaceId &&
-    left.baseUrl === right.baseUrl &&
-    left.apiRoot === right.apiRoot &&
-    left.artifactOrigins.length === right.artifactOrigins.length &&
-    left.artifactOrigins.every((origin, index) => origin === right.artifactOrigins[index]) &&
-    left.signing.keyId === right.signing.keyId &&
-    left.signing.publicKey === right.signing.publicKey &&
-    left.signing.fingerprint === right.signing.fingerprint
-  );
+  return cloneEndpoint(endpoint);
 }
 
 function endpointErrorCode(error: unknown): string {
   if (!(error instanceof Error)) return "MARKETPLACE_UNAVAILABLE";
   if (error.message.includes("HTTPS") || error.message.includes("URL")) return "MARKETPLACE_ENDPOINT_INVALID";
-  if (error.message.includes("fingerprint")) return "MARKETPLACE_IDENTITY_CHANGED";
-  if (error.message.includes("signature") || error.message.includes("Ed25519")) {
-    return "MARKETPLACE_ENDPOINT_UNTRUSTED";
-  }
   return "MARKETPLACE_UNAVAILABLE";
-}
-
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalValue(value));
-}
-
-function canonicalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalValue);
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(record).sort()) result[key] = canonicalValue(record[key]);
-  return result;
 }
 
 function hashBytes(bytes: Uint8Array): string {

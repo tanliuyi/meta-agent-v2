@@ -1,51 +1,29 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "../src/main/plugins/default-plugin-marketplace.ts";
-import { targetMatchesRuntime } from "../src/main/plugins/marketplace-artifact-verifier.ts";
+import { targetMatchesRuntime } from "../src/main/plugins/marketplace-artifact-manifest.ts";
 import { MarketplaceCatalogService } from "../src/main/plugins/marketplace-catalog-service.ts";
 import {
+  type MarketplaceEndpoint,
   MarketplaceEndpointSettingsService,
   MISSING_MARKETPLACE_ENDPOINT_REVISION,
-  type TrustedMarketplaceEndpoint,
 } from "../src/main/plugins/marketplace-endpoint-settings-service.ts";
 import { readBoundedJsonResponse } from "../src/main/plugins/marketplace-http.ts";
 
 const directories: string[] = [];
-const signingKeyPair = generateKeyPairSync("ed25519");
-const publicKey = signingKeyPair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
 
 function wellKnown(baseUrl = "https://market.example/", marketplaceId = "example.market") {
-  const data = {
-    protocolVersion: 1,
-    marketplaceId,
-    apiRoot: `${baseUrl}v1/`,
-    artifactOrigins: ["https://artifacts.example/"],
-    signing: { algorithm: "ed25519", keyId: "key-1", publicKey },
-  };
   return {
-    data,
-    signature: {
-      algorithm: "ed25519",
-      keyId: "key-1",
-      value: sign(null, Buffer.from(canonicalJson(data), "utf8"), signingKeyPair.privateKey).toString("base64"),
+    data: {
+      protocolVersion: 1,
+      marketplaceId,
+      apiRoot: `${baseUrl}v1/`,
     },
+    signature: { algorithm: "ignored", keyId: "ignored", value: "ignored" },
   };
-}
-
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(canonicalValue(value));
-}
-
-function canonicalValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalValue);
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(record).sort()) result[key] = canonicalValue(record[key]);
-  return result;
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -115,20 +93,15 @@ describe("MarketplaceEndpointSettingsService", () => {
           marketplaceId: "meta-agent-development",
           baseUrl: "http://100.91.230.10:4317/",
           active: true,
-          signing: expect.objectContaining({
-            fingerprint: "sha256:e2fe86ee17f7f2114f71351ac8592dceb485a0faa0432bc11bf2a89398690d18",
-          }),
         }),
       ],
     });
-    expect(JSON.stringify(await service.getSettings())).not.toContain("publicKey");
-    await expect(service.getActiveTrustedEndpoint()).resolves.toMatchObject({
+    await expect(service.getActiveEndpoint()).resolves.toMatchObject({
       apiRoot: "http://100.91.230.10:4317/v1/",
-      signing: { publicKey: DEFAULT_PLUGIN_MARKETPLACE.signing.publicKey },
     });
   });
 
-  it("tests, confirms, and atomically saves a normalized endpoint", async () => {
+  it("tests and atomically saves a normalized endpoint", async () => {
     const directory = join(tmpdir(), `marketplace-endpoint-${Date.now()}-${Math.random()}`);
     directories.push(directory);
     const fetch = vi.fn(async () => jsonResponse(wellKnown()));
@@ -143,7 +116,6 @@ describe("MarketplaceEndpointSettingsService", () => {
     const tested = await service.testEndpoint({ baseUrl: "https://market.example" });
     expect(tested).toMatchObject({
       status: "ready",
-      confirmationRequired: true,
       endpoint: { marketplaceId: "example.market", baseUrl: "https://market.example/" },
     });
     if (tested.status !== "ready") throw new Error("endpoint test failed");
@@ -152,14 +124,17 @@ describe("MarketplaceEndpointSettingsService", () => {
       requestId: "save",
       expectedRevision: initial.revision,
       baseUrl: "https://market.example",
-      confirmationToken: tested.confirmationToken,
     });
     expect(saved).toMatchObject({
       status: "saved",
       snapshot: { activeMarketplaceId: "example.market", endpoints: [{ active: true }] },
     });
+    if (saved.status !== "saved") throw new Error("endpoint save failed");
+    const endpointPath = join(directory, "plugins", "marketplace-endpoints.json");
+    const bytes = await readFile(endpointPath);
+    expect(saved.snapshot.revision).toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(JSON.stringify(saved)).not.toContain("publicKey");
-    const source = JSON.parse(await readFile(join(directory, "plugins", "marketplace-endpoints.json"), "utf8"));
+    const source = JSON.parse(bytes.toString("utf8"));
     expect(source.endpoints[0]).not.toHaveProperty("privateKey");
     expect(fetch).toHaveBeenCalledWith(
       new URL("https://market.example/.well-known/meta-agent-marketplace.json"),
@@ -167,7 +142,6 @@ describe("MarketplaceEndpointSettingsService", () => {
     );
     await expect(service.testEndpoint({ baseUrl: "https://mirror.example" })).resolves.toMatchObject({
       status: "ready",
-      confirmationRequired: true,
     });
     const restartedWithDefault = new MarketplaceEndpointSettingsService(directory, {
       fetch,
@@ -182,42 +156,22 @@ describe("MarketplaceEndpointSettingsService", () => {
     });
   });
 
-  it("validates the compiled-in default endpoint identity and URLs at construction", () => {
+  it("validates compiled-in endpoint URLs at construction", () => {
     const directory = join(tmpdir(), `marketplace-default-validate-${Date.now()}-${Math.random()}`);
     directories.push(directory);
-    const hash = createHash("sha256").update(Buffer.from(publicKey, "base64")).digest("hex");
-    const valid: TrustedMarketplaceEndpoint = {
+    const valid: MarketplaceEndpoint = {
       marketplaceId: "fixture.market",
       baseUrl: "https://fixture.example/",
       apiRoot: "https://fixture.example/v1/",
-      artifactOrigins: ["https://fixture.example"],
-      signing: {
-        algorithm: "ed25519",
-        keyId: `ed25519:${hash.slice(0, 16)}`,
-        fingerprint: `sha256:${hash}`,
-        publicKey,
-      },
       active: true,
     };
-    const build = (defaultEndpoint: TrustedMarketplaceEndpoint) =>
+    const build = (defaultEndpoint: MarketplaceEndpoint) =>
       new MarketplaceEndpointSettingsService(directory, { defaultEndpoint });
 
     expect(() => build(valid)).not.toThrow();
-    expect(() => build({ ...valid, signing: { ...valid.signing, publicKey: "AAAA" } })).toThrow(
-      "Default marketplace signing public key is not valid Ed25519 SPKI",
-    );
-    expect(() => build({ ...valid, signing: { ...valid.signing, fingerprint: `sha256:${"0".repeat(64)}` } })).toThrow(
-      "Default marketplace signing identity does not match its public key",
-    );
-    expect(() => build({ ...valid, signing: { ...valid.signing, keyId: "ed25519:0000000000000000" } })).toThrow(
-      "Default marketplace signing identity does not match its public key",
-    );
     expect(() => build({ ...valid, active: false })).toThrow("Default marketplace endpoint must be active");
     expect(() => build({ ...valid, apiRoot: "https://fixture.example/v1" })).toThrow(
       "Default marketplace API root is not normalized",
-    );
-    expect(() => build({ ...valid, artifactOrigins: ["https://fixture.example/artifacts"] })).toThrow(
-      "Marketplace artifact origin must not contain a path",
     );
   });
 
@@ -238,16 +192,14 @@ describe("MarketplaceEndpointSettingsService", () => {
         requestId: "save-other",
         expectedRevision: initial.revision,
         baseUrl: "https://market.example",
-        confirmationToken: tested.confirmationToken,
       }),
     ).resolves.toMatchObject({ status: "saved" });
 
     const source = JSON.parse(await readFile(join(directory, "plugins", "marketplace-endpoints.json"), "utf8"));
     expect(source.activeMarketplaceId).toBe("example.market");
     expect(source.endpoints).toEqual([expect.objectContaining({ marketplaceId: "example.market", active: true })]);
-    await expect(service.getTrustedEndpoint("meta-agent-development")).resolves.toMatchObject({
+    await expect(service.getEndpoint("meta-agent-development")).resolves.toMatchObject({
       active: false,
-      signing: { publicKey: DEFAULT_PLUGIN_MARKETPLACE.signing.publicKey },
     });
   });
 
@@ -258,8 +210,6 @@ describe("MarketplaceEndpointSettingsService", () => {
       marketplaceId: "example.market",
       baseUrl: "https://market.example/",
       apiRoot: "https://market.example/v1/",
-      artifactOrigins: ["https://artifacts.example"],
-      signing: { algorithm: "ed25519", keyId: "key-1", publicKey, fingerprint: "sha256:stored" },
       active: false,
     };
     await mkdir(join(directory, "plugins"), { recursive: true });
@@ -289,7 +239,6 @@ describe("MarketplaceEndpointSettingsService", () => {
         requestId: "save-mirror",
         expectedRevision: settings.revision,
         baseUrl: "https://mirror.example",
-        confirmationToken: tested.confirmationToken,
       }),
     ).resolves.toMatchObject({ status: "saved" });
 
@@ -301,7 +250,7 @@ describe("MarketplaceEndpointSettingsService", () => {
     ]);
   });
 
-  it("requires a fresh fingerprint confirmation and revision", async () => {
+  it("requires the current settings revision", async () => {
     const directory = join(tmpdir(), `marketplace-confirm-${Date.now()}-${Math.random()}`);
     directories.push(directory);
     const service = new MarketplaceEndpointSettingsService(directory, {
@@ -312,11 +261,11 @@ describe("MarketplaceEndpointSettingsService", () => {
 
     await expect(
       service.saveEndpoint({
-        requestId: "without-confirmation",
+        requestId: "save",
         expectedRevision: initial.revision,
         baseUrl: "https://market.example",
       }),
-    ).resolves.toMatchObject({ status: "confirmation-required" });
+    ).resolves.toMatchObject({ status: "saved" });
 
     await mkdir(join(directory, "plugins"), { recursive: true });
     await writeFile(
@@ -333,7 +282,7 @@ describe("MarketplaceEndpointSettingsService", () => {
     ).resolves.toMatchObject({ status: "conflict" });
   });
 
-  it("rejects discovery metadata that does not match its self-signature", async () => {
+  it("ignores legacy discovery signatures", async () => {
     const directory = join(tmpdir(), `marketplace-signature-${Date.now()}-${Math.random()}`);
     directories.push(directory);
     const envelope = wellKnown();
@@ -343,8 +292,8 @@ describe("MarketplaceEndpointSettingsService", () => {
     });
 
     await expect(service.testEndpoint({ baseUrl: "https://market.example" })).resolves.toMatchObject({
-      status: "invalid",
-      code: "MARKETPLACE_ENDPOINT_UNTRUSTED",
+      status: "ready",
+      endpoint: { apiRoot: "https://attacker.example/v1/" },
     });
   });
 
@@ -384,8 +333,6 @@ describe("MarketplaceCatalogService", () => {
       marketplaceId: "example.market",
       baseUrl: "https://market.example/",
       apiRoot: "https://market.example/v1/",
-      artifactOrigins: ["https://artifacts.example"],
-      signing: { algorithm: "ed25519" as const, keyId: "key", publicKey, fingerprint: "sha256:key" },
       active: true,
     };
     const endpoints = {

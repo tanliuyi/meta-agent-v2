@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readdir } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { Unzip, UnzipInflate, UnzipPassThrough } from "fflate";
@@ -6,7 +5,6 @@ import { Unzip, UnzipInflate, UnzipPassThrough } from "fflate";
 export interface ExtractedMarketplaceFile {
   path: string;
   size: number;
-  sha256: string;
 }
 
 export interface ExtractedMarketplaceArchive {
@@ -64,7 +62,6 @@ export async function extractMarketplaceArchive(
       }
       const content: Uint8Array[] = [];
       let size = 0;
-      const hash = createHash("sha256");
       file.ondata = (error, data, final) => {
         if (failure) return;
         if (error) {
@@ -78,7 +75,6 @@ export async function extractMarketplaceArchive(
           file.terminate();
           return;
         }
-        hash.update(data);
         content.push(data);
         if (!final) return;
         const target = resolve(stagingRoot, ...path.split("/"));
@@ -89,7 +85,7 @@ export async function extractMarketplaceArchive(
         const write = mkdir(dirname(target), { recursive: true, mode: 0o700 })
           .then(() => writeDurableFile(target, source))
           .then(() => {
-            files.set(path, { path, size, sha256: hash.digest("hex") });
+            files.set(path, { path, size });
           });
         pendingWrites.push(write);
         void write.catch((error: unknown) => {

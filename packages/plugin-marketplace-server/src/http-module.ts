@@ -1,10 +1,9 @@
-import { type DynamicModule, GoneException, Module, Param, Req, Res, type Type } from "@nestjs/common";
+import { type DynamicModule, Module, Param, Req, Res, type Type } from "@nestjs/common";
 import { extractPayloadArchive } from "./artifact-builder.ts";
 import type {
 	MarketplaceArtifactMetadata,
 	MarketplacePluginDetail,
 	MarketplacePluginVersionDetail,
-	MarketplaceRevocationData,
 	MarketplaceRuntimeQuery,
 	StoredPlugin,
 	StoredPluginVersion,
@@ -16,7 +15,7 @@ import { createCommunityControllers } from "./http-community.ts";
 import { applyController, applyParameter, applyRoute } from "./http-decorators.ts";
 import { artifactMetadata, artifactUrl, pluginDetail, versionDetail } from "./http-mapping.ts";
 import { createPublishControllers } from "./http-publish.ts";
-import { badRequest, errorBody, type MarketplaceHttpRuntime, mapStoreErrors, notFound } from "./http-util.ts";
+import { badRequest, type MarketplaceHttpRuntime, mapStoreErrors, notFound } from "./http-util.ts";
 
 export type { MarketplaceHttpRuntime } from "./http-util.ts";
 
@@ -35,30 +34,21 @@ interface ResponseLike {
 
 export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): DynamicModule {
 	class HealthController {
-		health(): Record<string, string | boolean> {
+		health(): Record<string, string> {
 			return {
 				status: "ok",
 				marketplaceId: runtime.config.marketplaceId,
-				ephemeralSigningKey: runtime.config.ephemeralSigningKey,
 			};
 		}
 	}
 
 	class DiscoveryController {
-		discovery() {
-			const data: WellKnownMarketplaceData = {
+		discovery(): WellKnownMarketplaceData {
+			return {
 				protocolVersion: 1,
 				marketplaceId: runtime.config.marketplaceId,
 				apiRoot: `${runtime.config.publicBaseUrl}/v1`,
-				artifactOrigins: effectiveArtifactOrigins(runtime),
-				signing: {
-					algorithm: "ed25519",
-					keyId: runtime.signing.keyId,
-					fingerprint: runtime.signing.fingerprint,
-					publicKey: runtime.signing.publicKey,
-				},
 			};
-			return runtime.signing.envelope(data);
 		}
 	}
 
@@ -173,25 +163,6 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 		}
 	}
 
-	let lastRevocationSequence = -1;
-	class RevocationsController {
-		revocations() {
-			const issuedAt = Math.trunc(runtime.clock());
-			if (!Number.isSafeInteger(issuedAt) || issuedAt < 0) throw new Error("Marketplace clock is invalid");
-			const sequence = Math.max(issuedAt, lastRevocationSequence + 1);
-			lastRevocationSequence = sequence;
-			const data: MarketplaceRevocationData = {
-				marketplaceId: runtime.config.marketplaceId,
-				sequence,
-				issuedAt,
-				nextUpdateAt: issuedAt + 4 * 60 * 60 * 1000,
-				revokedKeys: [],
-				pluginVersions: runtime.store.getRevocations(),
-			};
-			return runtime.signing.envelope(data);
-		}
-	}
-
 	applyController(HealthController, "");
 	applyRoute(HealthController.prototype, "health", "get", "health");
 
@@ -229,9 +200,6 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	applyParameter(ArtifactsController.prototype, "bytes", 3, Req());
 	applyParameter(ArtifactsController.prototype, "bytes", 4, Res());
 
-	applyController(RevocationsController, "v1");
-	applyRoute(RevocationsController.prototype, "revocations", "get", "revocations");
-
 	class MarketplaceModule {
 		onApplicationShutdown(): void {
 			runtime.store.close();
@@ -243,7 +211,6 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			DiscoveryController,
 			PluginsController,
 			ArtifactsController,
-			RevocationsController,
 			...createAuthControllers(runtime),
 			...createAdminControllers(runtime),
 			...createPublishControllers(runtime),
@@ -267,16 +234,7 @@ function requireAvailableVersion(
 ): StoredPluginVersion {
 	const found = runtime.store.getPublicVersion(pluginId, version);
 	if (!found) throw notFound("PLUGIN_VERSION_NOT_FOUND", `Plugin version not found: ${pluginId}@${version}`);
-	if (found.status === "withdrawn" || found.status === "blocked") {
-		throw new GoneException(
-			errorBody("PLUGIN_VERSION_UNAVAILABLE", `Plugin version is ${found.status}: ${pluginId}@${version}`),
-		);
-	}
 	return found;
-}
-
-function effectiveArtifactOrigins(runtime: MarketplaceHttpRuntime): string[] {
-	return [...new Set([new URL(runtime.config.publicBaseUrl).origin, ...runtime.config.artifactOrigins])];
 }
 
 function parseRuntimeQuery(query: Record<string, unknown>): MarketplaceRuntimeQuery {

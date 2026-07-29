@@ -14,13 +14,11 @@ import type {
 
 export const MISSING_MARKETPLACE_REGISTRY_REVISION = "missing:marketplace-installed-v1";
 
-export interface InstalledMarketplacePluginRecord
-  extends Omit<InstalledMarketplacePluginSummary, "configurable" | "revocation"> {
+export interface InstalledMarketplacePluginRecord extends Omit<InstalledMarketplacePluginSummary, "configurable"> {
   artifactHash: string;
   entryPath: string;
   rootPath: string;
   configurationSchema?: PluginConfigurationSchema;
-  verifiedFiles: Array<{ path: string; sha256: string; size: number }>;
 }
 
 interface RegistryFileData {
@@ -283,7 +281,6 @@ function snapshot(current: CurrentRegistry): InstalledMarketplacePluginsSnapshot
         entryPath: _entryPath,
         rootPath: _rootPath,
         configurationSchema,
-        verifiedFiles: _verifiedFiles,
         ...plugin
       }) => ({
         ...plugin,
@@ -301,7 +298,6 @@ function cloneRecord(record: InstalledMarketplacePluginRecord): InstalledMarketp
     ...(record.configurationSchema
       ? { configurationSchema: clonePluginConfigurationSchema(record.configurationSchema) }
       : {}),
-    verifiedFiles: record.verifiedFiles.map((file) => ({ ...file })),
   };
 }
 
@@ -322,16 +318,6 @@ function assertRegistryFile(value: unknown): asserts value is RegistryFileData {
       typeof plugin.artifactHash !== "string" ||
       typeof plugin.entryPath !== "string" ||
       typeof plugin.rootPath !== "string" ||
-      !Array.isArray(plugin.verifiedFiles) ||
-      !plugin.verifiedFiles.every(
-        (file) =>
-          isPlainObject(file) &&
-          typeof file.path === "string" &&
-          typeof file.sha256 === "string" &&
-          /^[a-f0-9]{64}$/.test(file.sha256) &&
-          Number.isSafeInteger(file.size) &&
-          (file.size as number) >= 0,
-      ) ||
       typeof plugin.enabled !== "boolean" ||
       !Array.isArray(plugin.capabilities) ||
       !plugin.capabilities.every((capability) => typeof capability === "string") ||

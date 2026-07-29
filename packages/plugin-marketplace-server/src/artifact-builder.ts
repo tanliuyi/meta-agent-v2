@@ -4,17 +4,14 @@ import type {
 	ArtifactTarget,
 	CatalogPluginVersion,
 	MarketplaceArtifactManifest,
-	MarketplaceArtifactSignature,
 	PluginConfigurationSchema,
 } from "./contracts.ts";
-import { canonicalJson, type MarketplaceSigningService } from "./signing-service.ts";
 
 export interface BuiltMarketplaceArtifact {
 	bytes: Uint8Array;
 	sha256: string;
 	size: number;
 	manifest: MarketplaceArtifactManifest;
-	signature: MarketplaceArtifactSignature;
 }
 
 export interface ArtifactBuildInput {
@@ -56,19 +53,13 @@ export function referencePayloadFiles(): Map<string, Uint8Array> {
 	return new Map([[EXAMPLE_ENTRY_PATH, strToU8(EXAMPLE_ENTRY)]]);
 }
 
-export function buildSignedArtifact(
-	signing: MarketplaceSigningService,
-	input: ArtifactBuildInput,
-): BuiltMarketplaceArtifact {
+export function buildArtifact(input: ArtifactBuildInput): BuiltMarketplaceArtifact {
 	if (input.files.size === 0) throw new Error("PAYLOAD_EMPTY");
 	if (!input.files.has(input.entry)) throw new Error("PAYLOAD_ENTRY_MISSING");
 	assertNoNativePayload(input.files);
 	const files: MarketplaceArtifactManifest["files"] = {};
 	for (const path of [...input.files.keys()].sort()) {
-		const bytes = input.files.get(path)!;
 		files[`payload/${path}`] = {
-			sha256: sha256(bytes),
-			size: bytes.byteLength,
 			mode: "0644",
 		};
 	}
@@ -89,10 +80,8 @@ export function buildSignedArtifact(
 		executables: [],
 		files,
 	};
-	const signature = signing.envelope(manifest).signature;
 	const archiveFiles: Zippable = {
-		"market-manifest.json": zipFile(canonicalJson(manifest)),
-		"signature.json": zipFile(`${JSON.stringify(signature, null, 2)}\n`),
+		"market-manifest.json": zipFile(JSON.stringify(manifest)),
 	};
 	for (const [path, bytes] of input.files) {
 		archiveFiles[`payload/${path}`] = [bytes, fileOptions()];
@@ -103,7 +92,6 @@ export function buildSignedArtifact(
 		sha256: sha256(bytes),
 		size: bytes.byteLength,
 		manifest,
-		signature,
 	};
 }
 

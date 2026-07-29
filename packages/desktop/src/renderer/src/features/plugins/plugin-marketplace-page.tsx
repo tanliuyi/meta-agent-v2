@@ -94,11 +94,6 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
                   当前显示离线缓存
                 </div>
               ) : null}
-              {controller.installed?.revocationChecks?.some((check) => check.status !== "fresh") ? (
-                <div className="plugin-marketplace-notice" data-tone="warning" role="status">
-                  插件撤回状态尚未刷新，安装和更新前将先进行在线验证
-                </div>
-              ) : null}
               {controller.notice ? (
                 <Toast
                   open

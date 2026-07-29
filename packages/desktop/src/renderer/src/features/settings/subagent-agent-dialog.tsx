@@ -3,6 +3,7 @@ import { SelectItem } from "@renderer/components/assistant-ui/select/select-item
 import { SelectRoot } from "@renderer/components/assistant-ui/select/select-root";
 import { SelectTrigger } from "@renderer/components/assistant-ui/select/select-trigger";
 import { SelectValue } from "@renderer/components/assistant-ui/select/select-value";
+import { getThinkingLevelLabel } from "@renderer/shared/lib/thinking-level-label";
 import { Button } from "@renderer/shared/ui/button";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
@@ -182,22 +183,11 @@ export function SubagentAgentDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="inherit">继承</SelectItem>
-                  {THINKING_LEVELS.map((level) => {
-                    const label: Record<string, string> = {
-                      off: "关闭",
-                      minimal: "最少",
-                      low: "低",
-                      medium: "中",
-                      high: "高",
-                      xhigh: "很高",
-                      max: "最高",
-                    };
-                    return (
-                      <SelectItem key={level} value={level}>
-                        {label[level] ?? level}
-                      </SelectItem>
-                    );
-                  })}
+                  {THINKING_LEVELS.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {getThinkingLevelLabel(level)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </SelectRoot>
             </SubagentFormField>

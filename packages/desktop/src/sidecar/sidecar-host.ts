@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import electron from "electron";
 import {
   type ParentToSidecarMessage,
   type RuntimeCompatibility,
@@ -85,6 +86,15 @@ export function createSidecarCommandScheduler(): (
 }
 
 export function runSidecarHost(runtime: RuntimeCompatibility, createService: SidecarServiceFactory): void {
+  if (process.platform === "darwin" && process.env.ELECTRON_RUN_AS_NODE) {
+    try {
+      electron.app?.dock?.hide();
+    } catch (error) {
+      process.stderr.write(
+        `Unable to hide the sidecar Dock icon: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  }
   let workerInstanceId: string | undefined;
   let service: SidecarService | undefined;
   let eventSequence = 0;

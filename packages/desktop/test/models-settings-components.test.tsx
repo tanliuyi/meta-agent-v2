@@ -5,7 +5,10 @@ import { ModelsCompatEditor } from "../src/renderer/src/features/settings/models
 import { ModelsProviderForm } from "../src/renderer/src/features/settings/models-provider-form.tsx";
 import { createProviderDraft } from "../src/renderer/src/features/settings/models-settings-model.ts";
 import { ProviderBuiltInModelDetail } from "../src/renderer/src/features/settings/provider-built-in-model-detail.tsx";
+import { ProviderCard } from "../src/renderer/src/features/settings/provider-card.tsx";
 import { ProviderCredentialsForm } from "../src/renderer/src/features/settings/provider-credentials-form.tsx";
+import { groupProviderEntries } from "../src/renderer/src/features/settings/providers-settings-page.tsx";
+import type { ProviderEntry } from "../src/shared/providers-config-contracts.ts";
 
 const metadata = {
   knownApis: ["openai-completions", "anthropic-messages"],
@@ -17,6 +20,18 @@ const metadata = {
     },
   ],
 };
+
+function providerEntry(key: string, source: ProviderEntry["source"], builtInModelCount = 0): ProviderEntry {
+  return {
+    key,
+    displayName: key,
+    source,
+    builtInModelCount,
+    credentialStatus: "missing",
+    models: [],
+    modelOverrides: [],
+  };
+}
 
 describe("models settings components", () => {
   test("renders apiKey as a directly editable password input", () => {
@@ -46,6 +61,39 @@ describe("models settings components", () => {
       />,
     );
     expect(markup).toContain("使用 OAuth 登录");
+  });
+
+  test("groups providers with Desktop and plugin registrations first", () => {
+    const groups = groupProviderEntries([
+      providerEntry("custom", "custom"),
+      providerEntry("radius", "ai-builtin"),
+      providerEntry("meta-agent", "desktop-builtin"),
+    ]);
+
+    expect(groups.map(({ key }) => key)).toEqual(["builtin", "custom"]);
+    expect(groups.map(({ providers }) => providers.map(({ key }) => key))).toEqual([
+      ["meta-agent", "radius"],
+      ["custom"],
+    ]);
+  });
+
+  test("labels a core provider without a static catalog as dynamic", () => {
+    const entry = providerEntry("radius", "ai-builtin");
+
+    const markup = renderToStaticMarkup(<ProviderCard entry={entry} onEdit={vi.fn()} />);
+
+    expect(markup).toContain("动态模型目录");
+    expect(markup).not.toContain("0 个自定义模型");
+    expect(markup).not.toContain("内置(desktop)");
+  });
+
+  test("renders an exact built-in model count", () => {
+    const markup = renderToStaticMarkup(
+      <ProviderCard entry={providerEntry("anthropic", "ai-builtin", 3)} onEdit={vi.fn()} />,
+    );
+
+    expect(markup).toContain("3 个内置模型");
+    expect(markup).not.toContain("3+ 内置模型");
   });
 
   test("renders complete built-in model metadata", () => {

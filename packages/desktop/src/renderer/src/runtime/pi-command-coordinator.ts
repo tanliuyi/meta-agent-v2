@@ -1,5 +1,6 @@
 import type { AppendMessage, CreateAttachment } from "@assistant-ui/react";
 import type {
+  ClearedQueue,
   PiQueueItem,
   PiQuote,
   PiThreadPhase,
@@ -7,7 +8,7 @@ import type {
   SessionCommandResult,
   SessionPromptInput,
 } from "../../../shared/contracts.ts";
-import { toPiImageInputs } from "./image-attachments.ts";
+import { toComposerAttachmentInput, toPiImageInputs } from "./image-attachments.ts";
 
 interface SessionTarget {
   projectId: string;
@@ -18,7 +19,7 @@ interface SessionTarget {
 interface ComposerTarget {
   getState(): { text: string };
   setText(text: string): void;
-  addAttachment(attachment: CreateAttachment): Promise<void>;
+  addAttachment(attachment: File | CreateAttachment): Promise<void>;
 }
 
 interface CommandNotification {
@@ -108,37 +109,18 @@ export class PiCommandCoordinator {
     if (result.error) this.report(result.error);
   };
 
-  cancel = async (): Promise<void> => {
+  cancel = async (items: readonly PiQueueItem[]): Promise<void> => {
     const target = this.requireTarget();
-    await window.desktop.sessions.cancel(target.projectId, target.threadId);
+    const pendingInputs = new Map(this.pendingInputs);
+    const cleared = await window.desktop.sessions.cancel(target.projectId, target.threadId);
+    await this.restoreClearedQueue(target, items, cleared, pendingInputs);
   };
 
   clearQueue = async (items: readonly PiQueueItem[]): Promise<void> => {
     const target = this.requireTarget();
     const pendingInputs = new Map(this.pendingInputs);
     const cleared = await window.desktop.sessions.clearQueue(target.projectId, target.threadId);
-    const restored = matchClearedInputs(items, cleared.steering, cleared.followUp, pendingInputs);
-    for (const { item } of restored) if (item.requestId) this.forgetInput(item.requestId);
-    if (!this.isCurrent(target)) return;
-    const composer = this.getComposer();
-    if (!composer) return;
-    const texts = [
-      ...restored.map(({ prompt, message }) => (message ? messageText(message) : prompt)),
-      composer.getState().text,
-    ];
-    composer.setText(texts.filter((value) => value.trim()).join("\n\n"));
-    for (const { message } of restored) {
-      if (!message) continue;
-      for (const attachment of message.attachments ?? []) {
-        await composer.addAttachment({
-          id: attachment.id,
-          type: attachment.type,
-          name: attachment.name,
-          ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
-          content: attachment.content ?? [],
-        });
-      }
-    }
+    await this.restoreClearedQueue(target, items, cleared, pendingInputs);
   };
 
   rejectUnexpectedOnNew = async (): Promise<void> => {
@@ -221,6 +203,30 @@ export class PiCommandCoordinator {
     }
   }
 
+  private async restoreClearedQueue(
+    target: SessionTarget,
+    items: readonly PiQueueItem[],
+    cleared: ClearedQueue,
+    pendingInputs: ReadonlyMap<string, PendingInput>,
+  ): Promise<void> {
+    const restored = matchClearedInputs(items, cleared.steering, cleared.followUp, pendingInputs);
+    for (const { item } of restored) if (item.requestId) this.forgetInput(item.requestId);
+    if (!this.isCurrent(target)) return;
+    const composer = this.getComposer();
+    if (!composer) return;
+    const texts = [
+      ...restored.map(({ prompt, message }) => (message ? messageText(message) : prompt)),
+      composer.getState().text,
+    ];
+    composer.setText(texts.filter((value) => value.trim()).join("\n\n"));
+    for (const { message } of restored) {
+      if (!message) continue;
+      for (const attachment of message.attachments ?? []) {
+        await composer.addAttachment(toComposerAttachmentInput(attachment));
+      }
+    }
+  }
+
   private requireTarget(): SessionTarget {
     const target = this.getTarget();
     if (!target) throw new Error("Pi runtime 尚未 attach session");
@@ -246,13 +252,7 @@ export class PiCommandCoordinator {
     if (!composer || message.role !== "user") return;
     composer.setText(messageText(message));
     for (const attachment of message.attachments ?? []) {
-      await composer.addAttachment({
-        id: attachment.id,
-        type: attachment.type,
-        name: attachment.name,
-        ...(attachment.contentType ? { contentType: attachment.contentType } : {}),
-        content: attachment.content ?? [],
-      });
+      await composer.addAttachment(toComposerAttachmentInput(attachment));
     }
   }
 

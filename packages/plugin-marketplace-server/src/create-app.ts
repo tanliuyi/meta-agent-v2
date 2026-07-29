@@ -5,7 +5,6 @@ import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { MarketplaceServerConfig } from "./config.ts";
 import { createMarketplaceHttpModule } from "./http-module.ts";
-import { MarketplaceSigningService } from "./signing-service.ts";
 import { MarketplaceStore } from "./store.ts";
 
 export interface CreateMarketplaceAppOptions {
@@ -17,7 +16,6 @@ export interface CreateMarketplaceAppOptions {
 
 export async function createMarketplaceApp(options: CreateMarketplaceAppOptions): Promise<INestApplication> {
 	const clock = options.clock ?? Date.now;
-	const signing = new MarketplaceSigningService(options.config.signingPrivateKey);
 	let databasePath: string | undefined;
 	if (options.config.dataDir) {
 		mkdirSync(options.config.dataDir, { recursive: true });
@@ -26,7 +24,6 @@ export async function createMarketplaceApp(options: CreateMarketplaceAppOptions)
 	const store = await MarketplaceStore.open({
 		...(databasePath ? { databasePath } : {}),
 		...(options.catalogPath ? { catalogPath: options.catalogPath } : {}),
-		signing,
 		marketplaceId: options.config.marketplaceId,
 		clock,
 	});
@@ -34,7 +31,6 @@ export async function createMarketplaceApp(options: CreateMarketplaceAppOptions)
 		const module = createMarketplaceHttpModule({
 			config: options.config,
 			store,
-			signing,
 			clock,
 		});
 		const app = await NestFactory.create(module, {

@@ -26,6 +26,7 @@ export function Composer(props: ComposerProps) {
   const aui = useAui();
   const [mode, setMode] = useState<"steer" | "followUp">("steer");
   const [sending, setSending] = useState(false);
+  const [escapeCancelPending, setEscapeCancelPending] = useState(false);
   const [selectingProject, setSelectingProject] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const materializing = props.mode === "draft" && props.phase === "materializing";
@@ -150,6 +151,7 @@ export function Composer(props: ComposerProps) {
                 materializing={materializing}
                 onSubmit={props.mode === "draft" ? () => void submitDraft() : () => aui.composer().send()}
                 onSubmitRunning={submitRunning}
+                onEscapeCancelPendingChange={setEscapeCancelPending}
               />
               <div className="flex min-h-8 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -243,6 +245,7 @@ export function Composer(props: ComposerProps) {
                     configLoading={configLoading}
                     sending={sending}
                     isRunning={isRunning}
+                    escapeCancelPending={escapeCancelPending}
                     loading={props.mode === "draft" && (sending || materializing)}
                   />
                 </div>

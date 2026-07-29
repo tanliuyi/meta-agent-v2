@@ -16,11 +16,17 @@ import { ProviderEditDialog } from "./provider-edit-dialog.tsx";
 import type { ProviderDrafts, ProvidersSettingsController } from "./use-providers-controller.ts";
 import { useProvidersSettingsController } from "./use-providers-controller.ts";
 
+type ProviderSourceFilter = "all" | "builtin" | "custom";
+
 const SOURCE_OPTIONS: SelectOption[] = [
   { value: "all", label: "全部来源" },
-  { value: "ai-builtin", label: "内置" },
-  { value: "desktop-builtin", label: "内置(desktop)" },
+  { value: "builtin", label: "内置" },
   { value: "custom", label: "自定义" },
+];
+
+const SOURCE_GROUPS: ReadonlyArray<{ key: Exclude<ProviderSourceFilter, "all">; label: string }> = [
+  { key: "builtin", label: "内置" },
+  { key: "custom", label: "自定义" },
 ];
 
 const CREDENTIAL_OPTIONS: SelectOption[] = [
@@ -30,13 +36,28 @@ const CREDENTIAL_OPTIONS: SelectOption[] = [
   { value: "env-available", label: "环境变量" },
 ];
 
+export function groupProviderEntries(providers: ProviderEntry[]) {
+  return SOURCE_GROUPS.map((group) => ({
+    ...group,
+    providers: providers
+      .filter((provider) => (group.key === "builtin" ? provider.source !== "custom" : provider.source === "custom"))
+      .sort((left, right) => providerSourcePriority(left.source) - providerSourcePriority(right.source)),
+  })).filter((group) => group.providers.length > 0);
+}
+
+function providerSourcePriority(source: ProviderEntry["source"]): number {
+  if (source === "desktop-builtin") return 0;
+  if (source === "ai-builtin") return 1;
+  return 2;
+}
+
 /** Unified providers settings page — replaces both models and auth pages. */
 export function ProvidersSettingsPage() {
   const controller = useProvidersSettingsController();
   const snapshot = controller.snapshot;
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [filterText, setFilterText] = useState("");
-  const [filterSource, setFilterSource] = useState<ProviderEntry["source"] | "all">("all");
+  const [filterSource, setFilterSource] = useState<ProviderSourceFilter>("all");
   const [filterCredentialStatus, setFilterCredentialStatus] = useState<ProviderEntry["credentialStatus"] | "all">(
     "all",
   );
@@ -52,14 +73,18 @@ export function ProvidersSettingsPage() {
       const lower = deferredFilterText.toLowerCase();
       list = list.filter((p) => p.displayName.toLowerCase().includes(lower) || p.key.toLowerCase().includes(lower));
     }
-    if (filterSource !== "all") {
-      list = list.filter((p) => p.source === filterSource);
+    if (filterSource === "builtin") {
+      list = list.filter((p) => p.source !== "custom");
+    } else if (filterSource === "custom") {
+      list = list.filter((p) => p.source === "custom");
     }
     if (filterCredentialStatus !== "all") {
       list = list.filter((p) => p.credentialStatus === filterCredentialStatus);
     }
     return list;
   }, [controller.providers, deferredFilterText, filterSource, filterCredentialStatus]);
+
+  const providerGroups = useMemo(() => groupProviderEntries(filteredProviders), [filteredProviders]);
 
   const hasActiveFilter = filterText !== "" || filterSource !== "all" || filterCredentialStatus !== "all";
 
@@ -173,7 +198,7 @@ export function ProvidersSettingsPage() {
               <Select
                 options={SOURCE_OPTIONS}
                 value={filterSource}
-                onValueChange={(v) => setFilterSource(v as ProviderEntry["source"] | "all")}
+                onValueChange={(v) => setFilterSource(v as ProviderSourceFilter)}
                 placeholder="全部来源"
                 className="border border-input bg-background"
               />
@@ -201,20 +226,33 @@ export function ProvidersSettingsPage() {
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <section
+            <div
               className="providers-list"
               aria-busy={controller.status === "saving"}
               inert={controller.status === "saving" ? true : undefined}
             >
-              {filteredProviders.map((entry) => (
-                <ProviderCard key={entry.key} entry={entry} onEdit={controller.selectProvider} />
-              ))}
+              {providerGroups.map((group) => {
+                const headingId = `providers-group-${group.key}`;
+                return (
+                  <section key={group.key} className="providers-group" aria-labelledby={headingId}>
+                    <header className="providers-group-header">
+                      <h3 id={headingId}>{group.label}</h3>
+                      <span>{group.providers.length}</span>
+                    </header>
+                    <div className="providers-group-list">
+                      {group.providers.map((entry) => (
+                        <ProviderCard key={entry.key} entry={entry} onEdit={controller.selectProvider} />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
               {filteredProviders.length === 0 ? (
                 <div className="providers-empty">
                   {hasActiveFilter ? "没有匹配的 Provider。" : "暂无 Provider 数据。"}
                 </div>
               ) : null}
-            </section>
+            </div>
           </div>
         </>
       ) : null}

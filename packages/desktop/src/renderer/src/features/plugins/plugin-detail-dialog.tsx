@@ -15,14 +15,7 @@ import type {
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
 import { PluginConfigurationForm } from "./plugin-configuration-form.tsx";
-import {
-  cardState,
-  formatDate,
-  revocationLabel,
-  statusLabel,
-  statusTone,
-  updateAvailable,
-} from "./plugin-marketplace-utils.ts";
+import { cardState, formatDate, statusLabel, statusTone, updateAvailable } from "./plugin-marketplace-utils.ts";
 import { canInstallMarketplacePlugin } from "./use-plugin-marketplace.ts";
 
 interface PluginDetailDialogProps {
@@ -118,16 +111,6 @@ export function PluginDetailDialog({
               <span className="plugin-marketplace-native-badge">包含 Native 内容</span>
             ) : null}
           </div>
-
-          {installed?.revocation ? (
-            <section className="plugin-marketplace-detail-warning" data-tone={installed.revocation.status}>
-              <strong>{revocationLabel(installed.revocation.status)}</strong>
-              <p>{installed.revocation.message}</p>
-              {installed.revocation.replacementVersion ? (
-                <span>建议版本：{installed.revocation.replacementVersion}</span>
-              ) : null}
-            </section>
-          ) : null}
 
           <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-detail-versions">
             <h3 id="plugin-detail-versions">版本与来源</h3>

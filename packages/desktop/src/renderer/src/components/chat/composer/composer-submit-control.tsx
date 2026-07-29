@@ -11,6 +11,7 @@ interface ComposerSubmitControlProps {
   configLoading: boolean;
   sending: boolean;
   isRunning: boolean;
+  escapeCancelPending: boolean;
   loading: boolean;
 }
 
@@ -21,6 +22,7 @@ export function ComposerSubmitControl({
   configLoading,
   sending,
   isRunning,
+  escapeCancelPending,
   loading,
 }: ComposerSubmitControlProps) {
   const aui = useAui();
@@ -52,14 +54,20 @@ export function ComposerSubmitControl({
       return (
         <TooltipIconButton
           type="button"
-          tooltip="停止运行"
+          tooltip={escapeCancelPending ? "再次按 Esc 停止运行" : "停止运行"}
           side="top"
           variant="default"
           className="size-7 rounded-full"
           disabled={disabled}
           onClick={() => aui.composer().cancel()}
         >
-          <Square className="size-4" />
+          {escapeCancelPending ? (
+            <span aria-hidden="true" className="text-[9px] font-semibold leading-none">
+              Esc
+            </span>
+          ) : (
+            <Square className="size-4" />
+          )}
         </TooltipIconButton>
       );
     }

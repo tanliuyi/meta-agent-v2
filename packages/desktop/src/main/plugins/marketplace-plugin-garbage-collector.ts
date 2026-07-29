@@ -95,10 +95,6 @@ export class MarketplacePluginGarbageCollector {
       }
       return;
     }
-    if (tombstone?.preserveFiles) {
-      preserveRoot(result, rootPath);
-      return;
-    }
     if (!active) {
       const allowedRootEntries = new Set([".versions", ".meta-agent-market.json", ".meta-agent-versions"]);
       const rootEntries = await readdir(rootPath);
@@ -183,7 +179,6 @@ interface UninstallTombstone {
   version: 1;
   state: "uninstalled";
   pluginId: string;
-  preserveFiles: boolean;
 }
 
 async function readUninstallTombstone(rootPath: string, pluginId: string): Promise<UninstallTombstone | undefined> {
@@ -201,20 +196,13 @@ async function readUninstallTombstone(rootPath: string, pluginId: string): Promi
   } catch {
     return undefined;
   }
-  if (
-    !isObject(value) ||
-    value.version !== 1 ||
-    value.state !== "uninstalled" ||
-    value.pluginId !== pluginId ||
-    typeof value.preserveFiles !== "boolean"
-  ) {
+  if (!isObject(value) || value.version !== 1 || value.state !== "uninstalled" || value.pluginId !== pluginId) {
     return undefined;
   }
   return {
     version: 1,
     state: "uninstalled",
     pluginId,
-    preserveFiles: value.preserveFiles,
   };
 }
 

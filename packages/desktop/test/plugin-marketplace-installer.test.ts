@@ -1,4 +1,3 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,7 +28,7 @@ afterEach(async () => {
 });
 
 describe("MarketplacePluginInstaller", () => {
-  it("verifies and installs a signed artifact using an immutable Pi extension projection", async () => {
+  it("installs an artifact using an immutable Pi extension projection", async () => {
     const harness = await createHarness();
     const initial = await harness.registry.getSnapshot();
 
@@ -89,7 +88,7 @@ describe("MarketplacePluginInstaller", () => {
     expect(repeated.status).toBe("already-installed");
   });
 
-  it("rejects a signed configurable artifact without configuration.read", async () => {
+  it("rejects a configurable artifact without configuration.read", async () => {
     const harness = await createHarness({ omitConfigurationCapability: true });
     const initial = await harness.registry.getSnapshot();
 
@@ -104,7 +103,7 @@ describe("MarketplacePluginInstaller", () => {
     ).rejects.toThrow("configuration requires configuration.read capability");
   });
 
-  it("retains a projection-committed transaction while immediate apply is pending", async () => {
+  it("completes the install transaction before immediate apply", async () => {
     const harness = await createHarness();
     const initial = await harness.registry.getSnapshot();
 
@@ -118,22 +117,7 @@ describe("MarketplacePluginInstaller", () => {
     });
 
     expect(result.status).toBe("installed");
-    await expect(harness.installer.getPendingApplyTransaction("install-for-apply")).resolves.toEqual(
-      expect.objectContaining({
-        phase: "projection-committed",
-        applyTarget: { projectId: "project", threadId: "thread" },
-      }),
-    );
-    if (result.status !== "installed") throw new Error("Expected installation");
-    await expect(
-      harness.installer.update({
-        requestId: "update-while-apply-pending",
-        expectedRevision: result.snapshot.revision,
-        pluginId: "dev.meta-agent.example-tools",
-        version: "2.0.0",
-        confirmFullTrust: true,
-      }),
-    ).rejects.toThrow("recovery is pending");
+    await expect(harness.transactions.list()).resolves.toEqual([]);
   });
 
   it("updates and downgrades by switching immutable versions without deleting the previous version", async () => {
@@ -147,7 +131,7 @@ describe("MarketplacePluginInstaller", () => {
       confirmFullTrust: true,
     });
     if (installed.status !== "installed") throw new Error("Expected installation to succeed");
-    harness.endpoints.getActiveTrustedEndpoint.mockRejectedValue(new Error("another marketplace is active"));
+    harness.endpoints.getActiveEndpoint.mockRejectedValue(new Error("another marketplace is active"));
 
     const updated = await harness.installer.update({
       requestId: "update-to-2",
@@ -166,7 +150,7 @@ describe("MarketplacePluginInstaller", () => {
         }),
       }),
     );
-    expect(harness.endpoints.getTrustedEndpoint).toHaveBeenCalledWith("local.market");
+    expect(harness.endpoints.getEndpoint).toHaveBeenCalledWith("local.market");
     const pluginRoot = join(harness.agentDir, "extensions", "dev.meta-agent.example-tools");
     await expect(
       readFile(join(pluginRoot, ".versions", harness.artifactHash, "payload", "index.ts"), "utf8"),
@@ -244,7 +228,7 @@ describe("MarketplacePluginInstaller", () => {
     );
   });
 
-  it("refuses to uninstall a modified managed version", async () => {
+  it("uninstalls a managed version without treating same-user edits as protected state", async () => {
     const harness = await createHarness();
     const initial = await harness.registry.getSnapshot();
     const installed = await harness.installer.install({
@@ -266,24 +250,14 @@ describe("MarketplacePluginInstaller", () => {
     );
     await writeFile(entry, "modified\n", "utf8");
 
-    await expect(
-      harness.installer.uninstall({
-        requestId: "uninstall-modified",
-        expectedRevision: installed.snapshot.revision,
-        pluginId: "dev.meta-agent.example-tools",
-        confirmRemoval: true,
-      }),
-    ).rejects.toThrow("integrity failed");
-    await expect(harness.registry.getSnapshot()).resolves.toEqual(installed.snapshot);
-
-    const preserved = await harness.installer.uninstall({
-      requestId: "uninstall-preserve-modified",
+    const result = await harness.installer.uninstall({
+      requestId: "uninstall-modified",
       expectedRevision: installed.snapshot.revision,
       pluginId: "dev.meta-agent.example-tools",
       confirmRemoval: true,
-      confirmPreserveModifiedFiles: true,
     });
-    expect(preserved.status).toBe("uninstalled");
+
+    expect(result.status).toBe("uninstalled");
     await expect(readFile(entry, "utf8")).resolves.toBe("modified\n");
   });
 
@@ -321,23 +295,6 @@ describe("MarketplacePluginInstaller", () => {
     await expect(harness.transactions.list()).resolves.toEqual([
       expect.objectContaining({ phase: "files-ready", operation: "install" }),
     ]);
-  });
-
-  it("rejects a version denied by the signed revocation policy before download", async () => {
-    const harness = await createHarness({ revocationError: "withdrawn" });
-    const initial = await harness.registry.getSnapshot();
-
-    await expect(
-      harness.installer.install({
-        requestId: "install-revoked",
-        expectedRevision: initial.revision,
-        pluginId: "dev.meta-agent.example-tools",
-        version: "1.0.0",
-        confirmFullTrust: true,
-      }),
-    ).rejects.toThrow("withdrawn");
-    expect(harness.fetchImpl).toHaveBeenCalledTimes(1);
-    await expect(harness.registry.getSnapshot()).resolves.toEqual(initial);
   });
 
   it("recovers a pre-journal extraction orphan from the main-owned same-filesystem staging area", async () => {
@@ -385,7 +342,7 @@ describe("MarketplacePluginInstaller", () => {
     ).resolves.toContain(harness.artifactHash);
   });
 
-  it("refuses to install into a tombstone-less root that has content", async () => {
+  it("installs into an existing inactive plugin directory without ownership metadata", async () => {
     const harness = await createHarness();
     const pluginRoot = join(harness.agentDir, "extensions", "dev.meta-agent.example-tools");
     await mkdir(pluginRoot, { recursive: true });
@@ -400,10 +357,9 @@ describe("MarketplacePluginInstaller", () => {
         version: "1.0.0",
         confirmFullTrust: true,
       }),
-    ).rejects.toThrow("no valid ownership tombstone");
+    ).resolves.toMatchObject({ status: "installed" });
 
     await expect(readFile(join(pluginRoot, "user-note.txt"), "utf8")).resolves.toBe("preserve me");
-    await expect(harness.registry.getSnapshot()).resolves.toEqual(initial);
   });
 
   it("does not delete unknown files when rolling back a newly created plugin root", async () => {
@@ -474,37 +430,94 @@ describe("MarketplacePluginInstaller", () => {
     await expect(harness.registry.getSnapshot()).resolves.toEqual(initial);
   });
 
-  it("rejects a bad manifest signature and removes the staging root", async () => {
-    const harness = await createHarness({ corruptSignature: true });
+  it("rejects an artifact key that cannot be used as an immutable version directory", async () => {
+    const harness = await createHarness({ artifactKey: "../escape" });
     const initial = await harness.registry.getSnapshot();
 
     await expect(
       harness.installer.install({
-        requestId: "install-bad-signature",
+        requestId: "install-invalid-artifact-key",
         expectedRevision: initial.revision,
         pluginId: "dev.meta-agent.example-tools",
         version: "1.0.0",
         confirmFullTrust: true,
       }),
-    ).rejects.toThrow("signature is invalid");
+    ).rejects.toThrow("Marketplace artifact metadata is invalid");
+
+    await expect(harness.registry.getSnapshot()).resolves.toEqual(initial);
+  });
+
+  it("allows independent plugin mutations to resolve endpoints concurrently", async () => {
+    const harness = await createHarness();
+    const initial = await harness.registry.getSnapshot();
+    const endpoint = await harness.endpoints.getActiveEndpoint();
+    let releaseEndpoint: ((value: typeof endpoint) => void) | undefined;
+    const endpointGate = new Promise<typeof endpoint>((resolve) => {
+      releaseEndpoint = resolve;
+    });
+    harness.endpoints.getActiveEndpoint.mockClear();
+    harness.endpoints.getActiveEndpoint
+      .mockImplementationOnce(() => endpointGate)
+      .mockImplementation(async () => endpoint);
+
+    const first = harness.installer
+      .install({
+        requestId: "concurrent-first",
+        expectedRevision: initial.revision,
+        pluginId: "dev.meta-agent.example-tools",
+        version: "1.0.0",
+        confirmFullTrust: true,
+      })
+      .then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+    await vi.waitFor(() => expect(harness.endpoints.getActiveEndpoint).toHaveBeenCalledTimes(1));
+
+    const second = harness.installer
+      .install({
+        requestId: "concurrent-second",
+        expectedRevision: initial.revision,
+        pluginId: "dev.meta-agent.other-tools",
+        version: "1.0.0",
+        confirmFullTrust: true,
+      })
+      .then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+    await vi.waitFor(() => expect(harness.endpoints.getActiveEndpoint).toHaveBeenCalledTimes(2));
+
+    if (!releaseEndpoint) throw new Error("endpoint gate was not initialized");
+    releaseEndpoint(endpoint);
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toMatchObject({ status: "fulfilled", value: { status: "installed" } });
+    expect(secondResult).toMatchObject({ status: "rejected", error: expect.any(Error) });
+  });
+
+  it("installs without signature metadata", async () => {
+    const harness = await createHarness();
+    const initial = await harness.registry.getSnapshot();
 
     await expect(
-      readFile(join(harness.agentDir, "extensions", "dev.meta-agent.example-tools", "index.ts")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(harness.registry.getSnapshot()).resolves.toEqual(initial);
+      harness.installer.install({
+        requestId: "install-without-signature",
+        expectedRevision: initial.revision,
+        pluginId: "dev.meta-agent.example-tools",
+        version: "1.0.0",
+        confirmFullTrust: true,
+      }),
+    ).resolves.toMatchObject({ status: "installed" });
   });
 });
 
 async function createHarness(
   options: {
-    corruptSignature?: boolean;
     omitConfigurationCapability?: boolean;
     failJournalPhase?: string;
-    revocationError?: string;
     writeUnknownRootOnJournalFailure?: boolean;
     artifactResponse?(archive: Uint8Array, init?: RequestInit): Response;
+    artifactKey?: string;
   } = {},
 ) {
   const root = join(tmpdir(), `plugin-marketplace-installer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -512,8 +525,6 @@ async function createHarness(
   const userDataDir = join(root, "user-data");
   const agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
-  const keyPair = generateKeyPairSync("ed25519");
-  const publicKey = keyPair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
   const target = { platform: "universal", arch: "universal", piVersion: runtime.piVersion };
   const buildArtifact = (version: string) => {
     const artifactId = `example-tools-${version}-universal`;
@@ -551,29 +562,20 @@ async function createHarness(
       executables: [],
       files: {
         "payload/index.ts": {
-          sha256: createHash("sha256").update(payload).digest("hex"),
-          size: payload.byteLength,
           mode: "0644",
         },
       },
     };
-    const signatureBytes = options.corruptSignature
-      ? Buffer.alloc(64)
-      : sign(null, Buffer.from(canonicalJson(manifest), "utf8"), keyPair.privateKey);
     const archive = Buffer.from(
       zipSync(
         {
-          "market-manifest.json": Buffer.from(canonicalJson(manifest), "utf8"),
-          "signature.json": Buffer.from(
-            canonicalJson({ algorithm: "ed25519", keyId: "key-1", value: signatureBytes.toString("base64") }),
-            "utf8",
-          ),
+          "market-manifest.json": Buffer.from(JSON.stringify(manifest), "utf8"),
           "payload/index.ts": payload,
         },
         { level: 9 },
       ),
     );
-    const sha256 = createHash("sha256").update(archive).digest("hex");
+    const sha256 = options.artifactKey ?? (version === "1.0.0" ? "1".repeat(64) : "2".repeat(64));
     const downloadEndpoint = `https://market.test/v1/plugins/dev.meta-agent.example-tools/versions/${version}/artifacts/${artifactId}/download`;
     const artifactUrl = `https://artifacts.test/${artifactId}.meta-plugin`;
     return { version, artifactId, archive, sha256, downloadEndpoint, artifactUrl };
@@ -623,18 +625,11 @@ async function createHarness(
     marketplaceId: "local.market",
     baseUrl: "https://market.test/",
     apiRoot,
-    artifactOrigins: ["https://artifacts.test"],
-    signing: {
-      algorithm: "ed25519" as const,
-      keyId: "key-1",
-      publicKey,
-      fingerprint: `sha256:${createHash("sha256").update(Buffer.from(publicKey, "base64")).digest("hex")}`,
-    },
     active: true,
   };
   const endpoints = {
-    getActiveTrustedEndpoint: vi.fn(async () => trustedEndpoint),
-    getTrustedEndpoint: vi.fn(async (marketplaceId: string) => {
+    getActiveEndpoint: vi.fn(async () => trustedEndpoint),
+    getEndpoint: vi.fn(async (marketplaceId: string) => {
       if (marketplaceId !== trustedEndpoint.marketplaceId) throw new Error("Marketplace trust record is unavailable");
       return trustedEndpoint;
     }),
@@ -676,15 +671,6 @@ async function createHarness(
       fetch: fetchImpl as typeof fetch,
       createId: () => "staging",
       now: () => 1_800_000_000_000,
-      ...(options.revocationError
-        ? {
-            revocations: {
-              assertArtifactAllowed: async () => {
-                throw new Error(options.revocationError);
-              },
-            },
-          }
-        : {}),
     },
   );
   return {
@@ -698,20 +684,4 @@ async function createHarness(
     updateArtifactHash,
     fetchImpl,
   };
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error("Non-finite number");
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (typeof value === "object" && value !== null) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`)
-      .join(",")}}`;
-  }
-  throw new Error("Unsupported canonical JSON value");
 }
