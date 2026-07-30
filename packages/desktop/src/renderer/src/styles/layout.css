@@ -854,6 +854,10 @@
   color: hsl(var(--success));
 }
 
+.dependency-name[data-checking] svg {
+  color: hsl(var(--muted-foreground));
+}
+
 .dependency-error {
   color: hsl(var(--destructive));
 }

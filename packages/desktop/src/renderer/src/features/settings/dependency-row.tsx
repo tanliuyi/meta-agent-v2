@@ -2,6 +2,7 @@ import CircleCheck from "lucide-react/dist/esm/icons/circle-check.mjs";
 import CircleX from "lucide-react/dist/esm/icons/circle-x.mjs";
 import Download from "lucide-react/dist/esm/icons/download.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
+import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import type { ShellRuntimeProgress, ShellRuntimeStatus } from "../../../../shared/desktop-api.ts";
 import { Button } from "../../shared/ui/button.tsx";
 
@@ -33,8 +34,16 @@ export function DependencyRow({
   return (
     <div className="settings-row dependency-row">
       <div className="settings-row-text">
-        <span className="dependency-name" data-ready={ready || undefined}>
-          {ready ? <CircleCheck aria-hidden="true" /> : <CircleX aria-hidden="true" />}
+        <span className="dependency-name" data-ready={ready || undefined} data-checking={!status || undefined}>
+          {status ? (
+            ready ? (
+              <CircleCheck aria-hidden="true" />
+            ) : (
+              <CircleX aria-hidden="true" />
+            )
+          ) : (
+            <LoaderCircle className="dependency-spin" aria-hidden="true" />
+          )}
           {label}
         </span>
         <p className="settings-row-description">

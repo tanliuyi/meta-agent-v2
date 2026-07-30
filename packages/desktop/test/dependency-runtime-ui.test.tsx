@@ -38,6 +38,23 @@ describe("dependency runtime settings UI", () => {
     expect(getShellStatus).not.toHaveBeenCalled();
   });
 
+  it("renders a neutral loading indicator while diagnosis is pending", () => {
+    const markup = renderToStaticMarkup(
+      createElement(DependencyRow, {
+        label: "Git Bash",
+        status: null,
+        progress: null,
+        installing: false,
+        busy: true,
+        onInstall: async () => true,
+      }),
+    );
+
+    expect(markup).toContain("检查中");
+    expect(markup).toContain("lucide-loader-circle");
+    expect(markup).not.toContain("lucide-circle-x");
+  });
+
   it("renders actionable status details without disabling recovery installation", () => {
     const markup = renderToStaticMarkup(
       createElement(DependencyRow, {
