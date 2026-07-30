@@ -22,13 +22,13 @@ export function SettingsPage() {
             projectId: returnSession.projectId,
             threadId: returnSession.threadId,
           }}
-          className="settings-menu-item settings-back-link"
+          className="settings-menu-item rounded-xl settings-back-link"
         >
           <ArrowLeft />
           <span>返回聊天</span>
         </Link>
       ) : (
-        <Link to="/" className="settings-menu-item settings-back-link">
+        <Link to="/" className="settings-menu-item rounded-xl settings-back-link">
           <ArrowLeft />
           <span>返回聊天</span>
         </Link>
@@ -36,25 +36,45 @@ export function SettingsPage() {
       <Link
         to="/settings/personalization"
         search={search}
-        className="settings-menu-item"
+        className="settings-menu-item rounded-xl"
         activeOptions={{ exact: true }}
       >
         <Palette aria-hidden="true" />
         <span>个性化</span>
       </Link>
-      <Link to="/settings/models" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
+      <Link
+        to="/settings/models"
+        search={search}
+        className="settings-menu-item rounded-xl"
+        activeOptions={{ exact: true }}
+      >
         <Server aria-hidden="true" />
         <span>模型服务商</span>
       </Link>
-      <Link to="/settings/subagents" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
+      <Link
+        to="/settings/subagents"
+        search={search}
+        className="settings-menu-item rounded-xl"
+        activeOptions={{ exact: true }}
+      >
         <Bot aria-hidden="true" />
         <span>子智能体</span>
       </Link>
-      <Link to="/settings/dependencies" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
+      <Link
+        to="/settings/dependencies"
+        search={search}
+        className="settings-menu-item rounded-xl"
+        activeOptions={{ exact: true }}
+      >
         <Boxes aria-hidden="true" />
         <span>依赖项</span>
       </Link>
-      <Link to="/settings/about" search={search} className="settings-menu-item" activeOptions={{ exact: true }}>
+      <Link
+        to="/settings/about"
+        search={search}
+        className="settings-menu-item rounded-xl"
+        activeOptions={{ exact: true }}
+      >
         <Info aria-hidden="true" />
         <span>关于</span>
       </Link>

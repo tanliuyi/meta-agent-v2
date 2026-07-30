@@ -20,7 +20,7 @@ import { UpdateBanner } from "./update-banner.tsx";
 
 /** 侧边栏行统一样式:新建任务、插件中心、设置共用,保证字号与高亮一致。 */
 const sidebarRowClass =
-  "hover:bg-muted data-active:bg-muted aria-[current=page]:bg-muted h-8 w-full justify-start gap-2 rounded-md px-2.5 text-sm font-normal";
+  "hover:bg-muted data-active:bg-muted aria-[current=page]:bg-muted h-8 w-full justify-start gap-2 rounded-xl px-2.5 text-sm font-normal";
 
 /** Codex Desktop 风格的 Project 与 session 主导航。 */
 export const Sidebar = memo(function Sidebar() {
