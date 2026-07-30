@@ -8,7 +8,7 @@ import { useDesktopStore } from "./desktop-store-context.tsx";
 import { ProjectActivationCoordinator } from "./project-activation.ts";
 import { useSessionCache, useSessionCacheSnapshot } from "./session-cache-context.tsx";
 import { SessionCatalogControlBridge } from "./session-catalog-control-bridge.tsx";
-import { commitCatalogRemovalAfterRouteExit } from "./session-navigation.ts";
+import { commitCatalogRemovalAfterRouteExit, draftSearch } from "./session-navigation.ts";
 
 interface DesktopCatalogProviderProps {
   children: ReactNode;
@@ -198,7 +198,7 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
         try {
           await commitCatalogRemovalAfterRouteExit(
             archived && router.state.location.pathname.endsWith(`/projects/${projectId}/session/${threadId}`),
-            () => navigate({ to: "/", replace: true }),
+            () => navigate({ to: "/new", search: draftSearch(projectId), replace: true }),
             async () => {
               if (archived) await cache.retire(key);
               dispatchDesktop(store, { type: "thread-archived", projectId, threadId, archived });
@@ -226,7 +226,7 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
             result.removedThreadIds.some((id) =>
               router.state.location.pathname.endsWith(`/projects/${projectId}/session/${id}`),
             ),
-            () => navigate({ to: "/", replace: true }),
+            () => navigate({ to: "/new", search: draftSearch(projectId), replace: true }),
             async () => {
               await Promise.all(
                 retiredThreadIds.map((retiredThreadId) => cache.retire(sessionRecordKey(projectId, retiredThreadId))),
