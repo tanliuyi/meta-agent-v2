@@ -27,6 +27,12 @@ import {
 import { discoverAvailableSkills } from "../pi/extensions/pi-subagents/src/agents/skills.ts";
 import { getConfigPath, loadConfigStrict, saveConfig } from "../pi/extensions/pi-subagents/src/extension/config.ts";
 import type { ExtensionConfig } from "../pi/extensions/pi-subagents/src/shared/types.ts";
+import {
+  readWatchdogSettingsOverride,
+  resolveWatchdogConfig,
+  resolveWatchdogInheritedConfig,
+  writeWatchdogSettings,
+} from "../pi/extensions/pi-subagents/src/watchdog/settings.ts";
 
 interface SubagentSettingsConfigServiceOptions {
   agentDir: string;
@@ -39,6 +45,7 @@ interface ResolvedContext {
   projectId?: string;
   cwd: string;
   discoveryScope: "user" | "both" | "system";
+  settingsScope: "user" | "project" | "system";
 }
 
 type BuiltinOverrideInput = Parameters<typeof mergeBuiltinAgentOverride>[3];
@@ -92,11 +99,25 @@ export class SubagentSettingsConfigService {
   }
 
   private resolveContext(input: GetSubagentSettingsInput): ResolvedContext {
-    if (input.settingsScope === "system") return { cwd: tmpdir(), discoveryScope: "system" };
-    if (input.projectId) {
-      return { projectId: input.projectId, cwd: this.options.getProjectCwd(input.projectId), discoveryScope: "both" };
+    if (input.settingsScope === "system") {
+      if (input.projectId !== undefined) throw new Error("System subagent settings do not accept a projectId");
+      return { cwd: tmpdir(), discoveryScope: "system", settingsScope: "system" };
     }
-    return { cwd: tmpdir(), discoveryScope: "user" };
+    if (input.settingsScope === "project" && !input.projectId) {
+      throw new Error("Project subagent settings require a projectId");
+    }
+    if (input.settingsScope === "user" && input.projectId !== undefined) {
+      throw new Error("User subagent settings do not accept a projectId");
+    }
+    if (input.projectId) {
+      return {
+        projectId: input.projectId,
+        cwd: this.options.getProjectCwd(input.projectId),
+        discoveryScope: "both",
+        settingsScope: "project",
+      };
+    }
+    return { cwd: tmpdir(), discoveryScope: "user", settingsScope: "user" };
   }
 
   private async buildSnapshot(context: ResolvedContext): Promise<SubagentSettingsSnapshot> {
@@ -113,14 +134,36 @@ export class SubagentSettingsConfigService {
           : (["off"] satisfies ThinkingLevel[]),
       }))
       .sort((left, right) => left.id.localeCompare(right.id));
-    const diagnostics = discovered.chainDiagnostics.map((diagnostic) => ({
-      extensionId: "pi-subagents",
-      source: "builtin" as const,
-      projectId: context.projectId,
-      phase: "resolve" as const,
-      code: "SUBAGENT_CHAIN_INVALID",
-      message: `${diagnostic.filePath}: ${diagnostic.error}`,
-    }));
+    const watchdogResult = resolveWatchdogConfig(context.cwd);
+    const watchdogScope = context.settingsScope === "project" ? "project" : "user";
+    let inheritedWatchdog = watchdogResult.config;
+    try {
+      inheritedWatchdog = resolveWatchdogInheritedConfig(watchdogScope);
+    } catch {
+      // The source error is already represented in watchdogResult.errors.
+    }
+    const watchdogOverride =
+      watchdogResult.ok && context.settingsScope !== "system"
+        ? readWatchdogSettingsOverride(context.settingsScope, context.cwd)
+        : { main: {}, children: {} };
+    const diagnostics = [
+      ...discovered.chainDiagnostics.map((diagnostic) => ({
+        extensionId: "pi-subagents",
+        source: "builtin" as const,
+        projectId: context.projectId,
+        phase: "resolve" as const,
+        code: "SUBAGENT_CHAIN_INVALID",
+        message: `${diagnostic.filePath}: ${diagnostic.error}`,
+      })),
+      ...watchdogResult.errors.map((error) => ({
+        extensionId: "pi-subagents",
+        source: "builtin" as const,
+        projectId: context.projectId,
+        phase: "resolve" as const,
+        code: "SUBAGENT_WATCHDOG_CONFIG_INVALID",
+        message: error.message,
+      })),
+    ];
     let extensionConfig: ExtensionConfig = {};
     try {
       const loadedExtensionConfig = loadConfigStrict();
@@ -146,6 +189,43 @@ export class SubagentSettingsConfigService {
       projectId: context.projectId,
       projectScopeAvailable: discovered.projectDir !== null,
       extensionConfig: selectExtensionConfig(extensionConfig),
+      watchdog: {
+        effective: {
+          enabled: watchdogResult.config.enabled,
+          main: {
+            enabled: watchdogResult.config.main.enabled,
+            ...(watchdogResult.config.main.model ? { model: watchdogResult.config.main.model } : {}),
+            ...(watchdogResult.config.main.thinking !== undefined
+              ? { thinking: watchdogResult.config.main.thinking as ThinkingLevel | false }
+              : {}),
+          },
+          children: {
+            enabled: watchdogResult.config.children.enabled,
+            ...(watchdogResult.config.children.model ? { model: watchdogResult.config.children.model } : {}),
+            ...(watchdogResult.config.children.thinking !== undefined
+              ? { thinking: watchdogResult.config.children.thinking as ThinkingLevel | false }
+              : {}),
+          },
+        },
+        inherited: {
+          enabled: inheritedWatchdog.enabled,
+          main: {
+            enabled: inheritedWatchdog.main.enabled,
+            ...(inheritedWatchdog.main.model ? { model: inheritedWatchdog.main.model } : {}),
+            ...(inheritedWatchdog.main.thinking !== undefined
+              ? { thinking: inheritedWatchdog.main.thinking as ThinkingLevel | false }
+              : {}),
+          },
+          children: {
+            enabled: inheritedWatchdog.children.enabled,
+            ...(inheritedWatchdog.children.model ? { model: inheritedWatchdog.children.model } : {}),
+            ...(inheritedWatchdog.children.thinking !== undefined
+              ? { thinking: inheritedWatchdog.children.thinking as ThinkingLevel | false }
+              : {}),
+          },
+        },
+        override: watchdogOverride,
+      },
       builtinAgents: discovered.builtin.map(agentSummary).sort(byName),
       packageAgents: discovered.package.map(agentSummary).sort(byName),
       userAgents: discovered.user.map(agentSummary).sort(byName),
@@ -159,6 +239,9 @@ export class SubagentSettingsConfigService {
   }
 
   private applyMutation(context: ResolvedContext, mutation: SubagentSettingsMutation): void {
+    if (mutation.type === "update-watchdog-config" && context.settingsScope !== mutation.scope) {
+      throw new Error(`Watchdog mutation scope '${mutation.scope}' does not match '${context.settingsScope}' settings`);
+    }
     assertProjectScopeAvailable(context.cwd, mutation);
     switch (mutation.type) {
       case "create-agent":
@@ -213,6 +296,13 @@ export class SubagentSettingsConfigService {
         return;
       case "delete-chain":
         this.runManagement(context.cwd, "delete", { chainName: mutation.chain, agentScope: mutation.scope });
+        return;
+      case "update-watchdog-config":
+        writeWatchdogSettings({
+          scope: mutation.scope,
+          cwd: context.cwd,
+          config: mutation.config,
+        });
         return;
       case "update-extension-config": {
         const current = loadConfigStrict();

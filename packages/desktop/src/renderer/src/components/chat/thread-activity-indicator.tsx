@@ -22,6 +22,12 @@ interface ThreadActivityIndicatorProps {
   lastError: string | undefined;
 }
 
+export function isThreadActivityVisible(phase: PiThreadPhase, lastError: string | undefined): boolean {
+  return (
+    phase === "running" || phase === "retrying" || phase === "compacting" || (phase === "idle" && Boolean(lastError))
+  );
+}
+
 /** Pi-specific activity rendered at the end of the message timeline. */
 export function ThreadActivityIndicator(props: ThreadActivityIndicatorProps) {
   const activity = getActivity(props);

@@ -5,6 +5,7 @@ import { Link, Outlet, useSearch } from "@tanstack/react-router";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
 import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
+import Brain from "lucide-react/dist/esm/icons/brain.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Server from "lucide-react/dist/esm/icons/server.mjs";
@@ -12,6 +13,7 @@ import Server from "lucide-react/dist/esm/icons/server.mjs";
 const SETTINGS_LINKS = [
   { to: "/settings/personalization", label: "个性化", icon: Palette },
   { to: "/settings/models", label: "模型服务商", icon: Server },
+  { to: "/settings/memory", label: "记忆", icon: Brain },
   { to: "/settings/subagents", label: "子智能体", icon: Bot },
   { to: "/settings/dependencies", label: "依赖项", icon: Boxes },
   { to: "/settings/about", label: "关于", icon: Info },

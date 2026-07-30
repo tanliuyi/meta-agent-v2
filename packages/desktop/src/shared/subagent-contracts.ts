@@ -238,6 +238,43 @@ export interface SubagentExtensionConfig {
   };
 }
 
+export interface SubagentWatchdogEndpointSettings {
+  model?: string;
+  thinking?: ThinkingLevel | false;
+}
+
+export interface SubagentWatchdogSettings {
+  effective: {
+    enabled: boolean;
+    main: SubagentWatchdogEndpointSettings & { enabled: boolean };
+    children: SubagentWatchdogEndpointSettings & { enabled: boolean };
+  };
+  inherited: {
+    enabled: boolean;
+    main: SubagentWatchdogEndpointSettings & { enabled: boolean };
+    children: SubagentWatchdogEndpointSettings & { enabled: boolean };
+  };
+  override: {
+    enabled?: boolean;
+    main: SubagentWatchdogEndpointSettings & { enabled?: boolean };
+    children: SubagentWatchdogEndpointSettings & { enabled?: boolean };
+  };
+}
+
+export interface SubagentWatchdogConfigInput {
+  enabled?: boolean | null;
+  main?: {
+    enabled?: boolean | null;
+    model?: string | null;
+    thinking?: ThinkingLevel | false | null;
+  };
+  children?: {
+    enabled?: boolean | null;
+    model?: string | null;
+    thinking?: ThinkingLevel | false | null;
+  };
+}
+
 export interface AgentModelSourceInfo {
   type: "subagents.defaultModel";
   scope: SubagentSettingsScope;
@@ -250,6 +287,7 @@ export interface SubagentSettingsSnapshot {
   projectId?: string;
   projectScopeAvailable: boolean;
   extensionConfig: SubagentExtensionConfig;
+  watchdog: SubagentWatchdogSettings;
   builtinAgents: AgentSummary[];
   packageAgents: AgentSummary[];
   userAgents: AgentSummary[];
@@ -294,6 +332,11 @@ export type SubagentSettingsMutation =
       config: Partial<{ name: string; description: string; steps: ChainStepConfig[] }>;
     }
   | { type: "delete-chain"; chain: string; scope: SubagentSettingsScope }
+  | {
+      type: "update-watchdog-config";
+      scope: SubagentSettingsScope;
+      config: SubagentWatchdogConfigInput;
+    }
   | { type: "update-extension-config"; config: Partial<SubagentExtensionConfig> };
 
 export type SubagentSettingsTarget =

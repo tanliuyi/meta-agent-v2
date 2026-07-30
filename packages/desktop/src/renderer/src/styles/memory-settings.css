@@ -1,0 +1,243 @@
+.memory-page-heading {
+  align-items: center;
+}
+
+.memory-page-heading > div:first-child {
+  min-width: 0;
+}
+
+.memory-page-heading span,
+.memory-section-meta {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
+
+.memory-page-actions,
+.memory-entry-actions,
+.memory-number-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-page-actions > button {
+  border-radius: var(--shape-radius-sm);
+}
+
+.memory-page-actions > button:first-child {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.memory-page-actions > button:last-child {
+  border-color: hsl(var(--settings-accent));
+  background: hsl(var(--settings-accent));
+  color: hsl(var(--settings-accent-foreground));
+  box-shadow: var(--settings-control-shadow);
+}
+
+.memory-page-message {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-sm);
+  font-size: var(--type-size-control);
+}
+
+.memory-page-message[data-tone="error"] {
+  border-color: hsl(var(--destructive) / 0.35);
+  background: hsl(var(--destructive) / 0.08);
+  color: hsl(var(--destructive));
+}
+
+.memory-page-message[data-tone="success"] {
+  border-color: hsl(var(--success) / 0.35);
+  background: hsl(var(--success) / 0.08);
+  color: hsl(var(--foreground));
+}
+
+.memory-tabs {
+  min-width: 0;
+}
+
+.memory-tab-list {
+  margin-bottom: 16px;
+}
+
+.memory-tab-content {
+  min-width: 0;
+}
+
+.memory-tab-content .settings-section-heading {
+  min-height: 60px;
+  padding-block: 10px;
+}
+
+.memory-tab-content .settings-section-heading h3 {
+  line-height: 1.35;
+}
+
+.memory-subtabs,
+.memory-subtab-content {
+  min-width: 0;
+}
+
+.memory-subtab-list {
+  margin-bottom: 16px;
+  gap: 4px;
+}
+
+.memory-subtab-list [role="tab"] {
+  height: 28px;
+  font-size: var(--type-size-meta);
+}
+
+.memory-control {
+  width: min(240px, 42vw);
+}
+
+.memory-number-group label {
+  display: grid;
+  width: 112px;
+  gap: 4px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
+
+.memory-textarea-row,
+.memory-preview {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-top: 1px solid hsl(var(--border) / 0.8);
+  font-size: var(--type-size-ui);
+}
+
+.memory-textarea-row textarea,
+.memory-preview textarea {
+  min-height: 140px;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+
+.memory-section-meta {
+  display: block;
+  margin-top: 2px;
+}
+
+.memory-entry-row {
+  align-items: flex-start;
+  padding-block: 10px;
+}
+
+.memory-entry-text {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font: inherit;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.memory-entry-text:hover {
+  color: hsl(var(--settings-accent));
+}
+
+.memory-entry-actions {
+  flex: 0 0 auto;
+}
+
+.memory-entry-actions button {
+  width: 28px;
+  height: 28px;
+}
+
+.memory-skill-row {
+  min-height: 60px;
+}
+
+.memory-scope-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--muted) / 0.55);
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+}
+
+.memory-empty-row {
+  color: hsl(var(--muted-foreground));
+}
+
+.memory-entry-form {
+  display: grid;
+  gap: 16px;
+}
+
+.memory-entry-form textarea {
+  min-height: 180px;
+}
+
+.memory-loading {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.memory-loading span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--muted-foreground));
+  animation: memory-loading-pulse 1.2s ease-in-out infinite;
+}
+
+.memory-loading span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.memory-loading span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes memory-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (max-width: 51.25rem) {
+  .memory-control,
+  .memory-number-group {
+    width: 100%;
+  }
+
+  .memory-number-group label {
+    width: 50%;
+  }
+
+  .memory-entry-row {
+    flex-direction: row;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-loading span {
+    animation: none;
+  }
+}

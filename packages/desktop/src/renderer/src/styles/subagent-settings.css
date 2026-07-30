@@ -235,6 +235,21 @@
   border-top: 0;
 }
 
+.subagent-watchdog-group {
+  padding: 16px;
+  border-top: 1px solid hsl(var(--border) / 0.8);
+}
+
+.subagent-watchdog-group:first-child {
+  border-top: 0;
+}
+
+.subagent-watchdog-group h4 {
+  margin: 0 0 12px;
+  font-size: var(--type-size-ui);
+  font-weight: 600;
+}
+
 /* width handled via className on controls */
 
 .subagent-config-actions {

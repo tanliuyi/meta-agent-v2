@@ -206,7 +206,7 @@ Returns bounded conversation snippets with session dates and project context. La
       if (totalMessages === 0) {
         const result: SearchResult = {
           success: false,
-          message: "No sessions indexed yet. Run /memory-index-sessions to import past sessions.",
+          message: "No sessions indexed yet. Use Desktop Settings > Memory > Maintenance to import past sessions.",
         };
         return { content: [{ type: "text" as const, text: result.message! }], details: result };
       }

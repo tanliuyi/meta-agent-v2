@@ -4,7 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 
 export const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-3.5 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -17,8 +17,8 @@ export const buttonVariants = cva(
       },
       size: {
         default: "h-(--control-height-button) px-4 py-1",
-        sm: "h-(--control-height-button-sm) rounded-xl px-3 text-xs",
-        lg: "h-(--control-height-button-lg) rounded-xl px-8",
+        sm: "h-(--control-height-button-sm) rounded-lg px-3 text-xs",
+        lg: "h-(--control-height-button-lg) rounded-lg px-8",
         icon: "h-(--control-height-button-icon) w-(--control-height-button-icon)",
       },
     },

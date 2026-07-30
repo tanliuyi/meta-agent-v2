@@ -109,6 +109,10 @@ export function NewSessionSurface() {
 
   const project = projects.find((entry) => entry.id === projectId) ?? null;
 
+  useEffect(() => {
+    sessionCache.setActiveKey(null);
+  }, [sessionCache]);
+
   async function selectProject(nextProjectId: string) {
     projectFallbackAllowed.current = true;
     setProjectId(nextProjectId);

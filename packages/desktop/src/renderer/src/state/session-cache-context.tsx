@@ -31,6 +31,8 @@ const SessionCacheContext = createContext<SessionCacheController | null>(null);
 const SessionCacheRecordsContext = createContext<CachedSessionRecord[] | null>(null);
 const SessionCacheActiveKeyContext = createContext<string | null | undefined>(undefined);
 const SessionDraftMaterializingContext = createContext<boolean | null>(null);
+const MAX_HIBERNATED_SESSION_COUNT = 12;
+const MAX_HIBERNATED_SESSION_BYTES = 32 * 1024 * 1024;
 
 /**
  * 持有所有 cached session records，并提供缓存生命周期管理。
@@ -51,7 +53,26 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
     const previousKey = activeKeyRef.current;
     if (previousKey === key) return;
     activeKeyRef.current = key;
-    if (previousKey) void transportManager.detach(previousKey);
+    if (previousKey) {
+      const previousRecord = recordsRef.current.get(previousKey);
+      void transportManager.detach(previousKey).then(() => {
+        if (activeKeyRef.current === previousKey || recordsRef.current.get(previousKey) !== previousRecord) return;
+        if (!previousRecord?.stores.timeline.hibernate()) return;
+
+        const hibernated = [...recordsRef.current.values()]
+          .map((record) => ({ record, bytes: record.stores.timeline.getHibernatedBytes() }))
+          .filter(({ bytes }) => bytes > 0)
+          .sort((left, right) => left.record.lastAccessedAt - right.record.lastAccessedAt);
+        let retainedCount = hibernated.length;
+        let retainedBytes = hibernated.reduce((total, entry) => total + entry.bytes, 0);
+        for (const entry of hibernated) {
+          if (retainedCount <= MAX_HIBERNATED_SESSION_COUNT && retainedBytes <= MAX_HIBERNATED_SESSION_BYTES) break;
+          if (!entry.record.stores.timeline.evictHibernated()) continue;
+          retainedCount -= 1;
+          retainedBytes -= entry.bytes;
+        }
+      });
+    }
     forceRender((n) => n + 1);
   };
 

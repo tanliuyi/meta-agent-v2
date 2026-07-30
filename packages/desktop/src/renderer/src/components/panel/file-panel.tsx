@@ -51,7 +51,7 @@ export function FilePanel() {
     const timeout = window.setTimeout(
       () => {
         void window.desktop.files
-          .list(projectId, "", query)
+          .list(projectId, "", query, "file-panel-root")
           .then((items) => {
             if (generation === treeGeneration.current) setRoots(items);
           })
@@ -101,10 +101,14 @@ export function FilePanel() {
 
       let request = directoryRequests.current.get(node.path);
       if (!request) {
-        request = window.desktop.files
-          .list(projectId, node.path)
-          .finally(() => directoryRequests.current.delete(node.path));
-        directoryRequests.current.set(node.path, request);
+        const created = window.desktop.files.list(projectId, node.path, "", `file-panel-directory:${node.path}`);
+        directoryRequests.current.set(node.path, created);
+        void created
+          .finally(() => {
+            if (directoryRequests.current.get(node.path) === created) directoryRequests.current.delete(node.path);
+          })
+          .catch(() => undefined);
+        request = created;
       }
       try {
         const items = await request;

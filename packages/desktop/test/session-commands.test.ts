@@ -27,6 +27,36 @@ describe("session commands", () => {
     expect(commands.filter(({ source }) => source === "builtin")).toHaveLength(1);
   });
 
+  it("在 Composer 中隐藏 Desktop 内置 subagents 命令且保留用户同名命令", () => {
+    const commands = getSessionCommands({
+      extensionRunner: {
+        getRegisteredCommands: () => [
+          {
+            invocationName: "run:1",
+            description: "Run a built-in subagent",
+            sourceInfo: { path: "<inline:desktop:pi-subagents>" },
+          },
+          {
+            invocationName: "run:2",
+            description: "Run a user workflow",
+            sourceInfo: { path: "/user/extensions/workflow.ts" },
+          },
+        ],
+      },
+      promptTemplates: [],
+      resourceLoader: { getSkills: () => ({ skills: [] }) },
+    });
+
+    expect(commands).toEqual([
+      {
+        name: "reload",
+        description: "Reload extensions, skills, prompts, and context files",
+        source: "builtin",
+      },
+      { name: "run:2", description: "Run a user workflow", source: "extension" },
+    ]);
+  });
+
   it("从 draft resources 暴露全局 extension 命令并保留重复命令后缀", () => {
     const command = (name: string, description: string) => ({ name, description });
     const resourceLoader = {
@@ -45,6 +75,32 @@ describe("session commands", () => {
       { name: "memory:2", description: "Other memory command", source: "extension" },
       { name: "fix", description: "Fix prompt", source: "prompt" },
       { name: "skill:review", description: "Review skill", source: "skill" },
+    ]);
+  });
+
+  it("draft Composer 隐藏 Desktop 内置 subagents 命令且保留运行时后缀", () => {
+    const command = (description: string, path: string) => ({
+      name: "run",
+      description,
+      sourceInfo: { path },
+    });
+    const resourceLoader = {
+      getExtensions: () => ({
+        extensions: [
+          {
+            commands: new Map([["run", command("Run a built-in subagent", "<inline:desktop:pi-subagents>")]]),
+          },
+          {
+            commands: new Map([["run", command("Run a user workflow", "/user/extensions/workflow.ts")]]),
+          },
+        ],
+      }),
+      getPrompts: () => ({ prompts: [] }),
+      getSkills: () => ({ skills: [] }),
+    } as unknown as ResourceLoader;
+
+    expect(getDraftCommands(resourceLoader)).toEqual([
+      { name: "run:2", description: "Run a user workflow", source: "extension" },
     ]);
   });
 });

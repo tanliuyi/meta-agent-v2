@@ -92,6 +92,7 @@ export interface ThreadWorkerRegistryOptions {
   listSubagentThreads?(projectId: string): readonly Thread[];
   isActiveSubagentThread?(projectId: string, threadId: string): boolean;
   attachSubagent?(projectId: string, threadId: string): Promise<SessionBootstrap | undefined>;
+  cancelSubagent?(projectId: string, threadId: string): Promise<void>;
   acknowledgeSubagent?(workerInstanceId: string, sidecarSequence: number): boolean;
   beginSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
   endSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
@@ -426,6 +427,12 @@ export class ThreadWorkerRegistry {
   }
 
   async cancel(projectId: string, threadId: string): Promise<ClearedQueue> {
+    if (this.options.isActiveSubagentThread?.(projectId, threadId)) {
+      const cancelSubagent = this.options.cancelSubagent;
+      if (!cancelSubagent) throw new Error("Active subagent cancellation is unavailable");
+      await cancelSubagent(projectId, threadId);
+      return { steering: [], followUp: [] };
+    }
     return this.use(projectId, threadId, (record) => record.client.request<ClearedQueue>({ type: "cancel" }));
   }
 

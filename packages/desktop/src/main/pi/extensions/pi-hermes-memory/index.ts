@@ -11,13 +11,9 @@
  * 5. Correction Detection — immediate save on user corrections
  * 6. Procedural Skills — SKILL.md files for reusable procedures
  * 7. Tool-Call-Aware Nudge — review triggers on tool call count too
- * 8. /memory-insights — shows what's stored
- * 9. /memory-skills — lists procedural skills
- * 10. /memory-consolidate — manual consolidation trigger
- * 11. /memory-interview — onboarding interview to pre-fill user profile
- * 12. /memory-switch-project — list project memories
- * 13. Context Fencing — <memory-context> tags prevent injection through stored memory
- * 14. Memory Aging — entry timestamps guide consolidation
+ * 8. Conversational Memory Commands — interview, guidance, and manual consolidation
+ * 9. Context Fencing — <memory-context> tags prevent injection through stored memory
+ * 10. Memory Aging — entry timestamps guide consolidation
  *
  * See docs/ROADMAP.md for full roadmap and Hermes competitive analysis.
  */
@@ -30,11 +26,8 @@ import { isDatabaseMigrationPending } from "./extension-root-migration.ts";
 import { registerConsolidateCommand, triggerConsolidation } from "./handlers/auto-consolidate.ts";
 import { setupBackgroundReview } from "./handlers/background-review.ts";
 import { setupCorrectionDetector } from "./handlers/correction-detector.ts";
-import { registerIndexSessionsCommand } from "./handlers/index-sessions.ts";
-import { registerInsightsCommand } from "./handlers/insights.ts";
 import { registerInterviewCommand } from "./handlers/interview.ts";
 import { registerLearnMemoryCommand } from "./handlers/learn-memory.ts";
-import { registerPreviewContextCommand } from "./handlers/preview-context.ts";
 import {
   SESSION_BACKFILL_SHUTDOWN_TIMEOUT_MS,
   scheduleSessionBackfill,
@@ -46,13 +39,8 @@ import {
   scheduleLiveSessionIndex,
   waitForLiveSessionIndex,
 } from "./handlers/session-live-index.ts";
-import { registerSkillsCommand } from "./handlers/skills-command.ts";
-import { registerSwitchProjectCommand } from "./handlers/switch-project.ts";
-import {
-  migrateThenSyncMarkdownMemories,
-  registerSyncMarkdownMemoriesCommand,
-} from "./handlers/sync-markdown-memories.ts";
-import { AGENT_ROOT } from "./paths.ts";
+import { migrateThenSyncMarkdownMemories } from "./handlers/sync-markdown-memories.ts";
+import { AGENT_ROOT, resolveGlobalMemoryRoot } from "./paths.ts";
 import { detectProject, detectProjectSkills } from "./project.ts";
 import { migrateLegacyProjectMemoryDirs } from "./project-memory-migration.ts";
 import { buildPromptContext } from "./prompt-context.ts";
@@ -110,17 +98,7 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
   };
 
   const agentRoot = AGENT_ROOT;
-  const legacyGlobalDir = path.join(agentRoot, "memory");
-  const defaultGlobalDir = path.join(agentRoot, "pi-hermes-memory");
-
-  const configuredMemoryDir = config.memoryDir?.trim();
-  const pointsToLegacyMemoryDir = configuredMemoryDir
-    ? path.resolve(configuredMemoryDir) === path.resolve(legacyGlobalDir)
-    : false;
-
-  const globalDir = !configuredMemoryDir || pointsToLegacyMemoryDir ? defaultGlobalDir : configuredMemoryDir;
-
-  const shouldMigrateExtensionRoot = !configuredMemoryDir || pointsToLegacyMemoryDir;
+  const { globalDir, legacyGlobalDir, shouldMigrateLegacyRoot } = resolveGlobalMemoryRoot(config.memoryDir, agentRoot);
   let persistenceInitialized = false;
 
   const store = new MemoryStore({ ...config, memoryDir: globalDir });
@@ -135,7 +113,7 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
     migrationSentinelPath: path.join(globalDir, ".skills-migrated-to-extension-storage"),
   });
   const dbManager = new DatabaseManager(globalDir);
-  let databaseMigrationPending = shouldMigrateExtensionRoot && isDatabaseMigrationPending(legacyGlobalDir, globalDir);
+  let databaseMigrationPending = shouldMigrateLegacyRoot && isDatabaseMigrationPending(legacyGlobalDir, globalDir);
   if (databaseMigrationPending) {
     dbManager.setOpenGuard(() => {
       if (databaseMigrationPending) {
@@ -171,7 +149,7 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
       try {
         await migrateThenSyncMarkdownMemories(
           dbManager,
-          shouldMigrateExtensionRoot ? legacyGlobalDir : null,
+          shouldMigrateLegacyRoot ? legacyGlobalDir : null,
           globalDir,
           config.projectsMemoryDir,
           agentRoot,
@@ -247,21 +225,16 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
       return triggerConsolidation(pi, projectStore, target, signal, config.consolidationTimeoutMs, toolTarget, config);
     });
   }
-  registerConsolidateCommand(pi, store, config.consolidationTimeoutMs, projectStore, projectName, config, dbManager);
-
   // ── 8. Setup correction detection ──
   setupCorrectionDetector(pi, store, projectStore, config, dbManager, projectName);
 
-  // ── 9. Register commands ──
-  registerInsightsCommand(pi, store, projectStore, projectName);
-  registerSkillsCommand(pi, skillStore);
+  // Desktop Settings owns structured management. Conversational and model-driven
+  // flows remain slash commands because they operate naturally inside a session.
   registerInterviewCommand(pi, store);
-  registerSwitchProjectCommand(pi, config);
   registerLearnMemoryCommand(pi);
-  registerSyncMarkdownMemoriesCommand(pi, dbManager, globalDir, config.projectsMemoryDir, agentRoot);
-  registerPreviewContextCommand(pi, store, projectStore, projectName, config);
+  registerConsolidateCommand(pi, store, config.consolidationTimeoutMs, projectStore, projectName, config, dbManager);
 
-  // ── 10. Live session indexing ──
+  // ── 9. Live session indexing ──
   pi.on("message_end", async (_event, ctx) => {
     scheduleLiveSessionIndex(dbManager, ctx.sessionManager, {
       onError: (err) =>
@@ -269,12 +242,11 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
     });
   });
 
-  // ── 11. SQLite session search + extended memory ──
+  // ── 10. SQLite session search + extended memory ──
   registerSessionSearchTool(pi, dbManager, config.sessionSearch ?? { variant: "legacy" });
   registerMemorySearchTool(pi, dbManager);
-  registerIndexSessionsCommand(pi);
 
-  // ── 12. Auto-index session on shutdown ──
+  // ── 11. Auto-index session on shutdown ──
   // Registered last, so this runs after the session-flush shutdown handler and
   // is the final DB activity. Closing here truncates the WAL via
   // PRAGMA wal_checkpoint(TRUNCATE); without it the WAL only grows to its

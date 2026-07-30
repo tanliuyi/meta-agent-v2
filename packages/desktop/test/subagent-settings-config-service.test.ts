@@ -318,6 +318,126 @@ describe("SubagentSettingsConfigService", () => {
     });
   });
 
+  test("persists scoped watchdog settings with project inheritance", async () => {
+    const service = await createService();
+    let userSnapshot = await service.getSnapshot();
+
+    expect(userSnapshot.watchdog).toMatchObject({
+      effective: { enabled: false, main: { enabled: false }, children: { enabled: false } },
+      inherited: { enabled: false, main: { enabled: false }, children: { enabled: false } },
+      override: { main: {}, children: {} },
+    });
+
+    const userResult = await service.saveConfig({
+      requestId: "user-watchdog",
+      expectedSnapshotRevision: userSnapshot.revision,
+      mutation: {
+        type: "update-watchdog-config",
+        scope: "user",
+        config: {
+          enabled: true,
+          main: { enabled: false, model: "openai/reviewer", thinking: "high" },
+        },
+      },
+    });
+    expect(userResult.status).toBe("saved");
+    if (userResult.status !== "saved") return;
+    userSnapshot = userResult.snapshot;
+    expect(userSnapshot.watchdog).toMatchObject({
+      effective: { enabled: true, main: { enabled: false, model: "openai/reviewer", thinking: "high" } },
+      inherited: { enabled: false, main: { enabled: false }, children: { enabled: false } },
+      override: {
+        enabled: true,
+        main: { enabled: false, model: "openai/reviewer", thinking: "high" },
+      },
+    });
+
+    let projectSnapshot = await service.getSnapshot({ settingsScope: "project", projectId: "project" });
+    expect(projectSnapshot.watchdog).toMatchObject({
+      effective: { enabled: true, main: { enabled: false, model: "openai/reviewer", thinking: "high" } },
+      inherited: { enabled: true, main: { enabled: false, model: "openai/reviewer", thinking: "high" } },
+      override: { main: {}, children: {} },
+    });
+
+    const projectResult = await service.saveConfig({
+      requestId: "project-watchdog",
+      settingsScope: "project",
+      projectId: "project",
+      expectedSnapshotRevision: projectSnapshot.revision,
+      mutation: {
+        type: "update-watchdog-config",
+        scope: "project",
+        config: {
+          enabled: null,
+          main: { model: null, thinking: null },
+          children: { enabled: true, model: "openai/child-reviewer", thinking: "medium" },
+        },
+      },
+    });
+    expect(projectResult.status).toBe("saved");
+    if (projectResult.status !== "saved") return;
+    projectSnapshot = projectResult.snapshot;
+    expect(projectSnapshot.watchdog).toMatchObject({
+      effective: {
+        enabled: true,
+        main: { enabled: false, model: "openai/reviewer", thinking: "high" },
+        children: { enabled: true, model: "openai/child-reviewer", thinking: "medium" },
+      },
+      inherited: {
+        enabled: true,
+        main: { enabled: false, model: "openai/reviewer", thinking: "high" },
+      },
+      override: {
+        main: {},
+        children: { enabled: true, model: "openai/child-reviewer", thinking: "medium" },
+      },
+    });
+
+    const userSettings = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
+    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi-desk", "settings.json"), "utf8"));
+    expect(userSettings.subagents.watchdog).toMatchObject({
+      enabled: true,
+      main: { enabled: false, model: "openai/reviewer", thinking: "high" },
+    });
+    expect(projectSettings.subagents.watchdog.children).toMatchObject({
+      enabled: true,
+      model: "openai/child-reviewer",
+      thinking: "medium",
+    });
+  });
+
+  test("rejects watchdog mutations that escape the selected settings scope", async () => {
+    const service = await createService();
+    const snapshot = await service.getSnapshot();
+
+    await expect(
+      service.saveConfig({
+        requestId: "watchdog-scope-mismatch",
+        expectedSnapshotRevision: snapshot.revision,
+        mutation: {
+          type: "update-watchdog-config",
+          scope: "project",
+          config: { enabled: true },
+        },
+      }),
+    ).rejects.toThrow("does not match 'user' settings");
+    await expect(service.getSnapshot({ settingsScope: "project" } as never)).rejects.toThrow("require a projectId");
+    await expect(service.getSnapshot({ settingsScope: "user", projectId: "project" } as never)).rejects.toThrow(
+      "do not accept a projectId",
+    );
+  });
+
+  test("reports malformed watchdog settings without failing the settings page", async () => {
+    await writeFile(join(agentDir, "settings.json"), '{"subagents":{"watchdog":{"enabled":"yes"}}}\n', "utf8");
+
+    const snapshot = await (await createService()).getSnapshot();
+
+    expect(snapshot.watchdog.effective.enabled).toBe(false);
+    expect(snapshot.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "SUBAGENT_WATCHDOG_CONFIG_INVALID", phase: "resolve" }),
+    );
+  });
+
   test("marks chains with unsupported steps or fields as read-only", async () => {
     const chainDir = join(agentDir, "chains");
     await mkdir(chainDir, { recursive: true });

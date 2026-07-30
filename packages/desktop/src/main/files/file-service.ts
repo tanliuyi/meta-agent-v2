@@ -5,37 +5,56 @@ import type { ProjectStore } from "../store/project-store.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_SEARCH_RESULTS = 200;
+const SEARCH_YIELD_INTERVAL_MS = 8;
 
 /** 只允许访问已注册 Project cwd 内部文件的工作区文件服务。 */
 export class FileService {
   private readonly projects: ProjectStore;
+  private readonly activeRequests = new Map<string, object>();
 
   constructor(projects: ProjectStore) {
     this.projects = projects;
   }
 
   /** 列出目录；提供 query 时在 Project 内执行有上限的名称搜索。 */
-  async list(projectId: string, path = "", query = ""): Promise<FileNode[]> {
+  async list(projectId: string, path = "", query = "", requestScope?: string): Promise<FileNode[]> {
     const cwd = this.projects.getCwd(projectId);
-    if (query.trim()) return this.search(cwd, query.trim().toLowerCase());
-    const target = resolveInside(cwd, path);
-    const entries = await readdir(target, { withFileTypes: true });
-    return Promise.all(
-      entries
-        .sort(
-          (left, right) =>
-            Number(right.isDirectory()) - Number(left.isDirectory()) || left.name.localeCompare(right.name),
-        )
-        .map(async (entry) => {
-          const child = resolve(target, entry.name);
-          return {
-            name: entry.name,
-            path: normalizeRelative(relative(cwd, child)),
-            type: entry.isDirectory() ? "directory" : "file",
-            hasChildren: entry.isDirectory() ? await directoryHasChildren(child) : undefined,
-          } satisfies FileNode;
-        }),
-    );
+    const normalizedQuery = query.trim().toLowerCase();
+    const requestGroup = normalizedQuery ? "root" : path || "root";
+    const requestKey = requestScope === undefined ? undefined : `${requestScope}\0${projectId}\0${requestGroup}`;
+    const requestToken = requestKey === undefined ? undefined : {};
+    if (requestKey !== undefined && requestToken !== undefined) this.activeRequests.set(requestKey, requestToken);
+    const isCancelled = () => requestKey !== undefined && this.activeRequests.get(requestKey) !== requestToken;
+
+    try {
+      if (normalizedQuery) {
+        const searchResults = await this.search(cwd, normalizedQuery, isCancelled);
+        return searchResults;
+      }
+      const target = resolveInside(cwd, path);
+      const entries = await readdir(target, { withFileTypes: true });
+      const nodes = await Promise.all(
+        entries
+          .sort(
+            (left, right) =>
+              Number(right.isDirectory()) - Number(left.isDirectory()) || left.name.localeCompare(right.name),
+          )
+          .map(async (entry) => {
+            const child = resolve(target, entry.name);
+            return {
+              name: entry.name,
+              path: normalizeRelative(relative(cwd, child)),
+              type: entry.isDirectory() ? "directory" : "file",
+              hasChildren: entry.isDirectory() ? await directoryHasChildren(child) : undefined,
+            } satisfies FileNode;
+          }),
+      );
+      return nodes;
+    } finally {
+      if (requestKey !== undefined && this.activeRequests.get(requestKey) === requestToken) {
+        this.activeRequests.delete(requestKey);
+      }
+    }
   }
 
   /** 读取 Project 内的小型 UTF-8 文本文件。 */
@@ -52,28 +71,41 @@ export class FileService {
     };
   }
 
-  private async search(cwd: string, query: string): Promise<FileNode[]> {
+  private async search(cwd: string, query: string, isCancelled: () => boolean): Promise<FileNode[]> {
     const results: FileNode[] = [];
     const pending = [cwd];
+    let nextYieldAt = performance.now() + SEARCH_YIELD_INTERVAL_MS;
     while (pending.length > 0 && results.length < MAX_SEARCH_RESULTS) {
+      if (isCancelled()) return [];
       const folder = pending.pop();
       if (!folder) break;
-      for (const entry of await readdir(folder, { withFileTypes: true })) {
+      const entries = await readdir(folder, { withFileTypes: true });
+      if (isCancelled()) return [];
+      for (const entry of entries) {
         if (entry.name === ".git" || entry.name === "node_modules") continue;
         const target = resolve(folder, entry.name);
         if (entry.isDirectory()) pending.push(target);
-        if (!entry.name.toLowerCase().includes(query)) continue;
-        results.push({
-          name: entry.name,
-          path: normalizeRelative(relative(cwd, target)),
-          type: entry.isDirectory() ? "directory" : "file",
-          hasChildren: entry.isDirectory(),
-        });
-        if (results.length >= MAX_SEARCH_RESULTS) break;
+        if (entry.name.toLowerCase().includes(query)) {
+          results.push({
+            name: entry.name,
+            path: normalizeRelative(relative(cwd, target)),
+            type: entry.isDirectory() ? "directory" : "file",
+            hasChildren: entry.isDirectory(),
+          });
+          if (results.length >= MAX_SEARCH_RESULTS) break;
+        }
+        if (performance.now() < nextYieldAt) continue;
+        await yieldToEventLoop();
+        if (isCancelled()) return [];
+        nextYieldAt = performance.now() + SEARCH_YIELD_INTERVAL_MS;
       }
     }
     return results;
   }
+}
+
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolveYield) => setImmediate(resolveYield));
 }
 
 function resolveInside(cwd: string, path: string): string {

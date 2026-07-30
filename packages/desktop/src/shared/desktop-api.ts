@@ -42,6 +42,15 @@ import type {
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
 } from "./desktop-extension-contracts.ts";
+import type {
+  MemoryMaintenanceResult,
+  MemoryMutationResult,
+  MemorySettingsSnapshot,
+  MutateMemoryEntryInput,
+  RunMemoryMaintenanceInput,
+  SaveMemorySettingsInput,
+  SaveMemorySettingsResult,
+} from "./memory-settings-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
 import type {
   PluginConfigurationSnapshot,
@@ -143,6 +152,13 @@ export interface DesktopApi {
     getConfig(): Promise<SettingsConfigSnapshot>;
     saveConfig(input: SaveSettingsConfigInput): Promise<SaveSettingsConfigResult>;
   };
+  memorySettings: {
+    getSnapshot(): Promise<MemorySettingsSnapshot>;
+    saveConfig(input: SaveMemorySettingsInput): Promise<SaveMemorySettingsResult>;
+    mutateEntry(input: MutateMemoryEntryInput): Promise<MemoryMutationResult>;
+    runMaintenance(input: RunMemoryMaintenanceInput): Promise<MemoryMaintenanceResult>;
+    setEditorDirty(dirty: boolean): boolean;
+  };
   extensions: {
     getConfig(projectId?: string, threadId?: string): Promise<DesktopExtensionSettingsSnapshot>;
     saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult>;
@@ -207,7 +223,7 @@ export interface DesktopApi {
     respond(projectId: string, threadId: string, response: HostResponse): Promise<void>;
   };
   files: {
-    list(projectId: string, path?: string, query?: string): Promise<FileNode[]>;
+    list(projectId: string, path?: string, query?: string, requestGroup?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
     resolvePath(projectId: string, path: string): Promise<string>;
     open(projectId: string, path: string): Promise<void>;

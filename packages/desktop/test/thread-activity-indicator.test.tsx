@@ -1,11 +1,22 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ThreadActivityIndicator } from "../src/renderer/src/components/chat/thread-activity-indicator.tsx";
+import {
+  isThreadActivityVisible,
+  ThreadActivityIndicator,
+} from "../src/renderer/src/components/chat/thread-activity-indicator.tsx";
 import type { PiThreadPhase, SessionControlState } from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
 
 describe("ThreadActivityIndicator", () => {
+  it("只为可见状态分配 timeline 尾项", () => {
+    expect(isThreadActivityVisible("idle", undefined)).toBe(false);
+    expect(isThreadActivityVisible("running", undefined)).toBe(true);
+    expect(isThreadActivityVisible("retrying", undefined)).toBe(true);
+    expect(isThreadActivityVisible("compacting", undefined)).toBe(true);
+    expect(isThreadActivityVisible("idle", "provider failed")).toBe(true);
+  });
+
   it("空闲且无错误时不渲染", () => {
     expect(renderIndicator("idle")).toBe("");
   });

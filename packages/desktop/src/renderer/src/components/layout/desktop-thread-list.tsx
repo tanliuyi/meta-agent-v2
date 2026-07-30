@@ -46,6 +46,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
+  const [pendingStop, setPendingStop] = useState<Thread | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
   const pendingDeleteDescendantIds = useMemo(
     () => (pendingDelete ? threadDescendantIds(threads, pendingDelete.id) : []),
@@ -125,6 +126,13 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     [actions, project.id, runAction],
   );
 
+  const confirmStop = useCallback(() => {
+    const thread = pendingStop;
+    if (!thread) return;
+    setPendingStop(null);
+    runAction(`stop:${thread.id}`, () => actions.stopThread(project.id, thread.id));
+  }, [actions, pendingStop, project.id, runAction]);
+
   return (
     <div className="thread-list mb-1" role="tree" aria-label={`${project.name} 会话`}>
       {visibleThreads.map(
@@ -144,6 +152,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               active={activeThreadId === thread.id}
               isSwitching={navigationDisabled || pendingKeys.has(`switch:${thread.id}`)}
               isRenamingPending={pendingKeys.has(`rename:${thread.id}`)}
+              isStopPending={pendingKeys.has(`stop:${thread.id}`)}
               isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
               isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
               depth={depth}
@@ -155,6 +164,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               compactRoot={compactRoot}
               onToggle={toggleThread}
               onRenameStart={startRename}
+              onStop={setPendingStop}
               onOpen={openThread}
               onArchive={archiveThread}
               onDelete={setPendingDelete}
@@ -246,6 +256,16 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
           </form>
         </DialogContent>
       </Dialog>
+      <ConfirmDialog
+        open={pendingStop !== null}
+        title="停止子智能体"
+        description={`停止“${pendingStop?.title ?? "当前任务"}”。已经生成的会话内容会保留。`}
+        confirmLabel="停止"
+        onOpenChange={(open) => {
+          if (!open) setPendingStop(null);
+        }}
+        onConfirm={confirmStop}
+      />
       <ConfirmDialog
         open={pendingDelete !== null && pendingDeleteDescendantIds.length === 0}
         title="删除会话"

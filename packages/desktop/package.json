@@ -32,6 +32,7 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
+    "@tanstack/react-virtual": "3.14.9",
     "electron-devtools-installer": "4.0.0",
     "electron-updater": "6.8.9",
     "electron-window-state": "5.0.3",

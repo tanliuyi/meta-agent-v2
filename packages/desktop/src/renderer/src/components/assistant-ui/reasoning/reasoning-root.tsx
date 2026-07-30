@@ -1,6 +1,5 @@
 "use client";
 
-import { useScrollLock } from "@assistant-ui/react";
 import { cn } from "@renderer/shared/lib/cn";
 import { Collapsible } from "@renderer/shared/ui/collapsible";
 import type { VariantProps } from "class-variance-authority";
@@ -18,7 +17,7 @@ export type ReasoningRootProps = Omit<ComponentProps<typeof Collapsible>, "open"
     autoOpen?: boolean;
     /** 是否采用 autoOpen/streaming 推导自动展开状态。 */
     autoExpand?: boolean;
-    /** 流式阶段自动展开并锁定底部；用户首次切换后改由用户控制。 */
+    /** 流式阶段自动展开；用户首次切换后改由用户控制。 */
     streaming?: boolean;
   };
 
@@ -34,12 +33,9 @@ export function ReasoningRoot({
   children,
   ...props
 }: ReasoningRootProps) {
-  const rootRef = useRef<HTMLDivElement>(null);
   const initialOpenRef = useRef(defaultOpen);
   const previousAutoOpenRef = useRef(autoOpen);
-  const previousOpenRef = useRef<boolean | undefined>(undefined);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const lockScroll = useScrollLock(rootRef, REASONING_ANIMATION_DURATION);
 
   useLayoutEffect(() => {
     const previousAutoOpen = previousAutoOpenRef.current;
@@ -52,23 +48,16 @@ export function ReasoningRoot({
   const isOpen = isControlled ? controlledOpen : (userOpen ?? automaticOpen ?? initialOpenRef.current);
   const isPreview = streaming === true && isOpen;
 
-  useLayoutEffect(() => {
-    if (previousOpenRef.current !== undefined && previousOpenRef.current !== isOpen) lockScroll();
-    previousOpenRef.current = isOpen;
-  }, [isOpen, lockScroll]);
-
   const handleOpenChange = useCallback(
     (open: boolean) => {
-      if (open !== isOpen) lockScroll();
       if (!isControlled) setUserOpen(open);
       controlledOnOpenChange?.(open);
     },
-    [controlledOnOpenChange, isControlled, isOpen, lockScroll],
+    [controlledOnOpenChange, isControlled],
   );
 
   return (
     <Collapsible
-      ref={rootRef}
       data-slot="reasoning-root"
       data-variant={variant}
       open={isOpen}

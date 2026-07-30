@@ -6,6 +6,8 @@ import type { ProjectStore } from "../store/project-store.ts";
 import { TerminalOutputBuffer } from "./terminal-output-buffer.ts";
 
 const MAX_OUTPUT = 2 * 1024 * 1024;
+const MAX_DATA_EVENT_LENGTH = 16 * 1024;
+const DATA_FLUSH_DELAY_MS = 16;
 const MIN_COLS = 20;
 const MAX_COLS = 500;
 const MIN_ROWS = 4;
@@ -24,6 +26,9 @@ interface TerminalProcess {
   exit?: pty.IDisposable;
   shell: string;
   output: TerminalOutputBuffer;
+  pendingData: string[];
+  pendingDataLength: number;
+  dataFlushTimer?: ReturnType<typeof setTimeout>;
   revision: number;
   running: boolean;
   disposed: boolean;
@@ -54,8 +59,11 @@ export class TerminalSupervisor {
     if (!terminal) {
       terminal = this.create(projectId, threadId, terminalId, cols, rows);
       this.terminals.set(key, terminal);
-    } else if (terminal.running) {
-      terminal.pty.resize(clamp(cols, MIN_COLS, MAX_COLS), clamp(rows, MIN_ROWS, MAX_ROWS));
+    } else {
+      this.flushData(key, projectId, threadId, terminalId, terminal);
+      if (terminal.running) {
+        terminal.pty.resize(clamp(cols, MIN_COLS, MAX_COLS), clamp(rows, MIN_ROWS, MAX_ROWS));
+      }
     }
     return snapshot(projectId, threadId, terminalId, terminal);
   }
@@ -122,6 +130,8 @@ export class TerminalSupervisor {
       pty: terminalPty,
       shell: shell.file,
       output: new TerminalOutputBuffer(MAX_OUTPUT),
+      pendingData: [],
+      pendingDataLength: 0,
       revision: this.nextRevision(key),
       running: true,
       disposed: false,
@@ -129,16 +139,59 @@ export class TerminalSupervisor {
     terminal.data = terminalPty.onData((data) => {
       if (terminal.disposed) return;
       terminal.output.append(data);
-      terminal.revision = this.nextRevision(key);
-      this.changed({ type: "data", projectId, threadId, terminalId, revision: terminal.revision, data });
+      this.queueData(key, projectId, threadId, terminalId, terminal, data);
     });
     terminal.exit = terminalPty.onExit(({ exitCode }) => {
       if (terminal.disposed) return;
+      this.flushData(key, projectId, threadId, terminalId, terminal);
       terminal.running = false;
       terminal.revision = this.nextRevision(key);
       this.changed({ type: "exit", projectId, threadId, terminalId, revision: terminal.revision, exitCode });
     });
     return terminal;
+  }
+
+  private queueData(
+    key: string,
+    projectId: string,
+    threadId: string,
+    terminalId: string,
+    terminal: TerminalProcess,
+    data: string,
+  ): void {
+    let offset = 0;
+    while (offset < data.length) {
+      const available = MAX_DATA_EVENT_LENGTH - terminal.pendingDataLength;
+      const end = Math.min(data.length, offset + available);
+      terminal.pendingData.push(data.slice(offset, end));
+      terminal.pendingDataLength += end - offset;
+      offset = end;
+      if (terminal.pendingDataLength >= MAX_DATA_EVENT_LENGTH) {
+        this.flushData(key, projectId, threadId, terminalId, terminal);
+      }
+    }
+    if (terminal.pendingDataLength === 0) return;
+    terminal.dataFlushTimer ??= setTimeout(() => {
+      terminal.dataFlushTimer = undefined;
+      this.flushData(key, projectId, threadId, terminalId, terminal);
+    }, DATA_FLUSH_DELAY_MS);
+  }
+
+  private flushData(
+    key: string,
+    projectId: string,
+    threadId: string,
+    terminalId: string,
+    terminal: TerminalProcess,
+  ): void {
+    if (terminal.dataFlushTimer) clearTimeout(terminal.dataFlushTimer);
+    terminal.dataFlushTimer = undefined;
+    if (terminal.pendingDataLength === 0) return;
+    const data = terminal.pendingData.length === 1 ? terminal.pendingData[0]! : terminal.pendingData.join("");
+    terminal.pendingData = [];
+    terminal.pendingDataLength = 0;
+    terminal.revision = this.nextRevision(key);
+    this.changed({ type: "data", projectId, threadId, terminalId, revision: terminal.revision, data });
   }
 
   private require(projectId: string, threadId: string, terminalId: string): TerminalProcess {
@@ -152,6 +205,10 @@ export class TerminalSupervisor {
     if (!terminal) return;
     this.terminals.delete(key);
     terminal.disposed = true;
+    if (terminal.dataFlushTimer) clearTimeout(terminal.dataFlushTimer);
+    terminal.dataFlushTimer = undefined;
+    terminal.pendingData = [];
+    terminal.pendingDataLength = 0;
     terminal.data?.dispose();
     terminal.exit?.dispose();
     if (terminal.running) terminal.pty.kill();

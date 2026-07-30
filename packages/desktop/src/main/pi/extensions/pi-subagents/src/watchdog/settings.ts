@@ -41,6 +41,38 @@ export type WatchdogModelSettingsTarget =
 	| { kind: "children" }
 	| { kind: "child"; agent: string };
 
+export interface WatchdogSettingsOverride {
+	enabled?: boolean;
+	main: {
+		enabled?: boolean;
+		model?: string;
+		thinking?: ThinkingLevel | false;
+	};
+	children: {
+		enabled?: boolean;
+		model?: string;
+		thinking?: ThinkingLevel | false;
+	};
+}
+
+export interface WatchdogSettingsWrite {
+	scope: WatchdogSettingsWriteScope;
+	cwd?: string;
+	config: {
+		enabled?: boolean | null;
+		main?: {
+			enabled?: boolean | null;
+			model?: string | null;
+			thinking?: ThinkingLevel | false | null;
+		};
+		children?: {
+			enabled?: boolean | null;
+			model?: string | null;
+			thinking?: ThinkingLevel | false | null;
+		};
+	};
+}
+
 export interface WatchdogModelSettingsWrite {
 	scope: WatchdogSettingsWriteScope;
 	cwd?: string;
@@ -442,6 +474,12 @@ export function resolveWatchdogConfigStrict(cwd: string, options: { session?: Re
 	return resolvePatch(patch);
 }
 
+export function resolveWatchdogInheritedConfig(
+	scope: WatchdogSettingsWriteScope,
+): ResolvedWatchdogConfig {
+	return scope === "user" ? resolvePatch({}) : resolvePatch(parseSourceFile(getUserSettingsPath(), "user"));
+}
+
 function ensureObjectField(parent: Record<string, unknown>, key: string, field: string, meta: ParseMeta): Record<string, unknown> {
 	if (!(key in parent)) parent[key] = {};
 	if (!isPlainObject(parent[key])) throw invalid(meta, field, "an object");
@@ -472,14 +510,62 @@ function writeSettingsFile(settingsPath: string, settings: Record<string, unknow
 	return settingsPath;
 }
 
-export function writeUserWatchdogEnabled(enabled: boolean): string {
-	const settingsPath = getUserSettingsPath();
-	const meta: ParseMeta = { scope: "user", path: settingsPath };
+function assignOptionalSetting(
+	target: Record<string, unknown>,
+	key: string,
+	value: string | boolean | null | undefined,
+): void {
+	if (value === null) delete target[key];
+	else if (value !== undefined) target[key] = value;
+}
+
+export function readWatchdogSettingsOverride(
+	scope: WatchdogSettingsWriteScope,
+	cwd?: string,
+): WatchdogSettingsOverride {
+	const settingsPath = settingsPathForWrite(scope, cwd);
+	const patch = parseSourceFile(settingsPath, scope);
+	return {
+		...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+		main: {
+			...(patch.main?.enabled !== undefined ? { enabled: patch.main.enabled } : {}),
+			...(patch.main?.model !== undefined ? { model: patch.main.model } : {}),
+			...(patch.main?.thinking !== undefined ? { thinking: patch.main.thinking } : {}),
+		},
+		children: {
+			...(patch.children?.enabled !== undefined ? { enabled: patch.children.enabled } : {}),
+			...(patch.children?.model !== undefined ? { model: patch.children.model } : {}),
+			...(patch.children?.thinking !== undefined ? { thinking: patch.children.thinking } : {}),
+		},
+	};
+}
+
+export function writeWatchdogSettings(input: WatchdogSettingsWrite): string {
+	const settingsPath = settingsPathForWrite(input.scope, input.cwd);
+	const meta: ParseMeta = { scope: input.scope, path: settingsPath };
 	const settings = readSettingsFileStrict(settingsPath);
 	const watchdog = ensureWatchdogSettings(settings, meta);
-	watchdog.enabled = enabled;
-	targetSettingsObject(watchdog, { kind: "main" }, meta).enabled = enabled;
+	if (input.config.enabled !== undefined) {
+		assignOptionalSetting(watchdog, "enabled", input.config.enabled);
+	}
+	if (input.config.main) {
+		const main = targetSettingsObject(watchdog, { kind: "main" }, meta);
+		assignOptionalSetting(main, "enabled", input.config.main.enabled);
+		assignOptionalSetting(main, "model", input.config.main.model);
+		assignOptionalSetting(main, "thinking", input.config.main.thinking);
+	}
+	if (input.config.children) {
+		const children = targetSettingsObject(watchdog, { kind: "children" }, meta);
+		assignOptionalSetting(children, "enabled", input.config.children.enabled);
+		assignOptionalSetting(children, "model", input.config.children.model);
+		assignOptionalSetting(children, "thinking", input.config.children.thinking);
+	}
+	parseSettingsObject(settings, meta);
 	return writeSettingsFile(settingsPath, settings);
+}
+
+export function writeUserWatchdogEnabled(enabled: boolean): string {
+	return writeWatchdogSettings({ scope: "user", config: { enabled, main: { enabled } } });
 }
 
 export function writeWatchdogModelSettings(input: WatchdogModelSettingsWrite): string {

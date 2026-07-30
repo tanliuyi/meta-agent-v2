@@ -319,6 +319,46 @@ export class MemoryStore {
     return this.runTargetMutation(target, () => this.replaceUnlocked(target, oldText, newContent));
   }
 
+  async replaceExact(
+    target: "memory" | "user" | "failure",
+    rawEntry: string,
+    newContent: string,
+  ): Promise<MemoryResult> {
+    return this.runTargetMutation(target, () => this.replaceExactUnlocked(target, rawEntry, newContent));
+  }
+
+  private async replaceExactUnlocked(
+    target: "memory" | "user" | "failure",
+    rawEntry: string,
+    newContent: string,
+  ): Promise<MemoryResult> {
+    newContent = newContent.trim();
+    if (!newContent) return { success: false, error: "new_content cannot be empty. Use 'remove' to delete entries." };
+    const scanError = scanContent(newContent);
+    if (scanError) return { success: false, error: scanError };
+
+    await this.syncTargetFromDiskIfChanged(target);
+    const entries = this.entriesFor(target);
+    const index = entries.indexOf(rawEntry);
+    if (index < 0) return { success: false, error: "The selected memory entry changed. Reload and try again." };
+
+    const decoded = this.decodeEntry(rawEntry);
+    const today = new Date().toISOString().split("T")[0];
+    const replacement = this.encodeEntry(newContent, decoded.created, today, decoded.project ?? undefined);
+    const testEntries = entries.with(index, replacement);
+    const newTotal = testEntries.join(ENTRY_DELIMITER).length;
+    if (newTotal > this.charLimit(target)) {
+      return {
+        success: false,
+        error: `Replacement would put memory at ${newTotal}/${this.charLimit(target)} chars. Shorten or remove other entries first.`,
+      };
+    }
+
+    this.setEntries(target, testEntries);
+    await this.saveToDisk(target);
+    return this.successResponse(target, "Entry replaced.");
+  }
+
   private async replaceUnlocked(
     target: "memory" | "user" | "failure",
     oldText: string,
@@ -371,6 +411,18 @@ export class MemoryStore {
 
   async remove(target: "memory" | "user" | "failure", oldText: string): Promise<MemoryResult> {
     return this.runTargetMutation(target, () => this.removeUnlocked(target, oldText));
+  }
+
+  async removeExact(target: "memory" | "user" | "failure", rawEntry: string): Promise<MemoryResult> {
+    return this.runTargetMutation(target, async () => {
+      await this.syncTargetFromDiskIfChanged(target);
+      const entries = this.entriesFor(target);
+      const index = entries.indexOf(rawEntry);
+      if (index < 0) return { success: false, error: "The selected memory entry changed. Reload and try again." };
+      this.setEntries(target, entries.toSpliced(index, 1));
+      await this.saveToDisk(target);
+      return this.successResponse(target, "Entry removed.");
+    });
   }
 
   private async removeUnlocked(target: "memory" | "user" | "failure", oldText: string): Promise<MemoryResult> {
@@ -699,7 +751,7 @@ export class MemoryStore {
             return await this.finalizeTargetMutation(target, storagePath, {
               success: false,
               error:
-                "Memory file changed repeatedly during this update. No external changes were overwritten. If you edited the file manually, re-run the memory tool or /memory-sync-markdown after the file is stable.",
+                "Memory file changed repeatedly during this update. No external changes were overwritten. If you edited the file manually, re-run the memory tool after the file is stable or use Desktop Settings > Memory > Maintenance to sync Markdown.",
             });
           }
         }

@@ -1,11 +1,9 @@
 /**
- * Markdown memory sync command — /memory-sync-markdown reconciles the SQLite
- * search mirror with authoritative Markdown memory files.
+ * Reconciles the SQLite search mirror with authoritative Markdown memory files.
  */
 
 import fs from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { ENTRY_DELIMITER, MEMORY_FILE, USER_FILE } from "../constants.ts";
 import { type ExtensionRootMigrationOptions, migrateExtensionRoot } from "../extension-root-migration.ts";
 import { AGENT_ROOT } from "../paths.ts";
@@ -89,7 +87,7 @@ function realpathIfPresent(filePath: string): string {
   }
 }
 
-function resolveAuthoritativeMemoryFile(root: string, projectName: string): string | null {
+export function resolveAuthoritativeMemoryFile(root: string, projectName: string): string | null {
   const canonicalRoot = realpathIfPresent(root);
   if (!isSafeProjectName(projectName, path.resolve(root))) return null;
 
@@ -127,7 +125,7 @@ function resolveAuthoritativeMemoryFile(root: string, projectName: string): stri
   return canonicalMemoryFile;
 }
 
-function isSafeProjectName(name: string, projectsRoot: string): boolean {
+export function isSafeProjectName(name: string, projectsRoot: string): boolean {
   if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\") || path.isAbsolute(name)) {
     return false;
   }
@@ -222,69 +220,4 @@ export async function migrateThenSyncMarkdownMemories(
     migrationOptions.onMigrationSucceeded?.();
   }
   return await syncMarkdownMemoriesToSqlite(dbManager, globalDir, projectsMemoryDir, agentRoot);
-}
-
-export function registerSyncMarkdownMemoriesCommand(
-  pi: ExtensionAPI,
-  dbManager: DatabaseManager,
-  globalDir: string,
-  projectsMemoryDir?: string,
-  agentRoot = AGENT_ROOT,
-): void {
-  pi.registerCommand("memory-sync-markdown", {
-    description: "Reconcile the SQLite search mirror with Markdown memories",
-    handler: async (_args, ctx: ExtensionCommandContext) => {
-      ctx.ui.notify("🔄 Reconciling the SQLite search mirror with Markdown memories...", "info", {
-        customType: "hermes-memory.markdown-sync",
-        details: { phase: "syncing" },
-      });
-
-      try {
-        const counters = await syncMarkdownMemoriesToSqlite(dbManager, globalDir, projectsMemoryDir, agentRoot);
-
-        let output = `\n✅ Markdown → SQLite sync complete!\n\n`;
-        output += `📊 Results:\n`;
-        output += `├─ Files scanned: ${counters.filesScanned}\n`;
-        output += `├─ Entries scanned: ${counters.entriesScanned}\n`;
-        output += `├─ Imported into SQLite: ${counters.imported}\n`;
-        output += `├─ Skipped as duplicates: ${counters.skipped}\n`;
-        output += `└─ Removed orphaned rows: ${counters.removed}\n`;
-
-        if (counters.projectCount > 0) {
-          output += `\n📁 Project memories scanned: ${counters.projectCount}\n`;
-        }
-
-        if (counters.warnings.length > 0) {
-          output += `\n⚠️ Warnings (${counters.warnings.length}):\n`;
-          for (const warning of counters.warnings.slice(0, 5)) {
-            output += `├─ ${warning}\n`;
-          }
-          if (counters.warnings.length > 5) {
-            output += `└─ ... and ${counters.warnings.length - 5} more\n`;
-          }
-        }
-
-        output += `\n💡 Re-running this command is safe — existing SQLite rows are de-duplicated.`;
-        ctx.ui.notify(output, "info", {
-          customType: "hermes-memory.markdown-sync",
-          details: {
-            phase: "complete",
-            filesScanned: counters.filesScanned,
-            entriesScanned: counters.entriesScanned,
-            imported: counters.imported,
-            skipped: counters.skipped,
-            removed: counters.removed,
-            projectCount: counters.projectCount,
-            warnings: counters.warnings,
-          },
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        ctx.ui.notify(`❌ Markdown sync failed: ${message}`, "error", {
-          customType: "hermes-memory.error",
-          details: { operation: "markdown-sync", message },
-        });
-      }
-    },
-  });
 }

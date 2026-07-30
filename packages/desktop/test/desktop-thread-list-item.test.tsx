@@ -29,6 +29,7 @@ function renderThread(
       active={false}
       isSwitching={false}
       isRenamingPending={false}
+      isStopPending={false}
       isArchivePending={false}
       isDeletePending={false}
       depth={options.depth ?? 1}
@@ -40,6 +41,7 @@ function renderThread(
       compactRoot={options.compactRoot}
       onToggle={vi.fn()}
       onRenameStart={vi.fn()}
+      onStop={vi.fn()}
       onOpen={vi.fn()}
       onArchive={vi.fn()}
       onDelete={vi.fn()}
@@ -52,6 +54,8 @@ describe("DesktopThreadListItem", () => {
     const markup = renderThread(baseThread);
 
     expect(markup).toContain('data-slot="subagent-name"');
+    expect(markup).toContain('data-variant="muted"');
+    expect(markup).toContain('data-size="sm"');
     expect(markup).toContain('title="reviewer"');
     expect(markup).toContain(">审查员</span>");
     expect(markup).toContain('data-slot="thread-title"');

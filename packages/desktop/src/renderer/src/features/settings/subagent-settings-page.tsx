@@ -27,6 +27,7 @@ import { SubagentChainDialog } from "./subagent-chain-dialog.tsx";
 import { SubagentChainRow } from "./subagent-chain-row.tsx";
 import { SubagentCustomAgentRow } from "./subagent-custom-agent-row.tsx";
 import { SubagentExtensionConfigPanel } from "./subagent-extension-config-panel.tsx";
+import { SubagentWatchdogPanel } from "./subagent-watchdog-panel.tsx";
 import { resolveSubagentSettingsActiveTab, useSubagentSettingsController } from "./use-subagent-settings-controller.ts";
 
 const USER_TAB = "user";
@@ -219,6 +220,14 @@ export function SubagentSettingsPage() {
             <>
               {!systemTab ? (
                 <>
+                  <SubagentWatchdogPanel
+                    key={`watchdog:${snapshot.revision}`}
+                    settings={snapshot.watchdog}
+                    models={snapshot.models}
+                    scopeLabel={scope === "project" ? "项目" : "个人"}
+                    saving={controller.mutating}
+                    onSave={(config) => controller.mutate({ type: "update-watchdog-config", scope, config })}
+                  />
                   <section className="settings-section subagent-section" aria-labelledby="custom-agents-heading">
                     <div className="settings-section-heading subagent-section-heading">
                       <h3 id="custom-agents-heading">自定义智能体</h3>

@@ -31,6 +31,11 @@ import type {
   ApproveDevelopmentExtensionInput,
   SaveDesktopExtensionSettingsInput,
 } from "../shared/desktop-extension-contracts.ts";
+import type {
+  MutateMemoryEntryInput,
+  RunMemoryMaintenanceInput,
+  SaveMemorySettingsInput,
+} from "../shared/memory-settings-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
 import type {
   SavePluginConfigurationInput,
@@ -58,6 +63,7 @@ import type { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-in
 import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
+import type { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
 import type { ProjectStore } from "./store/project-store.ts";
 import type { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
@@ -68,6 +74,7 @@ import type { WindowDirtyGuard } from "./window-dirty-guard.ts";
 /** 注册 Desktop 的 Project、Pi session、文件和 Workbench IPC。 */
 const authEditorWebContents = new Set<number>();
 const providerEditorWebContents = new Set<number>();
+const memoryEditorWebContents = new Set<number>();
 
 export function registerIpc(
   projects: ProjectStore,
@@ -81,6 +88,7 @@ export function registerIpc(
   dirtyGuard: WindowDirtyGuard,
   runtimeDependencies: {
     refreshActiveModelRuntimes?(): Promise<void>;
+    refreshMemoryConfiguration?(): Promise<void>;
     shell?: {
       getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
       install(): Promise<ShellRuntimeStatus>;
@@ -96,6 +104,7 @@ export function registerIpc(
   marketplaceRegistry?: MarketplacePluginRegistry,
   marketplaceInstaller?: MarketplacePluginInstaller,
   pluginConfigurations?: PluginConfigurationService,
+  memorySettings?: MemorySettingsService,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -182,6 +191,30 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.providersOpenConfigExternally, async () => openPath(await providers.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
   ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
+  if (memorySettings) {
+    ipcMain.handle(CHANNELS.memorySettingsGetSnapshot, () => memorySettings.getSnapshot());
+    ipcMain.handle(CHANNELS.memorySettingsSaveConfig, async (_event, input: SaveMemorySettingsInput) => {
+      const result = await memorySettings.saveConfig(input);
+      if (result.status !== "saved" || !runtimeDependencies.refreshMemoryConfiguration) return result;
+      try {
+        await runtimeDependencies.refreshMemoryConfiguration();
+        return result;
+      } catch (error) {
+        console.error("Memory settings were saved, but active sessions failed to refresh:", error);
+        const refreshWarning = "设置已保存，但活动会话刷新失败；新会话将使用最新配置。";
+        return {
+          ...result,
+          warning: result.warning ? `${result.warning} ${refreshWarning}` : refreshWarning,
+        };
+      }
+    });
+    ipcMain.handle(CHANNELS.memorySettingsMutateEntry, (_event, input: MutateMemoryEntryInput) =>
+      memorySettings.mutateEntry(input),
+    );
+    ipcMain.handle(CHANNELS.memorySettingsRunMaintenance, (_event, input: RunMemoryMaintenanceInput) =>
+      memorySettings.runMaintenance(input),
+    );
+  }
   if (subagents) {
     ipcMain.handle(CHANNELS.subagentsGetSnapshot, (_event, input?: GetSubagentSettingsInput) =>
       subagents.getSnapshot(input),
@@ -294,6 +327,23 @@ export function registerIpc(
       sessions.applyExtensionSet(input.projectId, input.threadId, input.expectedDesiredGeneration, input.abortRunning),
     );
   }
+  ipcMain.on(CHANNELS.memorySettingsSetEditorDirty, (event, dirty: unknown) => {
+    if (typeof dirty !== "boolean") {
+      event.returnValue = false;
+      return;
+    }
+    const ownerId = event.sender.id;
+    dirtyGuard.setDirty(ownerId, dirty);
+    if (!memoryEditorWebContents.has(ownerId)) {
+      memoryEditorWebContents.add(ownerId);
+      event.sender.once("destroyed", () => {
+        memoryEditorWebContents.delete(ownerId);
+        dirtyGuard.remove(ownerId);
+      });
+    }
+    event.returnValue = true;
+  });
+
   ipcMain.on(CHANNELS.authSetEditorDirty, (event, dirty: unknown) => {
     if (typeof dirty !== "boolean") {
       event.returnValue = false;
@@ -454,8 +504,8 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsRespond, (_event, projectId: string, threadId: string, response: HostResponse) =>
     sessions.respond(projectId, threadId, response),
   );
-  ipcMain.handle(CHANNELS.filesList, (_event, projectId: string, path?: string, query?: string) =>
-    files.list(projectId, path, query),
+  ipcMain.handle(CHANNELS.filesList, (event, projectId: string, path?: string, query?: string, requestGroup?: string) =>
+    files.list(projectId, path, query, `${event.sender.id}\0${requestGroup ?? "default"}`),
   );
   ipcMain.handle(CHANNELS.filesRead, (_event, projectId: string, path: string) => files.read(projectId, path));
   ipcMain.handle(CHANNELS.filesResolvePath, (_event, projectId: string, path: string) =>

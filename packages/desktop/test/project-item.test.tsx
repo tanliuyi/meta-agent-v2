@@ -108,6 +108,7 @@ function desktopActions(): DesktopActions {
     removeProject: vi.fn(),
     prewarmThread: vi.fn(),
     renameThread: vi.fn(),
+    stopThread: vi.fn(),
     setThreadArchived: vi.fn(),
     removeThread: vi.fn(),
     clearError: vi.fn(),

@@ -27,6 +27,7 @@ import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry
 import { MarketplacePluginTransactionStore } from "./plugins/marketplace-plugin-transaction-store.ts";
 import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
+import { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { locateGitForWindowsBash, locateManagedBash } from "./sidecar/managed-shell-locator.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
@@ -82,7 +83,7 @@ if (!app.isPackaged) {
 
 /** 在开发环境加载 React DevTools，生产构建不下载开发扩展。 */
 async function installReactDevTools(): Promise<void> {
-  if (app.isPackaged) return;
+  if (app.isPackaged || process.env.PI_DISABLE_REACT_DEVTOOLS === "1") return;
 
   try {
     const extensions = await installExtension(REACT_DEVELOPER_TOOLS, {
@@ -217,6 +218,10 @@ app.whenReady().then(async () => {
     allowModelNetwork: false,
   });
   const settings = new SettingsConfigService(userDataDir);
+  const memorySettings = new MemorySettingsService(agentDir, {
+    listProjects: () => projects.list(),
+    getProjectCwd: (projectId) => projects.getCwd(projectId),
+  });
   const builtinExtensions = DesktopControlledExtensionRegistry.getBuiltinDefinitions();
   const curatedExtensions = DesktopControlledExtensionRegistry.getCuratedDefinitions();
   const extensionSettings = new DesktopExtensionSettingsService(userDataDir, {
@@ -342,6 +347,7 @@ app.whenReady().then(async () => {
     listSubagentThreads: (projectId) => activeSubagents.listThreads(projectId),
     isActiveSubagentThread: (projectId, threadId) => activeSubagents.isActiveThread(projectId, threadId),
     attachSubagent: (projectId, threadId) => activeSubagents.attach(projectId, threadId),
+    cancelSubagent: (projectId, threadId) => activeSubagents.cancelActiveThread(projectId, threadId),
     acknowledgeSubagent: (workerInstanceId, sidecarSequence) =>
       activeSubagents.acknowledge(workerInstanceId, sidecarSequence),
     beginSubagentTreeMutation: (projectId, parentThreadId) =>
@@ -401,6 +407,10 @@ app.whenReady().then(async () => {
         if (failures.length > 0) {
           throw new AggregateError(failures, "Failed to refresh one or more active model runtimes");
         }
+      },
+      refreshMemoryConfiguration: async () => {
+        extensionSourcePolicy.invalidate();
+        await startedSupervisor.extensionSettingsChanged();
       },
       shell: {
         getStatus: async () => {
@@ -466,6 +476,7 @@ app.whenReady().then(async () => {
     marketplaceRegistry,
     marketplacePluginInstaller,
     pluginConfigurations,
+    memorySettings,
   );
   createWindow();
   stopAutoUpdateChecks = scheduleAutoUpdateChecks(updater);

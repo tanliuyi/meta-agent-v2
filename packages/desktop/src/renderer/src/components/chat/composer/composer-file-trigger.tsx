@@ -15,7 +15,7 @@ interface ComposerFileTriggerProps {
 export function ComposerFileTrigger({ projectId, onOpenChange }: ComposerFileTriggerProps) {
   const fetchFiles = useCallback(
     async (query: string): Promise<readonly Unstable_TriggerItem[]> => {
-      const files = await window.desktop.files.list(projectId, "", query);
+      const files = await window.desktop.files.list(projectId, "", query, "composer-file-trigger");
       return fileSuggestions(files.slice(0, 10)).map((file) => ({
         id: file.id,
         type: file.type,

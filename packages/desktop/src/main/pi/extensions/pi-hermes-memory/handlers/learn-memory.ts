@@ -85,14 +85,12 @@ export function registerLearnMemoryCommand(pi: ExtensionAPI): void {
         lines.push("  ║             📋 Commands                      ║");
         lines.push("  ╚══════════════════════════════════════════════╝");
         lines.push("");
-        lines.push("  /memory-insights      Show everything stored in memory");
-        lines.push("  /memory-skills        List all saved skills");
-        lines.push("  /memory-consolidate   Manually trigger memory cleanup");
         lines.push("  /memory-interview     Answer questions to pre-fill profile");
-        lines.push("  /memory-switch-project List all project memories");
-        lines.push("  /memory-index-sessions Import past sessions for search");
-        lines.push("  /memory-sync-markdown Backfill Markdown memories into SQLite");
-        lines.push("  /memory-preview-context Show memory policy or legacy prompt blocks");
+        lines.push("  /memory-consolidate   Manually trigger memory cleanup");
+        lines.push("  /learn-memory-tool    Open this conversational guide");
+        lines.push("");
+        lines.push("  Structured memory management, indexing, Markdown sync,");
+        lines.push("  context preview, projects, and skills are in Desktop Settings > Memory.");
       }
 
       if (section.startsWith("✅")) {
@@ -153,7 +151,7 @@ export function registerLearnMemoryCommand(pi: ExtensionAPI): void {
         lines.push("  │ projects-memory/<project>/MEMORY.md │");
         lines.push('  │ session_search("auth flow")         │');
         lines.push('  │ memory_search("testing patterns")   │');
-        lines.push("  │ /memory-sync-markdown (backfill old md)│");
+        lines.push("  │ Settings > Memory (backfill old md)│");
         lines.push('  │ memory_search("auth", cat:"failure")│');
         lines.push("  └─────────────────────────────────────┘");
         lines.push("");
@@ -173,13 +171,13 @@ export function registerLearnMemoryCommand(pi: ExtensionAPI): void {
         lines.push("");
         lines.push('  "Can\'t find something"');
         lines.push("    → memory_search to search the SQLite mirror/store");
-        lines.push("    → /memory-sync-markdown to import older Markdown entries");
+        lines.push("    → Settings > Memory > Maintenance to sync older Markdown entries");
         lines.push("");
         lines.push('  "Agent forgot something"');
-        lines.push('    → Check /memory-insights, tell agent "remember X"');
+        lines.push('    → Check Settings > Memory > Memory Content, then tell agent "remember X"');
         lines.push("");
         lines.push('  "Want to edit manually"');
-        lines.push("    → Files at ~/.pi-desk/agent/memory/ (plain markdown)");
+        lines.push("    → Files at ~/.pi-desk/agent/pi-hermes-memory/ (plain markdown)");
       }
 
       if (lines.length > 0) {

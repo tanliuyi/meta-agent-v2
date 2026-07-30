@@ -112,6 +112,17 @@ export class SubagentWorkerRegistry {
     return record.client.request<SessionBootstrap>({ type: "subagentBootstrap" }, 30_000);
   }
 
+  async cancelActiveThread(projectId: string, threadId: string): Promise<void> {
+    const record = this.recordForThread(projectId, threadId);
+    if (!record) return;
+    try {
+      await record.client.request({ type: "subagentCancel", runId: record.request.runId }, 10_000);
+    } catch (error) {
+      if (record.terminalEvent || record.failure || this.records.get(record.key) !== record) return;
+      throw error;
+    }
+  }
+
   acknowledge(workerInstanceId: string, sequence: number): boolean {
     const record = [...this.records.values()].find(({ client }) => client.instanceId === workerInstanceId);
     if (!record) return false;

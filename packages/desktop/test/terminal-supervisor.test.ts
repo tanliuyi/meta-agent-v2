@@ -38,6 +38,70 @@ describe("TerminalSupervisor", () => {
     expect(events.filter(({ type }) => type === "data")).toHaveLength(2);
   });
 
+  it("合并短时间内的输出，并在退出前按 revision flush", async () => {
+    const { project, store } = await createStore();
+    const terminal = new FakePty();
+    ptyMock.spawn.mockReturnValue(terminal);
+    const events: TerminalEvent[] = [];
+    const terminals = new TerminalSupervisor(store, (event) => events.push(event));
+    vi.useFakeTimers();
+
+    try {
+      terminals.open(project.id, "thread", "bottom", 80, 24);
+      terminal.emitData("first ");
+      terminal.emitData("batch");
+
+      expect(events).toEqual([]);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(events).toMatchObject([{ type: "data", data: "first batch" }]);
+
+      terminal.emitData("before ");
+      terminal.emitData("exit");
+      terminal.emitExit(0);
+
+      expect(events).toMatchObject([
+        { type: "data", data: "first batch" },
+        { type: "data", data: "before exit" },
+        { type: "exit", exitCode: 0 },
+      ]);
+      expect(events.map(({ revision }) => revision)).toEqual([2, 3, 4]);
+    } finally {
+      terminals.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("按事件上限拆分大 chunk，并在 dispose 后取消待发送数据", async () => {
+    const { project, store } = await createStore();
+    const terminal = new FakePty();
+    ptyMock.spawn.mockReturnValue(terminal);
+    const events: TerminalEvent[] = [];
+    const terminals = new TerminalSupervisor(store, (event) => events.push(event));
+    vi.useFakeTimers();
+
+    try {
+      terminals.open(project.id, "thread", "bottom", 80, 24);
+      const output = "x".repeat(16 * 1024 + 5);
+      terminal.emitData(output);
+
+      expect(events).toMatchObject([{ type: "data", data: "x".repeat(16 * 1024) }]);
+      await vi.advanceTimersByTimeAsync(16);
+      expect(events).toMatchObject([
+        { type: "data", data: "x".repeat(16 * 1024) },
+        { type: "data", data: "x".repeat(5) },
+      ]);
+      expect(terminals.open(project.id, "thread", "bottom", 80, 24).output).toBe(output);
+
+      terminal.emitData("discarded");
+      terminals.disposeSession(project.id, "thread");
+      await vi.advanceTimersByTimeAsync(16);
+      expect(events).toHaveLength(2);
+    } finally {
+      terminals.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("prefers the user shellPath over the managed fallback and uses interactive bash args", async () => {
     const { project, root, store } = await createStore();
     const agentDir = join(root, "agent");

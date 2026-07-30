@@ -31,50 +31,14 @@ const COMMAND_SOURCE_SEARCH_TERMS: Record<SlashCommand["source"], string> = {
   skill: "skill 技能",
 };
 
-const HIDDEN_UI_ONLY_EXTENSION_COMMANDS = new Set([
-  "memory-insights",
-  "memory-skills",
-  "memory-preview-context",
-  "memory-switch-project",
-  "learn-memory-tool",
-]);
-
 const BUILTIN_EXTENSION_COMMAND_LOCALIZATIONS: Readonly<Record<string, { name: string; description: string }>> = {
-  "memory-insights": { name: "记忆概览", description: "查看持久记忆中存储的内容" },
-  "memory-skills": { name: "记忆技能", description: "列出已管理和已加载的流程技能" },
   "memory-interview": { name: "记忆访谈", description: "回答问题并预先填写用户资料，以便跨会话记住你" },
-  "memory-switch-project": { name: "切换记忆项目", description: "切换项目级记忆的当前项目" },
-  "learn-memory-tool": { name: "了解记忆工具", description: "学习如何有效使用 Hermes Memory 扩展" },
-  "memory-sync-markdown": { name: "同步 Markdown 记忆", description: "协调 SQLite 搜索镜像与 Markdown 记忆" },
-  "memory-preview-context": { name: "预览记忆上下文", description: "预览记忆策略或旧版记忆上下文块" },
-  "memory-index-sessions": { name: "索引历史会话", description: "将过去的 Pi 会话导入搜索数据库" },
-  "memory-consolidate": { name: "整理记忆", description: "手动触发记忆整理以释放空间" },
-  subagents: { name: "管理子代理", description: "检查子代理信息并更新模型、思考级别或提示词" },
-  run: { name: "运行子代理", description: "直接运行一个子代理" },
-  chain: { name: "串行运行子代理", description: "按顺序运行多个子代理" },
-  "run-chain": { name: "运行已保存链", description: "运行已保存的子代理链" },
-  parallel: { name: "并行运行子代理", description: "并行运行多个子代理" },
-  "subagent-cost": { name: "子代理成本", description: "显示当前会话中主代理与子代理的用量成本" },
-  "subagents-doctor": { name: "子代理诊断", description: "显示子代理诊断信息" },
-  "subagents-fleet": { name: "子代理运行列表", description: "打开实时只读的子代理运行列表" },
-  "subagents-stop": { name: "停止子代理", description: "停止当前会话中的异步子代理运行" },
-  "prompt-workflow": { name: "运行提示词工作流", description: "通过原生子代理运行一个提示词模板" },
-  "chain-prompts": { name: "串联提示词", description: "将多个提示词模板作为原生子代理链运行" },
-  "subagents-models": { name: "子代理模型", description: "显示运行时加载的内置子代理模型" },
-  "subagents-profiles": { name: "子代理配置方案", description: "列出已保存的子代理配置方案" },
-  "subagents-load-profile": { name: "加载子代理配置", description: "将子代理配置方案加载到设置中" },
-  "subagents-refresh-provider-models": { name: "刷新提供商模型", description: "刷新指定提供商的缓存模型目录" },
-  "subagents-generate-profiles": { name: "生成子代理配置", description: "生成指定提供商的配额与质量配置方案" },
-  "subagents-check-profile": { name: "检查子代理配置", description: "检查已保存的配置方案是否仍指向可用模型" },
-  "subagents-watchdog": { name: "子代理监视器", description: "查看或切换默认关闭的子代理监视器" },
+  "learn-memory-tool": { name: "了解记忆工具", description: "在对话中查看记忆工具使用指南" },
+  "memory-consolidate": { name: "整理记忆", description: "使用当前模型合并重复或过期记忆" },
 };
 
 function builtinExtensionCommandLocalization(command: SlashCommand) {
   return command.source === "extension" ? BUILTIN_EXTENSION_COMMAND_LOCALIZATIONS[command.name] : undefined;
-}
-
-function isHiddenUiOnlyCommand(command: SlashCommand): boolean {
-  return command.source === "extension" && HIDDEN_UI_ONLY_EXTENSION_COMMANDS.has(command.name);
 }
 
 function normalizedSearchTerms(value: string): string[] {
@@ -127,7 +91,6 @@ export function slashCommandDisplayDescription(command: SlashCommand): string | 
 export function searchSlashCommands(commands: readonly SlashCommand[], query: string): SlashCommand[] {
   const terms = normalizedSearchTerms(query);
   return commands
-    .filter((command) => !isHiddenUiOnlyCommand(command))
     .map((command, index) => ({ command, index, score: commandSearchScore(command, terms) }))
     .filter((entry): entry is { command: SlashCommand; index: number; score: number } => entry.score !== null)
     .sort((left, right) => left.score - right.score || left.index - right.index)

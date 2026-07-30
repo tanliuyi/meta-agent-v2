@@ -11,13 +11,22 @@ const DESKTOP_BUILTIN_COMMANDS: SlashCommand[] = [
   },
 ];
 
+const DESKTOP_SUBAGENTS_EXTENSION_PATH = "<inline:desktop:pi-subagents>";
+
+function isComposerVisibleExtensionCommand(command: { sourceInfo?: { path?: string } }): boolean {
+  return command.sourceInfo?.path !== DESKTOP_SUBAGENTS_EXTENSION_PATH;
+}
+
 /** 从 Pi session 的真实资源生成 Composer slash command。 */
 export function getSessionCommands(session: CommandSession): SlashCommand[] {
-  const extensions = session.extensionRunner.getRegisteredCommands().map((command) => ({
-    name: command.invocationName,
-    description: command.description,
-    source: "extension" as const,
-  }));
+  const extensions = session.extensionRunner
+    .getRegisteredCommands()
+    .filter(isComposerVisibleExtensionCommand)
+    .map((command) => ({
+      name: command.invocationName,
+      description: command.description,
+      source: "extension" as const,
+    }));
   const prompts = session.promptTemplates.map((prompt) => ({
     name: prompt.name,
     description: prompt.description,
@@ -38,20 +47,27 @@ export function getDraftCommands(resourceLoader: ResourceLoader): SlashCommand[]
   for (const command of registered) counts.set(command.name, (counts.get(command.name) ?? 0) + 1);
   const seen = new Map<string, number>();
   const taken = new Set<string>();
-  const extensions = registered.map((command) => {
-    const occurrence = (seen.get(command.name) ?? 0) + 1;
-    seen.set(command.name, occurrence);
-    let name = (counts.get(command.name) ?? 0) > 1 ? `${command.name}:${occurrence}` : command.name;
-    if (taken.has(name)) {
-      let suffix = occurrence;
-      do {
-        suffix += 1;
-        name = `${command.name}:${suffix}`;
-      } while (taken.has(name));
-    }
-    taken.add(name);
-    return { name, description: command.description, source: "extension" as const };
-  });
+  const extensions = registered
+    .map((command) => {
+      const occurrence = (seen.get(command.name) ?? 0) + 1;
+      seen.set(command.name, occurrence);
+      let name = (counts.get(command.name) ?? 0) > 1 ? `${command.name}:${occurrence}` : command.name;
+      if (taken.has(name)) {
+        let suffix = occurrence;
+        do {
+          suffix += 1;
+          name = `${command.name}:${suffix}`;
+        } while (taken.has(name));
+      }
+      taken.add(name);
+      return { command, name };
+    })
+    .filter(({ command }) => isComposerVisibleExtensionCommand(command))
+    .map(({ command, name }) => ({
+      name,
+      description: command.description,
+      source: "extension" as const,
+    }));
   const prompts = resourceLoader.getPrompts().prompts.map((prompt) => ({
     name: prompt.name,
     description: prompt.description,

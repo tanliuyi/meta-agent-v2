@@ -185,6 +185,14 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
           throw error;
         }
       },
+      async stopThread(projectId, threadId) {
+        try {
+          await window.desktop.sessions.cancel(projectId, threadId);
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
       async setThreadArchived(projectId, threadId, archived) {
         const key = sessionRecordKey(projectId, threadId);
         const restore = archived ? cache.quiesce(key) : () => undefined;

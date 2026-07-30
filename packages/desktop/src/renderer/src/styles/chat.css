@@ -11,7 +11,7 @@
 .tool-view {
   width: 100%;
   overflow: hidden;
-  border-radius: var(--shape-radius-sm);
+  border-radius: var(--shape-radius-xl);
   background: hsl(var(--muted) / 0.42);
   color: hsl(var(--foreground));
   transition: background var(--motion-duration-fast) var(--motion-ease-standard);
@@ -127,7 +127,7 @@
   padding: 0;
   place-items: center;
   border: 0;
-  border-radius: var(--shape-radius-xs);
+  border-radius: var(--shape-radius-lg);
   background: transparent;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
@@ -201,6 +201,7 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   color: hsl(var(--muted-foreground));
+  padding: 4px 10px;
 }
 .tool-result-image {
   display: block;

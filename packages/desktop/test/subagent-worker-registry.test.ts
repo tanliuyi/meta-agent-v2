@@ -101,6 +101,7 @@ class FakeClient implements SubagentWorkerClient {
   readonly commandTypes: string[] = [];
   shutdownCount = 0;
   failure?: Error;
+  cancelError?: Error;
   run?: Promise<unknown>;
   bootstrapResult?: SessionBootstrap;
 
@@ -127,6 +128,7 @@ class FakeClient implements SubagentWorkerClient {
       return { status: "completed" } as T;
     }
     if (command.type === "subagentBootstrap") return this.bootstrapResult as T;
+    if (command.type === "subagentCancel" && this.cancelError) throw this.cancelError;
     return null as T;
   }
 
@@ -390,6 +392,36 @@ describe("SubagentWorkerRegistry", () => {
     await expect.poll(() => persisted).toEqual([true, false]);
     release();
     await run;
+  });
+
+  it("cancels an active child through its Desktop thread identity", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+    const run = registry.handleHostRequest({ type: "subagent.run", request: runRequest() }, () => undefined);
+    await expect.poll(() => client).toBeDefined();
+    client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1", threadId: "child" }));
+
+    await registry.cancelActiveThread("project", "child");
+
+    expect(client?.commandTypes).toContain("subagentCancel");
+    client!.cancelError = new Error("worker already stopped");
+    client?.emitSidecarEvent(event(client.instanceId, 2, { type: "completed", runId: "run-1" }));
+    await expect(registry.cancelActiveThread("project", "child")).resolves.toBeUndefined();
+    release();
+    await run;
+    await expect(registry.cancelActiveThread("project", "child")).resolves.toBeUndefined();
   });
 
   it("仅在子会话 prompt 和运行结束时更新 thread updatedAt", async () => {

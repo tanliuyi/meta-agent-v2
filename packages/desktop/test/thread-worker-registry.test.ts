@@ -85,12 +85,14 @@ describe("ThreadWorkerRegistry", () => {
   it("routes active subagent sessions without opening a second thread worker", async () => {
     const harness = createHarness(userDataDir);
     const acknowledgeSubagent = vi.fn(() => true);
+    const cancelSubagent = vi.fn(async () => undefined);
     harness.options.isActiveSubagentThread = (_projectId, threadId) => threadId === "subagent";
     harness.options.attachSubagent = async (_projectId, threadId) =>
       threadId === "subagent"
         ? { ...bootstrap(threadId), control: { ...bootstrap(threadId).control, interaction: "read-only" } }
         : undefined;
     harness.options.acknowledgeSubagent = acknowledgeSubagent;
+    harness.options.cancelSubagent = cancelSubagent;
     const registry = new ThreadWorkerRegistry(harness.options);
 
     await expect(registry.attach("project", "subagent")).resolves.toMatchObject({
@@ -98,10 +100,11 @@ describe("ThreadWorkerRegistry", () => {
       control: { interaction: "read-only" },
     });
     await expect(registry.prewarm("project", "subagent")).resolves.toBeUndefined();
-    await expect(registry.cancel("project", "subagent")).rejects.toThrow("read-only");
+    await expect(registry.cancel("project", "subagent")).resolves.toEqual({ steering: [], followUp: [] });
     registry.acknowledge("subagent-worker", 7);
 
     expect(harness.clients).toHaveLength(0);
+    expect(cancelSubagent).toHaveBeenCalledWith("project", "subagent");
     expect(acknowledgeSubagent).toHaveBeenCalledWith("subagent-worker", 7);
     await registry.dispose();
   });

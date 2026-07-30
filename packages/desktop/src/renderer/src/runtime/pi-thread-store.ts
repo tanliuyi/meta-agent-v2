@@ -32,7 +32,7 @@ export function getPiThreadNodesChange(nodes: readonly PiTimelineNode[]): PiThre
 
 /** 保持 Pi timeline identity，并以事务方式应用一个 event batch。 */
 export class PiThreadStore {
-  private state: PiThreadSnapshot;
+  private state: PiThreadSnapshot | string;
   private nodeIndexes: Map<string, number>;
   private partIndexes: Map<string, Map<string, number>>;
   private readonly listeners = new Set<Listener>();
@@ -44,7 +44,28 @@ export class PiThreadStore {
     this.partIndexes = indexes.partIndexes;
   }
 
-  getSnapshot = (): PiThreadSnapshot => this.state;
+  getSnapshot = (): PiThreadSnapshot => this.hydrate();
+
+  hibernate(): boolean {
+    if (typeof this.state === "string") return true;
+    if (this.listeners.size > 0) return false;
+    this.state = JSON.stringify(this.state);
+    this.nodeIndexes = new Map();
+    this.partIndexes = new Map();
+    return true;
+  }
+
+  getHibernatedBytes(): number {
+    return typeof this.state === "string" ? this.state.length * 2 : 0;
+  }
+
+  evictHibernated(): boolean {
+    if (typeof this.state !== "string" || this.listeners.size > 0) return false;
+    this.state = detachedSnapshot();
+    this.nodeIndexes = new Map();
+    this.partIndexes = new Map();
+    return true;
+  }
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
@@ -53,40 +74,51 @@ export class PiThreadStore {
 
   replace(snapshot: PiThreadSnapshot): void {
     const indexes = indexSnapshot(snapshot);
-    const previousNodes = this.state.nodes;
+    const previousNodes = typeof this.state === "string" ? undefined : this.state.nodes;
     this.state = snapshot;
     this.nodeIndexes = indexes.nodeIndexes;
     this.partIndexes = indexes.partIndexes;
-    recordNodeChange(previousNodes, snapshot.nodes, 0);
+    if (previousNodes) recordNodeChange(previousNodes, snapshot.nodes, 0);
     this.notify();
   }
 
   apply(batch: PiThreadEventBatch): void {
-    validateBatch(batch, this.state);
-    if (batch.toSequence <= this.state.cursor) return;
+    const state = this.hydrate();
+    validateBatch(batch, state);
+    if (batch.toSequence <= state.cursor) return;
 
     let firstNewEvent = 0;
     while (
       batch.events[firstNewEvent]?.sequence !== undefined &&
-      batch.events[firstNewEvent]!.sequence <= this.state.cursor
+      batch.events[firstNewEvent]!.sequence <= state.cursor
     ) {
       firstNewEvent += 1;
     }
     const firstSequence = batch.events[firstNewEvent]?.sequence;
-    if (firstSequence !== this.state.cursor + 1)
-      throw new PiThreadStoreError(`timeline sequence gap: ${this.state.cursor} -> ${String(firstSequence)}`);
+    if (firstSequence !== state.cursor + 1)
+      throw new PiThreadStoreError(`timeline sequence gap: ${state.cursor} -> ${String(firstSequence)}`);
 
-    const mutation = new PiThreadBatchMutation(this.state, this.nodeIndexes, this.partIndexes);
+    const mutation = new PiThreadBatchMutation(state, this.nodeIndexes, this.partIndexes);
     for (let index = firstNewEvent; index < batch.events.length; index += 1) {
       const envelope = batch.events[index];
       if (envelope) mutation.apply(envelope.event, envelope.sequence);
     }
     const result = mutation.finish();
-    recordNodeChange(this.state.nodes, result.snapshot.nodes, result.dirtyFrom);
+    recordNodeChange(state.nodes, result.snapshot.nodes, result.dirtyFrom);
     this.state = result.snapshot;
     this.nodeIndexes = result.nodeIndexes;
     this.partIndexes = result.partIndexes;
     this.notify();
+  }
+
+  private hydrate(): PiThreadSnapshot {
+    if (typeof this.state !== "string") return this.state;
+    const snapshot = JSON.parse(this.state) as PiThreadSnapshot;
+    const indexes = indexSnapshot(snapshot);
+    this.state = snapshot;
+    this.nodeIndexes = indexes.nodeIndexes;
+    this.partIndexes = indexes.partIndexes;
+    return snapshot;
   }
 
   private notify(): void {

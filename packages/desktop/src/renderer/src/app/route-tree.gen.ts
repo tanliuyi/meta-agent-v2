@@ -19,6 +19,7 @@ import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
 import { Route as SettingsDependenciesRouteImport } from './routes/settings.dependencies'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
+import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
 import { Route as SettingsSubagentsRouteImport } from './routes/settings.subagents'
@@ -73,6 +74,11 @@ const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
   path: '/extensions',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsMemoryRoute = SettingsMemoryRouteImport.update({
+  id: '/memory',
+  path: '/memory',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsModelsRoute = SettingsModelsRouteImport.update({
   id: '/models',
   path: '/models',
@@ -104,6 +110,7 @@ export interface FileRoutesByFullPath {
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/subagents': typeof SettingsSubagentsRoute
@@ -117,6 +124,7 @@ export interface FileRoutesByTo {
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/subagents': typeof SettingsSubagentsRoute
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
+  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/subagents': typeof SettingsSubagentsRoute
@@ -152,6 +161,7 @@ export interface FileRouteTypes {
     | '/settings/auth'
     | '/settings/dependencies'
     | '/settings/extensions'
+    | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/subagents'
@@ -165,6 +175,7 @@ export interface FileRouteTypes {
     | '/settings/auth'
     | '/settings/dependencies'
     | '/settings/extensions'
+    | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/subagents'
@@ -181,6 +192,7 @@ export interface FileRouteTypes {
     | '/settings/auth'
     | '/settings/dependencies'
     | '/settings/extensions'
+    | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/subagents'
@@ -266,6 +278,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsExtensionsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/memory': {
+      id: '/settings/memory'
+      path: '/memory'
+      fullPath: '/settings/memory'
+      preLoaderRoute: typeof SettingsMemoryRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/models': {
       id: '/settings/models'
       path: '/models'
@@ -319,6 +338,7 @@ interface SettingsRouteChildren {
   SettingsAuthRoute: typeof SettingsAuthRoute
   SettingsDependenciesRoute: typeof SettingsDependenciesRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
+  SettingsMemoryRoute: typeof SettingsMemoryRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
   SettingsSubagentsRoute: typeof SettingsSubagentsRoute
@@ -330,6 +350,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAuthRoute: SettingsAuthRoute,
   SettingsDependenciesRoute: SettingsDependenciesRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
+  SettingsMemoryRoute: SettingsMemoryRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,
   SettingsSubagentsRoute: SettingsSubagentsRoute,

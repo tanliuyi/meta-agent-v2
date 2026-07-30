@@ -56,7 +56,10 @@ describe("ComposerSuggestions", () => {
   it("仅本地化内置扩展命令，技能与提示词保持原样", () => {
     expect(slashCommandDisplayName({ name: "reload", source: "builtin" })).toBe("reload");
     expect(slashCommandDisplayName({ name: "skill:add-llm-provider", source: "skill" })).toBe("add-llm-provider");
-    expect(slashCommandDisplayName({ name: "memory-insights", source: "extension" })).toBe("记忆概览");
+    expect(slashCommandDisplayName({ name: "memory-interview", source: "extension" })).toBe("记忆访谈");
+    expect(slashCommandDisplayName({ name: "subagents", source: "extension" })).toBe("subagents");
+    expect(slashCommandDisplayName({ name: "run", source: "extension" })).toBe("run");
+    expect(slashCommandDisplayName({ name: "subagents-watchdog", source: "extension" })).toBe("subagents-watchdog");
     expect(
       slashCommandDisplayDescription({
         name: "parallel-review",
@@ -100,18 +103,22 @@ describe("ComposerSuggestions", () => {
     expect(searchSlashCommands(commands, "memory interview")).toEqual(commands);
   });
 
-  it("隐藏仅展示只读 UI 内容的 Hermes Memory 命令", () => {
-    const commands: SlashCommand[] = [
-      "memory-insights",
-      "memory-skills",
-      "memory-preview-context",
-      "memory-switch-project",
-      "learn-memory-tool",
-      "memory-interview",
-    ].map((name) => ({ name, source: "extension" }));
+  it("保留适合对话场景的 Hermes Memory 命令", () => {
+    const commands: SlashCommand[] = ["memory-interview", "memory-consolidate", "learn-memory-tool"].map((name) => ({
+      name,
+      source: "extension",
+    }));
 
-    expect(commandSuggestions(commands, "").map(({ text }) => text)).toEqual(["/memory-interview "]);
-    expect(searchSlashCommands(commands, "memory-insights")).toEqual([]);
+    expect(commandSuggestions(commands, "").map(({ label }) => label)).toEqual([
+      "/记忆访谈",
+      "/整理记忆",
+      "/了解记忆工具",
+    ]);
+    expect(
+      searchSlashCommands(commands, "记忆")
+        .map(({ name }) => name)
+        .sort(),
+    ).toEqual(["memory-interview", "memory-consolidate", "learn-memory-tool"].sort());
   });
 
   it("为 combobox 解析补全上下文并生成稳定 option id", () => {

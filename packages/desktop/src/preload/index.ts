@@ -189,6 +189,13 @@ const desktopApi: DesktopApi = {
     getConfig: () => ipcRenderer.invoke(CHANNELS.settingsGetConfig),
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.settingsSaveConfig, input),
   },
+  memorySettings: {
+    getSnapshot: () => ipcRenderer.invoke(CHANNELS.memorySettingsGetSnapshot),
+    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsSaveConfig, input),
+    mutateEntry: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsMutateEntry, input),
+    runMaintenance: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsRunMaintenance, input),
+    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.memorySettingsSetEditorDirty, dirty) === true,
+  },
   extensions: {
     getConfig: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.extensionsGetConfig, projectId, threadId),
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.extensionsSaveConfig, input),
@@ -329,7 +336,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.sessionsRespond, projectId, threadId, response),
   },
   files: {
-    list: (projectId, path, query) => ipcRenderer.invoke(CHANNELS.filesList, projectId, path, query),
+    list: (projectId, path, query, requestGroup) =>
+      ipcRenderer.invoke(CHANNELS.filesList, projectId, path, query, requestGroup),
     read: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesRead, projectId, path),
     resolvePath: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, projectId, path),
     open: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesOpen, projectId, path),

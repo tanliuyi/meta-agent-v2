@@ -3,14 +3,17 @@ import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
+import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
+import Square from "lucide-react/dist/esm/icons/square.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { memo } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { ContextMenuContent } from "../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../shared/ui/context-menu-item.tsx";
+import { Badge } from "../assistant-ui/badge.tsx";
 import { ThreadElapsedTime } from "./thread-elapsed-time.tsx";
 
 const TREE_GUIDE_START = 16;
@@ -22,6 +25,7 @@ interface DesktopThreadListItemProps {
   active: boolean;
   isSwitching: boolean;
   isRenamingPending: boolean;
+  isStopPending: boolean;
   isArchivePending: boolean;
   isDeletePending: boolean;
   depth: number;
@@ -33,6 +37,7 @@ interface DesktopThreadListItemProps {
   compactRoot?: boolean;
   onToggle(threadId: string): void;
   onRenameStart(thread: Thread): void;
+  onStop(thread: Thread): void;
   onOpen(thread: Thread): void;
   onArchive(thread: Thread, archived: boolean): void;
   onDelete(thread: Thread): void;
@@ -42,7 +47,13 @@ interface DesktopThreadListItemProps {
 export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   const { thread } = props;
   const subagentDisplayName = thread.agentName ? builtinSubagentDisplayName(thread.agentName) : undefined;
-  const isPending = props.isSwitching || props.isRenamingPending || props.isArchivePending || props.isDeletePending;
+  const activeSubagent = thread.origin === "subagent" && thread.running;
+  const isPending =
+    props.isSwitching ||
+    props.isRenamingPending ||
+    props.isStopPending ||
+    props.isArchivePending ||
+    props.isDeletePending;
   const contentIndent =
     props.compactRoot && props.depth === 0 && props.childCount === 0 ? 8 : 32 + props.depth * TREE_LEVEL_INDENT;
   return (
@@ -128,13 +139,15 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
               <GitBranch className="text-muted-foreground size-3.5 shrink-0" aria-label="分支会话" />
             ) : null}
             {thread.origin === "subagent" && thread.agentName && subagentDisplayName ? (
-              <span
+              <Badge
                 data-slot="subagent-name"
-                className="text-foreground/75 max-w-20 shrink-0 truncate text-xs font-medium"
+                variant="muted"
+                size="sm"
+                className="max-w-20 shrink-0 truncate"
                 title={thread.agentName}
               >
                 {subagentDisplayName}
-              </span>
+              </Badge>
             ) : null}
             <span data-slot="thread-title" className="min-w-0 flex-1 truncate" title={thread.title || "新会话"}>
               {thread.title || "新会话"}
@@ -156,13 +169,31 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         </div>
       </ContextMenu.Trigger>
       <ContextMenuContent>
-        <ContextMenuItem disabled={props.isSwitching} onSelect={() => props.onRenameStart(thread)}>
+        {thread.origin === "subagent" ? (
+          <ContextMenuItem disabled={props.isSwitching} onSelect={() => props.onOpen(thread)}>
+            <Eye /> 查看运行详情
+          </ContextMenuItem>
+        ) : null}
+        {activeSubagent ? (
+          <ContextMenuItem
+            variant="destructive"
+            disabled={props.isSwitching || props.isStopPending}
+            onSelect={() => props.onStop(thread)}
+          >
+            <Square /> 停止运行
+          </ContextMenuItem>
+        ) : null}
+        <ContextMenuItem disabled={props.isSwitching || activeSubagent} onSelect={() => props.onRenameStart(thread)}>
           <Pencil /> 重命名
         </ContextMenuItem>
-        <ContextMenuItem disabled={props.isSwitching} onSelect={() => props.onArchive(thread, true)}>
+        <ContextMenuItem disabled={props.isSwitching || activeSubagent} onSelect={() => props.onArchive(thread, true)}>
           <Archive /> 归档
         </ContextMenuItem>
-        <ContextMenuItem variant="destructive" disabled={props.isSwitching} onSelect={() => props.onDelete(thread)}>
+        <ContextMenuItem
+          variant="destructive"
+          disabled={props.isSwitching || activeSubagent}
+          onSelect={() => props.onDelete(thread)}
+        >
           <Trash2 /> 删除
         </ContextMenuItem>
       </ContextMenuContent>

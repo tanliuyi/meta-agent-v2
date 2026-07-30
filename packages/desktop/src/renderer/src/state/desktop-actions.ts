@@ -10,6 +10,7 @@ export interface DesktopActions {
   removeProject(projectId: string): Promise<void>;
   prewarmThread(projectId: string, threadId: string): void;
   renameThread(projectId: string, threadId: string, title: string): Promise<void>;
+  stopThread(projectId: string, threadId: string): Promise<void>;
   setThreadArchived(projectId: string, threadId: string, archived: boolean): Promise<void>;
   removeThread(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<void>;
   clearError(): void;

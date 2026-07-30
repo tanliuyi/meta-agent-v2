@@ -52,6 +52,27 @@ export function normalizeProjectsMemoryDir(input: string): string | undefined {
   return normalized;
 }
 
+export interface GlobalMemoryRoot {
+  globalDir: string;
+  legacyGlobalDir: string;
+  shouldMigrateLegacyRoot: boolean;
+}
+
+export function resolveGlobalMemoryRoot(
+  configuredMemoryDir: string | undefined,
+  agentRoot = AGENT_ROOT,
+): GlobalMemoryRoot {
+  const legacyGlobalDir = path.join(agentRoot, "memory");
+  const defaultGlobalDir = path.join(agentRoot, "pi-hermes-memory");
+  const configured = configuredMemoryDir?.trim();
+  const pointsToLegacyRoot = configured ? path.resolve(configured) === path.resolve(legacyGlobalDir) : false;
+  return {
+    globalDir: !configured || pointsToLegacyRoot ? defaultGlobalDir : configured,
+    legacyGlobalDir,
+    shouldMigrateLegacyRoot: !configured || pointsToLegacyRoot,
+  };
+}
+
 export function resolveProjectsRoot(projectsMemoryDir = DEFAULT_PROJECTS_MEMORY_DIR): string {
   const normalized = normalizeProjectsMemoryDir(projectsMemoryDir) ?? DEFAULT_PROJECTS_MEMORY_DIR;
   return path.join(AGENT_ROOT, normalized);

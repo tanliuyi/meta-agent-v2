@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { PiMessageRepositoryConverter } from "../src/renderer/src/runtime/pi-message-repository.ts";
-import { PiThreadStore, PiThreadStoreError } from "../src/renderer/src/runtime/pi-thread-store.ts";
+import {
+  detachedSnapshot as detachedThreadSnapshot,
+  PiThreadStore,
+  PiThreadStoreError,
+} from "../src/renderer/src/runtime/pi-thread-store.ts";
 import {
   type PiAssistantMessage,
   type PiNoticeMessage,
@@ -22,6 +26,47 @@ describe("PiThreadStore", () => {
     expect(nodes[0]).toBe(user);
     expect(nodes[1]).not.toBe(assistant);
     expect(nodes[1]).toMatchObject({ content: [{ type: "text", text: "hello!" }] });
+  });
+
+  it("休眠后按需恢复 snapshot 与索引，并继续应用增量", () => {
+    const initial = snapshot([userNode("u", null), assistantNode("a", "u")], "a");
+    const store = new PiThreadStore(initial);
+
+    expect(store.hibernate()).toBe(true);
+    expect(store.hibernate()).toBe(true);
+    const restored = store.getSnapshot();
+
+    expect(restored).toEqual(initial);
+    expect(restored).not.toBe(initial);
+    store.apply(batch(1, { type: "text-delta", messageId: "a", partId: "a:text:0", delta: "!" }));
+    expect(store.getSnapshot().nodes[1]).toMatchObject({ content: [{ text: "hello!" }] });
+  });
+
+  it("休眠状态可由新 bootstrap 直接替换，无需恢复旧 snapshot", () => {
+    const store = new PiThreadStore(snapshot([assistantNode("old", null)], "old"));
+    const replacement = snapshot([userNode("new", null)], "new", 2);
+
+    store.hibernate();
+    store.replace(replacement);
+
+    expect(store.getSnapshot()).toBe(replacement);
+  });
+
+  it("有订阅者时拒绝休眠，并可在释放订阅后按预算驱逐", () => {
+    const initial = snapshot([assistantNode("a", null)], "a");
+    const store = new PiThreadStore(initial);
+    const unsubscribe = store.subscribe(() => undefined);
+
+    expect(store.hibernate()).toBe(false);
+    expect(store.getSnapshot()).toBe(initial);
+    expect(store.getHibernatedBytes()).toBe(0);
+
+    unsubscribe();
+    expect(store.hibernate()).toBe(true);
+    expect(store.getHibernatedBytes()).toBeGreaterThan(0);
+    expect(store.evictHibernated()).toBe(true);
+    expect(store.getHibernatedBytes()).toBe(0);
+    expect(store.getSnapshot()).toEqual(detachedThreadSnapshot());
   });
 
   it("同一 batch 多个 delta 只发布最终快照，且不修改旧 snapshot", () => {
