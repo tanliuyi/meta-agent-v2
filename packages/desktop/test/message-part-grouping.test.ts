@@ -178,7 +178,7 @@ describe("message part grouping", () => {
     ] satisfies PartState[];
 
     expect(summarizeChainOfThought(parts, [0, 1, 2, 3, 4])).toBe("读取一些文件，修改一些文件，执行一些命令");
-    expect(summarizeChainOfThought(parts, [0])).toBe("思考过程");
+    expect(summarizeChainOfThought(parts, [0])).toBe("思考");
   });
 
   it("未知扩展工具使用通用语义", () => {
