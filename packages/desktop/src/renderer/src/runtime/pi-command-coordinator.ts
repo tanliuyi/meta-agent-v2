@@ -84,8 +84,13 @@ export class PiCommandCoordinator {
     );
   };
 
-  edit = async (message: AppendMessage): Promise<void> => {
-    this.assertIdle("edit");
+  edit = async (
+    message: AppendMessage,
+    items: readonly PiQueueItem[] = [],
+    isRunning = this.getPhase() === "running",
+  ): Promise<void> => {
+    if (isRunning) await this.cancel(items);
+    else this.assertIdle("edit");
     const target = this.requireTarget();
     if (!message.sourceId) throw new Error("assistant-ui edit 缺少 sourceId");
     const input = await promptInput(message, target, undefined);

@@ -103,7 +103,10 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
       isSendDisabled,
       onNew: coordinator.rejectUnexpectedOnNew,
       queue,
-      onEdit: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.edit : undefined,
+      onEdit:
+        active && (snapshot.phase === "idle" || snapshot.phase === "running") && !isSendDisabled
+          ? (message) => coordinator.edit(message, snapshotRef.current.queue, isAgentRunning)
+          : undefined,
       onReload: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.reload : undefined,
       onCancel: hasCommandTarget && isCancelable ? () => coordinator.cancel(snapshotRef.current.queue) : undefined,
       adapters: { attachments: !isSendDisabled ? imageAttachmentAdapter : undefined },

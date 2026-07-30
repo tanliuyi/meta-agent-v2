@@ -1,7 +1,7 @@
 import type { AssistantRuntime } from "@assistant-ui/react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSessionRecord } from "../src/renderer/src/runtime/pi-session-store.ts";
 import { SessionTransportManager } from "../src/renderer/src/runtime/session-transport-manager.ts";
 import { usePiSessionRuntime } from "../src/renderer/src/runtime/use-pi-session-runtime.ts";
@@ -16,12 +16,14 @@ describe("session route running state", () => {
     record.stores.control.replace(control(true));
     record.stores.connection.setState("ready");
     let runtime: AssistantRuntime | undefined;
+    const transport = new SessionTransportManager();
+    vi.spyOn(transport, "hasCommittedLease").mockReturnValue(true);
 
     function RuntimeProbe() {
       runtime = usePiSessionRuntime({
         record,
         active: true,
-        transport: new SessionTransportManager(),
+        transport,
       }).runtime;
       return null;
     }
@@ -29,6 +31,7 @@ describe("session route running state", () => {
     renderToStaticMarkup(createElement(ToastProvider, null, createElement(RuntimeProbe)));
 
     expect(runtime?.thread.getState().isRunning).toBe(true);
+    expect(runtime?.thread.getState().capabilities.edit).toBe(true);
   });
 
   it("cached control 通过窄 summary action 更新 catalog running", () => {

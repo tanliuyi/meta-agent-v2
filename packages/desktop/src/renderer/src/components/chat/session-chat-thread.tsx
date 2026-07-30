@@ -25,7 +25,7 @@ export function SessionChatThread() {
               <Messages />
               <SessionThreadActivity />
             </div>
-            <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer pointer-events-auto sticky bottom-0 mt-auto flex w-full flex-col gap-2 overflow-visible bg-[linear-gradient(to_bottom,transparent,var(--color-background))] pb-4">
+            <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer flex-shrink-0 pointer-events-auto sticky bottom-0 mt-auto flex w-full flex-col gap-2 overflow-visible bg-[linear-gradient(to_bottom,transparent,var(--color-background))] pb-4">
               <ThreadPrimitive.ScrollToBottom asChild>
                 <TooltipIconButton
                   tooltip="滚动到底部"

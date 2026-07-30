@@ -1,6 +1,6 @@
 export function SessionBootstrapPendingThread() {
   return (
-    <div className="session-bootstrap-pending" aria-busy="true" aria-label="正在连接会话">
+    <div className="session-bootstrap-pending p-4" aria-busy="true" aria-label="正在连接会话">
       <div className="session-bootstrap-messages" aria-hidden="true">
         <span />
         <span />

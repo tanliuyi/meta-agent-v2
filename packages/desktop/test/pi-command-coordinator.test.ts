@@ -188,6 +188,21 @@ describe("PiCommandCoordinator", () => {
     expect(reload).toHaveBeenCalledWith(expect.objectContaining({ parentId: "resolved-user-entry" }));
   });
 
+  it("running 时提交 edit 先取消当前 run，再发送编辑后的消息", async () => {
+    phase = "running";
+    const coordinator = createCoordinator();
+    const edited = { ...userMessage("edited while running"), sourceId: "user-entry" };
+    const items = [{ id: "queued", mode: "followUp" as const, prompt: "later", source: "pi-observed" as const }];
+
+    await coordinator.edit(edited, items, true);
+
+    expect(cancel).toHaveBeenCalledWith("project", "thread");
+    expect(edit).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceId: "user-entry", text: "edited while running" }),
+    );
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(edit.mock.invocationCallOrder[0] ?? 0);
+  });
+
   it("不支持单项 queue 操作 fail fast，framework clear 只记录 advisory", () => {
     const coordinator = createCoordinator();
 

@@ -1,3 +1,6 @@
+import { Collapsible } from "@renderer/shared/ui/collapsible";
+import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
+import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
@@ -56,8 +59,7 @@ export function GeneralConversationSection({
     });
   }, [actions, catalogLoading, expanded, generalAvailable, generalThreads, loadState.attempted]);
 
-  function toggleExpanded() {
-    const next = !expanded;
+  function handleOpenChange(next: boolean) {
     setExpanded(next);
     writeStoredProjectExpanded(GENERAL_WORKSPACE_ID, next);
   }
@@ -68,79 +70,76 @@ export function GeneralConversationSection({
 
   return (
     <section className="sidebar-conversation-section" data-expanded={expanded}>
-      <div className="sidebar-section-heading">
-        <button
-          type="button"
-          className="sidebar-section-toggle"
-          aria-expanded={expanded}
-          aria-controls={GENERAL_THREAD_LIST_ID}
-          onClick={toggleExpanded}
+      <Collapsible open={expanded} onOpenChange={handleOpenChange}>
+        <div className="sidebar-section-heading">
+          <CollapsibleTrigger asChild>
+            <button type="button" className="sidebar-section-toggle">
+              <span>对话</span>
+              {expanded ? (
+                <ChevronDown className="sidebar-conversation-control" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="sidebar-conversation-control" aria-hidden="true" />
+              )}
+            </button>
+          </CollapsibleTrigger>
+          <TooltipIconButton
+            variant="ghost"
+            size="icon"
+            aria-label="新建对话"
+            tooltip="新建对话"
+            side="top"
+            disabled={!generalAvailable || newConversationDisabled}
+            className="sidebar-conversation-control"
+            onClick={(event) => runControlledThreadAction(event, onNewConversation)}
+          >
+            <Plus />
+          </TooltipIconButton>
+        </div>
+        <CollapsibleContent
+          id={GENERAL_THREAD_LIST_ID}
+          className="data-closed:animate-collapsible-up data-open:animate-collapsible-down data-open:duration-(--animation-duration) data-closed:duration-(--animation-duration) overflow-hidden"
+          role="region"
+          aria-label="对话会话列表"
         >
-          <span>对话</span>
-          {expanded ? (
-            <ChevronDown className="sidebar-conversation-control" aria-hidden="true" />
-          ) : (
-            <ChevronRight className="sidebar-conversation-control" aria-hidden="true" />
-          )}
-        </button>
-        <TooltipIconButton
-          variant="ghost"
-          size="icon"
-          aria-label="新建对话"
-          tooltip="新建对话"
-          side="top"
-          disabled={!generalAvailable || newConversationDisabled}
-          className="sidebar-conversation-control"
-          onClick={(event) => runControlledThreadAction(event, onNewConversation)}
-        >
-          <Plus />
-        </TooltipIconButton>
-      </div>
-      <div
-        id={GENERAL_THREAD_LIST_ID}
-        className="sidebar-projects sidebar-conversation-list"
-        role="region"
-        aria-label="对话会话列表"
-        hidden={!expanded}
-      >
-        {expanded ? (
-          catalogLoading ? (
-            <div className="flex h-8 items-center gap-2 px-4 text-sm text-muted-foreground" role="status">
-              <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
-              <span>加载中</span>
-            </div>
-          ) : !generalAvailable ? (
-            <div className="flex h-8 items-center gap-2 px-4 text-sm text-destructive" role="status">
-              <span>不可用</span>
-            </div>
-          ) : loadState.failed ? (
-            <div className="flex h-8 items-center justify-between gap-2 px-2 text-sm text-destructive" role="status">
-              <span>加载失败</span>
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                aria-label="重试加载对话"
-                tooltip="重试"
-                className="sidebar-conversation-control"
-                onClick={retryLoad}
-              >
-                <RefreshCw />
-              </TooltipIconButton>
-            </div>
-          ) : generalThreads === undefined ? (
-            <div className="flex h-8 items-center gap-2 px-4 text-sm text-muted-foreground" role="status">
-              <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
-              <span>加载中</span>
-            </div>
-          ) : generalThreads.length > 0 && generalProject ? (
-            <DesktopThreadList project={generalProject} threads={generalThreads} compactRoot />
-          ) : (
-            <div className="flex h-8 items-center gap-2 px-2 text-sm text-muted-foreground" role="status">
-              <span>没有会话</span>
-            </div>
-          )
-        ) : null}
-      </div>
+          <div className="sidebar-projects sidebar-conversation-list">
+            {catalogLoading ? (
+              <div className="flex h-8 items-center gap-2 px-4 text-sm text-muted-foreground" role="status">
+                <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
+                <span>加载中</span>
+              </div>
+            ) : !generalAvailable ? (
+              <div className="flex h-8 items-center gap-2 px-4 text-sm text-destructive" role="status">
+                <span>不可用</span>
+              </div>
+            ) : loadState.failed ? (
+              <div className="flex h-8 items-center justify-between gap-2 px-2 text-sm text-destructive" role="status">
+                <span>加载失败</span>
+                <TooltipIconButton
+                  variant="ghost"
+                  size="icon"
+                  aria-label="重试加载对话"
+                  tooltip="重试"
+                  className="sidebar-conversation-control"
+                  onClick={retryLoad}
+                >
+                  <RefreshCw />
+                </TooltipIconButton>
+              </div>
+            ) : generalThreads === undefined ? (
+              <div className="flex h-8 items-center gap-2 px-4 text-sm text-muted-foreground" role="status">
+                <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
+                <span>加载中</span>
+              </div>
+            ) : generalThreads.length > 0 && generalProject ? (
+              <DesktopThreadList project={generalProject} threads={generalThreads} compactRoot />
+            ) : (
+              <div className="flex h-8 items-center gap-2 px-2 text-sm text-muted-foreground" role="status">
+                <span>没有会话</span>
+              </div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </section>
   );
 }

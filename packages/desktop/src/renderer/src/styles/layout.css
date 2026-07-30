@@ -219,8 +219,8 @@
   transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
-.sidebar-conversation-section > .sidebar-section-heading:hover .sidebar-conversation-control,
-.sidebar-conversation-section > .sidebar-section-heading:focus-within .sidebar-conversation-control {
+.sidebar-conversation-section .sidebar-section-heading:hover .sidebar-conversation-control,
+.sidebar-conversation-section .sidebar-section-heading:focus-within .sidebar-conversation-control {
   visibility: visible;
   opacity: 1;
 }
@@ -262,7 +262,6 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-top: 4px;
 }
 
 .thread-main {
@@ -322,12 +321,23 @@
 }
 
 .topbar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
   padding: 0 10px 0 16px;
-  border-bottom: 1px solid hsl(var(--border));
+}
+
+.topbar::after {
+  content: " ";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: hsl(var(--border));
+  opacity: 0.2;
 }
 
 .app-frame[data-platform="darwin"] .topbar {

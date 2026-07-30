@@ -1,5 +1,8 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { Button } from "@renderer/shared/ui/button";
+import { Collapsible } from "@renderer/shared/ui/collapsible";
+import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
+import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogClose } from "@renderer/shared/ui/dialog-close";
@@ -69,8 +72,7 @@ export const ProjectItem = memo(function ProjectItem({
     };
   }, [actions, expanded, project.id, threads]);
 
-  const toggleExpanded = () => {
-    const next = !expanded;
+  const handleOpenChange = (next: boolean) => {
     setExpanded(next);
     writeStoredProjectExpanded(project.id, next);
   };
@@ -101,94 +103,98 @@ export const ProjectItem = memo(function ProjectItem({
 
   return (
     <li className="project-group" data-project-id={project.id}>
-      <ContextMenu.Root>
-        <ContextMenu.Trigger asChild>
-          <div
-            className="project-row group hover:bg-muted data-[state=open]:bg-muted grid h-8 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md pe-1.5 transition-colors"
-            data-active={active || undefined}
-            data-pending={pendingAction || undefined}
-          >
-            <button
-              type="button"
-              className="focus-visible:ring-ring/50 flex h-8 min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm outline-none focus-visible:ring-[3px]"
-              aria-expanded={expanded}
-              aria-controls={threadListId}
-              onClick={toggleExpanded}
-            >
-              {expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
-              <span className="min-w-0 flex-1 select-none truncate font-medium">{project.name}</span>
-              {project.available ? null : <span className="project-warning">不可用</span>}
-            </button>
+      <Collapsible open={expanded} onOpenChange={handleOpenChange}>
+        <ContextMenu.Root>
+          <ContextMenu.Trigger asChild>
             <div
-              className={
-                showRunningIndicator
-                  ? "flex h-6 w-6 shrink-0 overflow-hidden transition-[width] group-hover:w-12 group-has-focus-visible:w-12"
-                  : "size-6 shrink-0"
-              }
+              className="project-row group hover:bg-muted data-[state=open]:bg-muted grid h-8 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md pe-1.5 transition-colors"
+              data-active={active || undefined}
+              data-pending={pendingAction || undefined}
             >
-              {showRunningIndicator ? (
-                <span
-                  className="text-muted-foreground/60 grid size-6 shrink-0 place-items-center"
-                  aria-label={`${project.name} 中有任务正在运行`}
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="focus-visible:ring-ring/50 flex h-8 min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm outline-none focus-visible:ring-[3px]"
                 >
-                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-                </span>
-              ) : null}
-              <TooltipIconButton
-                tooltip="新建任务"
-                side="right"
-                disabled={!project.available || newTaskDisabled}
-                className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 disabled:opacity-0"
-                aria-label={`在 ${project.name} 中新建任务`}
-                onClick={() => onNewTask(project.id)}
+                  {expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
+                  <span className="min-w-0 flex-1 select-none truncate font-medium">{project.name}</span>
+                  {project.available ? null : <span className="project-warning">不可用</span>}
+                </button>
+              </CollapsibleTrigger>
+              <div
+                className={
+                  showRunningIndicator
+                    ? "flex h-6 w-6 shrink-0 overflow-hidden transition-[width] group-hover:w-12 group-has-focus-visible:w-12"
+                    : "size-6 shrink-0"
+                }
               >
-                <Plus className="size-3.5" />
-              </TooltipIconButton>
+                {showRunningIndicator ? (
+                  <span
+                    className="text-muted-foreground/60 grid size-6 shrink-0 place-items-center"
+                    aria-label={`${project.name} 中有任务正在运行`}
+                  >
+                    <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+                  </span>
+                ) : null}
+                <TooltipIconButton
+                  tooltip="新建任务"
+                  side="right"
+                  disabled={!project.available || newTaskDisabled}
+                  className="text-muted-foreground/60 hover:bg-foreground/10 hover:text-foreground size-6 shrink-0 p-0 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 disabled:opacity-0"
+                  aria-label={`在 ${project.name} 中新建任务`}
+                  onClick={() => onNewTask(project.id)}
+                >
+                  <Plus className="size-3.5" />
+                </TooltipIconButton>
+              </div>
             </div>
-          </div>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Content className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-44 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm">
-            <ContextMenu.Item
-              className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
-              disabled={pendingAction}
-              onSelect={() => setRenameName(project.name)}
-            >
-              <Pencil size={14} /> 重命名
-            </ContextMenu.Item>
-            <ContextMenu.Item
-              className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
-              disabled={pendingAction}
-              onSelect={() => runProjectAction(() => actions.openProjectExternally(project.id))}
-            >
-              <FolderOpen size={14} /> 在资源管理器中打开
-            </ContextMenu.Item>
-            <ContextMenu.Item
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
-              disabled={pendingAction}
-              onSelect={() => setDeletePending(true)}
-            >
-              <Trash2 size={14} /> 删除
-            </ContextMenu.Item>
-          </ContextMenu.Content>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
-      <div id={threadListId} hidden={!expanded}>
-        {expanded && threads ? (
-          threads.length > 0 ? (
-            <DesktopThreadList project={project} threads={threads} />
-          ) : (
+          </ContextMenu.Trigger>
+          <ContextMenu.Portal>
+            <ContextMenu.Content className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-44 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm">
+              <ContextMenu.Item
+                className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
+                disabled={pendingAction}
+                onSelect={() => setRenameName(project.name)}
+              >
+                <Pencil size={14} /> 重命名
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
+                disabled={pendingAction}
+                onSelect={() => runProjectAction(() => actions.openProjectExternally(project.id))}
+              >
+                <FolderOpen size={14} /> 在资源管理器中打开
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
+                disabled={pendingAction}
+                onSelect={() => setDeletePending(true)}
+              >
+                <Trash2 size={14} /> 删除
+              </ContextMenu.Item>
+            </ContextMenu.Content>
+          </ContextMenu.Portal>
+        </ContextMenu.Root>
+        <CollapsibleContent
+          id={threadListId}
+          className="data-closed:animate-collapsible-up data-open:animate-collapsible-down data-open:duration-(--animation-duration) data-closed:duration-(--animation-duration) overflow-hidden"
+        >
+          {threads ? (
+            threads.length > 0 ? (
+              <DesktopThreadList project={project} threads={threads} />
+            ) : (
+              <div className="flex h-8 items-center gap-2 px-8 text-sm text-muted-foreground" role="status">
+                <span>没有会话</span>
+              </div>
+            )
+          ) : loading ? (
             <div className="flex h-8 items-center gap-2 px-8 text-sm text-muted-foreground" role="status">
-              <span>没有会话</span>
+              <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
+              <span>加载中</span>
             </div>
-          )
-        ) : expanded && loading ? (
-          <div className="flex h-8 items-center gap-2 px-8 text-sm text-muted-foreground" role="status">
-            <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
-            <span>加载中</span>
-          </div>
-        ) : null}
-      </div>
+          ) : null}
+        </CollapsibleContent>
+      </Collapsible>
       <Dialog
         open={renameName !== null}
         onOpenChange={(open) => {
