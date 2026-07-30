@@ -39,6 +39,7 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 
 const bashSchema = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
+	description: Type.Optional(Type.String({ description: "Natural-language description of what the command does" })),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
 });
 

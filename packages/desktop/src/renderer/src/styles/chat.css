@@ -182,7 +182,8 @@
   color: hsl(var(--destructive));
 }
 .tool-code,
-.tool-result {
+.tool-result,
+.tool-command {
   margin: 0;
   padding: 8px 10px;
   /* overflow: visible; */
@@ -192,6 +193,14 @@
   font-family: var(--font-family-mono);
   font-size: var(--type-size-control);
   line-height: 1.7;
+}
+.tool-command {
+  display: -webkit-box;
+  overflow: hidden;
+  border-bottom: 1px solid hsl(var(--foreground) / 0.07);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: hsl(var(--muted-foreground));
 }
 .tool-result-image {
   display: block;

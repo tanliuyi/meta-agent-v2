@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { TooltipProvider } from "@renderer/shared/ui/tooltip-provider";
 import React from "react";
@@ -27,6 +28,8 @@ import {
   projectDisplayToolPath,
 } from "../src/renderer/src/components/chat/tools/tool-format.ts";
 
+const chatCss = readFileSync(new URL("../src/renderer/src/styles/chat.css", import.meta.url), "utf8");
+
 describe("ToolView TUI parity", () => {
   it("用 TUI 标题与 pending 底色展示流式 write 参数", () => {
     const markup = renderToolView(
@@ -45,39 +48,37 @@ describe("ToolView TUI parity", () => {
     expect(markup).toContain('data-state="closed"');
   });
 
-  it("bash content 默认完全折叠", () => {
+  it("bash content 默认完全折叠，标题只展示 description", () => {
     const partialResult = toolResult(Array.from({ length: 7 }, (_, index) => `line-${index + 1}`).join("\n"));
     const markup = renderToolView(
       toolCall({
         toolName: "bash",
-        args: { command: "generate output" },
+        args: { command: "generate output", description: "生成测试输出" },
         status: { type: "running" },
         artifact: { execution: "running", partialResult },
       }),
     );
 
-    expect(markup).toContain("generate output");
+    expect(markup).toContain("生成测试输出");
+    expect(markup).not.toContain("generate output");
     expect(markup).toContain("tool-running-cursor");
     expect(markup).not.toContain("tool-running-cursor-end");
     expect(markup).not.toContain("data-cursor-position");
     expect(markup).not.toContain("line-1");
   });
 
-  it("展开后的 bash content 随 delta 原位更新", () => {
+  it("展开后的 bash content 展示两行截断命令并随 delta 原位更新", () => {
+    const command = "printf one\nprintf two\nprintf three";
     const renderDelta = (result: unknown) =>
       renderToStaticMarkup(
-        <ToolContent
-          name="bash"
-          args={{ command: "stream output" }}
-          result={result}
-          error={false}
-          expanded
-          argsComplete
-        />,
+        <ToolContent name="bash" args={{ command }} result={result} error={false} expanded argsComplete />,
       );
     const first = renderDelta(toolResult("one\ntwo"));
     const next = renderDelta(toolResult("one\ntwo\nthree\nfour\nfive\nsix"));
 
+    expect(first).toContain('class="tool-command"');
+    expect(first).toContain("printf one\nprintf two\nprintf three");
+    expect(chatCss).toMatch(/\.tool-command\s*\{[^}]*-webkit-line-clamp:\s*2;/s);
     expect(first).toContain("one\ntwo");
     expect(first).not.toContain("six");
     expect(next).toContain("one\ntwo\nthree\nfour\nfive\nsix");

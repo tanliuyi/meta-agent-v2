@@ -125,7 +125,7 @@ function toolHeader(name: string, args: Readonly<Record<string, unknown>>, proje
   const rawPath = readToolStringArgument(args, "path", "file_path");
   const path = projectCwd ? projectDisplayToolPath(rawPath, projectCwd) : rawPath;
   if (name === "bash") {
-    return { label: "$", target: textTarget(readToolStringArgument(args, "command") || "…") };
+    return { label: "$", target: textTarget(readToolStringArgument(args, "description") || "…") };
   }
   if (name === "read") {
     return { label: "read", target: fileTarget(path), context: readLineRange(args) };
