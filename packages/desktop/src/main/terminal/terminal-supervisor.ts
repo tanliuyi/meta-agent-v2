@@ -3,6 +3,7 @@ import { getShellConfig, SettingsManager } from "@earendil-works/pi-coding-agent
 import * as pty from "node-pty";
 import type { TerminalEvent, TerminalSnapshot } from "../../shared/contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
+import { TerminalOutputBuffer } from "./terminal-output-buffer.ts";
 
 const MAX_OUTPUT = 2 * 1024 * 1024;
 const MIN_COLS = 20;
@@ -22,7 +23,7 @@ interface TerminalProcess {
   data?: pty.IDisposable;
   exit?: pty.IDisposable;
   shell: string;
-  output: string;
+  output: TerminalOutputBuffer;
   revision: number;
   running: boolean;
   disposed: boolean;
@@ -120,14 +121,14 @@ export class TerminalSupervisor {
     const terminal: TerminalProcess = {
       pty: terminalPty,
       shell: shell.file,
-      output: "",
+      output: new TerminalOutputBuffer(MAX_OUTPUT),
       revision: this.nextRevision(key),
       running: true,
       disposed: false,
     };
     terminal.data = terminalPty.onData((data) => {
       if (terminal.disposed) return;
-      terminal.output = trimOutput(terminal.output + data);
+      terminal.output.append(data);
       terminal.revision = this.nextRevision(key);
       this.changed({ type: "data", projectId, threadId, terminalId, revision: terminal.revision, data });
     });
@@ -213,17 +214,11 @@ function snapshot(
     terminalId,
     revision: terminal.revision,
     shell: terminal.shell,
-    output: terminal.output,
+    output: terminal.output.toString(),
     running: terminal.running,
     cols: terminal.pty.cols,
     rows: terminal.pty.rows,
   };
-}
-
-function trimOutput(output: string): string {
-  if (output.length <= MAX_OUTPUT) return output;
-  const start = output.indexOf("\n", output.length - MAX_OUTPUT);
-  return output.slice(start === -1 ? output.length - MAX_OUTPUT : start + 1);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

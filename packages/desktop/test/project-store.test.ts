@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectStore } from "../src/main/store/project-store.ts";
 
 const roots: string[] = [];
@@ -107,6 +107,33 @@ describe("ProjectStore", () => {
     const metadata = JSON.parse(await readFile(join(root, "state", "projects.json"), "utf8"));
     expect(metadata.projects[0]).toMatchObject({ projectId: "legacy-project", path: cwd });
     expect(JSON.parse(await readFile(file, "utf8"))).not.toHaveProperty("projects");
+  });
+
+  it("迁移目标写入失败时保留旧项目记录以便下次重试", async () => {
+    const root = await mkdtemp(join(tmpdir(), "meta-agent-project-migration-failure-"));
+    roots.push(root);
+    const file = join(root, "desktop-state.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        projects: [{ id: "legacy-project", name: "Legacy", cwd: root, lastOpenedAt: 1_700_000_000_000 }],
+        archivedThreads: {},
+        workbenches: {},
+      }),
+    );
+    const store = new ProjectStore(file);
+    const persistence = store as unknown as {
+      saveProjects(): Promise<void>;
+      saveDesktop(): Promise<void>;
+    };
+    vi.spyOn(persistence, "saveProjects").mockRejectedValue(new Error("disk full"));
+    const saveDesktop = vi.spyOn(persistence, "saveDesktop");
+
+    await expect(store.load()).rejects.toThrow("disk full");
+
+    expect(saveDesktop).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(file, "utf8"))).toHaveProperty("projects");
   });
 });
 

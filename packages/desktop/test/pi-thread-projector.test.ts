@@ -319,6 +319,66 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("长历史上的连续 delta 复用历史节点并保持旧 snapshot 不变", () => {
+    const entries: SessionEntry[] = Array.from({ length: 500 }, (_, index) =>
+      messageEntry(`user-${index}`, index === 0 ? null : `user-${index - 1}`, userMessage(`question ${index}`, index)),
+    );
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const message = assistantMessage("stop", 1_000, []);
+    const partial = assistantMessage("stop", 1_000, [{ type: "text", text: "" }]);
+
+    projector.handle({ type: "message_start", message });
+    projector.handle({
+      type: "message_update",
+      message,
+      assistantMessageEvent: { type: "text_start", contentIndex: 0, partial },
+    });
+    const before = projector.snapshot();
+    for (let index = 0; index < 1_000; index += 1) {
+      projector.handle({
+        type: "message_update",
+        message,
+        assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x", partial },
+      });
+    }
+    const after = projector.snapshot();
+
+    expect(after.nodes[0]).toBe(before.nodes[0]);
+    expect(before.nodes.at(-1)).toMatchObject({ kind: "assistant", content: [{ type: "text", text: "" }] });
+    expect(after.nodes.at(-1)).toMatchObject({
+      kind: "assistant",
+      content: [{ type: "text", text: "x".repeat(1_000) }],
+    });
+    projector.dispose();
+  });
+
+  it("长历史 rekey 单次更新 canonical id 与 transient 子节点", () => {
+    const entries: SessionEntry[] = Array.from({ length: 500 }, (_, index) =>
+      messageEntry(`user-${index}`, index === 0 ? null : `user-${index - 1}`, userMessage(`question ${index}`, index)),
+    );
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const assistant = assistantMessage("stop", 1_000, [{ type: "text", text: "answer" }]);
+    const child = customMessage(1_001);
+    projector.handle({ type: "message_start", message: assistant });
+    projector.handle({ type: "message_start", message: child });
+    const before = projector.snapshot();
+    const transientId = before.nodes[500]!.id;
+
+    entries.push(messageEntry("assistant-canonical", "user-499", assistant));
+    projector.checkpoint();
+    const after = projector.snapshot();
+
+    expect(after.nodes).toHaveLength(502);
+    expect(after.nodes[0]).toBe(before.nodes[0]);
+    expect(after.nodes[500]).toMatchObject({ id: "assistant-canonical", sourceEntryId: "assistant-canonical" });
+    expect(after.nodes[501]).toMatchObject({ parentId: "assistant-canonical", kind: "notice" });
+    expect(before.nodes[500]).toMatchObject({ id: transientId });
+    expect(before.nodes[501]).toMatchObject({ parentId: transientId });
+    projector.dispose();
+  });
+
   it("toolcall delta 直接使用 provider 的结构化参数，并在执行开始时校正", () => {
     const { session } = sessionHarness([]);
     const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });

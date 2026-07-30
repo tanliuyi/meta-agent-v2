@@ -297,6 +297,8 @@ export class SessionSupervisor {
   receive(update: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void {
     const consumerIds = new Set<string>();
     const consumerBytes = new Map<string, number>();
+    let deliveryTemplate: SessionPush | undefined;
+    let deliveryTemplateBytes = 0;
     for (const [ownerId, leases] of this.subscriptions) {
       for (const subscription of leases.values()) {
         if (
@@ -306,23 +308,30 @@ export class SessionSupervisor {
         )
           continue;
         const consumerId = consumerKey(ownerId, subscription.attachmentId);
-        const deliveredUpdate =
-          update.type === "control"
-            ? {
-                ...update,
-                control: {
-                  ...update.control,
-                  hostRequests: update.control.hostRequests.map((request) => ({ ...request, workerInstanceId })),
-                },
-              }
-            : update;
+        if (!deliveryTemplate) {
+          const deliveredUpdate =
+            update.type === "control"
+              ? {
+                  ...update,
+                  control: {
+                    ...update.control,
+                    hostRequests: update.control.hostRequests.map((request) => ({ ...request, workerInstanceId })),
+                  },
+                }
+              : update;
+          deliveryTemplate = {
+            ...deliveredUpdate,
+            attachmentId: "",
+            workerInstanceId,
+            sidecarSequence,
+          };
+          deliveryTemplateBytes = estimateDeliveryBytes(deliveryTemplate);
+        }
         const delivered: SessionPush = {
-          ...deliveredUpdate,
+          ...deliveryTemplate,
           attachmentId: subscription.attachmentId,
-          workerInstanceId,
-          sidecarSequence,
         };
-        const bytes = estimateDeliveryBytes(delivered);
+        const bytes = deliveryTemplateBytes + subscription.attachmentId.length * 2;
         if (
           subscription.pendingEvents >= MAX_ATTACHMENT_PENDING_EVENTS ||
           subscription.pendingBytes + bytes > MAX_ATTACHMENT_PENDING_BYTES

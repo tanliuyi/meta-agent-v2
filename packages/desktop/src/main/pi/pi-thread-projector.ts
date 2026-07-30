@@ -53,7 +53,8 @@ export class PiThreadProjector {
   private readonly projectId: string;
   private readonly session: AgentSession;
   private readonly publish: (batch: PiThreadEventBatch) => void;
-  private nodes: PiTimelineNode[] = [];
+  private nodeIds: string[] = [];
+  private nodeSnapshot: PiTimelineNode[] | undefined;
   private readonly byId = new Map<string, PiTimelineNode>();
   private readonly visibleByEntryId = new Map<string, string | null>();
   private readonly messageNodeIds = new Map<AgentMessage, string>();
@@ -92,13 +93,14 @@ export class PiThreadProjector {
   }
 
   snapshot(): PiThreadSnapshot {
+    const nodes = this.nodes();
     return {
       protocolVersion: PROTOCOL_VERSION,
       projectId: this.projectId,
       threadId: this.session.sessionId,
       cursor: this.sequence,
-      headId: this.nodes.at(-1)?.id ?? null,
-      nodes: this.nodes,
+      headId: this.nodeIds.at(-1) ?? null,
+      nodes,
       queue: this.queueItems,
       phase: this.phase,
       ...(this.activeTurnId ? { activeTurnId: this.activeTurnId } : {}),
@@ -180,7 +182,7 @@ export class PiThreadProjector {
 
     const node = {
       id: this.transientId("notification"),
-      parentId: this.nodes.at(-1)?.id ?? null,
+      parentId: this.nodeIds.at(-1) ?? null,
       createdAt,
       kind: "notice",
       noticeType: "notification",
@@ -332,7 +334,7 @@ export class PiThreadProjector {
 
   private startMessage(message: AgentMessage): void {
     if (this.messageNodeIds.has(message)) return;
-    const parentId = this.nodes.at(-1)?.id ?? null;
+    const parentId = this.nodeIds.at(-1) ?? null;
     switch (message.role) {
       case "user": {
         const consumed = this.pendingConsumption.shift();
@@ -596,7 +598,8 @@ export class PiThreadProjector {
         })
       : [];
     const branch = this.session.sessionManager.getBranch();
-    this.nodes = [];
+    this.nodeIds = [];
+    this.nodeSnapshot = undefined;
     this.byId.clear();
     this.visibleByEntryId.clear();
     this.messageNodeIds.clear();
@@ -618,7 +621,7 @@ export class PiThreadProjector {
         this.visibleByEntryId.set(entry.id, parentId);
         continue;
       }
-      this.nodes.push(node);
+      this.nodeIds.push(node.id);
       this.byId.set(node.id, node);
       this.visibleByEntryId.set(entry.id, node.id);
       if (slashRequestId) this.slashResultNodes.set(slashRequestId, node.id);
@@ -631,8 +634,9 @@ export class PiThreadProjector {
           this.liveMessages.delete(message);
           continue;
         }
-        const restored = { ...node, parentId: this.nodes.at(-1)?.id ?? null } as PiTimelineNode;
-        this.nodes.push(restored);
+        const restored = { ...node, parentId: this.nodeIds.at(-1) ?? null } as PiTimelineNode;
+        this.nodeIds.push(restored.id);
+        this.nodeSnapshot = undefined;
         this.byId.set(restored.id, restored);
         this.messageNodeIds.set(message, restored.id);
         this.indexTools(restored);
@@ -642,7 +646,7 @@ export class PiThreadProjector {
       this.finalAssistantMessages.clear();
       this.activeAssistantId = undefined;
     }
-    for (const node of this.nodes) this.applyLabel(node.sourceEntryId ?? node.id, false);
+    for (const node of this.nodes()) this.applyLabel(node.sourceEntryId ?? node.id, false);
     this.branchIds = branch.map((entry) => entry.id);
     if (!publish) return;
     const eventSequence = this.sequence + 1;
@@ -654,17 +658,26 @@ export class PiThreadProjector {
     const current = this.byId.get(previousId);
     if (!current) throw new ProjectionError(`rekey node 不存在: ${previousId}`);
     const node = mergeCanonicalNode(current, canonical);
+    const nodes = new Array<PiTimelineNode>(this.nodeIds.length);
+    const nodeIds = new Array<string>(this.nodeIds.length);
+    for (let index = 0; index < this.nodeIds.length; index += 1) {
+      const id = this.nodeIds[index]!;
+      const item = id === previousId ? current : this.byId.get(id);
+      if (!item) throw new ProjectionError(`node index 不一致: ${id}`);
+      const replacement =
+        item.id === previousId
+          ? node
+          : item.parentId === previousId
+            ? ({ ...item, parentId: node.id } as PiTimelineNode)
+            : item;
+      if (replacement !== item && item.id !== previousId) this.byId.set(replacement.id, replacement);
+      nodes[index] = replacement;
+      nodeIds[index] = replacement.id;
+    }
     this.byId.delete(previousId);
     this.byId.set(node.id, node);
-    this.nodes = this.nodes.map((item) => {
-      if (item.id === previousId) return node;
-      if (item.parentId === previousId) {
-        const child = { ...item, parentId: node.id } as PiTimelineNode;
-        this.byId.set(child.id, child);
-        return child;
-      }
-      return item;
-    });
+    this.nodeIds = nodeIds;
+    this.nodeSnapshot = nodes;
     for (const [message, id] of this.messageNodeIds) {
       if (id !== previousId) continue;
       this.messageNodeIds.set(message, node.id);
@@ -683,7 +696,8 @@ export class PiThreadProjector {
   }
 
   private addNode(node: PiTimelineNode, message?: AgentMessage): void {
-    this.nodes = [...this.nodes, node];
+    this.nodeIds.push(node.id);
+    this.nodeSnapshot = undefined;
     this.byId.set(node.id, node);
     if (message) this.messageNodeIds.set(message, node.id);
     this.indexTools(node);
@@ -693,7 +707,7 @@ export class PiThreadProjector {
   private replaceNode(node: PiTimelineNode, emit = true): void {
     if (!this.byId.has(node.id)) throw new ProjectionError(`replace node 不存在: ${node.id}`);
     this.byId.set(node.id, node);
-    this.nodes = this.nodes.map((item) => (item.id === node.id ? node : item));
+    this.nodeSnapshot = undefined;
     this.indexTools(node);
     if (emit) this.emit({ type: "node-replaced", node });
   }
@@ -770,8 +784,7 @@ export class PiThreadProjector {
       part.id === owner.partId && part.type === "tool-call" ? update(part) : part,
     );
     const replacement = { ...node, content };
-    this.byId.set(node.id, replacement);
-    this.nodes = this.nodes.map((item) => (item.id === node.id ? replacement : item));
+    this.replaceNode(replacement, false);
   }
 
   private indexTools(node: PiTimelineNode): void {
@@ -793,7 +806,7 @@ export class PiThreadProjector {
       return uniqueNodeMatch(candidates, `message entry ${entry.id}`)?.id;
     }
     if (entry.type !== "custom_message") return undefined;
-    const candidates = this.nodes.filter(
+    const candidates = this.nodes().filter(
       (node) =>
         node.kind === "notice" &&
         node.noticeType === "custom" &&
@@ -808,7 +821,7 @@ export class PiThreadProjector {
 
   private findMatchingCustomNode(message: CustomMessage): PiTimelineNode | undefined {
     const boundIds = new Set(this.messageNodeIds.values());
-    const candidates = this.nodes.filter(
+    const candidates = this.nodes().filter(
       (node) =>
         node.kind === "notice" &&
         node.noticeType === "custom" &&
@@ -820,6 +833,18 @@ export class PiThreadProjector {
         sameJson(node.content.details, message.details),
     );
     return uniqueNodeMatch(candidates, `custom message ${message.customType}`);
+  }
+
+  /** byId 是更新权威；仅在 snapshot 或低频全量查询需要时组装有序数组。 */
+  private nodes(): PiTimelineNode[] {
+    if (!this.nodeSnapshot) {
+      this.nodeSnapshot = this.nodeIds.map((id) => {
+        const node = this.byId.get(id);
+        if (!node) throw new ProjectionError(`node index 不一致: ${id}`);
+        return node;
+      });
+    }
+    return this.nodeSnapshot;
   }
 
   private applyLabel(entryId: string, emit = true): void {

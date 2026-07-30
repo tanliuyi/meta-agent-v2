@@ -190,6 +190,7 @@ app.whenReady().then(async () => {
     }
     return;
   }
+  const reactDevToolsInstall = installReactDevTools();
   const shellInstaller = new ShellRuntimeInstaller(userDataDir, () => undefined);
   const managedBashPath = locateManagedBash({
     isPackaged: app.isPackaged,
@@ -204,20 +205,16 @@ app.whenReady().then(async () => {
     join(agentDir, "projects.json"),
     generalWorkspaceCwd,
   );
-  await projects.load();
+  const projectsLoad = projects.load();
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
   const models = new ModelsConfigService(agentDir, {
     log: (text) => sidecarLog?.write("models", text),
   });
-  const authModelRuntime = await ModelRuntime.create({
+  const authModelRuntimeCreation = ModelRuntime.create({
     credentials: new FileCredentialStore(join(agentDir, "auth.json")),
     modelsPath: join(agentDir, "models.json"),
     allowModelNetwork: false,
-  });
-  const auth = new AuthConfigService(agentDir, {
-    log: (text) => sidecarLog?.write("auth", text),
-    modelRuntime: authModelRuntime,
   });
   const settings = new SettingsConfigService(userDataDir);
   const builtinExtensions = DesktopControlledExtensionRegistry.getBuiltinDefinitions();
@@ -249,7 +246,17 @@ app.whenReady().then(async () => {
     marketplaceGenerationReferences,
     agentDir,
   );
-  await marketplaceReconciler.reconcile();
+  const marketplaceReconciliation = marketplaceReconciler.reconcile();
+  const [authModelRuntime] = await Promise.all([
+    authModelRuntimeCreation,
+    projectsLoad,
+    marketplaceReconciliation,
+    reactDevToolsInstall,
+  ]);
+  const auth = new AuthConfigService(agentDir, {
+    log: (text) => sidecarLog?.write("auth", text),
+    modelRuntime: authModelRuntime,
+  });
   const extensionSourcePolicy = new DesktopExtensionSourcePolicy({
     settings: extensionSettings,
     getBuiltinDefinitions: () => builtinExtensions,
@@ -460,7 +467,6 @@ app.whenReady().then(async () => {
     marketplacePluginInstaller,
     pluginConfigurations,
   );
-  await installReactDevTools();
   createWindow();
   stopAutoUpdateChecks = scheduleAutoUpdateChecks(updater);
   stopMarketplaceGarbageCollection = scheduleMarketplaceGarbageCollection(marketplaceGarbageCollector, (text) =>

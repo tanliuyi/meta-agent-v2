@@ -64,7 +64,10 @@ export class ProjectStore {
   }
 
   async load(): Promise<void> {
-    const desktop = await readOptionalJson(this.desktopFile);
+    const [desktop, projects] = await Promise.all([
+      readOptionalJson(this.desktopFile),
+      readOptionalJson(this.projectFile),
+    ]);
     if (desktop === undefined) {
       this.desktopState = { ...EMPTY_DESKTOP_STATE, archivedThreads: {}, workbenches: {} };
     } else {
@@ -77,7 +80,6 @@ export class ProjectStore {
       };
     }
 
-    const projects = await readOptionalJson(this.projectFile);
     if (projects !== undefined) {
       if (!isProjectMetadataFile(projects)) throw new Error("Project metadata 文件格式无效");
       this.projectMetadata = projects;
