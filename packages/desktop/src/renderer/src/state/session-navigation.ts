@@ -25,6 +25,26 @@ export function draftSearch(projectId?: string): DraftSearchParams {
   return projectId ? { projectId } : {};
 }
 
+/** 当前 route 将被 catalog mutation 移除时，先完成导航，避免渲染短暂的 invalid route。 */
+export async function commitCatalogRemovalAfterRouteExit(
+  removesActiveRoute: boolean,
+  exitRoute: () => Promise<void>,
+  commit: () => Promise<void> | void,
+): Promise<void> {
+  let exitError: unknown;
+  let exitFailed = false;
+  if (removesActiveRoute) {
+    try {
+      await exitRoute();
+    } catch (error) {
+      exitFailed = true;
+      exitError = error;
+    }
+  }
+  await commit();
+  if (exitFailed) throw exitError;
+}
+
 export function resolveDraftProjectId(
   projects: readonly Pick<Project, "id">[],
   requestedProjectId: string | undefined,

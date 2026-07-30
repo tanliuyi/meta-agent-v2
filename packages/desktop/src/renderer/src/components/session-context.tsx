@@ -1,6 +1,13 @@
-import { createContext, type ReactNode, useContext, useMemo, useSyncExternalStore } from "react";
-import type { SessionBranchResult, ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
+import type {
+  PiThreadSnapshot,
+  SessionBranchResult,
+  SessionControlState,
+  ThinkingLevel,
+  WorkbenchState,
+} from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
+import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
 
 interface SessionScope {
   record: CachedSessionRecord;
@@ -29,47 +36,46 @@ export function useSessionScope(): SessionScope {
 
 export function useSessionControl() {
   const { record } = useSessionScope();
-  return useSyncExternalStore(
-    record.stores.control.subscribe,
-    record.stores.control.getSnapshot,
-    record.stores.control.getSnapshot,
-  );
+  return useExternalStoreSelector(record.stores.control, selectSnapshot);
+}
+
+export function useSessionControlSelector<T>(selector: (control: SessionControlState | null) => T): T {
+  const { record } = useSessionScope();
+  return useExternalStoreSelector(record.stores.control, selector);
 }
 
 export function useSessionTimeline() {
   const { record } = useSessionScope();
-  return useSyncExternalStore(
-    record.stores.timeline.subscribe,
-    record.stores.timeline.getSnapshot,
-    record.stores.timeline.getSnapshot,
-  );
+  return useExternalStoreSelector(record.stores.timeline, selectSnapshot);
+}
+
+export function useSessionTimelineSelector<T>(selector: (timeline: PiThreadSnapshot) => T): T {
+  const { record } = useSessionScope();
+  return useExternalStoreSelector(record.stores.timeline, selector);
 }
 
 export function useSessionWorkbench() {
   const { record } = useSessionScope();
-  return useSyncExternalStore(
-    record.stores.workbench.subscribe,
-    record.stores.workbench.getSnapshot,
-    record.stores.workbench.getSnapshot,
-  );
+  return useExternalStoreSelector(record.stores.workbench, selectSnapshot);
+}
+
+export function useSessionWorkbenchSelector<T>(selector: (workbench: WorkbenchState | null) => T): T {
+  const { record } = useSessionScope();
+  return useExternalStoreSelector(record.stores.workbench, selector);
 }
 
 export function useSessionConnection() {
   const { record } = useSessionScope();
-  return useSyncExternalStore(
-    record.stores.connection.subscribe,
-    record.stores.connection.getSnapshot,
-    record.stores.connection.getSnapshot,
-  );
+  return useExternalStoreSelector(record.stores.connection, selectSnapshot);
 }
 
 export function useSessionSummary() {
   const { record } = useSessionScope();
-  return useSyncExternalStore(
-    record.stores.summary.subscribe,
-    record.stores.summary.getSnapshot,
-    record.stores.summary.getSnapshot,
-  );
+  return useExternalStoreSelector(record.stores.summary, selectSnapshot);
+}
+
+function selectSnapshot<T>(snapshot: T): T {
+  return snapshot;
 }
 
 export function useSessionIdentity() {

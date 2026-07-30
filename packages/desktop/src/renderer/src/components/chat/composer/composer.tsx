@@ -35,11 +35,11 @@ export function Composer(props: ComposerProps) {
     isRunning || (props.mode === "session" && (props.phase === "compacting" || props.phase === "tree-navigation"));
   const extensionWidgets = props.mode === "session" ? props.widgets : EMPTY_WIDGETS;
   const aboveWidgets = useMemo(
-    () => extensionWidgets.filter(({ placement }) => placement === "aboveEditor"),
+    () => extensionWidgets?.filter(({ placement }) => placement === "aboveEditor"),
     [extensionWidgets],
   );
   const belowWidgets = useMemo(
-    () => extensionWidgets.filter(({ placement }) => placement === "belowEditor"),
+    () => extensionWidgets?.filter(({ placement }) => placement === "belowEditor"),
     [extensionWidgets],
   );
   const suggestionProjectId = props.mode === "draft" ? props.project?.id : props.projectId;

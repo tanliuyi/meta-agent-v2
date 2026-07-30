@@ -7,6 +7,8 @@ import {
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import type { SessionControlState } from "../../../shared/contracts.ts";
+import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
 import { useToast } from "../shared/ui/use-toast.ts";
 import { imageAttachmentAdapter, restoreComposerAttachments } from "./image-attachments.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
@@ -34,11 +36,8 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
     stores.timeline.getSnapshot,
     stores.timeline.getSnapshot,
   );
-  const controlSnapshot = useSyncExternalStore(
-    stores.control.subscribe,
-    stores.control.getSnapshot,
-    stores.control.getSnapshot,
-  );
+  const readiness = useExternalStoreSelector(stores.control, selectReadiness);
+  const controlRunning = useExternalStoreSelector(stores.control, selectRunning);
   const connection = useSyncExternalStore(
     stores.connection.subscribe,
     stores.connection.getSnapshot,
@@ -87,11 +86,10 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
     [coordinator, snapshot.queue],
   );
 
-  const readiness = controlSnapshot?.readiness;
   const isLoading = snapshot.phase === "compacting" || snapshot.phase === "tree-navigation";
   const isAgentRunning =
-    !isLoading && (controlSnapshot?.running === true || snapshot.phase === "running" || snapshot.phase === "retrying");
-  const isCancelable = controlSnapshot?.running === true || snapshot.phase !== "idle";
+    !isLoading && (controlRunning || snapshot.phase === "running" || snapshot.phase === "retrying");
+  const isCancelable = controlRunning || snapshot.phase !== "idle";
   const acceptsInput = snapshot.phase === "idle" || snapshot.phase === "running";
   const hasCommandTarget = active && connection === "ready" && transport.hasCommittedLease(record);
   const isSendDisabled = !hasCommandTarget || !acceptsInput || readiness?.state !== "ready";
@@ -191,4 +189,12 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
 
   const clearQueue = useCallback(() => coordinator.clearQueue(snapshotRef.current.queue), [coordinator]);
   return useMemo(() => ({ runtime, clearQueue }), [clearQueue, runtime]);
+}
+
+function selectReadiness(control: SessionControlState | null): SessionControlState["readiness"] | undefined {
+  return control?.readiness;
+}
+
+function selectRunning(control: SessionControlState | null): boolean {
+  return control?.running === true;
 }

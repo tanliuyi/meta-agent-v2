@@ -1,4 +1,4 @@
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { sessionRecordKey } from "../runtime/pi-session-store.ts";
 import type { DesktopActions } from "./desktop-actions.ts";
@@ -8,6 +8,7 @@ import { useDesktopStore } from "./desktop-store-context.tsx";
 import { ProjectActivationCoordinator } from "./project-activation.ts";
 import { useSessionCache, useSessionCacheSnapshot } from "./session-cache-context.tsx";
 import { SessionCatalogControlBridge } from "./session-catalog-control-bridge.tsx";
+import { commitCatalogRemovalAfterRouteExit } from "./session-navigation.ts";
 
 interface DesktopCatalogProviderProps {
   children: ReactNode;
@@ -19,7 +20,7 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
   const cache = useSessionCache();
   const { records } = useSessionCacheSnapshot();
   const navigate = useNavigate();
-  const route = useRouterState({ select: (state) => state.location.pathname });
+  const router = useRouter();
   const catalogRequests = useRef(new Map<string, Promise<void>>());
   const catalogGenerations = useRef(new Map<string, number>());
   const projectActivation = useRef(new ProjectActivationCoordinator()).current;
@@ -152,12 +153,22 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
         const restore = cache.quiesceProject(projectId);
         try {
           await window.desktop.projects.remove(projectId);
-          invalidateProjectThreads(projectId);
-          await cache.retireProject(projectId);
-          dispatchDesktop(store, { type: "project-removed", projectId });
-          if (route.includes(`/projects/${projectId}/`)) await navigate({ to: "/", replace: true });
         } catch (error) {
           restore();
+          reportError(error);
+          throw error;
+        }
+        invalidateProjectThreads(projectId);
+        try {
+          await commitCatalogRemovalAfterRouteExit(
+            router.state.location.pathname.includes(`/projects/${projectId}/`),
+            () => navigate({ to: "/", replace: true }),
+            async () => {
+              await cache.retireProject(projectId);
+              dispatchDesktop(store, { type: "project-removed", projectId });
+            },
+          );
+        } catch (error) {
           reportError(error);
           throw error;
         }
@@ -179,13 +190,21 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
         const restore = archived ? cache.quiesce(key) : () => undefined;
         try {
           await window.desktop.sessions.archive(projectId, threadId, archived);
-          if (archived) await cache.retire(key);
-          dispatchDesktop(store, { type: "thread-archived", projectId, threadId, archived });
-          if (archived && route.endsWith(`/projects/${projectId}/session/${threadId}`)) {
-            await navigate({ to: "/", replace: true });
-          }
         } catch (error) {
           restore();
+          reportError(error);
+          throw error;
+        }
+        try {
+          await commitCatalogRemovalAfterRouteExit(
+            archived && router.state.location.pathname.endsWith(`/projects/${projectId}/session/${threadId}`),
+            () => navigate({ to: "/", replace: true }),
+            async () => {
+              if (archived) await cache.retire(key);
+              dispatchDesktop(store, { type: "thread-archived", projectId, threadId, archived });
+            },
+          );
+        } catch (error) {
           reportError(error);
           throw error;
         }
@@ -193,18 +212,29 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
       async removeThread(projectId, threadId, policy) {
         const key = sessionRecordKey(projectId, threadId);
         const restore = cache.quiesce(key);
+        let result: Awaited<ReturnType<typeof window.desktop.sessions.remove>>;
         try {
-          const result = await window.desktop.sessions.remove(projectId, threadId, policy);
-          const retiredThreadIds = [...result.removedThreadIds, ...result.reparentedThreads.map(({ id }) => id)];
-          await Promise.all(
-            retiredThreadIds.map((retiredThreadId) => cache.retire(sessionRecordKey(projectId, retiredThreadId))),
-          );
-          dispatchDesktop(store, { type: "session-tree-removed", projectId, ...result });
-          if (result.removedThreadIds.some((id) => route.endsWith(`/projects/${projectId}/session/${id}`))) {
-            await navigate({ to: "/", replace: true });
-          }
+          result = await window.desktop.sessions.remove(projectId, threadId, policy);
         } catch (error) {
           restore();
+          reportError(error);
+          throw error;
+        }
+        const retiredThreadIds = [...result.removedThreadIds, ...result.reparentedThreads.map(({ id }) => id)];
+        try {
+          await commitCatalogRemovalAfterRouteExit(
+            result.removedThreadIds.some((id) =>
+              router.state.location.pathname.endsWith(`/projects/${projectId}/session/${id}`),
+            ),
+            () => navigate({ to: "/", replace: true }),
+            async () => {
+              await Promise.all(
+                retiredThreadIds.map((retiredThreadId) => cache.retire(sessionRecordKey(projectId, retiredThreadId))),
+              );
+              dispatchDesktop(store, { type: "session-tree-removed", projectId, ...result });
+            },
+          );
+        } catch (error) {
           reportError(error);
           throw error;
         }
@@ -221,7 +251,7 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
       projectActivation,
       refreshProjectThreads,
       reportError,
-      route,
+      router,
       store,
     ],
   );

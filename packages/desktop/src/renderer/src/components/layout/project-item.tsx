@@ -107,7 +107,7 @@ export const ProjectItem = memo(function ProjectItem({
         <ContextMenu.Root>
           <ContextMenu.Trigger asChild>
             <div
-              className="project-row group hover:bg-muted data-[state=open]:bg-muted grid h-8 grid-cols-[minmax(0,1fr)_auto] items-center rounded-md pe-1.5 transition-colors"
+              className="project-row group hover:bg-muted data-[state=open]:bg-muted grid h-8 grid-cols-[minmax(0,1fr)_auto] items-center rounded-xl pe-1.5 transition-colors"
               data-active={active || undefined}
               data-pending={pendingAction || undefined}
             >

@@ -21,7 +21,7 @@ export const ProjectList = memo(function ProjectList({
   const userProjects = projects.filter(isUserProject);
 
   if (userProjects.length === 0) {
-    return <p className="px-3 py-6 text-center text-sm text-muted-foreground">没有项目</p>;
+    return <p className="px-3 py-6 text-sm text-muted-foreground">没有项目</p>;
   }
 
   return (

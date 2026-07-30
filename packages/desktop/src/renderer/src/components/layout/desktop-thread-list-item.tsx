@@ -6,27 +6,14 @@ import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { memo, useEffect, useState } from "react";
+import { memo } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
+import { ThreadElapsedTime } from "./thread-elapsed-time.tsx";
 
 const TREE_GUIDE_START = 16;
 const TREE_LEVEL_INDENT = 16;
 const TREE_TOGGLE_SIZE = 16;
-
-function formatElapsedTime(updatedAt: number, now: number): string {
-  const diffMs = now - updatedAt;
-  const diffMinutes = Math.floor(diffMs / 60_000);
-  if (diffMinutes < 1) return "刚刚";
-  if (diffMinutes < 60) return `${diffMinutes} 分钟`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} 小时`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 30) return `${diffDays} 天`;
-  const diffMonths = Math.floor(diffDays / 30);
-  if (diffMonths < 12) return `${diffMonths} 个月`;
-  return `${Math.floor(diffMonths / 12)} 年`;
-}
 
 interface DesktopThreadListItemProps {
   thread: Thread;
@@ -56,18 +43,11 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
   const isPending = props.isSwitching || props.isRenamingPending || props.isArchivePending || props.isDeletePending;
   const contentIndent =
     props.compactRoot && props.depth === 0 && props.childCount === 0 ? 8 : 32 + props.depth * TREE_LEVEL_INDENT;
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(interval);
-  }, []);
-
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
         <div
-          className="thread-row group hover:bg-muted focus-visible:bg-muted data-active:bg-foreground/10 data-active:hover:bg-foreground/10 has-focus-visible:bg-muted data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors focus-visible:outline-none"
+          className="thread-row group hover:bg-muted focus-visible:bg-muted data-active:bg-foreground/10 data-active:hover:bg-foreground/10 has-focus-visible:bg-muted data-[state=open]:bg-muted relative flex h-8 items-center rounded-xl transition-colors focus-visible:outline-none"
           data-thread-id={thread.id}
           data-active={props.active || undefined}
           data-pending={isPending || undefined}
@@ -168,9 +148,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             {thread.running ? (
               <span className="running-dot" aria-label="运行中" />
             ) : (
-              <span className="thread-time" aria-label="更新时间">
-                {formatElapsedTime(thread.updatedAt, now)}
-              </span>
+              <ThreadElapsedTime updatedAt={thread.updatedAt} />
             )}
           </button>
         </div>

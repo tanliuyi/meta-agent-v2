@@ -124,7 +124,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   );
 
   return (
-    <div className="thread-list" role="tree" aria-label={`${project.name} 会话`}>
+    <div className="thread-list mb-1" role="tree" aria-label={`${project.name} 会话`}>
       {visibleThreads.map(
         ({
           thread,

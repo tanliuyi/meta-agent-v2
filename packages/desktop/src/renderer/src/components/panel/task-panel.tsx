@@ -1,33 +1,30 @@
-import { useSessionControl, useSessionTimeline } from "../session-context.tsx";
+import { useSessionControlSelector, useSessionTimelineSelector } from "../session-context.tsx";
 
 /** Session diagnostics derive from the record's timeline and control stores. */
 export function TaskPanel() {
-  const control = useSessionControl();
-  const timeline = useSessionTimeline();
-  const statuses = control?.extensionHost.statuses ?? {};
+  const contextPercent = useSessionControlSelector((control) => control?.context?.percent);
+  const statuses = useSessionControlSelector((control) => control?.extensionHost.statuses ?? EMPTY_STATUSES);
+  const phase = useSessionTimelineSelector((timeline) => timeline.phase);
+  const queueLength = useSessionTimelineSelector((timeline) => timeline.queue.length);
   return (
     <div className="task-panel">
       <h3>会话状态</h3>
       <dl>
         <div>
           <dt>运行</dt>
-          <dd>{timeline.phase === "idle" ? "空闲" : "进行中"}</dd>
+          <dd>{phase === "idle" ? "空闲" : "进行中"}</dd>
         </div>
         <div>
           <dt>上下文</dt>
-          <dd>
-            {control?.context?.percent === null || control?.context?.percent === undefined
-              ? "--"
-              : `${control.context.percent.toFixed(1)}%`}
-          </dd>
+          <dd>{contextPercent === null || contextPercent === undefined ? "--" : `${contextPercent.toFixed(1)}%`}</dd>
         </div>
         <div>
           <dt>队列</dt>
-          <dd>{timeline.queue.length}</dd>
+          <dd>{queueLength}</dd>
         </div>
         <div>
           <dt>压缩</dt>
-          <dd>{timeline.phase === "compacting" ? "进行中" : "空闲"}</dd>
+          <dd>{phase === "compacting" ? "进行中" : "空闲"}</dd>
         </div>
       </dl>
       {Object.keys(statuses).length > 0 ? (
@@ -46,3 +43,5 @@ export function TaskPanel() {
     </div>
   );
 }
+
+const EMPTY_STATUSES: Readonly<Record<string, string>> = {};

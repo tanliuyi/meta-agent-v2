@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  commitCatalogRemovalAfterRouteExit,
   draftSearch,
   resolveDraftProjectId,
   resolveRootTarget,
@@ -8,6 +9,58 @@ import {
 import { GENERAL_WORKSPACE_ID } from "../src/shared/contracts.ts";
 
 describe("draft navigation", () => {
+  it("删除当前 route 时先完成导航，再提交 catalog mutation", async () => {
+    const order: string[] = [];
+
+    await commitCatalogRemovalAfterRouteExit(
+      true,
+      async () => {
+        order.push("navigate");
+      },
+      () => {
+        order.push("commit");
+      },
+    );
+
+    expect(order).toEqual(["navigate", "commit"]);
+  });
+
+  it("删除非当前 route 时直接提交 catalog mutation", async () => {
+    const order: string[] = [];
+
+    await commitCatalogRemovalAfterRouteExit(
+      false,
+      async () => {
+        order.push("navigate");
+      },
+      () => {
+        order.push("commit");
+      },
+    );
+
+    expect(order).toEqual(["commit"]);
+  });
+
+  it("导航失败时仍提交 catalog mutation，再向调用方报告失败", async () => {
+    const order: string[] = [];
+    const navigationError = new Error("navigation failed");
+
+    await expect(
+      commitCatalogRemovalAfterRouteExit(
+        true,
+        async () => {
+          order.push("navigate");
+          throw navigationError;
+        },
+        () => {
+          order.push("commit");
+        },
+      ),
+    ).rejects.toBe(navigationError);
+
+    expect(order).toEqual(["navigate", "commit"]);
+  });
+
   it("从 Project 新建任务时保留 projectId", () => {
     expect(draftSearch("project-a")).toEqual({ projectId: "project-a" });
     expect(validateDraftSearch({ projectId: "project-a" })).toEqual({ projectId: "project-a" });

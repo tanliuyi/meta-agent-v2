@@ -1,9 +1,10 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { SessionControlState, ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useTransportManager } from "../runtime/session-transport-context.tsx";
 import { usePiSessionRuntime } from "../runtime/use-pi-session-runtime.ts";
+import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
 import { SessionScopeProvider } from "./session-context.tsx";
 
 interface SessionProviderProps {
@@ -15,18 +16,10 @@ interface SessionProviderProps {
 /** Owns the mounted session runtime and its session-scoped view commands. */
 export function SessionProvider({ record, active, children }: SessionProviderProps) {
   const transport = useTransportManager();
-  const connection = useSyncExternalStore(
-    record.stores.connection.subscribe,
-    record.stores.connection.getSnapshot,
-    record.stores.connection.getSnapshot,
-  );
-  const control = useSyncExternalStore(
-    record.stores.control.subscribe,
-    record.stores.control.getSnapshot,
-    record.stores.control.getSnapshot,
-  );
+  const connection = useExternalStoreSelector(record.stores.connection, selectSnapshot);
+  const interaction = useExternalStoreSelector(record.stores.control, selectInteraction);
   const commandsReady =
-    active && connection === "ready" && control?.interaction !== "read-only" && transport.hasCommittedLease(record);
+    active && connection === "ready" && interaction !== "read-only" && transport.hasCommittedLease(record);
   const modelsRefreshRequested = useRef(false);
   const modelsRefreshRequest = useRef<Promise<void> | null>(null);
   const [modelsRefreshing, setModelsRefreshing] = useState(false);
@@ -139,4 +132,12 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
       <SessionScopeProvider scope={scope}>{children}</SessionScopeProvider>
     </AssistantRuntimeProvider>
   );
+}
+
+function selectSnapshot<T>(snapshot: T): T {
+  return snapshot;
+}
+
+function selectInteraction(control: SessionControlState | null): SessionControlState["interaction"] {
+  return control?.interaction;
 }
