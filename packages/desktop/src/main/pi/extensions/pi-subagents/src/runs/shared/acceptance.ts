@@ -30,10 +30,9 @@ const LEVEL_RANK: Record<Exclude<AcceptanceLevel, "auto">, number> = {
 	attested: 1,
 	checked: 2,
 	verified: 3,
-	reviewed: 4,
 };
 
-const VALID_LEVELS = new Set<AcceptanceLevel>(["auto", "none", "attested", "checked", "verified", "reviewed"]);
+const VALID_LEVELS = new Set<AcceptanceLevel>(["auto", "none", "attested", "checked", "verified"]);
 const VALID_EVIDENCE = new Set<AcceptanceEvidenceKind>([
 	"changed-files",
 	"tests-added",
@@ -49,7 +48,7 @@ const ACCEPTANCE_CONFIG_KEYS = new Set(["level", "criteria", "evidence", "verify
 const ACCEPTANCE_GATE_KEYS = new Set(["id", "must", "evidence", "severity"]);
 const ACCEPTANCE_VERIFY_KEYS = new Set(["id", "command", "timeoutMs", "cwd", "env", "allowFailure"]);
 const ACCEPTANCE_REVIEW_KEYS = new Set(["agent", "focus", "required"]);
-const EXPLICIT_REVIEWED_UNAVAILABLE = "cannot be requested explicitly because this run cannot supply an independent reviewer result; use checked/verified and orchestrate the reviewer separately, or omit acceptance for read-only review tasks.";
+const EXPLICIT_REVIEWED_UNAVAILABLE = "is an achieved status, not a requestable acceptance level. For a read-only reviewer call, omit acceptance. To require independent review of a writer result, use acceptance.review.required and orchestrate the reviewer separately.";
 
 function normalizeLevel(level: AcceptanceLevel | undefined): Exclude<AcceptanceLevel, "auto"> | "auto" {
 	return level ?? "auto";
@@ -68,7 +67,6 @@ function requiredEvidenceForLevel(level: Exclude<AcceptanceLevel, "auto">): Acce
 		case "checked":
 			return ["changed-files", "tests-added", "commands-run", "residual-risks", "no-staged-files"];
 		case "verified":
-		case "reviewed":
 			return ["changed-files", "tests-added", "commands-run", "validation-output", "residual-risks", "no-staged-files"];
 	}
 }
@@ -111,10 +109,10 @@ function inferLevel(input: {
 		reasons.push(input.async ? "async write-capable or risky run" : "risky write-capable run");
 		if (input.dynamic || input.dynamicGroup) reasons.push("dynamic fanout context");
 		return {
-			level: "reviewed",
+			level: "checked",
 			reasons,
 			criteria: ["Implement the requested change without widening scope", "Return evidence sufficient for an independent acceptance review"],
-			evidence: requiredEvidenceForLevel("reviewed"),
+			evidence: requiredEvidenceForLevel("checked"),
 			review: { agent: "reviewer", required: true },
 		};
 	}
@@ -161,9 +159,9 @@ export function validateAcceptanceInput(input: unknown, pathLabel = "acceptance"
 	if (input === undefined) return errors;
 	if (input === false) return errors;
 	if (typeof input === "string") {
-		if (!VALID_LEVELS.has(input as AcceptanceLevel)) errors.push(`${pathLabel} has invalid level '${input}'.`);
+		if (input === "reviewed") errors.push(`${pathLabel} ${EXPLICIT_REVIEWED_UNAVAILABLE}`);
+		else if (!VALID_LEVELS.has(input as AcceptanceLevel)) errors.push(`${pathLabel} has invalid level '${input}'.`);
 		else if (input === "none") errors.push(`${pathLabel} level "none" requires a reason; use { level: "none", reason: "..." }.`);
-		else if (input === "reviewed") errors.push(`${pathLabel} ${EXPLICIT_REVIEWED_UNAVAILABLE}`);
 		return errors;
 	}
 	if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -174,13 +172,14 @@ export function validateAcceptanceInput(input: unknown, pathLabel = "acceptance"
 	for (const key of Object.keys(value)) {
 		if (!ACCEPTANCE_CONFIG_KEYS.has(key)) errors.push(`${pathLabel}.${key} is not supported.`);
 	}
-	if (value.level !== undefined && (typeof value.level !== "string" || !VALID_LEVELS.has(value.level as AcceptanceLevel))) {
-		errors.push(`${pathLabel}.level must be one of auto, none, attested, checked, verified, reviewed.`);
+	if (value.level === "reviewed") {
+		errors.push(`${pathLabel}.level ${EXPLICIT_REVIEWED_UNAVAILABLE}`);
+	} else if (value.level !== undefined && (typeof value.level !== "string" || !VALID_LEVELS.has(value.level as AcceptanceLevel))) {
+		errors.push(`${pathLabel}.level must be one of auto, none, attested, checked, verified.`);
 	}
 	if (value.level === "none" && (typeof value.reason !== "string" || !value.reason.trim())) {
 		errors.push(`${pathLabel}.reason is required when level is none.`);
 	}
-	if (value.level === "reviewed") errors.push(`${pathLabel}.level ${EXPLICIT_REVIEWED_UNAVAILABLE}`);
 	if (value.reason !== undefined && typeof value.reason !== "string") errors.push(`${pathLabel}.reason must be a string.`);
 	if (value.criteria !== undefined && !Array.isArray(value.criteria)) errors.push(`${pathLabel}.criteria must be an array.`);
 	if (Array.isArray(value.criteria)) {
@@ -363,10 +362,7 @@ export function resolveEffectiveAcceptance(input: {
 		(explicit.criteria?.length ? explicit.criteria : inferred.criteria) as Array<string | { id?: string; must?: string; evidence?: AcceptanceEvidenceKind[]; severity?: "required" | "recommended" }>,
 		evidence,
 	);
-	let review = explicit.review !== undefined ? explicit.review : inferred.review;
-	if (level === "reviewed" && input.explicit !== undefined && explicitLevel !== "reviewed" && explicit.review === undefined && review && review !== false) {
-		review = { ...review, required: false };
-	}
+	const review = explicit.review !== undefined ? explicit.review : inferred.review;
 	return {
 		level,
 		explicit: input.explicit !== undefined,
@@ -1062,8 +1058,10 @@ export async function evaluateAcceptance(input: {
 	reportOptional?: boolean;
 }): Promise<AcceptanceLedger> {
 	const acceptance = input.acceptance;
+	const initialStatus = acceptance.level === "none" ? "not-required" : "claimed";
 	const ledger: AcceptanceLedger = {
-		status: acceptance.level === "none" ? "not-required" : "claimed",
+		status: initialStatus,
+		evidenceStatus: initialStatus,
 		explicit: acceptance.explicit,
 		effectiveAcceptance: acceptance,
 		inferredReason: acceptance.inferredReason,
@@ -1085,11 +1083,13 @@ export async function evaluateAcceptance(input: {
 	if (parsed.report) {
 		ledger.childReport = parsed.report;
 		ledger.status = "attested";
+		ledger.evidenceStatus = "attested";
 	} else if (!input.reportOptional || needsReport || parsed.error !== ACCEPTANCE_REPORT_NOT_FOUND) {
 		ledger.childReportParseError = parsed.error;
 		ledger.runtimeChecks.push({ id: "attestation", status: "failed", message: parsed.error ?? "Structured acceptance report missing." });
 		if (!input.reportOptional) {
 			ledger.status = "rejected";
+			ledger.evidenceStatus = "rejected";
 			return ledger;
 		}
 	} else {
@@ -1104,6 +1104,7 @@ export async function evaluateAcceptance(input: {
 		];
 		if (!ledger.runtimeChecks.some((check) => check.status === "failed")) {
 			ledger.status = "checked";
+			ledger.evidenceStatus = "checked";
 		}
 	}
 
@@ -1111,6 +1112,7 @@ export async function evaluateAcceptance(input: {
 		if (acceptance.level === "verified" && acceptance.verify.length === 0) {
 			ledger.runtimeChecks.push({ id: "verification-config", status: "failed", message: "verified acceptance requires runtime verify commands." });
 			ledger.status = "rejected";
+			ledger.evidenceStatus = "rejected";
 			return ledger;
 		}
 		ledger.verifyRuns = [];
@@ -1120,34 +1122,42 @@ export async function evaluateAcceptance(input: {
 		}
 		if (ledger.verifyRuns.some((run) => run.status === "failed" || run.status === "timed-out")) {
 			ledger.status = "rejected";
+			ledger.evidenceStatus = "rejected";
 			return ledger;
 		}
-		if (!ledger.runtimeChecks.some((check) => check.status === "failed")) ledger.status = "verified";
+		if (!ledger.runtimeChecks.some((check) => check.status === "failed")) {
+			ledger.status = "verified";
+			ledger.evidenceStatus = "verified";
+		}
 	}
 
 	if (ledger.runtimeChecks.some((check) => check.status === "failed")) {
 		ledger.status = "rejected";
+		ledger.evidenceStatus = "rejected";
 		return ledger;
 	}
-	if (ledger.status === "claimed" && acceptance.level !== "reviewed") {
+	if (ledger.status === "claimed") {
 		ledger.status = acceptance.level === "verified" ? "verified" : acceptance.level;
+		ledger.evidenceStatus = ledger.status;
 	}
 
-	if (acceptance.level === "reviewed") {
-		if (input.reviewResult) {
+	if (acceptance.review && acceptance.review !== false) {
+		if (input.reviewResult?.status === "reviewed") {
 			ledger.reviewResult = input.reviewResult;
-			ledger.status = input.reviewResult.status === "no-blockers" ? "reviewed" : "rejected";
-		} else {
-			const optionalReview = acceptance.review && acceptance.review !== false && acceptance.review.required === false;
-			ledger.reviewResult = {
-				status: "needs-parent-decision",
+			ledger.status = "reviewed";
+		} else if (input.reviewResult?.status === "blockers") {
+			ledger.reviewResult = input.reviewResult;
+			ledger.status = "rejected";
+		} else if (acceptance.review.required !== false) {
+			ledger.reviewResult = input.reviewResult ?? {
+				status: "review-required",
 				findings: [{
-					severity: acceptance.explicit && !optionalReview ? "blocker" : "non-blocking",
-					issue: "Reviewed acceptance requires an independent reviewer result.",
+					severity: "non-blocking",
+					issue: "Independent review has not been supplied.",
 					rationale: "The run cannot be marked reviewed from child evidence alone.",
 				}],
 			};
-			if (acceptance.review === false || (acceptance.explicit && !optionalReview)) ledger.status = "rejected";
+			ledger.status = "review-required";
 		}
 	}
 
@@ -1155,8 +1165,10 @@ export async function evaluateAcceptance(input: {
 }
 
 export function buildSkippedAcceptanceLedger(acceptance: ResolvedAcceptanceConfig, input: { id: string; message: string }): AcceptanceLedger {
+	const status = acceptance.level === "none" ? "not-required" : "rejected";
 	return {
-		status: acceptance.level === "none" ? "not-required" : "rejected",
+		status,
+		evidenceStatus: status,
 		explicit: acceptance.explicit,
 		effectiveAcceptance: acceptance,
 		inferredReason: acceptance.inferredReason,
@@ -1174,7 +1186,6 @@ export function acceptanceFailureMessage(ledger: AcceptanceLedger): string | und
 	if (failedCheck) return `Acceptance rejected: ${failedCheck.message}`;
 	const failedVerify = ledger.verifyRuns.find((run) => run.status === "failed" || run.status === "timed-out");
 	if (failedVerify) return `Acceptance verification '${failedVerify.id}' ${failedVerify.status}.`;
-	if (ledger.reviewResult?.status === "needs-parent-decision") return "Acceptance review required but no automatic reviewer result is available.";
 	if (ledger.reviewResult?.status === "blockers") return "Acceptance review found blockers.";
 	return "Acceptance rejected.";
 }

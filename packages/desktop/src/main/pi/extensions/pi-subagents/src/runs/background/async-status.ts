@@ -38,6 +38,9 @@ interface AsyncRunStepSummary {
 	model?: string;
 	thinking?: string;
 	attemptedModels?: string[];
+	launchContractDigest?: string;
+	sessionFile?: string;
+	transcriptPath?: string;
 	error?: string;
 	timedOut?: boolean;
 	stopped?: boolean;
@@ -89,6 +92,7 @@ export interface AsyncRunSummary {
 	totalTokens?: TokenUsage;
 	totalCost?: CostSummary;
 	sessionFile?: string;
+	launchContractDigest?: string;
 	nestedChildren?: NestedRunSummary[];
 	nestedWarnings?: string[];
 }
@@ -101,6 +105,7 @@ interface AsyncRunListOptions {
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
 	reconcile?: boolean;
+	runId?: string;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -124,6 +129,42 @@ function isAsyncRunDir(root: string, entry: string): boolean {
 			cause: error instanceof Error ? error : undefined,
 		});
 	}
+}
+
+type TargetedAsyncRunResolution =
+	| { kind: "exact"; id: string }
+	| { kind: "scan" }
+	| { kind: "reject" };
+
+/** Resolve a targeted run without following a symlink outside the async root. */
+export function resolveTargetedAsyncRun(asyncDirRoot: string, id: string, sessionId?: string): TargetedAsyncRunResolution {
+	if (!id || id === "." || id === ".." || path.basename(id) !== id) return { kind: "reject" };
+	const asyncDir = path.join(asyncDirRoot, id);
+	let entryStat: fs.Stats;
+	try {
+		entryStat = fs.lstatSync(asyncDir);
+	} catch (error) {
+		if (isNotFoundError(error)) return { kind: "scan" };
+		throw new Error(`Failed to inspect async run path '${asyncDir}': ${getErrorMessage(error)}`, {
+			cause: error instanceof Error ? error : undefined,
+		});
+	}
+	if (!entryStat.isDirectory() || entryStat.isSymbolicLink()) return { kind: "reject" };
+	try {
+		const canonicalRoot = fs.realpathSync(asyncDirRoot);
+		const canonicalDir = fs.realpathSync(asyncDir);
+		if (canonicalDir !== canonicalRoot && !canonicalDir.startsWith(`${canonicalRoot}${path.sep}`)) return { kind: "reject" };
+	} catch (error) {
+		if (isNotFoundError(error)) return { kind: "reject" };
+		throw new Error(`Failed to resolve async run path '${asyncDir}': ${getErrorMessage(error)}`, {
+			cause: error instanceof Error ? error : undefined,
+		});
+	}
+	if (sessionId !== undefined) {
+		const status = readStatus(asyncDir);
+		if (status?.sessionId !== sessionId) return { kind: "scan" };
+	}
+	return { kind: "exact", id };
 }
 
 function outputFileMtime(outputFile: string | undefined): number | undefined {
@@ -196,6 +237,9 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 			...(step.model ? { model: step.model } : {}),
 			...(step.thinking ? { thinking: step.thinking } : {}),
 			...(step.attemptedModels ? { attemptedModels: step.attemptedModels } : {}),
+			...(step.launchContractDigest ? { launchContractDigest: step.launchContractDigest } : {}),
+			...(step.sessionFile ? { sessionFile: step.sessionFile } : {}),
+			...(step.transcriptPath ? { transcriptPath: step.transcriptPath } : {}),
 			...(step.error ? { error: step.error } : {}),
 			...(step.timedOut !== undefined ? { timedOut: step.timedOut } : {}),
 			...(step.stopped !== undefined ? { stopped: step.stopped } : {}),
@@ -245,6 +289,7 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 		steps: summarizedSteps,
 		...(nestedChildren.length ? { nestedChildren } : {}),
 		...(nestedWarnings.length ? { nestedWarnings } : {}),
+		...(status.launchContractDigest ? { launchContractDigest: status.launchContractDigest } : {}),
 		...(status.sessionDir ? { sessionDir: status.sessionDir } : {}),
 		...(status.outputFile ? { outputFile: status.outputFile } : {}),
 		...(status.totalTokens ? { totalTokens: status.totalTokens } : {}),
@@ -280,7 +325,19 @@ function sortRuns(runs: AsyncRunSummary[]): AsyncRunSummary[] {
 export function listAsyncRuns(asyncDirRoot: string, options: AsyncRunListOptions = {}): AsyncRunSummary[] {
 	let entries: string[];
 	try {
-		entries = fs.readdirSync(asyncDirRoot).filter((entry) => isAsyncRunDir(asyncDirRoot, entry));
+		if (options.runId !== undefined) {
+			const resolution = resolveTargetedAsyncRun(asyncDirRoot, options.runId, options.sessionId);
+			entries = resolution.kind === "exact"
+				? [resolution.id]
+				: resolution.kind === "scan"
+					? fs.readdirSync(asyncDirRoot).filter((entry) =>
+						(entry === options.runId || entry.startsWith(options.runId!))
+						&& resolveTargetedAsyncRun(asyncDirRoot, entry, options.sessionId).kind === "exact"
+					)
+					: [];
+		} else {
+			entries = fs.readdirSync(asyncDirRoot).filter((entry) => isAsyncRunDir(asyncDirRoot, entry));
+		}
 	} catch (error) {
 		if (isNotFoundError(error)) return [];
 		throw new Error(`Failed to list async runs in '${asyncDirRoot}': ${getErrorMessage(error)}`, {

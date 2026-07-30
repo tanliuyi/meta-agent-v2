@@ -6,7 +6,7 @@
 
 `pi-subagents` lets Pi delegate work to focused child agents. Use it for code review, scouting, implementation, parallel audits, saved workflows, background jobs, and anything else that benefits from a second or third set of model eyes.
 
-https://github.com/user-attachments/assets/702554ec-faaf-4635-80aa-fb5d6e292fd1
+<https://github.com/user-attachments/assets/702554ec-faaf-4635-80aa-fb5d6e292fd1>
 
 ## Installation
 
@@ -155,9 +155,39 @@ For a persistent override, edit settings. This example pins the reviewer everywh
 }
 ```
 
-Use `~/.pi-desk/agent/settings.json` for a user override or the project config settings file (`.pi-desk/settings.json` in standard Pi) for a project override. `subagents.defaultModel` applies to builtin, package, user, and project agents that do not set `model` in frontmatter. Per-run model overrides and `agentOverrides.<name>.model` still win, and explicit agent frontmatter still wins over the global default. The same `agentOverrides` block can change `tools`, `skills`, inherited context, prompt text, or disable a builtin. Matching user and project agents also receive override fields that their frontmatter leaves unset, so a shared project config agent can keep the persona while local settings choose the model.
+Use `~/.pi/agent/settings.json` for a user override or the project config settings file (`.pi/settings.json` in standard Pi) for a project override. `subagents.defaultModel` applies to builtin, package, user, and project agents that do not set `model` in frontmatter. Per-run model overrides and `agentOverrides.<name>.model` still win, and explicit agent frontmatter still wins over the global default. The same `agentOverrides` block can change `tools`, `skills`, inherited context, prompt text, or disable a builtin. Matching user and project agents also receive override fields that their frontmatter leaves unset, so a shared project config agent can keep the persona while local settings choose the model.
 
-If your provider rejects model IDs with thinking suffixes, set `subagents.disableThinking: true` in user or project settings. That clears bundled builtin thinking defaults in one place; an explicit higher-precedence `agentOverrides.<name>.thinking` value can opt a role back in.
+Set `subagents.defaultThinking` to give builtin, package, user, and project agents without a `thinking` value a shared thinking level, independent of the parent session's default. Project settings win over user settings. Explicit frontmatter, `agentOverrides.<name>.thinking`, and per-run thinking overrides still win; `thinking: false` remains an explicit opt-out:
+
+```json
+{
+  "subagents": {
+    "defaultThinking": "medium",
+    "agentOverrides": {
+      "reviewer": { "thinking": "high" }
+    }
+  }
+}
+```
+
+If your provider rejects model IDs with thinking suffixes, set `subagents.disableThinking: true` in user or project settings. That clears bundled builtin thinking defaults in one place; an explicit higher-precedence `agentOverrides.<name>.thinking` value can opt a role back in. Existing custom-agent frontmatter remains authoritative.
+
+Set `subagents.defaultExtensions` to give builtin, package, user, and project agents without an `extensions` field a shared extension allowlist. Absent preserves Pi's normal ambient extension discovery. Present as an empty array, the default sets `extensions: []` for agents that do not explicitly define it, disabling ambient extension loading. Present as a non-empty array, the default supplies that allowlist to agents that do not explicitly define one. Project settings win over user settings. Use `agentOverrides.<name>.extensions` for per-agent settings; explicit custom-agent frontmatter remains authoritative.
+
+```json
+{
+  "subagents": {
+    "defaultExtensions": [],
+    "agentOverrides": {
+      "researcher": {
+        "extensions": ["./tools/research.ts"]
+      }
+    }
+  }
+}
+```
+
+A non-array value, an array containing a non-string entry, or an empty/whitespace-only string raises a settings error naming `defaultExtensions` and the offending settings file, matching the validation pattern used by `defaultModel` and `defaultThinking`.
 
 To inspect what `pi-subagents` has actually loaded right now, use:
 
@@ -186,7 +216,7 @@ Use `/subagents-watchdog recommend-model` to ask pi-subagents for the current st
 /subagents-watchdog model recommended
 ```
 
-`session model recommended` changes only the current Pi session. `model recommended` saves the recommendation to `~/.pi-desk/agent/settings.json`; it does not turn the watchdog on. Enable it separately with `/subagents-watchdog on` when you want the extra review pass.
+`session model recommended` changes only the current Pi session. `model recommended` saves the recommendation to `~/.pi/agent/settings.json`; it does not turn the watchdog on. Enable it separately with `/subagents-watchdog on` when you want the extra review pass.
 
 You can also set the model explicitly:
 
@@ -242,11 +272,13 @@ To keep subagents inside a budget or compliance profile, enforce a model scope. 
 
 ## Where running subagents show up
 
-Foreground runs stream progress in the conversation while they run.
+Foreground runs stream progress in the conversation while they run. They default to a generous 30-minute wall-clock timeout when neither the call nor the selected agent provides a timeout; explicit `timeoutMs`/`maxRuntimeMs` and agent defaults win.
 
-Background runs keep working after control returns to you. Inspect active runs with `subagent({ action: "status" })`, or a specific run with `subagent({ action: "status", id: "..." })`. `/subagents-fleet` opens a live, inspection-only fleet with current-session foreground work, recent async children, transcript tails, and completed output/session paths. Use `↑`/`↓` or `j`/`k` to select a child, `PgUp`/`PgDn` to scroll its transcript, `r` to refresh immediately, and `Esc` to close. `Ctrl+Alt+F` opens the same inspector even while a foreground turn is active and slash input is queued. Without a TUI, `/subagents-fleet` retains the textual `subagent({ action: "status", view: "fleet" })` fallback. Mutations stay in explicit commands: run `/subagents-stop` and pick from the selector, or use `/subagents-stop <run-id>` / `subagent({ action: "stop", id: "..." })` when you already know the id. To inspect one background child in text, use `subagent({ action: "status", id: "...", view: "transcript" })`; add `index` for a specific child in a parallel or chain run.
+Background runs keep working after control returns to you. Inspect active runs with `subagent({ action: "status" })`, or a specific run with `subagent({ action: "status", id: "..." })`. In the TUI, a persistent FleetView below the editor by default shows `main` plus active children with task, elapsed time, and token totals. Set `fleetViewPlacement` to `"aboveEditor"` to move it above the editor. When the focused editor is empty, use `↑`/`↓` or `j`/`k` to select a child and `Enter` to inspect it; normal editor input is never intercepted.
 
-They also show a compact async widget and send completion notifications. Parallel background runs show per-agent progress instead of fake chain steps. Chains with parallel groups keep their grouped shape in progress and results, so failed or paused agents stay visible next to completed ones. When a child is explicitly allowed to fan out with `tools: subagent`, its nested runs appear under that parent child in the main status tree instead of being hidden inside the child process.
+`/subagents-fleet` opens the live, inspection-only fleet inspector with current-session foreground work, recent async children, structured Markdown/tool transcripts, and completed output/session paths. Use `↑`/`↓` or `j`/`k` to select a child, `Shift+K`/`Shift+J` to scroll one line, `PgUp`/`PgDn` to scroll one page, `x`/`Ctrl+O` to toggle tool details, `r` to refresh, and `Esc` to close. `Ctrl+Alt+F` opens the same inspector even while a foreground turn is active and slash input is queued. Without a TUI, `/subagents-fleet` retains the textual `subagent({ action: "status", view: "fleet" })` fallback. Mutations stay in explicit commands: run `/subagents-stop` and pick from the selector, or use `/subagents-stop <run-id>` / `subagent({ action: "stop", id: "..." })` when you already know the id. To inspect one background child in text, use `subagent({ action: "status", id: "...", view: "transcript" })`; add `index` for a specific child in a parallel or chain run.
+
+FleetView replaces the legacy above-editor async widget by default, while completion notifications remain enabled. Parallel runs show every active child independently. Chains with parallel groups keep their grouped shape in progress and results, so failed or paused agents stay visible next to completed ones. When a child is explicitly allowed to fan out with `tools: subagent`, its nested runs appear under that parent child in the main status tree instead of being hidden inside the child process.
 
 You can also ask naturally:
 
@@ -254,13 +286,15 @@ You can also ask naturally:
 Show me the current async runs.
 ```
 
+Lifecycle artifact v3 adds `process-terminal-candidate.json` (private runner evidence) and `process-terminal.json` (the public proof projection). A proof is `observed` only after the live parent observes the exact detached runner's `close` event, every recorded child writer has a close record, and any tracked canonical-session lease is free. If the observer is unavailable, the proof is `unknown`; do not infer process exit from `endedAt`, result-file existence, PID disappearance, or lease-directory absence. The `subagent:process-terminal` event and RPC `ping.capabilities.processTerminalProof` expose this status. Process proof is point-in-time evidence and remains separate from execution success or stopped/non-resumable state.
+
 Async runs also write machine-readable lifecycle artifacts for observability and workflow gates. For a top-level async run, `details.asyncDir` points at a directory containing `status.json`, `events.jsonl`, `output-<index>.log`, and `subagent-log-<runId>.md`; the final summary is written to Pi's subagent results directory as `<runId>.json`. Nested async runs use the same shape under the nested async root and are discoverable through status projections that read the nested-run registry. These files are append/update artifacts only; interactive foreground behavior is unchanged.
 
 Foreground and async runners share bounded child-protocol handling. A child JSONL line above 4 MiB fails with structured `protocolError` code `protocol_output_limit`, stderr retains only its latest 128 KiB, split UTF-8 and final unterminated JSON events remain valid, and `agent_end.willRetry` defers completion until the child settles. Current Pi builds use `agent_settled` as the terminal watermark; older builds retain the bounded terminal-message fallback.
 
 The stable v1 status/result fields are `lifecycleArtifactVersion`, `runId`/`id`, `sessionId`, `mode`, `state`, `startedAt`, `lastUpdate`, `endedAt`, `durationMs`, `cwd`, `asyncDir`, `sessionFile`, `outputFile`, `workflowGraph`, `steps`, `results`, `totalTokens`, `totalCost`, `model`/`attemptedModels`/`modelAttempts`, `toolCount`, `turnCount`, and nested `children` when a child is allowed to launch subagents. `events.jsonl` records lifecycle transitions such as `subagent.run.started`, `subagent.step.started`, `subagent.step.completed`/`failed`/`paused`/`stopped`, control attention events, nested interrupt failures, and `subagent.run.completed`/`stopped`; run boundary events include the lifecycle artifact version. Consumers should read these JSON files instead of scraping terminal output; unknown fields and event types should be ignored for forward compatibility.
 
-Other Pi extensions can use the versioned in-process event-bus RPC instead of scraping slash output or calling internal modules. Listen for `subagents:rpc:v1:ready`, send requests on `subagents:rpc:v1:request`, and read replies from `subagents:rpc:v1:reply:<requestId>`.
+Other Pi extensions can use the versioned in-process event-bus RPC instead of scraping slash output or calling internal modules. Listen for `subagents:rpc:v1:ready`, send requests on `subagents:rpc:v1:request`, and read replies from `subagents:rpc:v1:reply:<requestId>`. The `ping` capability metadata also advertises `events.asyncComplete` for exact process-local completion correlation after RPC `spawn`. Delegation v1/v2 progress updates carry `runId` as soon as foreground execution allocates it, so a caller can retain the package-owned revival target even if its own tool turn is interrupted before the terminal response.
 
 ```typescript
 const requestId = crypto.randomUUID();
@@ -276,7 +310,7 @@ pi.events.emit("subagents:rpc:v1:request", {
 });
 ```
 
-The v1 methods are `ping`, `status`, `spawn`, `interrupt`, and `stop`. `status` and `interrupt` reuse the normal control actions. `spawn` is async-only: omit `async` or set `async: true`, omit `clarify` or set `clarify: false`, and do not pass management `action` values. It goes through the same executor as the `subagent` tool, so agent discovery, validation, session attribution, configured spawn caps, child-safety depth, artifacts, and async status all behave the same. `stop` targets current-session top-level async runs through the stop control channel and records a `stopped` lifecycle instead of reporting a timeout.
+The v1 methods are `ping`, `status`, `spawn`, `steer`, `interrupt`, `stop`, and `resume`. `status`, `steer`, `interrupt`, and `resume` reuse the normal package-owned actions. `steer` requires an async run `id` (plus optional child `index`) and a non-empty `message`; its reply preserves the normal acknowledged-delivery result. RPC steering disables the direct tool's pause-and-revive recovery so an extension keeps authority over the exact child it spawned; `ping.capabilities.nonRecoveringSteer` advertises this guarantee. `resume` requires a run target and non-empty `message`; it delegates to the existing revival path, which validates current-session ownership, persisted session/recovery metadata, stopped/live state, capability ceilings, and the exclusive session lease before returning the new async run details. Callers may request a `file-only` output path for the revived result without overriding its model, tools, or budgets. `ping.capabilities.resume` advertises this seam. `spawn` is async-only: omit `async` or set `async: true`, omit `clarify` or set `clarify: false`, and do not pass management `action` values. It goes through the same executor as the `subagent` tool, so agent discovery, validation, session attribution, configured spawn caps, child-safety depth, artifacts, and async status all behave the same. `stop` targets current-session top-level async runs through the stop control channel and records a `stopped` lifecycle instead of reporting a timeout.
 
 `pi.events` is in-process only. It does not reach separate Pi processes or child subagents; use the file lifecycle artifacts or `pi-intercom` for cross-process coordination.
 
@@ -443,7 +477,7 @@ Skip this section until you want exact syntax.
 | `/subagents-doctor` | Show read-only setup diagnostics |
 | `/subagents-models [agent]` | Show the runtime-loaded builtin model mapping, optionally filtered to one builtin |
 | `/subagents-watchdog [status|on|off|recommend-model|model ...|session model ...|check]` | Show or configure the opt-in watchdog; use a strong complementary model such as Opus 4.8 high or GPT 5.5 high |
-| `/subagents-profiles` | List saved subagent profiles from `~/.pi-desk/agent/profiles/pi-subagents/` |
+| `/subagents-profiles` | List saved subagent profiles from `~/.pi/agent/profiles/pi-subagents/` |
 | `/subagents-load-profile <name>` | Replace only `settings.subagents` with a saved profile and optionally switch this session to the profile worker model |
 | `/subagents-refresh-provider-models <provider> [--force]` | Create or refresh the cached provider model catalog |
 | `/subagents-generate-profiles <provider>` | Generate `<provider>.quota.json` and `<provider>.quality.json` profiles |
@@ -458,13 +492,13 @@ Commands validate agent names locally, support tab completion, and send results 
 Profiles are stored under:
 
 ```text
-~/.pi-desk/agent/profiles/pi-subagents/
+~/.pi/agent/profiles/pi-subagents/
 ```
 
 Provider model catalogs are cached under:
 
 ```text
-~/.pi-desk/agent/profiles/pi-subagents/providers/
+~/.pi/agent/profiles/pi-subagents/providers/
 ```
 
 Use the profile workflow like this:
@@ -563,7 +597,7 @@ Append `[key=value,...]` to an agent name to override defaults. `/chain` applies
 | `cwd` | `cwd=packages/api` | Run the step in a subdirectory. |
 | `count` | `count=3` | Fan a group task into N copies (only inside a `( ... )` group). |
 | `outputSchema` | `outputSchema=schema.json` | Validate structured output against a JSON Schema file (path resolved against the session cwd, not an inline step `cwd`). |
-| `acceptance` | `acceptance=checked` | Inline acceptance level: `auto`, `attested`, or `checked`. Use the tool API or saved `.chain.json` for object contracts such as `none` or `verified`; `reviewed` is inferred-only. |
+| `acceptance` | `acceptance=checked` | Inline evidence level: `auto`, `attested`, or `checked`. Use the tool API or saved `.chain.json` for object contracts such as `none`, `verified`, or an orthogonal review requirement. `reviewed` is an achieved status, not an input level. |
 
 Set `output=false`, `reads=false`, or `skills=false` to disable that behavior explicitly. Do not use `output=false` for file-only returns; use `outputMode=file-only` with an `output` path.
 
@@ -629,10 +663,10 @@ Agent locations, lowest to highest priority:
 
 | Scope | Path |
 |-------|------|
-| Builtin | `~/.pi-desk/agent/extensions/subagent/agents/` |
+| Builtin | `~/.pi/agent/extensions/subagent/agents/` |
 | Installed package | `package.json` `pi-subagents.agents` or `pi.subagents.agents` |
-| User | `~/.pi-desk/agent/agents/**/*.md` |
-| Project | Project config `agents/**/*.md` (`.pi-desk/agents/**/*.md` in standard Pi) |
+| User | `~/.pi/agent/agents/**/*.md` |
+| Project | Project config `agents/**/*.md` (`.pi/agents/**/*.md` in standard Pi) |
 
 Project discovery also reads legacy `.agents/**/*.md` files. Nested subdirectories are discovered recursively. `.chain.md` files do not define agents. Installed Pi packages can expose agent directories from either `{"pi-subagents":{"agents":["./agents"]}}` or `{"pi":{"subagents":{"agents":["./agents"]}}}` in their package manifest. Package agents load above builtins and below user/project agents. If both `.agents/` and the project config agents directory define the same parsed runtime agent name, the project config directory wins. Use `agentScope: "user" | "project" | "both"` to control discovery; `both` is the default and project definitions win runtime-name collisions.
 
@@ -648,8 +682,8 @@ pi install npm:pi-web-access
 
 You can override selected builtin fields without copying the whole agent. Overrides live in settings:
 
-- User: `~/.pi-desk/agent/settings.json`
-- Project: project config settings file (`.pi-desk/settings.json` in standard Pi)
+- User: `~/.pi/agent/settings.json`
+- Project: project config settings file (`.pi/settings.json` in standard Pi)
 
 Example:
 
@@ -757,14 +791,14 @@ Important fields:
 | `defaultReads` | Files to read before running in chain/parallel behavior. |
 | `defaultProgress` | Maintain `progress.md`. |
 | `async` | Default a single-agent launch to background (`true`) or foreground (`false`) when the call omits `async`. Explicit call values and `forceTopLevelAsync` win. |
-| `timeoutMs` | Positive integer default runtime deadline in milliseconds for single-agent launches. An explicit `timeoutMs` or `maxRuntimeMs` wins. |
+| `timeoutMs` | Positive integer default runtime deadline in milliseconds for single-agent launches. Foreground launches use 30 minutes when neither the call nor agent provides a timeout; explicit `timeoutMs`/`maxRuntimeMs` and agent defaults win. |
 | `turnBudget` | JSON object default such as `{"maxTurns":20,"graceTurns":2}` for single-agent launches. An explicit call value wins, followed by this agent default, then global `turnBudget` config. |
 | `acceptance` | Acceptance default for single-agent launches. Use a scalar level such as `checked` or an inline/block YAML map such as `{ level: "none", reason: "lightweight lookup" }`. Explicit call values win; chain and parallel acceptance remains task/step configuration. |
 | `acceptanceRole` | Optional `read-only` or `writer` role for automatic acceptance inference. Explicit task mutation or no-edit intent wins; otherwise the declared role replaces agent-name guessing. This does not grant or revoke tools. |
 | `completionGuard` | Set `false` only for non-implementation agents that may mention implementation words while using mutation-capable tools such as `bash`. |
 | `interactive` | Parsed for compatibility but not enforced in v1. |
 | `maxSubagentDepth` | Tightens nested delegation for this agent's children. |
-| `memory` | Opt-in role-specific persistent memory. `memory: { scope: "project" \| "user", path: "<name>" }` injects the first lines of a `MEMORY.md` from a dedicated `agent-memory/` directory into the child system prompt. Agents with write tools (`edit`/`write`/`bash`) get a read-write block; read-only agents get a read-only fallback. Project scope resolves under `<project>/.pi-desk/agent-memory/`, user scope under `~/.pi-desk/agent/agent-memory/`. Paths are validated against traversal and symlink escape. |
+| `memory` | Opt-in role-specific persistent memory. `memory: { scope: "project" \| "user", path: "<name>" }` injects the first lines of a `MEMORY.md` from a dedicated `agent-memory/` directory into the child system prompt. Agents with write tools (`edit`/`write`/`bash`) get a read-write block; read-only agents get a read-only fallback. Project scope resolves under `<project>/.pi/agent-memory/`, user scope under `~/.pi/agent/agent-memory/`. Paths are validated against traversal and symlink escape. |
 
 Agent-local `skillPath` candidates never enter Pi's parent/global skills catalog. Pair `inheritSkills: false` with explicit `skills` and `skillPath` when a child should receive only its selected private skills.
 
@@ -780,21 +814,21 @@ memory:
 
 On each run, the first 200 lines of `MEMORY.md` in the resolved memory directory are injected into the child system prompt so the agent can recall accumulated role notes such as threat-model entries, release gotchas, or verified commands. Agents that have write tools (`edit`, `write`, or `bash`, or no `tools` allowlist at all) are told they may append concise dated entries to the file. Agents without write tools receive a read-only memory block and are not instructed to edit it, so a read-only reviewer can still recall prior notes without being granted write capability. The memory directory is never created eagerly; the agent's own `write` tool creates it (and `MEMORY.md`) on the first persist. Memory paths are validated against `.`/`..` traversal and symlink escape, and an unsafe or unresolvable scope is silently skipped rather than breaking the run.
 
-Project-scoped memory resolves under `<project>/.pi-desk/agent-memory/<path>` and travels with the repo. User-scoped memory resolves under `~/.pi-desk/agent/agent-memory/<path>` and is shared across projects for that agent.
+Project-scoped memory resolves under `<project>/.pi/agent-memory/<path>` and travels with the repo. User-scoped memory resolves under `~/.pi/agent/agent-memory/<path>` and is shared across projects for that agent.
 
 ### Tool and extension selection
 
-If `tools` is omitted, `pi-subagents` does not pass `--tools`, so the child gets Pi’s normal builtin tools. If `tools` is present, regular tool names become an explicit allowlist. An allowlisted name does not load the extension that registers it: load that provider through normal Pi extension discovery, `extensions`, `subagentOnlyExtensions`, or a path-like `tools` entry. `mcp:` entries are split out and forwarded as direct MCP selections. Path-like `tools` entries, such as extension paths or `.ts`/`.js` files, are treated as tool-extension paths rather than tool names. Internal runtime tools such as `structured_output` are added to an explicit allowlist only when their contract is active. Agents that declare only known read-only builtin tools skip the implementation completion guard, but `bash`, unknown tools, and MCP tools stay mutation-capable. Use `completionGuard: false` for bash-enabled validators or advisors that should never be judged as implementation agents.
+If `tools` is omitted, `pi-subagents` does not pass `--tools`, so the child gets Pi’s normal builtin tools. If `tools` is present, regular tool names become an explicit allowlist; an empty `tools:` field emits `--no-tools`. An allowlisted name does not load the extension that registers it: load that provider through normal Pi extension discovery, `extensions`, `subagentOnlyExtensions`, or a path-like `tools` entry. `mcp:` entries are split out and forwarded as direct MCP selections without granting normal builtins unless those builtins are also listed. Path-like `tools` entries, such as extension paths or `.ts`/`.js` files, are treated as tool-extension paths rather than tool names. Internal runtime tools such as `structured_output` are added to an explicit allowlist only when their contract is active. Agents that declare only known read-only builtin tools skip the implementation completion guard, but `bash`, unknown tools, and MCP tools stay mutation-capable. Use `completionGuard: false` for bash-enabled validators or advisors that should never be judged as implementation agents.
 
 Examples:
 
 - `tools` omitted and `extensions` omitted: normal builtins and normal extensions.
-- `tools: mcp:chrome-devtools`: normal builtins plus direct Chrome DevTools MCP tools.
+- `tools: mcp:chrome-devtools`: only the resolved direct Chrome DevTools MCP tools.
 - `tools: read, bash, mcp:chrome-devtools`: only `read` and `bash` as builtins, plus direct Chrome DevTools MCP tools.
 - `tools: subagent, read`: a child-safe `subagent` tool is available inside that child so it can run explicitly assigned nested fanout.
 - `tools: read, fixture_search` plus `subagentOnlyExtensions: ./tools/fixture-search.ts`: the provider loads only in this agent's child process, and the registered `fixture_search` name survives the strict allowlist.
 
-Direct MCP tools require [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter). Subagents only receive direct MCP tools when `mcp:` entries are listed in their frontmatter; global `directTools: true` in `mcp.json` is not enough by itself. The generic `mcp` proxy tool can still be used for discovery when available. The adapter caches tool metadata at startup, so after connecting a new MCP server for the first time, restart Pi before relying on direct tools. An `mcp:` entry named `subagent` does not authorize nested fanout; only the builtin `subagent` tool name does.
+Direct MCP tools require [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter). Subagents only receive direct MCP tools when `mcp:` entries are listed in their frontmatter; global `directTools: true` in `mcp.json` is not enough by itself. The generic `mcp` proxy tool can still be used for discovery when available. The adapter caches tool metadata at startup, so after connecting a new MCP server for the first time, restart Pi before relying on direct tools. An `mcp:` entry named `subagent` does not authorize nested fanout; only the builtin `subagent` tool name does. If a resolved direct MCP name is missing from the child registry, pi-subagents keeps the launch failed under the strict allowlist and identifies the condition as a host/pi-mcp-adapter registration problem; verify that the adapter registers the selected tools before child startup.
 
 `extensions` controls child extension loading:
 
@@ -812,6 +846,8 @@ When `extensions` is present, normal discovered extensions are disabled; the lis
 
 Use `subagentOnlyExtensions` when a custom extension tool should exist only inside child sessions. It is scoped by agent config: every run of that agent receives those extension paths, while other agents do not unless they declare the same field. The current model does not have a separate named-subagent audience inside one agent definition.
 
+To apply the same `extensions` allowlist to every agent that does not declare its own, set `subagents.defaultExtensions` in user or project settings. Omit it to preserve ambient extension discovery or set it to `[]` to disable ambient extensions by default; project settings win over user settings. Agents that explicitly define `extensions` keep their own value, including an empty `extensions:` field.
+
 Before the first model turn, the child runtime compares every explicit tool name with Pi's final filtered registry. A missing provider now fails the run with the unavailable names and concrete `subagentOnlyExtensions`/`extensions` guidance instead of letting a direct or chained child silently continue without its requested tools.
 
 ## Chain files
@@ -821,8 +857,8 @@ Chains are reusable workflows stored separately from agent files. Use `.chain.md
 | Scope | Path |
 |-------|------|
 | Installed package | `package.json` `pi-subagents.chains` or `pi.subagents.chains` |
-| User | `~/.pi-desk/agent/chains/**/*.chain.md`, `~/.pi-desk/agent/chains/**/*.chain.json` |
-| Project | Project config `chains/**/*.chain.md`, `chains/**/*.chain.json` (`.pi-desk/chains/...` in standard Pi) |
+| User | `~/.pi/agent/chains/**/*.chain.md`, `~/.pi/agent/chains/**/*.chain.json` |
+| Project | Project config `chains/**/*.chain.md`, `chains/**/*.chain.json` (`.pi/chains/...` in standard Pi) |
 
 Nested subdirectories are discovered recursively. Installed Pi packages can expose chain directories from either `{"pi-subagents":{"chains":["./chains"]}}` or `{"pi":{"subagents":{"chains":["./chains"]}}}` in their package manifest. Package chains load below user/project chains. If both `.chain.md` and `.chain.json` define the same parsed runtime chain name in the same scope, `.chain.json` wins. If user and project scopes define the same parsed runtime chain name, the project chain wins. Chains support the same optional `package` frontmatter as agents; `name: review-flow` plus `package: code-analysis` runs as `code-analysis.review-flow`.
 
@@ -928,13 +964,13 @@ Skills are `SKILL.md` files made available to an agent. The prompt includes skil
 
 Discovery uses project-first precedence:
 
-1. Project config `skills/{name}/SKILL.md` (`.pi-desk/skills/{name}/SKILL.md` in standard Pi)
+1. Project config `skills/{name}/SKILL.md` (`.pi/skills/{name}/SKILL.md` in standard Pi)
 2. Project packages and project settings packages via `package.json -> pi.skills`
 3. Current task cwd package via `package.json -> pi.skills`
 4. Project config `settings.json -> skills`
-5. `~/.pi-desk/agent/skills/{name}/SKILL.md`
+5. `~/.pi/agent/skills/{name}/SKILL.md`
 6. User packages and user settings packages via `package.json -> pi.skills`
-7. `~/.pi-desk/agent/settings.json -> skills`
+7. `~/.pi/agent/settings.json -> skills`
 
 Use agent defaults, override them at runtime, or disable them:
 
@@ -971,6 +1007,7 @@ Missing skills do not fail execution. The result summary shows a warning.
 The package bundles a `pi-subagents` skill that is automatically available to the parent agent when the extension is installed. It is for the orchestrating parent only: child subagents never receive it, and their context is explicitly filtered to strip parent-only orchestration instructions.
 
 What the bundled skill covers:
+
 - **Delegation patterns**: when to launch which agent, whether to use single, parallel, chain, or async mode, and whether to use fresh or forked context
 - **Prompt workflow recipes**: how to apply the packaged techniques directly with `subagent(...)` when the user describes the workflow in natural language instead of invoking a slash command. This includes parallel review, review-loop, parallel research, parallel context-build, parallel handoff-plan, gather-context-and-clarify, and parallel cleanup
 - **Role-agent prompting guidance**: compact contract prompts instead of long scripts, what to include in role-specific meta prompts, and retrieval budgets for researchers
@@ -982,7 +1019,39 @@ If you are writing an agent that orchestrates subagents, the bundled skill helps
 
 ## Extension delegation API
 
-Pi extensions can request one configured foreground agent through the typed v1 event contract:
+Pi extensions can request configured foreground agents through the public event
+contract exported by `pi-subagents/delegation`.
+
+### Launch contract preflight
+
+Use `pi-subagents/preflight` when an extension needs to inspect the resolved child launch contract before deciding whether to run anything:
+
+```ts
+import { resolveSubagentLaunchContract } from "pi-subagents/preflight";
+
+const result = await resolveSubagentLaunchContract({
+  agent: "reviewer",
+  task: "Review the current diff.",
+  context: "fresh",
+  cwd: ctx.cwd,
+  sessionRoot: "/tmp/my-extension-preflight-session-root",
+  availableModels: ctx.modelRegistry.getAvailable(),
+});
+
+if (!result.ok) {
+  // missing_agent, ambiguous_agent, missing_skill, denied_required_tool,
+  // invalid_artifact_dir, invalid_cwd, or unsupported_mode
+  throw new Error(result.message);
+}
+
+console.log(result.contract.digest, result.contract.tools.effectiveAllowlist);
+```
+
+Preflight covers ordinary single-agent launch resolution under public contract version 2: selected agent identity and shadowed candidates, a versioned parsed-definition digest (including system prompt and launch-affecting model, tool, skill, extension, output, and memory fields), fresh/fork context, effective model and thinking, skill and tool resolution, direct MCP selections, runtime/configured extensions, artifact/session paths, async lifecycle/status/result/event/process-terminal paths, package/lifecycle versions, capability-ceiling audit data, and stable digests. `launchContractDigest` is the canonical digest of the caller task, effective system prompt (including the resolved `turnBudget` prompt augmentation when supplied), model candidates, effective tools/extensions/MCP (including inherited capability ceilings), output binding, and structured-output schema that ordinary foreground and async execution report in results/status/events and metadata. Runtime acceptance prose and output-task annotations are intentionally excluded because side-effect-free preflight does not resolve those host/runtime augmentations; the contract version and task digest make that boundary explicit. Raw prompts are not exposed in public contract output. It is side-effect-free for launch state: it does not create child sessions, temp prompt files, structured-output runtimes, tool-diagnostic files, or run artifacts. Some host-owned facts, such as exact fork snapshots, nested async roots, and live model registries, can only be proven by the Pi host; those appear as `host_required` diagnostics instead of silently pretending to be exact.
+
+### Delegation v1
+
+The compatibility v1 contract runs one configured foreground agent per request:
 
 ```ts
 import {
@@ -1014,11 +1083,108 @@ pi.events.emit(SUBAGENT_DELEGATION_REQUEST_EVENT, request);
 
 The contract uses the established `prompt-template:subagent:*` event transport and the same executor as the `subagent` tool; it does not add another launcher. New integrations must send `version: 1`. Requests are strict and single-agent only. They can set fresh or fork context, model, cwd, timeout, turn and tool-call budgets, skills, output behavior, acceptance, and artifact capture. Unknown or malformed fields return `invalid_request` before execution.
 
-Responses distinguish completion, failure, timeout, cancellation, interruption, turn or tool-budget exhaustion, explicit acceptance failure, invalid requests, and unavailable active context. Optional run, model, output, session, acceptance, usage, progress, and warning fields are omitted when unavailable. Request IDs must be unique while active; duplicate active IDs are ignored so the original request keeps ownership of its terminal response. Emit `SUBAGENT_DELEGATION_CANCEL_EVENT` with the same version and request ID to cancel queued or active work.
+Responses distinguish completion, failure, timeout, cancellation, interruption,
+turn or tool-budget exhaustion, explicit acceptance failure, invalid requests,
+and unavailable active context. Optional metadata is omitted when unavailable.
+Request IDs must be unique while active; duplicate active IDs are ignored so the
+original request keeps ownership of its terminal response. Emit
+`SUBAGENT_DELEGATION_CANCEL_EVENT` with the same version and request ID to cancel
+queued or active work.
+
+### Delegation v2
+
+V2 is the owned-leaf contract for workflow supervisors. Independent requests
+can overlap through the delegated executor without weakening the ordinary
+model-facing tool's one-foreground-call-per-turn guard.
+
+```ts
+import {
+  SUBAGENT_DELEGATION_REQUEST_EVENT,
+  SUBAGENT_DELEGATION_RESPONSE_EVENT,
+  type SubagentDelegationV2Request,
+  type SubagentDelegationV2Response,
+} from "pi-subagents/delegation";
+
+const request: SubagentDelegationV2Request = {
+  version: 2,
+  requestId: crypto.randomUUID(),
+  ownerRunId: workflowRunId,
+  nodeId: "review-accuracy",
+  agent: "reviewer",
+  task: "Review the supplied evidence.",
+  context: "fresh",
+  cwd: ctx.cwd,
+  thinking: "high",
+  result: {
+    kind: "structured",
+    schema: {
+      type: "object",
+      properties: { verdict: { type: "string" } },
+      required: ["verdict"],
+      additionalProperties: false,
+    },
+  },
+};
+
+const unsubscribe = pi.events.on(SUBAGENT_DELEGATION_RESPONSE_EVENT, (payload) => {
+  const response = payload as SubagentDelegationV2Response;
+  if (response.version !== 2 || response.requestId !== request.requestId) return;
+  if (response.ownerRunId !== request.ownerRunId || response.nodeId !== request.nodeId) return;
+  unsubscribe();
+  // Inspect response.status, response.result, response.usage, model, and thinking.
+});
+pi.events.emit(SUBAGENT_DELEGATION_REQUEST_EVENT, request);
+```
+
+`ownerRunId` plus `nodeId` is the active logical identity; `requestId` identifies
+one attempt. A second active attempt for the same logical node receives
+`duplicate_node` without disturbing the original. Started, update, response,
+and cancellation payloads carry the full tuple. Cancellation affects only an
+exact tuple, including cancel-before-start races. Each attempt emits at most one
+terminal response.
+
+Result mode is explicit. Text remains literal even when it looks like JSON.
+Structured mode returns the separately captured, schema-validated JSON value.
+Terminal usage reports input, output, cache-read, cache-write, cost, turns, tool
+calls, and duration alongside the effective model and thinking level when
+known. Schemas are capped at 64 KiB; tasks and returned text/structured values
+are capped at 1 MiB, with smaller bounds on identity/configuration strings and
+a maximum v2 `timeoutMs` of 2,147,483,647. V2 alone accepts
+`toolBudget: { hard: 0, block: "*" }` to block the first tool call and run a
+zero-tool leaf; delegation v1 and ordinary model-facing/configured budgets keep
+their existing minimum of one. The foreground bridge retains up to 8,192 exact
+pending-cancellation and settled-attempt identities per extension
+context. If either history fills, it fails closed with `unavailable_context`
+for later v2 starts rather than evicting identity facts; lifecycle reset clears
+the bounded history.
 
 Delegation requires an active extension context. Emit requests from a supported event callback or queued application step, not by recursively invoking the `subagent` tool inside another tool's `tool_call` hook. The caller selects a configured agent, but agent discovery and effective tools remain package-owned. A request cannot grant arbitrary tools, and tool restrictions are not an operating-system sandbox. The detached RPC remains async-only; this API is foreground-only.
 
-Existing prompt-template payloads continue over the same event family, including their parallel-only adapter. `pi-subagents/delegation` is the canonical contract for new extension integrations.
+Existing prompt-template payloads and delegation v1 continue over the same event
+family. V2 remains foreground-only and inherits the configured agent's current
+tools, skills, context, model policy, and workspace authority; it is not a
+sandbox or a durable task broker. `pi-subagents/delegation` is the canonical
+contract for extension integrations.
+
+## Capability ceilings
+
+Parent extensions can enforce an out-of-band, session-scoped capability ceiling without adding a model-visible field to `subagent`:
+
+```ts
+import { registerSubagentCapabilityCeiling } from "pi-subagents/capability-ceiling";
+
+const restriction = registerSubagentCapabilityCeiling({
+  sessionId: ctx.sessionManager.getSessionId(),
+  source: "plan-mode",
+  ceiling: { allowedTools: ["read", "grep", "find", "ls"], denyExtensions: true },
+});
+// restriction.update(...) replaces this provider's policy atomically.
+// restriction.dispose() removes only this provider's registration.
+```
+
+Active registrations intersect their `allowedTools` sets and OR `denyExtensions`; an explicit empty list means no caller-facing tools, while an omitted list does not restrict names. The resolved snapshot is propagated monotonically to nested and async children and is retained for recovery. `structured_output` may remain as a package-owned internal protocol tool when an output schema requires it; it is not a caller capability. A denied lazy-skill `read` requirement fails before spawn rather than widening the ceiling.
+
+`denyExtensions` suppresses ambient, configured, and MCP provider extensions while retaining the package runtime needed for child protocol enforcement. This is a same-process policy boundary, not a sandbox against malicious code already running in the parent process. Schedules created while a ceiling is active are rejected until durable schedule persistence is available; unrestricted schedules remain subject to any policy active when they fire. Public status exposes bounded audit counts and sources, never full extension paths.
 
 ## Background-work provider API
 
@@ -1216,7 +1382,7 @@ Agent definitions are not loaded into context by default. Management actions let
 | `clarify` | boolean | false | Show TUI preview/edit flow. Explicit `clarify: true` keeps the run foreground for the clarify UI. |
 | `agentScope` | `user \| project \| both` | `both` | Agent discovery scope. Project wins on collisions. |
 | `async` | boolean | false | Background execution. For chains, `clarify: true` explicitly keeps the run foreground for the clarify UI. |
-| `timeoutMs` / `maxRuntimeMs` | number | none | Optional run-level max runtime in milliseconds for foreground and async/background runs. |
+| `timeoutMs` / `maxRuntimeMs` | number | 30 min foreground; none async | Optional run-level max runtime in milliseconds. Foreground uses 30 minutes only when neither the call nor selected agent provides a timeout. |
 | `turnBudget` | object | none | Optional assistant-turn budget `{ maxTurns, graceTurns }`. At `maxTurns` the child is warned to wrap up. After the grace window (default 1), termination occurs at the next assistant boundary; a response that starts tool work records `termination-deferred` until a later boundary. Partial output is returned on abort. |
 | `toolBudget` | object | none | Optional child tool-call budget `{ soft?, hard, block? }`. At `soft` the child is nudged to finalize. After `hard`, configured tools are blocked; `block` defaults to `read`, `grep`, `find`, and `ls`, while `"*"` blocks every tool call. Final assistant text is never blocked. |
 | `cwd` | string | runtime cwd | Override working directory. |
@@ -1225,7 +1391,7 @@ Agent definitions are not loaded into context by default. Management actions let
 | `includeProgress` | boolean | false | Include full progress in result. |
 | `share` | boolean | false | Upload session export to GitHub Gist. |
 | `sessionDir` | string | derived | Override session log directory. |
-| `acceptance` | string/object/false | inferred | Override inferred gates with `"auto"`, `"attested"`, `"checked"`, `"verified"`, or `{ level: "none", reason: "..." }`. `reviewed` is inferred-only; explicit requests fail preflight. `false` disables gates. With `agentContract: { version: 1 }`, omitted, `"auto"`, and `false` mean no acceptance request for that run; explicit acceptance is reported separately from execution. |
+| `acceptance` | string/object/false | inferred | Configure evidence gates with `"auto"`, `"attested"`, `"checked"`, `"verified"`, or `{ level: "none", reason: "..." }`. Independent review is orthogonal: use `review: { required: true, agent?: "reviewer", focus?: "..." }`. `review-required` means evidence passed but review is pending; `reviewed` is achieved only after a real independent result. Explicit `"reviewed"` remains schema-recognized solely for actionable preflight recovery. For reviewer/read-only calls, omit acceptance. `false` disables gates. With `agentContract: { version: 1 }`, omitted, `"auto"`, and `false` mean no acceptance request for that run; explicit acceptance is reported separately from execution. |
 
 `agentContract: { version: 1 }` keeps existing fields and artifacts but adds derived `execution`, `acceptance`, `review`, and `effects` projections. In v1, acceptance failures do not rewrite execution success, and an explicit completion guard reports `effects.fileMutation` instead of failing the run by itself. Chain steps default to advancing on execution under v1; set `gateOn: "acceptance"` on a v1 step or parallel task when rejected acceptance should stop the chain.
 
@@ -1299,11 +1465,11 @@ Requirements:
 
 By default, worktrees are created under the system temp directory. Set `worktreeBaseDir` in config, or `PI_SUBAGENTS_WORKTREE_DIR` when config is unset, to put them under a stable trusted directory. Missing base directories are created automatically.
 
-After a worktree parallel step completes, per-agent diff stats are appended to the output and full patch files are written to artifacts. Worktrees and temp branches are cleaned up in `finally` blocks.
+After a worktree parallel step completes, per-agent diff stats are appended to the output and full patch files are written to artifacts. The runtime also writes a versioned aggregate handoff manifest: foreground runs use the artifact directory's `handoffs/<run-id>.json`, while async runs use `<async-dir>/handoff.json`. The manifest records each child's terminal status, summary, output/session/structured-output references, patch stats and path, and whether its worktree and temporary branch were actually removed. Foreground `details`, async `status.json` and result files, status output, intercom delivery, and completion notifications expose the manifest path. Worktrees and temp branches still receive best-effort fallback cleanup if handoff finalization cannot run.
 
 ## Configuration
 
-`pi-subagents` reads optional JSON config from `~/.pi-desk/agent/extensions/subagent/config.json`.
+`pi-subagents` reads optional JSON config from `~/.pi/agent/extensions/subagent/config.json`.
 
 ### `toolDescriptionMode`
 
@@ -1313,7 +1479,7 @@ After a worktree parallel step completes, per-agent diff stats are appended to t
 
 Controls the parent-facing `subagent` tool description registered at startup. `full` is the default. `compact` keeps the execution modes, async/`subagent_wait` guidance, child-safety boundary, management/action split, one-writer review guidance, and artifact/status essentials with less prompt bloat.
 
-`custom` reads `subagent-tool-description.md` from the project config directory, then from `~/.pi-desk/agent/subagent-tool-description.md`. Missing, empty, unreadable, or oversized custom files fall back to the full description. Custom templates may use `{{fullDescription}}`, `{{compactDescription}}`, `{{safetyGuidance}}`, `{{agentDir}}`, and `{{projectConfigDir}}`; the safety guidance is always present so custom prose cannot remove the runtime guardrails. Restart Pi after changing the mode or custom file.
+`custom` reads `subagent-tool-description.md` from the project config directory, then from `~/.pi/agent/subagent-tool-description.md`. Missing, empty, unreadable, or oversized custom files fall back to the full description. Custom templates may use `{{fullDescription}}`, `{{compactDescription}}`, `{{safetyGuidance}}`, `{{agentDir}}`, and `{{projectConfigDir}}`; the safety guidance is always present so custom prose cannot remove the runtime guardrails. Restart Pi after changing the mode or custom file.
 
 ### `asyncByDefault`
 
@@ -1323,13 +1489,29 @@ Controls the parent-facing `subagent` tool description registered at startup. `f
 
 Makes top-level calls use background execution when the request does not explicitly set `async`. Callers can still force foreground with `async: false` unless `forceTopLevelAsync` is enabled.
 
+### `fleetView`
+
+```json
+{ "fleetView": false }
+```
+
+Controls the persistent, navigable FleetView. The default is `true`. Set it to `false` to hide FleetView without disabling status tracking, completion notifications, `/subagents-fleet`, or lifecycle events.
+
+### `fleetViewPlacement`
+
+```json
+{ "fleetViewPlacement": "aboveEditor" }
+```
+
+Places the persistent FleetView either `"belowEditor"` or `"aboveEditor"`. The default is `"belowEditor"`; invalid values fall back to `"belowEditor"`.
+
 ### `asyncWidget`
 
 ```json
-{ "asyncWidget": false }
+{ "asyncWidget": true }
 ```
 
-Controls the above-editor widget for background runs. The default is `true`. Set it to `false` when another extension renders async lifecycle data in a custom footer, status line, or dashboard; status tracking, completion notifications, `/subagents-fleet`, and lifecycle events continue to work.
+Controls the legacy above-editor widget for background runs. It defaults to `false` while FleetView is enabled and `true` when FleetView is disabled. Set it explicitly to show both surfaces or hide the legacy widget entirely.
 
 ### `waitTool`
 
@@ -1391,7 +1573,7 @@ Enables optional one-shot scheduled subagent runs. When enabled, `subagent({ act
 ### `defaultSessionDir`
 
 ```json
-{ "defaultSessionDir": "~/.pi-desk/agent/sessions/subagent/" }
+{ "defaultSessionDir": "~/.pi/agent/sessions/subagent/" }
 ```
 
 Session directory precedence is: `params.sessionDir`, then `config.defaultSessionDir`, then a directory derived from the parent session. Sessions are always enabled.
@@ -1399,7 +1581,7 @@ Session directory precedence is: `params.sessionDir`, then `config.defaultSessio
 ### `singleRunOutputBaseDir`
 
 ```json
-{ "singleRunOutputBaseDir": "~/.pi-desk/subagent-outputs" }
+{ "singleRunOutputBaseDir": "~/.pi/subagent-outputs" }
 ```
 
 Routes relative `output` paths for single-agent `/run` calls under this directory. Absolute per-call or agent output paths are still used as-is. When unset, relative single-run outputs go under the run's output artifact directory instead of the project root.
@@ -1426,7 +1608,8 @@ Overrides the command used to launch child Pi processes. Package wrappers can se
 {
   "intercomBridge": {
     "mode": "always",
-    "instructionFile": "./intercom-bridge.md"
+    "instructionFile": "./intercom-bridge.md",
+    "resultDelivery": true
   }
 }
 ```
@@ -1436,7 +1619,8 @@ Controls whether subagents receive runtime intercom coordination instructions an
 Fields:
 
 - `mode`: default `always`; use `fork-only` to inject only for forked runs, or `off` to disable the bridge.
-- `instructionFile`: optional Markdown template replacing the default bridge instructions. `{orchestratorTarget}` is interpolated. Relative paths resolve from `~/.pi-desk/agent/extensions/subagent/`.
+- `instructionFile`: optional Markdown template replacing the default bridge instructions. `{orchestratorTarget}` is interpolated. Relative paths resolve from `~/.pi/agent/extensions/subagent/`.
+- `resultDelivery`: default `true`; attempts acknowledged grouped completion delivery through an external `subagent:result-intercom` listener. Set `false` when native parent notifications own completion delivery. Supervisor asks/progress remain active, and genuine enabled-transport acknowledgement failures remain visible.
 
 Bridge activation requires a targetable current parent session id, which `pi-subagents` passes to children automatically. It no longer depends on an external `pi-intercom` installation or per-agent extension allowlists.
 
@@ -1477,7 +1661,7 @@ stdin is a JSON object with `repoRoot`, `worktreePath`, `agentCwd`, `branch`, `i
 }
 ```
 
-Controls where subagent artifact files (inputs, outputs, transcripts, metadata) are stored. Defaults to `"project"`, which writes to `<cwd>/.pi-subagents/artifacts/`. Set to `"session"` to store artifacts under pi's session directory (`~/.pi-desk/agent/sessions/<session>/subagent-artifacts/`), keeping the working directory clean. Set to `"temp"` to use the OS temp directory.
+Controls where subagent artifact files (inputs, outputs, transcripts, metadata) are stored. Defaults to `"project"`, which writes to `<cwd>/.pi-subagents/artifacts/`. Set to `"session"` to store artifacts under pi's session directory (`~/.pi/agent/sessions/<session>/subagent-artifacts/`), keeping the working directory clean. Set to `"temp"` to use the OS temp directory.
 
 The `"session"` option uses the same directory that `cleanupAllArtifactDirs` already scans for age-based cleanup, so artifacts are still cleaned up automatically.
 
@@ -1552,15 +1736,18 @@ Every run resolves an effective acceptance policy. Callers may omit `acceptance`
 }
 ```
 
-Acceptance policies use the levels `auto`, `none`, `attested`, `checked`, `verified`, and `reviewed`. `acceptance: "auto"` is the default. Callers may explicitly request levels through `verified`; `reviewed` is reserved for inferred policy because the current execution path cannot supply an independent reviewer result. Explicit `reviewed` fails preflight instead of spawning a child that is guaranteed to be rejected. Read-only tasks infer lightweight attestation, normal writer tasks infer checked evidence, and async/risky/dynamic writer contexts infer a reviewed gate. Agent frontmatter or `subagents.agentOverrides` may set `acceptanceRole: "read-only" | "writer"` for ambiguous tasks; explicit task mutation or no-edit intent wins over that role, while omitted metadata preserves the existing reviewer/scout/worker name heuristics. The role affects acceptance inference only and does not change tool access. The bare string `"none"` is rejected; use `{ level: "none", reason: "..." }` instead. `acceptance: false` is accepted only as a deprecated shorthand for disabling gates.
+Acceptance evidence levels are `auto`, `none`, `attested`, `checked`, and `verified`. `acceptance: "auto"` is the default. Review is a separate gate configured with `acceptance.review`; async, risky, and dynamic writer contexts infer checked evidence plus `review: { agent: "reviewer", required: true }`. Read-only tasks infer lightweight attestation, while normal writer tasks infer checked evidence without review. Agent frontmatter or `subagents.agentOverrides` may set `acceptanceRole: "read-only" | "writer"` for ambiguous tasks; explicit task mutation or no-edit intent wins over that role, while omitted metadata preserves the existing reviewer/scout/worker name heuristics. The role affects acceptance inference only and does not change tool access. The bare string `"none"` is rejected; use `{ level: "none", reason: "..." }` instead. `acceptance: false` is accepted only as a deprecated shorthand for disabling gates.
 
-Acceptance provenance is stored separately from child prose:
+For reviewer/read-only calls, omit `acceptance`. The explicit value `"reviewed"` is not a policy level: it remains schema-recognized only so semantic preflight can explain the mistake without spawning a child. To require review of a writer result, use `acceptance: { level: "checked", review: { required: true, agent: "reviewer" } }` and orchestrate the reviewer separately.
+
+Acceptance provenance is stored separately from child prose. `evidenceStatus` preserves evidence progress when the overall status is waiting on or has completed review:
 
 - `claimed`: child finished but did not provide structured evidence.
 - `attested`: child returned a structured acceptance report.
 - `checked`: runtime structural checks passed, such as required evidence and no staged files.
 - `verified`: configured runtime verification commands passed. Child-reported command success does not count.
-- `reviewed`: an independent reviewer result is present.
+- `review-required`: required evidence passed, but no independent reviewer result has been supplied.
+- `reviewed`: an independent reviewer result is present and has no blockers.
 - `rejected`: attestation, structural checks, verification, or review failed.
 
 For `attested` or stricter levels, the child prompt includes a standardized acceptance section and asks for a fenced `acceptance-report` JSON block. The parser canonicalizes known enum synonyms, snake_case report keys and wrappers, underscore fence tags, unambiguous scalar arrays, string booleans, and criterion-id separators. Unknown or ambiguous keys and enum values fail with field-level diagnostics. Explicit empty `changedFiles` and `testsAddedOrUpdated` arrays are recorded as not applicable; missing fields and empty required command or validation evidence still fail.
@@ -1625,7 +1812,7 @@ The result watcher emits `subagent:async-complete`; `src/extension/index.ts` reg
 
 `pi-subagents` works standalone through natural language, the `subagent` tool, slash commands, and the packaged prompt shortcuts listed near the top of this README. It also includes a native prompt-workflow adapter for reusable subagent prompt templates, so you do not need `pi-prompt-template-model` for the common subagent workflow path.
 
-Create a prompt in `.pi-desk/prompts/` or `~/.pi-desk/agent/prompts/`:
+Create a prompt in `.pi/prompts/` or `~/.pi/agent/prompts/`:
 
 ```md
 ---

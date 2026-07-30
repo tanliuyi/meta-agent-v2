@@ -33,6 +33,7 @@ Do not use contact_supervisor or intercom for routine completion handoffs. If no
 export interface IntercomBridgeState {
 	active: boolean;
 	mode: IntercomBridgeMode;
+	resultDelivery: boolean;
 	orchestratorTarget?: string;
 	extensionDir: string;
 	instruction: string;
@@ -79,11 +80,12 @@ export function resolveIntercomBridgeMode(value: unknown): IntercomBridgeMode {
 
 function resolveIntercomBridgeConfig(value: ExtensionConfig["intercomBridge"]): Required<IntercomBridgeConfig> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		return { mode: "off", instructionFile: "" };
+		return { mode: "off", instructionFile: "", resultDelivery: true };
 	}
 	return {
 		mode: resolveIntercomBridgeMode(value.mode),
 		instructionFile: typeof value.instructionFile === "string" ? value.instructionFile : "",
+		resultDelivery: value.resultDelivery !== false,
 	};
 }
 
@@ -147,11 +149,12 @@ export function resolveIntercomBridge(input: ResolveIntercomBridgeInput): Interc
 	);
 	const reason = inactiveReason(mode, input.context, orchestratorTarget);
 	if (reason || !orchestratorTarget) {
-		return { active: false, mode, extensionDir: NATIVE_INTERCOM_EXTENSION_DIR, instruction: defaultInstruction };
+		return { active: false, mode, resultDelivery: config.resultDelivery, extensionDir: NATIVE_INTERCOM_EXTENSION_DIR, instruction: defaultInstruction };
 	}
 	return {
 		active: true,
 		mode,
+		resultDelivery: config.resultDelivery,
 		orchestratorTarget,
 		extensionDir: NATIVE_INTERCOM_EXTENSION_DIR,
 		instruction: buildIntercomBridgeInstruction(orchestratorTarget, resolveInstructionTemplate(config.instructionFile, settingsDir)),
@@ -162,7 +165,7 @@ export function applyIntercomBridgeToAgent(agent: AgentConfig, bridge: IntercomB
 	if (!bridge.active || !bridge.orchestratorTarget) return agent;
 
 	const bridgeTools = ["intercom", "contact_supervisor"];
-	const tools = agent.tools
+	const tools = agent.tools && agent.tools.length > 0
 		? [...agent.tools, ...bridgeTools.filter((tool) => !agent.tools?.includes(tool))]
 		: agent.tools;
 	const instruction = bridge.instruction;

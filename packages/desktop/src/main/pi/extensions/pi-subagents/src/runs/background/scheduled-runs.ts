@@ -14,6 +14,7 @@ import {
 } from "../../shared/types.ts";
 import type { SubagentParamsLike } from "../foreground/subagent-executor.ts";
 import { validateExecutionAcceptance } from "../shared/acceptance.ts";
+import { resolveCurrentSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling } from "../shared/capability-ceiling.ts";
 
 export const SCHEDULED_RUNS_DIR = path.join(TEMP_ROOT_DIR, "scheduled-subagent-runs");
 export const SCHEDULED_RUN_ACTIONS = ["schedule", "schedule-list", "schedule-status", "schedule-cancel"] as const;
@@ -58,6 +59,7 @@ type ScheduledRunManagerDeps = {
 	storeRoot?: string;
 	now?: () => number;
 	randomId?: () => string;
+	resolveCapabilityCeiling?: (sessionId: string) => ResolvedSubagentCapabilityCeiling | undefined;
 	timers?: ScheduledRunTimers;
 };
 
@@ -311,12 +313,16 @@ export class ScheduledRunManager {
 		const sanitized = sanitizeScheduledParams(params);
 		if (sanitized.error) return textResult(sanitized.error, true);
 		const scheduleInput = params.schedule!.trim();
+		const sessionId = resolveCurrentSessionId(ctx.sessionManager);
+		const resolveCapabilityCeiling = this.deps.resolveCapabilityCeiling ?? resolveCurrentSubagentCapabilityCeiling;
+		if (resolveCapabilityCeiling(sessionId)) {
+			return textResult("Cannot schedule a capability-ceiling-restricted run because this store does not yet persist ceilings. Remove the active parent restriction or run it immediately.", true);
+		}
 		const runAt = parseScheduledRunTime(scheduleInput, this.now());
 		const pendingCount = store.list().filter((job) => job.state === "scheduled" || job.state === "running").length;
 		const maxPending = resolveMaxPending(this.deps.config);
 		if (pendingCount >= maxPending) return textResult(`Scheduled subagent limit reached (${pendingCount}/${maxPending} pending or running). Cancel an existing scheduled run before adding another.`, true);
 		const id = this.randomId();
-		const sessionId = resolveCurrentSessionId(ctx.sessionManager);
 		const scheduleName = params.scheduleName?.trim();
 		const executionParams = sanitized.params!;
 		const now = this.now();

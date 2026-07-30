@@ -7,7 +7,8 @@ import { resolveAsyncRunLocation } from "../runs/background/async-resume.ts";
 import { deliverStopRequest } from "../runs/background/control-channel.ts";
 import { reconcileAsyncRun } from "../runs/background/stale-run-reconciler.ts";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
-import { type Details, ASYNC_DIR, RESULTS_DIR } from "../shared/types.ts";
+import { resolveCurrentSessionId } from "../shared/session-identity.ts";
+import { type Details, ASYNC_DIR, RESULTS_DIR, SUBAGENT_ASYNC_COMPLETE_EVENT } from "../shared/types.ts";
 import { readStatus } from "../shared/utils.ts";
 import { SubagentParams } from "./schemas.ts";
 import { validateChainInput } from "./chain-validation.ts";
@@ -17,7 +18,7 @@ export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
 export const SUBAGENT_RPC_READY_EVENT = "subagents:rpc:v1:ready";
 export const SUBAGENT_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
 
-export const SUBAGENT_RPC_METHODS = ["ping", "status", "spawn", "interrupt", "stop"] as const;
+export const SUBAGENT_RPC_METHODS = ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"] as const;
 export type SubagentRpcMethod = typeof SUBAGENT_RPC_METHODS[number];
 
 export interface SubagentRpcRequestEnvelope {
@@ -173,13 +174,17 @@ function pingData(ctx: ExtensionContext | null) {
 		capabilities: {
 			status: true,
 			asyncSpawn: true,
+			steer: true,
+			nonRecoveringSteer: true,
 			interrupt: true,
 			stop: true,
+			resume: true,
 		},
 		events: {
 			ready: SUBAGENT_RPC_READY_EVENT,
 			request: SUBAGENT_RPC_REQUEST_EVENT,
 			replyPrefix: SUBAGENT_RPC_REPLY_EVENT_PREFIX,
+			asyncComplete: SUBAGENT_ASYNC_COMPLETE_EVENT,
 		},
 		session: sessionData(ctx),
 	};
@@ -213,6 +218,38 @@ function spawnParams(params: unknown): SubagentParamsLike {
 	return { ...(input as SubagentParamsLike), async: true, clarify: false };
 }
 
+function steerParams(params: unknown): SubagentParamsLike {
+	const input = assertRecordParams(params, "steer");
+	if (typeof input.message !== "string" || !input.message.trim())
+		throw new SubagentRpcError("invalid_params", "RPC steer requires a non-empty message.");
+	const target = normalizeTargetParams(input, "steer");
+	if (!target.id && !target.runId && !target.dir) throw new SubagentRpcError("invalid_params", "RPC steer requires id, runId, or dir.");
+	return {
+		action: "steer",
+		...target,
+		message: input.message.trim(),
+		steeringRecovery: false,
+	};
+}
+
+function resumeParams(params: unknown): SubagentParamsLike {
+	const input = assertRecordParams(params, "resume");
+	if (typeof input.message !== "string" || !input.message.trim())
+		throw new SubagentRpcError("invalid_params", "RPC resume requires a non-empty message.");
+	const target = normalizeTargetParams(input, "resume");
+	if (!target.id && !target.runId && !target.dir) throw new SubagentRpcError("invalid_params", "RPC resume requires id, runId, or dir.");
+	if (input.output !== undefined && (typeof input.output !== "string" || !input.output.trim()))
+		throw new SubagentRpcError("invalid_params", "RPC resume output must be a non-empty path.");
+	if (input.outputMode !== undefined && input.outputMode !== "file-only")
+		throw new SubagentRpcError("invalid_params", "RPC resume supports only file-only output mode.");
+	return {
+		action: "resume",
+		...target,
+		message: input.message.trim(),
+		...(typeof input.output === "string" ? { output: input.output.trim(), outputMode: "file-only" } : {}),
+	};
+}
+
 function stopAsyncRun(
 	params: unknown,
 	options: RegisterSubagentRpcBridgeOptions,
@@ -232,7 +269,7 @@ function stopAsyncRun(
 		throw new SubagentRpcError("not_found", "Async run not found or already completed; stop requires a live async run directory.");
 	}
 
-	const currentSessionId = ctx.sessionManager.getSessionId();
+	const currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
 	const initialStatus = readStatus(location.asyncDir);
 	const initialRunId = initialStatus?.runId ?? location.resolvedId ?? path.basename(location.asyncDir);
 	if (!initialStatus) throw new SubagentRpcError("not_found", `Status file not found for async run '${initialRunId}'.`);
@@ -290,11 +327,17 @@ async function handleRequest(
 	if (request.method === "status") {
 		return executeChecked(options, ctx, request.requestId, request.method, { action: "status", ...normalizeTargetParams(request.params, "status") });
 	}
+	if (request.method === "steer") {
+		return executeChecked(options, ctx, request.requestId, request.method, steerParams(request.params));
+	}
 	if (request.method === "interrupt") {
 		return executeChecked(options, ctx, request.requestId, request.method, { action: "interrupt", ...normalizeTargetParams(request.params, "interrupt") });
 	}
 	if (request.method === "stop") {
 		return stopAsyncRun(request.params, options, ctx);
+	}
+	if (request.method === "resume") {
+		return executeChecked(options, ctx, request.requestId, request.method, resumeParams(request.params));
 	}
 	throw new SubagentRpcError("unsupported_method", `Unsupported subagent RPC method: ${String(request.method)}`);
 }

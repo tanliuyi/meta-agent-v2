@@ -3,7 +3,6 @@
  * Core execution logic for running subagents
  */
 
-import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 import * as path from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
@@ -49,14 +48,19 @@ import {
 	getFinalOutput,
 	findLatestSessionFile,
 	detectSubagentError,
+	hasEmptyTerminalAssistantResponse,
 	extractToolArgsPreview,
 	extractTextFromContent,
 } from "../../shared/utils.ts";
 import { buildSkillInjection, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
-import { readStructuredOutput } from "../shared/structured-output.ts";
+import { MISSING_STRUCTURED_OUTPUT_CALL_ERROR, readStructuredOutput } from "../shared/structured-output.ts";
 import { captureSingleOutputSnapshot, extractChildWrittenOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
+import {
+	applyThinkingSuffix,
+	resolveEffectiveThinking,
+} from "../../shared/model-info.ts";
 import {
 	buildModelCandidates,
 	formatModelAttemptNote,
@@ -79,6 +83,8 @@ import { attachContractProjections, isAgentContractV1 } from "../shared/agent-co
 import { appendTurnBudgetSystemPrompt, formatTurnBudgetOutput, initialTurnBudgetState, turnBudgetDecision, turnBudgetDeferredNote, turnBudgetDeferredState, turnBudgetExceededMessage, turnBudgetSoftNote, turnBudgetState } from "../shared/turn-budget.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
+import { agentDefinitionDigest, launchBindingDigest } from "../../shared/launch-contract.ts";
+import { resolveCurrentSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, projectChildLifecycle, type ChildLifecycleAction, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
 import {
 	acceptChildWatchdogEvent,
@@ -127,6 +133,7 @@ function resolveAttemptTimeout(options: RunSyncOptions): { timeoutMs: number; re
 function buildPendingAcceptanceLedger(acceptance: ResolvedAcceptanceConfig): AcceptanceLedger {
 	return {
 		status: "pending",
+		evidenceStatus: "pending",
 		explicit: acceptance.explicit,
 		effectiveAcceptance: acceptance,
 		inferredReason: acceptance.inferredReason,
@@ -258,6 +265,7 @@ async function runProgrammaticSingleAttempt(
 		sessionEnabled: boolean;
 		systemPrompt: string;
 		resolvedSkillNames?: string[];
+		modelCandidates?: string[];
 		skillsWarning?: string;
 		jsonlPath?: string;
 		artifactPaths?: ArtifactPaths;
@@ -287,25 +295,74 @@ async function runProgrammaticSingleAttempt(
 		? parsedModel.thinkingSuffix.slice(1) as AgentConfig["thinking"]
 		: undefined;
 	const effectiveThinking = options.thinkingOverride ?? suffixThinking ?? agent.thinking;
-	const toolNames = agent.tools ? [...agent.tools] : undefined;
-	if (shared.resolvedSkillNames?.length && toolNames && !toolNames.includes("read")) toolNames.unshift("read");
+	const resolvedThinking = resolveEffectiveThinking(model, effectiveThinking);
+	const allowedToolSet = options.capabilityCeiling?.allowedTools === undefined
+		? undefined
+		: new Set(options.capabilityCeiling.allowedTools);
+	if (shared.resolvedSkillNames?.length && allowedToolSet && !allowedToolSet.has("read")) {
+		throw new Error(`Capability ceiling from ${options.capabilityCeiling?.sources.join(", ") || "unknown source"} excludes required tool 'read' for lazy skill loading.`);
+	}
+	const requestedTools = agent.tools ? [...agent.tools] : undefined;
+	const declaredTools = requestedTools === undefined
+		? (allowedToolSet ? [...allowedToolSet] : [])
+		: (shared.resolvedSkillNames?.length && requestedTools.length > 0 && !requestedTools.includes("read") && !allowedToolSet
+			? ["read", ...requestedTools]
+			: requestedTools).filter((tool) => !allowedToolSet || allowedToolSet.has(tool));
+	const internalTools = options.structuredOutput ? ["structured_output"] : [];
+	const effectiveToolAllowlist = [...new Set([...declaredTools, ...internalTools])];
+	const explicitToolAllowlist = requestedTools !== undefined || allowedToolSet !== undefined;
+	const toolNames = explicitToolAllowlist ? effectiveToolAllowlist : undefined;
+	const capabilityAudit = options.capabilityCeiling ? {
+		ceiling: options.capabilityCeiling,
+		...(requestedTools ? { requestedTools } : {}),
+		effectiveTools: effectiveToolAllowlist,
+		removedTools: requestedTools?.filter((tool) => !effectiveToolAllowlist.includes(tool)) ?? [],
+		internalTools,
+		extensionsDenied: options.capabilityCeiling.denyExtensions,
+		removedExtensionCount: 0,
+		requestedMcpToolCount: 0,
+		effectiveMcpTools: [],
+	} satisfies SubagentCapabilityAudit : undefined;
+	const effectiveSystemPrompt = appendTurnBudgetSystemPrompt(shared.systemPrompt, options.turnBudget);
+	const launchContractDigest = launchBindingDigest({
+		definitionDigest: agentDefinitionDigest(agent),
+		task: shared.originalTask ?? task,
+		...(model ? { model } : {}),
+		modelCandidates: shared.modelCandidates,
+		...(resolvedThinking ? { thinking: resolvedThinking } : {}),
+		systemPrompt: effectiveSystemPrompt,
+		systemPromptMode: agent.systemPromptMode,
+		inheritProjectContext: agent.inheritProjectContext,
+		inheritSkills: agent.inheritSkills,
+		skills: shared.resolvedSkillNames ?? [],
+		tools: effectiveToolAllowlist,
+		extensions: [],
+		mcpDirectTools: [],
+		...(options.outputPath ? { outputPath: options.outputPath } : {}),
+		outputMode: options.outputMode ?? "inline",
+		...(options.structuredOutput ? { structuredOutputSchema: options.structuredOutput.schema } : {}),
+	});
 	const timeout = resolveAttemptTimeout(options);
 	const result: SingleResult = withRunContext(
 		{
 			agent: agent.name,
 			task: shared.originalTask ?? task,
 			...(options.agentContract ? { agentContract: options.agentContract } : {}),
+			launchContractDigest,
 			exitCode: 0,
 			messages: [],
 			usage: emptyUsage(),
 			provider: model?.includes("/") ? model.slice(0, model.indexOf("/")) : undefined,
 			model,
+			...(resolvedThinking ? { thinking: resolvedThinking } : {}),
 			artifactPaths: shared.artifactPaths,
 			transcriptPath: shared.transcriptWriter ? shared.artifactPaths?.transcriptPath : undefined,
 			skills: shared.resolvedSkillNames,
 			skillsWarning: shared.skillsWarning,
 			...(options.turnBudget ? { turnBudget: initialTurnBudgetState(options.turnBudget) } : {}),
 			...(options.toolBudget ? { toolBudget: initialToolBudgetState(options.toolBudget) } : {}),
+			...(options.capabilityCeiling ? { capabilityCeiling: options.capabilityCeiling } : {}),
+			...(capabilityAudit ? { capabilityAudit } : {}),
 		},
 		options.context,
 	);
@@ -393,6 +450,7 @@ async function runProgrammaticSingleAttempt(
 	const activityTimer = controlConfig.enabled ? setInterval(refreshActivity, 1_000) : undefined;
 	activityTimer?.unref?.();
 	let observedMutationAttempt = false;
+	let structuredOutputToolInvoked = false;
 	let completedSessionFile: string | undefined;
 	let interrupted = false;
 	let timedOutByCode = false;
@@ -446,6 +504,7 @@ async function runProgrammaticSingleAttempt(
 			const args = event.args && typeof event.args === "object" && !Array.isArray(event.args)
 				? event.args as Record<string, unknown>
 				: {};
+			if (options.structuredOutput && event.toolName === "structured_output") structuredOutputToolInvoked = true;
 			progress.toolCount += 1;
 			progress.currentTool = event.toolName;
 			progress.currentToolArgs = extractToolArgsPreview(args);
@@ -531,7 +590,7 @@ async function runProgrammaticSingleAttempt(
 			preferredProvider: options.preferredModelProvider,
 			thinking: effectiveThinking === false ? "off" : effectiveThinking,
 			tools: toolNames,
-			systemPrompt: appendTurnBudgetSystemPrompt(shared.systemPrompt, options.turnBudget),
+			systemPrompt: effectiveSystemPrompt,
 			systemPromptMode: agent.systemPromptMode,
 			inheritProjectContext: agent.inheritProjectContext,
 			inheritSkills: agent.inheritSkills,
@@ -565,18 +624,39 @@ async function runProgrammaticSingleAttempt(
 		result.turnBudget = turnBudgetState(options.turnBudget, result.usage.turns, true);
 	}
 	result.exitCode = result.error ? 1 : 0;
-	if (result.exitCode === 0 && !result.interrupted && !getFinalOutput(result.messages).trim() && !options.structuredOutput) {
-		result.exitCode = 1;
-		result.error = "Subagent produced no output (possible model cold-start or empty response).";
+	if (result.exitCode === 0 && !result.interrupted) {
+		const messages = result.messages ?? [];
+		const finalText = getFinalOutput(messages);
+		const missingStructuredOutput = options.structuredOutput
+			? !existsSync(options.structuredOutput.outputPath)
+			: false;
+		const errInfo = detectSubagentError(messages);
+		const missingOutput = !finalText.trim() && (!options.structuredOutput || missingStructuredOutput);
+		if (missingOutput && (!errInfo.hasError || hasEmptyTerminalAssistantResponse(messages))) {
+			result.exitCode = 1;
+			result.error = "Subagent produced no output (possible model cold-start or empty response).";
+		} else if (errInfo.hasError) {
+			result.exitCode = errInfo.exitCode ?? 1;
+			result.error = errInfo.details
+				? `${errInfo.errorType} failed (exit ${errInfo.exitCode}): ${errInfo.details}`
+				: `${errInfo.errorType} failed with exit code ${errInfo.exitCode}`;
+		}
 	}
 	if (options.structuredOutput && result.exitCode === 0) {
-		const structured = await readStructuredOutput(options.structuredOutput);
 		result.structuredOutputSchemaPath = options.structuredOutput.schemaPath;
 		result.structuredOutputPath = options.structuredOutput.outputPath;
-		if (structured.error) {
+		if (!structuredOutputToolInvoked && !existsSync(options.structuredOutput.outputPath)) {
 			result.exitCode = 1;
-			result.error = structured.error;
-		} else result.structuredOutput = structured.value;
+			result.error = MISSING_STRUCTURED_OUTPUT_CALL_ERROR;
+			result.structuredOutputFailed = true;
+		} else {
+			const structured = await readStructuredOutput(options.structuredOutput);
+			if (structured.error) {
+				result.exitCode = 1;
+				result.error = structured.error;
+				result.structuredOutputFailed = true;
+			} else result.structuredOutput = structured.value;
+		}
 	}
 	progress.status = result.exitCode === 0 ? "completed" : "failed";
 	progress.durationMs = Date.now() - startedAt;
@@ -660,6 +740,7 @@ async function runSingleAttempt(
 		sessionEnabled: boolean;
 		systemPrompt: string;
 		resolvedSkillNames?: string[];
+		modelCandidates?: string[];
 		skillsWarning?: string;
 		jsonlPath?: string;
 		artifactPaths?: ArtifactPaths;
@@ -681,6 +762,10 @@ export async function runSync(
 	task: string,
 	options: RunSyncOptions,
 ): Promise<SingleResult> {
+	options = {
+		...options,
+		capabilityCeiling: options.capabilityCeiling ?? resolveCurrentSubagentCapabilityCeiling(options.parentSessionId),
+	};
 	const agent = agents.find((a) => a.name === agentName);
 	if (!agent) {
 		return withRunContext({
@@ -804,8 +889,11 @@ export async function runSync(
 			toolCount: target.progressSummary?.toolCount,
 			error: target.error,
 			agentContract: target.agentContract,
+			launchContractDigest: target.launchContractDigest,
 			execution: target.execution,
 			acceptance: target.acceptance,
+			capabilityCeiling: target.capabilityCeiling,
+			capabilityAudit: target.capabilityAudit,
 			review: target.review,
 			effects: target.effects,
 			...(transcriptWriter ? { transcriptPath: artifactPathsResult.transcriptPath } : {}),
@@ -870,6 +958,7 @@ export async function runSync(
 			artifactPaths: artifactPathsResult,
 			transcriptWriter,
 			attemptNotes,
+			modelCandidates: candidates.map((candidate) => applyThinkingSuffix(candidate, options.thinkingOverride ?? agent.thinking, options.thinkingOverride !== undefined)),
 			outputSnapshot,
 			originalTask: task,
 		});

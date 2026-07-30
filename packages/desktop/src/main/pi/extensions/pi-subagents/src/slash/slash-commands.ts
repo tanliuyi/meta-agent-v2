@@ -747,6 +747,13 @@ async function runSlashSubagent(
 	}
 }
 
+function launchSlashSubagent(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	params: SubagentParamsLike,
+): void {
+	void runSlashSubagent(pi, ctx, params);
+}
 
 export interface GroupConfig { concurrency?: number; failFast?: boolean; worktree?: boolean }
 export interface ParsedStep { kind: "step"; name: string; config: InlineConfig; task?: string }
@@ -1011,7 +1018,7 @@ function validateInlineAcceptanceInput(value: string, agent: string): void {
 	const errors = validateAcceptanceInput(value, `acceptance for step '${agent}'`);
 	if (errors.length > 0) throw new SlashParseError(errors[0]!);
 	if (!INLINE_ACCEPTANCE_LEVELS.has(value)) {
-		throw new SlashParseError(`Inline acceptance for step '${agent}' supports auto, attested, or checked. Use the subagent tool API or a saved .chain.json file for none or verified acceptance contracts; reviewed is inferred-only.`);
+		throw new SlashParseError(`Inline acceptance for step '${agent}' supports auto, attested, or checked. Use the subagent tool API or a saved .chain.json file for none, verified, or review requirements; reviewed is an achieved status, not an input level.`);
 	}
 }
 
@@ -1199,7 +1206,7 @@ export function registerSlashCommands(
 			if (inline.model) params.model = inline.model;
 			if (bg) params.async = true;
 			if (fork) params.context = "fork";
-			await runSlashSubagent(pi, ctx, params);
+			launchSlashSubagent(pi, ctx, params);
 		},
 	});
 
@@ -1213,7 +1220,7 @@ export function registerSlashCommands(
 			const params: SubagentParamsLike = { chain: built.chain, task: built.task, clarify: false, agentScope: "both" };
 			if (bg) params.async = true;
 			if (fork) params.context = "fork";
-			await runSlashSubagent(pi, ctx, params);
+			launchSlashSubagent(pi, ctx, params);
 		},
 	});
 
@@ -1243,7 +1250,7 @@ export function registerSlashCommands(
 			const params: SubagentParamsLike = { chain: mapSavedChainSteps(chain), task, clarify: false, agentScope: "both" };
 			if (bg) params.async = true;
 			if (fork) params.context = "fork";
-			await runSlashSubagent(pi, ctx, params);
+			launchSlashSubagent(pi, ctx, params);
 		},
 	});
 
@@ -1267,7 +1274,7 @@ export function registerSlashCommands(
 			const params: SubagentParamsLike = { tasks, clarify: false, agentScope: "both" };
 			if (bg) params.async = true;
 			if (fork) params.context = "fork";
-			await runSlashSubagent(pi, ctx, params);
+			launchSlashSubagent(pi, ctx, params);
 		},
 	});
 
@@ -1341,7 +1348,9 @@ export function registerSlashCommands(
 
 	registerPromptWorkflowCommands({
 		pi,
-		run: (params, ctx) => runSlashSubagent(pi, ctx, params),
+		run: async (params, ctx) => {
+			launchSlashSubagent(pi, ctx, params);
+		},
 	});
 
 	pi.registerCommand("subagents-models", {

@@ -278,6 +278,16 @@ function resultStatusLine(result: Details["results"][number], output: string): s
 	return "Done";
 }
 
+function formatResultLaunchContract(result: Details["results"][number], details: Details): string | undefined {
+	const digest = result.launchContractDigest ?? details.launchContractDigest;
+	return digest ? `Launch contract: ${digest}` : undefined;
+}
+
+function formatParallelHandoff(handoff: Details["parallelHandoff"]): string | undefined {
+	if (!handoff) return undefined;
+	return `Parallel handoff: ${handoff.path} (${handoff.childCount} children, ${handoff.changedPatches} changed patches, cleanup ${handoff.cleanupState})`;
+}
+
 function resultGlyph(result: Details["results"][number], output: string, theme: Theme, running = result.progress?.status === "running", seed = progressRunningSeed(result.progress ?? result.progressSummary), frame?: number): string {
 	if (running) {
 		if (frame !== undefined) return theme.fg("accent", runningGlyph((seed ?? 0) + frame));
@@ -537,10 +547,14 @@ function isChainParallelGroupActive(details: Pick<Details, "mode" | "chainAgents
 }
 
 function buildAsyncChainStepSpans(total: number, stepCount: number, parallelGroups: AsyncParallelGroupStatus[] = []): ChainStepSpan[] {
+	const groupsByStep = new Map<number, AsyncParallelGroupStatus>();
+	for (const group of parallelGroups) {
+		if (!groupsByStep.has(group.stepIndex)) groupsByStep.set(group.stepIndex, group);
+	}
 	const spans: ChainStepSpan[] = [];
 	let flatIndex = 0;
 	for (let stepIndex = 0; stepIndex < total; stepIndex++) {
-		const group = parallelGroups.find((candidate) => candidate.stepIndex === stepIndex);
+		const group = groupsByStep.get(stepIndex);
 		if (group) {
 			spans.push({ stepIndex, start: group.start, count: group.count, isParallel: true });
 			flatIndex = Math.max(flatIndex, group.start + group.count);
@@ -568,6 +582,7 @@ interface ChainRenderResultEntry {
 	kind: "result";
 	resultIndex: number;
 	rowNumber: number;
+	rowLabel?: string;
 	agentName: string;
 }
 
@@ -602,6 +617,7 @@ function buildChainRenderEntries(details: Details, label: MultiProgressLabel): C
 				kind: "result",
 				resultIndex: index,
 				rowNumber: index + 1,
+				rowLabel: span.isParallel ? `Agent ${index - span.start + 1}/${span.count}` : `Step ${span.stepIndex + 1}`,
 				agentName: details.results[index]?.agent ?? details.chainAgents?.[span.stepIndex] ?? `step-${span.stepIndex + 1}`,
 			});
 		}
@@ -709,15 +725,10 @@ function buildMultiProgressLabel(details: Pick<Details, "mode" | "results" | "pr
 	return { headerLabel, itemTitle, totalCount, hasParallelInChain, activeParallelGroup, groupStartIndex: 0, groupEndIndex: details.results.length, showActiveGroupOnly: false };
 }
 
-function resultRowLabel(details: Pick<Details, "mode" | "chainAgents" | "workflowGraph">, label: MultiProgressLabel, resultIndex: number, stepNumber: number): string {
-	if (details.mode === "chain" && label.hasParallelInChain) {
-		const span = buildChainStepSpans(details).find((candidate) => resultIndex >= candidate.start && resultIndex < candidate.start + candidate.count);
-		if (span?.isParallel) return `Agent ${resultIndex - span.start + 1}/${span.count}`;
-		if (span) return `Step ${span.stepIndex + 1}`;
-	}
+function resultRowLabel(label: MultiProgressLabel, resultIndex: number, stepNumber: number): string {
 	if (label.itemTitle === "Agent") {
 		const localStepNumber = label.activeParallelGroup
-			? Math.max(1, stepNumber - label.groupStartIndex)
+			? resultIndex - label.groupStartIndex + 1
 			: stepNumber;
 		return `Agent ${localStepNumber}/${label.totalCount}`;
 	}
@@ -1323,6 +1334,10 @@ function renderSingleCompact(d: Details, r: Details["results"][number], theme: T
 	const width = getTermWidth() - 4;
 	const modelDisplay = modelThinkingBadge(theme, r.model);
 	c.addChild(new Text(truncLine(`${resultGlyph(r, output, theme, isRunning, undefined, frame)} ${theme.fg("toolTitle", theme.bold(r.agent))}${modelDisplay}${contextBadge}${stats ? ` ${theme.fg("dim", "·")} ${stats}` : ""}`, width), 0, 0));
+	const launchContract = formatResultLaunchContract(r, d);
+	if (launchContract) c.addChild(new Text(truncLine(theme.fg("dim", `  ${launchContract}`), width), 0, 0));
+	const handoff = formatParallelHandoff(d.parallelHandoff);
+	if (handoff) c.addChild(new Text(truncLine(theme.fg("dim", `  ${handoff}`), width), 0, 0));
 
 	if (isRunning && r.progress) {
 		const progressSnapshotNow = snapshotNowForProgress(r.progress);
@@ -1417,7 +1432,7 @@ function renderMultiCompact(d: Details, theme: Theme, frame?: number): Component
 		const rowNumber = entry.rowNumber;
 		const agentName = entry.agentName;
 		if (!r) {
-			const pendingLabel = chainEntries ? resultRowLabel(d, multiLabel, i, rowNumber) : `${itemTitle} ${rowNumber}`;
+			const pendingLabel = entry.rowLabel ?? `${itemTitle} ${rowNumber}`;
 			c.addChild(new Text(truncLine(theme.fg("dim", `  ◦ ${pendingLabel}: ${agentName} · pending`), width), 0, 0));
 			continue;
 		}
@@ -1430,7 +1445,7 @@ function renderMultiCompact(d: Details, theme: Theme, frame?: number): Component
 		const stepStats = formatProgressStats(theme, rProg);
 		const glyph = rPending ? theme.fg("dim", "◦") : resultGlyph(r, output, theme, rRunning, progressRunningSeed(rProg), frame);
 		const pendingLabel = rPending ? ` ${theme.fg("dim", "· pending")}` : "";
-		const stepLabel = resultRowLabel(d, multiLabel, i, stepNumber);
+		const stepLabel = entry.rowLabel ?? resultRowLabel(multiLabel, i, stepNumber);
 		const line = `${glyph} ${stepLabel}: ${themeBold(theme, agentName)}${contextModeBadge(theme, r.context)}${stepStats ? ` ${theme.fg("dim", "·")} ${stepStats}` : ""}${pendingLabel}`;
 		c.addChild(new Text(truncLine(`  ${line}`, width), 0, 0));
 		if (rRunning && rProg && "status" in rProg) {
@@ -1440,9 +1455,11 @@ function renderMultiCompact(d: Details, theme: Theme, frame?: number): Component
 				c.addChild(new Text(truncLine(`    ${nestedLine}`, width), 0, 0));
 			}
 			c.addChild(new Text(truncLine(theme.fg("accent", `    ${liveDetailHintText()}`), width), 0, 0));
-		} else if (!rPending && (r.exitCode !== 0 || r.interrupted || r.detached || hasEmptyTextOutputWithoutOutputTarget(r.task, output))) {
+		} else if (!rPending && (r.exitCode !== 0 || r.interrupted || r.detached || hasEmptyTextOutputWithoutOutputTarget(r.task, output) || (r.acceptance?.status && r.acceptance.status !== "not-required"))) {
 			c.addChild(new Text(truncLine(theme.fg(r.exitCode !== 0 ? "error" : "dim", `    ⎿  ${resultStatusLine(r, output)}`), width), 0, 0));
 		}
+		const launchContract = formatResultLaunchContract(r, d);
+		if (launchContract) c.addChild(new Text(truncLine(theme.fg("dim", `    ${launchContract}`), width), 0, 0));
 		if (!rRunning && !rPending) {
 			for (const nestedLine of formatNestedWidgetLines(r.children, theme, width, false, r.progress?.lastActivityAt)) {
 				c.addChild(new Text(truncLine(`    ${nestedLine}`, width), 0, 0));
@@ -1453,6 +1470,8 @@ function renderMultiCompact(d: Details, theme: Theme, frame?: number): Component
 		if (r.artifactPaths) c.addChild(new Text(truncLine(theme.fg("dim", `    output: ${shortenPath(r.artifactPaths.outputPath)}`), width), 0, 0));
 	}
 	if (d.artifacts) c.addChild(new Text(truncLine(theme.fg("dim", `  artifacts: ${shortenPath(d.artifacts.dir)}`), width), 0, 0));
+	const handoff = formatParallelHandoff(d.parallelHandoff);
+	if (handoff) c.addChild(new Text(truncLine(theme.fg("dim", `  ${handoff}`), width), 0, 0));
 	return c;
 }
 
@@ -1522,6 +1541,13 @@ export function renderSubagentResult(
 		c.addChild(
 			new Text(fit(theme.fg("dim", `Task: ${taskPreview}`)), 0, 0),
 		);
+		const launchContract = formatResultLaunchContract(r, d);
+		if (launchContract) c.addChild(new Text(fit(theme.fg("dim", launchContract)), 0, 0));
+		const handoff = formatParallelHandoff(d.parallelHandoff);
+		if (handoff) c.addChild(new Text(fit(theme.fg("dim", handoff)), 0, 0));
+		if (r.acceptance?.status && r.acceptance.status !== "not-required") {
+			c.addChild(new Text(fit(theme.fg("dim", `Acceptance: ${r.acceptance.status}`)), 0, 0));
+		}
 		c.addChild(new Spacer(1));
 
 		if (isRunning && r.progress) {
@@ -1717,7 +1743,7 @@ export function renderSubagentResult(
 		const agentName = entry.agentName;
 
 		if (!r) {
-			const pendingLabel = chainEntries ? resultRowLabel(d, multiLabel, i, rowNumber) : `${itemTitle} ${rowNumber}`;
+			const pendingLabel = entry.rowLabel ?? `${itemTitle} ${rowNumber}`;
 			c.addChild(new Text(fit(theme.fg("dim", `  ${pendingLabel}: ${agentName}`)), 0, 0));
 			c.addChild(new Text(theme.fg("dim", `    status: pending`), 0, 0));
 			c.addChild(new Spacer(1));
@@ -1740,13 +1766,18 @@ export function renderSubagentResult(
 					: theme.fg("success", "done");
 		const stats = rProg ? ` | ${rProg.toolCount} tools, ${formatDuration(rProg.durationMs)}` : "";
 		const modelDisplay = modelThinkingBadge(theme, r.model);
-		const stepLabel = resultRowLabel(d, multiLabel, i, stepNumber);
+		const stepLabel = entry.rowLabel ?? resultRowLabel(multiLabel, i, stepNumber);
 		const contextBadge = contextModeBadge(theme, r.context);
 		const stepHeader = rRunning
 			? `${statusIcon} ${stepLabel}: ${theme.bold(theme.fg("warning", r.agent))}${contextBadge}${modelDisplay}${stats}`
 			: `${statusIcon} ${stepLabel}: ${theme.bold(r.agent)}${contextBadge}${modelDisplay}${stats}`;
 		const toolCallLines = getToolCallLines(r, expanded);
 		c.addChild(new Text(fit(stepHeader), 0, 0));
+		const launchContract = formatResultLaunchContract(r, d);
+		if (launchContract) c.addChild(new Text(fit(theme.fg("dim", `    ${launchContract}`)), 0, 0));
+		if (r.acceptance?.status && r.acceptance.status !== "not-required") {
+			c.addChild(new Text(fit(theme.fg("dim", `    Acceptance: ${r.acceptance.status}`)), 0, 0));
+		}
 
 		const taskMaxLen = Math.max(20, w - 12);
 		const taskPreview = expanded || r.task.length <= taskMaxLen
@@ -1827,6 +1858,11 @@ export function renderSubagentResult(
 	if (d.artifacts) {
 		c.addChild(new Spacer(1));
 		c.addChild(new Text(fit(theme.fg("dim", `Artifacts dir: ${shortenPath(d.artifacts.dir)}`)), 0, 0));
+	}
+	const handoff = formatParallelHandoff(d.parallelHandoff);
+	if (handoff) {
+		c.addChild(new Spacer(1));
+		c.addChild(new Text(fit(theme.fg("dim", handoff)), 0, 0));
 	}
 	return c;
 }

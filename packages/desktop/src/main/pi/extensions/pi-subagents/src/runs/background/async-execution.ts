@@ -8,6 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentConfig } from "../../agents/agents.ts";
 import { writeAtomicJson, writePrivateAtomicJson } from "../../shared/atomic-json.ts";
 import { applyThinkingSuffix, splitKnownThinkingSuffix } from "../../shared/model-info.ts";
+import { agentDefinitionDigest, launchBindingDigest } from "../../shared/launch-contract.ts";
 import { injectOutputPathSystemPrompt, injectSingleOutputInstruction, normalizeSingleOutputOverride, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { buildChainInstructions, isDynamicParallelStep, isParallelStep, resolveStepBehavior, suppressProgressForReadOnlyTask, writeInitialProgressFile, type ChainStep, type ResolvedStepBehavior, type SequentialStep, type StepOverrides } from "../../shared/settings.ts";
 import { isParallelGroup, isDynamicRunnerGroup, mapConcurrent, MAX_PARALLEL_CONCURRENCY, type RunnerStep, type RunnerSubagentStep } from "../shared/parallel-utils.ts";
@@ -16,7 +17,7 @@ import { buildSkillInjection
 , normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { resolveChildCwd } from "../../shared/utils.ts";
-import { buildModelCandidates, resolveEffectiveSubagentModel, resolveModelCandidate, resolveSubagentModelOverride, type AvailableModelInfo, type ParentModel } from "../shared/model-fallback.ts";
+import { buildModelCandidates, formatModelAttemptNote, isRetryableModelFailure, resolveEffectiveSubagentModel, resolveModelCandidate, resolveSubagentModelOverride, type AvailableModelInfo, type ParentModel } from "../shared/model-fallback.ts";
 import type { ModelScopeConfig } from "../shared/model-scope.ts";
 import { resolveEffectiveThinking } from "../../shared/model-info.ts";
 import { resolveCurrentPath } from "../shared/long-running-guard.ts";
@@ -29,9 +30,11 @@ import {
 	consumeChainAppendRequests,
 	countPendingChainAppendRequests,
 } from "./chain-append.ts";
-import { resolveEffectiveAcceptance } from "../shared/acceptance.ts";
+import { resolveEffectiveAcceptance, evaluateAcceptance, acceptanceFailureMessage, buildSkippedAcceptanceLedger } from "../shared/acceptance.ts";
+import { isAgentContractV1 } from "../shared/agent-contract.ts";
 import {
 	type AcceptanceInput,
+	type AcceptanceLedger,
 	type AgentContract,
 	type ArtifactConfig,
 	type ChainOutputMap,
@@ -40,6 +43,7 @@ import {
 	type MaxOutputConfig,
 	type NestedRouteInfo,
 	type ResolvedControlConfig,
+	type ResolvedAcceptanceConfig,
 	type ResolvedTurnBudget,
 	type ResolvedToolBudget,
 	type SubagentRunMode,
@@ -53,9 +57,12 @@ import {
 	resolveChildMaxSubagentDepth,
 } from "../../shared/types.ts";
 import { nestedResultsPath, resolveInheritedNestedRouteFromEnv, resolveNestedParentAddressFromEnv, writeNestedEvent } from "../shared/nested-events.ts";
-import { initialTurnBudgetState } from "../shared/turn-budget.ts";
+import { appendTurnBudgetSystemPrompt, initialTurnBudgetState } from "../shared/turn-budget.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
 import { waitForImportedAsyncRoot, type ImportedAsyncRoot } from "./chain-root-attachment.ts";
+import { resolveCurrentSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
+import { cleanupWorktrees, createWorktrees, diffWorktrees, formatWorktreeDiffSummary, type WorktreeSetup } from "../shared/worktree.ts";
+import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup } from "../shared/parallel-handoff.ts";
 import type { SessionLeaseRequest } from "../shared/session-lease.ts";
 import { appendJsonl } from "../../shared/artifacts.ts";
 import type { SubagentRuntime, SubagentRuntimeRunRequest } from "../../runtime/subagent-runtime.ts";
@@ -135,6 +142,7 @@ interface AsyncChainParams {
 	configToolBudget?: ResolvedToolBudget;
 	/** Global cap on simultaneously-running subagent tasks within the async run. */
 	globalConcurrencyLimit?: number;
+	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 }
 
 interface AsyncSingleParams {
@@ -179,6 +187,7 @@ interface AsyncSingleParams {
 	turnBudget?: ResolvedTurnBudget;
 	toolBudget?: ResolvedToolBudget;
 	configToolBudget?: ResolvedToolBudget;
+	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 }
 
 interface AsyncExecutionResult {
@@ -211,6 +220,33 @@ export interface AsyncRunnerStepBuildParams {
 	validateOutputBindings?: boolean;
 	toolBudget?: ResolvedToolBudget;
 	configToolBudget?: ResolvedToolBudget;
+	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+}
+
+function resolveProgrammaticToolPlan(
+	requestedTools: string[] | undefined,
+	capabilityCeiling: ResolvedSubagentCapabilityCeiling | undefined,
+	structuredOutput: boolean,
+): { tools?: string[]; audit?: SubagentCapabilityAudit } {
+	const allowed = capabilityCeiling?.allowedTools ? new Set(capabilityCeiling.allowedTools) : undefined;
+	const effectiveTools = requestedTools?.filter((tool) => !allowed || allowed.has(tool));
+	const internalTools = structuredOutput ? ["structured_output"] : [];
+	return {
+		...(effectiveTools ? { tools: effectiveTools } : {}),
+		...(capabilityCeiling ? {
+			audit: {
+				ceiling: capabilityCeiling,
+				...(requestedTools ? { requestedTools } : {}),
+				effectiveTools: [...new Set([...(effectiveTools ?? []), ...internalTools])],
+				removedTools: requestedTools?.filter((tool) => !effectiveTools?.includes(tool)) ?? [],
+				internalTools,
+				extensionsDenied: capabilityCeiling.denyExtensions,
+				removedExtensionCount: 0,
+				requestedMcpToolCount: 0,
+				effectiveMcpTools: [],
+			},
+		} : {}),
+	};
 }
 
 export type AsyncRunnerStepBuildResult =
@@ -395,9 +431,33 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		const thinkingOverride = flatIndex === undefined ? undefined : thinkingOverridesByFlatIndex?.[flatIndex];
 		const effectiveThinking = thinkingOverride ?? a.thinking;
 		const model = applyThinkingSuffix(primaryModel, effectiveThinking, thinkingOverride !== undefined);
+		const modelCandidates = buildModelCandidates(primaryModel, a.fallbackModels, availableModels, ctx.currentModelProvider, { scope: ctx.modelScope }).map((candidate) =>
+			applyThinkingSuffix(candidate, effectiveThinking, thinkingOverride !== undefined) ?? candidate,
+		);
+		const toolPlan = resolveProgrammaticToolPlan(a.tools, params.capabilityCeiling, Boolean(s.outputSchema));
+		const launchContractDigest = launchBindingDigest({
+			definitionDigest: agentDefinitionDigest(a),
+			task: s.task ?? originalTask,
+			...(model ? { model } : {}),
+			modelCandidates,
+			...(resolveEffectiveThinking(model, effectiveThinking) ? { thinking: resolveEffectiveThinking(model, effectiveThinking) } : {}),
+			systemPrompt: appendTurnBudgetSystemPrompt(systemPrompt, undefined),
+			systemPromptMode: a.systemPromptMode,
+			inheritProjectContext: a.inheritProjectContext,
+			inheritSkills: a.inheritSkills,
+			skills: resolvedSkills.map((skill) => skill.name),
+			tools: toolPlan.tools,
+			extensions: params.capabilityCeiling?.denyExtensions ? [] : a.extensions,
+			subagentOnlyExtensions: params.capabilityCeiling?.denyExtensions ? [] : a.subagentOnlyExtensions,
+			mcpDirectTools: params.capabilityCeiling?.denyExtensions ? [] : a.mcpDirectTools,
+			...(outputPath ? { outputPath } : {}),
+			outputMode: behavior.outputMode,
+			...(s.outputSchema ? { structuredOutputSchema: s.outputSchema } : {}),
+		});
 		const agentContract = s.agentContract ?? params.agentContract;
 		return {
 			parentSessionId: ctx.parentSessionId ?? ctx.currentSessionId,
+			...(params.capabilityCeiling ? { capabilityCeiling: params.capabilityCeiling } : {}),
 			agent: s.agent,
 			task,
 			...(params.contextForAgent ? { context: params.contextForAgent(s.agent) } : {}),
@@ -409,13 +469,15 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			cwd: stepCwd,
 			model,
 			thinking: resolveEffectiveThinking(model, effectiveThinking),
-			modelCandidates: buildModelCandidates(primaryModel, a.fallbackModels, availableModels, ctx.currentModelProvider, { scope: ctx.modelScope }).map((candidate) =>
-				applyThinkingSuffix(candidate, effectiveThinking, thinkingOverride !== undefined) ?? candidate,
-			),
-			tools: a.tools,
-			extensions: a.extensions,
-			subagentOnlyExtensions: a.subagentOnlyExtensions,
-			mcpDirectTools: a.mcpDirectTools,
+			modelCandidates,
+			tools: toolPlan.tools,
+			...(toolPlan.audit ? { capabilityAudit: toolPlan.audit } : {}),
+			definitionDigest: agentDefinitionDigest(a),
+			launchBindingTask: s.task ?? originalTask,
+			launchContractDigest,
+			extensions: params.capabilityCeiling?.denyExtensions ? [] : a.extensions,
+			subagentOnlyExtensions: params.capabilityCeiling?.denyExtensions ? [] : a.subagentOnlyExtensions,
+			mcpDirectTools: params.capabilityCeiling?.denyExtensions ? [] : a.mcpDirectTools,
 			completionGuard: a.completionGuard,
 			systemPrompt,
 			systemPromptMode: a.systemPromptMode,
@@ -595,6 +657,7 @@ export function executeAsyncChain(
 		nestedRoute,
 	} = params;
 	const resultMode = params.resultMode ?? "chain";
+	const capabilityCeiling = params.capabilityCeiling ?? resolveCurrentSubagentCapabilityCeiling(ctx.currentSessionId);
 	const inheritedNestedRoute = resolveInheritedNestedRouteFromEnv();
 	const nestedAddress = inheritedNestedRoute ? resolveNestedParentAddressFromEnv() : undefined;
 	const asyncDir = inheritedNestedRoute
@@ -634,6 +697,7 @@ export function executeAsyncChain(
 		asyncDir,
 		toolBudget: params.toolBudget,
 		configToolBudget: params.configToolBudget,
+		capabilityCeiling,
 	});
 	if ("error" in built) {
 		try {
@@ -686,7 +750,8 @@ export function executeAsyncChain(
 			chainStepCount: eventChain.length,
 			currentStep: 0,
 			parallelGroups: parallelGroupsProg,
-			steps: flatAgentsProg.map((agent, index) => ({ index, agent, status: "pending" as const })),
+			...(capabilityCeiling ? { capabilityCeiling } : {}),
+			steps: flattenProgrammaticStepDetails(steps),
 		});
 		// Fire-and-forget consumer
 		consumeAsyncChainRun(params.subagentRuntime, id, steps, {
@@ -699,10 +764,29 @@ export function executeAsyncChain(
 			globalConcurrencyLimit: params.globalConcurrencyLimit,
 			deadlineAt,
 			turnBudget: params.turnBudget,
+			worktreeSetupHook,
+			worktreeSetupHookTimeoutMs,
+			worktreeBaseDir,
+			capabilityCeiling,
 		}).catch((error) => {
 			const errMsg = error instanceof Error ? error.message : String(error);
+			const cancelled = consumeChainAppendRequests(asyncDir);
+			const cancelledAt = Date.now();
+			for (const request of cancelled) {
+				appendJsonl(eventsPath, JSON.stringify({
+					type: "subagent.chain.append.cancelled",
+					ts: cancelledAt,
+					runId: id,
+					requestId: request.id,
+					stepCount: request.steps.length,
+					reason: "The async chain consumer failed before appended steps became eligible.",
+					pendingAppends: 0,
+				}));
+			}
 			const latestStatus = readStatus(asyncDir) ?? { runId: id, mode: resultMode, state: "running" as const, startedAt: now, lastUpdate: now };
 			latestStatus.state = "failed";
+			(latestStatus as unknown as Record<string, unknown>).acceptingAppends = false;
+			(latestStatus as unknown as Record<string, unknown>).pendingAppends = 0;
 			(latestStatus as unknown as Record<string, unknown>).error = errMsg;
 			(latestStatus as unknown as Record<string, unknown>).endedAt = Date.now();
 			(latestStatus as unknown as Record<string, unknown>).lastUpdate = Date.now();
@@ -757,6 +841,7 @@ export function executeAsyncChain(
 						parallelGroups: parallelGroupsProg,
 						...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}),
 						...(initialTurnBudget ? { turnBudget: initialTurnBudget } : {}),
+						...(capabilityCeiling ? { capabilityCeiling } : {}),
 						startedAt: now,
 						lastUpdate: now,
 					},
@@ -784,6 +869,7 @@ export function executeAsyncChain(
 			asyncDir,
 			...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}),
 			...(initialTurnBudget ? { turnBudget: initialTurnBudget } : {}),
+			...(capabilityCeiling ? { capabilityCeiling } : {}),
 			nestedRoute,
 		});
 		const chainDesc = chain
@@ -793,7 +879,7 @@ export function executeAsyncChain(
 			.join(" -> ");
 		return {
 			content: [{ type: "text", text: formatAsyncStartedMessage(`Async ${resultMode}: ${chainDesc} [${id}]`, ctx.interactive === true) }],
-			details: { mode: resultMode, runId: id, results: [], asyncId: id, asyncDir, workflowGraph, ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
+			details: { mode: resultMode, runId: id, results: [], asyncId: id, asyncDir, workflowGraph, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
 		};
 	}
 
@@ -838,6 +924,7 @@ export function executeAsyncSingle(
 		nestedRoute,
 	} = params;
 	const task = params.task ?? "";
+	const capabilityCeiling = params.capabilityCeiling ?? resolveCurrentSubagentCapabilityCeiling(ctx.currentSessionId);
 	const runnerCwd = resolveChildCwd(ctx.cwd, cwd);
 	const skillNames = params.skills ?? agentConfig.skills ?? [];
 	const availableModels = params.availableModels;
@@ -882,6 +969,7 @@ export function executeAsyncSingle(
 	const validationError = validateFileOnlyOutputMode(outputMode, outputPath, `Async single run (${agent})`);
 	if (validationError) return formatAsyncStartError("single", validationError);
 	const taskWithOutputInstruction = injectSingleOutputInstruction(task, outputPath, agentConfig);
+	systemPrompt = appendTurnBudgetSystemPrompt(systemPrompt, params.turnBudget);
 	const primaryModel = resolveSubagentModelOverride(
 		params.modelOverride ?? agentConfig.model,
 		ctx.currentModel,
@@ -904,6 +992,29 @@ export function executeAsyncSingle(
 	const structuredOutput = params.structuredOutputSchema
 		? createStructuredOutputRuntime(params.structuredOutputSchema, path.join(asyncDir, "structured-output"))
 		: undefined;
+	const modelCandidates = buildModelCandidates(primaryModel, agentConfig.fallbackModels, availableModels, ctx.currentModelProvider, { scope: ctx.modelScope }).map((candidate) =>
+		applyThinkingSuffix(candidate, effectiveThinking, params.thinkingOverride !== undefined) ?? candidate,
+	);
+	const toolPlan = resolveProgrammaticToolPlan(agentConfig.tools, capabilityCeiling, Boolean(params.structuredOutputSchema));
+	const launchContractDigest = launchBindingDigest({
+		definitionDigest: agentDefinitionDigest(agentConfig),
+		task,
+		...(model ? { model } : {}),
+		modelCandidates,
+		...(resolveEffectiveThinking(model, effectiveThinking) ? { thinking: resolveEffectiveThinking(model, effectiveThinking) } : {}),
+		systemPrompt,
+		systemPromptMode: agentConfig.systemPromptMode,
+		inheritProjectContext: agentConfig.inheritProjectContext,
+		inheritSkills: agentConfig.inheritSkills,
+		skills: resolvedSkills.map((skill) => skill.name),
+		tools: toolPlan.tools,
+		extensions: capabilityCeiling?.denyExtensions ? [] : agentConfig.extensions,
+		subagentOnlyExtensions: capabilityCeiling?.denyExtensions ? [] : agentConfig.subagentOnlyExtensions,
+		mcpDirectTools: capabilityCeiling?.denyExtensions ? [] : agentConfig.mcpDirectTools,
+		...(outputPath ? { outputPath } : {}),
+		outputMode,
+		...(params.structuredOutputSchema ? { structuredOutputSchema: params.structuredOutputSchema } : {}),
+	});
 	const resolvedAcceptance = resolveEffectiveAcceptance({
 		explicit: params.acceptance,
 		agentName: agent,
@@ -915,6 +1026,7 @@ export function executeAsyncSingle(
 	});
 	const recoveryDescriptor: SteeringRecoveryDescriptor = {
 		version: 1,
+		launchContractDigest,
 		sourceRunId: id,
 		...(params.agentContract ? { agentContract: params.agentContract } : {}),
 		agent,
@@ -927,7 +1039,7 @@ export function executeAsyncSingle(
 		...(agentConfig.extensions ? { extensions: [...agentConfig.extensions] } : {}),
 		...(agentConfig.subagentOnlyExtensions ? { subagentOnlyExtensions: [...agentConfig.subagentOnlyExtensions] } : {}),
 		...(agentConfig.mcpDirectTools ? { mcpDirectTools: [...agentConfig.mcpDirectTools] } : {}),
-		...(agentConfig.systemPrompt ? { systemPrompt: agentConfig.systemPrompt } : {}),
+		...(systemPrompt ? { systemPrompt } : {}),
 		systemPromptMode: agentConfig.systemPromptMode,
 		inheritProjectContext: agentConfig.inheritProjectContext,
 		inheritSkills: agentConfig.inheritSkills,
@@ -950,6 +1062,7 @@ export function executeAsyncSingle(
 		...(writerSessionDir ? { sessionDir: writerSessionDir } : {}),
 		...(artifactsDir ? { artifactsDir } : {}),
 		artifactConfig,
+		...(capabilityCeiling ? { capabilityCeiling } : {}),
 	};
 	try {
 		writePrivateAtomicJson(path.join(asyncDir, "recovery-descriptor.json"), recoveryDescriptor);
@@ -975,7 +1088,20 @@ export function executeAsyncSingle(
 			cwd: runnerCwd,
 			chainStepCount: 1,
 			currentStep: 0,
-			steps: [{ index: 0, agent, status: "running" as const, startedAt: now }],
+			launchContractDigest,
+			...(capabilityCeiling ? { capabilityCeiling } : {}),
+			steps: [{
+				index: 0,
+				agent,
+				status: "running" as const,
+				startedAt: now,
+				...(model ? { model } : {}),
+				...(resolveEffectiveThinking(model, effectiveThinking) ? { thinking: resolveEffectiveThinking(model, effectiveThinking) } : {}),
+				attemptedModels: [],
+				launchContractDigest,
+				...(capabilityCeiling ? { capabilityCeiling } : {}),
+				...(toolPlan.audit ? { capabilityAudit: toolPlan.audit } : {}),
+			}],
 		});
 		// Programmatic workers receive thinking separately from the base model ID.
 		const programmaticModel = model ? splitKnownThinkingSuffix(model).baseModel : undefined;
@@ -999,12 +1125,12 @@ export function executeAsyncSingle(
 			...(programmaticModel ? { model: programmaticModel } : {}),
 			...(ctx.currentModelProvider ? { preferredProvider: ctx.currentModelProvider } : {}),
 			...(programmaticThinking ? { thinking: programmaticThinking as SubagentRuntimeRunRequest["thinking"] } : {}),
-			...(agentConfig.tools ? { tools: agentConfig.tools } : {}),
+			...(toolPlan.tools ? { tools: toolPlan.tools } : {}),
 			...(systemPrompt ? { systemPrompt } : {}),
 			systemPromptMode: agentConfig.systemPromptMode,
 			inheritProjectContext: agentConfig.inheritProjectContext,
 			inheritSkills: agentConfig.inheritSkills,
-			extensionProfile: (agentConfig.extensions?.includes("pi-subagents") ? ["provider" as SubagentExtensionProfile, "runtime" as SubagentExtensionProfile, "fanout" as SubagentExtensionProfile] : ["provider" as SubagentExtensionProfile, "runtime" as SubagentExtensionProfile]),
+			extensionProfile: (toolPlan.tools?.includes("subagent") ? ["provider" as SubagentExtensionProfile, "runtime" as SubagentExtensionProfile, "fanout" as SubagentExtensionProfile] : ["provider" as SubagentExtensionProfile, "runtime" as SubagentExtensionProfile]),
 			...(timeoutMs !== undefined ? { timeoutMs } : {}),
 			...(params.turnBudget ? { turnBudget: params.turnBudget } : {}),
 			...(resolvedToolBudget.budget ? { toolBudget: resolvedToolBudget.budget } : {}),
@@ -1020,6 +1146,13 @@ export function executeAsyncSingle(
 			resultMode: "single",
 			runnerCwd,
 			sessionId: ctx.currentSessionId,
+			modelCandidates,
+			thinking: programmaticThinking,
+			launchContractDigest,
+			capabilityCeiling,
+			capabilityAudit: toolPlan.audit,
+			effectiveAcceptance: resolvedAcceptance,
+			agentContract: params.agentContract,
 		}).catch((error) => {
 			console.error(`Async single run '${id}' consumer failed:`, error);
 			const failedStatus = readStatus(asyncDir) ?? { runId: id, mode: "single" as const, state: "running" as const, startedAt: now, lastUpdate: now };
@@ -1066,6 +1199,7 @@ export function executeAsyncSingle(
 						chainStepCount: 1,
 						...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}),
 						...(initialTurnBudget ? { turnBudget: initialTurnBudget } : {}),
+						...(capabilityCeiling ? { capabilityCeiling } : {}),
 						startedAt: now,
 						lastUpdate: now,
 					},
@@ -1084,13 +1218,15 @@ export function executeAsyncSingle(
 			goal: (params.goal ?? task).slice(0, 120),
 			cwd: runnerCwd,
 			asyncDir,
+			launchContractDigest,
 			...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}),
 			...(initialTurnBudget ? { turnBudget: initialTurnBudget } : {}),
+			...(capabilityCeiling ? { capabilityCeiling } : {}),
 			nestedRoute,
 		});
 		return {
 			content: [{ type: "text", text: formatAsyncStartedMessage(`Async: ${agent} [${id}]`, ctx.interactive === true) }],
-			details: { mode: "single", runId: id, results: [], asyncId: id, asyncDir, ...(params.context ? { context: params.context } : {}), ...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
+			details: { mode: "single", runId: id, results: [], asyncId: id, asyncDir, launchContractDigest, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.context ? { context: params.context } : {}), ...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
 		};
 	}
 
@@ -1108,76 +1244,37 @@ async function consumeAsyncSingleRun(
 ): Promise<void> {
 	const { asyncDir, resultPath, eventsPath, runnerCwd, sessionId } = options;
 	const startedAt = Date.now();
-	let output = "";
-	let streamedText = "";
-	let sessionFile = request.sessionFile;
-	const projector = createProgrammaticStepProjector(asyncDir, request.childIndex);
-	let terminalSeen = false;
+	const control = new AbortController();
 	let stopRequested = false;
 	let interrupted = false;
-	let timedOut = false;
-	const pollController = new AbortController();
 	const cancel = (state: "stopped" | "paused"): void => {
 		stopRequested ||= state === "stopped";
 		interrupted ||= state === "paused";
-		void runtime.cancel(request.runId, request.childIndex).catch(() => undefined);
-		pollController.abort();
+		control.abort();
 	};
-	const pollPromise = runControlPollLoop(asyncDir, pollController.signal, {
+	const pollPromise = runControlPollLoop(asyncDir, control.signal, {
 		onSteer: (steerRequest) => routeProgrammaticSteer(runtime, asyncDir, steerRequest, [request]),
 		onStop: () => cancel("stopped"),
 		onInterrupt: () => cancel("paused"),
 	});
-
 	try {
-		for await (const event of runtime.run(request)) {
-			appendJsonl(eventsPath, JSON.stringify(event));
-			const textDelta = subagentTextDelta(event);
-			if (textDelta !== undefined) {
-				streamedText = appendProgrammaticStreamText(streamedText, textDelta);
-				projector.project(event, streamedText);
-			} else {
-				projector.project(event);
-			}
-			const text = assistantOutput(event);
-			if (text) {
-				output = text;
-				streamedText = "";
-			}
-			if (event.type === "completed") {
-				terminalSeen = true;
-				sessionFile = event.sessionFile ?? sessionFile;
-				break;
-			}
-			if (event.type === "failed") {
-				terminalSeen = true;
-				timedOut = event.code === SUBAGENT_TIMEOUT_CODE;
-				sessionFile = event.sessionFile ?? sessionFile;
-				throw new Error(event.error);
-			}
-		}
-		projector.flush();
-		if (!terminalSeen) throw new Error("Subagent event stream ended without a terminal event.");
-		const structuredOutput = readProgrammaticStructuredOutput(request);
+		const result = await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal, options);
 		const endedAt = Date.now();
-		projectProgrammaticStepResult(
-			asyncDir,
-			{
-				agent: request.agent,
-				index: request.childIndex,
-				output,
-				success: true,
-				...(structuredOutput !== undefined ? { structuredOutput } : {}),
-				...(sessionFile ? { sessionFile } : {}),
-			},
-			"completed",
-			endedAt,
-		);
+		const state = stopRequested ? "stopped" : interrupted ? "paused" : result.success ? "complete" : "failed";
+		const error = result.success ? undefined : stopRequested ? "Async run stopped." : interrupted ? "Async run interrupted." : result.error;
+		const terminalStepState: "completed" | "failed" | "paused" | "stopped" = result.success
+			? "completed"
+			: state === "stopped" || state === "paused"
+				? state
+				: "failed";
+		projectProgrammaticStepResult(asyncDir, { ...result, ...(error ? { error } : {}) }, terminalStepState);
 		writeProgrammaticStatus(asyncDir, {
-			state: "complete",
+			state,
+			error,
+			...(result.timedOut ? { timedOut: true } : {}),
 			endedAt,
 			lastUpdate: endedAt,
-			currentStep: 1,
+			...(result.success ? { currentStep: 1 } : {}),
 		});
 		writeAtomicJson(resultPath, {
 			lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
@@ -1186,91 +1283,41 @@ async function consumeAsyncSingleRun(
 			sessionId,
 			agent: request.agent,
 			mode: "single",
-			success: true,
-			state: "complete",
-			summary: output || `Async run ${request.runId} completed.`,
-			results: [
-				{
-					agent: request.agent,
-					output,
-					success: true,
-					...(structuredOutput !== undefined ? { structuredOutput } : {}),
-					sessionFile,
-				},
-			],
-			...(structuredOutput !== undefined ? { structuredOutput } : {}),
+			success: result.success,
+			state,
+			summary: result.output || error || `Async run ${request.runId} completed.`,
+			...(error ? { error } : {}),
+			...(result.timedOut ? { timedOut: true } : {}),
+			results: [{
+				agent: result.agent,
+				output: result.output,
+				success: result.success,
+				...(error ? { error } : {}),
+				...(result.timedOut ? { timedOut: true } : {}),
+				...(result.structuredOutput !== undefined ? { structuredOutput: result.structuredOutput } : {}),
+				...(result.sessionFile ? { sessionFile: result.sessionFile } : {}),
+				...(result.model ? { model: result.model } : {}),
+				...(result.thinking ? { thinking: result.thinking } : {}),
+				...(result.attemptedModels ? { attemptedModels: result.attemptedModels } : {}),
+				...(result.acceptance ? { acceptance: result.acceptance } : {}),
+				...(result.launchContractDigest ? { launchContractDigest: result.launchContractDigest } : {}),
+				...(result.capabilityCeiling ? { capabilityCeiling: result.capabilityCeiling } : {}),
+				...(result.capabilityAudit ? { capabilityAudit: result.capabilityAudit } : {}),
+			}],
+			...(result.structuredOutput !== undefined ? { structuredOutput: result.structuredOutput } : {}),
 			...(request.structuredOutput ? { structuredOutputPath: request.structuredOutput.outputPath } : {}),
-			sessionFile,
-			cwd: runnerCwd,
-			asyncDir,
-			startedAt,
-			endedAt,
-		});
-	} catch (error) {
-		// Pending throttled projections must land before the terminal step projection below.
-		projector.flush();
-		const endedAt = Date.now();
-		const state = stopRequested ? "stopped" : interrupted ? "paused" : "failed";
-		const message = stopRequested
-			? "Async run stopped."
-			: interrupted
-				? "Async run interrupted."
-				: error instanceof Error
-					? error.message
-					: String(error);
-		projectProgrammaticStepResult(
-			asyncDir,
-			{
-				agent: request.agent,
-				index: request.childIndex,
-				output,
-				success: false,
-				error: message,
-				...(stopRequested || interrupted ? { cancelled: true } : {}),
-				...(timedOut ? { timedOut: true } : {}),
-				...(sessionFile ? { sessionFile } : {}),
-			},
-			state,
-			endedAt,
-		);
-		writeProgrammaticStatus(asyncDir, {
-			state,
-			error: message,
-			...(timedOut ? { timedOut: true } : {}),
-			endedAt,
-			lastUpdate: endedAt,
-		});
-		writeAtomicJson(resultPath, {
-			lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
-			id: request.runId,
-			runId: request.runId,
-			sessionId,
-			agent: request.agent,
-			mode: "single",
-			success: false,
-			state,
-			error: message,
-			...(timedOut ? { timedOut: true } : {}),
-			summary: output || message,
-			results: [
-				{
-					agent: request.agent,
-					output,
-					success: false,
-					error: message,
-					state,
-					...(timedOut ? { timedOut: true } : {}),
-					sessionFile,
-				},
-			],
-			sessionFile,
+			...(result.sessionFile ? { sessionFile: result.sessionFile } : {}),
+			...(result.model ? { model: result.model } : {}),
+			...(result.thinking ? { thinking: result.thinking } : {}),
+			...(result.launchContractDigest ? { launchContractDigest: result.launchContractDigest } : {}),
+			...(result.capabilityCeiling ? { capabilityCeiling: result.capabilityCeiling } : {}),
 			cwd: runnerCwd,
 			asyncDir,
 			startedAt,
 			endedAt,
 		});
 	} finally {
-		pollController.abort();
+		control.abort();
 		closeSteerInbox(asyncDir, readStatus(asyncDir)?.state ?? "failed");
 		try {
 			await pollPromise;
@@ -1290,6 +1337,16 @@ interface ConsumeAsyncChainOptions {
 	globalConcurrencyLimit?: number;
 	deadlineAt?: number;
 	turnBudget?: ResolvedTurnBudget;
+	worktreeSetupHook?: string;
+	worktreeSetupHookTimeoutMs?: number;
+	worktreeBaseDir?: string;
+	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	modelCandidates?: string[];
+	thinking?: string;
+	launchContractDigest?: string;
+	capabilityAudit?: SubagentCapabilityAudit;
+	effectiveAcceptance?: ResolvedAcceptanceConfig;
+	agentContract?: AgentContract;
 }
 
 const PROGRAMMATIC_TEXT_PROJECTION_INTERVAL_MS = 1_000;
@@ -1309,6 +1366,13 @@ interface ProgrammaticLeafResult {
 	stopped?: boolean;
 	structuredOutput?: unknown;
 	sessionFile?: string;
+	model?: string;
+	thinking?: string;
+	attemptedModels?: string[];
+	acceptance?: AcceptanceLedger;
+	launchContractDigest?: string;
+	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	capabilityAudit?: SubagentCapabilityAudit;
 }
 
 function runnerStepToRequest(
@@ -1363,13 +1427,15 @@ async function consumeLeafRun(
 	asyncDir: string,
 	eventsPath: string,
 	signal: AbortSignal,
+	metadata: Pick<ConsumeAsyncChainOptions, "modelCandidates" | "thinking" | "effectiveAcceptance" | "agentContract" | "launchContractDigest" | "capabilityCeiling" | "capabilityAudit"> = {},
 ): Promise<ProgrammaticLeafResult> {
 	let output = "";
-	let streamedText = "";
 	let sessionFile = request.sessionFile;
+	const attemptedModels: string[] = [];
 	const projector = createProgrammaticStepProjector(asyncDir, request.childIndex);
+	let activeRequest = request;
 	const cancel = (): void => {
-		void runtime.cancel(request.runId, request.childIndex).catch(() => undefined);
+		void runtime.cancel(activeRequest.runId, activeRequest.childIndex).catch(() => undefined);
 	};
 	if (signal.aborted) {
 		return {
@@ -1383,37 +1449,89 @@ async function consumeLeafRun(
 	}
 	signal.addEventListener("abort", cancel, { once: true });
 	try {
-		for await (const event of runtime.run(request)) {
-			appendJsonl(eventsPath, JSON.stringify(event));
-			const textDelta = subagentTextDelta(event);
-			if (textDelta !== undefined) {
-				streamedText = appendProgrammaticStreamText(streamedText, textDelta);
-				projector.project(event, streamedText);
-			} else {
-				projector.project(event);
+		const candidates: Array<string | undefined> = metadata.modelCandidates?.length
+			? metadata.modelCandidates
+			: [request.model];
+		let lastError = "Subagent did not produce a result.";
+		let timedOut = false;
+		for (let attemptIndex = 0; attemptIndex < candidates.length; attemptIndex += 1) {
+			const candidate = candidates[attemptIndex];
+			const candidateModel = candidate ? splitKnownThinkingSuffix(candidate).baseModel : request.model;
+			const candidateThinking = resolveEffectiveThinking(candidate, metadata.thinking ?? request.thinking);
+			activeRequest = {
+				...request,
+				...(candidateModel ? { model: candidateModel } : {}),
+				...(candidateThinking ? { thinking: candidateThinking as SubagentRuntimeRunRequest["thinking"] } : {}),
+			};
+			const attemptedModel = candidate ?? candidateModel ?? "default";
+			attemptedModels.push(attemptedModel);
+			markProgrammaticStep(asyncDir, request.childIndex, {
+				model: candidate ?? candidateModel,
+				thinking: candidateThinking,
+				attemptedModels: [...attemptedModels],
+			});
+			let streamedText = "";
+			let attemptOutput = "";
+			let terminalSeen = false;
+			let attemptError: string | undefined;
+			try {
+				for await (const event of runtime.run(activeRequest)) {
+					appendJsonl(eventsPath, JSON.stringify(event));
+					const textDelta = subagentTextDelta(event);
+					if (textDelta !== undefined) {
+						streamedText = appendProgrammaticStreamText(streamedText, textDelta);
+						projector.project(event, streamedText);
+					} else {
+						projector.project(event);
+					}
+					const text = assistantOutput(event);
+					if (text) {
+						attemptOutput = text;
+						streamedText = "";
+					}
+					if (event.type === "failed") {
+						terminalSeen = true;
+						timedOut = event.code === SUBAGENT_TIMEOUT_CODE;
+						sessionFile = event.sessionFile ?? sessionFile;
+						attemptError = event.error;
+						break;
+					}
+					if (event.type === "completed") {
+						terminalSeen = true;
+						sessionFile = event.sessionFile ?? sessionFile;
+						break;
+					}
+				}
+			} catch (error) {
+				attemptError = error instanceof Error ? error.message : String(error);
 			}
-			const text = assistantOutput(event);
-			if (text) {
-				output = text;
-				streamedText = "";
-			}
-			if (event.type === "failed") {
-				sessionFile = event.sessionFile ?? sessionFile;
-				return {
-					agent: request.agent,
-					index: request.childIndex,
-					output,
-					success: false,
-					error: event.error,
-					cancelled: signal.aborted,
-					...(event.code === SUBAGENT_TIMEOUT_CODE ? { timedOut: true } : {}),
-					...(sessionFile ? { sessionFile } : {}),
-				};
-			}
-			if (event.type === "completed") {
-				sessionFile = event.sessionFile ?? sessionFile;
+			projector.flush();
+			output = attemptOutput;
+			if (!terminalSeen && !attemptError) attemptError = "Subagent event stream ended without a terminal event.";
+			let structuredOutput: unknown;
+			if (!attemptError) {
 				try {
-					const structuredOutput = readProgrammaticStructuredOutput(request);
+					structuredOutput = readProgrammaticStructuredOutput(activeRequest);
+				} catch (error) {
+					attemptError = error instanceof Error ? error.message : String(error);
+				}
+			}
+			if (!attemptError && !output.trim() && structuredOutput === undefined) {
+				attemptError = "Subagent produced no output (possible model cold-start or empty response).";
+			}
+			if (!attemptError) {
+				const acceptance = metadata.effectiveAcceptance
+					? await evaluateAcceptance({
+						acceptance: metadata.effectiveAcceptance,
+						output,
+						cwd: request.cwd,
+						reportOptional: isAgentContractV1(metadata.agentContract),
+					})
+					: undefined;
+				const acceptanceFailure = acceptance ? acceptanceFailureMessage(acceptance) : undefined;
+				if (acceptanceFailure && acceptance?.explicit && !isAgentContractV1(metadata.agentContract)) {
+					attemptError = acceptanceFailure;
+				} else {
 					return {
 						agent: request.agent,
 						index: request.childIndex,
@@ -1421,36 +1539,46 @@ async function consumeLeafRun(
 						success: true,
 						...(structuredOutput !== undefined ? { structuredOutput } : {}),
 						...(sessionFile ? { sessionFile } : {}),
-					};
-				} catch (error) {
-					return {
-						agent: request.agent,
-						index: request.childIndex,
-						output,
-						success: false,
-						error: error instanceof Error ? error.message : String(error),
-						...(sessionFile ? { sessionFile } : {}),
+						...(candidate ?? candidateModel ? { model: candidate ?? candidateModel } : {}),
+						...(candidateThinking ? { thinking: candidateThinking } : {}),
+						attemptedModels,
+						...(acceptance ? { acceptance } : {}),
+						...(metadata.launchContractDigest ? { launchContractDigest: metadata.launchContractDigest } : {}),
+						...(metadata.capabilityCeiling ? { capabilityCeiling: metadata.capabilityCeiling } : {}),
+						...(metadata.capabilityAudit ? { capabilityAudit: metadata.capabilityAudit } : {}),
 					};
 				}
 			}
+			lastError = attemptError;
+			if (signal.aborted || timedOut || !isRetryableModelFailure(attemptError) || attemptIndex === candidates.length - 1) break;
+			const note = formatModelAttemptNote({ model: attemptedModel, success: false, exitCode: 1, error: attemptError }, candidates[attemptIndex + 1]);
+			markProgrammaticStep(asyncDir, request.childIndex, { recentOutput: [note] });
 		}
+		const skippedAcceptance = metadata.effectiveAcceptance
+			? buildSkippedAcceptanceLedger(metadata.effectiveAcceptance, {
+				id: signal.aborted ? "stopped" : timedOut ? "timeout" : "failed",
+				message: signal.aborted
+					? "Acceptance was not evaluated because the subagent was cancelled."
+					: timedOut
+						? "Acceptance was not evaluated because the subagent timed out."
+						: "Acceptance was not evaluated because the subagent failed.",
+			})
+			: undefined;
 		return {
 			agent: request.agent,
 			index: request.childIndex,
 			output,
 			success: false,
-			error: "Subagent event stream ended without a terminal event.",
-		};
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return {
-			agent: request.agent,
-			index: request.childIndex,
-			output,
-			success: false,
-			error: message,
-			cancelled: signal.aborted || /abort|cancel|disposed/i.test(message),
+			error: lastError,
+			cancelled: signal.aborted,
+			...(timedOut ? { timedOut: true } : {}),
 			...(sessionFile ? { sessionFile } : {}),
+			...(attemptedModels.at(-1) ? { model: attemptedModels.at(-1), attemptedModels } : {}),
+			...(metadata.thinking ? { thinking: metadata.thinking } : {}),
+			...(skippedAcceptance ? { acceptance: skippedAcceptance } : {}),
+			...(metadata.launchContractDigest ? { launchContractDigest: metadata.launchContractDigest } : {}),
+			...(metadata.capabilityCeiling ? { capabilityCeiling: metadata.capabilityCeiling } : {}),
+			...(metadata.capabilityAudit ? { capabilityAudit: metadata.capabilityAudit } : {}),
 		};
 	} finally {
 		projector.flush();
@@ -1566,12 +1694,19 @@ async function consumeAsyncChainRun(
 			if (isParallelGroup(step)) {
 				const baseIndex = nextFlatIndex;
 				nextFlatIndex += step.parallel.length;
+				const worktreeSetup: WorktreeSetup | undefined = step.worktree
+					? createWorktrees(runnerCwd, `${id}-s${logicalIndex}`, step.parallel.length, {
+						agents: step.parallel.map((task) => task.agent),
+						...(options.worktreeSetupHook ? { setupHook: { hookPath: options.worktreeSetupHook, timeoutMs: options.worktreeSetupHookTimeoutMs } } : {}),
+						...(options.worktreeBaseDir ? { baseDir: options.worktreeBaseDir } : {}),
+					})
+					: undefined;
 				const requests = step.parallel.map((task, taskIndex) =>
 					runnerStepToRequest(
 						{ ...task, task: substituteTask(task.task) },
 						`${id}-${logicalIndex}-${taskIndex}`,
 						baseIndex + taskIndex,
-						task.cwd ?? runnerCwd,
+						worktreeSetup?.worktrees[taskIndex]?.agentCwd ?? task.cwd ?? runnerCwd,
 						options,
 					),
 				);
@@ -1594,7 +1729,7 @@ async function consumeAsyncChainRun(
 					active.set(request.childIndex, request);
 					markProgrammaticStep(asyncDir, request.childIndex, { status: "running", startedAt: Date.now() });
 					try {
-						const result = await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal);
+						const result = await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal, programmaticMetadataFromStep(step.parallel[request.childIndex - baseIndex]!));
 						if (!result.success && step.failFast) groupFailed = true;
 						return projectResult(result);
 					} finally {
@@ -1606,6 +1741,36 @@ async function consumeAsyncChainRun(
 					if (task.outputName && leaf) outputs[task.outputName] = outputEntryFromAsyncResult(leaf, logicalIndex);
 				});
 				previousOutput = aggregateProgrammaticOutputs(stepResults);
+				if (worktreeSetup) {
+					const diffs = diffWorktrees(worktreeSetup, step.parallel.map((task) => task.agent), path.join(asyncDir, "worktree-diffs", `step-${logicalIndex}`));
+					const diffSummary = formatWorktreeDiffSummary(diffs);
+					const cleanup = cleanupWorktrees(worktreeSetup);
+					try {
+						const parallelHandoff = writeParallelHandoffGroup({
+							manifestPath: parallelHandoffPath(asyncDir),
+							runId: id,
+							mode: resultMode === "parallel" ? "parallel" : "chain",
+							source: "async",
+							cwd: runnerCwd,
+							stepIndex: logicalIndex,
+							flatStartIndex: baseIndex,
+							setup: worktreeSetup,
+							diffs,
+							cleanup,
+							results: stepResults.map((result) => ({
+								agent: result.agent,
+								status: result.success ? "completed" : result.cancelled ? (stopRequested ? "stopped" : "paused") : "failed",
+								summary: result.output || result.error || "(no output)",
+								...(result.structuredOutput !== undefined ? { structuredOutput: result.structuredOutput } : {}),
+								...(result.sessionFile ? { sessionPath: result.sessionFile } : {}),
+							})),
+						});
+						writeProgrammaticStatus(asyncDir, { parallelHandoff, lastUpdate: Date.now() });
+						previousOutput = [previousOutput, diffSummary, formatParallelHandoffReference(parallelHandoff)].filter(Boolean).join("\n\n");
+					} catch (error) {
+						previousOutput = [previousOutput, diffSummary, formatParallelHandoffError(error)].filter(Boolean).join("\n\n");
+					}
+				}
 			} else {
 				const index = nextFlatIndex++;
 				const sequential = step as RunnerSubagentStep;
@@ -1643,7 +1808,7 @@ async function consumeAsyncChainRun(
 					active.set(index, request);
 					markProgrammaticStep(asyncDir, index, { status: "running", startedAt: Date.now() });
 					try {
-						stepResults = [projectResult(await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal))];
+						stepResults = [projectResult(await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal, programmaticMetadataFromStep(sequential)))];
 					} finally {
 						active.delete(index);
 					}
@@ -1670,6 +1835,7 @@ async function consumeAsyncChainRun(
 			: interrupted
 				? "Async run interrupted."
 				: results.find((result) => !result.success)?.error;
+		const parallelHandoff = readStatus(asyncDir)?.parallelHandoff;
 		writeProgrammaticStatus(asyncDir, {
 			state,
 			error,
@@ -1698,9 +1864,18 @@ async function consumeAsyncChainRun(
 				stopped: result.stopped,
 				structuredOutput: result.structuredOutput,
 				sessionFile: result.sessionFile,
+				model: result.model,
+				thinking: result.thinking,
+				attemptedModels: result.attemptedModels,
+				acceptance: result.acceptance,
+				launchContractDigest: result.launchContractDigest,
+				capabilityCeiling: result.capabilityCeiling,
+				capabilityAudit: result.capabilityAudit,
 				state: result.cancelled ? state : undefined,
 			})),
 			outputs,
+			...(parallelHandoff ? { parallelHandoff } : {}),
+			...(options.capabilityCeiling ? { capabilityCeiling: options.capabilityCeiling } : {}),
 			cwd: runnerCwd,
 			asyncDir,
 			startedAt,
@@ -1735,6 +1910,47 @@ async function consumeAsyncChainRun(
 			// Control polling is best effort after the terminal result is durable.
 		}
 	}
+}
+
+function programmaticMetadataFromStep(step: RunnerSubagentStep): Pick<ConsumeAsyncChainOptions, "modelCandidates" | "thinking" | "effectiveAcceptance" | "agentContract" | "launchContractDigest" | "capabilityCeiling" | "capabilityAudit"> {
+	return {
+		modelCandidates: step.modelCandidates,
+		thinking: step.thinking,
+		effectiveAcceptance: step.effectiveAcceptance,
+		agentContract: step.agentContract,
+		launchContractDigest: step.launchContractDigest,
+		capabilityCeiling: step.capabilityCeiling,
+		capabilityAudit: step.capabilityAudit,
+	};
+}
+
+function flattenProgrammaticStepDetails(steps: RunnerStep[]): Array<Record<string, unknown>> {
+	const details: Array<Record<string, unknown>> = [];
+	for (const step of steps) {
+		const children = isParallelGroup(step)
+			? step.parallel
+			: isDynamicRunnerGroup(step)
+				? [step.parallel]
+				: [step];
+		for (const child of children) {
+			details.push({
+				agent: child.agent,
+				status: "pending",
+				...(child.context ? { context: child.context } : {}),
+				...(child.phase ? { phase: child.phase } : {}),
+				...(child.label ? { label: child.label } : {}),
+				...(child.outputName ? { outputName: child.outputName } : {}),
+				...(child.structured ? { structured: true } : {}),
+				...(child.model ? { model: child.model } : {}),
+				...(child.thinking ? { thinking: child.thinking } : {}),
+				attemptedModels: [],
+				...(child.launchContractDigest ? { launchContractDigest: child.launchContractDigest } : {}),
+				...(child.capabilityCeiling ? { capabilityCeiling: child.capabilityCeiling } : {}),
+				...(child.capabilityAudit ? { capabilityAudit: child.capabilityAudit } : {}),
+			});
+		}
+	}
+	return details;
 }
 
 function flattenProgrammaticSteps(steps: RunnerStep[]): {
@@ -1993,6 +2209,13 @@ function projectProgrammaticStepResult(
 		step.currentPath = undefined;
 		if (result.output) step.recentOutput = programmaticRecentOutput(result.output);
 		if (result.sessionFile) step.sessionFile = result.sessionFile;
+		if (result.model) step.model = result.model;
+		if (result.thinking) step.thinking = result.thinking;
+		if (result.attemptedModels) step.attemptedModels = result.attemptedModels;
+		if (result.acceptance) step.acceptance = result.acceptance;
+		if (result.launchContractDigest) step.launchContractDigest = result.launchContractDigest;
+		if (result.capabilityCeiling) step.capabilityCeiling = result.capabilityCeiling;
+		if (result.capabilityAudit) step.capabilityAudit = result.capabilityAudit;
 		if (result.structuredOutput !== undefined) step.structuredOutput = result.structuredOutput;
 	}, now);
 }

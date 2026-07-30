@@ -9,13 +9,13 @@ const CUSTOM_TOOL_DESCRIPTION_MAX_BYTES = 50 * 1024;
 
 export const SUBAGENT_SAFETY_GUIDANCE = `SAFETY-CRITICAL SUBAGENT GUIDANCE:
 • Use { action: "list" } before execution and only run executable/non-disabled agents or chains.
-• Keep execution and management separate: omit action for SINGLE/PARALLEL/CHAIN execution; use action only for list/get/models/create/update/delete/status/grant-spawn-budget/interrupt/stop/resume/append-step/doctor.
+• Keep execution and management separate: omit action for SINGLE/PARALLEL/CHAIN execution; use action only for list/get/models/create/update/delete/status/grant-spawn-budget/interrupt/stop/resume/steer/append-step/doctor.
 • Async/background runs: launch with async:true only when work can proceed independently. Do not sleep or poll status just to wait. In an interactive session, normally return control and let Pi wake you; do not call subagent_wait merely to wait. Override that default and call subagent_wait when the current request is run-to-completion — for example, the user asked you to report results back before continuing or a skill must finish in one turn. Headless sessions auto-drain current-session work at agent_end; use subagent_wait when this turn must receive results before it ends.
 • Child-safety boundary: ordinary child subagents are not orchestrators and must not run subagents. Only explicitly configured fanout children may use the child-safe subagent tool, still bounded by depth/session limits.
 • Writing/review safety: keep one writer for the same cwd/worktree. Use fresh-context read-only reviewers/validators for independent review, then have the parent synthesize and apply fixes as the sole writer unless an isolated worktree was intentionally requested.
 • Artifacts/status essentials: chain outputs live under {chain_dir}; async runs expose asyncId/asyncDir with status.json, events.jsonl, output logs, and status via { action: "status", id }. Include output paths and residual risks when reporting results.`;
 
-export const FULL_SUBAGENT_TOOL_DESCRIPTION = `Delegate to subagents or manage agent definitions.
+export const FULL_SUBAGENT_TOOL_DESCRIPTION = `To delegate work, call with { agent, task }, { tasks }, or { chain }; omit action. Use action only for management/control actions listed below.
 
 EXECUTION (use exactly ONE mode):
 • Before executing, use { action: "list" } to inspect configured agents/chains. Only execute agents listed as executable/non-disabled.
@@ -24,8 +24,8 @@ EXECUTION (use exactly ONE mode):
 • PARALLEL: { tasks: [{agent,task,count?,output?,reads?,progress?}, ...], concurrency?: number, worktree?: true } - concurrent execution (worktree: isolate each task in a git worktree)
 • Optional context: { context: "fresh" | "fork" } (explicit value overrides every child; when omitted, each requested agent uses its own defaultContext, otherwise "fresh"; inspect agent defaults via { action: "list" })
 • Fork thinking: model strings accept a thinking suffix (provider/model:off|minimal|low|medium|high|xhigh|max). Forking over a parent transcript that carries signed Anthropic thinking blocks forces thinking off only when a child's effective primary or fallback model resolves to the Anthropic provider or anthropic-messages API; unresolved models are treated conservatively. The result notes affected children, including on failures. Use fresh context when an Anthropic child needs thinking.
-• Optional timeout: { timeoutMs } or { maxRuntimeMs } sets a run-level max runtime for foreground and async/background runs
-• Acceptance: omit acceptance for auto-inference. reviewed is inferred-only and must never be passed explicitly; use checked/verified and orchestrate an independent reviewer separately when required.
+• Optional timeout: { timeoutMs } or { maxRuntimeMs } sets a run-level max runtime for foreground and async/background runs; foreground defaults to 30 minutes only when neither value nor an agent timeout is provided
+• Acceptance: omit acceptance for reviewer/read-only calls and auto-inference. reviewed is inferred-only and must never be passed explicitly; evidence levels end at verified. Use acceptance.review.required and orchestrate an independent reviewer when required.
 • If { action: "list" } shows proactive skill subagent suggestions, consider a small fresh-context fanout for broad tasks where one of those skills would materially help
 
 CHAIN TEMPLATE VARIABLES (use in task strings):
@@ -42,6 +42,7 @@ MANAGEMENT (use action field, omit agent/task/chain/tasks):
 • { action: "list" } - discover executable agents/chains
 • { action: "get", agent: "name" } - full detail; packaged agents use dotted runtime names like "package.agent"
 • { action: "models", agent?: "name" } - show the runtime-loaded builtin subagent model mapping, optionally filtered to one builtin
+• User/project subagent settings support defaultThinking for agents without an explicit thinking value and defaultExtensions for agents without an explicit extensions allowlist; an empty defaultExtensions array disables ambient extension loading for those agents
 • { action: "watchdog.status" | "watchdog.check" | "watchdog.recommend-model" } - inspect the opt-in subagent watchdog and its strong complementary model recommendation
 • { action: "watchdog.configure", model: "recommended" | "inherit" | "provider/model[:thinking]", scope?: "session" | "user" | "project", target?: "main" | "children" | "child", agent?: "name", thinking?: "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" } - configure watchdog model selection; default scope is session, use persistent scopes only when the user asks
 • { action: "create", config: { name: "custom-agent", package: "code-analysis", systemPrompt, systemPromptMode, inheritProjectContext, inheritSkills, defaultContext, acceptance, acceptanceRole: "read-only" | "writer", ... } }
@@ -76,19 +77,20 @@ DIAGNOSTICS:
 
 ${SUBAGENT_SAFETY_GUIDANCE}`;
 
-export const COMPACT_SUBAGENT_TOOL_DESCRIPTION = `Delegate to subagents or manage definitions. Use exactly one mode per call.
+export const COMPACT_SUBAGENT_TOOL_DESCRIPTION = `To delegate work, call with { agent, task }, { tasks }, or { chain }; omit action. Use action only for management/control actions listed below. Use exactly one mode per call.
 
 EXECUTE:
 • Before execution, call { action: "list" }; run only executable/non-disabled configured agents/chains.
 • SINGLE {agent, task?}; PARALLEL {tasks:[{agent,task,count?,output?,reads?,progress?}], concurrency?, worktree?}; CHAIN {chain:[{agent,task?},{parallel:[...]}]}.
-• context can be "fresh" or "fork"; omitted uses each agent defaultContext, otherwise fresh. timeoutMs/maxRuntimeMs apply to foreground and async/background runs.
-• Omit acceptance for auto-inference. reviewed is inferred-only and must never be passed explicitly; use checked/verified with a separately orchestrated reviewer when required.
+• context can be "fresh" or "fork"; omitted uses each agent defaultContext, otherwise fresh. timeoutMs/maxRuntimeMs apply to foreground and async/background runs; foreground defaults to 30 minutes only when neither value nor an agent timeout is provided.
+• Omit acceptance for reviewer/read-only calls and auto-inference. reviewed is inferred-only and must never be passed explicitly; evidence levels end at verified. Use acceptance.review.required with a separately orchestrated reviewer when required.
 • Chain templates may use {task}, {previous}, {chain_dir}, and named outputs. Parallel worktree isolation requires a clean git repo.
 • Chain example: { chain: [{agent:"agent-a", task:"Analyze {task}"}, {parallel: [{agent:"agent-b", task:"Check {previous}", count: 3}]}] }
 • If list shows proactive skill subagent suggestions, use a small fresh-context fanout only when the task is broad enough.
 
 MANAGE / CONTROL:
 • Use action without execution fields: list, get, models, create, update, delete, eject, disable, enable, reset, grant-spawn-budget, doctor, watchdog.status, watchdog.check, watchdog.recommend-model, watchdog.configure.
+• User/project settings may set defaultThinking and defaultExtensions for agents that omit those fields; defaultExtensions:[] disables ambient extension loading for those agents.
 • Agent acceptanceRole (read-only or writer) affects inferred acceptance only, never tools. Explicit task intent wins; omission keeps name heuristics. Update with false or an empty string to clear it.
 • Async control actions: status, interrupt, stop, resume, steer, append-step. Use stop with an id for current-session top-level async runs. Use status view:"fleet" for active-run overview, view:"transcript" to tail child output, steer for acknowledged top-level live async guidance, and resume for paused/completed/failed revival or a routed nested follow-up. Stopped runs are non-resumable. Steering delivery means Pi accepted the correlated user input, not model compliance; use index for a specific child.
 • Opt-in schedule actions: schedule, schedule-list, schedule-status, schedule-cancel. Schedule only explicit delayed runs the user asked for.

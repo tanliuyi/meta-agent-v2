@@ -22,6 +22,10 @@ import type {
   SubagentRuntime,
   SubagentRuntimeRunRequest,
 } from "../src/main/pi/extensions/pi-subagents/src/runtime/subagent-runtime.ts";
+import {
+  agentDefinitionDigest,
+  launchBindingDigest,
+} from "../src/main/pi/extensions/pi-subagents/src/shared/launch-contract.ts";
 import { ASYNC_DIR, RESULTS_DIR } from "../src/main/pi/extensions/pi-subagents/src/shared/types.ts";
 import { SUBAGENT_TIMEOUT_CODE } from "../src/shared/subagent-contracts.ts";
 
@@ -421,6 +425,59 @@ describe("Desktop programmatic async modes", () => {
       state: "complete",
       summary: "first output",
       results: [{ agent: "worker", output: "first output", success: true }],
+    });
+  });
+
+  it("binds an async single fanout request and artifacts to the turn-budget prompt", async () => {
+    const id = `desktop-async-single-fanout-${Date.now()}`;
+    const { asyncDir, resultPath } = paths(id);
+    const runtime = new CompletingRuntime();
+    const fanoutAgent: AgentConfig = {
+      ...agent,
+      tools: ["read", "subagent"],
+    };
+
+    const started = executeAsyncSingle(id, {
+      agent: fanoutAgent.name,
+      task: "delegate work",
+      agentConfig: fanoutAgent,
+      ctx: context(),
+      subagentRuntime: runtime,
+      artifactConfig: { enabled: false } as never,
+      shareEnabled: false,
+      maxSubagentDepth: 2,
+      turnBudget: { maxTurns: 3, graceTurns: 1 },
+      acceptance: false,
+    });
+
+    const result = await readResult(resultPath);
+    const status = JSON.parse(readFileSync(`${asyncDir}/status.json`, "utf8")) as Record<string, unknown>;
+    const request = runtime.requests[0];
+    expect(request).toBeDefined();
+    expect(request?.extensionProfile).toEqual(["provider", "runtime", "fanout"]);
+    expect(request?.systemPrompt).toContain("This child run has a soft budget of 3 assistant turns.");
+    expect(request?.systemPrompt).toContain("1 additional assistant turn may be allowed only for a final wrap-up.");
+
+    const expectedDigest = launchBindingDigest({
+      definitionDigest: agentDefinitionDigest(fanoutAgent),
+      task: "delegate work",
+      modelCandidates: [],
+      systemPrompt: request?.systemPrompt,
+      systemPromptMode: fanoutAgent.systemPromptMode,
+      inheritProjectContext: fanoutAgent.inheritProjectContext,
+      inheritSkills: fanoutAgent.inheritSkills,
+      skills: [],
+      tools: fanoutAgent.tools,
+      outputMode: "inline",
+    });
+    expect(started.details?.launchContractDigest).toBe(expectedDigest);
+    expect(status).toMatchObject({
+      launchContractDigest: expectedDigest,
+      steps: [{ launchContractDigest: expectedDigest }],
+    });
+    expect(result).toMatchObject({
+      launchContractDigest: expectedDigest,
+      results: [{ launchContractDigest: expectedDigest }],
     });
   });
 

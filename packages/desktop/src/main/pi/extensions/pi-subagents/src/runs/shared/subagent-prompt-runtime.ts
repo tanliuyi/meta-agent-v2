@@ -8,12 +8,12 @@ import { SUBAGENT_CHILD_AGENT_ENV, SUBAGENT_CHILD_INDEX_ENV, SUBAGENT_FANOUT_CHI
 import { createStructuredOutputToolParameters, STRUCTURED_OUTPUT_CAPTURE_ENV, STRUCTURED_OUTPUT_SCHEMA_ENV, validateStructuredOutputValue } from "./structured-output.ts";
 import {
 	CHILD_TOOL_DIAGNOSTIC_PATH_ENV,
-	formatChildToolDiagnostic,
+	MCP_DIRECT_CHILD_TOOLS_ENV,
 	REQUIRED_CHILD_TOOLS_ENV,
 	writeChildToolDiagnostic,
 	type ChildToolDiagnostic,
 } from "./tool-availability.ts";
-import { TOOL_BUDGET_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
+import { TOOL_BUDGET_ENV, TOOL_BUDGET_ZERO_AUTH_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
 import type { JsonSchemaObject, ResolvedToolBudget, SubagentState } from "../../shared/types.ts";
 import { resolveCurrentSessionId } from "../../shared/session-identity.ts";
 import { resolveWatchPath } from "../../shared/utils.ts";
@@ -80,12 +80,24 @@ function readRequiredChildTools(): string[] | undefined {
 	return required;
 }
 
+function readMcpDirectChildTools(): string[] | undefined {
+	const encoded = process.env[MCP_DIRECT_CHILD_TOOLS_ENV]?.trim();
+	if (!encoded) return undefined;
+	try {
+		const tools = JSON.parse(encoded) as unknown;
+		if (!Array.isArray(tools) || tools.some((name) => typeof name !== "string" || !name)) return undefined;
+		return tools;
+	} catch {
+		return undefined;
+	}
+}
+
 function refreshChildToolDiagnostic(pi: ExtensionAPI): ChildToolDiagnostic | undefined {
 	const filePath = process.env[CHILD_TOOL_DIAGNOSTIC_PATH_ENV]?.trim();
 	const required = readRequiredChildTools();
 	if (!filePath || !required) return undefined;
 	const available = pi.getAllTools().map((tool) => tool.name);
-	return writeChildToolDiagnostic(filePath, required, available, process.env[SUBAGENT_CHILD_AGENT_ENV]?.trim());
+	return writeChildToolDiagnostic(filePath, required, available, process.env[SUBAGENT_CHILD_AGENT_ENV]?.trim(), readMcpDirectChildTools());
 }
 
 function findSectionEnd(prompt: string, startIndex: number, nextHeaders: string[]): number {
@@ -336,7 +348,7 @@ export function registerSteeringInbox(
 
 export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 	registerSteeringInbox(pi);
-	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV]));
+	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV], { allowZero: process.env[TOOL_BUDGET_ZERO_AUTH_ENV] === "1" }));
 	registerChildWatchdog(pi);
 	const waitToolEnabled = resolveWaitToolConfig().enabled;
 	const waitState = {
@@ -373,6 +385,8 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 		waitState.currentSessionId = sessionManager ? resolveCurrentSessionId(sessionManager) : null;
 		registerNativeSupervisorClientOnce();
 		if (readRequiredChildTools()?.includes("intercom")) registerNativeSupervisorFallbackOnce();
+	});
+	onRuntimeEvent("agent_start", () => {
 		refreshChildToolDiagnostic(pi);
 	});
 	onRuntimeEvent("agent_end", async (_event: unknown, ctx: unknown) => {
@@ -420,7 +434,6 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 
 	onRuntimeEvent("before_agent_start", async (event: { systemPrompt: string }) => {
 		registerNativeSupervisorFallbackOnce();
-		const toolDiagnostic = refreshChildToolDiagnostic(pi);
 		const intercomSessionName = process.env[SUBAGENT_INTERCOM_SESSION_NAME_ENV]?.trim();
 		if (intercomSessionName && typeof pi.setSessionName === "function") {
 			pi.setSessionName(intercomSessionName);
@@ -436,9 +449,6 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 				inheritSkills: inheritSkills ?? true,
 				fanoutChild: fanoutChild === true,
 			});
-		}
-		if (toolDiagnostic) {
-			rewritten = `${formatChildToolDiagnostic(toolDiagnostic)}\nDo not claim tool-dependent work succeeded; report this configuration error to the parent.\n\n${rewritten}`;
 		}
 		if (rewritten === event.systemPrompt) return;
 		return { systemPrompt: rewritten };

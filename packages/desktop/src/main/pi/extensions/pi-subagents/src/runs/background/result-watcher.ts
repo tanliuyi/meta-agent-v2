@@ -7,6 +7,7 @@ import {
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
 	type IntercomEventBus,
 	type NestedRunSummary,
+	type ParallelHandoffReference,
 	type SubagentResultIntercomChild,
 	type SubagentState,
 } from "../../shared/types.ts";
@@ -38,6 +39,8 @@ type ResultWatcherDeps = {
 	fs?: ResultWatcherFs;
 	timers?: ResultWatcherTimers;
 	notifier?: Pick<CompletionNotifier, "deliver">;
+	/** External grouped-result transport. Disable when native completion notifications own delivery. */
+	deliverIntercomResults?: boolean;
 };
 
 type ResultFileChild = {
@@ -60,6 +63,7 @@ type ResultFileData = CompletionNotification & {
 	nestedChildren?: unknown;
 	asyncDir?: string;
 	intercomTarget?: string;
+	parallelHandoff?: ParallelHandoffReference;
 };
 
 function sanitizeNestedResultChildren(value: unknown, resultPath: string, label: string): NestedRunSummary[] | undefined {
@@ -107,6 +111,7 @@ export function createResultWatcher(
 	const fsApi = deps.fs ?? fs;
 	const timers = deps.timers ?? { setTimeout, clearTimeout, setInterval, clearInterval };
 	const notifier = deps.notifier ?? { deliver: async () => true };
+	const deliverIntercomResults = deps.deliverIntercomResults !== false;
 	const pendingTriggerTurn = new Map<string, boolean>();
 	const processing = new Set<string>();
 	let deliveryActive = true;
@@ -200,11 +205,12 @@ export function createResultWatcher(
 			}), nestedChildren);
 
 			const intercomTarget = data.intercomTarget?.trim();
-			if (intercomTarget && triggerTurn) {
+			let intercomDelivered = false;
+			if (deliverIntercomResults && intercomTarget && triggerTurn) {
 				const mode = data.mode === "single" || data.mode === "parallel" || data.mode === "chain"
 					? data.mode
 					: resultChildren.length > 1 ? "chain" : "single";
-				const delivered = await deliverSubagentResultIntercomEvent(pi.events, buildSubagentResultIntercomPayload({
+				intercomDelivered = await deliverSubagentResultIntercomEvent(pi.events, buildSubagentResultIntercomPayload({
 					to: intercomTarget,
 					runId,
 					mode,
@@ -212,9 +218,10 @@ export function createResultWatcher(
 					children: normalizedChildren,
 					asyncId: data.id,
 					asyncDir: data.asyncDir,
+					...(data.parallelHandoff ? { parallelHandoff: data.parallelHandoff } : {}),
 				}));
 				if (!ownsSession(data.sessionId, epoch)) return;
-				if (!delivered) console.error(`Subagent async grouped result intercom delivery was not acknowledged for '${resultPath}'.`);
+				if (!intercomDelivered) console.error(`Subagent async grouped result intercom delivery was not acknowledged for '${resultPath}'.`);
 			}
 
 			const accepted = await notifier.deliver({
@@ -222,6 +229,7 @@ export function createResultWatcher(
 				id: data.id ?? runId,
 				runId,
 				triggerTurn,
+				intercomDelivered,
 				...(nestedChildren?.length ? { nestedChildren } : {}),
 				...(Array.isArray(data.results) ? {
 					results: hasResultChildren ? normalizedChildren.map((child, index) => ({
@@ -247,6 +255,7 @@ export function createResultWatcher(
 					...data,
 					runId,
 					triggerTurn,
+					intercomDelivered,
 					...(nestedChildren?.length ? { nestedChildren } : {}),
 					...(Array.isArray(data.results) ? {
 						results: hasResultChildren ? normalizedChildren.map((child, index) => ({

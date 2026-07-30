@@ -2,8 +2,8 @@
 import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
-import { formatTokens, shortenPath } from "../shared/formatters.ts";
-import { RESULTS_DIR, type AsyncJobState, type ForegroundResumeChild, type ForegroundResumeRun, type SubagentState } from "../shared/types.ts";
+import { formatDuration, formatTokens, shortenPath } from "../shared/formatters.ts";
+import { RESULTS_DIR, type AsyncJobState, type ForegroundResumeChild, type ForegroundResumeRun, type ParallelHandoffReference, type SubagentState } from "../shared/types.ts";
 import { readStatus } from "../shared/utils.ts";
 import { formatAsyncRunTranscript } from "../runs/background/fleet-view.ts";
 import { listAsyncRuns, summarizeAsyncStatus, type AsyncRunSummary } from "../runs/background/async-status.ts";
@@ -175,6 +175,31 @@ function foregroundActiveDetail(item: Extract<FleetItem, { kind: "foreground-act
 	return lines.filter((line): line is string => line !== undefined);
 }
 
+function asyncDuration(item: Extract<FleetItem, { kind: "async" }>): number {
+	if (item.step?.durationMs !== undefined) return item.step.durationMs;
+	const terminal = item.state !== "queued" && item.state !== "running" && item.state !== "pending";
+	const endTime = item.run.endedAt ?? (terminal ? item.run.lastUpdate : undefined) ?? Date.now();
+	return Math.max(0, endTime - item.run.startedAt);
+}
+
+function acceptanceLine(status: string | undefined): string | undefined {
+	return status && status !== "not-required" ? `Acceptance: ${status}` : undefined;
+}
+
+function handoffLine(handoff: ParallelHandoffReference | undefined): string | undefined {
+	if (!handoff) return undefined;
+	return `Parallel handoff: ${handoff.path} (${handoff.childCount} children, ${handoff.changedPatches} changed patches, cleanup ${handoff.cleanupState})`;
+}
+
+function asyncMetadataLines(item: Extract<FleetItem, { kind: "async" }>, handoff?: ParallelHandoffReference): string[] {
+	return [
+		`Duration: ${formatDuration(asyncDuration(item))}`,
+		acceptanceLine(item.step?.acceptance?.status),
+		item.step?.launchContractDigest ? `Launch contract: ${item.step.launchContractDigest}` : item.run.launchContractDigest ? `Launch contract: ${item.run.launchContractDigest}` : undefined,
+		handoffLine(handoff),
+	].filter((line): line is string => line !== undefined);
+}
+
 function foregroundRecentDetail(item: Extract<FleetItem, { kind: "foreground-recent" }>): string[] {
 	const { child, run } = item;
 	const outputPath = child.artifactPaths?.outputPath ?? child.savedOutputPath;
@@ -188,6 +213,8 @@ function foregroundRecentDetail(item: Extract<FleetItem, { kind: "foreground-rec
 		outputPath ? `Output: ${outputPath}` : undefined,
 		child.sessionFile ? `Session: ${child.sessionFile}` : undefined,
 		child.transcriptPath ? `Transcript file: ${child.transcriptPath}` : undefined,
+		acceptanceLine(child.acceptance?.status),
+		child.launchContractDigest ? `Launch contract: ${child.launchContractDigest}` : undefined,
 		child.error ? `Error: ${child.error}` : undefined,
 		child.outputSaveError ? `Output warning: ${child.outputSaveError}` : undefined,
 		child.transcriptError ? `Transcript warning: ${child.transcriptError}` : undefined,
@@ -201,8 +228,9 @@ function foregroundRecentDetail(item: Extract<FleetItem, { kind: "foreground-rec
 
 function asyncDetail(item: Extract<FleetItem, { kind: "async" }>): string[] {
 	const status = readStatus(item.run.asyncDir);
+	const metadata = asyncMetadataLines(item, status?.parallelHandoff);
 	if (status) {
-		return formatAsyncRunTranscript(status, item.run.asyncDir, { index: item.index, lines: TRANSCRIPT_LINES }).split("\n");
+		return [...metadata, "", ...formatAsyncRunTranscript(status, item.run.asyncDir, { index: item.index, lines: TRANSCRIPT_LINES }).split("\n")];
 	}
 	const outputPath = item.index !== undefined ? path.join(item.run.asyncDir, `output-${item.index}.log`) : undefined;
 	return [
@@ -210,6 +238,7 @@ function asyncDetail(item: Extract<FleetItem, { kind: "async" }>): string[] {
 		"Source: async",
 		`State: ${item.state}`,
 		`Mode: ${item.run.mode}${contextModeLabel(item.run.context) ? ` ${contextModeLabel(item.run.context)}` : ""}`,
+		...metadata,
 		item.index !== undefined ? `Child: ${item.index} (${item.agent})${contextModeLabel(item.step?.context) ? ` ${contextModeLabel(item.step?.context)}` : ""}` : `Agent: ${item.agent}${contextModeLabel(item.run.context) ? ` ${contextModeLabel(item.run.context)}` : ""}`,
 		outputPath ? `Output: ${outputPath}` : undefined,
 		item.step?.sessionFile ? `Session: ${item.step.sessionFile}` : item.run.sessionFile ? `Session: ${item.run.sessionFile}` : undefined,
