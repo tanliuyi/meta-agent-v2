@@ -311,7 +311,7 @@ const desktopApi: DesktopApi = {
     rename: (projectId, threadId, title) => ipcRenderer.invoke(CHANNELS.sessionsRename, projectId, threadId, title),
     archive: (projectId, threadId, archived) =>
       ipcRenderer.invoke(CHANNELS.sessionsArchive, projectId, threadId, archived),
-    remove: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsRemove, projectId, threadId),
+    remove: (projectId, threadId, policy) => ipcRenderer.invoke(CHANNELS.sessionsRemove, projectId, threadId, policy),
     prompt: (input) => ipcRenderer.invoke(CHANNELS.sessionsPrompt, input),
     edit: (input) => ipcRenderer.invoke(CHANNELS.sessionsEdit, input),
     reload: (input) => ipcRenderer.invoke(CHANNELS.sessionsReload, input),

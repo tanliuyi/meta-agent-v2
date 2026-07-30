@@ -16,6 +16,8 @@ import type {
   SessionPush,
   SessionPushPayload,
   SessionReloadInput,
+  SessionRemovePolicy,
+  SessionRemoveResult,
   SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
@@ -217,11 +219,31 @@ export class SessionSupervisor {
     }
   }
 
-  async remove(projectId: string, threadId: string): Promise<void> {
+  async remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult> {
     this.clearPendingAttachments(projectId, threadId);
     this.clearSessionSubscriptions(projectId, threadId);
-    await this.workers.remove(projectId, threadId);
-    await this.projects.removeWorkbench(projectId, threadId);
+    const result = await this.workers.remove(projectId, threadId, policy);
+    for (const removedThreadId of result.removedThreadIds) {
+      this.clearPendingAttachments(projectId, removedThreadId);
+      this.clearSessionSubscriptions(projectId, removedThreadId);
+    }
+    for (const reparented of result.reparentedThreads) {
+      this.clearPendingAttachments(projectId, reparented.id);
+      this.clearSessionSubscriptions(projectId, reparented.id);
+    }
+    const cleanupResults = await Promise.allSettled(
+      result.removedThreadIds.map((removedThreadId) => this.projects.removeWorkbench(projectId, removedThreadId)),
+    );
+    cleanupResults.forEach((cleanupResult, index) => {
+      if (cleanupResult.status !== "rejected") return;
+      this.log?.(
+        "session-remove",
+        `Failed to remove workbench for ${projectId}/${result.removedThreadIds[index]}: ${
+          cleanupResult.reason instanceof Error ? cleanupResult.reason.message : String(cleanupResult.reason)
+        }`,
+      );
+    });
+    return result;
   }
 
   async removeProject(projectId: string): Promise<void> {

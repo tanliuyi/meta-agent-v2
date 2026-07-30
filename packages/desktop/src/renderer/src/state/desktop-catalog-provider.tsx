@@ -190,14 +190,17 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
           throw error;
         }
       },
-      async removeThread(projectId, threadId) {
+      async removeThread(projectId, threadId, policy) {
         const key = sessionRecordKey(projectId, threadId);
         const restore = cache.quiesce(key);
         try {
-          await window.desktop.sessions.remove(projectId, threadId);
-          await cache.retire(key);
-          dispatchDesktop(store, { type: "thread-removed", projectId, threadId });
-          if (route.endsWith(`/projects/${projectId}/session/${threadId}`)) {
+          const result = await window.desktop.sessions.remove(projectId, threadId, policy);
+          const retiredThreadIds = [...result.removedThreadIds, ...result.reparentedThreads.map(({ id }) => id)];
+          await Promise.all(
+            retiredThreadIds.map((retiredThreadId) => cache.retire(sessionRecordKey(projectId, retiredThreadId))),
+          );
+          dispatchDesktop(store, { type: "session-tree-removed", projectId, ...result });
+          if (result.removedThreadIds.some((id) => route.endsWith(`/projects/${projectId}/session/${id}`))) {
             await navigate({ to: "/", replace: true });
           }
         } catch (error) {

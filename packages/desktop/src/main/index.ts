@@ -337,6 +337,10 @@ app.whenReady().then(async () => {
     attachSubagent: (projectId, threadId) => activeSubagents.attach(projectId, threadId),
     acknowledgeSubagent: (workerInstanceId, sidecarSequence) =>
       activeSubagents.acknowledge(workerInstanceId, sidecarSequence),
+    beginSubagentTreeMutation: (projectId, parentThreadId) =>
+      activeSubagents.beginThreadMutation(projectId, parentThreadId),
+    endSubagentTreeMutation: (projectId, parentThreadId) =>
+      activeSubagents.endThreadMutation(projectId, parentThreadId),
   });
   const startedSupervisor = new SessionSupervisor(projects, workers, {
     log: (scope, text) => sidecarLog?.write(scope, text),

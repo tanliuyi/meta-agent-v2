@@ -12,6 +12,8 @@ import type {
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
+  SessionRemovePolicy,
+  SessionRemoveResult,
   SessionResourceReloadInput,
   Thread,
 } from "./contracts.ts";
@@ -278,6 +280,7 @@ export type MetadataSidecarCommand =
       projectId: string;
       cwd: string;
       threadId: string;
+      policy: SessionRemovePolicy;
       lease: ColdOperationLease;
     }
   | { type: "recoverCreationReservation"; reservation: CreationReservation }
@@ -293,6 +296,7 @@ export type SidecarCommandResult =
   | DraftSessionConfig
   | Thread
   | Thread[]
+  | SessionRemoveResult
   | { path: string; id: string }
   | { pong: true }
   | null;

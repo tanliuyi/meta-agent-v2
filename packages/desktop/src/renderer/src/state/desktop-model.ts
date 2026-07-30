@@ -29,6 +29,12 @@ export type DesktopAction =
   | { type: "thread-archived"; projectId: string; threadId: string; archived: boolean }
   | { type: "thread-removed"; projectId: string; threadId: string }
   | {
+      type: "session-tree-removed";
+      projectId: string;
+      removedThreadIds: string[];
+      reparentedThreads: Thread[];
+    }
+  | {
       type: "thread-summary-updated";
       projectId: string;
       threadId: string;
@@ -124,6 +130,19 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
           [action.projectId]: (state.threadCatalogs[action.projectId] ?? []).filter(({ id }) => id !== action.threadId),
         },
       };
+    case "session-tree-removed": {
+      const removedIds = new Set(action.removedThreadIds);
+      const reparentedById = new Map(action.reparentedThreads.map((thread) => [thread.id, thread]));
+      return {
+        ...state,
+        threadCatalogs: {
+          ...state.threadCatalogs,
+          [action.projectId]: (state.threadCatalogs[action.projectId] ?? [])
+            .filter(({ id }) => !removedIds.has(id))
+            .map((thread) => reparentedById.get(thread.id) ?? thread),
+        },
+      };
+    }
     case "thread-summary-updated": {
       const threads = state.threadCatalogs[action.projectId];
       if (!threads) return state;

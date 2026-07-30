@@ -1,5 +1,7 @@
 import type { Thread } from "../../../shared/contracts.ts";
 
+export { collectThreadDescendantIds as threadDescendantIds } from "../../../shared/thread-tree.ts";
+
 export interface ThreadListItemIdentity {
   id: string;
   remoteId?: string | undefined;

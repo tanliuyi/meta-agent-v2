@@ -15,6 +15,8 @@ import type {
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
+  SessionRemovePolicy,
+  SessionRemoveResult,
   SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
@@ -31,6 +33,7 @@ import type {
   ThreadWorkerBinding,
 } from "../../shared/sidecar-contracts.ts";
 import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
+import { collectThreadDescendantIds } from "../../shared/thread-tree.ts";
 import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
 import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
@@ -90,6 +93,8 @@ export interface ThreadWorkerRegistryOptions {
   isActiveSubagentThread?(projectId: string, threadId: string): boolean;
   attachSubagent?(projectId: string, threadId: string): Promise<SessionBootstrap | undefined>;
   acknowledgeSubagent?(workerInstanceId: string, sidecarSequence: number): boolean;
+  beginSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
+  endSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
   createWorkerClient?(options: WorkerClientOptions): ThreadWorkerClient;
   idleTtlMs?: number;
   maxLiveWorkers?: number;
@@ -629,20 +634,68 @@ export class ThreadWorkerRegistry {
     });
   }
 
-  async remove(projectId: string, threadId: string): Promise<void> {
-    this.assertNotActiveSubagent(projectId, threadId);
-    const key = workerKey(projectId, threadId);
-    await this.withThreadLock(key, async () => {
-      this.assertProjectAvailable(projectId);
-      const current = this.records.get(key);
-      if (current) {
-        if (current.inFlight > 0) throw new Error(`Cannot remove busy thread ${projectId}/${threadId}`);
-        current.retired = true;
-        await this.awaitRecordShutdown(current);
-        if (this.records.get(key) === current) this.records.delete(key);
+  async remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult> {
+    const barrierThreadIds = [threadId];
+    this.options.beginSubagentTreeMutation?.(projectId, threadId);
+    try {
+      const catalog = await this.list(projectId);
+      const descendantIds = collectThreadDescendantIds(catalog, threadId);
+      for (const descendantId of [...descendantIds].sort()) {
+        this.options.beginSubagentTreeMutation?.(projectId, descendantId);
+        barrierThreadIds.push(descendantId);
       }
-      await this.options.metadata.removeCold(projectId, this.options.getCwd(projectId), threadId);
-      this.clearCreationReservation(threadId);
+      return await this.removeTree(projectId, threadId, policy, catalog, descendantIds);
+    } finally {
+      for (const barrierThreadId of [...barrierThreadIds].reverse()) {
+        this.options.endSubagentTreeMutation?.(projectId, barrierThreadId);
+      }
+    }
+  }
+
+  private async removeTree(
+    projectId: string,
+    threadId: string,
+    policy: SessionRemovePolicy,
+    catalog: readonly Thread[],
+    descendantIds: readonly string[],
+  ): Promise<SessionRemoveResult> {
+    const target = catalog.find(({ id }) => id === threadId);
+    if (!target) throw new Error(`Pi session does not exist: ${threadId}`);
+    const relatedIds = new Set([threadId, ...descendantIds]);
+    const running = catalog.find((thread) => relatedIds.has(thread.id) && thread.running);
+    if (running) throw new Error(`Cannot remove session tree while ${running.id} is running`);
+    const removedIds = policy === "subtree" ? relatedIds : new Set([threadId]);
+    for (const id of removedIds) this.assertNotActiveSubagent(projectId, id);
+    const lockKeys = [...relatedIds].map((id) => workerKey(projectId, id)).sort();
+    return this.withThreadLocks(lockKeys, async () => {
+      this.assertProjectAvailable(projectId);
+      const latestCatalog = await this.list(projectId);
+      const latestRelatedIds = new Set([threadId, ...collectThreadDescendantIds(latestCatalog, threadId)]);
+      if (latestRelatedIds.size !== relatedIds.size || [...latestRelatedIds].some((id) => !relatedIds.has(id))) {
+        throw new Error("Session tree changed while deletion was starting; retry the operation");
+      }
+      const latestRunning = latestCatalog.find((thread) => latestRelatedIds.has(thread.id) && thread.running);
+      if (latestRunning) throw new Error(`Cannot remove session tree while ${latestRunning.id} is running`);
+      const records = [...latestRelatedIds].flatMap((id) => {
+        const current = this.records.get(workerKey(projectId, id));
+        return current ? [current] : [];
+      });
+      const busy = records.find((record) => record.inFlight > 0 || record.summary?.running);
+      if (busy) throw new Error(`Cannot remove busy thread ${projectId}/${busy.threadId}`);
+      for (const record of records) record.retired = true;
+      await Promise.all(records.map((record) => this.awaitRecordShutdown(record)));
+      for (const record of records) {
+        const key = workerKey(record.projectId, record.threadId);
+        if (this.records.get(key) === record) this.records.delete(key);
+      }
+      const result = await this.options.metadata.removeCold(
+        projectId,
+        this.options.getCwd(projectId),
+        threadId,
+        policy,
+      );
+      for (const id of result.removedThreadIds) this.clearCreationReservation(id);
+      return result;
     });
   }
 
@@ -1070,6 +1123,15 @@ export class ThreadWorkerRegistry {
   private assertProjectAvailable(projectId: string): void {
     if (this.disposing) throw new Error("Desktop thread worker registry is shutting down");
     if (this.drainingProjects.has(projectId)) throw new Error(`Project ${projectId} is being removed`);
+  }
+
+  private async withThreadLocks<T>(keys: readonly string[], operation: () => Promise<T>): Promise<T> {
+    const uniqueKeys = [...new Set(keys)].sort();
+    const run = (index: number): Promise<T> => {
+      const key = uniqueKeys[index];
+      return key ? this.withThreadLock(key, () => run(index + 1)) : operation();
+    };
+    return run(0);
   }
 
   private async withThreadLock<T>(key: string, operation: () => Promise<T>): Promise<T> {

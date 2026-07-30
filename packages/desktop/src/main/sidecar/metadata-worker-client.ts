@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DraftSessionConfig, Thread } from "../../shared/contracts.ts";
+import type { DraftSessionConfig, SessionRemovePolicy, SessionRemoveResult, Thread } from "../../shared/contracts.ts";
 import type { ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
 import type {
   ColdOperationLease,
@@ -86,10 +86,18 @@ export class MetadataWorkerClient {
     });
   }
 
-  removeCold(projectId: string, cwd: string, threadId: string): Promise<void> {
+  removeCold(
+    projectId: string,
+    cwd: string,
+    threadId: string,
+    policy: SessionRemovePolicy,
+  ): Promise<SessionRemoveResult> {
     return this.enqueue(async () => {
       const lease = createColdLease(projectId, threadId, "remove");
-      await this.request({ type: "removeColdSession", projectId, cwd, threadId, lease }, 30_000);
+      return this.request<SessionRemoveResult>(
+        { type: "removeColdSession", projectId, cwd, threadId, policy, lease },
+        null,
+      );
     });
   }
 
@@ -143,7 +151,7 @@ export class MetadataWorkerClient {
     }
   }
 
-  private request<T>(command: MetadataSidecarCommand, timeoutMs: number): Promise<T> {
+  private request<T>(command: MetadataSidecarCommand, timeoutMs: number | null): Promise<T> {
     if (this.disposed) return Promise.reject(new Error("Metadata sidecar client is disposed"));
     const client = this.client?.available ? this.client : this.createClient();
     this.client = client;

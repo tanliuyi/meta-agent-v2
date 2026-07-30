@@ -55,6 +55,13 @@ export interface Thread {
   agentName?: string;
 }
 
+export type SessionRemovePolicy = "subtree" | "reparent";
+
+export interface SessionRemoveResult {
+  removedThreadIds: string[];
+  reparentedThreads: Thread[];
+}
+
 /** 可供当前会话选择的模型。 */
 export interface ModelOption {
   provider: string;

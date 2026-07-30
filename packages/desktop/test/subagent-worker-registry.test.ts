@@ -203,6 +203,57 @@ describe("SubagentWorkerRegistry", () => {
     expect(() => assertHostRequestIdentity({ type: "subagent.run", request: runRequest() }, binding)).not.toThrow();
   });
 
+  it("blocks new runs while the parent session tree is being mutated", async () => {
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      createWorkerClient: (options) => new FakeClient(options),
+    });
+    registry.beginThreadMutation("project", "nested-parent");
+    await expect(
+      registry.handleHostRequest(
+        { type: "subagent.run", request: { ...runRequest(), parentSessionId: "nested-parent" } },
+        () => undefined,
+      ),
+    ).rejects.toThrow("being mutated");
+    registry.endThreadMutation("project", "nested-parent");
+
+    registry.beginThreadMutation("project", "thread");
+    await expect(
+      registry.handleHostRequest({ type: "subagent.run", request: runRequest() }, () => undefined),
+    ).rejects.toThrow("being mutated");
+    registry.endThreadMutation("project", "thread");
+    await expect(
+      registry.handleHostRequest({ type: "subagent.run", request: runRequest() }, () => undefined),
+    ).resolves.toEqual({ status: "completed" });
+  });
+
+  it("rejects a mutation while a run uses the target as its effective session parent", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      createWorkerClient: (options) => {
+        const client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+    const run = registry.handleHostRequest(
+      { type: "subagent.run", request: { ...runRequest(), parentSessionId: "nested-parent" } },
+      () => undefined,
+    );
+    await Promise.resolve();
+
+    expect(() => registry.beginThreadMutation("project", "nested-parent")).toThrow("subagent is running");
+
+    release();
+    await run;
+  });
+
   it("rejects extension paths before spawning a worker", async () => {
     let spawned = false;
     const registry = new SubagentWorkerRegistry({

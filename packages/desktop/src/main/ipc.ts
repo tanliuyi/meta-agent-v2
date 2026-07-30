@@ -18,6 +18,7 @@ import type {
   SessionEditInput,
   SessionPromptInput,
   SessionReloadInput,
+  SessionRemovePolicy,
   SessionResourceReloadInput,
   TerminalEvent,
   Thread,
@@ -409,10 +410,15 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsArchive, (_event, projectId: string, threadId: string, archived: boolean) =>
     sessions.archive(projectId, threadId, archived),
   );
-  ipcMain.handle(CHANNELS.sessionsRemove, async (_event, projectId: string, threadId: string) => {
-    await sessions.remove(projectId, threadId);
-    terminals.disposeSession(projectId, threadId);
-  });
+  ipcMain.handle(
+    CHANNELS.sessionsRemove,
+    async (_event, projectId: string, threadId: string, policy: SessionRemovePolicy) => {
+      if (policy !== "subtree" && policy !== "reparent") throw new Error(`Invalid session removal policy: ${policy}`);
+      const result = await sessions.remove(projectId, threadId, policy);
+      for (const removedThreadId of result.removedThreadIds) terminals.disposeSession(projectId, removedThreadId);
+      return result;
+    },
+  );
   ipcMain.handle(CHANNELS.sessionsPrompt, (_event, input: SessionPromptInput) => sessions.prompt(input));
   ipcMain.handle(CHANNELS.sessionsEdit, (_event, input: SessionEditInput) => sessions.edit(input));
   ipcMain.handle(CHANNELS.sessionsReload, (_event, input: SessionReloadInput) => sessions.reload(input));

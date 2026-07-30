@@ -827,6 +827,40 @@ describe("ThreadWorkerRegistry", () => {
     expect(harness.clients[0]?.shutdownCount).toBe(1);
   });
 
+  it("removes a complete subtree through one metadata mutation", async () => {
+    const harness = createHarness(userDataDir);
+    harness.metadataList.mockResolvedValue([
+      thread("parent"),
+      { ...thread("child"), parentThreadId: "parent" },
+      { ...thread("grandchild"), parentThreadId: "child" },
+    ]);
+    const begun: string[] = [];
+    const ended: string[] = [];
+    harness.options.beginSubagentTreeMutation = (_projectId, id) => begun.push(id);
+    harness.options.endSubagentTreeMutation = (_projectId, id) => ended.push(id);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await expect(registry.remove("project", "parent", "subtree")).resolves.toEqual({
+      removedThreadIds: ["parent", "child", "grandchild"],
+      reparentedThreads: [],
+    });
+    expect(harness.metadataRemoveCold).toHaveBeenCalledWith("project", "/workspace", "parent", "subtree");
+    expect(begun).toEqual(["parent", "child", "grandchild"]);
+    expect(ended).toEqual(["grandchild", "child", "parent"]);
+    await registry.dispose();
+  });
+
+  it("rejects tree deletion while a descendant is running", async () => {
+    const harness = createHarness(userDataDir);
+    harness.metadataList.mockResolvedValue([
+      thread("parent"),
+      { ...thread("child"), parentThreadId: "parent", running: true },
+    ]);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await expect(registry.remove("project", "parent", "subtree")).rejects.toThrow("child is running");
+    expect(harness.metadataRemoveCold).not.toHaveBeenCalled();
+    await registry.dispose();
+  });
+
   it("rejects catalog and cold mutations after project draining starts", async () => {
     const harness = createHarness(userDataDir);
     const registry = new ThreadWorkerRegistry(harness.options);
@@ -834,7 +868,7 @@ describe("ThreadWorkerRegistry", () => {
 
     await expect(registry.list("project")).rejects.toThrow("Project project is being removed");
     await expect(registry.rename("project", "thread", "title")).rejects.toThrow("Project project is being removed");
-    await expect(registry.remove("project", "thread")).rejects.toThrow("Project project is being removed");
+    await expect(registry.remove("project", "thread", "subtree")).rejects.toThrow("Project project is being removed");
     expect(harness.metadataRenameCold).not.toHaveBeenCalled();
     await registry.dispose();
   });
@@ -847,6 +881,8 @@ interface Harness {
   failed: ReturnType<typeof vi.fn>;
   catalogChanged: ReturnType<typeof vi.fn>;
   metadataRenameCold: ReturnType<typeof vi.fn>;
+  metadataList: ReturnType<typeof vi.fn>;
+  metadataRemoveCold: ReturnType<typeof vi.fn>;
   resolveExtensions: ReturnType<typeof vi.fn>;
   resync: ReturnType<typeof vi.fn>;
 }
@@ -868,8 +904,13 @@ function createHarness(
   const failed = vi.fn<(projectId: string, threadId: string, error: Error) => void>();
   const catalogChanged = vi.fn<(thread: Thread) => void>();
   const metadataRenameCold = vi.fn(async () => {});
+  const metadataList = vi.fn(async (): Promise<Thread[]> => []);
+  const metadataRemoveCold = vi.fn(async (_projectId: string, _cwd: string, threadId: string, policy: string) => ({
+    removedThreadIds: policy === "subtree" && threadId === "parent" ? ["parent", "child", "grandchild"] : [threadId],
+    reparentedThreads: [],
+  }));
   const metadata = {
-    list: vi.fn(async () => []),
+    list: metadataList,
     getDraftConfig: vi.fn(async () => ({
       models: [],
       commands: [],
@@ -885,7 +926,7 @@ function createHarness(
     })),
     upsert: vi.fn(async () => {}),
     renameCold: metadataRenameCold,
-    removeCold: vi.fn(async () => {}),
+    removeCold: metadataRemoveCold,
     recoverCreationReservation: vi.fn(async () => ({ status: "orphan" as const })),
     invalidateProject: vi.fn(async () => {}),
   } as unknown as MetadataWorkerClient;
@@ -920,7 +961,18 @@ function createHarness(
     idleTtlMs: overrides?.idleTtlMs,
     maxLiveWorkers: overrides?.maxLiveWorkers,
   };
-  return { options, clients, push, failed, catalogChanged, metadataRenameCold, resolveExtensions, resync };
+  return {
+    options,
+    clients,
+    push,
+    failed,
+    catalogChanged,
+    metadataRenameCold,
+    metadataList,
+    metadataRemoveCold,
+    resolveExtensions,
+    resync,
+  };
 }
 
 class FakeWorkerClient implements ThreadWorkerClient {

@@ -25,6 +25,8 @@ import type {
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
+  SessionRemovePolicy,
+  SessionRemoveResult,
   SessionResourceReloadInput,
   TerminalEvent,
   TerminalSnapshot,
@@ -190,7 +192,7 @@ export interface DesktopApi {
     prewarm(projectId: string, threadId: string): Promise<void>;
     rename(projectId: string, threadId: string, title: string): Promise<void>;
     archive(projectId: string, threadId: string, archived: boolean): Promise<void>;
-    remove(projectId: string, threadId: string): Promise<void>;
+    remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult>;
     prompt(input: SessionPromptInput): Promise<SessionCommandResult>;
     edit(input: SessionEditInput): Promise<SessionCommandResult>;
     reload(input: SessionReloadInput): Promise<SessionCommandResult>;

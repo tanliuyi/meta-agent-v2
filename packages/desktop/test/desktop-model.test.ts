@@ -214,6 +214,29 @@ describe("desktop catalog reducer", () => {
     expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({ id: thread.id, title: "新会话" });
   });
 
+  it("applies session tree removal and reparenting atomically", () => {
+    const grandparent = { ...thread, id: "grandparent" };
+    const parent = { ...thread, id: "parent", parentThreadId: "grandparent" };
+    const child = { ...thread, id: "child", parentThreadId: "parent" };
+    const grandchild = { ...thread, id: "grandchild", parentThreadId: "child" };
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [grandparent, parent, child, grandchild],
+    });
+    state = desktopReducer(state, {
+      type: "session-tree-removed",
+      projectId: project.id,
+      removedThreadIds: ["parent"],
+      reparentedThreads: [{ ...child, parentThreadId: "grandparent" }],
+    });
+    expect(state.threadCatalogs[project.id]).toEqual([
+      grandparent,
+      { ...child, parentThreadId: "grandparent" },
+      grandchild,
+    ]);
+  });
+
   it("删除 Project 同时删除其 thread catalog，不影响其他 Project", () => {
     const other = { ...project, id: "other" };
     let state = desktopReducer(INITIAL_STATE, {

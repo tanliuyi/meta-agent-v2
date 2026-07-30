@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COLLAPSED_THREAD_COUNT,
   flattenVisibleThreadTree,
+  threadDescendantIds,
   threadTreeByArchiveState,
 } from "../src/renderer/src/state/thread-list-commands.ts";
 import type { Thread } from "../src/shared/contracts.ts";
@@ -148,6 +149,17 @@ describe("thread list tree", () => {
       { id: "grandchild", depth: 2, ancestorContinuations: [true], isLastChild: true },
       { id: "child-b", depth: 1, ancestorContinuations: [], isLastChild: true },
     ]);
+  });
+
+  it("collects every descendant without including unrelated nodes", () => {
+    const threads = [
+      thread("parent", 50),
+      thread("child-a", 40, { parentThreadId: "parent" }),
+      thread("child-b", 30, { parentThreadId: "parent" }),
+      thread("grandchild", 20, { parentThreadId: "child-a" }),
+      thread("other", 10),
+    ];
+    expect(new Set(threadDescendantIds(threads, "parent"))).toEqual(new Set(["child-a", "child-b", "grandchild"]));
   });
 
   it("keeps orphaned and cyclic relationships visible as roots", () => {

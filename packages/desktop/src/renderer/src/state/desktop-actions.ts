@@ -1,3 +1,5 @@
+import type { SessionRemovePolicy } from "../../../shared/contracts.ts";
+
 export interface DesktopActions {
   chooseProject(): Promise<void>;
   loadProjectThreads(projectId: string): Promise<void>;
@@ -9,6 +11,6 @@ export interface DesktopActions {
   prewarmThread(projectId: string, threadId: string): void;
   renameThread(projectId: string, threadId: string, title: string): Promise<void>;
   setThreadArchived(projectId: string, threadId: string, archived: boolean): Promise<void>;
-  removeThread(projectId: string, threadId: string): Promise<void>;
+  removeThread(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<void>;
   clearError(): void;
 }

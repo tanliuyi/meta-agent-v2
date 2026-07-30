@@ -8,7 +8,7 @@ import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
-import type { Project, Thread } from "../../../../shared/contracts.ts";
+import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/contracts.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
 import {
@@ -18,6 +18,7 @@ import {
   nextThreadVisibleLimit,
   normalizeThreadTitle,
   runPendingThreadAction,
+  threadDescendantIds,
   threadTreeByArchiveState,
 } from "../../state/thread-list-commands.ts";
 import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
@@ -44,6 +45,14 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
+  const pendingDeleteDescendantIds = useMemo(
+    () => (pendingDelete ? threadDescendantIds(threads, pendingDelete.id) : []),
+    [pendingDelete, threads],
+  );
+  const pendingDeleteHasRunningDescendant = useMemo(() => {
+    const descendantIds = new Set(pendingDeleteDescendantIds);
+    return threads.some((thread) => descendantIds.has(thread.id) && thread.running);
+  }, [pendingDeleteDescendantIds, threads]);
   const [visibleLimit, setVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
   const threadTree = useMemo(() => threadTreeByArchiveState(threads, false, Number.MAX_SAFE_INTEGER), [threads]);
   const [expandedThreadIds, setExpandedThreadIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -74,12 +83,15 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     [actions, project.id, renaming, runAction, threads],
   );
 
-  const confirmDelete = useCallback(() => {
-    const thread = pendingDelete;
-    if (!thread) return;
-    setPendingDelete(null);
-    runAction(`delete:${thread.id}`, () => actions.removeThread(project.id, thread.id));
-  }, [actions, pendingDelete, project.id, runAction]);
+  const confirmDelete = useCallback(
+    (policy: SessionRemovePolicy) => {
+      const thread = pendingDelete;
+      if (!thread) return;
+      setPendingDelete(null);
+      runAction(`delete:${thread.id}`, () => actions.removeThread(project.id, thread.id, policy));
+    },
+    [actions, pendingDelete, project.id, runAction],
+  );
 
   const openThread = useCallback(
     (thread: Thread) => {
@@ -249,14 +261,48 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
         </DialogContent>
       </Dialog>
       <ConfirmDialog
-        open={pendingDelete !== null}
+        open={pendingDelete !== null && pendingDeleteDescendantIds.length === 0}
         title="删除会话"
         description="永久删除此会话及其本地会话文件。"
         onOpenChange={(open) => {
           if (!open) setPendingDelete(null);
         }}
-        onConfirm={confirmDelete}
+        onConfirm={() => confirmDelete("subtree")}
       />
+      <Dialog
+        open={pendingDelete !== null && pendingDeleteDescendantIds.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+      >
+        <DialogContent className="gap-3 sm:max-w-lg">
+          <DialogTitle>删除会话树</DialogTitle>
+          <DialogDescription>
+            {pendingDeleteHasRunningDescendant
+              ? `该会话包含 ${pendingDeleteDescendantIds.length} 个后代会话，其中仍有会话正在运行。请先停止相关任务。`
+              : `该会话包含 ${pendingDeleteDescendantIds.length} 个后代会话。可以保留并提升后代，或永久删除整棵会话树。`}
+          </DialogDescription>
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost">取消</Button>
+            </DialogClose>
+            <Button
+              variant="outline"
+              disabled={pendingDeleteHasRunningDescendant}
+              onClick={() => confirmDelete("reparent")}
+            >
+              保留并提升子会话
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={pendingDeleteHasRunningDescendant}
+              onClick={() => confirmDelete("subtree")}
+            >
+              删除全部 {pendingDeleteDescendantIds.length + 1} 个会话
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

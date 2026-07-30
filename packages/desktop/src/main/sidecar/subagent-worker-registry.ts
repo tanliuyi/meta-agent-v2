@@ -55,10 +55,28 @@ export interface SubagentWorkerRegistryOptions {
 export class SubagentWorkerRegistry {
   private readonly options: SubagentWorkerRegistryOptions;
   private readonly records = new Map<string, SubagentWorkerRecord>();
+  private readonly blockedParentThreads = new Set<string>();
   private disposing = false;
 
   constructor(options: SubagentWorkerRegistryOptions) {
     this.options = options;
+  }
+
+  beginThreadMutation(projectId: string, parentThreadId: string): void {
+    const key = parentThreadKey(projectId, parentThreadId);
+    if (this.blockedParentThreads.has(key)) throw new Error("Session tree mutation is already in progress");
+    if (
+      [...this.records.values()].some(
+        (record) => record.request.projectId === projectId && recordUsesParentSession(record, parentThreadId),
+      )
+    ) {
+      throw new Error("Cannot mutate a session tree while a subagent is running");
+    }
+    this.blockedParentThreads.add(key);
+  }
+
+  endThreadMutation(projectId: string, parentThreadId: string): void {
+    this.blockedParentThreads.delete(parentThreadKey(projectId, parentThreadId));
   }
 
   async handleHostRequest(request: SubagentHostRequest, emit: (event: SubagentRunEvent) => void): Promise<unknown> {
@@ -142,6 +160,13 @@ export class SubagentWorkerRegistry {
     parent?: SubagentWorkerRecord,
   ): Promise<JsonValue> {
     if (this.disposing) throw new Error("Desktop subagent worker registry is shutting down");
+    const effectiveParentSessionId = request.parentSessionId ?? request.parentThreadId;
+    if (
+      this.blockedParentThreads.has(parentThreadKey(request.projectId, request.parentThreadId)) ||
+      this.blockedParentThreads.has(parentThreadKey(request.projectId, effectiveParentSessionId))
+    ) {
+      throw new Error("Cannot start a subagent while its parent session tree is being mutated");
+    }
     validateRunRequest(request);
     if (parent) validateNestedRequest(parent.request, request);
     else validateRootRequest(request);
@@ -567,6 +592,18 @@ function sameLineage(actual: SubagentRunRequest["lineage"], expected: SubagentRu
         ancestor.runId === expected[index]?.runId && ancestor.childIndex === expected[index]?.childIndex,
     )
   );
+}
+
+function recordUsesParentSession(record: SubagentWorkerRecord, parentSessionId: string): boolean {
+  return (
+    record.request.parentThreadId === parentSessionId ||
+    record.request.parentSessionId === parentSessionId ||
+    record.catalogThread?.parentThreadId === parentSessionId
+  );
+}
+
+function parentThreadKey(projectId: string, parentThreadId: string): string {
+  return `${projectId}\0${parentThreadId}`;
 }
 
 function workerKey(projectId: string, parentThreadId: string, runId: string, childIndex: number): string {

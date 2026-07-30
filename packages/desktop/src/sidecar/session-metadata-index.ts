@@ -13,7 +13,8 @@ import {
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
-import type { Thread } from "../shared/contracts.ts";
+import type { SessionRemovePolicy, SessionRemoveResult, Thread } from "../shared/contracts.ts";
+import { collectThreadDescendantIds } from "../shared/thread-tree.ts";
 import {
   migrateLegacyGeneralSessionDirectory,
   remapLegacyGeneralSessionPath,
@@ -29,6 +30,18 @@ interface IndexedSession extends Thread {
 
 interface ExplicitIndexedSession {
   session: IndexedSession;
+}
+
+export interface SessionRemovalPlan {
+  projectId: string;
+  cwd: string;
+  removedSessions: Array<{ id: string; path: string }>;
+  reparentedSessions: Array<{
+    session: IndexedSession;
+    previousParentPath: string;
+    nextParentPath?: string;
+  }>;
+  result: SessionRemoveResult;
 }
 
 interface IndexedProject {
@@ -162,6 +175,95 @@ export class SessionMetadataIndex {
     project.explicitSessions = project.explicitSessions.filter(({ session }) => session.id !== threadId);
     if (!explicit) project.directoryFingerprint = null;
     this.persist();
+  }
+
+  async planRemoval(
+    projectId: string,
+    cwd: string,
+    threadId: string,
+    policy: SessionRemovePolicy,
+  ): Promise<SessionRemovalPlan> {
+    const project = await this.requireProject(projectId, cwd);
+    const target = project.sessions.find(({ id }) => id === threadId);
+    if (!target) throw new Error(`Pi session does not exist: ${threadId}`);
+    const sessionsById = new Map(project.sessions.map((session) => [session.id, session]));
+    const descendantIds = collectThreadDescendantIds(project.sessions, threadId);
+    const removedIds = policy === "subtree" ? new Set([threadId, ...descendantIds]) : new Set([threadId]);
+    const removedSessions = [...removedIds].map((id) => {
+      const session = sessionsById.get(id);
+      if (!session) throw new Error(`Pi session removal plan is missing ${id}`);
+      return { id, path: session.path };
+    });
+    const nextParent = target.parentThreadId ? sessionsById.get(target.parentThreadId) : undefined;
+    const reparentedSessions =
+      policy === "reparent"
+        ? project.sessions.flatMap((session) => {
+            if (session.parentThreadId !== threadId) return [];
+            const next = withParentThreadId(session, target.parentThreadId);
+            return [
+              {
+                session: next,
+                previousParentPath: target.path,
+                ...(nextParent ? { nextParentPath: nextParent.path } : {}),
+              },
+            ];
+          })
+        : [];
+    return {
+      projectId,
+      cwd,
+      removedSessions,
+      reparentedSessions,
+      result: {
+        removedThreadIds: removedSessions.map(({ id }) => id),
+        reparentedThreads: reparentedSessions.map(({ session: { path: _path, ...thread } }) => thread),
+      },
+    };
+  }
+
+  isRemovalApplied(plan: SessionRemovalPlan): boolean {
+    const project = this.load().projects[plan.projectId];
+    if (!project || project.cwd !== plan.cwd) return false;
+    if (plan.removedSessions.some(({ id }) => project.sessions.some((session) => session.id === id))) return false;
+    return plan.reparentedSessions.every(({ session }) => {
+      const current = project.sessions.find(({ id }) => id === session.id);
+      return current?.parentThreadId === session.parentThreadId;
+    });
+  }
+
+  applyRemoval(plan: SessionRemovalPlan): SessionRemoveResult {
+    const data = this.load();
+    const project = data.projects[plan.projectId];
+    if (!project || project.cwd !== plan.cwd) {
+      throw new Error(`Session metadata index is missing project ${plan.projectId}`);
+    }
+    const removedIds = new Set(plan.removedSessions.map(({ id }) => id));
+    for (const removed of plan.removedSessions) {
+      const current = project.sessions.find(({ id }) => id === removed.id);
+      if (!current || resolve(current.path) !== resolve(removed.path)) {
+        throw new Error(`Pi session removal plan is stale for ${removed.id}`);
+      }
+    }
+    const reparentedById = new Map(plan.reparentedSessions.map(({ session }) => [session.id, session]));
+    const previousSessions = project.sessions;
+    const previousExplicitSessions = project.explicitSessions;
+    const previousFingerprint = project.directoryFingerprint;
+    project.sessions = project.sessions
+      .filter(({ id }) => !removedIds.has(id))
+      .map((session) => reparentedById.get(session.id) ?? session);
+    project.explicitSessions = project.explicitSessions
+      .filter(({ session }) => !removedIds.has(session.id))
+      .map((explicit) => ({ session: reparentedById.get(explicit.session.id) ?? explicit.session }));
+    project.directoryFingerprint = null;
+    try {
+      this.persist();
+      return plan.result;
+    } catch (error) {
+      project.sessions = previousSessions;
+      project.explicitSessions = previousExplicitSessions;
+      project.directoryFingerprint = previousFingerprint;
+      throw error;
+    }
   }
 
   invalidateProject(projectId: string): void {
@@ -361,6 +463,11 @@ function hasAutomaticSessionTitle(thread: Thread): boolean {
   );
 }
 
+function withParentThreadId(session: IndexedSession, parentThreadId: string | undefined): IndexedSession {
+  const { parentThreadId: _currentParent, ...rest } = session;
+  return parentThreadId ? { ...rest, parentThreadId } : rest;
+}
+
 function indexedSession(thread: Thread, sessionFile: string, existing?: IndexedSession): IndexedSession {
   const parentThreadId = thread.parentThreadId ?? existing?.parentThreadId;
   const origin = thread.origin ?? existing?.origin;
@@ -483,8 +590,6 @@ async function listNestedSessionInfos(
   }
   for (const parentEntry of parentEntries) {
     if (!parentEntry.isDirectory()) continue;
-    const parentSessionFile = join(sessionDirectory, `${parentEntry.name}.jsonl`);
-    if (!existsSync(parentSessionFile)) continue;
     const parentDirectory = join(sessionDirectory, parentEntry.name);
     let runGroupEntries: Dirent[];
     try {

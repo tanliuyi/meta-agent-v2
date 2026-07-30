@@ -88,6 +88,6 @@ async function cleanupMaterializedSession(
 ): Promise<void> {
   await Promise.allSettled([
     dependencies.cache.retire(recordKey),
-    dependencies.sessions.remove(target.projectId, target.threadId),
+    dependencies.sessions.remove(target.projectId, target.threadId, "subtree"),
   ]);
 }
