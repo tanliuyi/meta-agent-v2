@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
 import { runSync } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/execution.ts";
 import { DesktopSubagentRuntime } from "../src/main/pi/subagents/desktop-subagent-runtime.ts";
+import type { SessionBootstrap } from "../src/shared/contracts.ts";
 import type { SidecarEventBody } from "../src/shared/sidecar-contracts.ts";
 import {
   SUBAGENT_TIMEOUT_CODE,
@@ -104,7 +105,7 @@ describe("SubagentWorkerService", () => {
     await expect
       .poll(() => events.some((event) => event.type === "subagent-event" && event.event.type === "completed"))
       .toBe(true);
-    const liveBootstrap = await created.service.command({ type: "subagentBootstrap" });
+    const liveBootstrap = (await created.service.command({ type: "subagentBootstrap" })) as SessionBootstrap;
     expect(liveBootstrap).toMatchObject({
       projectId: "project",
       control: { interaction: "read-only" },
@@ -139,6 +140,8 @@ describe("SubagentWorkerService", () => {
       expect.arrayContaining(["started", "message_update", "message_end", "completed"]),
     );
     const startedEvents = subagentEvents.filter((event) => event.type === "started");
+    const messageEndEvents = subagentEvents.filter((event) => event.type === "message_end");
+    const completedEvent = subagentEvents.find((event) => event.type === "completed");
     expect(startedEvents[0]).toEqual(
       expect.objectContaining({
         runId: "run-1",
@@ -146,6 +149,9 @@ describe("SubagentWorkerService", () => {
       }),
     );
     expect(startedEvents[0]).not.toHaveProperty("sessionFile");
+    expect(messageEndEvents.every(({ updatedAt }) => updatedAt === startedEvents[0]?.updatedAt)).toBe(true);
+    expect(completedEvent?.updatedAt).toBe(liveBootstrap.control.updatedAt);
+    expect(completedEvent?.updatedAt).toBeGreaterThanOrEqual(startedEvents[0]?.updatedAt ?? 0);
     expect(startedEvents.find((event) => event.type === "started" && event.sessionFile)).toMatchObject({
       sessionFile: join(root, "child", "session.jsonl"),
     });

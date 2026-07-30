@@ -219,14 +219,14 @@ describe("SessionMetadataIndex", () => {
       sessionInfo("added", addedFile, "Added", 3),
     ]);
     await expect(index.list("project", cwd)).resolves.toEqual([
-      { ...thread("initial", "Renamed externally"), updatedAt: 4 },
       { ...thread("added", "Added"), updatedAt: 3 },
+      { ...thread("initial", "Renamed externally"), updatedAt: 2 },
     ]);
 
     rmSync(addedFile);
     mocks.listSessions.mockResolvedValue([sessionInfo("initial", initialFile, "Renamed externally", 4)]);
     await expect(index.list("project", cwd)).resolves.toEqual([
-      { ...thread("initial", "Renamed externally"), updatedAt: 4 },
+      { ...thread("initial", "Renamed externally"), updatedAt: 2 },
     ]);
     expect(mocks.listSessions).toHaveBeenCalledTimes(3);
   });
@@ -244,7 +244,7 @@ describe("SessionMetadataIndex", () => {
     mocks.listSessions.mockResolvedValue([sessionInfo("thread", sessionFile, "Renamed externally", 5)]);
 
     await expect(new SessionMetadataIndex(userDataDir).list("project", cwd)).resolves.toEqual([
-      { ...thread("thread", "Renamed externally"), updatedAt: 5 },
+      { ...thread("thread", "Renamed externally"), updatedAt: 2 },
     ]);
     expect(mocks.listSessions).toHaveBeenCalledTimes(1);
   });
@@ -541,6 +541,12 @@ describe("SessionMetadataIndex", () => {
     writeFileSync(sessionFile, "initial\n");
     index.upsert("project", cwd, sessionFile, thread("thread", "Initial"));
     index.rename("project", cwd, "thread", "Renamed");
+    const stored = JSON.parse(readFileSync(join(userDataDir, "session-metadata-index.json"), "utf8")) as {
+      projects: Record<string, { sessions: Thread[] }>;
+    };
+    expect(stored.projects.project?.sessions).toContainEqual(
+      expect.objectContaining({ id: "thread", title: "Renamed", updatedAt: 2 }),
+    );
     mocks.listSessions.mockResolvedValue([sessionInfo("thread", sessionFile, "Renamed", 3)]);
     await expect(index.list("project", cwd)).resolves.toEqual([
       expect.objectContaining({ id: "thread", title: "Renamed" }),

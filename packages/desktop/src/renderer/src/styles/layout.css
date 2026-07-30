@@ -491,69 +491,6 @@
   line-height: 1.125rem;
 }
 
-.settings-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  height: 32px;
-  padding: 0 9px;
-  border-radius: var(--shape-radius-md);
-  color: hsl(var(--foreground));
-  font-size: var(--type-size-ui);
-  text-decoration: none;
-  transition:
-    background-color var(--motion-duration-fast) var(--motion-ease-standard),
-    color var(--motion-duration-fast) var(--motion-ease-standard);
-}
-
-.settings-menu-item:hover {
-  background: hsl(var(--foreground) / 0.055);
-}
-
-.settings-menu-item:active {
-  background: hsl(var(--foreground) / 0.09);
-}
-
-.settings-menu-item:focus-visible {
-  outline: 2px solid hsl(var(--settings-accent) / 0.55);
-  outline-offset: -2px;
-}
-
-.settings-menu-item[aria-current="page"] {
-  background: hsl(var(--foreground) / 0.085);
-  font-weight: 500;
-}
-
-.settings-menu-item svg {
-  width: 15px;
-  height: 15px;
-  flex: 0 0 15px;
-  stroke-width: 1.8;
-  color: hsl(var(--muted-foreground));
-  transition: color var(--motion-duration-fast) var(--motion-ease-standard);
-}
-
-.settings-menu-item:hover svg,
-.settings-menu-item[aria-current="page"] svg {
-  color: hsl(var(--foreground));
-}
-
-.settings-menu-divider {
-  height: 1px;
-  margin: 6px 4px 0;
-  background: hsl(var(--border) / 0.8);
-}
-
-.settings-back-link {
-  margin-bottom: var(--space-4);
-  color: hsl(var(--muted-foreground));
-}
-
-.settings-back-link:hover {
-  color: hsl(var(--foreground));
-}
-
 .settings-main {
   display: grid;
   grid-template-rows: var(--layout-topbar-height) minmax(0, 1fr) auto;

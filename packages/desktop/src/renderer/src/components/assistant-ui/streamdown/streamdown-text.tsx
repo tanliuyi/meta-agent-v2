@@ -6,6 +6,7 @@ import { LINK_SAFETY, SHIKI_THEMES, STREAMDOWN_PLUGINS } from "./streamdown-conf
 export const StreamdownText = memo(function StreamdownText() {
   return (
     <StreamdownTextPrimitive
+      defer
       components={STREAMDOWN_COMPONENTS}
       containerClassName="aui-md"
       linkSafety={LINK_SAFETY}

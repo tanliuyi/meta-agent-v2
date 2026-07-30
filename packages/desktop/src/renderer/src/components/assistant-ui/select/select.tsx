@@ -17,7 +17,7 @@ export function Select({ options, placeholder, tooltip, className, ...props }: S
   const trigger = (
     <SelectPrimitive.Trigger
       className={cn(
-        "group flex items-center gap-1 rounded-[0.625rem] py-1 px-2 text-sm transition-colors outline-none",
+        "group flex items-center gap-1 rounded-xl py-1 px-2 text-sm transition-colors outline-none",
         "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2",
         "disabled:cursor-not-allowed disabled:opacity-50",
         !selectedOption && placeholder ? "italic opacity-70" : null,

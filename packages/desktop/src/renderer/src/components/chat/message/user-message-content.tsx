@@ -48,7 +48,7 @@ export function UserMessageContent() {
           type="button"
           variant="ghost"
           size="sm"
-          className="ms-auto mt-1 flex h-6 gap-1 rounded-md px-2 text-xs"
+          className="ms-auto mt-1 flex h-6 gap-1 rounded-xl px-2 text-xs"
           aria-expanded={isExpanded}
           onClick={() => setIsExpanded((expanded) => !expanded)}
         >

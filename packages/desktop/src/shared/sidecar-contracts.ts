@@ -61,6 +61,7 @@ export type ThreadWorkerBinding =
       shellPath?: string;
       threadId: string;
       sessionFile: string;
+      initialUpdatedAt?: number;
       extensionSet: ResolvedExtensionSet;
     };
 

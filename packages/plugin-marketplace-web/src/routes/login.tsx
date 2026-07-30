@@ -37,7 +37,7 @@ function LoginPage() {
     <div className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_520px]">
       <section className="hidden border-r bg-sidebar p-10 lg:flex lg:flex-col lg:justify-between">
         <div className="flex items-center gap-3">
-          <span className="grid size-9 place-items-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+          <span className="grid size-9 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
             <Boxes size={19} />
           </span>
           <div>
@@ -56,7 +56,7 @@ function LoginPage() {
         <Card className="w-full max-w-md">
           <CardHeader>
             <div className="mb-3 flex items-center gap-3 lg:hidden">
-              <span className="grid size-9 place-items-center rounded-md bg-primary text-primary-foreground">
+              <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground">
                 <Boxes size={18} />
               </span>
               <span className="text-sm font-semibold">插件市场管理</span>

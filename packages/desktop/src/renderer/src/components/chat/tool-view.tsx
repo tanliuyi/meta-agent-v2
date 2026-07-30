@@ -96,7 +96,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
           <ChevronRight size={15} className="tool-chevron" aria-hidden="true" />
         </CollapsibleTrigger>
       </div>
-      <CollapsibleContent className="data-closed:animate-collapsible-up data-open:animate-collapsible-down overflow-hidden data-closed:pointer-events-none data-closed:fill-mode-forwards motion-reduce:animate-none">
+      <CollapsibleContent animation="persistent">
         <div className="tool-scroll-area" ref={viewportRef}>
           <div ref={bodyRef} className="tool-body">
             <ToolContent

@@ -80,7 +80,7 @@ export function AssistantMessageContent({
         }}
       </MessagePrimitive.GroupedParts>
       <MessagePrimitive.Error>
-        <ErrorPrimitive.Root className="mt-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+        <ErrorPrimitive.Root className="mt-2 rounded-xl border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
           <ErrorPrimitive.Message className="line-clamp-2" />
         </ErrorPrimitive.Root>
       </MessagePrimitive.Error>

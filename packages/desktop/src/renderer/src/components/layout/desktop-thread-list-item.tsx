@@ -9,6 +9,8 @@ import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { memo } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
+import { ContextMenuContent } from "../../shared/ui/context-menu-content.tsx";
+import { ContextMenuItem } from "../../shared/ui/context-menu-item.tsx";
 import { ThreadElapsedTime } from "./thread-elapsed-time.tsx";
 
 const TREE_GUIDE_START = 16;
@@ -94,7 +96,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           {props.childCount > 0 ? (
             <button
               type="button"
-              className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 bg-background ring-border/60 hover:bg-muted group-data-[active=true]:bg-muted group-data-[state=open]:bg-muted absolute z-6 grid place-items-center rounded-sm outline-none focus-visible:ring-[3px]"
+              className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 bg-background ring-border/60 hover:bg-muted group-data-[active=true]:bg-muted group-data-[state=open]:bg-muted absolute z-6 grid place-items-center rounded-xl outline-none focus-visible:ring-[3px]"
               style={{
                 blockSize: TREE_TOGGLE_SIZE,
                 inlineSize: TREE_TOGGLE_SIZE,
@@ -109,7 +111,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           ) : null}
           <button
             type="button"
-            className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1 rounded-md pe-2 text-start outline-none focus-visible:ring-[3px]"
+            className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1 rounded-xl pe-2 text-start outline-none focus-visible:ring-[3px]"
             style={{ paddingInlineStart: contentIndent }}
             role="treeitem"
             aria-level={props.depth + 1}
@@ -153,31 +155,17 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           </button>
         </div>
       </ContextMenu.Trigger>
-      <ContextMenu.Portal>
-        <ContextMenu.Content className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-32 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm">
-          <ContextMenu.Item
-            className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
-            disabled={props.isSwitching}
-            onSelect={() => props.onRenameStart(thread)}
-          >
-            <Pencil size={14} /> 重命名
-          </ContextMenu.Item>
-          <ContextMenu.Item
-            className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
-            disabled={props.isSwitching}
-            onSelect={() => props.onArchive(thread, true)}
-          >
-            <Archive size={14} /> 归档
-          </ContextMenu.Item>
-          <ContextMenu.Item
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none"
-            disabled={props.isSwitching}
-            onSelect={() => props.onDelete(thread)}
-          >
-            <Trash2 size={14} /> 删除
-          </ContextMenu.Item>
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
+      <ContextMenuContent>
+        <ContextMenuItem disabled={props.isSwitching} onSelect={() => props.onRenameStart(thread)}>
+          <Pencil /> 重命名
+        </ContextMenuItem>
+        <ContextMenuItem disabled={props.isSwitching} onSelect={() => props.onArchive(thread, true)}>
+          <Archive /> 归档
+        </ContextMenuItem>
+        <ContextMenuItem variant="destructive" disabled={props.isSwitching} onSelect={() => props.onDelete(thread)}>
+          <Trash2 /> 删除
+        </ContextMenuItem>
+      </ContextMenuContent>
     </ContextMenu.Root>
   );
 });

@@ -102,7 +102,7 @@ export function MarkdownCodeBlock({ code, language }: { code: string; language: 
                       <span
                         className="markdown-code-token"
                         key={`${tokenIndex}:${token.offset}`}
-                        style={tokenStyle(token)}
+                        style={resolveTokenStyle(token)}
                         {...token.htmlAttrs}
                       >
                         {token.content}
@@ -163,9 +163,12 @@ function plainTokens(code: string): HighlightResult["tokens"] {
   return (code || " ").split("\n").map((line) => [{ content: line, offset: 0 }]);
 }
 
-function tokenStyle(token: HighlightResult["tokens"][number][number]): CSSProperties {
-  const style: Record<string, string> = { ...token.htmlStyle };
-  if (token.color) style["--markdown-code-token-color"] = token.color;
-  if (token.bgColor) style["--markdown-code-token-background"] = token.bgColor;
+export function resolveTokenStyle(token: HighlightResult["tokens"][number][number]): CSSProperties {
+  const { backgroundColor, color, ...htmlStyle } = token.htmlStyle ?? {};
+  const style: Record<string, string | number> = { ...htmlStyle };
+  const lightColor = token.color ?? color;
+  const lightBackground = token.bgColor ?? backgroundColor;
+  if (lightColor) style["--markdown-code-token-color"] = lightColor;
+  if (lightBackground) style["--markdown-code-token-background"] = lightBackground;
   return style as CSSProperties;
 }

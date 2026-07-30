@@ -55,7 +55,7 @@ export function Combobox({
       <PopoverTrigger asChild>
         <div
           className={cn(
-            "border-input bg-background ring-offset-background flex h-(--control-height-input) w-full cursor-text items-center rounded-[0.625rem] border px-3 text-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-ring",
+            "border-input bg-background ring-offset-background flex h-(--control-height-input) w-full cursor-text items-center rounded-xl border px-3 text-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-ring",
             className,
           )}
           onClick={() => setOpen(true)}

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import { type SubagentWorkerClient, SubagentWorkerRegistry } from "../src/main/sidecar/subagent-worker-registry.ts";
 import { assertHostRequestIdentity } from "../src/main/sidecar/thread-worker-registry.ts";
@@ -388,6 +388,76 @@ describe("SubagentWorkerRegistry", () => {
     client?.emitSidecarEvent(event(client.instanceId, 3, { type: "completed", runId: "run-1" }));
     expect(summaries.at(-1)).toMatchObject({ id: "live-child", running: false });
     await expect.poll(() => persisted).toEqual([true, false]);
+    release();
+    await run;
+  });
+
+  it("仅在子会话 prompt 和运行结束时更新 thread updatedAt", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const summaries: Array<{ messageCount: number; running: boolean; updatedAt: number }> = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      catalogChanged: ({ messageCount, running, updatedAt }) => summaries.push({ messageCount, running, updatedAt }),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+    const run = registry.handleHostRequest({ type: "subagent.run", request: runRequest() }, () => undefined);
+    await expect.poll(() => client).toBeDefined();
+    const now = vi.spyOn(Date, "now");
+
+    now.mockReturnValue(1_000);
+    client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1", threadId: "child" }));
+    now.mockReturnValue(1_500);
+    client?.emitSidecarEvent(
+      event(client.instanceId, 2, { type: "message_end", message: { role: "user", content: "Inspect" } }),
+    );
+    now.mockReturnValue(2_000);
+    client?.emitSidecarEvent(
+      event(client.instanceId, 3, { type: "tool_execution_start", toolCallId: "tool", toolName: "read", args: {} }),
+    );
+    now.mockReturnValue(3_000);
+    client?.emitSidecarEvent(
+      event(client.instanceId, 4, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "working" }] },
+      }),
+    );
+    now.mockReturnValue(4_000);
+    client?.emitSidecarEvent(
+      event(client.instanceId, 5, { type: "message_end", message: { role: "user", content: "steer" } }),
+    );
+    now.mockReturnValue(5_000);
+    client?.emitSidecarEvent(
+      event(client.instanceId, 6, {
+        type: "tool_execution_end",
+        toolCallId: "tool",
+        toolName: "read",
+        result: {},
+        isError: false,
+      }),
+    );
+    now.mockReturnValue(6_000);
+    client?.emitSidecarEvent(event(client.instanceId, 7, { type: "completed", runId: "run-1" }));
+
+    expect(summaries).toEqual([
+      { messageCount: 0, running: true, updatedAt: 1_000 },
+      { messageCount: 1, running: true, updatedAt: 1_000 },
+      { messageCount: 1, running: true, updatedAt: 1_000 },
+      { messageCount: 2, running: true, updatedAt: 1_000 },
+      { messageCount: 3, running: true, updatedAt: 4_000 },
+      { messageCount: 3, running: true, updatedAt: 4_000 },
+      { messageCount: 3, running: false, updatedAt: 6_000 },
+    ]);
+
+    now.mockRestore();
     release();
     await run;
   });

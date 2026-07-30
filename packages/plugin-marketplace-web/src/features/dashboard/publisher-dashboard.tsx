@@ -151,7 +151,7 @@ export function PublisherDashboard() {
           <CardContent className="space-y-2">
             {publisherIds.length ? (
               publisherIds.map((publisherId) => (
-                <div className="flex items-center justify-between rounded-md border px-3 py-2" key={publisherId}>
+                <div className="flex items-center justify-between rounded-xl border px-3 py-2" key={publisherId}>
                   <span className="font-mono text-xs">{publisherId}</span>
                   <Badge variant="outline">成员</Badge>
                 </div>

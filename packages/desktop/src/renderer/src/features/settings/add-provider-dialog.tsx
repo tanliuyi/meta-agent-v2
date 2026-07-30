@@ -51,7 +51,7 @@ export function AddProviderDialog({ knownProviders, onConfirm, onCancel }: AddPr
             </p>
           )}
         </div>
-        <DialogFooter className="mt-4 flex justify-end gap-2">
+        <DialogFooter variant="actions" className="mt-4">
           <Button variant="outline" onClick={onCancel}>
             取消
           </Button>

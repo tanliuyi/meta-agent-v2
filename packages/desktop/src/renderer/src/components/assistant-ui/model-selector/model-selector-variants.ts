@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority";
 
 export const modelSelectorTriggerVariants = cva(
-  "flex w-fit max-w-40 items-center justify-between gap-1.5 overflow-hidden rounded-[0.625rem] text-xs whitespace-nowrap text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+  "flex w-fit max-w-40 items-center justify-between gap-1.5 overflow-hidden rounded-xl text-xs whitespace-nowrap text-muted-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
   {
     variants: {
       variant: {

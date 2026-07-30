@@ -2,6 +2,7 @@ import { Button } from "@renderer/shared/ui/button";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { useState } from "react";
 import type { HostRequest } from "../../../../shared/contracts.ts";
@@ -31,7 +32,7 @@ export function HostRequestDialog({ request, projectId, threadId }: HostRequestD
         <DialogTitle>{request.title}</DialogTitle>
         {request.message ? <DialogDescription>{request.message}</DialogDescription> : null}
         <HostRequestField request={request} value={value} onChange={setValue} />
-        <div className="mt-3 flex justify-end gap-2">
+        <DialogFooter variant="actions">
           <Button
             variant="ghost"
             onClick={() =>
@@ -66,7 +67,7 @@ export function HostRequestDialog({ request, projectId, threadId }: HostRequestD
               继续
             </Button>
           )}
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -27,14 +27,10 @@ export interface SessionCacheController {
   getAllRecords(): CachedSessionRecord[];
 }
 
-interface SessionCacheSnapshot {
-  records: CachedSessionRecord[];
-  activeKey: string | null;
-  draftMaterializing: boolean;
-}
-
 const SessionCacheContext = createContext<SessionCacheController | null>(null);
-const SessionCacheSnapshotContext = createContext<SessionCacheSnapshot | null>(null);
+const SessionCacheRecordsContext = createContext<CachedSessionRecord[] | null>(null);
+const SessionCacheActiveKeyContext = createContext<string | null | undefined>(undefined);
+const SessionDraftMaterializingContext = createContext<boolean | null>(null);
 
 /**
  * 持有所有 cached session records，并提供缓存生命周期管理。
@@ -49,6 +45,8 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
   const recordsRef = useRef(new Map<string, CachedSessionRecord>());
   const activeKeyRef = useRef<string | null>(null);
   const draftMaterializingRef = useRef(false);
+  const recordsSnapshotRef = useRef<CachedSessionRecord[]>([]);
+  const recordsDirtyRef = useRef(false);
   const activateKey = (key: string | null): void => {
     const previousKey = activeKeyRef.current;
     if (previousKey === key) return;
@@ -66,6 +64,7 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
           const created = createSessionRecord(identity);
           record = created;
           recordsRef.current.set(key, created);
+          recordsDirtyRef.current = true;
           forceRender((n) => n + 1);
         }
         void transportManager.ensure(record).catch((error: unknown) => {
@@ -118,6 +117,7 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
         await transportManager.retire(key);
         if (recordsRef.current.get(key) !== record) return;
         recordsRef.current.delete(key);
+        recordsDirtyRef.current = true;
         if (activeKeyRef.current === key) activeKeyRef.current = null;
         forceRender((n) => n + 1);
       },
@@ -125,9 +125,16 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
       async retireProject(projectId: string) {
         const records = [...recordsRef.current.values()].filter((record) => record.identity.projectId === projectId);
         await Promise.all(records.map((record) => transportManager.retire(record.key)));
-        for (const record of records) recordsRef.current.delete(record.key);
+        let recordsChanged = false;
+        for (const record of records) {
+          if (recordsRef.current.get(record.key) !== record) continue;
+          recordsRef.current.delete(record.key);
+          recordsChanged = true;
+        }
+        if (recordsChanged) recordsDirtyRef.current = true;
+        const previousActiveKey = activeKeyRef.current;
         if (activeKeyRef.current && !recordsRef.current.has(activeKeyRef.current)) activeKeyRef.current = null;
-        forceRender((n) => n + 1);
+        if (recordsChanged || previousActiveKey !== activeKeyRef.current) forceRender((n) => n + 1);
       },
 
       touch(key: string) {
@@ -160,15 +167,21 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => () => void transportManager.detachAll(), [transportManager]);
-  const snapshot = {
-    records: [...recordsRef.current.values()],
-    activeKey: activeKeyRef.current,
-    draftMaterializing: draftMaterializingRef.current,
-  };
+  if (recordsDirtyRef.current) {
+    recordsSnapshotRef.current = [...recordsRef.current.values()];
+    recordsDirtyRef.current = false;
+  }
+  const recordsSnapshot = recordsSnapshotRef.current;
 
   return (
     <SessionCacheContext.Provider value={controllerRef.current}>
-      <SessionCacheSnapshotContext.Provider value={snapshot}>{children}</SessionCacheSnapshotContext.Provider>
+      <SessionCacheRecordsContext.Provider value={recordsSnapshot}>
+        <SessionCacheActiveKeyContext.Provider value={activeKeyRef.current}>
+          <SessionDraftMaterializingContext.Provider value={draftMaterializingRef.current}>
+            {children}
+          </SessionDraftMaterializingContext.Provider>
+        </SessionCacheActiveKeyContext.Provider>
+      </SessionCacheRecordsContext.Provider>
     </SessionCacheContext.Provider>
   );
 }
@@ -180,8 +193,20 @@ export function useSessionCache(): SessionCacheController {
   return controller;
 }
 
-export function useSessionCacheSnapshot(): SessionCacheSnapshot {
-  const snapshot = useContext(SessionCacheSnapshotContext);
-  if (!snapshot) throw new Error("useSessionCacheSnapshot 必须在 SessionCacheProvider 内使用");
-  return snapshot;
+export function useSessionCacheRecords(): CachedSessionRecord[] {
+  const records = useContext(SessionCacheRecordsContext);
+  if (!records) throw new Error("useSessionCacheRecords 必须在 SessionCacheProvider 内使用");
+  return records;
+}
+
+export function useSessionCacheActiveKey(): string | null {
+  const activeKey = useContext(SessionCacheActiveKeyContext);
+  if (activeKey === undefined) throw new Error("useSessionCacheActiveKey 必须在 SessionCacheProvider 内使用");
+  return activeKey;
+}
+
+export function useSessionDraftMaterializing(): boolean {
+  const materializing = useContext(SessionDraftMaterializingContext);
+  if (materializing === null) throw new Error("useSessionDraftMaterializing 必须在 SessionCacheProvider 内使用");
+  return materializing;
 }

@@ -25,7 +25,7 @@ export function ModelSelectorItem({ model, className, children, onSelect, ...pro
         onSelect?.(selectedValue);
       }}
       className={cn(
-        "relative mx-1.5 min-h-8 items-center gap-2 rounded-md px-2 py-1.5 pe-8 text-[length:var(--type-size-ui)] data-[selected=true]:bg-accent/80 [&_svg:not([class*='size-'])]:size-3.5",
+        "relative mx-1.5 min-h-8 items-center gap-2 rounded-xl px-2 py-1.5 pe-8 text-[length:var(--type-size-ui)] data-[selected=true]:bg-accent/80 [&_svg:not([class*='size-'])]:size-3.5",
         className,
       )}
       {...props}

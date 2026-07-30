@@ -874,7 +874,11 @@ export class ThreadWorkerRegistry {
 
   private async open(projectId: string, threadId: string): Promise<WorkerRecord> {
     const cwd = this.options.getCwd(projectId);
-    const session = await this.options.metadata.resolve(projectId, cwd, threadId);
+    const [threads, session] = await Promise.all([
+      this.options.metadata.list(projectId, cwd),
+      this.options.metadata.resolve(projectId, cwd, threadId),
+    ]);
+    const initialUpdatedAt = threads.find(({ id }) => id === threadId)?.updatedAt;
     const extensionSet = await this.options.extensionSourcePolicy.resolve(projectId);
     return this.spawn({
       mode: "open",
@@ -884,6 +888,7 @@ export class ThreadWorkerRegistry {
       ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
       threadId,
       sessionFile: session.path,
+      ...(initialUpdatedAt !== undefined ? { initialUpdatedAt } : {}),
       extensionSet,
     });
   }

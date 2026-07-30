@@ -62,6 +62,8 @@ export class SubagentWorkerService implements SidecarService {
   private projector?: PiThreadProjector;
   private controlState?: SessionControlState;
   private runStarted = false;
+  private initialPromptObserved = false;
+  private runSettled = false;
   private cancelled = false;
   private disposed = false;
 
@@ -318,6 +320,7 @@ export class SubagentWorkerService implements SidecarService {
         runId: request.runId,
         threadId: created.session.sessionId,
         ...(announcedSessionFile ? { sessionFile: announcedSessionFile } : {}),
+        updatedAt: this.controlState.updatedAt,
       },
     });
     let assistantTurns = 0;
@@ -336,6 +339,7 @@ export class SubagentWorkerService implements SidecarService {
               runId: request.runId,
               threadId: created.session.sessionId,
               sessionFile: materialized,
+              updatedAt: this.controlState?.updatedAt,
             },
           });
         }
@@ -364,7 +368,11 @@ export class SubagentWorkerService implements SidecarService {
         }
         this.context.emit({
           type: "subagent-event",
-          event: { type: "message_end", message: toJsonValue(event.message) },
+          event: {
+            type: "message_end",
+            message: toJsonValue(event.message),
+            updatedAt: this.controlState?.updatedAt,
+          },
         });
       } else if (event.type === "tool_execution_start") {
         this.context.emit({
@@ -419,15 +427,17 @@ export class SubagentWorkerService implements SidecarService {
         throw new Error(`Subagent exceeded its turn budget (${request.turnBudget?.maxTurns}).`);
       }
       const sessionFile = created.session.sessionFile;
+      const updatedAt = this.terminalUpdatedAt();
       this.context.emit({
         type: "subagent-event",
-        event: { type: "completed", runId: request.runId, ...(sessionFile ? { sessionFile } : {}) },
+        event: { type: "completed", runId: request.runId, ...(sessionFile ? { sessionFile } : {}), updatedAt },
       });
       await this.context.flushEvents();
       return { status: "completed", ...(sessionFile ? { sessionFile } : {}) };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const sessionFile = created.session.sessionFile;
+      const updatedAt = this.terminalUpdatedAt();
       this.context.emit({
         type: "subagent-event",
         event: {
@@ -436,6 +446,7 @@ export class SubagentWorkerService implements SidecarService {
           error: message,
           ...(timedOut ? { code: SUBAGENT_TIMEOUT_CODE } : {}),
           ...(sessionFile ? { sessionFile } : {}),
+          updatedAt,
         },
       });
       await this.context.flushEvents();
@@ -465,6 +476,22 @@ export class SubagentWorkerService implements SidecarService {
     } catch {
       this.projector.resync();
     }
+    if (event.type === "message_end" && event.message.role === "user" && this.controlState) {
+      if (this.initialPromptObserved) {
+        this.controlState = {
+          ...this.controlState,
+          updatedAt: Math.max(this.controlState.updatedAt, event.message.timestamp),
+        };
+      } else {
+        this.initialPromptObserved = true;
+      }
+    } else if (event.type === "agent_settled" && this.controlState) {
+      this.runSettled = true;
+      this.controlState = {
+        ...this.controlState,
+        updatedAt: Math.max(this.controlState.updatedAt, Date.now()),
+      };
+    }
     if (
       event.type === "agent_start" ||
       event.type === "agent_settled" ||
@@ -488,7 +515,6 @@ export class SubagentWorkerService implements SidecarService {
     const contextUsage = this.session.getContextUsage();
     return {
       ...this.controlState,
-      updatedAt: Date.now(),
       running: this.projector.snapshot().phase !== "idle",
       thinkingLevel: this.session.thinkingLevel,
       thinkingLevels: this.session.getAvailableThinkingLevels(),
@@ -519,6 +545,17 @@ export class SubagentWorkerService implements SidecarService {
         control,
       },
     });
+  }
+
+  private terminalUpdatedAt(): number {
+    if (!this.controlState) return Date.now();
+    if (!this.runSettled) {
+      this.controlState = {
+        ...this.controlState,
+        updatedAt: Math.max(this.controlState.updatedAt, Date.now()),
+      };
+    }
+    return this.controlState.updatedAt;
   }
 
   private validateRequest(request: SubagentRunRequest): void {

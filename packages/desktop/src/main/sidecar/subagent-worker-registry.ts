@@ -27,6 +27,7 @@ interface SubagentWorkerRecord {
   client: SubagentWorkerClient;
   emit(event: SubagentRunEvent): void;
   catalogThread?: Thread;
+  initialPromptObserved: boolean;
   /** Latest child session file, announced after a fresh session materializes. */
   liveSessionFile?: string;
   metadataTail: Promise<void>;
@@ -194,7 +195,7 @@ export class SubagentWorkerRegistry {
       onHostRequest: (hostRequest, nestedEmit) => this.handleNestedHostRequest(record, hostRequest, nestedEmit),
     };
     const client = this.options.createWorkerClient?.(clientOptions) ?? new SidecarWorkerClient(clientOptions);
-    record = { key, request, client, emit, metadataTail: Promise.resolve() };
+    record = { key, request, client, emit, initialPromptObserved: false, metadataTail: Promise.resolve() };
     this.records.set(key, record);
     try {
       try {
@@ -332,6 +333,14 @@ export class SubagentWorkerRegistry {
   }
 
   private projectCatalogEvent(record: SubagentWorkerRecord, event: SubagentRunEvent): Promise<void> | undefined {
+    const userPrompt =
+      event.type === "message_end" &&
+      typeof event.message === "object" &&
+      event.message !== null &&
+      !Array.isArray(event.message) &&
+      event.message.role === "user";
+    const initialPrompt = userPrompt && !record.initialPromptObserved;
+    if (userPrompt) record.initialPromptObserved = true;
     const announcedSessionFile =
       (event.type === "started" || event.type === "completed" || event.type === "failed") && event.sessionFile
         ? event.sessionFile
@@ -343,22 +352,24 @@ export class SubagentWorkerRegistry {
     const current =
       record.catalogThread ??
       (event.type === "started" && event.threadId
-        ? threadFromSubagentStart(record.request, event.threadId)
+        ? threadFromSubagentStart(record.request, event.threadId, event.updatedAt)
         : sessionFile
           ? threadFromSubagentRequest(record.request, sessionFile)
           : undefined);
     if (!current) return undefined;
     if (event.type === "message_update" || event.type === "tool_execution_update") return undefined;
     const terminal = event.type === "completed" || event.type === "failed";
+    const promptSubmitted = (event.type === "started" && firstProjection) || (userPrompt && !initialPrompt);
     const next = {
       ...current,
-      updatedAt: Date.now(),
+      updatedAt:
+        promptSubmitted || terminal ? Math.max(current.updatedAt, event.updatedAt ?? Date.now()) : current.updatedAt,
       messageCount: current.messageCount + (event.type === "message_end" ? 1 : 0),
       running: !terminal,
     };
     record.catalogThread = next;
     const persistence =
-      sessionFile && (firstProjection || sessionFileAnnounced || terminal)
+      sessionFile && (firstProjection || sessionFileAnnounced || promptSubmitted || terminal)
         ? this.queueMetadataPersistence(record, sessionFile, next)
         : undefined;
     this.options.catalogChanged?.({ ...next });
@@ -425,8 +436,14 @@ export class SubagentWorkerRegistry {
   }
 }
 
-function threadFromSubagentStart(request: SubagentRunRequest, threadId: string): Thread {
-  return createSubagentThread(request, threadId, Date.now(), request.parentSessionId ?? request.parentThreadId);
+function threadFromSubagentStart(request: SubagentRunRequest, threadId: string, updatedAt = Date.now()): Thread {
+  return createSubagentThread(
+    request,
+    threadId,
+    updatedAt,
+    request.parentSessionId ?? request.parentThreadId,
+    updatedAt,
+  );
 }
 
 function threadFromSubagentRequest(request: SubagentRunRequest, sessionFile: string): Thread | undefined {
@@ -443,6 +460,7 @@ function createSubagentThread(
   threadId: string,
   createdAt: number,
   parentThreadId: string,
+  updatedAt = Date.now(),
 ): Thread {
   const title = subagentTitle(request.task);
   return {
@@ -450,7 +468,7 @@ function createSubagentThread(
     projectId: request.projectId,
     title,
     createdAt,
-    updatedAt: Date.now(),
+    updatedAt,
     messageCount: 0,
     preview: title,
     archived: false,

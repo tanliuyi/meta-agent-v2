@@ -129,7 +129,7 @@ export function Composer(props: ComposerProps) {
         <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
           <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
             <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-(--composer-background) p-(--composer-padding) shadow-(--elevation-composer) transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-(--elevation-composer-focus) data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
-              <ComposerPrimitive.Quote className="flex min-w-0 items-center gap-2 rounded-[0.625rem] bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
+              <ComposerPrimitive.Quote className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
                 <Quote aria-hidden="true" className="size-3.5 shrink-0" />
                 <ComposerPrimitive.QuoteText className="min-w-0 truncate" />
                 <ComposerPrimitive.QuoteDismiss

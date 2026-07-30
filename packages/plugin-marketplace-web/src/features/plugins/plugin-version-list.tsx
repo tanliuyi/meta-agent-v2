@@ -147,7 +147,7 @@ export function PluginVersionList({ plugin, token }: { plugin: PublishPluginStat
                 </div>
               </div>
 
-              <div className="mt-3 divide-y rounded-md border bg-muted/20">
+              <div className="mt-3 divide-y rounded-xl border bg-muted/20">
                 {version.artifacts.map((artifact) => {
                   const uploadKey = `${version.version}:${artifact.id}`;
                   return (

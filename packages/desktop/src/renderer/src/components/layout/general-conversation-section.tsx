@@ -95,12 +95,7 @@ export function GeneralConversationSection({
             <Plus />
           </TooltipIconButton>
         </div>
-        <CollapsibleContent
-          id={GENERAL_THREAD_LIST_ID}
-          className="data-closed:animate-collapsible-up data-open:animate-collapsible-down data-open:duration-(--animation-duration) data-closed:duration-(--animation-duration) overflow-hidden"
-          role="region"
-          aria-label="对话会话列表"
-        >
+        <CollapsibleContent id={GENERAL_THREAD_LIST_ID} animation="height" role="region" aria-label="对话会话列表">
           <div className="sidebar-projects sidebar-conversation-list">
             {catalogLoading ? (
               <div className="flex h-8 items-center gap-2 px-4 text-sm text-muted-foreground" role="status">

@@ -338,6 +338,68 @@ describe("SessionRuntime Pi-native commands", () => {
     await runtime.dispose();
   });
 
+  it("恢复 session 时优先使用 catalog 的逻辑 updatedAt", async () => {
+    const session = createSession();
+    const mutable = session as unknown as { messages: AgentSession["messages"] };
+    mutable.messages = [
+      { role: "user", content: "prompt", timestamp: 1_000 },
+      { role: "assistant", content: [{ type: "text", text: "response" }], timestamp: 3_000 },
+    ] as AgentSession["messages"];
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      initialUpdatedAt: 4_000,
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    expect(runtime.threadSummary(false).updatedAt).toBe(4_000);
+    await runtime.dispose();
+  });
+
+  it("仅在用户 prompt 和整次运行结束时更新 thread updatedAt", async () => {
+    const session = createSession();
+    let emit: ((event: AgentSessionEvent) => void) | undefined;
+    const mutable = session as unknown as {
+      messages: AgentSession["messages"];
+      subscribe(listener: (event: AgentSessionEvent) => void): () => void;
+    };
+    mutable.messages = [{ role: "user", content: "old prompt", timestamp: 1_000 }] as AgentSession["messages"];
+    mutable.subscribe = (listener) => {
+      emit = listener;
+      return () => {};
+    };
+    const onSummaryChanged = vi.fn();
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged,
+    });
+
+    emit?.({ type: "agent_start" });
+    expect(runtime.threadSummary(false).updatedAt).toBe(1_000);
+
+    emit?.({ type: "message_end", message: { role: "user", content: "next", timestamp: 2_000 } });
+    expect(runtime.threadSummary(false).updatedAt).toBe(2_000);
+
+    emit?.({
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "partial" }], timestamp: 3_000 },
+    });
+    expect(runtime.threadSummary(false)).toMatchObject({ updatedAt: 2_000, messageCount: 3 });
+
+    const now = vi.spyOn(Date, "now").mockReturnValue(4_000);
+    emit?.({ type: "agent_settled" });
+    expect(runtime.threadSummary(false).updatedAt).toBe(4_000);
+    expect(onSummaryChanged).toHaveBeenCalledTimes(3);
+    now.mockRestore();
+    await runtime.dispose();
+  });
+
   it("所有 Composer 输入直接交给 session.prompt，并立即更新首条标题", async () => {
     const session = createSession();
     const push = vi.fn();

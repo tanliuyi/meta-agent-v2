@@ -1,6 +1,21 @@
-import { cn } from "@renderer/shared/lib/cn";
-import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import type { HTMLAttributes } from "react";
+import { cn } from "../lib/cn.ts";
 
-export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)} {...props} />;
+const dialogFooterVariants = cva("flex", {
+  variants: {
+    variant: {
+      default: "flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+      actions: "mt-3 flex-row justify-end gap-2",
+    },
+  },
+  defaultVariants: {
+    variant: "default",
+  },
+});
+
+type DialogFooterProps = HTMLAttributes<HTMLDivElement> & VariantProps<typeof dialogFooterVariants>;
+
+export function DialogFooter({ className, variant, ...props }: DialogFooterProps) {
+  return <div className={cn(dialogFooterVariants({ variant }), className)} {...props} />;
 }

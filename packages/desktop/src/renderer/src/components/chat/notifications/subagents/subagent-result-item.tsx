@@ -37,7 +37,7 @@ export function SubagentResultItem({ item }: { item: SubagentNotificationItem })
         ) : null}
       </div>
       {hasDetails ? (
-        <CollapsibleContent className="data-closed:animate-collapsible-up data-open:animate-collapsible-down overflow-hidden data-closed:pointer-events-none data-closed:fill-mode-forwards motion-reduce:animate-none">
+        <CollapsibleContent animation="persistent">
           <div className="builtin-subagent-detail-scroll">
             {item.markdown ? (
               <div className="builtin-subagent-markdown">

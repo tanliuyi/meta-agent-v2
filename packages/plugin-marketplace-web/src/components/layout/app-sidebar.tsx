@@ -47,7 +47,7 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" tooltip="插件市场" onClick={() => navigate("/")}>
-              <span className="grid aspect-square size-8 place-items-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
+              <span className="grid aspect-square size-8 place-items-center rounded-xl bg-sidebar-primary text-sidebar-primary-foreground">
                 <Boxes size={17} />
               </span>
               <span className="grid flex-1 text-left text-sm leading-tight">
@@ -88,7 +88,7 @@ export function AppSidebar({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SidebarMenuButton size="lg" tooltip={username}>
-                    <span className="grid aspect-square size-8 place-items-center rounded-md bg-sidebar-accent">
+                    <span className="grid aspect-square size-8 place-items-center rounded-xl bg-sidebar-accent">
                       <UserRound size={16} />
                     </span>
                     <span className="grid flex-1 text-left text-sm leading-tight">

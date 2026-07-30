@@ -6,7 +6,11 @@ import { SessionRoutePending } from "../../components/session-route-pending.tsx"
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import type { DesktopState } from "../../state/desktop-model.ts";
 import { useDesktopStore } from "../../state/desktop-store-context.tsx";
-import { useSessionCache, useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
+import {
+  useSessionCache,
+  useSessionCacheActiveKey,
+  useSessionCacheRecords,
+} from "../../state/session-cache-context.tsx";
 
 export const Route = createFileRoute("/_chat/projects/$projectId/session/$threadId")({
   beforeLoad: () => {
@@ -39,7 +43,8 @@ function SessionRoute() {
   const catalogStatus = useStore(store, (state) => selectSessionCatalogStatus(state, projectId, threadId));
   const catalogLoading = useStore(store, (state) => state.loading);
   const cache = useSessionCache();
-  const snapshot = useSessionCacheSnapshot();
+  const records = useSessionCacheRecords();
+  const cacheActiveKey = useSessionCacheActiveKey();
   const [validation, setValidation] = useState<ValidationState>("loading");
 
   useEffect(() => {
@@ -88,9 +93,9 @@ function SessionRoute() {
     );
   }
 
-  const routeRecord = snapshot.records.find(
+  const routeRecord = records.find(
     (record) => record.identity.projectId === projectId && record.identity.threadId === threadId,
   );
-  const activeKey = validation === "ready" && routeRecord?.key === snapshot.activeKey ? snapshot.activeKey : null;
-  return activeKey ? <SessionCacheHost records={snapshot.records} activeKey={activeKey} /> : <SessionRoutePending />;
+  const activeKey = validation === "ready" && routeRecord?.key === cacheActiveKey ? cacheActiveKey : null;
+  return activeKey ? <SessionCacheHost records={records} activeKey={activeKey} /> : <SessionRoutePending />;
 }

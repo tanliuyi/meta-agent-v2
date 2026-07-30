@@ -194,7 +194,7 @@ function CatalogSkeleton() {
     <div className="space-y-0 border-t">
       {[0, 1, 2, 3, 4].map((key) => (
         <div className="flex h-16 items-center gap-3 border-b px-6" key={key}>
-          <Skeleton className="size-9 rounded-md" />
+          <Skeleton className="size-9 rounded-xl" />
           <div className="space-y-2">
             <Skeleton className="h-3 w-40" />
             <Skeleton className="h-3 w-64" />

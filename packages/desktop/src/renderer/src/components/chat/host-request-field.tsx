@@ -21,7 +21,7 @@ export function HostRequestField({ request, value, onChange }: HostRequestFieldP
       >
         {request.options?.map((option) => (
           <RadioGroup.Item
-            className="rounded-md border px-3 py-2 text-left text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=checked]:border-primary data-[state=checked]:bg-accent"
+            className="rounded-xl border px-3 py-2 text-left text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=checked]:border-primary data-[state=checked]:bg-accent"
             key={option}
             value={option}
           >
@@ -33,7 +33,7 @@ export function HostRequestField({ request, value, onChange }: HostRequestFieldP
   }
   return request.type === "editor" ? (
     <textarea
-      className="mt-2 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="mt-2 w-full resize-y rounded-xl border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       aria-label={request.title}
       rows={10}
       value={value}
@@ -41,7 +41,7 @@ export function HostRequestField({ request, value, onChange }: HostRequestFieldP
     />
   ) : (
     <input
-      className="mt-2 h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="mt-2 h-9 w-full rounded-xl border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       aria-label={request.title}
       autoFocus
       value={value}

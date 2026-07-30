@@ -37,7 +37,7 @@ export function ModelSelectorEffort({ label = "Thinking", className, onKeyDown, 
           <RadioGroupPrimitive.Item
             key={option.id}
             value={option.id}
-            className="rounded-md px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=checked]:bg-accent data-[state=checked]:font-medium data-[state=checked]:text-accent-foreground"
+            className="rounded-xl px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=checked]:bg-accent data-[state=checked]:font-medium data-[state=checked]:text-accent-foreground"
           >
             {option.name}
           </RadioGroupPrimitive.Item>

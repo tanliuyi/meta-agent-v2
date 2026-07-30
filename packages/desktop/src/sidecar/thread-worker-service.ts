@@ -52,6 +52,9 @@ export class ThreadWorkerService implements SidecarService {
         agentDir: input.agentDir,
         ...(input.shellPath ? { shellPath: input.shellPath } : {}),
         sessionManager,
+        ...(input.mode === "open" && input.initialUpdatedAt !== undefined
+          ? { initialUpdatedAt: input.initialUpdatedAt }
+          : {}),
         createInput: input.mode === "create" ? input.createInput : undefined,
         extensionSet,
         subagentRuntime,

@@ -6,7 +6,7 @@ import { DesktopActionsContext } from "./desktop-context.tsx";
 import { dispatchDesktop } from "./desktop-store.ts";
 import { useDesktopStore } from "./desktop-store-context.tsx";
 import { ProjectActivationCoordinator } from "./project-activation.ts";
-import { useSessionCache, useSessionCacheSnapshot } from "./session-cache-context.tsx";
+import { useSessionCache, useSessionCacheRecords } from "./session-cache-context.tsx";
 import { SessionCatalogControlBridge } from "./session-catalog-control-bridge.tsx";
 import { commitCatalogRemovalAfterRouteExit, draftSearch } from "./session-navigation.ts";
 
@@ -18,7 +18,7 @@ interface DesktopCatalogProviderProps {
 export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps) {
   const store = useDesktopStore();
   const cache = useSessionCache();
-  const { records } = useSessionCacheSnapshot();
+  const records = useSessionCacheRecords();
   const navigate = useNavigate();
   const router = useRouter();
   const catalogRequests = useRef(new Map<string, Promise<void>>());

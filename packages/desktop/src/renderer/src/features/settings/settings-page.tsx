@@ -1,4 +1,5 @@
 import { DesktopSectionShell } from "@renderer/components/layout/desktop-section-shell";
+import { settingsMenuItemVariants } from "@renderer/shared/ui/settings-menu-item-variants";
 import { settingsReturnSession } from "@renderer/state/settings-navigation";
 import { Link, Outlet, useSearch } from "@tanstack/react-router";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
@@ -7,6 +8,14 @@ import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Server from "lucide-react/dist/esm/icons/server.mjs";
+
+const SETTINGS_LINKS = [
+  { to: "/settings/personalization", label: "个性化", icon: Palette },
+  { to: "/settings/models", label: "模型服务商", icon: Server },
+  { to: "/settings/subagents", label: "子智能体", icon: Bot },
+  { to: "/settings/dependencies", label: "依赖项", icon: Boxes },
+  { to: "/settings/about", label: "关于", icon: Info },
+] as const;
 
 /** 提供不依赖 Desktop session runtime 的设置页布局。 */
 export function SettingsPage() {
@@ -22,62 +31,23 @@ export function SettingsPage() {
             projectId: returnSession.projectId,
             threadId: returnSession.threadId,
           }}
-          className="settings-menu-item rounded-xl settings-back-link"
+          className={settingsMenuItemVariants({ variant: "back" })}
         >
           <ArrowLeft />
           <span>返回聊天</span>
         </Link>
       ) : (
-        <Link to="/" className="settings-menu-item rounded-xl settings-back-link">
+        <Link to="/" className={settingsMenuItemVariants({ variant: "back" })}>
           <ArrowLeft />
           <span>返回聊天</span>
         </Link>
       )}
-      <Link
-        to="/settings/personalization"
-        search={search}
-        className="settings-menu-item rounded-xl"
-        activeOptions={{ exact: true }}
-      >
-        <Palette aria-hidden="true" />
-        <span>个性化</span>
-      </Link>
-      <Link
-        to="/settings/models"
-        search={search}
-        className="settings-menu-item rounded-xl"
-        activeOptions={{ exact: true }}
-      >
-        <Server aria-hidden="true" />
-        <span>模型服务商</span>
-      </Link>
-      <Link
-        to="/settings/subagents"
-        search={search}
-        className="settings-menu-item rounded-xl"
-        activeOptions={{ exact: true }}
-      >
-        <Bot aria-hidden="true" />
-        <span>子智能体</span>
-      </Link>
-      <Link
-        to="/settings/dependencies"
-        search={search}
-        className="settings-menu-item rounded-xl"
-        activeOptions={{ exact: true }}
-      >
-        <Boxes aria-hidden="true" />
-        <span>依赖项</span>
-      </Link>
-      <Link
-        to="/settings/about"
-        search={search}
-        className="settings-menu-item rounded-xl"
-        activeOptions={{ exact: true }}
-      >
-        <Info aria-hidden="true" />
-        <span>关于</span>
-      </Link>
+      {SETTINGS_LINKS.map(({ icon: Icon, label, to }) => (
+        <Link key={to} to={to} search={search} className={settingsMenuItemVariants()} activeOptions={{ exact: true }}>
+          <Icon aria-hidden="true" />
+          <span>{label}</span>
+        </Link>
+      ))}
     </>
   );
 

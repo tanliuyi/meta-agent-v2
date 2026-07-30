@@ -3,6 +3,7 @@ import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogClose } from "@renderer/shared/ui/dialog-close";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import type { LinkSafetyModalProps } from "streamdown";
 import { useSessionScope } from "../../session-context.tsx";
@@ -14,7 +15,7 @@ export function LinkSafetyModal({ url, isOpen, onClose }: LinkSafetyModalProps) 
       <DialogContent className="gap-3 sm:max-w-lg">
         <DialogTitle>打开外部链接？</DialogTitle>
         <DialogDescription className="break-all">{url}</DialogDescription>
-        <div className="mt-3 flex justify-end gap-2">
+        <DialogFooter variant="actions">
           <DialogClose asChild>
             <Button variant="ghost">取消</Button>
           </DialogClose>
@@ -28,7 +29,7 @@ export function LinkSafetyModal({ url, isOpen, onClose }: LinkSafetyModalProps) 
           >
             继续打开
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

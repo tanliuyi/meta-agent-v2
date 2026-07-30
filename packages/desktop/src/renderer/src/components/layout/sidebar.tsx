@@ -9,7 +9,7 @@ import { GENERAL_WORKSPACE_ID } from "../../../../shared/contracts.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useLayout } from "../../state/layout.tsx";
 import { getSidebarMaxWidth, SIDEBAR_MIN_WIDTH } from "../../state/layout-preference.ts";
-import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
+import { useSessionDraftMaterializing } from "../../state/session-cache-context.tsx";
 import { draftSearch } from "../../state/session-navigation.ts";
 import { settingsReturnSession, validateSettingsSearch } from "../../state/settings-navigation.ts";
 import { runControlledThreadAction } from "../../state/thread-list-commands.ts";
@@ -25,7 +25,7 @@ const sidebarRowClass =
 /** Codex Desktop 风格的 Project 与 session 主导航。 */
 export const Sidebar = memo(function Sidebar() {
   const actions = useDesktopActions();
-  const { draftMaterializing } = useSessionCacheSnapshot();
+  const draftMaterializing = useSessionDraftMaterializing();
   const { sidebarWidth, setSidebarWidth } = useLayout();
   const matchRoute = useMatchRoute();
   const navigate = useNavigate();

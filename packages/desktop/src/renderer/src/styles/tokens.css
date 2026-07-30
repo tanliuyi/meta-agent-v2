@@ -245,6 +245,12 @@
     --window-close-background: 4 75% 44%;
     --window-close-background-active: 4 78% 38%;
     --window-close-foreground: 0 0% 100%;
+    --markdown-code-background: #0d1117;
+    --markdown-code-header-background: #161b22;
+    --markdown-code-border: #30363d;
+    --markdown-code-foreground: #e6edf3;
+    --markdown-code-muted-foreground: #8b949e;
+    --markdown-code-line-number: #6e7681;
     --overlay: 0 0% 0%;
     --focus-ring-color: hsl(var(--ring) / 0.5);
     --settings-accent: 211 100% 62%;

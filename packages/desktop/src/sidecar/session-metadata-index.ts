@@ -156,7 +156,6 @@ export class SessionMetadataIndex {
     const session = project.sessions.find(({ id }) => id === threadId);
     if (!session) throw new Error(`Pi session does not exist: ${threadId}`);
     session.title = title;
-    session.updatedAt = Date.now();
     const explicit = project.explicitSessions.find(({ session: candidate }) => candidate.id === threadId);
     if (explicit) {
       explicit.session = { ...session };
@@ -315,6 +314,7 @@ export class SessionMetadataIndex {
     for (const { session } of candidates) registerSessionIdentity(sessionPathById, session.id, session.path);
     const threadIdByPath = new Map(validExplicitSessions.map(({ session }) => [resolve(session.path), session.id]));
     for (const { session } of candidates) threadIdByPath.set(resolve(session.path), session.id);
+    const knownSessionsById = new Map(currentProject?.sessions.map((session) => [session.id, session]));
     const rebuiltSessions = await Promise.all(
       candidates.map(async ({ session, originHint }): Promise<IndexedSession> => {
         const parentThreadId = session.parentSessionPath
@@ -326,7 +326,7 @@ export class SessionMetadataIndex {
           projectId,
           title: fork?.title || session.name || session.firstMessage || "新会话",
           createdAt: session.created.getTime(),
-          updatedAt: session.modified.getTime(),
+          updatedAt: knownSessionsById.get(session.id)?.updatedAt ?? session.modified.getTime(),
           messageCount: session.messageCount,
           preview: fork?.title || session.firstMessage,
           archived: false,

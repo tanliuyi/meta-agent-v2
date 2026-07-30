@@ -52,6 +52,7 @@ interface RuntimeOptions {
   agentDir?: string;
   shellPath?: string;
   sessionManager?: SessionManager;
+  initialUpdatedAt?: number;
   createInput?: SessionCreateInput;
   extensionSet?: ResolvedExtensionSet;
   subagentRuntime?: SubagentRuntime;
@@ -89,6 +90,7 @@ export class SessionRuntime {
     session: AgentSession,
     models: ModelRuntime,
     extensionSet: ResolvedExtensionSet,
+    initialUpdatedAt: number | undefined,
     subagentRuntime: SubagentRuntime | undefined,
     push: (update: SessionPushPayload) => void,
     onSummaryChanged: (runtime: SessionRuntime) => void,
@@ -121,7 +123,7 @@ export class SessionRuntime {
       (message, type, options) => this.projector.notify(message, type, options),
     );
     this.compatibility = new PiCompatibilityAdapter({ session, projector: this.projector });
-    this.summaryState = createSummary(session);
+    this.summaryState = createSummary(session, initialUpdatedAt);
   }
 
   /** 创建新会话或从指定 SessionManager 恢复会话。 */
@@ -172,6 +174,7 @@ export class SessionRuntime {
         result.session,
         services.modelRuntime,
         extensionSet,
+        options.initialUpdatedAt,
         options.subagentRuntime,
         options.push,
         options.onSummaryChanged,
@@ -549,7 +552,13 @@ export class SessionRuntime {
       this.onSummaryChanged(this);
       publish = true;
     }
-    if (event.type === "agent_settled") this.onSummaryChanged(this);
+    if (event.type === "agent_settled") {
+      this.summaryState = {
+        ...this.summaryState,
+        updatedAt: Math.max(this.summaryState.updatedAt, Date.now()),
+      };
+      this.onSummaryChanged(this);
+    }
     if (this.timelineError) this.lastError = this.timelineError.message;
     if (publish || this.lastError) this.publishControl();
   }
@@ -609,7 +618,10 @@ export class SessionRuntime {
       ...this.summaryState,
       title,
       preview,
-      updatedAt: message.timestamp,
+      updatedAt:
+        message.role === "user"
+          ? Math.max(this.summaryState.updatedAt, message.timestamp)
+          : this.summaryState.updatedAt,
       messageCount: this.summaryState.messageCount + 1,
     };
   }
@@ -650,14 +662,18 @@ function builtinOnlyExtensionSet(projectId: string): ResolvedExtensionSet {
   };
 }
 
-function createSummary(session: AgentSession): Omit<Thread, "projectId" | "archived" | "running"> {
+function createSummary(
+  session: AgentSession,
+  initialUpdatedAt?: number,
+): Omit<Thread, "projectId" | "archived" | "running"> {
   const visible = session.messages.filter((message) => message.role === "user" || message.role === "assistant");
   const first = visible.find((message) => message.role === "user");
   const preview = first?.role === "user" ? contentText(first.content).slice(0, 120) : "";
   const headerTimestamp = Date.parse(session.sessionManager.getHeader()?.timestamp ?? "");
   const lastMessageTimestamp = visible.at(-1)?.timestamp ?? 0;
   const updatedAt =
-    Math.max(lastMessageTimestamp, Number.isFinite(headerTimestamp) ? headerTimestamp : 0) || Date.now();
+    initialUpdatedAt ??
+    (Math.max(lastMessageTimestamp, Number.isFinite(headerTimestamp) ? headerTimestamp : 0) || Date.now());
   return {
     id: session.sessionId,
     title: session.sessionName || preview.slice(0, 48) || "新会话",

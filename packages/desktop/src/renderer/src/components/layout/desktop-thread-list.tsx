@@ -4,13 +4,14 @@ import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogClose } from "@renderer/shared/ui/dialog-close";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/contracts.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
-import { useSessionCacheSnapshot } from "../../state/session-cache-context.tsx";
+import { useSessionDraftMaterializing } from "../../state/session-cache-context.tsx";
 import {
   COLLAPSED_THREAD_COUNT,
   flattenVisibleThreadTree,
@@ -22,6 +23,7 @@ import {
   threadTreeByArchiveState,
 } from "../../state/thread-list-commands.ts";
 import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
+import { ThreadListToggle } from "./thread-list-toggle.tsx";
 
 interface DesktopThreadListProps {
   project: Project;
@@ -40,7 +42,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const activeThreadId = params.projectId === project.id ? (params.threadId ?? null) : null;
-  const { draftMaterializing: navigationDisabled } = useSessionCacheSnapshot();
+  const navigationDisabled = useSessionDraftMaterializing();
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
@@ -164,10 +166,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
                 style={{ paddingInlineStart: 32 + siblingExpansion.depth * 14 }}
               >
                 {siblingExpansion.hasMore ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                  <ThreadListToggle
                     onClick={() =>
                       setChildVisibleLimits((current) => {
                         const next = new Map(current);
@@ -183,13 +182,10 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
                     }
                   >
                     展开更多
-                  </Button>
+                  </ThreadListToggle>
                 ) : null}
                 {siblingExpansion.expanded ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+                  <ThreadListToggle
                     onClick={() =>
                       setChildVisibleLimits((current) => {
                         const next = new Map(current);
@@ -199,7 +195,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
                     }
                   >
                     收起
-                  </Button>
+                  </ThreadListToggle>
                 ) : null}
               </div>
             ))}
@@ -209,24 +205,14 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
       {hasMoreThreads || isExpanded ? (
         <div className="flex items-center gap-2" style={{ paddingInlineStart: compactRoot ? 8 : 32 }}>
           {hasMoreThreads ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
+            <ThreadListToggle
               onClick={() => setVisibleLimit((current) => nextThreadVisibleLimit(current, regularThreadCount))}
             >
               展开更多
-            </Button>
+            </ThreadListToggle>
           ) : null}
           {isExpanded ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground text-sm hover:text-foreground active:text-foreground inline-block h-7 p-0 text-left font-normal hover:bg-transparent"
-              onClick={() => setVisibleLimit(COLLAPSED_THREAD_COUNT)}
-            >
-              收起
-            </Button>
+            <ThreadListToggle onClick={() => setVisibleLimit(COLLAPSED_THREAD_COUNT)}>收起</ThreadListToggle>
           ) : null}
         </div>
       ) : null}
@@ -282,7 +268,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               ? `该会话包含 ${pendingDeleteDescendantIds.length} 个后代会话，其中仍有会话正在运行。请先停止相关任务。`
               : `该会话包含 ${pendingDeleteDescendantIds.length} 个后代会话。可以保留并提升后代，或永久删除整棵会话树。`}
           </DialogDescription>
-          <div className="mt-3 flex flex-wrap justify-end gap-2">
+          <DialogFooter variant="actions" className="flex-wrap">
             <DialogClose asChild>
               <Button variant="ghost">取消</Button>
             </DialogClose>
@@ -300,7 +286,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
             >
               删除全部 {pendingDeleteDescendantIds.length + 1} 个会话
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

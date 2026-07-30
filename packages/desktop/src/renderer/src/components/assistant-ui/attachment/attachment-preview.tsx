@@ -109,7 +109,7 @@ export function AttachmentPreview({ src }: { src: string }) {
       )}
     >
       {zoomed ? (
-        <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-md bg-background/80 px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground shadow-(--elevation-popover) backdrop-blur-sm">
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-xl bg-background/80 px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground shadow-(--elevation-popover) backdrop-blur-sm">
           {Math.round(transform.scale * 100)}%
         </div>
       ) : null}

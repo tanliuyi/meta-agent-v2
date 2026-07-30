@@ -4,6 +4,8 @@ import { Collapsible } from "@renderer/shared/ui/collapsible";
 import { CollapsibleContent } from "@renderer/shared/ui/collapsible-content";
 import { CollapsibleTrigger } from "@renderer/shared/ui/collapsible-trigger";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
+import { ContextMenuContent } from "@renderer/shared/ui/context-menu-content";
+import { ContextMenuItem } from "@renderer/shared/ui/context-menu-item";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogClose } from "@renderer/shared/ui/dialog-close";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
@@ -114,7 +116,7 @@ export const ProjectItem = memo(function ProjectItem({
               <CollapsibleTrigger asChild>
                 <button
                   type="button"
-                  className="focus-visible:ring-ring/50 flex h-8 min-w-0 items-center gap-2 rounded-md px-2.5 text-left text-sm outline-none focus-visible:ring-[3px]"
+                  className="focus-visible:ring-ring/50 flex h-8 min-w-0 items-center gap-2 rounded-xl px-2.5 text-left text-sm outline-none focus-visible:ring-[3px]"
                 >
                   {expanded ? <FolderOpen className="size-3.5 shrink-0" /> : <Folder className="size-3.5 shrink-0" />}
                   <span className="min-w-0 flex-1 select-none truncate font-medium">{project.name}</span>
@@ -149,36 +151,22 @@ export const ProjectItem = memo(function ProjectItem({
               </div>
             </div>
           </ContextMenu.Trigger>
-          <ContextMenu.Portal>
-            <ContextMenu.Content className="bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out z-(--stack-menu) min-w-44 overflow-hidden rounded-md border p-1 shadow-(--elevation-popover) backdrop-blur-sm">
-              <ContextMenu.Item
-                className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
-                disabled={pendingAction}
-                onSelect={() => setRenameName(project.name)}
-              >
-                <Pencil size={14} /> 重命名
-              </ContextMenu.Item>
-              <ContextMenu.Item
-                className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
-                disabled={pendingAction}
-                onSelect={() => runProjectAction(() => actions.openProjectExternally(project.id))}
-              >
-                <FolderOpen size={14} /> 在资源管理器中打开
-              </ContextMenu.Item>
-              <ContextMenu.Item
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50"
-                disabled={pendingAction}
-                onSelect={() => setDeletePending(true)}
-              >
-                <Trash2 size={14} /> 删除
-              </ContextMenu.Item>
-            </ContextMenu.Content>
-          </ContextMenu.Portal>
+          <ContextMenuContent className="min-w-44">
+            <ContextMenuItem disabled={pendingAction} onSelect={() => setRenameName(project.name)}>
+              <Pencil /> 重命名
+            </ContextMenuItem>
+            <ContextMenuItem
+              disabled={pendingAction}
+              onSelect={() => runProjectAction(() => actions.openProjectExternally(project.id))}
+            >
+              <FolderOpen /> 在资源管理器中打开
+            </ContextMenuItem>
+            <ContextMenuItem variant="destructive" disabled={pendingAction} onSelect={() => setDeletePending(true)}>
+              <Trash2 /> 删除
+            </ContextMenuItem>
+          </ContextMenuContent>
         </ContextMenu.Root>
-        <CollapsibleContent
-          id={threadListId}
-          className="data-closed:animate-collapsible-up data-open:animate-collapsible-down data-open:duration-(--animation-duration) data-closed:duration-(--animation-duration) overflow-hidden"
-        >
+        <CollapsibleContent id={threadListId} animation="height">
           {threads ? (
             threads.length > 0 ? (
               <DesktopThreadList project={project} threads={threads} />

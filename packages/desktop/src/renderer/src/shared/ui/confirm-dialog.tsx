@@ -3,6 +3,7 @@ import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogClose } from "@renderer/shared/ui/dialog-close";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { useRef } from "react";
 
@@ -49,7 +50,7 @@ export function ConfirmDialog({
       >
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
-        <div className="mt-3 flex justify-end gap-2">
+        <DialogFooter variant="actions">
           <DialogClose asChild>
             <Button ref={cancelRef} variant="ghost">
               取消
@@ -58,7 +59,7 @@ export function ConfirmDialog({
           <Button variant="destructive" onClick={handleConfirm}>
             {confirmLabel}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -21,7 +21,7 @@ export function ReadOnlySessionStatus({ phase, model, thinkingLevel }: ReadOnlyS
 
   return (
     <div
-      className="border-border/60 flex min-h-10 items-center justify-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm"
+      className="border-border/60 flex min-h-10 items-center justify-center gap-2 rounded-xl border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm"
       role="status"
       aria-live="polite"
     >

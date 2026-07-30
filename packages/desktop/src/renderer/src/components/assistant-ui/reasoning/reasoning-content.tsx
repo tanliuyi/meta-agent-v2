@@ -16,11 +16,10 @@ export function ReasoningContent({
   return (
     <CollapsibleContent
       data-slot="reasoning-content"
+      animation="persistent"
       className={cn(
         "aui-reasoning-content text-muted-foreground relative overflow-hidden text-sm outline-none",
-        "group/collapsible-content ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none",
-        "data-closed:animate-collapsible-up data-open:animate-collapsible-down",
-        "data-closed:fill-mode-forwards data-closed:pointer-events-none",
+        "group/collapsible-content ease-[cubic-bezier(0.32,0.72,0,1)]",
         "data-open:duration-(--animation-duration) data-closed:duration-(--animation-duration)",
         className,
       )}

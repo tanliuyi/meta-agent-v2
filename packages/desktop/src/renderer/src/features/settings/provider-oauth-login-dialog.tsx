@@ -65,14 +65,14 @@ export function ProviderOauthLoginDialog({ state, onClose }: ProviderOauthLoginD
         <DialogDescription>OAuth 凭据将直接保存到全局 auth.json。</DialogDescription>
 
         {auth?.type === "auth" ? (
-          <div className="grid gap-1 rounded-md border p-3 text-sm">
+          <div className="grid gap-1 rounded-xl border p-3 text-sm">
             <span>{auth.instructions ?? "请在已打开的浏览器页面中完成授权。"}</span>
             <code className="break-all text-xs text-muted-foreground">{auth.url}</code>
           </div>
         ) : null}
 
         {deviceCode?.type === "device-code" ? (
-          <div className="grid gap-2 rounded-md border p-3 text-sm">
+          <div className="grid gap-2 rounded-xl border p-3 text-sm">
             <span>在授权页面输入设备码</span>
             <div className="flex items-center gap-2">
               <code className="min-w-0 flex-1 rounded bg-muted px-3 py-2 text-center text-base font-semibold">
@@ -91,7 +91,7 @@ export function ProviderOauthLoginDialog({ state, onClose }: ProviderOauthLoginD
         ) : null}
 
         {info?.type === "info" ? (
-          <div className="grid gap-1 rounded-md border p-3 text-sm">
+          <div className="grid gap-1 rounded-xl border p-3 text-sm">
             <span>{info.message}</span>
             {info.links?.map((link) => (
               <a

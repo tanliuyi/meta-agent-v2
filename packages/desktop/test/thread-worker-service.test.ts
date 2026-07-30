@@ -111,6 +111,7 @@ describe("ThreadWorkerService", () => {
       agentDir,
       threadId: sessionId,
       sessionFile,
+      initialUpdatedAt: 4_000,
       extensionSet: {
         generation: "extensions-generation",
         projectId: GENERAL_WORKSPACE_ID,
@@ -126,6 +127,7 @@ describe("ThreadWorkerService", () => {
     );
 
     expect(mocks.openSession).toHaveBeenCalledWith(sessionFile, join(agentDir, "sessions", "--general--"), cwd);
+    expect(mocks.runtimeCreate).toHaveBeenCalledWith(expect.objectContaining({ initialUpdatedAt: 4_000 }));
   });
 
   it("rejects a session identity mismatch before opening or migrating the file", async () => {
