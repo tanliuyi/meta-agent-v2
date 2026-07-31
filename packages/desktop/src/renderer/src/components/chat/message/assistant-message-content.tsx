@@ -17,6 +17,7 @@ export function AssistantMessageContent({
 }) {
   const { showThinking, autoExpandRunning } = useThinkingVisibility();
   const messageParts = useAuiState((state) => state.message.parts);
+  const messageId = useAuiState((state) => state.message.id);
   const toolUIs = useAuiState((state) => state.tools.toolUIs);
   const runStartedAt = useAuiState((state) => state.message.createdAt.getTime());
   const runCompletedAt = useAuiState((state) => piCompletedAt(state.message.metadata.custom));
@@ -32,7 +33,13 @@ export function AssistantMessageContent({
       className="flex flex-col gap-3 text-sm leading-relaxed text-foreground wrap-break-word"
     >
       {isRunActivityRunning && !hasGroupedRunActivity ? (
-        <RunActivityGroup running startedAt={runStartedAt} completedAt={runCompletedAt} hasContent={false}>
+        <RunActivityGroup
+          running
+          startedAt={runStartedAt}
+          completedAt={runCompletedAt}
+          hasContent={false}
+          stateKey={`${messageId}:run-activity`}
+        >
           {null}
         </RunActivityGroup>
       ) : null}
@@ -46,6 +53,7 @@ export function AssistantMessageContent({
                   startedAt={runStartedAt}
                   completedAt={runCompletedAt}
                   hasContent={showThinking || part.indices.some((index) => messageParts[index]?.type !== "reasoning")}
+                  stateKey={`${messageId}:run-activity`}
                 >
                   {children}
                 </RunActivityGroup>
@@ -61,6 +69,7 @@ export function AssistantMessageContent({
                   running={running}
                   hasFollowingText={hasTextAfterGroup(messageParts, part.indices)}
                   autoExpandRunning={autoExpandRunning}
+                  stateKey={`${messageId}:chain-of-thought:${part.indices[0]}`}
                 >
                   {children}
                 </ChainOfThoughtGroup>

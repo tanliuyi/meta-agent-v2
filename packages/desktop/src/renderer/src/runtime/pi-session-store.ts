@@ -13,6 +13,7 @@ export interface SessionRecordStores {
   readonly workbench: WorkbenchStore;
   readonly summary: SessionSummaryStore;
   readonly runActivity: SessionRunActivityStore;
+  readonly disclosure: SessionDisclosureStore;
   readonly connection: SessionConnectionStore;
 }
 
@@ -54,6 +55,12 @@ export interface SessionRunActivityStore {
   markParticipated(): void;
   reset(): void;
   sync(snapshot: PiThreadSnapshot): void;
+}
+
+export interface SessionDisclosureStore {
+  get(key: string): boolean | undefined;
+  set(key: string, open: boolean): void;
+  delete(key: string): void;
 }
 
 export type SessionConnectionState = "attaching" | "ready" | "recovering" | "error";
@@ -118,6 +125,7 @@ export function createSessionRecordStores(): SessionRecordStores {
     workbench: createWorkbenchStore(),
     summary: createSummaryStore(),
     runActivity: createRunActivityStore(),
+    disclosure: createDisclosureStore(),
     connection: createConnectionStore(),
   };
 }
@@ -235,6 +243,22 @@ function createRunActivityStore(): SessionRunActivityStore {
       }
       const lastAssistant = snapshot.nodes.findLast((node) => node.kind === "assistant");
       if (lastAssistant?.status.type === "running") participated = true;
+    },
+  };
+}
+
+function createDisclosureStore(): SessionDisclosureStore {
+  const states = new Map<string, boolean>();
+
+  return {
+    get(key: string) {
+      return states.get(key);
+    },
+    set(key: string, open: boolean) {
+      states.set(key, open);
+    },
+    delete(key: string) {
+      states.delete(key);
     },
   };
 }

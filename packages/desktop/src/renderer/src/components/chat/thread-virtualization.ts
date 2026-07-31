@@ -1,0 +1,47 @@
+export interface ThreadMessageRow {
+  id: string;
+  role: "user" | "assistant" | "system";
+}
+
+export interface ThreadTurn {
+  id: string;
+  messageIds: readonly string[];
+}
+
+export function buildThreadTurns(messages: readonly ThreadMessageRow[]): readonly ThreadTurn[] {
+  const turns: { id: string; messageIds: string[] }[] = [];
+  for (const { id, role } of messages) {
+    const last = turns.at(-1);
+    if (role === "user" || !last) turns.push({ id, messageIds: [id] });
+    else last.messageIds.push(id);
+  }
+  return turns;
+}
+
+/** snapshot 替换部分 message ID 时，通过仍稳定的成员复用既有 turn ID。 */
+export function stabilizeThreadTurnIds(
+  previous: readonly ThreadTurn[],
+  current: readonly ThreadTurn[],
+): readonly ThreadTurn[] {
+  if (previous.length === 0 || current.length === 0) return current;
+
+  const previousTurnIdByMessageId = new Map<string, string>();
+  for (const turn of previous) {
+    for (const messageId of turn.messageIds) previousTurnIdByMessageId.set(messageId, turn.id);
+  }
+
+  const reusedTurnIds = new Set<string>();
+  let changed = false;
+  const stabilized = current.map((turn) => {
+    const previousTurnId = turn.messageIds
+      .map((messageId) => previousTurnIdByMessageId.get(messageId))
+      .find((turnId) => turnId !== undefined && !reusedTurnIds.has(turnId));
+    const id = previousTurnId ?? turn.id;
+    reusedTurnIds.add(id);
+    if (id === turn.id) return turn;
+    changed = true;
+    return { ...turn, id };
+  });
+
+  return changed ? stabilized : current;
+}

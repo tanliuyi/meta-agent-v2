@@ -43,7 +43,7 @@ import { ChainOfThoughtGroup } from "../src/renderer/src/components/chat/message
 describe("ChainOfThoughtGroup", () => {
   it("配置开启时在 running 阶段自动展开内层分组", () => {
     const markup = renderToStaticMarkup(
-      <ChainOfThoughtGroup indices={[0]} running hasFollowingText={false} autoExpandRunning>
+      <ChainOfThoughtGroup indices={[0]} running hasFollowingText={false} autoExpandRunning stateKey="chain">
         thinking
       </ChainOfThoughtGroup>,
     );
@@ -55,7 +55,7 @@ describe("ChainOfThoughtGroup", () => {
 
   it("配置关闭时不自动展开内层分组", () => {
     const markup = renderToStaticMarkup(
-      <ChainOfThoughtGroup indices={[0]} running hasFollowingText={false} autoExpandRunning={false}>
+      <ChainOfThoughtGroup indices={[0]} running hasFollowingText={false} autoExpandRunning={false} stateKey="chain">
         thinking
       </ChainOfThoughtGroup>,
     );

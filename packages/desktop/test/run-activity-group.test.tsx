@@ -1,13 +1,15 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { ReasoningDisclosureStateProvider } from "../src/renderer/src/components/assistant-ui/reasoning/reasoning-disclosure-state.tsx";
 import { RunActivityGroup } from "../src/renderer/src/components/chat/message/run-activity-group.tsx";
+import { createSessionRecordStores } from "../src/renderer/src/runtime/pi-session-store.ts";
 
 describe("RunActivityGroup", () => {
   it("run 进行中强制展开并禁用折叠入口", () => {
     const now = Date.now();
     const markup = renderToStaticMarkup(
-      <RunActivityGroup running startedAt={now - 12_000} hasContent>
+      <RunActivityGroup running startedAt={now - 12_000} hasContent stateKey="run">
         <span>step content</span>
       </RunActivityGroup>,
     );
@@ -21,7 +23,7 @@ describe("RunActivityGroup", () => {
   it("run 进行中使用不补零的紧凑时分秒格式", () => {
     const now = Date.now();
     const markup = renderToStaticMarkup(
-      <RunActivityGroup running startedAt={now - (3 * 3_600 + 4 * 60 + 5) * 1_000} hasContent>
+      <RunActivityGroup running startedAt={now - (3 * 3_600 + 4 * 60 + 5) * 1_000} hasContent stateKey="run">
         <span>step content</span>
       </RunActivityGroup>,
     );
@@ -31,7 +33,7 @@ describe("RunActivityGroup", () => {
 
   it("第 0s 时只渲染 running 标题", () => {
     const markup = renderToStaticMarkup(
-      <RunActivityGroup running startedAt={Date.now() + 1_000} hasContent={false}>
+      <RunActivityGroup running startedAt={Date.now() + 1_000} hasContent={false} stateKey="run">
         <>{null}</>
       </RunActivityGroup>,
     );
@@ -41,7 +43,7 @@ describe("RunActivityGroup", () => {
 
   it("隐藏后的历史 activity 不显示空折叠入口", () => {
     const markup = renderToStaticMarkup(
-      <RunActivityGroup running={false} startedAt={Date.now()} hasContent={false}>
+      <RunActivityGroup running={false} startedAt={Date.now()} hasContent={false} stateKey="run">
         <>{null}</>
       </RunActivityGroup>,
     );
@@ -52,7 +54,13 @@ describe("RunActivityGroup", () => {
   it("resume 后按固定完成时间显示本次 run 耗时", () => {
     const startedAt = Date.now() - 10 * 60_000;
     const markup = renderToStaticMarkup(
-      <RunActivityGroup running={false} startedAt={startedAt} completedAt={startedAt + (4 * 60 + 5) * 1_000} hasContent>
+      <RunActivityGroup
+        running={false}
+        startedAt={startedAt}
+        completedAt={startedAt + (4 * 60 + 5) * 1_000}
+        hasContent
+        stateKey="run"
+      >
         <span>step content</span>
       </RunActivityGroup>,
     );
@@ -63,7 +71,7 @@ describe("RunActivityGroup", () => {
   it("历史 run 默认折叠且不使用当前时间伪造处理耗时", () => {
     const now = Date.now();
     const markup = renderToStaticMarkup(
-      <RunActivityGroup running={false} startedAt={now - (4 * 60 + 5) * 1_000} hasContent>
+      <RunActivityGroup running={false} startedAt={now - (4 * 60 + 5) * 1_000} hasContent stateKey="run">
         <span>step content</span>
       </RunActivityGroup>,
     );
@@ -72,5 +80,26 @@ describe("RunActivityGroup", () => {
     expect(markup).not.toContain('disabled=""');
     expect(markup).not.toContain("04m 05s");
     expect(markup).not.toContain("step content");
+  });
+
+  it("虚拟行重新挂载时恢复历史 activity 展开状态", () => {
+    const disclosure = createSessionRecordStores().disclosure;
+    disclosure.set("message:run", true);
+    const markup = renderToStaticMarkup(
+      <ReasoningDisclosureStateProvider store={disclosure}>
+        <RunActivityGroup
+          running={false}
+          startedAt={Date.now()}
+          completedAt={Date.now()}
+          hasContent
+          stateKey="message:run"
+        >
+          <span>step content</span>
+        </RunActivityGroup>
+      </ReasoningDisclosureStateProvider>,
+    );
+
+    expect(markup).toContain('data-state="open"');
+    expect(markup).toContain("step content");
   });
 });

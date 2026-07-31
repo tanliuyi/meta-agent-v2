@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { ReasoningContent } from "../../assistant-ui/reasoning/reasoning-content.tsx";
+import { useReasoningDisclosureState } from "../../assistant-ui/reasoning/reasoning-disclosure-state.tsx";
 import { ReasoningRoot } from "../../assistant-ui/reasoning/reasoning-root.tsx";
 import { ReasoningTrigger } from "../../assistant-ui/reasoning/reasoning-trigger.tsx";
 
@@ -9,15 +10,17 @@ export function RunActivityGroup({
   startedAt,
   completedAt,
   hasContent,
+  stateKey,
   children,
 }: {
   running: boolean;
   startedAt: number;
   completedAt?: number;
   hasContent: boolean;
+  stateKey: string;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  const [storedOpen, setOpen] = useReasoningDisclosureState(stateKey);
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(() =>
     running ? elapsedDuration(startedAt, Date.now()) : completedDuration(startedAt, completedAt),
   );
@@ -33,7 +36,7 @@ export function RunActivityGroup({
       );
     }
     previousRunning.current = running;
-  }, [completedAt, running, startedAt]);
+  }, [completedAt, running, setOpen, startedAt]);
 
   useEffect(() => {
     if (!running) return;
@@ -50,7 +53,7 @@ export function RunActivityGroup({
     <ReasoningRoot
       variant="ghost"
       className="aui-run-activity-root w-full"
-      open={running || open}
+      open={running || storedOpen === true}
       onOpenChange={(nextOpen) => {
         if (!running && hasContent) setOpen(nextOpen);
       }}

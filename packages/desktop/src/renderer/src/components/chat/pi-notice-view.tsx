@@ -39,7 +39,12 @@ export function PiNoticeView({ data }: { data: unknown }) {
   }
 
   return (
-    <ReasoningRoot className="pi-notice" variant="ghost" data-notice-type={data.noticeType}>
+    <ReasoningRoot
+      className="pi-notice"
+      variant="ghost"
+      data-notice-type={data.noticeType}
+      stateKey={`pi-notice:${data.id}`}
+    >
       <ReasoningTrigger className="max-w-full" label={noticeTitle(data)} />
       <ReasoningContent fade={false}>
         <ReasoningText>

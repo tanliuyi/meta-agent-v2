@@ -4,8 +4,9 @@ import { cn } from "@renderer/shared/lib/cn";
 import { Collapsible } from "@renderer/shared/ui/collapsible";
 import type { VariantProps } from "class-variance-authority";
 import type { ComponentProps, CSSProperties } from "react";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { ReasoningPreviewContext } from "./reasoning-context.ts";
+import { useReasoningDisclosureState } from "./reasoning-disclosure-state.tsx";
 import { REASONING_ANIMATION_DURATION, reasoningVariants } from "./reasoning-variants.ts";
 
 export type ReasoningRootProps = Omit<ComponentProps<typeof Collapsible>, "open" | "onOpenChange"> &
@@ -19,6 +20,8 @@ export type ReasoningRootProps = Omit<ComponentProps<typeof Collapsible>, "open"
     autoExpand?: boolean;
     /** 流式阶段自动展开；用户首次切换后改由用户控制。 */
     streaming?: boolean;
+    /** 在虚拟消息卸载期间保留用户选择。 */
+    stateKey?: string;
   };
 
 export function ReasoningRoot({
@@ -30,18 +33,19 @@ export function ReasoningRoot({
   autoOpen,
   autoExpand = true,
   streaming,
+  stateKey,
   children,
   ...props
 }: ReasoningRootProps) {
   const initialOpenRef = useRef(defaultOpen);
   const previousAutoOpenRef = useRef(autoOpen);
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const [userOpen, setUserOpen] = useReasoningDisclosureState(stateKey);
 
   useLayoutEffect(() => {
     const previousAutoOpen = previousAutoOpenRef.current;
     previousAutoOpenRef.current = autoOpen;
     if (previousAutoOpen === true && autoOpen === false) setUserOpen(null);
-  }, [autoOpen]);
+  }, [autoOpen, setUserOpen]);
 
   const isControlled = controlledOpen !== undefined;
   const automaticOpen = autoExpand ? (autoOpen ?? streaming) : undefined;
@@ -53,7 +57,7 @@ export function ReasoningRoot({
       if (!isControlled) setUserOpen(open);
       controlledOnOpenChange?.(open);
     },
-    [controlledOnOpenChange, isControlled],
+    [controlledOnOpenChange, isControlled, setUserOpen],
   );
 
   return (
