@@ -294,6 +294,19 @@
   font-weight: 600;
 }
 
+.providers-row-avatar-icon {
+  background: hsl(var(--provider-icon-background));
+  border: 1px solid hsl(var(--border));
+  padding: 5px;
+}
+
+.providers-row-avatar-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .providers-row-body {
   min-width: 0;
   flex: 1;

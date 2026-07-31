@@ -193,6 +193,7 @@
     --focus-ring-color: hsl(var(--ring) / 0.35);
     --settings-accent: 211 100% 43%;
     --settings-accent-foreground: 0 0% 100%;
+    --provider-icon-background: 0 0% 100%;
     --settings-group-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
     --settings-control-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
     --workspace-edge-shadow: -2px 0 6px rgb(0 0 0 / 0.04);
@@ -247,6 +248,7 @@
     --window-close-foreground: 0 0% 100%;
     --markdown-code-background: #0d1117;
     --markdown-code-header-background: #161b22;
+    --provider-icon-background: 0 0% 100%;
     --markdown-code-border: #30363d;
     --markdown-code-foreground: #e6edf3;
     --markdown-code-muted-foreground: #8b949e;

@@ -96,6 +96,25 @@ describe("models settings components", () => {
     expect(markup).not.toContain("3+ 内置模型");
   });
 
+  test("renders the official brand icon for a known built-in provider", () => {
+    const markup = renderToStaticMarkup(
+      <ProviderCard entry={providerEntry("openai", "ai-builtin", 5)} onEdit={vi.fn()} />,
+    );
+
+    expect(markup).toContain("providers-row-avatar-icon");
+    expect(markup).toMatch(/<img[^>]*draggable="false"/);
+    expect(markup).not.toContain('class="providers-row-avatar">O');
+  });
+
+  test("falls back to the letter avatar without an official icon", () => {
+    const markup = renderToStaticMarkup(
+      <ProviderCard entry={providerEntry("radius", "ai-builtin")} onEdit={vi.fn()} />,
+    );
+
+    expect(markup).toContain('class="providers-row-avatar">R');
+    expect(markup).not.toContain("providers-row-avatar-icon");
+  });
+
   test("renders complete built-in model metadata", () => {
     const markup = renderToStaticMarkup(
       <ProviderBuiltInModelDetail

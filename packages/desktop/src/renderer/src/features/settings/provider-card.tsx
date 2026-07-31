@@ -1,6 +1,7 @@
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
 import { memo } from "react";
 import type { ProviderEntry } from "../../../../shared/providers-config-contracts.ts";
+import { providerIcon } from "./provider-icon.tsx";
 
 interface ProviderCardProps {
   entry: ProviderEntry;
@@ -22,9 +23,17 @@ export const ProviderCard = memo(function ProviderCard({ entry, onEdit }: Provid
         ? "动态模型目录"
         : `${entry.models.length} 个自定义模型`;
 
+  const icon = providerIcon(entry.key);
+
   return (
     <button type="button" className="providers-row" onClick={() => onEdit(entry.key)}>
-      <div className="providers-row-avatar">{entry.displayName.charAt(0).toUpperCase()}</div>
+      {icon ? (
+        <span className="providers-row-avatar providers-row-avatar-icon">
+          <img src={icon} alt="" draggable={false} />
+        </span>
+      ) : (
+        <span className="providers-row-avatar">{entry.displayName.charAt(0).toUpperCase()}</span>
+      )}
       <div className="providers-row-body">
         <div className="providers-row-heading">
           <span className="providers-row-name">{entry.displayName}</span>
