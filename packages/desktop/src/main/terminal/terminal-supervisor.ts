@@ -12,6 +12,8 @@ const MIN_COLS = 20;
 const MAX_COLS = 500;
 const MIN_ROWS = 4;
 const MAX_ROWS = 200;
+const TERMINAL_SHUTDOWN_GRACE_MS = 2_000;
+const TERMINAL_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export interface TerminalShellCommand {
   file: string;
@@ -41,6 +43,7 @@ export class TerminalSupervisor {
   private readonly projects: ProjectStore;
   private readonly changed: (event: TerminalEvent) => void;
   private readonly resolveShell: TerminalShellResolver;
+  private readonly restoreBlockedProjects = new Map<string, number>();
 
   constructor(
     projects: ProjectStore,
@@ -52,8 +55,36 @@ export class TerminalSupervisor {
     this.resolveShell = resolveShell;
   }
 
+  /** Close affected PTYs, await their exit, and block terminal input for the restore duration. */
+  async beginWorkspaceRestore(projectIds: readonly string[]): Promise<() => void> {
+    const uniqueProjectIds = [...new Set(projectIds)];
+    for (const projectId of uniqueProjectIds) {
+      this.restoreBlockedProjects.set(projectId, (this.restoreBlockedProjects.get(projectId) ?? 0) + 1);
+    }
+    const release = () => {
+      for (const projectId of uniqueProjectIds) {
+        const remaining = (this.restoreBlockedProjects.get(projectId) ?? 1) - 1;
+        if (remaining > 0) this.restoreBlockedProjects.set(projectId, remaining);
+        else this.restoreBlockedProjects.delete(projectId);
+      }
+    };
+    try {
+      await Promise.all(uniqueProjectIds.map((projectId) => this.disposeProjectAndWait(projectId)));
+    } catch (error) {
+      release();
+      throw error;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      release();
+    };
+  }
+
   /** 打开已有 PTY，若不存在则在 Project cwd 中创建。 */
   open(projectId: string, threadId: string, terminalId: string, cols: number, rows: number): TerminalSnapshot {
+    this.assertWorkspaceWritable(projectId);
     const key = terminalKey(projectId, threadId, terminalId);
     let terminal = this.terminals.get(key);
     if (!terminal) {
@@ -70,6 +101,7 @@ export class TerminalSupervisor {
 
   /** 将 renderer 输入写入指定 PTY。 */
   write(projectId: string, threadId: string, terminalId: string, data: string): void {
+    this.assertWorkspaceWritable(projectId);
     const terminal = this.require(projectId, threadId, terminalId);
     if (!terminal.running) throw new Error("终端进程已退出，请重新启动");
     terminal.pty.write(data);
@@ -85,6 +117,7 @@ export class TerminalSupervisor {
 
   /** 结束旧 PTY 并在相同 session cwd 中重新启动。 */
   restart(projectId: string, threadId: string, terminalId: string, cols: number, rows: number): TerminalSnapshot {
+    this.assertWorkspaceWritable(projectId);
     const key = terminalKey(projectId, threadId, terminalId);
     this.disposeTerminal(key);
     const terminal = this.create(projectId, threadId, terminalId, cols, rows);
@@ -112,6 +145,11 @@ export class TerminalSupervisor {
   /** 应用退出时释放全部 PTY。 */
   dispose(): void {
     for (const key of [...this.terminals.keys()]) this.disposeTerminal(key);
+    this.restoreBlockedProjects.clear();
+  }
+
+  private assertWorkspaceWritable(projectId: string): void {
+    if (this.restoreBlockedProjects.has(projectId)) throw new Error("终端在 checkpoint 恢复期间不可用");
   }
 
   private create(projectId: string, threadId: string, terminalId: string, cols: number, rows: number): TerminalProcess {
@@ -200,9 +238,52 @@ export class TerminalSupervisor {
     return terminal;
   }
 
-  private disposeTerminal(key: string): void {
+  private async disposeProjectAndWait(projectId: string): Promise<void> {
+    const prefix = `${projectId}:`;
+    const keys = [...this.terminals.keys()].filter((key) => key.startsWith(prefix));
+    await Promise.all(keys.map((key) => this.disposeTerminalAndWait(key)));
+  }
+
+  private async disposeTerminalAndWait(key: string): Promise<void> {
     const terminal = this.terminals.get(key);
     if (!terminal) return;
+    this.detachTerminal(key, terminal);
+    if (!terminal.running) return;
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let exit: pty.IDisposable | undefined;
+      let forceTimer: ReturnType<typeof setTimeout> | undefined;
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (forceTimer) clearTimeout(forceTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        exit?.dispose();
+        if (error) reject(error);
+        else resolve();
+      };
+      exit = terminal.pty.onExit(() => finish());
+      forceTimer = setTimeout(() => {
+        try {
+          terminal.pty.kill("SIGKILL");
+        } catch {
+          // The PTY may have exited between the grace timer and this signal.
+        }
+      }, TERMINAL_SHUTDOWN_GRACE_MS);
+      timeoutTimer = setTimeout(
+        () => finish(new Error(`Terminal process ${terminal.pty.pid} did not exit before checkpoint restore`)),
+        TERMINAL_SHUTDOWN_TIMEOUT_MS,
+      );
+      try {
+        terminal.pty.kill();
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private detachTerminal(key: string, terminal: TerminalProcess): void {
     this.terminals.delete(key);
     terminal.disposed = true;
     if (terminal.dataFlushTimer) clearTimeout(terminal.dataFlushTimer);
@@ -211,6 +292,12 @@ export class TerminalSupervisor {
     terminal.pendingDataLength = 0;
     terminal.data?.dispose();
     terminal.exit?.dispose();
+  }
+
+  private disposeTerminal(key: string): void {
+    const terminal = this.terminals.get(key);
+    if (!terminal) return;
+    this.detachTerminal(key, terminal);
     if (terminal.running) terminal.pty.kill();
   }
 

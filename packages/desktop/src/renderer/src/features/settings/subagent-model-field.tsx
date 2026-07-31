@@ -7,6 +7,7 @@ import { Input } from "@renderer/shared/ui/input";
 import { useDeferredValue, useMemo, useState } from "react";
 import type { SubagentModelOption } from "../../../../shared/subagent-contracts.ts";
 import { SubagentFormField } from "./subagent-form-field.tsx";
+import { SubagentModelSelectOptions } from "./subagent-model-select-options.tsx";
 
 interface SubagentModelFieldProps {
   initialModel: string;
@@ -26,33 +27,35 @@ export function SubagentModelField({ initialModel, models, onValueChange }: Suba
   return (
     <div className="subagent-form-grid">
       <SubagentFormField label="筛选模型">
-        <Input
-          type="search"
-          value={search}
-          placeholder="输入模型名称或 ID 搜索"
-          onChange={(event) => setSearch(event.target.value)}
-        />
+        {({ controlId, labelId }) => (
+          <Input
+            id={controlId}
+            aria-labelledby={labelId}
+            type="search"
+            value={search}
+            placeholder="输入模型名称或 ID 搜索"
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        )}
       </SubagentFormField>
       <SubagentFormField label="模型">
-        <SelectRoot
-          value={model}
-          onValueChange={(value) => {
-            setModel(value);
-            onValueChange(value);
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue placeholder="继承当前会话模型" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">继承当前会话模型</SelectItem>
-            {filteredModels.map((option) => (
-              <SelectItem key={option.id} value={option.id}>
-                {option.name} ({option.id})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </SelectRoot>
+        {({ controlId, labelId }) => (
+          <SelectRoot
+            value={model}
+            onValueChange={(value) => {
+              setModel(value);
+              onValueChange(value);
+            }}
+          >
+            <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+              <SelectValue placeholder="继承当前会话模型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">继承当前会话模型</SelectItem>
+              <SubagentModelSelectOptions models={filteredModels} />
+            </SelectContent>
+          </SelectRoot>
+        )}
       </SubagentFormField>
     </div>
   );

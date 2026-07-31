@@ -107,8 +107,13 @@ describe("SidecarWorkerClient lifecycle", () => {
     if (!pid) throw new Error("Stubborn sidecar PID is missing");
 
     const pendingMutation = client.request({ type: "rename", title: "draft" }, 10_000);
+    const pendingDiff = client.request(
+      { type: "getCheckpointDiff", fromCheckpointId: "before", toCheckpointId: "after", path: "file.txt" },
+      10_000,
+    );
     await client.shutdown(25);
     await expect(pendingMutation).rejects.not.toMatchObject({ code: "SIDECAR_MUTATION_UNKNOWN_OUTCOME" });
+    await expect(pendingDiff).rejects.not.toMatchObject({ code: "SIDECAR_MUTATION_UNKNOWN_OUTCOME" });
 
     expect(() => process.kill(pid, 0)).toThrow();
   }, 5_000);

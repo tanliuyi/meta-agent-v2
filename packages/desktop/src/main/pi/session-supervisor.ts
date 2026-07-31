@@ -21,6 +21,12 @@ import type {
   SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
+import type {
+  SessionCheckpointDiffInput,
+  SessionCheckpointDiffResult,
+  SessionCheckpointRestoreInput,
+  SessionCheckpointRestoreResult,
+} from "../../shared/pi-rewind-contracts.ts";
 import type { ThreadWorkerRegistry } from "../sidecar/thread-worker-registry.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 
@@ -173,6 +179,14 @@ export class SessionSupervisor {
 
   reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult> {
     return this.workers.reloadResources(input);
+  }
+
+  getCheckpointDiff(input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult> {
+    return this.workers.getCheckpointDiff(input);
+  }
+
+  restoreCheckpoint(input: SessionCheckpointRestoreInput): Promise<SessionCheckpointRestoreResult> {
+    return this.workers.restoreCheckpoint(input);
   }
 
   branch(input: SessionBranchInput): Promise<SessionBranchResult> {

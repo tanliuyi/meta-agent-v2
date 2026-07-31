@@ -23,6 +23,7 @@ import type {
   SubagentSettingsScope,
   SubagentSkillOption,
 } from "../../../../shared/subagent-contracts.ts";
+import { SubagentModelSelectOptions } from "./subagent-model-select-options.tsx";
 import { SubagentSkillsField } from "./subagent-skills-field.tsx";
 
 interface SubagentChainDialogProps {
@@ -215,11 +216,7 @@ export function SubagentChainDialog({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="">使用智能体模型</SelectItem>
-                        {models.map((model) => (
-                          <SelectItem key={model.id} value={model.id}>
-                            {model.name} ({model.id})
-                          </SelectItem>
-                        ))}
+                        <SubagentModelSelectOptions models={models} />
                       </SelectContent>
                     </SelectRoot>
                   </label>

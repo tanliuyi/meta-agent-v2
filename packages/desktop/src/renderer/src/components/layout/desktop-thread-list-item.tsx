@@ -3,7 +3,6 @@ import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
-import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
@@ -169,11 +168,6 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         </div>
       </ContextMenu.Trigger>
       <ContextMenuContent>
-        {thread.origin === "subagent" ? (
-          <ContextMenuItem disabled={props.isSwitching} onSelect={() => props.onOpen(thread)}>
-            <Eye /> 查看运行详情
-          </ContextMenuItem>
-        ) : null}
         {activeSubagent ? (
           <ContextMenuItem
             variant="destructive"

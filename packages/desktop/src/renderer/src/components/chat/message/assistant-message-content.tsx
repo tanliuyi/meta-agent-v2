@@ -1,4 +1,5 @@
 import { ErrorPrimitive, MessagePrimitive, useAuiState } from "@assistant-ui/react";
+import AlertCircle from "lucide-react/dist/esm/icons/circle-alert.mjs";
 import { useMemo } from "react";
 import { useThinkingVisibility } from "../../../state/thinking-visibility.tsx";
 import { StreamdownText } from "../../assistant-ui/streamdown/streamdown-text.tsx";
@@ -89,8 +90,9 @@ export function AssistantMessageContent({
         }}
       </MessagePrimitive.GroupedParts>
       <MessagePrimitive.Error>
-        <ErrorPrimitive.Root className="mt-2 rounded-xl border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-          <ErrorPrimitive.Message className="line-clamp-2" />
+        <ErrorPrimitive.Root className="mt-1 flex flex-row items-start gap-1.5 py-1 text-md leading-relaxed text-muted-foreground">
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive/70" aria-hidden="true" />
+          <ErrorPrimitive.Message className="line-clamp-2 min-w-0" />
         </ErrorPrimitive.Root>
       </MessagePrimitive.Error>
     </div>

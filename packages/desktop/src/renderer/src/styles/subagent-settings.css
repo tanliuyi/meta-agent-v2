@@ -277,6 +277,10 @@
   border-bottom: 1px solid hsl(var(--border));
 }
 
+.subagent-agent-dialog {
+  height: min(34rem, calc(100vh - 32px));
+}
+
 .subagent-editor-header-text h2 {
   margin: 0;
   font-size: var(--type-size-title);
@@ -299,6 +303,32 @@
   flex-direction: column;
   gap: 16px;
   padding: 20px 24px 24px;
+  overflow-y: auto;
+}
+
+.subagent-agent-form {
+  padding: 0;
+  overflow: hidden;
+}
+
+.subagent-editor-tabs {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.subagent-editor-tab-list {
+  margin: 16px 24px 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
+}
+
+.subagent-editor-tab-content {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 24px 24px;
   overflow-y: auto;
 }
 

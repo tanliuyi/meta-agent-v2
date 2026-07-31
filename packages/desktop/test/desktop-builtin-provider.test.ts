@@ -17,13 +17,20 @@ describe("DesktopBuiltinProviderRegistry", () => {
     );
     expect(definitions).toContainEqual(
       expect.objectContaining({
+        id: "pi-rewind",
+        source: "builtin",
+        capabilities: ["events.subscribe", "messages.custom", "session.read", "ui.notify"],
+      }),
+    );
+    expect(definitions).toContainEqual(
+      expect.objectContaining({
         id: "pi-subagents",
         source: "builtin",
         capabilities: expect.arrayContaining(["events.subscribe", "tools.register", "commands.register"]),
       }),
     );
     expect(factories.map(({ name }) => name)).toEqual(
-      expect.arrayContaining(["desktop:pi-hermes-memory", "desktop:pi-subagents"]),
+      expect.arrayContaining(["desktop:pi-hermes-memory", "desktop:pi-rewind", "desktop:pi-subagents"]),
     );
   });
 

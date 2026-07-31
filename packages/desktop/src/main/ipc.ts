@@ -38,6 +38,12 @@ import type {
 } from "../shared/memory-settings-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
 import type {
+  SessionCheckpointDiffInput,
+  SessionCheckpointDiffResult,
+  SessionCheckpointRestoreInput,
+  SessionCheckpointRestoreResult,
+} from "../shared/pi-rewind-contracts.ts";
+import type {
   SavePluginConfigurationInput,
   SavePluginConfigurationResult,
 } from "../shared/plugin-configuration-contracts.ts";
@@ -414,7 +420,10 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.projectsOpenExternally, async (_event, projectId: string) => {
     await openPath(projects.getCwd(projectId));
   });
-  ipcMain.handle(CHANNELS.projectsRemove, (_event, projectId: string) => projects.remove(projectId));
+  ipcMain.handle(CHANNELS.projectsRemove, async (_event, projectId: string) => {
+    terminals.disposeProject(projectId);
+    return projects.remove(projectId);
+  });
 
   ipcMain.handle(CHANNELS.sessionsList, (_event, projectId: string, includeArchived?: boolean) =>
     sessions.list(projectId, includeArchived),
@@ -474,6 +483,16 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsReload, (_event, input: SessionReloadInput) => sessions.reload(input));
   ipcMain.handle(CHANNELS.sessionsReloadResources, (_event, input: SessionResourceReloadInput) =>
     sessions.reloadResources(input),
+  );
+  ipcMain.handle(
+    CHANNELS.sessionsGetCheckpointDiff,
+    (_event, input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult> =>
+      sessions.getCheckpointDiff(input),
+  );
+  ipcMain.handle(
+    CHANNELS.sessionsRestoreCheckpoint,
+    (_event, input: SessionCheckpointRestoreInput): Promise<SessionCheckpointRestoreResult> =>
+      sessions.restoreCheckpoint(input),
   );
   ipcMain.handle(
     CHANNELS.sessionsBranch,

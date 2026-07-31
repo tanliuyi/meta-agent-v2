@@ -24,6 +24,7 @@ import type {
 import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
 import type { ModelsModelDefinition } from "../models/models-config-schema.ts";
 import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
+import piRewindExtension from "./extensions/pi-rewind/src/index.ts";
 import subagentsExtension from "./extensions/pi-subagents/index.ts";
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 
@@ -55,6 +56,16 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       ],
     },
     factory: { name: "desktop:pi-hermes-memory", factory: hermesMemoryExtension },
+  },
+  {
+    definition: {
+      id: "pi-rewind",
+      displayName: "Checkpoint History",
+      source: "builtin",
+      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+      capabilities: ["events.subscribe", "messages.custom", "session.read", "ui.notify"],
+    },
+    factory: { name: "desktop:pi-rewind", factory: piRewindExtension },
   },
   {
     definition: {

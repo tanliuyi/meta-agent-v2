@@ -21,6 +21,8 @@ interface ComboboxProps {
   placeholder?: string;
   emptyText?: string;
   className?: string;
+  inputId?: string;
+  ariaLabelledBy?: string;
   onValueChange(value: string): void;
 }
 
@@ -34,6 +36,8 @@ export function Combobox({
   placeholder,
   emptyText = "无匹配",
   className,
+  inputId,
+  ariaLabelledBy,
   onValueChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
@@ -51,16 +55,17 @@ export function Combobox({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <div
           className={cn(
             "border-input bg-background ring-offset-background flex h-(--control-height-input) w-full cursor-text items-center rounded-xl border px-3 text-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-ring",
             className,
           )}
-          onClick={() => setOpen(true)}
         >
           <input
+            id={inputId}
+            aria-labelledby={ariaLabelledBy}
             ref={inputRef}
             className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
             placeholder={placeholder}
@@ -69,12 +74,11 @@ export function Combobox({
               onValueChange(event.target.value);
               if (!open) setOpen(true);
             }}
-            onFocus={() => setOpen(true)}
           />
         </div>
       </PopoverTrigger>
       <PopoverContent
-        className="w-(--radix-popover-trigger-width) p-0"
+        className="z-(--stack-menu) w-(--radix-popover-trigger-width) p-0"
         align="start"
         onOpenAutoFocus={(event) => event.preventDefault()}
       >

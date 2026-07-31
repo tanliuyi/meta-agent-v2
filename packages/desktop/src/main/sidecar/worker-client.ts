@@ -461,6 +461,7 @@ function isMutationCommand(commandType: SidecarCommand["type"]): boolean {
     "bootstrap",
     "subagentBootstrap",
     "getSummary",
+    "getCheckpointDiff",
     "listSessions",
     "resolveSession",
     "getDraftConfig",

@@ -5,13 +5,6 @@ import { SelectTrigger } from "@renderer/components/assistant-ui/select/select-t
 import { SelectValue } from "@renderer/components/assistant-ui/select/select-value";
 import { TooltipIconButton } from "@renderer/components/assistant-ui/tooltip-icon-button";
 import { Button } from "@renderer/shared/ui/button";
-import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
-import { Dialog } from "@renderer/shared/ui/dialog";
-import { DialogContent } from "@renderer/shared/ui/dialog-content";
-import { DialogDescription } from "@renderer/shared/ui/dialog-description";
-import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
-import { DialogHeader } from "@renderer/shared/ui/dialog-header";
-import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
 import { Switch } from "@renderer/shared/ui/switch";
 import { Tabs } from "@renderer/shared/ui/tabs";
@@ -28,77 +21,26 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import Wrench from "lucide-react/dist/esm/icons/wrench.mjs";
-import { type FormEvent, useState } from "react";
+import { useRef } from "react";
 import type {
-  MemoryEntryCollection,
-  MemoryEntrySummary,
   MemoryEntryTarget,
   MemoryOverflowStrategy,
   MemoryPolicyStyle,
   MemoryPromptMode,
   MemorySessionSearchVariant,
 } from "../../../../shared/memory-settings-contracts.ts";
+import { MemorySettingsDialogs, type MemorySettingsDialogsHandle } from "./memory-settings-dialogs.tsx";
 import { useMemorySettingsController } from "./use-memory-settings-controller.ts";
-
-interface EntryEditorState {
-  mode: "add" | "replace";
-  target: MemoryEntryTarget;
-  projectId?: string;
-  projectName?: string;
-  entryId?: string;
-  content: string;
-}
-
-interface PendingDelete {
-  target: MemoryEntryTarget;
-  projectId?: string;
-  entryId: string;
-}
 
 export function MemorySettingsPage() {
   const controller = useMemorySettingsController();
-  const [editor, setEditor] = useState<EntryEditorState>();
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete>();
+  const dialogsRef = useRef<MemorySettingsDialogsHandle>(null);
   const draft = controller.draft;
   const snapshot = controller.snapshot;
   const busy = controller.status === "loading" || controller.status === "saving" || controller.status === "working";
   const canSave = controller.dirty && controller.errors.length === 0 && !busy;
   const globalCollections = snapshot?.collections.filter(({ target }) => target !== "project") ?? [];
   const projectCollections = snapshot?.collections.filter(({ target }) => target === "project") ?? [];
-
-  function openAdd(collection: MemoryEntryCollection): void {
-    setEditor({
-      target: collection.target,
-      projectId: collection.projectId,
-      projectName: collection.projectName,
-      mode: "add",
-      content: "",
-    });
-  }
-
-  function openReplace(collection: MemoryEntryCollection, entry: MemoryEntrySummary): void {
-    setEditor({
-      target: collection.target,
-      projectId: collection.projectId,
-      projectName: collection.projectName,
-      mode: "replace",
-      entryId: entry.id,
-      content: entry.content,
-    });
-  }
-
-  async function submitEntry(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (!editor?.content.trim()) return;
-    const success = await controller.mutateEntry({
-      action: editor.mode,
-      target: editor.target,
-      projectId: editor.projectId,
-      entryId: editor.entryId,
-      content: editor.content,
-    });
-    if (success) setEditor(undefined);
-  }
 
   return (
     <div className="settings-content memory-settings">
@@ -409,7 +351,7 @@ export function MemorySettingsPage() {
                         variant="outline"
                         size="sm"
                         disabled={busy || controller.dirty}
-                        onClick={() => openAdd(collection)}
+                        onClick={() => dialogsRef.current?.openAdd(collection)}
                       >
                         <Plus />
                         新增
@@ -422,7 +364,7 @@ export function MemorySettingsPage() {
                             type="button"
                             className="memory-entry-text"
                             disabled={busy || controller.dirty}
-                            onClick={() => openReplace(collection, entry)}
+                            onClick={() => dialogsRef.current?.openReplace(collection, entry)}
                           >
                             {entry.content}
                           </button>
@@ -430,7 +372,7 @@ export function MemorySettingsPage() {
                             <TooltipIconButton
                               tooltip="编辑"
                               disabled={busy || controller.dirty}
-                              onClick={() => openReplace(collection, entry)}
+                              onClick={() => dialogsRef.current?.openReplace(collection, entry)}
                             >
                               <Pencil />
                             </TooltipIconButton>
@@ -438,7 +380,7 @@ export function MemorySettingsPage() {
                               tooltip="删除"
                               disabled={busy || controller.dirty}
                               onClick={() =>
-                                setPendingDelete({
+                                dialogsRef.current?.requestDelete({
                                   target: collection.target,
                                   projectId: collection.projectId,
                                   entryId: entry.id,
@@ -487,7 +429,7 @@ export function MemorySettingsPage() {
                         variant="outline"
                         size="sm"
                         disabled={busy || controller.dirty}
-                        onClick={() => openAdd(collection)}
+                        onClick={() => dialogsRef.current?.openAdd(collection)}
                       >
                         <Plus />
                         新增
@@ -500,7 +442,7 @@ export function MemorySettingsPage() {
                             type="button"
                             className="memory-entry-text"
                             disabled={busy || controller.dirty}
-                            onClick={() => openReplace(collection, entry)}
+                            onClick={() => dialogsRef.current?.openReplace(collection, entry)}
                           >
                             {entry.content}
                           </button>
@@ -508,7 +450,7 @@ export function MemorySettingsPage() {
                             <TooltipIconButton
                               tooltip="编辑"
                               disabled={busy || controller.dirty}
-                              onClick={() => openReplace(collection, entry)}
+                              onClick={() => dialogsRef.current?.openReplace(collection, entry)}
                             >
                               <Pencil />
                             </TooltipIconButton>
@@ -516,7 +458,7 @@ export function MemorySettingsPage() {
                               tooltip="删除"
                               disabled={busy || controller.dirty}
                               onClick={() =>
-                                setPendingDelete({
+                                dialogsRef.current?.requestDelete({
                                   target: "project",
                                   projectId: collection.projectId,
                                   entryId: entry.id,
@@ -610,56 +552,7 @@ export function MemorySettingsPage() {
         </Tabs>
       )}
 
-      <Dialog open={editor !== undefined} onOpenChange={(open) => !open && setEditor(undefined)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editor?.mode === "add" ? "新增记忆" : "编辑记忆"}</DialogTitle>
-            <DialogDescription>
-              {editor?.projectName ? `项目：${editor.projectName}` : "保存到持久记忆"}
-            </DialogDescription>
-          </DialogHeader>
-          <form className="memory-entry-form" onSubmit={(event) => void submitEntry(event)}>
-            <Textarea
-              aria-label="记忆内容"
-              autoFocus
-              value={editor?.content ?? ""}
-              onChange={(event) =>
-                setEditor((current) => (current ? { ...current, content: event.target.value } : current))
-              }
-            />
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditor(undefined)}>
-                取消
-              </Button>
-              <Button type="submit" disabled={!editor?.content.trim() || busy}>
-                保存
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={pendingDelete !== undefined}
-        title="删除这条记忆？"
-        description="删除后会同步更新记忆搜索索引。"
-        confirmLabel="删除"
-        onCancel={() => setPendingDelete(undefined)}
-        onConfirm={() => {
-          if (!pendingDelete) return;
-          void controller
-            .mutateEntry({ action: "remove", ...pendingDelete })
-            .then((success) => success && setPendingDelete(undefined));
-        }}
-      />
-      <ConfirmDialog
-        open={controller.routeBlocked}
-        title="放弃未保存的记忆设置？"
-        description="离开此页面会丢失当前配置修改。"
-        confirmLabel="放弃并离开"
-        onCancel={controller.cancelRouteChange}
-        onConfirm={controller.discardAndProceed}
-      />
+      <MemorySettingsDialogs ref={dialogsRef} controller={controller} busy={busy} />
     </div>
   );
 }

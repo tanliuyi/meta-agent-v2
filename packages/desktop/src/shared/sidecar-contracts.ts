@@ -18,6 +18,7 @@ import type {
   Thread,
 } from "./contracts.ts";
 import type { ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
+import type { SessionCheckpointDiffResult, SessionCheckpointRestoreResult } from "./pi-rewind-contracts.ts";
 import type {
   SubagentHostRequest,
   SubagentRunEvent,
@@ -230,6 +231,8 @@ export type ThreadSidecarCommand =
   | { type: "edit"; input: SessionEditInput }
   | { type: "reload"; input: SessionReloadInput }
   | { type: "reloadResources"; input: SessionResourceReloadInput }
+  | { type: "getCheckpointDiff"; fromCheckpointId: string; toCheckpointId: string; path: string }
+  | { type: "restoreCheckpoint"; checkpointId: string; expectedCheckpointId: string }
   | { type: "cancel" }
   | { type: "clearQueue" }
   | { type: "compact" }
@@ -298,6 +301,8 @@ export type SidecarCommandResult =
   | Thread
   | Thread[]
   | SessionRemoveResult
+  | SessionCheckpointDiffResult
+  | SessionCheckpointRestoreResult
   | { path: string; id: string }
   | { pong: true }
   | null;

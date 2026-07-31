@@ -703,6 +703,101 @@ describe("ThreadWorkerRegistry", () => {
     expect(harness.clients[1]?.shutdownCount).toBe(1);
   });
 
+  it("uses a bounded request deadline for checkpoint diffs", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    await registry.getCheckpointDiff({
+      projectId: "project",
+      threadId: "thread",
+      fromCheckpointId: "before",
+      toCheckpointId: "after",
+      path: "file.txt",
+    });
+
+    expect(harness.clients[0]?.requestTimeouts).toContainEqual({ type: "getCheckpointDiff", timeoutMs: 35_000 });
+    await registry.dispose();
+  });
+
+  it("rejects checkpoint restore while another project in the workspace is running", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "first");
+    await registry.attach("overlap", "second");
+    harness.clients[1]?.emit({ type: "summary-changed", summary: { ...thread("second"), running: true } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(
+      registry.restoreCheckpoint({
+        projectId: "project",
+        threadId: "first",
+        checkpointId: "before",
+        expectedCheckpointId: "after",
+      }),
+    ).rejects.toThrow("overlap/second");
+    expect(harness.clients[0]?.requests).not.toContain("restoreCheckpoint");
+    await registry.dispose();
+  });
+
+  it("allows checkpoint restore while an unrelated workspace worker is starting", async () => {
+    const harness = createHarness(userDataDir);
+    harness.options.getWorkspaceKey = async (projectId) =>
+      projectId === "unrelated" ? "workspace-other" : "workspace";
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "first");
+    const readyGate = deferred<void>();
+    harness.options.createWorkerClient = (clientOptions) => {
+      const client = new FakeWorkerClient(clientOptions, readyGate);
+      harness.clients.push(client);
+      return client;
+    };
+    const opening = registry.attach("unrelated", "second");
+    await waitFor(() => harness.clients[1]?.readyStarted === true);
+
+    await expect(
+      registry.restoreCheckpoint({
+        projectId: "project",
+        threadId: "first",
+        checkpointId: "before",
+        expectedCheckpointId: "after",
+      }),
+    ).resolves.toEqual({ checkpointId: "before", restoredFiles: 1 });
+
+    readyGate.resolve();
+    await opening;
+    await registry.dispose();
+  });
+
+  it("blocks new workspace commands while checkpoint restore is in progress", async () => {
+    const checkpointGate = deferred<void>();
+    const harness = createHarness(userDataDir, { checkpointGate });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "first");
+    await registry.attach("overlap", "second");
+
+    const restoring = registry.restoreCheckpoint({
+      projectId: "project",
+      threadId: "first",
+      checkpointId: "before",
+      expectedCheckpointId: "after",
+    });
+    await waitFor(() => harness.clients[0]?.requests.includes("restoreCheckpoint") === true);
+    await expect(
+      registry.prompt({
+        requestId: "during-restore",
+        projectId: "overlap",
+        threadId: "second",
+        text: "blocked",
+        images: [],
+      }),
+    ).rejects.toThrow("restoring a checkpoint");
+
+    checkpointGate.resolve();
+    await expect(restoring).resolves.toEqual({ checkpointId: "before", restoredFiles: 1 });
+    await registry.dispose();
+  });
+
   it("requires explicit abort before replacing a running worker", async () => {
     const harness = createHarness(userDataDir);
     const registry = new ThreadWorkerRegistry(harness.options);
@@ -847,6 +942,7 @@ describe("ThreadWorkerRegistry", () => {
       reparentedThreads: [],
     });
     expect(harness.metadataRemoveCold).toHaveBeenCalledWith("project", "/workspace", "parent", "subtree");
+    expect(harness.cleanupSessionCheckpoints).toHaveBeenCalledWith("project", ["parent", "child", "grandchild"]);
     expect(begun).toEqual(["parent", "child", "grandchild"]);
     expect(ended).toEqual(["grandchild", "child", "parent"]);
     await registry.dispose();
@@ -886,6 +982,7 @@ interface Harness {
   metadataRenameCold: ReturnType<typeof vi.fn>;
   metadataList: ReturnType<typeof vi.fn>;
   metadataRemoveCold: ReturnType<typeof vi.fn>;
+  cleanupSessionCheckpoints: ReturnType<typeof vi.fn>;
   resolveExtensions: ReturnType<typeof vi.fn>;
   resync: ReturnType<typeof vi.fn>;
 }
@@ -899,6 +996,7 @@ function createHarness(
     failGeneration?: string;
     shutdownGate?: ReturnType<typeof deferred<void>>;
     reloadGate?: ReturnType<typeof deferred<void>>;
+    checkpointGate?: ReturnType<typeof deferred<void>>;
     generationReferences?: ThreadWorkerRegistryOptions["generationReferences"];
   },
 ): Harness {
@@ -912,6 +1010,7 @@ function createHarness(
     removedThreadIds: policy === "subtree" && threadId === "parent" ? ["parent", "child", "grandchild"] : [threadId],
     reparentedThreads: [],
   }));
+  const cleanupSessionCheckpoints = vi.fn(async () => undefined);
   const metadata = {
     list: metadataList,
     getDraftConfig: vi.fn(async () => ({
@@ -946,10 +1045,12 @@ function createHarness(
     extensionSourcePolicy,
     generationReferences: overrides?.generationReferences,
     getCwd: () => "/workspace",
+    getWorkspaceKey: async () => "workspace",
     push,
     failed,
     resync,
     catalogChanged,
+    cleanupSessionCheckpoints,
     createWorkerClient: (clientOptions) => {
       const client = new FakeWorkerClient(
         clientOptions,
@@ -957,6 +1058,7 @@ function createHarness(
         overrides?.failGeneration,
         overrides?.shutdownGate,
         overrides?.reloadGate,
+        overrides?.checkpointGate,
       );
       clients.push(client);
       return client;
@@ -973,6 +1075,7 @@ function createHarness(
     metadataRenameCold,
     metadataList,
     metadataRemoveCold,
+    cleanupSessionCheckpoints,
     resolveExtensions,
     resync,
   };
@@ -982,6 +1085,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   readonly instanceId: string;
   readonly pid: number;
   readonly requests: SidecarCommand["type"][] = [];
+  readonly requestTimeouts: Array<{ type: SidecarCommand["type"]; timeoutMs?: number | null }> = [];
   readonly acknowledgements: number[] = [];
   readonly bindingGeneration: string;
   readonly shellPath: string | undefined;
@@ -993,6 +1097,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   private readonly failGeneration?: string;
   private readonly shutdownGate?: ReturnType<typeof deferred<void>>;
   private readonly reloadGate?: ReturnType<typeof deferred<void>>;
+  private readonly checkpointGate?: ReturnType<typeof deferred<void>>;
 
   constructor(
     options: WorkerClientOptions,
@@ -1000,12 +1105,14 @@ class FakeWorkerClient implements ThreadWorkerClient {
     failGeneration?: string,
     shutdownGate?: ReturnType<typeof deferred<void>>,
     reloadGate?: ReturnType<typeof deferred<void>>,
+    checkpointGate?: ReturnType<typeof deferred<void>>,
   ) {
     this.options = options;
     this.readyGate = readyGate;
     this.failGeneration = failGeneration;
     this.shutdownGate = shutdownGate;
     this.reloadGate = reloadGate;
+    this.checkpointGate = checkpointGate;
     const sequence = fakeWorkerSequence++;
     this.instanceId = `worker-${sequence}`;
     this.pid = 10_000 + sequence;
@@ -1031,13 +1138,18 @@ class FakeWorkerClient implements ThreadWorkerClient {
     };
   }
 
-  async request<T>(command: SidecarCommand): Promise<T> {
+  async request<T>(command: SidecarCommand, timeoutMs?: number | null): Promise<T> {
     this.requests.push(command.type);
+    this.requestTimeouts.push({ type: command.type, timeoutMs });
     if (command.type === "bootstrap") return this.bootstrap as unknown as T;
     if (command.type === "getSummary") return thread(this.bootstrap.threadId) as unknown as T;
     if (command.type === "reloadResources") {
       await this.reloadGate?.promise;
       return { accepted: true, queued: false } as T;
+    }
+    if (command.type === "restoreCheckpoint") {
+      await this.checkpointGate?.promise;
+      return { checkpointId: command.checkpointId, restoredFiles: 1 } as T;
     }
     return null as T;
   }

@@ -1,7 +1,9 @@
 import Cpu from "lucide-react/dist/esm/icons/cpu.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
+import Square from "lucide-react/dist/esm/icons/square.mjs";
 import type { PiThreadPhase, SessionControlState } from "../../../../shared/contracts.ts";
 import { getThinkingLevelLabel } from "../../shared/lib/thinking-level-label.ts";
+import { Button } from "../../shared/ui/button.tsx";
 
 const SUBAGENT_PHASE_LABELS: Record<Exclude<PiThreadPhase, "idle">, string> = {
   running: "子智能体运行中",
@@ -14,19 +16,27 @@ interface ReadOnlySessionStatusProps {
   phase: PiThreadPhase;
   model: SessionControlState["model"];
   thinkingLevel: SessionControlState["thinkingLevel"];
+  onStop?(): void;
+  stopPending?: boolean;
 }
 
-export function ReadOnlySessionStatus({ phase, model, thinkingLevel }: ReadOnlySessionStatusProps) {
+export function ReadOnlySessionStatus({
+  phase,
+  model,
+  thinkingLevel,
+  onStop,
+  stopPending,
+}: ReadOnlySessionStatusProps) {
   const syncing = phase === "idle";
 
   return (
     <div
-      className="border-border/60 flex min-h-10 items-center justify-center gap-2 rounded-xl border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm"
+      className="border-border/60 flex min-h-10 items-center gap-2 rounded-xl border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm"
       role="status"
       aria-live="polite"
     >
       <LoaderCircle className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
-      <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-3 gap-y-1">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-x-3 gap-y-1">
         <span className="font-medium text-foreground/80">
           {syncing ? "正在同步子智能体会话" : SUBAGENT_PHASE_LABELS[phase]}
         </span>
@@ -40,6 +50,18 @@ export function ReadOnlySessionStatus({ phase, model, thinkingLevel }: ReadOnlyS
         {!syncing ? <span>思考：{getThinkingLevelLabel(thinkingLevel)}</span> : null}
         <span>{syncing ? "请稍候" : "此会话暂时只读"}</span>
       </div>
+      {!syncing && onStop ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 text-destructive hover:text-destructive"
+          disabled={stopPending}
+          onClick={onStop}
+        >
+          <Square className="size-3.5" aria-hidden="true" />
+          停止运行
+        </Button>
+      ) : null}
     </div>
   );
 }

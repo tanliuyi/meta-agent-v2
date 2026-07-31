@@ -11,6 +11,7 @@ import { SessionThreadActivity } from "./session-thread-activity.tsx";
 import { isThreadActivityVisible } from "./thread-activity-indicator.tsx";
 import {
   buildThreadTurns,
+  mergeSelectedVirtualIndexes,
   stabilizeThreadTurnIds,
   type ThreadMessageRow,
   type ThreadTurn,
@@ -55,12 +56,7 @@ export function Messages() {
   const rangeExtractor = useCallback(
     (range: Range) => {
       const indexes = defaultRangeExtractor(range);
-      if (!selectionRange) return indexes;
-      const selected = Array.from(
-        { length: selectionRange.end - selectionRange.start + 1 },
-        (_, offset) => selectionRange.start + offset,
-      );
-      return [...new Set([...indexes, ...selected])].sort((left, right) => left - right);
+      return selectionRange ? mergeSelectedVirtualIndexes(indexes, selectionRange, range.count) : indexes;
     },
     [selectionRange],
   );
@@ -136,6 +132,22 @@ export function Messages() {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    const element = scrollerRef.current;
+    const threadRoot = element?.parentElement;
+    if (!element || !threadRoot) return;
+    const syncScrollbarWidth = () => {
+      threadRoot.style.setProperty("--thread-scrollbar-width", `${element.offsetWidth - element.clientWidth}px`);
+    };
+    syncScrollbarWidth();
+    const observer = new ResizeObserver(syncScrollbarWidth);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      threadRoot.style.removeProperty("--thread-scrollbar-width");
+    };
+  }, []);
+
   useEffect(() => {
     const element = scrollerRef.current;
     const content = contentRef.current;
@@ -201,7 +213,7 @@ export function Messages() {
         data-slot="aui_thread-viewport"
         className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain"
       >
-        <div ref={contentRef} className="mx-auto w-full max-w-(--layout-thread-max-width) px-4">
+        <div ref={contentRef} className="mx-auto w-full max-w-(--layout-thread-max-width) px-4 pb-2">
           <div ref={virtualContentRef} style={{ paddingTop, paddingBottom }}>
             {items.map((item) => {
               if (activityVisible && item.index === activityIndex) {

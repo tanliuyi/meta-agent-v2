@@ -28,6 +28,13 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
     ],
   },
   {
+    id: "pi-rewind",
+    displayName: "Checkpoint History",
+    source: "builtin",
+    hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+    capabilities: ["events.subscribe", "messages.custom", "session.read", "ui.notify"],
+  },
+  {
     id: "pi-subagents",
     displayName: "Subagents",
     source: "builtin",

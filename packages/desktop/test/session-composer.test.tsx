@@ -49,4 +49,49 @@ describe("ReadOnlySessionStatus", () => {
     expect(markup).toContain("思考：极高");
     expect(markup).not.toContain("模型：");
   });
+
+  it("运行时展示停止按钮,同步时隐藏", () => {
+    const running = renderToStaticMarkup(
+      createElement(ReadOnlySessionStatus, {
+        phase: "running",
+        model: undefined,
+        thinkingLevel: "off",
+        onStop: () => undefined,
+      }),
+    );
+    const syncing = renderToStaticMarkup(
+      createElement(ReadOnlySessionStatus, {
+        phase: "idle",
+        model: undefined,
+        thinkingLevel: "off",
+        onStop: () => undefined,
+      }),
+    );
+    const withoutHandler = renderToStaticMarkup(
+      createElement(ReadOnlySessionStatus, {
+        phase: "running",
+        model: undefined,
+        thinkingLevel: "off",
+      }),
+    );
+
+    expect(running).toContain("停止运行");
+    expect(syncing).not.toContain("停止运行");
+    expect(withoutHandler).not.toContain("停止运行");
+  });
+
+  it("停止请求进行中时禁用停止按钮", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReadOnlySessionStatus, {
+        phase: "running",
+        model: undefined,
+        thinkingLevel: "off",
+        onStop: () => undefined,
+        stopPending: true,
+      }),
+    );
+
+    expect(markup).toContain("停止运行");
+    expect(markup).toContain("disabled");
+  });
 });

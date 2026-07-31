@@ -10,6 +10,7 @@ import { MemorySkillsNotification } from "./hermes-memory/memory-skills-notifica
 import { MemoryUpdatedNotification } from "./hermes-memory/memory-updated-notification.tsx";
 import { ProjectMemoryListNotification } from "./hermes-memory/project-memory-list-notification.tsx";
 import { SessionIndexNotification } from "./hermes-memory/session-index-notification.tsx";
+import { CheckpointNotification } from "./pi-rewind/checkpoint-notification.tsx";
 import { SubagentCompletionNotification } from "./subagents/subagent-completion-notification.tsx";
 import { SubagentControlNotification } from "./subagents/subagent-control-notification.tsx";
 import { SubagentSlashResultNotification } from "./subagents/subagent-slash-result-notification.tsx";
@@ -35,6 +36,7 @@ const BUILTIN_NOTIFICATION_TYPES = new Set([
   "hermes-memory.profile",
   "hermes-memory.updated",
   "hermes-memory.error",
+  "pi-rewind.checkpoint",
   "subagents.info",
   "subagents.warning",
   "subagents.error",
@@ -86,6 +88,8 @@ export function BuiltinNotificationView({ notice }: { notice: PiNoticeMessage })
       return <MemoryUpdatedNotification notice={notice} />;
     case "hermes-memory.error":
       return <MemoryErrorNotification notice={notice} />;
+    case "pi-rewind.checkpoint":
+      return <CheckpointNotification notice={notice} />;
     case "subagents.info":
       return <SubagentsInfoNotification notice={notice} />;
     case "subagents.warning":

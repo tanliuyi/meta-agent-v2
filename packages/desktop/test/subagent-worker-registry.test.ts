@@ -205,6 +205,62 @@ describe("SubagentWorkerRegistry", () => {
     expect(() => assertHostRequestIdentity({ type: "subagent.run", request: runRequest() }, binding)).not.toThrow();
   });
 
+  it("blocks project subagent starts for a restore barrier, including pre-catalog workers", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      createWorkerClient: (options) => {
+        const client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+
+    registry.beginProjectMutation("project");
+    await expect(
+      registry.handleHostRequest({ type: "subagent.run", request: runRequest("blocked") }, () => undefined),
+    ).rejects.toThrow("project is being mutated");
+    registry.endProjectMutation("project");
+
+    const run = registry.handleHostRequest({ type: "subagent.run", request: runRequest("starting") }, () => undefined);
+    await Promise.resolve();
+    expect(() => registry.beginProjectMutation("project")).toThrow("subagent is running");
+
+    release();
+    await run;
+    expect(() => registry.beginProjectMutation("project")).not.toThrow();
+    registry.endProjectMutation("project");
+  });
+
+  it("blocks overlapping-project subagents for a workspace restore barrier", async () => {
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      getWorkspaceKey: async () => "shared-workspace",
+      createWorkerClient: (options) => new FakeClient(options),
+    });
+
+    registry.beginWorkspaceMutation("shared-workspace");
+    await expect(
+      registry.handleHostRequest(
+        { type: "subagent.run", request: { ...runRequest("blocked-workspace"), projectId: "overlap" } },
+        () => undefined,
+      ),
+    ).rejects.toThrow("workspace is being mutated");
+    registry.endWorkspaceMutation("shared-workspace");
+
+    await expect(
+      registry.handleHostRequest(
+        { type: "subagent.run", request: { ...runRequest("allowed-workspace"), projectId: "overlap" } },
+        () => undefined,
+      ),
+    ).resolves.toEqual({ status: "completed" });
+  });
+
   it("blocks new runs while the parent session tree is being mutated", async () => {
     const registry = new SubagentWorkerRegistry({
       manifest: manifest(),

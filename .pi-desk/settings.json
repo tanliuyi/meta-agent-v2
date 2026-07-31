@@ -1,0 +1,8 @@
+{
+  "subagents": {
+    "watchdog": {
+      "main": {},
+      "children": {}
+    }
+  }
+}

@@ -15,6 +15,8 @@ import { FileService } from "./files/file-service.ts";
 import { broadcastTerminalEvent, broadcastThreadCatalogUpdate, registerIpc } from "./ipc.ts";
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
+import { DesktopBuiltinProviderRegistry } from "./pi/desktop-builtin-provider.ts";
+import { deleteSessionCheckpoints } from "./pi/extensions/pi-rewind/src/core.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "./plugins/default-plugin-marketplace.ts";
 import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
@@ -43,6 +45,7 @@ import { SidecarLog } from "./sidecar/sidecar-log.ts";
 import { loadSidecarRuntimeManifest } from "./sidecar/sidecar-runtime-manifest.ts";
 import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
+import { resolveWorkspaceMutationKey } from "./sidecar/workspace-mutation-key.ts";
 import { ProjectStore } from "./store/project-store.ts";
 import { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
 import { createTerminalShellResolver, TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
@@ -207,13 +210,16 @@ app.whenReady().then(async () => {
     generalWorkspaceCwd,
   );
   const projectsLoad = projects.load();
+  const getWorkspaceKey = (projectId: string): Promise<string> =>
+    resolveWorkspaceMutationKey(projects.getCwd(projectId));
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
   const models = new ModelsConfigService(agentDir, {
     log: (text) => sidecarLog?.write("models", text),
   });
+  const credentialStore = new FileCredentialStore(join(agentDir, "auth.json"));
   const authModelRuntimeCreation = ModelRuntime.create({
-    credentials: new FileCredentialStore(join(agentDir, "auth.json")),
+    credentials: credentialStore,
     modelsPath: join(agentDir, "models.json"),
     allowModelNetwork: false,
   });
@@ -310,6 +316,7 @@ app.whenReady().then(async () => {
     manifest: runtimeManifest,
     agentDir,
     ...(desktopBashPath ? { shellPath: desktopBashPath } : {}),
+    getWorkspaceKey,
     log: (scope, text) => sidecarLog?.write(scope, text),
     catalogChanged: broadcastThreadCatalogUpdate,
     persistSession: (projectId, sessionFile, thread) =>
@@ -331,6 +338,7 @@ app.whenReady().then(async () => {
     extensionSourcePolicy,
     generationReferences: marketplaceGenerationReferences,
     getCwd: (projectId) => projects.getCwd(projectId),
+    getWorkspaceKey,
     push: (payload, workerInstanceId, sidecarSequence) => {
       if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
       else workers.acknowledge(workerInstanceId, sidecarSequence);
@@ -350,6 +358,23 @@ app.whenReady().then(async () => {
     cancelSubagent: (projectId, threadId) => activeSubagents.cancelActiveThread(projectId, threadId),
     acknowledgeSubagent: (workerInstanceId, sidecarSequence) =>
       activeSubagents.acknowledge(workerInstanceId, sidecarSequence),
+    beginSubagentWorkspaceMutation: (workspaceKey) => activeSubagents.beginWorkspaceMutation(workspaceKey),
+    endSubagentWorkspaceMutation: (workspaceKey) => activeSubagents.endWorkspaceMutation(workspaceKey),
+    beginTerminalWorkspaceMutation: async (workspaceKey) => {
+      const projectKeys = await Promise.all(
+        (await projects.list())
+          .filter((project) => project.available)
+          .map(async (project) => ({ projectId: project.id, workspaceKey: await getWorkspaceKey(project.id) })),
+      );
+      const projectIds = projectKeys
+        .filter((project) => project.workspaceKey === workspaceKey)
+        .map((project) => project.projectId);
+      return terminals?.beginWorkspaceRestore(projectIds) ?? (() => undefined);
+    },
+    cleanupSessionCheckpoints: (projectId, threadIds) =>
+      deleteSessionCheckpoints(projects.getCwd(projectId), threadIds),
+    beginSubagentProjectMutation: (projectId) => activeSubagents.beginProjectMutation(projectId),
+    endSubagentProjectMutation: (projectId) => activeSubagents.endProjectMutation(projectId),
     beginSubagentTreeMutation: (projectId, parentThreadId) =>
       activeSubagents.beginThreadMutation(projectId, parentThreadId),
     endSubagentTreeMutation: (projectId, parentThreadId) =>
@@ -366,6 +391,9 @@ app.whenReady().then(async () => {
     createTerminalShellResolver(agentDir, desktopBashPath),
   );
   const providers = new ProvidersConfigService(models, auth, authModelRuntime);
+  const desktopProviderEnvKeys = new Map(
+    DesktopBuiltinProviderRegistry.getKnownProviderInfos().map((provider) => [provider.id, provider.envKeys]),
+  );
   let modelConfigurationGeneration = 0;
   const subagentSettings = new SubagentSettingsConfigService({
     agentDir,
@@ -379,6 +407,11 @@ app.whenReady().then(async () => {
       "agents",
     ),
     modelRuntime: authModelRuntime,
+    isDesktopProviderAvailable: async (providerId) => {
+      const credential = await credentialStore.read(providerId);
+      if (credential?.type === "oauth" || (credential?.type === "api_key" && Boolean(credential.key))) return true;
+      return desktopProviderEnvKeys.get(providerId)?.some((envKey) => Boolean(process.env[envKey])) ?? false;
+    },
     getProjectCwd: (projectId) => {
       // 通用工作区不是用户项目，不用于 subagent project-scoped 配置
       if (projectId === GENERAL_WORKSPACE_ID) throw new Error("通用工作区不支持 subagent project scope");

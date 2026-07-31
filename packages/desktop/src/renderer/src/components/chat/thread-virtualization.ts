@@ -8,6 +8,18 @@ export interface ThreadTurn {
   messageIds: readonly string[];
 }
 
+export function mergeSelectedVirtualIndexes(
+  indexes: readonly number[],
+  selection: { start: number; end: number },
+  count: number,
+): number[] {
+  const merged = new Set(indexes.filter((index) => Number.isInteger(index) && index >= 0 && index < count));
+  const start = Math.max(0, selection.start);
+  const end = Math.min(count - 1, selection.end);
+  for (let index = start; index <= end; index += 1) merged.add(index);
+  return [...merged].sort((left, right) => left - right);
+}
+
 export function buildThreadTurns(messages: readonly ThreadMessageRow[]): readonly ThreadTurn[] {
   const turns: { id: string; messageIds: string[] }[] = [];
   for (const { id, role } of messages) {

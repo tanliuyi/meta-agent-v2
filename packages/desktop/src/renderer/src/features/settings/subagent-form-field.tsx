@@ -1,15 +1,24 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
+
+export interface SubagentFormControlIds {
+  controlId: string;
+  labelId: string;
+}
 
 interface SubagentFormFieldProps {
   label: string;
-  children: ReactNode;
+  children(ids: SubagentFormControlIds): ReactNode;
 }
 
 export function SubagentFormField({ label, children }: SubagentFormFieldProps) {
+  const controlId = useId();
+  const labelId = `${controlId}-label`;
   return (
-    <label className="subagent-field">
-      <span>{label}</span>
-      {children}
-    </label>
+    <div className="subagent-field">
+      <label id={labelId} htmlFor={controlId}>
+        {label}
+      </label>
+      {children({ controlId, labelId })}
+    </div>
   );
 }

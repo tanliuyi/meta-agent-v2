@@ -23,6 +23,7 @@ export interface SubagentWorkerClient {
 
 interface SubagentWorkerRecord {
   key: string;
+  workspaceKey: string;
   request: SubagentRunRequest;
   client: SubagentWorkerClient;
   emit(event: SubagentRunEvent): void;
@@ -42,6 +43,7 @@ export interface SubagentWorkerRegistryOptions {
   manifest: SidecarRuntimeManifest;
   agentDir: string;
   shellPath?: string;
+  getWorkspaceKey?(projectId: string): Promise<string>;
   log?(scope: string, text: string): void;
   createWorkerClient?(options: WorkerClientOptions): SubagentWorkerClient;
   catalogChanged?(thread: Thread): void;
@@ -56,11 +58,37 @@ export interface SubagentWorkerRegistryOptions {
 export class SubagentWorkerRegistry {
   private readonly options: SubagentWorkerRegistryOptions;
   private readonly records = new Map<string, SubagentWorkerRecord>();
+  private readonly blockedWorkspaces = new Set<string>();
+  private readonly blockedProjects = new Set<string>();
   private readonly blockedParentThreads = new Set<string>();
   private disposing = false;
 
   constructor(options: SubagentWorkerRegistryOptions) {
     this.options = options;
+  }
+
+  beginWorkspaceMutation(workspaceKey: string): void {
+    if (this.blockedWorkspaces.has(workspaceKey)) throw new Error("Workspace mutation is already in progress");
+    if ([...this.records.values()].some((record) => record.workspaceKey === workspaceKey)) {
+      throw new Error("Cannot mutate a workspace while a subagent is running");
+    }
+    this.blockedWorkspaces.add(workspaceKey);
+  }
+
+  endWorkspaceMutation(workspaceKey: string): void {
+    this.blockedWorkspaces.delete(workspaceKey);
+  }
+
+  beginProjectMutation(projectId: string): void {
+    if (this.blockedProjects.has(projectId)) throw new Error("Project mutation is already in progress");
+    if ([...this.records.values()].some((record) => record.request.projectId === projectId)) {
+      throw new Error("Cannot mutate a project while a subagent is running");
+    }
+    this.blockedProjects.add(projectId);
+  }
+
+  endProjectMutation(projectId: string): void {
+    this.blockedProjects.delete(projectId);
   }
 
   beginThreadMutation(projectId: string, parentThreadId: string): void {
@@ -164,6 +192,8 @@ export class SubagentWorkerRegistry {
     const records = [...this.records.values()];
     await Promise.allSettled(records.map((record) => this.finalizeRecord(record)));
     this.records.clear();
+    this.blockedWorkspaces.clear();
+    this.blockedProjects.clear();
   }
 
   private async run(
@@ -172,6 +202,14 @@ export class SubagentWorkerRegistry {
     parent?: SubagentWorkerRecord,
   ): Promise<JsonValue> {
     if (this.disposing) throw new Error("Desktop subagent worker registry is shutting down");
+    const workspaceKey = await (this.options.getWorkspaceKey?.(request.projectId) ??
+      Promise.resolve(request.projectId));
+    if (this.blockedWorkspaces.has(workspaceKey)) {
+      throw new Error("Cannot start a subagent while its workspace is being mutated");
+    }
+    if (this.blockedProjects.has(request.projectId)) {
+      throw new Error("Cannot start a subagent while its project is being mutated");
+    }
     const effectiveParentSessionId = request.parentSessionId ?? request.parentThreadId;
     if (
       this.blockedParentThreads.has(parentThreadKey(request.projectId, request.parentThreadId)) ||
@@ -206,7 +244,19 @@ export class SubagentWorkerRegistry {
       onHostRequest: (hostRequest, nestedEmit) => this.handleNestedHostRequest(record, hostRequest, nestedEmit),
     };
     const client = this.options.createWorkerClient?.(clientOptions) ?? new SidecarWorkerClient(clientOptions);
-    record = { key, request, client, emit, initialPromptObserved: false, metadataTail: Promise.resolve() };
+    if (this.blockedWorkspaces.has(workspaceKey)) {
+      await client.shutdown().catch(() => undefined);
+      throw new Error("Cannot start a subagent while its workspace is being mutated");
+    }
+    record = {
+      key,
+      workspaceKey,
+      request,
+      client,
+      emit,
+      initialPromptObserved: false,
+      metadataTail: Promise.resolve(),
+    };
     this.records.set(key, record);
     try {
       try {

@@ -23,16 +23,20 @@ export function SubagentSkillsField({
 
   return (
     <SubagentFormField label={label}>
-      <Combobox
-        value={value}
-        options={options}
-        placeholder={placeholder}
-        emptyText="无匹配技能"
-        onValueChange={(next) => {
-          setValue(next);
-          onValueChange(next);
-        }}
-      />
+      {({ controlId, labelId }) => (
+        <Combobox
+          inputId={controlId}
+          ariaLabelledBy={labelId}
+          value={value}
+          options={options}
+          placeholder={placeholder}
+          emptyText="无匹配技能"
+          onValueChange={(next) => {
+            setValue(next);
+            onValueChange(next);
+          }}
+        />
+      )}
     </SubagentFormField>
   );
 }

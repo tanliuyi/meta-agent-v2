@@ -16,7 +16,7 @@
   min-width: 0;
   overflow: hidden;
   border: 1px solid hsl(var(--border));
-  border-radius: var(--shape-radius-sm);
+  border-radius: var(--shape-radius-xl);
   background: hsl(var(--background));
 }
 

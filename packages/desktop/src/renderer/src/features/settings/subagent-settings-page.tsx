@@ -1,5 +1,4 @@
 import { Button } from "@renderer/shared/ui/button";
-import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
 import { Input } from "@renderer/shared/ui/input";
 import { Tabs } from "@renderer/shared/ui/tabs";
 import { TabsContent } from "@renderer/shared/ui/tabs-content";
@@ -10,34 +9,22 @@ import { useDesktopStore } from "@renderer/state/desktop-store-context";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { isUserProject } from "../../../../shared/contracts.ts";
-import type {
-  AgentSummary,
-  ChainSummary,
-  SubagentAgentConfigInput,
-  SubagentSettingsMutation,
-  SubagentSettingsScope,
-} from "../../../../shared/subagent-contracts.ts";
+import type { AgentSummary, ChainSummary, SubagentSettingsScope } from "../../../../shared/subagent-contracts.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
-import { SubagentAgentDialog } from "./subagent-agent-dialog.tsx";
 import { SubagentAgentSection } from "./subagent-agent-section.tsx";
-import { SubagentChainDialog } from "./subagent-chain-dialog.tsx";
 import { SubagentChainRow } from "./subagent-chain-row.tsx";
 import { SubagentCustomAgentRow } from "./subagent-custom-agent-row.tsx";
 import { SubagentExtensionConfigPanel } from "./subagent-extension-config-panel.tsx";
+import { SubagentSettingsDialogs, type SubagentSettingsDialogsHandle } from "./subagent-settings-dialogs.tsx";
 import { SubagentWatchdogPanel } from "./subagent-watchdog-panel.tsx";
 import { resolveSubagentSettingsActiveTab, useSubagentSettingsController } from "./use-subagent-settings-controller.ts";
 
 const USER_TAB = "user";
 const SYSTEM_TAB = "system";
 const PROJECT_TAB_PREFIX = "project:";
-
-type AgentEditor = { agent?: AgentSummary; builtin?: boolean };
-type DeleteTarget =
-  | { kind: "agent"; name: string; scope: SubagentSettingsScope }
-  | { kind: "chain"; name: string; scope: SubagentSettingsScope };
 
 export function SubagentSettingsPage() {
   const desktopStore = useDesktopStore();
@@ -55,10 +42,8 @@ export function SubagentSettingsPage() {
     selectedProjectId,
     systemTab ? "system" : selectedProjectId ? "project" : "user",
   );
+  const dialogsRef = useRef<SubagentSettingsDialogsHandle>(null);
   const [query, setQuery] = useState("");
-  const [agentEditor, setAgentEditor] = useState<AgentEditor>();
-  const [chainEditor, setChainEditor] = useState<ChainSummary | null>();
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
   const snapshot = controller.snapshot;
 
   const selectTab = useCallback(
@@ -68,9 +53,7 @@ export function SubagentSettingsPage() {
         if (!projects.some((project) => project.id === projectId && project.available)) return;
       }
       setSelectedTab(value);
-      setAgentEditor(undefined);
-      setChainEditor(undefined);
-      setDeleteTarget(undefined);
+      dialogsRef.current?.close();
     },
     [projects],
   );
@@ -107,57 +90,6 @@ export function SubagentSettingsPage() {
         : [],
     [snapshot],
   );
-
-  async function saveAgent(targetScope: SubagentSettingsScope, config: SubagentAgentConfigInput): Promise<boolean> {
-    if (agentEditor?.builtin && agentEditor.agent) {
-      return controller.mutate({
-        type: "update-agent",
-        agent: agentEditor.agent.name,
-        scope: targetScope,
-        target: "builtin",
-        config,
-      });
-    }
-    if (agentEditor?.agent) {
-      return controller.mutate({
-        type: "update-agent",
-        agent: agentEditor.agent.name,
-        scope: targetScope,
-        target: "custom",
-        config,
-      });
-    }
-    if (!config.name || !config.description) return false;
-    return controller.mutate({
-      type: "create-agent",
-      scope: targetScope,
-      config: { ...config, name: config.name, description: config.description },
-    });
-  }
-
-  async function saveChain(
-    targetScope: SubagentSettingsScope,
-    config: { name: string; description: string; steps: ChainSummary["steps"] },
-  ): Promise<boolean> {
-    if (chainEditor) {
-      return controller.mutate({
-        type: "update-chain",
-        chain: chainEditor.name,
-        scope: targetScope,
-        config,
-      });
-    }
-    return controller.mutate({ type: "create-chain", scope: targetScope, config });
-  }
-
-  async function confirmDelete(): Promise<void> {
-    if (!deleteTarget) return;
-    const mutation: SubagentSettingsMutation =
-      deleteTarget.kind === "agent"
-        ? { type: "delete-agent", agent: deleteTarget.name, scope: deleteTarget.scope }
-        : { type: "delete-chain", chain: deleteTarget.name, scope: deleteTarget.scope };
-    if (await controller.mutate(mutation)) setDeleteTarget(undefined);
-  }
 
   return (
     <div className="settings-content subagent-settings">
@@ -231,7 +163,7 @@ export function SubagentSettingsPage() {
                   <section className="settings-section subagent-section" aria-labelledby="custom-agents-heading">
                     <div className="settings-section-heading subagent-section-heading">
                       <h3 id="custom-agents-heading">自定义智能体</h3>
-                      <Button size="sm" variant="outline" onClick={() => setAgentEditor({})}>
+                      <Button size="sm" variant="outline" onClick={() => dialogsRef.current?.openAgent()}>
                         <Plus />
                         新建智能体
                       </Button>
@@ -242,8 +174,8 @@ export function SubagentSettingsPage() {
                           key={`${agent.source}:${agent.filePath}`}
                           agent={agent}
                           disabled={controller.mutating}
-                          onEdit={() => setAgentEditor({ agent })}
-                          onDelete={() => setDeleteTarget({ kind: "agent", name: agent.name, scope })}
+                          onEdit={() => dialogsRef.current?.openAgent(agent)}
+                          onDelete={() => dialogsRef.current?.requestDelete({ kind: "agent", name: agent.name, scope })}
                         />
                       ))
                     ) : (
@@ -256,7 +188,7 @@ export function SubagentSettingsPage() {
                   <section className="settings-section subagent-section" aria-labelledby="chains-heading">
                     <div className="settings-section-heading subagent-section-heading">
                       <h3 id="chains-heading">流程</h3>
-                      <Button size="sm" variant="outline" onClick={() => setChainEditor(null)}>
+                      <Button size="sm" variant="outline" onClick={() => dialogsRef.current?.openChain()}>
                         <Plus />
                         新建流程
                       </Button>
@@ -267,8 +199,8 @@ export function SubagentSettingsPage() {
                           key={`${chain.source}:${chain.filePath}`}
                           chain={chain}
                           disabled={controller.mutating}
-                          onEdit={() => setChainEditor(chain)}
-                          onDelete={() => setDeleteTarget({ kind: "chain", name: chain.name, scope })}
+                          onEdit={() => dialogsRef.current?.openChain(chain)}
+                          onDelete={() => dialogsRef.current?.requestDelete({ kind: "chain", name: chain.name, scope })}
                         />
                       ))
                     ) : (
@@ -302,7 +234,7 @@ export function SubagentSettingsPage() {
                 builtin={!systemTab}
                 readOnly={systemTab}
                 copyLabel={scope === "project" ? "复制到项目" : "复制到个人"}
-                onEdit={(agent) => setAgentEditor({ agent, builtin: true })}
+                onEdit={(agent) => dialogsRef.current?.openAgent(agent, true)}
                 onToggle={(agent, disabled) =>
                   controller.mutate({
                     type: "set-agent-enabled",
@@ -326,44 +258,18 @@ export function SubagentSettingsPage() {
                   ))}
                 </section>
               ) : null}
-
-              {!systemTab && agentEditor ? (
-                <SubagentAgentDialog
-                  agent={agentEditor.agent}
-                  builtin={agentEditor.builtin}
-                  models={snapshot.models}
-                  skills={snapshot.skills}
-                  scope={scope}
-                  saving={controller.mutating}
-                  onClose={() => setAgentEditor(undefined)}
-                  onSave={saveAgent}
-                />
-              ) : null}
-
-              {!systemTab && chainEditor !== undefined ? (
-                <SubagentChainDialog
-                  chain={chainEditor ?? undefined}
-                  agents={allAgents}
-                  models={snapshot.models}
-                  skills={snapshot.skills}
-                  scope={scope}
-                  saving={controller.mutating}
-                  onClose={() => setChainEditor(undefined)}
-                  onSave={saveChain}
-                />
-              ) : null}
-
-              <ConfirmDialog
-                open={Boolean(deleteTarget)}
-                title={`删除 ${deleteTarget?.name ?? ""}？`}
-                description="对应作用域中的定义文件将被删除。"
-                onOpenChange={(open) => !open && setDeleteTarget(undefined)}
-                onConfirm={() => void confirmDelete()}
-              />
             </>
           ) : null}
         </TabsContent>
       </Tabs>
+      <SubagentSettingsDialogs
+        ref={dialogsRef}
+        allAgents={allAgents}
+        controller={controller}
+        scope={scope}
+        snapshot={snapshot}
+        systemTab={systemTab}
+      />
     </div>
   );
 }

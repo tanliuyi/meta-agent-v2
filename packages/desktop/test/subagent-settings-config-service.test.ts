@@ -38,7 +38,10 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-async function createService(builtinAgentsDir = sourceBuiltinAgentsDir): Promise<SubagentSettingsConfigService> {
+async function createService(
+  builtinAgentsDir = sourceBuiltinAgentsDir,
+  isDesktopProviderAvailable: (providerId: string) => Promise<boolean> = async () => false,
+): Promise<SubagentSettingsConfigService> {
   const modelRuntime = await ModelRuntime.create({
     modelsPath: null,
     allowModelNetwork: false,
@@ -47,6 +50,7 @@ async function createService(builtinAgentsDir = sourceBuiltinAgentsDir): Promise
     agentDir,
     builtinAgentsDir,
     modelRuntime,
+    isDesktopProviderAvailable,
     getProjectCwd: () => projectDir,
   });
 }
@@ -57,6 +61,21 @@ describe("SubagentSettingsConfigService", () => {
 
     expect(snapshot.projectId).toBeUndefined();
     expect(snapshot.projectAgents).toEqual([]);
+  });
+
+  test("includes authenticated Desktop builtin provider models", async () => {
+    const snapshot = await (
+      await createService(sourceBuiltinAgentsDir, async (providerId) => providerId === "meta-agent")
+    ).getSnapshot();
+
+    expect(snapshot.models).toContainEqual(
+      expect.objectContaining({
+        id: "meta-agent/gpt-5.6-sol",
+        provider: "meta-agent",
+        name: "GPT-5.6 Sol",
+        reasoning: true,
+      }),
+    );
   });
 
   test("excludes project memory files from user agent discovery", async () => {

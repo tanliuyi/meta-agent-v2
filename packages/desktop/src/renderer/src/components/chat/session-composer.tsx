@@ -1,4 +1,7 @@
+import { useCallback, useState } from "react";
 import type { SessionControlState } from "../../../../shared/contracts.ts";
+import { ConfirmDialog } from "../../shared/ui/confirm-dialog.tsx";
+import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionControlSelector, useSessionScope, useSessionTimelineSelector } from "../session-context.tsx";
 import { Composer } from "./composer/composer.tsx";
 import { ReadOnlySessionStatus } from "./session-read-only-status.tsx";
@@ -7,6 +10,9 @@ import { ReadOnlySessionStatus } from "./session-read-only-status.tsx";
 export function SessionComposer() {
   const { record, clearQueue, commandsReady, modelsRefreshing, refreshModels, setModel, setThinking } =
     useSessionScope();
+  const actions = useDesktopActions();
+  const [pendingStop, setPendingStop] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const hasControl = useSessionControlSelector((control) => control !== null);
   const interaction = useSessionControlSelector((control) => control?.interaction);
   const model = useSessionControlSelector((control) => control?.model);
@@ -19,9 +25,35 @@ export function SessionComposer() {
   const composerCommand = useSessionControlSelector((control) => control?.extensionHost.composerCommand);
   const phase = useSessionTimelineSelector((timeline) => timeline.phase);
   const queue = useSessionTimelineSelector((timeline) => timeline.queue);
+  const confirmStop = useCallback(() => {
+    setPendingStop(false);
+    setStopping(true);
+    void actions
+      .stopThread(record.identity.projectId, record.identity.threadId)
+      .catch(() => undefined)
+      .finally(() => setStopping(false));
+  }, [actions, record.identity.projectId, record.identity.threadId]);
   if (!hasControl || !readiness) return null;
   if (interaction === "read-only") {
-    return <ReadOnlySessionStatus phase={phase} model={model} thinkingLevel={thinkingLevel} />;
+    return (
+      <>
+        <ReadOnlySessionStatus
+          phase={phase}
+          model={model}
+          thinkingLevel={thinkingLevel}
+          onStop={() => setPendingStop(true)}
+          stopPending={stopping}
+        />
+        <ConfirmDialog
+          open={pendingStop}
+          title="停止子智能体"
+          description="停止运行中的子智能体。已经生成的会话内容会保留。"
+          confirmLabel="停止"
+          onOpenChange={setPendingStop}
+          onConfirm={confirmStop}
+        />
+      </>
+    );
   }
   return (
     <Composer

@@ -13,9 +13,11 @@ import type {
   SaveSubagentSettingsResult,
   SubagentAgentConfigInput,
   SubagentExtensionConfig,
+  SubagentModelOption,
   SubagentSettingsMutation,
   SubagentSettingsSnapshot,
 } from "../../shared/subagent-contracts.ts";
+import { DesktopBuiltinProviderRegistry } from "../pi/desktop-builtin-provider.ts";
 import { handleManagementAction } from "../pi/extensions/pi-subagents/src/agents/agent-management.ts";
 import {
   type AgentConfig,
@@ -26,6 +28,7 @@ import {
 } from "../pi/extensions/pi-subagents/src/agents/agents.ts";
 import { discoverAvailableSkills } from "../pi/extensions/pi-subagents/src/agents/skills.ts";
 import { getConfigPath, loadConfigStrict, saveConfig } from "../pi/extensions/pi-subagents/src/extension/config.ts";
+import { getSupportedThinkingLevels, toModelInfo } from "../pi/extensions/pi-subagents/src/shared/model-info.ts";
 import type { ExtensionConfig } from "../pi/extensions/pi-subagents/src/shared/types.ts";
 import {
   readWatchdogSettingsOverride,
@@ -38,6 +41,7 @@ interface SubagentSettingsConfigServiceOptions {
   agentDir: string;
   builtinAgentsDir: string;
   modelRuntime: ModelRuntime;
+  isDesktopProviderAvailable(providerId: string): Promise<boolean>;
   getProjectCwd(projectId: string): string;
 }
 
@@ -55,9 +59,16 @@ export class SubagentSettingsConfigService {
   private saveTail: Promise<void> = Promise.resolve();
   private readonly requestResults = new Map<string, SaveSubagentSettingsResult>();
   private readonly options: SubagentSettingsConfigServiceOptions;
+  private readonly desktopBuiltinModels: ReadonlyMap<string, SubagentModelOption[]>;
 
   constructor(options: SubagentSettingsConfigServiceOptions) {
     this.options = options;
+    this.desktopBuiltinModels = new Map(
+      DesktopBuiltinProviderRegistry.getProviderInfos().map((provider) => [
+        provider.id,
+        provider.models.map((model) => subagentModelOption({ ...model, provider: provider.id })),
+      ]),
+    );
     configureBuiltinAgentsDir(options.builtinAgentsDir);
   }
 
@@ -123,17 +134,24 @@ export class SubagentSettingsConfigService {
   private async buildSnapshot(context: ResolvedContext): Promise<SubagentSettingsSnapshot> {
     const discovered = discoverAgentsAll(context.cwd, context.discoveryScope);
     await this.options.modelRuntime.refresh({ allowNetwork: false });
-    const models = (await this.options.modelRuntime.getAvailable())
-      .map((model) => ({
-        id: `${model.provider}/${model.id}`,
+    const runtimeModels = (await this.options.modelRuntime.getAvailable()).map((model) =>
+      subagentModelOption({
+        id: model.id,
         provider: model.provider,
         name: model.name,
         reasoning: model.reasoning,
-        thinkingLevels: model.reasoning
-          ? (["off", "minimal", "low", "medium", "high", "xhigh", "max"] satisfies ThinkingLevel[])
-          : (["off"] satisfies ThinkingLevel[]),
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id));
+      }),
+    );
+    const desktopBuiltinModels = (
+      await Promise.all(
+        [...this.desktopBuiltinModels].map(async ([providerId, models]) =>
+          (await this.options.isDesktopProviderAvailable(providerId)) ? models : [],
+        ),
+      )
+    ).flat();
+    const models = [
+      ...new Map([...desktopBuiltinModels, ...runtimeModels].map((model) => [model.id, model])).values(),
+    ].sort((left, right) => left.id.localeCompare(right.id));
     const watchdogResult = resolveWatchdogConfig(context.cwd);
     const watchdogScope = context.settingsScope === "project" ? "project" : "user";
     let inheritedWatchdog = watchdogResult.config;
@@ -340,6 +358,24 @@ export class SubagentSettingsConfigService {
       throw new Error(message || `Subagent ${action} failed`);
     }
   }
+}
+
+function subagentModelOption(model: {
+  id: string;
+  provider: string;
+  name: string;
+  api?: string;
+  reasoning?: boolean;
+  thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
+}): SubagentModelOption {
+  const info = toModelInfo(model);
+  return {
+    id: info.fullId,
+    provider: info.provider,
+    name: model.name,
+    reasoning: info.reasoning ?? false,
+    thinkingLevels: getSupportedThinkingLevels(info),
+  };
 }
 
 function agentSummary(agent: AgentConfig): AgentSummary {

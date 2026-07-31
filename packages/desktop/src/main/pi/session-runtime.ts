@@ -27,6 +27,7 @@ import {
   type Thread,
 } from "../../shared/contracts.ts";
 import type { DesktopExtensionDiagnostic, ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
+import type { SessionCheckpointDiffResult, SessionCheckpointRestoreResult } from "../../shared/pi-rewind-contracts.ts";
 import { FileCredentialStore } from "../models/credential-store.ts";
 import { DesktopBuiltinProviderRegistry } from "./desktop-builtin-provider.ts";
 import { DesktopExtensionCompatibilityError, DesktopExtensionHost } from "./desktop-extension-host.ts";
@@ -36,6 +37,7 @@ import {
   extensionServiceDiagnostics,
   sanitizeExtensionMessage,
 } from "./desktop-extension-runtime-policy.ts";
+import { getDesktopCheckpointDiff, restoreDesktopCheckpoint } from "./extensions/pi-rewind/src/index.ts";
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 import { PiCompatibilityAdapter } from "./pi-compatibility-adapter.ts";
 import { PiThreadProjector } from "./pi-thread-projector.ts";
@@ -327,6 +329,31 @@ export class SessionRuntime {
     this.assertTimelineAvailable();
     if (input.threadId !== this.id || input.projectId !== this.projectId) throw new Error("Pi reload session 不匹配");
     return this.runCommand(input.requestId, () => this.compatibility.reload(input));
+  }
+
+  getCheckpointDiff(
+    fromCheckpointId: string,
+    toCheckpointId: string,
+    path: string,
+  ): Promise<SessionCheckpointDiffResult> {
+    this.assertTimelineAvailable();
+    return getDesktopCheckpointDiff(this.cwd, this.id, fromCheckpointId, toCheckpointId, path);
+  }
+
+  async restoreCheckpoint(checkpointId: string, expectedCheckpointId: string): Promise<SessionCheckpointRestoreResult> {
+    this.assertTimelineAvailable();
+    const phase = this.projector.snapshot().phase;
+    if (phase !== "idle") throw new Error(`Pi ${phase} 阶段不支持撤销 checkpoint`);
+    this.lastError = undefined;
+    try {
+      const result = await restoreDesktopCheckpoint(this.cwd, this.id, checkpointId, expectedCheckpointId);
+      this.publishControl();
+      return result;
+    } catch (error) {
+      this.lastError = errorMessage(error);
+      this.publishControl();
+      throw error;
+    }
   }
 
   /** 在指定 entry 处 fork 当前 session 为新 session 文件，返回新会话 id + 文件路径。 */

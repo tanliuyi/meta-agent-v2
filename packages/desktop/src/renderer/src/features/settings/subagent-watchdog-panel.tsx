@@ -13,6 +13,7 @@ import type {
 } from "../../../../shared/subagent-contracts.ts";
 import { getThinkingLevelLabel } from "../../shared/lib/thinking-level-label.ts";
 import { SubagentFormField } from "./subagent-form-field.tsx";
+import { SubagentModelSelectOptions } from "./subagent-model-select-options.tsx";
 
 const INHERIT_VALUE = "inherit";
 const ENABLED_VALUE = "enabled";
@@ -97,16 +98,20 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
           <h4>全局</h4>
           <div className="subagent-form-grid">
             <SubagentFormField label="自动审查">
-              <SelectRoot value={globalEnabled} onValueChange={setGlobalEnabled}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>继承（{settings.inherited.enabled ? "启用" : "停用"}）</SelectItem>
-                  <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
-                  <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
-                </SelectContent>
-              </SelectRoot>
+              {({ controlId, labelId }) => (
+                <SelectRoot value={globalEnabled} onValueChange={setGlobalEnabled}>
+                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>
+                      继承（{settings.inherited.enabled ? "启用" : "停用"}）
+                    </SelectItem>
+                    <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
+                    <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
+                  </SelectContent>
+                </SelectRoot>
+              )}
             </SubagentFormField>
           </div>
         </div>
@@ -114,50 +119,52 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
           <h4>主会话</h4>
           <div className="subagent-form-grid">
             <SubagentFormField label="启用状态">
-              <SelectRoot value={mainEnabled} onValueChange={setMainEnabled}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>
-                    继承（{settings.inherited.main.enabled ? "启用" : "停用"}）
-                  </SelectItem>
-                  <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
-                  <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
-                </SelectContent>
-              </SelectRoot>
+              {({ controlId, labelId }) => (
+                <SelectRoot value={mainEnabled} onValueChange={setMainEnabled}>
+                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>
+                      继承（{settings.inherited.main.enabled ? "启用" : "停用"}）
+                    </SelectItem>
+                    <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
+                    <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
+                  </SelectContent>
+                </SelectRoot>
+              )}
             </SubagentFormField>
             <SubagentFormField label="审查模型">
-              <SelectRoot value={mainModel} onValueChange={setMainModel}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>
-                    继承（{settings.inherited.main.model ?? "当前会话模型"}）
-                  </SelectItem>
-                  {modelOptions.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.name} ({option.id})
+              {({ controlId, labelId }) => (
+                <SelectRoot value={mainModel} onValueChange={setMainModel}>
+                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>
+                      继承（{settings.inherited.main.model ?? "当前会话模型"}）
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
+                    <SubagentModelSelectOptions models={modelOptions} />
+                  </SelectContent>
+                </SelectRoot>
+              )}
             </SubagentFormField>
             <SubagentFormField label="思考级别">
-              <SelectRoot value={mainThinking} onValueChange={setMainThinking}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>继承（{mainThinkingLabel}）</SelectItem>
-                  {THINKING_LEVELS.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      {getThinkingLevelLabel(level)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
+              {({ controlId, labelId }) => (
+                <SelectRoot value={mainThinking} onValueChange={setMainThinking}>
+                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>继承（{mainThinkingLabel}）</SelectItem>
+                    {THINKING_LEVELS.map((level) => (
+                      <SelectItem key={level} value={level}>
+                        {getThinkingLevelLabel(level)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectRoot>
+              )}
             </SubagentFormField>
           </div>
         </div>
@@ -165,50 +172,52 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
           <h4>子智能体</h4>
           <div className="subagent-form-grid">
             <SubagentFormField label="启用状态">
-              <SelectRoot value={childrenEnabled} onValueChange={setChildrenEnabled}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>
-                    继承（{settings.inherited.children.enabled ? "启用" : "停用"}）
-                  </SelectItem>
-                  <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
-                  <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
-                </SelectContent>
-              </SelectRoot>
+              {({ controlId, labelId }) => (
+                <SelectRoot value={childrenEnabled} onValueChange={setChildrenEnabled}>
+                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>
+                      继承（{settings.inherited.children.enabled ? "启用" : "停用"}）
+                    </SelectItem>
+                    <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
+                    <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
+                  </SelectContent>
+                </SelectRoot>
+              )}
             </SubagentFormField>
             <SubagentFormField label="审查模型">
-              <SelectRoot value={childrenModel} onValueChange={setChildrenModel}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>
-                    继承（{settings.inherited.children.model ?? "当前会话模型"}）
-                  </SelectItem>
-                  {modelOptions.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.name} ({option.id})
+              {({ controlId, labelId }) => (
+                <SelectRoot value={childrenModel} onValueChange={setChildrenModel}>
+                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>
+                      继承（{settings.inherited.children.model ?? "当前会话模型"}）
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
+                    <SubagentModelSelectOptions models={modelOptions} />
+                  </SelectContent>
+                </SelectRoot>
+              )}
             </SubagentFormField>
             <SubagentFormField label="思考级别">
-              <SelectRoot value={childrenThinking} onValueChange={setChildrenThinking}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INHERIT_VALUE}>继承（{childrenThinkingLabel}）</SelectItem>
-                  {THINKING_LEVELS.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      {getThinkingLevelLabel(level)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </SelectRoot>
+              {({ controlId, labelId }) => (
+                <SelectRoot value={childrenThinking} onValueChange={setChildrenThinking}>
+                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT_VALUE}>继承（{childrenThinkingLabel}）</SelectItem>
+                    {THINKING_LEVELS.map((level) => (
+                      <SelectItem key={level} value={level}>
+                        {getThinkingLevelLabel(level)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </SelectRoot>
+              )}
             </SubagentFormField>
           </div>
         </div>

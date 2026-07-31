@@ -15,7 +15,7 @@ export function SessionChatThread() {
         <Messages />
         <div
           data-slot="session-composer-footer"
-          className="w-full shrink-0 bg-[linear-gradient(to_bottom,transparent,var(--color-background)_16px)]"
+          className="w-full shrink-0 bg-[linear-gradient(to_bottom,transparent,var(--color-background)_16px)] pr-(--thread-scrollbar-width) overscroll-contain"
         >
           <div className="mx-auto w-full max-w-(--layout-thread-max-width) px-4 pb-4">
             <SessionComposer />

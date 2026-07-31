@@ -1,4 +1,5 @@
 import { Switch } from "@renderer/shared/ui/switch";
+import { useId } from "react";
 
 interface SubagentToggleFieldProps {
   label: string;
@@ -8,10 +9,11 @@ interface SubagentToggleFieldProps {
 }
 
 export function SubagentToggleField({ label, checked, defaultChecked, onCheckedChange }: SubagentToggleFieldProps) {
+  const controlId = useId();
   return (
-    <label className="subagent-toggle-field">
-      <span>{label}</span>
-      <Switch checked={checked} defaultChecked={defaultChecked} onCheckedChange={onCheckedChange} />
-    </label>
+    <div className="subagent-toggle-field">
+      <label htmlFor={controlId}>{label}</label>
+      <Switch id={controlId} checked={checked} defaultChecked={defaultChecked} onCheckedChange={onCheckedChange} />
+    </div>
   );
 }

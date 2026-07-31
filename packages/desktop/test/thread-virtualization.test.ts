@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildThreadTurns,
+  mergeSelectedVirtualIndexes,
   stabilizeThreadTurnIds,
   type ThreadMessageRow,
 } from "../src/renderer/src/components/chat/thread-virtualization.ts";
@@ -18,6 +19,14 @@ describe("thread virtualization", () => {
       { id: "user-1", messageIds: ["user-1", "assistant-1", "system"] },
       { id: "user-2", messageIds: ["user-2"] },
     ]);
+  });
+
+  it("activity 行消失后丢弃旧选区中的越界索引", () => {
+    expect(mergeSelectedVirtualIndexes([3, 4, 5], { start: 3, end: 6 }, 6)).toEqual([3, 4, 5]);
+  });
+
+  it("合并有效选区并过滤无效的默认索引", () => {
+    expect(mergeSelectedVirtualIndexes([-1, 0, 3, 8, 10], { start: 1, end: 4 }, 10)).toEqual([0, 1, 2, 3, 4, 8]);
   });
 
   it("run finish 替换 user message ID 时复用原 turn ID", () => {

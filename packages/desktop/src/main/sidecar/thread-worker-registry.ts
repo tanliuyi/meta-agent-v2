@@ -27,6 +27,12 @@ import type {
   StaleDraftExtensionSetErrorDetails,
 } from "../../shared/desktop-extension-contracts.ts";
 import type {
+  SessionCheckpointDiffInput,
+  SessionCheckpointDiffResult,
+  SessionCheckpointRestoreInput,
+  SessionCheckpointRestoreResult,
+} from "../../shared/pi-rewind-contracts.ts";
+import type {
   CreationReservation,
   ModelConfigurationRevision,
   SidecarEvent,
@@ -57,6 +63,7 @@ interface WorkerRecord {
   client: ThreadWorkerClient;
   projectId: string;
   threadId: string;
+  workspaceKey: string;
   summary?: Thread;
   initialBootstrap?: SessionBootstrap;
   lastActivityAt: number;
@@ -82,6 +89,7 @@ export interface ThreadWorkerRegistryOptions {
   extensionSourcePolicy: DesktopExtensionSourcePolicy;
   generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
   getCwd(projectId: string): string;
+  getWorkspaceKey(projectId: string): Promise<string>;
   push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
   failed(projectId: string, threadId: string, error: Error): void;
   resync(projectId: string, threadId: string, reason: string): void;
@@ -94,6 +102,12 @@ export interface ThreadWorkerRegistryOptions {
   attachSubagent?(projectId: string, threadId: string): Promise<SessionBootstrap | undefined>;
   cancelSubagent?(projectId: string, threadId: string): Promise<void>;
   acknowledgeSubagent?(workerInstanceId: string, sidecarSequence: number): boolean;
+  beginSubagentWorkspaceMutation?(workspaceKey: string): void;
+  endSubagentWorkspaceMutation?(workspaceKey: string): void;
+  beginTerminalWorkspaceMutation?(workspaceKey: string): Promise<() => void>;
+  cleanupSessionCheckpoints?(projectId: string, threadIds: readonly string[]): Promise<void>;
+  beginSubagentProjectMutation?(projectId: string): void;
+  endSubagentProjectMutation?(projectId: string): void;
   beginSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
   endSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
   createWorkerClient?(options: WorkerClientOptions): ThreadWorkerClient;
@@ -133,6 +147,7 @@ export class ThreadWorkerRegistry {
   >();
   private readonly subagentAttachments = new Map<string, number>();
   private readonly operationTails = new Map<string, Promise<void>>();
+  private readonly exclusiveWorkspaceKeys = new Set<string>();
   private readonly exclusiveThreads = new Set<string>();
   private readonly drainingThreads = new Set<string>();
   private readonly extensionApplyCompletions = new Map<string, Promise<void>>();
@@ -236,6 +251,8 @@ export class ThreadWorkerRegistry {
 
   private async createOnce(input: SessionCreateInput): Promise<SessionBootstrap> {
     this.assertProjectAvailable(input.projectId);
+    const workspaceKey = await this.options.getWorkspaceKey(input.projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
     const recovered = await this.recoverCreationRequest(input.projectId, input.createRequestId);
     if (recovered) return recovered;
     const cwd = this.options.getCwd(input.projectId);
@@ -419,6 +436,33 @@ export class ThreadWorkerRegistry {
     }
   }
 
+  async getCheckpointDiff(input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult> {
+    return this.use(input.projectId, input.threadId, (record) =>
+      record.client.request<SessionCheckpointDiffResult>(
+        {
+          type: "getCheckpointDiff",
+          fromCheckpointId: input.fromCheckpointId,
+          toCheckpointId: input.toCheckpointId,
+          path: input.path,
+        },
+        35_000,
+      ),
+    );
+  }
+
+  async restoreCheckpoint(input: SessionCheckpointRestoreInput): Promise<SessionCheckpointRestoreResult> {
+    return this.runWorkspaceExclusive(input.projectId, input.threadId, (record) =>
+      record.client.request<SessionCheckpointRestoreResult>(
+        {
+          type: "restoreCheckpoint",
+          checkpointId: input.checkpointId,
+          expectedCheckpointId: input.expectedCheckpointId,
+        },
+        null,
+      ),
+    );
+  }
+
   async branch(input: SessionBranchInput): Promise<SessionBranchResult> {
     const result = await this.use(input.projectId, input.threadId, (record) =>
       record.client.request<SessionBranchResult>({ type: "branch", input }, null),
@@ -482,6 +526,8 @@ export class ThreadWorkerRegistry {
     expectedDesiredGeneration: string,
     abortRunning = false,
   ): Promise<ApplyDesktopExtensionSetResult> {
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
     this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
     if (this.drainingThreads.has(key))
@@ -494,6 +540,7 @@ export class ThreadWorkerRegistry {
     this.extensionApplyCompletions.set(key, completion);
     try {
       return await this.withThreadLock(key, async () => {
+        this.assertWorkspaceNotExclusive(workspaceKey);
         const current = await this.requireUnlocked(projectId, threadId);
         const desired = await this.options.extensionSourcePolicy.resolve(projectId);
         if (desired.generation !== expectedDesiredGeneration) {
@@ -591,9 +638,12 @@ export class ThreadWorkerRegistry {
   }
 
   async respond(projectId: string, threadId: string, response: HostResponse): Promise<void> {
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
     const key = workerKey(projectId, threadId);
     let record!: WorkerRecord;
     await this.withThreadLock(key, async () => {
+      this.assertWorkspaceNotExclusive(workspaceKey);
       const current = this.records.get(key);
       if (!current) throw new Error("Host UI response targets an unavailable thread worker");
       if (response.workerInstanceId && response.workerInstanceId !== current.client.instanceId) {
@@ -642,6 +692,8 @@ export class ThreadWorkerRegistry {
   }
 
   async remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult> {
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
     const barrierThreadIds = [threadId];
     this.options.beginSubagentTreeMutation?.(projectId, threadId);
     try {
@@ -651,7 +703,14 @@ export class ThreadWorkerRegistry {
         this.options.beginSubagentTreeMutation?.(projectId, descendantId);
         barrierThreadIds.push(descendantId);
       }
-      return await this.removeTree(projectId, threadId, policy, catalog, descendantIds);
+      const result = await this.removeTree(projectId, threadId, policy, catalog, descendantIds);
+      try {
+        this.assertWorkspaceNotExclusive(workspaceKey);
+        await this.options.cleanupSessionCheckpoints?.(projectId, result.removedThreadIds);
+      } catch (error) {
+        this.options.log?.(`checkpoint-cleanup:${projectId}`, error instanceof Error ? error.message : String(error));
+      }
+      return result;
     } finally {
       for (const barrierThreadId of [...barrierThreadIds].reverse()) {
         this.options.endSubagentTreeMutation?.(projectId, barrierThreadId);
@@ -751,6 +810,7 @@ export class ThreadWorkerRegistry {
     if (failure?.status === "rejected") throw failure.reason;
     this.records.clear();
     this.subagentAttachments.clear();
+    this.exclusiveWorkspaceKeys.clear();
     this.exclusiveThreads.clear();
     for (const request of this.resourceReloadRequests.values()) {
       if (request.timer) clearTimeout(request.timer);
@@ -758,15 +818,83 @@ export class ThreadWorkerRegistry {
     this.resourceReloadRequests.clear();
   }
 
+  private async runWorkspaceExclusive<T>(
+    projectId: string,
+    threadId: string,
+    operation: (record: WorkerRecord) => Promise<T>,
+  ): Promise<T> {
+    this.assertProjectAvailable(projectId);
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
+    this.assertNotActiveSubagent(projectId, threadId);
+    this.exclusiveWorkspaceKeys.add(workspaceKey);
+    let subagentBarrier = false;
+    let releaseTerminalBarrier: (() => void) | undefined;
+    try {
+      this.options.beginSubagentWorkspaceMutation?.(workspaceKey);
+      subagentBarrier = true;
+      if (await this.hasPendingWorkerForWorkspace(workspaceKey)) {
+        throw new Error("Cannot restore a checkpoint while a thread worker is starting");
+      }
+      const targetKey = workerKey(projectId, threadId);
+      const lockKeys = [
+        ...new Set([
+          targetKey,
+          ...[...this.records.entries()]
+            .filter(([, record]) => record.workspaceKey === workspaceKey && !record.retired)
+            .map(([key]) => key),
+        ]),
+      ].sort();
+      return await this.withThreadLocks(lockKeys, async () => {
+        if (await this.hasPendingWorkerForWorkspace(workspaceKey)) {
+          throw new Error("Cannot restore a checkpoint while a thread worker is starting");
+        }
+        const busyRecord = [...this.records.values()].find(
+          (record) =>
+            record.workspaceKey === workspaceKey && !record.retired && (record.inFlight > 0 || record.summary?.running),
+        );
+        if (busyRecord) {
+          throw new Error(
+            `Cannot restore a checkpoint while thread ${busyRecord.projectId}/${busyRecord.threadId} is busy`,
+          );
+        }
+
+        releaseTerminalBarrier = await this.options.beginTerminalWorkspaceMutation?.(workspaceKey);
+        const record = await this.requireUnlocked(projectId, threadId);
+        if (record.workspaceKey !== workspaceKey) {
+          throw new Error("Checkpoint worker resolved to a different workspace");
+        }
+        record.lastActivityAt = Date.now();
+        record.inFlight += 1;
+        try {
+          return await operation(record);
+        } catch (error) {
+          if (isUnknownOutcome(error)) this.retireAfterUnknown(targetKey, record, error);
+          throw error;
+        } finally {
+          record.inFlight -= 1;
+          record.lastActivityAt = Date.now();
+        }
+      });
+    } finally {
+      releaseTerminalBarrier?.();
+      this.exclusiveWorkspaceKeys.delete(workspaceKey);
+      if (subagentBarrier) this.options.endSubagentWorkspaceMutation?.(workspaceKey);
+    }
+  }
+
   private async runExclusive<T>(
     projectId: string,
     threadId: string,
     operation: (record: WorkerRecord) => Promise<T>,
   ): Promise<T> {
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
     this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
     let record!: WorkerRecord;
     await this.withThreadLock(key, async () => {
+      this.assertWorkspaceNotExclusive(workspaceKey);
       if (this.drainingThreads.has(key) || this.exclusiveThreads.has(key)) {
         throw new Error(`Cannot reload resources while thread ${projectId}/${threadId} is busy`);
       }
@@ -798,6 +926,8 @@ export class ThreadWorkerRegistry {
     operation: (record: WorkerRecord) => Promise<T>,
     waitForExtensionApply = false,
   ): Promise<T> {
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
     this.assertNotActiveSubagent(projectId, threadId);
     const key = workerKey(projectId, threadId);
     if (this.exclusiveThreads.has(key)) {
@@ -810,6 +940,7 @@ export class ThreadWorkerRegistry {
     while (true) {
       let applyCompletion: Promise<void> | undefined;
       await this.withThreadLock(key, async () => {
+        this.assertWorkspaceNotExclusive(workspaceKey);
         applyCompletion = this.extensionApplyCompletions.get(key);
         if (waitForExtensionApply && applyCompletion) return;
         if (this.exclusiveThreads.has(key)) {
@@ -955,6 +1086,7 @@ export class ThreadWorkerRegistry {
   }
 
   private async spawnAttempt(binding: ThreadWorkerBinding): Promise<WorkerRecord> {
+    const workspaceKey = await this.options.getWorkspaceKey(binding.projectId);
     let record: WorkerRecord;
     let client: ThreadWorkerClient;
     const clientOptions: WorkerClientOptions = {
@@ -1004,6 +1136,7 @@ export class ThreadWorkerRegistry {
       client,
       projectId: binding.projectId,
       threadId: binding.mode === "open" ? binding.threadId : "",
+      workspaceKey,
       lastActivityAt: Date.now(),
       inFlight: 1,
       attachments: 0,
@@ -1129,6 +1262,24 @@ export class ThreadWorkerRegistry {
   private assertNotActiveSubagent(projectId: string, threadId: string): void {
     if (this.options.isActiveSubagentThread?.(projectId, threadId)) {
       throw new Error("Active subagent sessions are read-only in Desktop");
+    }
+  }
+
+  private async hasPendingWorkerForWorkspace(workspaceKey: string): Promise<boolean> {
+    const projectIds = new Set<string>();
+    for (const key of [...this.pendingCreations.keys(), ...this.pending.keys()]) {
+      const separator = key.indexOf("\0");
+      if (separator !== -1) projectIds.add(key.slice(0, separator));
+    }
+    const workspaceKeys = await Promise.all(
+      [...projectIds].map((projectId) => this.options.getWorkspaceKey(projectId)),
+    );
+    return workspaceKeys.includes(workspaceKey);
+  }
+
+  private assertWorkspaceNotExclusive(workspaceKey: string): void {
+    if (this.exclusiveWorkspaceKeys.has(workspaceKey)) {
+      throw new Error(`Workspace ${workspaceKey} is restoring a checkpoint`);
     }
   }
 

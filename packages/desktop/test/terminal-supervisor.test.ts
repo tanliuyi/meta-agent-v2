@@ -140,6 +140,79 @@ describe("TerminalSupervisor", () => {
     expect(ptyMock.spawn).toHaveBeenCalledWith(managedShell, ["--login", "-i"], expect.any(Object));
   });
 
+  it("closes affected terminals and blocks new input during workspace restore", async () => {
+    const { project, store } = await createStore();
+    const before = new FakePty();
+    const after = new FakePty();
+    ptyMock.spawn.mockReturnValueOnce(before).mockReturnValueOnce(after);
+    const terminals = new TerminalSupervisor(store, () => undefined);
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+    const restoreBarrier = terminals.beginWorkspaceRestore([project.id]);
+    let barrierReady = false;
+    void restoreBarrier.then(() => {
+      barrierReady = true;
+    });
+
+    expect(before.kill).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(barrierReady).toBe(false);
+    expect(() => terminals.open(project.id, "thread", "bottom", 80, 24)).toThrow("恢复期间不可用");
+    expect(() => terminals.write(project.id, "thread", "bottom", "dir\r")).toThrow("恢复期间不可用");
+
+    before.emitExit(0);
+    const release = await restoreBarrier;
+    expect(barrierReady).toBe(true);
+    release();
+    expect(terminals.open(project.id, "thread", "bottom", 80, 24).running).toBe(true);
+    expect(ptyMock.spawn).toHaveBeenCalledTimes(2);
+    terminals.dispose();
+  });
+
+  it("does not block terminals from unrelated projects during restore", async () => {
+    const { project, root, store } = await createStore();
+    const otherCwd = join(root, "other-workspace");
+    await mkdir(otherCwd);
+    const otherProject = await store.add(otherCwd);
+    const before = new FakePty();
+    const unrelated = new FakePty();
+    ptyMock.spawn.mockReturnValueOnce(before).mockReturnValueOnce(unrelated);
+    const terminals = new TerminalSupervisor(store, () => undefined);
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+    const restoreBarrier = terminals.beginWorkspaceRestore([project.id]);
+    expect(terminals.open(otherProject.id, "thread", "bottom", 80, 24).running).toBe(true);
+    terminals.write(otherProject.id, "thread", "bottom", "dir\r");
+    expect(unrelated.write).toHaveBeenCalledWith("dir\r");
+
+    before.emitExit(0);
+    const release = await restoreBarrier;
+    release();
+    terminals.dispose();
+  });
+
+  it("rejects restore and releases the barrier when a terminal does not exit", async () => {
+    const { project, store } = await createStore();
+    const terminal = new FakePty();
+    ptyMock.spawn.mockReturnValue(terminal);
+    const terminals = new TerminalSupervisor(store, () => undefined);
+    vi.useFakeTimers();
+
+    try {
+      terminals.open(project.id, "thread", "bottom", 80, 24);
+      const restoreBarrier = terminals.beginWorkspaceRestore([project.id]);
+      const rejection = expect(restoreBarrier).rejects.toThrow("did not exit");
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(terminal.kill).toHaveBeenLastCalledWith("SIGKILL");
+      await vi.advanceTimersByTimeAsync(3_000);
+      await rejection;
+      expect(() => terminals.open(project.id, "thread", "bottom", 80, 24)).not.toThrow();
+    } finally {
+      terminals.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("只释放指定 session 的 PTY", async () => {
     const { project, store } = await createStore();
     const first = new FakePty();

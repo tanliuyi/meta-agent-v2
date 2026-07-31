@@ -30,6 +30,8 @@ export const CHANNELS = {
   sessionsEdit: "desktop:sessions:edit",
   sessionsReload: "desktop:sessions:reload",
   sessionsReloadResources: "desktop:sessions:reload-resources",
+  sessionsGetCheckpointDiff: "desktop:sessions:get-checkpoint-diff",
+  sessionsRestoreCheckpoint: "desktop:sessions:restore-checkpoint",
   sessionsBranch: "desktop:sessions:branch",
   sessionsPush: "desktop:sessions:push",
   sessionsCatalogChanged: "desktop:sessions:catalog-changed",

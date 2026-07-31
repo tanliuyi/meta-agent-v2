@@ -53,6 +53,12 @@ import type {
 } from "./memory-settings-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
 import type {
+  SessionCheckpointDiffInput,
+  SessionCheckpointDiffResult,
+  SessionCheckpointRestoreInput,
+  SessionCheckpointRestoreResult,
+} from "./pi-rewind-contracts.ts";
+import type {
   PluginConfigurationSnapshot,
   SavePluginConfigurationInput,
   SavePluginConfigurationResult,
@@ -213,6 +219,8 @@ export interface DesktopApi {
     edit(input: SessionEditInput): Promise<SessionCommandResult>;
     reload(input: SessionReloadInput): Promise<SessionCommandResult>;
     reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult>;
+    getCheckpointDiff(input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult>;
+    restoreCheckpoint(input: SessionCheckpointRestoreInput): Promise<SessionCheckpointRestoreResult>;
     branch(input: SessionBranchInput): Promise<SessionBranchResult>;
     cancel(projectId: string, threadId: string): Promise<ClearedQueue>;
     clearQueue(projectId: string, threadId: string): Promise<ClearedQueue>;
