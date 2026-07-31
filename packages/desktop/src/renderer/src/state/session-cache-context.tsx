@@ -6,6 +6,7 @@ import {
   sessionRecordKey,
 } from "../runtime/pi-session-store.ts";
 import { useTransportManager } from "../runtime/session-transport-context";
+import { SessionHolderRegistry } from "./session-holders.ts";
 
 export interface SessionCacheState {
   records: Map<string, CachedSessionRecord>;
@@ -17,6 +18,10 @@ export interface SessionCacheController {
   get(key: string): CachedSessionRecord | undefined;
   quiesce(key: string): () => void;
   quiesceProject(projectId: string): () => void;
+  /** 次级视图（如侧边栏 tab）持有一席：导航切换不会 detach 被持有的会话。 */
+  retain(key: string): void;
+  /** 释放一席；无其他持有者且非路由活动会话时 detach 租约。 */
+  release(key: string): void;
   retire(key: string): Promise<void>;
   retireProject(projectId: string): Promise<void>;
   touch(key: string): void;
@@ -46,6 +51,7 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
   const [, forceRender] = useState(0);
   const recordsRef = useRef(new Map<string, CachedSessionRecord>());
   const activeKeyRef = useRef<string | null>(null);
+  const holdersRef = useRef(new SessionHolderRegistry());
   const draftMaterializingRef = useRef(false);
   const recordsSnapshotRef = useRef<CachedSessionRecord[]>([]);
   const recordsDirtyRef = useRef(false);
@@ -53,7 +59,7 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
     const previousKey = activeKeyRef.current;
     if (previousKey === key) return;
     activeKeyRef.current = key;
-    if (previousKey) {
+    if (previousKey && !holdersRef.current.isHeld(previousKey)) {
       const previousRecord = recordsRef.current.get(previousKey);
       void transportManager.detach(previousKey).then(() => {
         if (activeKeyRef.current === previousKey || recordsRef.current.get(previousKey) !== previousRecord) return;
@@ -132,7 +138,17 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
         };
       },
 
+      retain(key: string) {
+        holdersRef.current.retain(key);
+      },
+
+      release(key: string) {
+        const remaining = holdersRef.current.release(key);
+        if (remaining === 0 && activeKeyRef.current !== key) void transportManager.detach(key);
+      },
+
       async retire(key: string) {
+        holdersRef.current.remove(key);
         const record = recordsRef.current.get(key);
         if (!record) return;
         await transportManager.retire(key);
@@ -145,6 +161,7 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
 
       async retireProject(projectId: string) {
         const records = [...recordsRef.current.values()].filter((record) => record.identity.projectId === projectId);
+        for (const record of records) holdersRef.current.remove(record.key);
         await Promise.all(records.map((record) => transportManager.retire(record.key)));
         let recordsChanged = false;
         for (const record of records) {

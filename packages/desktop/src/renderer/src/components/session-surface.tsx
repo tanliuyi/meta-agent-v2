@@ -14,9 +14,9 @@ export function SessionSurface() {
         <main className="chat-workspace">
           <ChatThread />
         </main>
-        <WorkbenchPanel />
       </div>
       <BottomTerminal />
+      <WorkbenchPanel />
     </>
   );
 }

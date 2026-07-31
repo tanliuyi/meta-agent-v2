@@ -53,6 +53,31 @@ describe("CheckpointNotificationView", () => {
     expect(markup).not.toContain("diff --git");
   });
 
+  it("defaults to five file rows and offers to reveal the remainder", () => {
+    const notice = checkpointNotice();
+    if (notice.content.type !== "custom" || !notice.content.details || typeof notice.content.details !== "object") {
+      throw new Error("Invalid fixture");
+    }
+    notice.content.details = {
+      ...notice.content.details,
+      fileCount: 7,
+      files: Array.from({ length: 7 }, (_, index) => ({
+        path: `file-${index + 1}.ts`,
+        additions: index + 1,
+        deletions: 0,
+      })),
+    };
+
+    const markup = renderToStaticMarkup(<CheckpointNotificationView notice={notice} />);
+
+    expect(markup).toContain("file-1.ts");
+    expect(markup).toContain("file-5.ts");
+    expect(markup).not.toContain("file-6.ts");
+    expect(markup).not.toContain("file-7.ts");
+    expect(markup).toContain("展开更多 2 个");
+    expect(markup).toContain('aria-expanded="false"');
+  });
+
   it("renders an expanded file with the shared edit tool diff surface", () => {
     const markup = renderToStaticMarkup(
       <CheckpointNotificationView

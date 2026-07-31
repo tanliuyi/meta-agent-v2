@@ -389,6 +389,48 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("passes the parent session file in the create binding", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "parent");
+
+    await registry.create({
+      projectId: "project",
+      createRequestId: "child-create",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+      parentThreadId: "parent",
+    });
+
+    // 父会话在 registry 中有活跃 worker 时，直接使用其 sessionFile（不经 metadata 索引）。
+    expect(harness.clients[1]?.bindingParentSessionFile).toBe(join(userDataDir, "parent.jsonl"));
+    await registry.dispose();
+  });
+
+  it("keeps the parent association through runtime summary updates", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.create({
+      projectId: "project",
+      createRequestId: "child-create",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+      parentThreadId: "parent",
+    });
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+
+    // 运行时 summary 更新不得冲掉父级关联。
+    client.emit({ type: "summary-changed", summary: { ...thread("child"), running: true } });
+    registry.detach("project", "child");
+    client.emit({ type: "summary-changed", summary: thread("child") }, 2);
+
+    expect(harness.catalogChanged).toHaveBeenCalledWith(expect.objectContaining({ parentThreadId: "parent" }));
+    await registry.dispose();
+  });
+
   it("rejects a stale draft generation before spawning a writer", async () => {
     const harness = createHarness(userDataDir);
     const registry = new ThreadWorkerRegistry(harness.options);
@@ -1005,6 +1047,10 @@ function createHarness(
   const failed = vi.fn<(projectId: string, threadId: string, error: Error) => void>();
   const catalogChanged = vi.fn<(thread: Thread) => void>();
   const metadataRenameCold = vi.fn(async () => {});
+  const metadataResolve = vi.fn(async (_projectId: string, _cwd: string, threadId: string) => ({
+    id: threadId,
+    path: join(userDataDir, `${threadId}.jsonl`),
+  }));
   const metadataList = vi.fn(async (): Promise<Thread[]> => []);
   const metadataRemoveCold = vi.fn(async (_projectId: string, _cwd: string, threadId: string, policy: string) => ({
     removedThreadIds: policy === "subtree" && threadId === "parent" ? ["parent", "child", "grandchild"] : [threadId],
@@ -1022,10 +1068,7 @@ function createHarness(
       readiness: { state: "missing-model" },
       extensions: { extensionSetGeneration: "extensions-generation", diagnostics: [] },
     })),
-    resolve: vi.fn(async (_projectId: string, _cwd: string, threadId: string) => ({
-      id: threadId,
-      path: join(userDataDir, `${threadId}.jsonl`),
-    })),
+    resolve: metadataResolve,
     upsert: vi.fn(async () => {}),
     renameCold: metadataRenameCold,
     removeCold: metadataRemoveCold,
@@ -1073,6 +1116,7 @@ function createHarness(
     failed,
     catalogChanged,
     metadataRenameCold,
+    metadataResolve,
     metadataList,
     metadataRemoveCold,
     cleanupSessionCheckpoints,
@@ -1089,6 +1133,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   readonly acknowledgements: number[] = [];
   readonly bindingGeneration: string;
   readonly shellPath: string | undefined;
+  readonly bindingParentSessionFile: string | undefined;
   readyStarted = false;
   shutdownCount = 0;
   private readonly options: WorkerClientOptions;
@@ -1121,6 +1166,8 @@ class FakeWorkerClient implements ThreadWorkerClient {
       options.binding.value.mode === "open" ? options.binding.value.threadId : options.binding.value.sessionId;
     this.bindingGeneration = options.binding.value.extensionSet.generation;
     this.shellPath = options.binding.value.shellPath;
+    this.bindingParentSessionFile =
+      options.binding.value.mode === "create" ? options.binding.value.parentSessionFile : undefined;
     this.bootstrap = bootstrap(threadId, this.bindingGeneration);
   }
 

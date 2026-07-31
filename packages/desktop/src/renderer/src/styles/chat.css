@@ -1,6 +1,11 @@
 .thread-root {
+  --thread-composer-overlap: var(--composer-radius);
+
   width: 100%;
   height: 100%;
+}
+.thread-root:has(.composer-queue) {
+  --thread-composer-overlap: var(--shape-radius-lg);
 }
 [data-slot="aui-turn"] > [data-role] + [data-role] {
   margin-top: 24px;
@@ -385,6 +390,14 @@
   font-size: var(--type-size-meta);
 }
 
+[data-slot="session-message-content"] {
+  padding-bottom: calc(var(--thread-composer-overlap) + var(--space-4));
+}
+[data-slot="session-composer-footer"] {
+  position: relative;
+  z-index: var(--stack-sticky-control);
+  margin-top: calc(-1 * var(--thread-composer-overlap));
+}
 .composer-wrap {
   width: 100%;
 }
@@ -837,6 +850,20 @@
 }
 .checkpoint-files {
   border-top: 1px solid hsl(var(--border) / 0.62);
+}
+.checkpoint-files-more {
+  width: 100%;
+  height: 34px;
+  gap: 5px;
+  border-top: 1px solid hsl(var(--border) / 0.42);
+  border-radius: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+  letter-spacing: 0;
+}
+.checkpoint-files-more svg {
+  width: 14px;
+  height: 14px;
 }
 .checkpoint-file + .checkpoint-file {
   border-top: 1px solid hsl(var(--border) / 0.42);

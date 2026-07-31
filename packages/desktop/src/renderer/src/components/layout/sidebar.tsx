@@ -16,6 +16,7 @@ import { runControlledThreadAction } from "../../state/thread-list-commands.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { GeneralConversationSection } from "./general-conversation-section.tsx";
 import { ProjectList } from "./project-list.tsx";
+import { SidebarToggle } from "./sidebar-toggle.tsx";
 import { UpdateBanner } from "./update-banner.tsx";
 
 /** 侧边栏行统一样式:新建任务、插件中心、设置共用,保证字号与高亮一致。 */
@@ -26,7 +27,7 @@ const sidebarRowClass =
 export const Sidebar = memo(function Sidebar() {
   const actions = useDesktopActions();
   const draftMaterializing = useSessionDraftMaterializing();
-  const { sidebarWidth, setSidebarWidth } = useLayout();
+  const { sidebarOpen, sidebarWidth, setSidebarWidth } = useLayout();
   const matchRoute = useMatchRoute();
   const navigate = useNavigate();
   const routeSearch = useSearch({ strict: false });
@@ -71,17 +72,24 @@ export const Sidebar = memo(function Sidebar() {
     <aside
       ref={resize.regionRef}
       className="sidebar"
+      data-collapsed={!sidebarOpen}
       style={
         {
           "--resizable-region-size": `${resize.initialSize}px`,
         } as CSSProperties
       }
     >
+      {window.desktop.platform === "darwin" ? (
+        <div className="macos-titlebar-space">
+          <SidebarToggle location="sidebar" />
+        </div>
+      ) : null}
       <div
         ref={resize.separatorRef}
         className="resize-handle resize-handle-sidebar"
         role="separator"
-        tabIndex={0}
+        tabIndex={sidebarOpen ? 0 : -1}
+        aria-hidden={!sidebarOpen}
         aria-label="调整侧边栏宽度"
         aria-controls="sidebar-content"
         aria-orientation="vertical"
@@ -92,69 +100,72 @@ export const Sidebar = memo(function Sidebar() {
         onPointerDown={resize.onPointerDown}
         onKeyDown={resize.onKeyDown}
       />
-      <div id="sidebar-content" className="sidebar-content">
-        {window.desktop.platform === "darwin" ? <div className="macos-titlebar-space" aria-hidden="true" /> : null}
-        <nav className="sidebar-actions" aria-label="主要操作">
-          <Button
-            variant="ghost"
-            disabled={draftMaterializing}
-            className={sidebarRowClass}
-            onClick={(event) => runControlledThreadAction(event, () => startDraft())}
-          >
-            <Plus size={16} />
-            <span className="whitespace-nowrap">新建任务</span>
-          </Button>
-        </nav>
-
-        <div className="sidebar-navigation-scroll py-1">
-          <nav className="sidebar-actions sidebar-secondary-actions" aria-label="辅助操作">
-            <Button asChild variant="ghost" className={sidebarRowClass}>
-              <Link to="/plugins" search={settingsSearch}>
-                <Blocks size={16} />
-                <span className="whitespace-nowrap">插件中心</span>
-              </Link>
-            </Button>
-          </nav>
-
-          <section className="sidebar-project-section mt-3">
-            <div className="sidebar-section-heading">
-              <span>项目</span>
-              <TooltipIconButton
+      <div id="sidebar-content" className="sidebar-content" hidden={!sidebarOpen}>
+        {sidebarOpen ? (
+          <>
+            <nav className="sidebar-actions mt-2" aria-label="主要操作">
+              <Button
                 variant="ghost"
-                size="icon"
-                aria-label="添加项目"
-                tooltip="添加项目"
-                side="top"
-                onClick={() => void actions.chooseProject().catch(() => undefined)}
+                disabled={draftMaterializing}
+                className={sidebarRowClass}
+                onClick={(event) => runControlledThreadAction(event, () => startDraft())}
               >
-                <Plus />
-              </TooltipIconButton>
-            </div>
-            <div className="sidebar-projects">
-              <ProjectList
-                activeProjectId={activeProjectId}
-                newTaskDisabled={draftMaterializing}
-                onNewTask={startDraft}
+                <Plus size={16} />
+                <span className="whitespace-nowrap">新建任务</span>
+              </Button>
+            </nav>
+
+            <div className="sidebar-navigation-scroll py-1">
+              <nav className="sidebar-actions sidebar-secondary-actions" aria-label="辅助操作">
+                <Button asChild variant="ghost" className={sidebarRowClass}>
+                  <Link to="/plugins" search={settingsSearch}>
+                    <Blocks size={16} />
+                    <span className="whitespace-nowrap">插件中心</span>
+                  </Link>
+                </Button>
+              </nav>
+
+              <section className="sidebar-project-section mt-3">
+                <div className="sidebar-section-heading">
+                  <span>项目</span>
+                  <TooltipIconButton
+                    variant="ghost"
+                    size="icon"
+                    aria-label="添加项目"
+                    tooltip="添加项目"
+                    side="top"
+                    onClick={() => void actions.chooseProject().catch(() => undefined)}
+                  >
+                    <Plus />
+                  </TooltipIconButton>
+                </div>
+                <div className="sidebar-projects">
+                  <ProjectList
+                    activeProjectId={activeProjectId}
+                    newTaskDisabled={draftMaterializing}
+                    onNewTask={startDraft}
+                  />
+                </div>
+              </section>
+
+              <GeneralConversationSection
+                active={activeProjectId === GENERAL_WORKSPACE_ID}
+                newConversationDisabled={draftMaterializing}
+                onNewConversation={() => startDraft(GENERAL_WORKSPACE_ID)}
               />
             </div>
-          </section>
 
-          <GeneralConversationSection
-            active={activeProjectId === GENERAL_WORKSPACE_ID}
-            newConversationDisabled={draftMaterializing}
-            onNewConversation={() => startDraft(GENERAL_WORKSPACE_ID)}
-          />
-        </div>
-
-        <div className="sidebar-footer">
-          <UpdateBanner />
-          <Button asChild variant="ghost" className={sidebarRowClass}>
-            <Link to="/settings/personalization" search={settingsSearch}>
-              <Settings size={16} />
-              <span className="whitespace-nowrap">设置</span>
-            </Link>
-          </Button>
-        </div>
+            <div className="sidebar-footer">
+              <UpdateBanner />
+              <Button asChild variant="ghost" className={sidebarRowClass}>
+                <Link to="/settings/personalization" search={settingsSearch}>
+                  <Settings size={16} />
+                  <span className="whitespace-nowrap">设置</span>
+                </Link>
+              </Button>
+            </div>
+          </>
+        ) : null}
       </div>
     </aside>
   );

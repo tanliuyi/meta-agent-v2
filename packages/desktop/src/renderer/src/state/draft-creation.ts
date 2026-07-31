@@ -20,6 +20,8 @@ interface DraftMaterializationInput {
   model: SessionCreateInput["model"];
   thinkingLevel: SessionCreateInput["thinkingLevel"];
   extensionSetGeneration: string;
+  /** 创建为该会话的子会话（侧边栏草稿等场景）。 */
+  parentThreadId?: string;
   text: string;
   images: ImageInput[];
 }
@@ -27,7 +29,7 @@ interface DraftMaterializationInput {
 interface DraftMaterializationDependencies {
   requestIds: Map<string, string>;
   sessions: Pick<DesktopApi["sessions"], "create" | "prompt" | "remove">;
-  cache: Pick<SessionCacheController, "ensureAttached" | "setActiveKey" | "retire">;
+  cache: Pick<SessionCacheController, "ensureAttached" | "retire">;
   onMaterialized(bootstrap: SessionBootstrap): void;
 }
 
@@ -41,19 +43,18 @@ export async function materializeDraftSession(
   dependencies: DraftMaterializationDependencies,
 ): Promise<DraftMaterializationResult> {
   const createRequestId = ensureDraftCreateRequestId(dependencies.requestIds, input.projectId);
-  dependencies.cache.setActiveKey(null);
   const bootstrap = await dependencies.sessions.create({
     projectId: input.projectId,
     createRequestId,
     extensionSetGeneration: input.extensionSetGeneration,
     model: input.model,
     thinkingLevel: input.thinkingLevel,
+    ...(input.parentThreadId ? { parentThreadId: input.parentThreadId } : {}),
   });
   dependencies.requestIds.delete(input.projectId);
 
   const target = { projectId: input.projectId, threadId: bootstrap.threadId };
   const recordKey = sessionRecordKey(target.projectId, target.threadId);
-  dependencies.cache.setActiveKey(recordKey);
   try {
     await dependencies.cache.ensureAttached(target);
   } catch (error) {
@@ -90,4 +91,12 @@ async function cleanupMaterializedSession(
     dependencies.cache.retire(recordKey),
     dependencies.sessions.remove(target.projectId, target.threadId, "subtree"),
   ]);
+}
+
+/** 草稿提交因扩展集过期被拒时的判定。 */
+export function isStaleExtensionSetError(reason: unknown): boolean {
+  return (
+    (reason instanceof Error && reason.message.includes("Draft extension set changed")) ||
+    (typeof reason === "object" && reason !== null && "code" in reason && reason.code === "STALE_DRAFT_EXTENSION_SET")
+  );
 }

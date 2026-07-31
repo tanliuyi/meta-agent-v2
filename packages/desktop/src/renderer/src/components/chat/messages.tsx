@@ -213,7 +213,11 @@ export function Messages() {
         data-slot="aui_thread-viewport"
         className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain"
       >
-        <div ref={contentRef} className="mx-auto w-full max-w-(--layout-thread-max-width) px-4 pb-2">
+        <div
+          ref={contentRef}
+          data-slot="session-message-content"
+          className="mx-auto w-full max-w-(--layout-thread-max-width) px-4"
+        >
           <div ref={virtualContentRef} style={{ paddingTop, paddingBottom }}>
             {items.map((item) => {
               if (activityVisible && item.index === activityIndex) {
@@ -259,7 +263,7 @@ export function Messages() {
           variant="outline"
           disabled={isAtBottom}
           onClick={jumpToBottom}
-          className="aui-thread-scroll-to-bottom dark:border-border dark:bg-background dark:hover:bg-accent pointer-events-auto absolute right-1/2 bottom-4 translate-x-1/2 rounded-full p-4 disabled:invisible"
+          className="aui-thread-scroll-to-bottom dark:border-border dark:bg-background dark:hover:bg-accent pointer-events-auto absolute right-1/2 bottom-[calc(var(--thread-composer-overlap)+var(--space-7))] translate-x-1/2 rounded-full p-4 disabled:invisible"
         >
           <ArrowDown />
         </TooltipIconButton>

@@ -1,5 +1,7 @@
 import { Button } from "@renderer/shared/ui/button";
 import { ConfirmDialog } from "@renderer/shared/ui/confirm-dialog";
+import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
+import ChevronUp from "lucide-react/dist/esm/icons/chevron-up.mjs";
 import FileDiff from "lucide-react/dist/esm/icons/file-diff.mjs";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
 import { useMemo, useState } from "react";
@@ -13,6 +15,8 @@ import { CheckpointFile } from "./checkpoint-file.tsx";
 import { parseCheckpointNotice } from "./checkpoint-notification-data.ts";
 
 type RestoreState = "idle" | "restoring" | "restored" | "error";
+const DEFAULT_VISIBLE_FILE_COUNT = 5;
+
 export type CheckpointDiffLoader = (
   details: PiCheckpointNoticeDetails,
   path: string,
@@ -35,6 +39,7 @@ export function CheckpointNotificationView({
 }) {
   const details = useMemo(() => parseCheckpointNotice(notice), [notice]);
   const [expandedPath, setExpandedPath] = useState<string | null>(() => initialExpandedPaths?.[0] ?? null);
+  const [filesExpanded, setFilesExpanded] = useState(false);
   const [diffs, setDiffs] = useState<Readonly<Record<string, SessionCheckpointDiffResult>>>(() => ({
     ...initialDiffs,
   }));
@@ -56,6 +61,9 @@ export function CheckpointNotificationView({
       </section>
     );
   }
+
+  const visibleFiles = filesExpanded ? details.files : details.files.slice(0, DEFAULT_VISIBLE_FILE_COUNT);
+  const hiddenFileCount = details.files.length - DEFAULT_VISIBLE_FILE_COUNT;
 
   const toggleFile = (path: string) => {
     if (expandedPath === path) {
@@ -134,7 +142,7 @@ export function CheckpointNotificationView({
         </div>
       </header>
       <div className="checkpoint-files">
-        {details.files.map((file) => (
+        {visibleFiles.map((file) => (
           <CheckpointFile
             key={file.path}
             file={file}
@@ -145,6 +153,19 @@ export function CheckpointNotificationView({
             onToggle={() => toggleFile(file.path)}
           />
         ))}
+        {hiddenFileCount > 0 ? (
+          <Button
+            type="button"
+            className="checkpoint-files-more rounded-[0px]"
+            variant="ghost"
+            size="sm"
+            aria-expanded={filesExpanded}
+            onClick={() => setFilesExpanded((expanded) => !expanded)}
+          >
+            {filesExpanded ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+            {filesExpanded ? "收起" : `展开更多 ${hiddenFileCount} 个`}
+          </Button>
+        ) : null}
       </div>
       {details.truncated ? (
         <p className="checkpoint-truncated">仅显示前 {details.files.length} 个文件，撤销仍使用完整 checkpoint。</p>

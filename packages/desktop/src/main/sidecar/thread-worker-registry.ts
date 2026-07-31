@@ -65,6 +65,8 @@ interface WorkerRecord {
   threadId: string;
   workspaceKey: string;
   summary?: Thread;
+  /** 子会话的父线程 id（create 模式传入），运行时 summary 更新时保持父级关联。 */
+  parentThreadId?: string;
   initialBootstrap?: SessionBootstrap;
   lastActivityAt: number;
   inFlight: number;
@@ -263,6 +265,11 @@ export class ThreadWorkerRegistry {
     this.assertProjectAvailable(input.projectId);
     const sessionId = randomUUID();
     this.writeCreationReservation(input.projectId, cwd, sessionId, input.createRequestId, "reserved", undefined);
+    // 父会话通常在 registry 中有活跃 worker（sessionFile 已知）；冷会话回退到 metadata 索引。
+    const parentSessionFile =
+      input.parentThreadId &&
+      (this.records.get(workerKey(input.projectId, input.parentThreadId))?.sessionFile ??
+        (await this.options.metadata.resolve(input.projectId, cwd, input.parentThreadId)).path);
     const binding: ThreadWorkerBinding = {
       mode: "create",
       projectId: input.projectId,
@@ -271,6 +278,7 @@ export class ThreadWorkerRegistry {
       ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
       sessionId,
       createInput: input,
+      ...(parentSessionFile ? { parentSessionFile } : {}),
       extensionSet,
     };
     const record = await this.spawn(binding);
@@ -295,7 +303,11 @@ export class ThreadWorkerRegistry {
       throw new Error(`Created session ID mismatch: expected ${sessionId}, got ${bootstrap.threadId}`);
     }
     record.threadId = bootstrap.threadId;
-    record.summary = summaryFromBootstrap(bootstrap);
+    record.parentThreadId = input.parentThreadId;
+    record.summary = {
+      ...summaryFromBootstrap(bootstrap),
+      ...(record.parentThreadId ? { parentThreadId: record.parentThreadId } : {}),
+    };
     const key = workerKey(input.projectId, bootstrap.threadId);
     if (record.retired) {
       await this.awaitRecordShutdown(record);
@@ -1228,7 +1240,9 @@ export class ThreadWorkerRegistry {
       }
       this.options.push(payload, event.workerInstanceId, event.sequence);
     } else if (event.event.type === "summary-changed") {
-      record.summary = event.event.summary;
+      record.summary = record.parentThreadId
+        ? { ...event.event.summary, parentThreadId: record.parentThreadId }
+        : event.event.summary;
       if (record.attachments === 0) this.options.catalogChanged?.({ ...record.summary });
       if (!record.summary.running) this.requestCapacityTrim();
       if (!record.sessionFile) {

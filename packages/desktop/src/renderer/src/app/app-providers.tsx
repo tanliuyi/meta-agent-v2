@@ -3,6 +3,7 @@ import { DesktopCacheProviders } from "@renderer/state/desktop-cache-providers";
 import { DesktopStoreProvider } from "@renderer/state/desktop-store-context";
 import { FontProvider } from "@renderer/state/font";
 import { LayoutProvider } from "@renderer/state/layout";
+import { SidebarSessionProvider } from "@renderer/state/sidebar-session-context";
 import { ThemeProvider } from "@renderer/state/theme";
 import { ThinkingVisibilityProvider } from "@renderer/state/thinking-visibility";
 import type { ReactNode } from "react";
@@ -20,9 +21,11 @@ export function AppProviders({ children }: { children: ReactNode }) {
         <FontProvider>
           <ThinkingVisibilityProvider>
             <LayoutProvider>
-              <TooltipProvider delayDuration={300} skipDelayDuration={100}>
-                <DesktopCacheProviders>{children}</DesktopCacheProviders>
-              </TooltipProvider>
+              <SidebarSessionProvider>
+                <TooltipProvider delayDuration={300} skipDelayDuration={100}>
+                  <DesktopCacheProviders>{children}</DesktopCacheProviders>
+                </TooltipProvider>
+              </SidebarSessionProvider>
             </LayoutProvider>
           </ThinkingVisibilityProvider>
         </FontProvider>

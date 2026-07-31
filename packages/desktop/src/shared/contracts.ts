@@ -95,6 +95,8 @@ export interface SessionCreateInput {
   extensionSetGeneration: string;
   model: { provider: string; id: string };
   thinkingLevel: ThinkingLevel;
+  /** 创建为该会话的子会话（侧边栏草稿等场景），写入 session header 的 parentSession。 */
+  parentThreadId?: string;
 }
 
 /** Composer 可补全的 Pi slash command。 */
@@ -526,6 +528,10 @@ export interface WorkbenchState {
   panel: "chat" | "terminal" | "files" | "tasks";
   panelOpen: boolean;
   panelWidth: number;
+  fileTreeWidth?: number;
+  fileTreeCollapsed?: boolean;
+  fileWrapMode?: boolean;
+  fileMarkdownPreview?: boolean;
   terminalOpen: boolean;
   terminalHeight: number;
   openFiles: string[];

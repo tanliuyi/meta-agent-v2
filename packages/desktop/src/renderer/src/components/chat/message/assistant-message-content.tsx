@@ -91,7 +91,7 @@ export function AssistantMessageContent({
       </MessagePrimitive.GroupedParts>
       <MessagePrimitive.Error>
         <ErrorPrimitive.Root className="mt-1 flex flex-row items-start gap-1.5 py-1 text-md leading-relaxed text-muted-foreground">
-          <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive/70" aria-hidden="true" />
+          <AlertCircle className="mt-[5px] size-3.5 shrink-0 text-destructive/70" aria-hidden="true" />
           <ErrorPrimitive.Message className="line-clamp-2 min-w-0" />
         </ErrorPrimitive.Root>
       </MessagePrimitive.Error>

@@ -52,6 +52,8 @@ export type ThreadWorkerBinding =
       shellPath?: string;
       sessionId: string;
       createInput: SessionCreateInput;
+      /** 父会话的 session 文件路径，用于在 header 中记录 parentSession。 */
+      parentSessionFile?: string;
       extensionSet: ResolvedExtensionSet;
     }
   | {

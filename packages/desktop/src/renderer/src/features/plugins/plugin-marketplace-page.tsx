@@ -6,6 +6,7 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
 import { useState } from "react";
+import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
 import { LocalPluginsView } from "./local-plugins-view.tsx";
 import { MarketplaceSettingsDialog } from "./marketplace-settings-dialog.tsx";
 import { PluginDetailDialog } from "./plugin-detail-dialog.tsx";
@@ -32,11 +33,13 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
   return (
     <>
       <header className="topbar plugin-marketplace-topbar">
+        <SidebarToggle location="topbar" />
         <h1>插件中心</h1>
         <div className="topbar-actions">
           <Button
             variant="ghost"
             size="icon"
+            className="size-6"
             disabled={
               activeView === "marketplace" ? controller.loading : localController.loading || localController.mutating
             }
@@ -49,6 +52,7 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
           <Button
             variant="ghost"
             size="icon"
+            className="size-6"
             aria-label="插件中心设置"
             title="设置"
             onClick={() => setSettingsOpen(true)}

@@ -15,6 +15,7 @@ interface ResizableRegionOptions {
   direction: 1 | -1;
   orientation: "horizontal" | "vertical";
   commitViewportClamp?: boolean;
+  constraintRef?: RefObject<HTMLElement | null>;
   onCommit(value: number): void;
 }
 
@@ -89,6 +90,14 @@ export function useResizableRegion<T extends HTMLElement>(options: ResizableRegi
     };
     window.addEventListener("resize", clampToViewport);
     return () => window.removeEventListener("resize", clampToViewport);
+  }, [applySize]);
+
+  useEffect(() => {
+    const constraint = optionsRef.current.constraintRef?.current;
+    if (!constraint) return;
+    const observer = new ResizeObserver(() => applySize(optionsRef.current.value));
+    observer.observe(constraint);
+    return () => observer.disconnect();
   }, [applySize]);
 
   useEffect(

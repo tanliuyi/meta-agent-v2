@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
+import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
 import { SessionCacheHost } from "../../components/session-cache-host.tsx";
 import { SessionRoutePending } from "../../components/session-route-pending.tsx";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
@@ -78,6 +79,7 @@ function SessionRoute() {
     return (
       <>
         <header className="topbar">
+          <SidebarToggle location="topbar" />
           <div className="topbar-title">
             <strong>无法打开会话</strong>
           </div>

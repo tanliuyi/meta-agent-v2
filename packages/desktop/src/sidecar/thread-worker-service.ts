@@ -33,7 +33,10 @@ export class ThreadWorkerService implements SidecarService {
     let sessionManager: SessionManager | undefined;
     const sessionDir = resolveDesktopSessionDirectory(input.projectId, input.agentDir);
     if (input.mode === "create") {
-      sessionManager = SessionManager.create(input.cwd, sessionDir, { id: createSessionId });
+      sessionManager = SessionManager.create(input.cwd, sessionDir, {
+        id: createSessionId,
+        ...(input.parentSessionFile ? { parentSession: input.parentSessionFile } : {}),
+      });
     } else {
       const sessionFile = await resolveCanonicalSessionFile(input);
       sessionManager = SessionManager.open(sessionFile, sessionDir, input.cwd);

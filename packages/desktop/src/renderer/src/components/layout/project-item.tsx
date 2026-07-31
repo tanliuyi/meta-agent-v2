@@ -159,7 +159,7 @@ export const ProjectItem = memo(function ProjectItem({
               disabled={pendingAction}
               onSelect={() => runProjectAction(() => actions.openProjectExternally(project.id))}
             >
-              <FolderOpen /> 在资源管理器中打开
+              <FolderOpen /> {window.desktop.platform === "darwin" ? "在 Finder 中打开" : "在资源管理器中打开"}
             </ContextMenuItem>
             <ContextMenuItem variant="destructive" disabled={pendingAction} onSelect={() => setDeletePending(true)}>
               <Trash2 /> 删除

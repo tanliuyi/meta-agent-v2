@@ -14,6 +14,8 @@ export type ComposerProps =
       config: DraftSessionConfig | null;
       configLoading: boolean;
       phase: "editing" | "materializing";
+      /** 固定项目（如侧边栏草稿），隐藏项目选择器。 */
+      fixedProject?: boolean;
       onProjectChange(projectId: string): Promise<void>;
       onModelChange(provider: string, modelId: string): void;
       onThinkingChange(level: SessionControlState["thinkingLevel"]): void;

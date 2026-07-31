@@ -10,8 +10,15 @@ import { Input } from "@renderer/shared/ui/input";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/contracts.ts";
+import { sessionRecordKey } from "../../runtime/pi-session-store.ts";
+import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
-import { useSessionDraftMaterializing } from "../../state/session-cache-context.tsx";
+import {
+  useSessionCache,
+  useSessionCacheActiveKey,
+  useSessionDraftMaterializing,
+} from "../../state/session-cache-context.tsx";
+import { useSidebarSessions } from "../../state/sidebar-session-context.tsx";
 import {
   COLLAPSED_THREAD_COUNT,
   flattenVisibleThreadTree,
@@ -40,6 +47,9 @@ interface RenameState {
 export function DesktopThreadList({ project, threads, compactRoot = false }: DesktopThreadListProps) {
   const actions = useDesktopActions();
   const navigate = useNavigate();
+  const sidebarSessions = useSidebarSessions();
+  const cache = useSessionCache();
+  const activeSessionKey = useSessionCacheActiveKey();
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const activeThreadId = params.projectId === project.id ? (params.threadId ?? null) : null;
   const navigationDisabled = useSessionDraftMaterializing();
@@ -106,6 +116,27 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     [navigate, project.id],
   );
 
+  const openThreadInSidebar = useCallback(
+    (thread: Thread) => {
+      sidebarSessions.openInSidebar({
+        key: sessionRecordKey(project.id, thread.id),
+        projectId: project.id,
+        threadId: thread.id,
+        agentName: thread.agentName,
+        displayName: thread.agentName ? builtinSubagentDisplayName(thread.agentName) : thread.title || "新会话",
+      });
+      // 打开当前活动会话的 workbench panel 以承载侧边栏 tab。
+      const record = activeSessionKey ? cache.get(activeSessionKey) : undefined;
+      const workbench = record?.stores.workbench.getSnapshot();
+      if (record && workbench) {
+        const next = { ...workbench, panelOpen: true };
+        record.stores.workbench.replace(next);
+        void window.desktop.workbench.update(next);
+      }
+    },
+    [activeSessionKey, cache, project.id, sidebarSessions],
+  );
+
   const toggleThread = useCallback((threadId: string) => {
     setExpandedThreadIds((current) => {
       const next = new Set(current);
@@ -166,6 +197,10 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               onRenameStart={startRename}
               onStop={setPendingStop}
               onOpen={openThread}
+              onOpenInSidebar={openThreadInSidebar}
+              sidebarOpenDisabled={
+                activeSessionKey === null || activeSessionKey === sessionRecordKey(project.id, thread.id)
+              }
               onArchive={archiveThread}
               onDelete={setPendingDelete}
             />

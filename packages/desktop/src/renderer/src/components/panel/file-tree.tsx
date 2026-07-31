@@ -46,8 +46,16 @@ export function FileTree({ nodes, children, expanded, active, onOpen, depth = 0,
               type="button"
               role="treeitem"
               className="file-row"
+              data-node-type={node.type}
               data-active={active === node.path || undefined}
-              style={{ "--file-tree-depth": depth } as CSSProperties}
+              title={node.path}
+              style={
+                {
+                  "--file-tree-depth": depth,
+                  top: `${depth * 28}px`,
+                  zIndex: 1000 - depth,
+                } as CSSProperties
+              }
               tabIndex={rovingPath === node.path ? 0 : -1}
               aria-expanded={node.type === "directory" ? open : undefined}
               aria-level={depth + 1}
@@ -76,16 +84,26 @@ export function FileTree({ nodes, children, expanded, active, onOpen, depth = 0,
               )}
               <span>{node.name}</span>
             </button>
-            {node.type === "directory" && open && children[node.path] ? (
-              <FileTree
-                nodes={children[node.path]}
-                children={children}
-                expanded={expanded}
-                active={active}
-                onOpen={onOpen}
-                depth={depth + 1}
-                focusPath={rovingPath}
-              />
+            {node.type === "directory" && open ? (
+              children[node.path] ? (
+                <FileTree
+                  nodes={children[node.path]}
+                  children={children}
+                  expanded={expanded}
+                  active={active}
+                  onOpen={onOpen}
+                  depth={depth + 1}
+                  focusPath={rovingPath}
+                />
+              ) : node.hasChildren ? (
+                <div
+                  className="file-tree-branch-status"
+                  style={{ "--file-tree-depth": depth + 1 } as CSSProperties}
+                  role="status"
+                >
+                  正在加载
+                </div>
+              ) : null
             ) : null}
           </div>
         );

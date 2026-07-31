@@ -6,12 +6,13 @@ import { toPiImageInputs } from "../runtime/image-attachments.ts";
 import { selectProjects } from "../state/desktop-selectors.ts";
 import { dispatchDesktop } from "../state/desktop-store.ts";
 import { useDesktopStore } from "../state/desktop-store-context.tsx";
-import { materializeDraftSession } from "../state/draft-creation.ts";
+import { isStaleExtensionSetError, materializeDraftSession } from "../state/draft-creation.ts";
 import { useDraftSession } from "../state/draft-session-context.tsx";
 import { useSessionCache } from "../state/session-cache-context.tsx";
 import { resolveDraftProjectId, useDraftSearchParams } from "../state/session-navigation.ts";
 import { DraftComposerThread } from "./chat/draft-composer-thread.tsx";
 import { EmptyChatState } from "./chat/empty-chat-state.tsx";
+import { SidebarToggle } from "./layout/sidebar-toggle.tsx";
 
 /** Loads draft configuration and materializes the first accepted prompt into a routed Pi session. */
 export function NewSessionSurface() {
@@ -192,6 +193,7 @@ export function NewSessionSurface() {
     return (
       <>
         <header className="topbar">
+          <SidebarToggle location="topbar" />
           <div className="topbar-title">
             <strong>新会话</strong>
           </div>
@@ -211,6 +213,7 @@ export function NewSessionSurface() {
   return (
     <>
       <header className="topbar">
+        <SidebarToggle location="topbar" />
         <div className="topbar-title">
           <strong>新会话</strong>
         </div>
@@ -232,12 +235,5 @@ export function NewSessionSurface() {
       </div>
       {loadError ? <div className="composer-error">{loadError}</div> : null}
     </>
-  );
-}
-
-function isStaleExtensionSetError(reason: unknown): boolean {
-  return (
-    (reason instanceof Error && reason.message.includes("Draft extension set changed")) ||
-    (typeof reason === "object" && reason !== null && "code" in reason && reason.code === "STALE_DRAFT_EXTENSION_SET")
   );
 }

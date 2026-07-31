@@ -130,7 +130,7 @@
 
     --layout-window-header-height: 40px;
     --layout-window-control-width: 46px;
-    --layout-topbar-height: 36.8px;
+    --layout-topbar-height: 42px;
     --layout-sidebar-width: 280px;
     --layout-sidebar-min-width: 220px;
     --layout-sidebar-max-width: 420px;
@@ -139,7 +139,7 @@
     --composer-padding: var(--space-4);
     --composer-background: color-mix(in oklab, hsl(var(--muted)) 30%, hsl(var(--background)));
     --layout-workbench-min-width: 360px;
-    --layout-workbench-max-width: 760px;
+    --layout-workbench-max-width: 50vw;
     --layout-workbench-default-width: 360px;
     --layout-terminal-min-height: 160px;
     --layout-terminal-max-height: 58vh;

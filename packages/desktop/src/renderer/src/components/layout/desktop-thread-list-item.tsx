@@ -4,6 +4,7 @@ import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
+import PanelRight from "lucide-react/dist/esm/icons/panel-right.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
@@ -38,6 +39,9 @@ interface DesktopThreadListItemProps {
   onRenameStart(thread: Thread): void;
   onStop(thread: Thread): void;
   onOpen(thread: Thread): void;
+  onOpenInSidebar(thread: Thread): void;
+  /** 主工作区无活动会话或该会话已是活动会话时禁用侧边栏打开。 */
+  sidebarOpenDisabled: boolean;
   onArchive(thread: Thread, archived: boolean): void;
   onDelete(thread: Thread): void;
 }
@@ -177,6 +181,12 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             <Square /> 停止运行
           </ContextMenuItem>
         ) : null}
+        <ContextMenuItem
+          disabled={props.isSwitching || props.sidebarOpenDisabled}
+          onSelect={() => props.onOpenInSidebar(thread)}
+        >
+          <PanelRight /> 在侧边栏打开
+        </ContextMenuItem>
         <ContextMenuItem disabled={props.isSwitching || activeSubagent} onSelect={() => props.onRenameStart(thread)}>
           <Pencil /> 重命名
         </ContextMenuItem>

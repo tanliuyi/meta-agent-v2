@@ -17,7 +17,7 @@ describe("draft creation request", () => {
     expect(ensureDraftCreateRequestId(requestIds, "project", createId)).toBe("second");
   });
 
-  it("按 deactivate、create、activate、attach、prompt 顺序提交", async () => {
+  it("按 create、attach、prompt 顺序提交，不切换路由活动会话", async () => {
     const harness = createHarness();
 
     await expect(materializeDraftSession(input(), harness.dependencies)).resolves.toEqual({
@@ -25,7 +25,7 @@ describe("draft creation request", () => {
       outcome: "accepted",
     });
 
-    expect(harness.order).toEqual(["deactivate", "create", "activate", "attach", "prompt", "catalog"]);
+    expect(harness.order).toEqual(["create", "attach", "prompt", "catalog"]);
     expect(harness.onMaterialized).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread" }));
   });
 
@@ -36,7 +36,7 @@ describe("draft creation request", () => {
     await expect(materializeDraftSession(input(), harness.dependencies)).rejects.toThrow("attach failed");
 
     expect(harness.retire).toHaveBeenCalledWith("project\u0000thread");
-    expect(harness.remove).toHaveBeenCalledWith("project", "thread");
+    expect(harness.remove).toHaveBeenCalledWith("project", "thread", "subtree");
     expect(harness.prompt).not.toHaveBeenCalled();
     expect(harness.onMaterialized).not.toHaveBeenCalled();
   });
@@ -82,7 +82,6 @@ function createHarness(promptResult: SessionCommandResult = { accepted: true, qu
     order.push("attach");
     return createSessionRecord({ projectId: "project", threadId: "thread" });
   });
-  const setActiveKey = vi.fn((key: string | null) => order.push(key ? "activate" : "deactivate"));
   const prompt = vi.fn(async () => {
     order.push("prompt");
     return promptResult;
@@ -100,7 +99,7 @@ function createHarness(promptResult: SessionCommandResult = { accepted: true, qu
     dependencies: {
       requestIds: new Map<string, string>(),
       sessions: { create, prompt, remove },
-      cache: { ensureAttached, setActiveKey, retire },
+      cache: { ensureAttached, retire },
       onMaterialized,
     },
   };
