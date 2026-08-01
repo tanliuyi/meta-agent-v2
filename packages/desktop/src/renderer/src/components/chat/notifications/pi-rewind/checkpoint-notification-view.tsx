@@ -62,6 +62,10 @@ export function CheckpointNotificationView({
     );
   }
 
+  if (details.fileCount === 0) {
+    return null;
+  }
+
   const visibleFiles = filesExpanded ? details.files : details.files.slice(0, DEFAULT_VISIBLE_FILE_COUNT);
   const hiddenFileCount = details.files.length - DEFAULT_VISIBLE_FILE_COUNT;
 

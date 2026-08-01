@@ -38,6 +38,18 @@ function checkpointNotice(): PiNoticeMessage {
 }
 
 describe("CheckpointNotificationView", () => {
+  it("renders nothing when the checkpoint contains zero changed files", () => {
+    const notice = checkpointNotice();
+    if (notice.content.type !== "custom" || !notice.content.details || typeof notice.content.details !== "object") {
+      throw new Error("Invalid fixture");
+    }
+    notice.content.details = { ...notice.content.details, fileCount: 0, additions: 0, deletions: 0, files: [] };
+
+    const markup = renderToStaticMarkup(<CheckpointNotificationView notice={notice} />);
+
+    expect(markup).toBe("");
+  });
+
   it("renders a Desktop checkpoint summary with collapsed file rows", () => {
     const markup = renderToStaticMarkup(<CheckpointNotificationView notice={checkpointNotice()} />);
 

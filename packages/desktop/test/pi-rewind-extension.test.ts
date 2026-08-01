@@ -132,6 +132,51 @@ describe("pi-rewind Desktop extension", () => {
     await handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, context);
   });
 
+  it("skips the checkpoint notice when a run leaves zero changed files", async () => {
+    const root = await createRepository();
+    const handlers = new Map<string, ExtensionHandler>();
+    const messages: Array<{ customType?: string; details?: unknown }> = [];
+    const api = {
+      on(event: string, handler: ExtensionHandler) {
+        handlers.set(event, handler);
+      },
+      sendMessage(message: { customType?: string; details?: unknown }) {
+        messages.push(message);
+      },
+      registerCommand: vi.fn(),
+      registerShortcut: vi.fn(),
+    } as unknown as ExtensionAPI;
+    const context = {
+      cwd: root,
+      sessionManager: { getSessionId: () => "session-zero" },
+      ui: { notify: vi.fn() },
+    } as unknown as ExtensionContext;
+
+    piRewindDesktop(api);
+    await handlers.get("session_start")?.({ type: "session_start", reason: "new" }, context);
+    await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "Stage a change" }, context);
+    await handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 1 }, context);
+    await handlers.get("tool_call")?.(
+      { type: "tool_call", toolCallId: "call-staging", toolName: "bash", input: { command: "stage then restore" } },
+      context,
+    );
+    // Simulate a tool that stages new content then restores the working tree.
+    await writeFile(join(root, "file.txt"), "after\n");
+    await git(["add", "file.txt"], root);
+    await writeFile(join(root, "file.txt"), "before\n");
+    await handlers.get("tool_execution_end")?.(
+      { type: "tool_execution_end", toolCallId: "call-staging", toolName: "bash", isError: false },
+      context,
+    );
+    await handlers.get("agent_settled")?.({ type: "agent_settled" }, context);
+
+    expect(messages).toHaveLength(0);
+    const checkpoints = await loadAllCheckpoints(root, "session-zero");
+    expect(checkpoints.filter((checkpoint) => checkpoint.trigger === "tool")).toHaveLength(0);
+
+    await handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, context);
+  });
+
   it("atomically consumes a recovery marker after a successful recovery", async () => {
     const root = await createRepository();
     const recovery = await createCheckpoint({

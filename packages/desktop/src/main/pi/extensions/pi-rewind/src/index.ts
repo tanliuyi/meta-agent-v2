@@ -71,6 +71,7 @@ export default function piRewindDesktop(pi: ExtensionAPI): void {
         resumeCheckpoint.worktreeTreeSha,
         signal,
       );
+      if (summary.fileCount === 0) return;
       sendCheckpointNotice({
         checkpointId: resumeCheckpoint.id,
         restoreCheckpointId: recoveryPoint.id,
@@ -178,6 +179,10 @@ export default function piRewindDesktop(pi: ExtensionAPI): void {
         previous.worktreeTreeSha,
         checkpoint.worktreeTreeSha,
       );
+      if (summary.fileCount === 0) {
+        await deleteCheckpoint(state.repoRoot!, checkpoint.id);
+        return;
+      }
       state.checkpoints.set(checkpoint.id, checkpoint);
       state.lastCheckpoint = checkpoint;
       sendCheckpointNotice({
