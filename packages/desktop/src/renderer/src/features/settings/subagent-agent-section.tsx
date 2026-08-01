@@ -42,7 +42,7 @@ export function SubagentAgentSection({
         <div className="settings-row subagent-row" key={`${agent.source}:${agent.filePath}`}>
           <div className="subagent-identity">
             <div className="subagent-title-line">
-              <strong title={builtin && displayName !== agent.name ? agent.name : undefined}>{displayName}</strong>
+              <strong>{displayName}</strong>
               <span className="subagent-scope-badge">{agent.source}</span>
               {agent.overridden ? <span className="subagent-scope-badge">{agent.overrideScope} override</span> : null}
             </div>

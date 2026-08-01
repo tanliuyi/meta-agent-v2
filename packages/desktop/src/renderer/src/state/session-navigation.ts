@@ -50,10 +50,17 @@ export function resolveDraftProjectId(
   requestedProjectId: string | undefined,
   selectedProjectId: string | null,
   allowFallback: boolean,
+  storedProjectId?: string | null,
 ): string | null {
   if (requestedProjectId && projects.some((project) => project.id === requestedProjectId)) return requestedProjectId;
   if (selectedProjectId && projects.some((project) => project.id === selectedProjectId)) return selectedProjectId;
-  if (selectedProjectId || !allowFallback) return null;
+  // 内存中的选择已失效时保持未选择，等待用户显式选择；不复活持久化的旧项目。
+  if (selectedProjectId) return null;
+  // 重启或首次进入时，恢复最近使用的项目。
+  if (allowFallback && storedProjectId && projects.some((project) => project.id === storedProjectId)) {
+    return storedProjectId;
+  }
+  if (!allowFallback) return null;
   // 通用工作区始终可用，作为兜底选项
   if (projects.some((project) => project.id === GENERAL_WORKSPACE_ID)) return GENERAL_WORKSPACE_ID;
   return projects[0]?.id ?? null;

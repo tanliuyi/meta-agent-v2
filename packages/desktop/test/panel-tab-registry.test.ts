@@ -63,12 +63,10 @@ describe("panel-tab-registry", () => {
       NEW_SESSION_PANEL_KIND,
       "terminal",
       "files",
-      "tasks",
     ]);
     expect(getWorkbenchPanelTabDefinition(NEW_SESSION_PANEL_KIND)?.label).toBe("新会话");
     expect(getWorkbenchPanelTabDefinition("terminal")?.label).toBe("终端");
     expect(getWorkbenchPanelTabDefinition("files")?.label).toBe("资源管理");
-    expect(getWorkbenchPanelTabDefinition("tasks")?.label).toBe("侧边任务");
     for (const definition of listWorkbenchPanelTabs()) {
       expect(definition.addable).not.toBe(false);
     }

@@ -19,9 +19,6 @@ vi.mock("@renderer/shared/hooks/use-resizable-region", () => ({
 vi.mock("../src/renderer/src/components/panel/files/file-panel.tsx", () => ({
   FilePanel: () => <div data-slot="files" />,
 }));
-vi.mock("../src/renderer/src/components/panel/tasks/task-panel.tsx", () => ({
-  TaskPanel: () => <div data-slot="tasks" />,
-}));
 vi.mock("../src/renderer/src/components/panel/terminal/terminal-panel.tsx", () => ({
   TerminalPanel: () => <div data-slot="terminal" />,
 }));
@@ -154,7 +151,6 @@ describe("OpenWorkbenchPanel presence", () => {
     expect(markup).toContain("新会话");
     expect(markup).toContain("资源管理");
     expect(markup).toContain("终端");
-    expect(markup).toContain("侧边任务");
     // 未选中任何 tab 时缺省页即当前视图，新建 Panel 按钮呈按下态。
     expect(markup).toContain('data-active="true"');
     expect(markup).toContain('aria-pressed="true"');

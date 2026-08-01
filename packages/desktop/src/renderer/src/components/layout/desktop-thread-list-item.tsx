@@ -68,7 +68,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
         <div
-          className="thread-row group hover:bg-muted focus-visible:bg-muted data-active:bg-foreground/10 data-active:hover:bg-foreground/10 has-focus-visible:bg-muted data-[state=open]:bg-muted relative flex h-8 items-center rounded-xl transition-colors focus-visible:outline-none"
+          className="thread-row group hover:bg-foreground/[0.055] active:bg-foreground/[0.09] focus-visible:bg-foreground/[0.055] data-active:bg-foreground/[0.085] data-active:hover:bg-foreground/[0.085] has-focus-visible:bg-foreground/[0.055] data-[state=open]:bg-foreground/[0.055] relative flex h-8 items-center rounded-xl transition-colors focus-visible:outline-none"
           data-thread-id={thread.id}
           data-active={props.active || undefined}
           data-pending={isPending || undefined}
@@ -171,7 +171,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
                 {subagentDisplayName}
               </Badge>
             ) : null}
-            <span data-slot="thread-title" className="min-w-0 flex-1 truncate" title={thread.title || "新会话"}>
+            <span data-slot="thread-title" className="min-w-0 flex-1 truncate">
               {thread.title || "新会话"}
             </span>
             {!props.expanded && props.runningChildCount > 0 ? (

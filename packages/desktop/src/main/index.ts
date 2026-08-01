@@ -454,7 +454,7 @@ app.whenReady().then(async () => {
           if (!shellPath) {
             return {
               state: "missing" as const,
-              message: "未找到 Git for Windows；WSL bash 不作为 Desktop 默认 shell",
+              message: "未找到 Git for Windows；WSL bash 不支持",
               installUrl: shellRuntimeInstallUrl(),
             };
           }

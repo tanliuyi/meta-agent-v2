@@ -12,6 +12,12 @@ import {
   selectDraftModel,
   selectDraftThinkingLevel,
 } from "../state/draft-creation.ts";
+import {
+  applyStoredDraftSelection,
+  persistDraftSelection,
+  readStoredDraftProject,
+  writeStoredDraftProject,
+} from "../state/draft-selection-preference.ts";
 import { useDraftSession } from "../state/draft-session-context.tsx";
 import { useSessionCache } from "../state/session-cache-context.tsx";
 import { resolveDraftProjectId, useDraftSearchParams } from "../state/session-navigation.ts";
@@ -56,9 +62,16 @@ export function NewSessionSurface() {
       return;
     }
     setProjectId((selected) => {
-      const resolved = resolveDraftProjectId(projects, search.projectId, selected, projectFallbackAllowed.current);
+      const resolved = resolveDraftProjectId(
+        projects,
+        search.projectId,
+        selected,
+        projectFallbackAllowed.current,
+        readStoredDraftProject(),
+      );
       if (search.projectId && resolved === search.projectId) projectFallbackAllowed.current = true;
       else if (selected && resolved === null) projectFallbackAllowed.current = false;
+      if (resolved) writeStoredDraftProject(resolved);
       return resolved;
     });
     setPhase((current) => {
@@ -95,7 +108,7 @@ export function NewSessionSurface() {
       .getDraftConfig(projectId)
       .then((next) => {
         if (!active) return;
-        setConfig(next);
+        setConfig(applyStoredDraftSelection(next, projectId));
         setConfigProjectId(projectId);
         setLoadError(
           next.extensions.diagnostics.length > 0
@@ -121,16 +134,21 @@ export function NewSessionSurface() {
 
   async function selectProject(nextProjectId: string) {
     projectFallbackAllowed.current = true;
+    writeStoredDraftProject(nextProjectId);
     setProjectId(nextProjectId);
     await navigate({ to: "/new", search: { projectId: nextProjectId }, replace: true });
   }
 
   function selectModel(provider: string, modelId: string) {
-    setConfig((current) => selectDraftModel(current, provider, modelId));
+    const next = selectDraftModel(config, provider, modelId);
+    persistDraftSelection(projectId, next);
+    setConfig(next);
   }
 
   function selectThinking(thinkingLevel: ThinkingLevel) {
-    setConfig((current) => selectDraftThinkingLevel(current, thinkingLevel));
+    const next = selectDraftThinkingLevel(config, thinkingLevel);
+    persistDraftSelection(projectId, next);
+    setConfig(next);
   }
 
   async function submit() {

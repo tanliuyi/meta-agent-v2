@@ -781,42 +781,6 @@ html[data-theme="dark"] .file-preview-token {
   font-size: var(--type-size-meta);
 }
 
-.task-panel {
-  padding: 16px;
-  overflow: auto;
-}
-.task-panel h3 {
-  margin: 0 0 10px;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--type-size-meta);
-  font-weight: 600;
-  text-transform: uppercase;
-}
-.task-panel dl {
-  margin: 0 0 22px;
-}
-.task-panel dl > div,
-.task-panel li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 31px;
-  border-bottom: 1px solid hsl(var(--border));
-  font-size: var(--type-size-control);
-}
-.task-panel dt,
-.task-panel li span {
-  color: hsl(var(--muted-foreground));
-}
-.task-panel dd {
-  margin: 0;
-}
-.task-panel ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .terminal-panel,
 .bottom-terminal {
   background: hsl(var(--terminal-background));

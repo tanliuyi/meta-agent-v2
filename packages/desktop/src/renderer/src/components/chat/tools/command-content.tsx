@@ -7,11 +7,7 @@ export function CommandContent({ args, result, error, expanded }: ToolArgumentsC
   const command = readToolStringArgument(args, "command");
   return (
     <>
-      {expanded && command ? (
-        <pre className="tool-command" title={command}>
-          {command}
-        </pre>
-      ) : null}
+      {expanded && command ? <pre className="tool-command">{command}</pre> : null}
       <ToolResult result={result} error={error} expanded={expanded} previewLines={5} previewFromEnd />
     </>
   );

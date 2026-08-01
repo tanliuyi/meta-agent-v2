@@ -100,6 +100,140 @@ describe("DesktopExtensionSettingsService", () => {
     });
   });
 
+  it("approves a plugin directory with a desktop-spec manifest using the manifest name and entry", async () => {
+    const pluginDirectory = join(directory, "my-plugin");
+    await mkdir(join(pluginDirectory, "payload"), { recursive: true });
+    await writeFile(join(pluginDirectory, "payload", "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(pluginDirectory, "market-manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "dev.my-plugin", name: "My Plugin", version: "0.1.0", publisherId: "local" },
+        pi: { entry: "payload/index.ts", extensionApi: "@earendil-works/pi-coding-agent" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: ["tools.register"],
+      }),
+      "utf8",
+    );
+    const before = await service.getConfig();
+
+    const approved = await service.approveDevelopmentEntry(
+      { requestId: "approve-directory", expectedRevision: before.revision },
+      pluginDirectory,
+    );
+
+    expect(approved).toMatchObject({
+      status: "saved",
+      snapshot: {
+        reloadRequired: true,
+        entries: [
+          { id: "builtin" },
+          { id: "curated" },
+          {
+            id: "development:entry-id",
+            displayName: "My Plugin",
+            source: "development",
+            enabled: false,
+            configuredEnabled: true,
+            displayPath: "my-plugin",
+          },
+        ],
+      },
+    });
+    expect(JSON.parse(await readFile(join(directory, "extensions.json"), "utf8"))).toMatchObject({
+      developmentEntries: [
+        { displayName: "My Plugin", entryPath: await realpath(join(pluginDirectory, "payload", "index.ts")) },
+      ],
+    });
+  });
+
+  it("approves a plugin directory without a manifest by resolving an index entry", async () => {
+    const pluginDirectory = join(directory, "plain-plugin");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "index.mjs"), "export default function () {}\n", "utf8");
+    const before = await service.getConfig();
+
+    const approved = await service.approveDevelopmentEntry(
+      { requestId: "approve-plain-directory", expectedRevision: before.revision },
+      pluginDirectory,
+    );
+
+    expect(approved).toMatchObject({
+      status: "saved",
+      snapshot: {
+        entries: [
+          { id: "builtin" },
+          { id: "curated" },
+          {
+            id: "development:entry-id",
+            displayName: "plain-plugin",
+            displayPath: "plain-plugin",
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects a plugin directory that is neither a desktop-spec plugin nor an index directory", async () => {
+    const pluginDirectory = join(directory, "empty-plugin");
+    await mkdir(pluginDirectory, { recursive: true });
+    const before = await service.getConfig();
+
+    await expect(
+      service.approveDevelopmentEntry(
+        { requestId: "approve-empty", expectedRevision: before.revision },
+        pluginDirectory,
+      ),
+    ).rejects.toThrow(/no market-manifest\.json or index entry file/);
+  });
+
+  it("rejects a plugin directory whose manifest host profile is incompatible", async () => {
+    const pluginDirectory = join(directory, "old-plugin");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(pluginDirectory, "market-manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "dev.old", name: "Old Plugin", version: "0.1.0", publisherId: "local" },
+        pi: { entry: "index.ts", extensionApi: "@earendil-works/pi-coding-agent" },
+        desktop: { hostProfileVersion: 99 },
+        capabilities: [],
+      }),
+      "utf8",
+    );
+    const before = await service.getConfig();
+
+    await expect(
+      service.approveDevelopmentEntry({ requestId: "approve-old", expectedRevision: before.revision }, pluginDirectory),
+    ).rejects.toThrow(/host profile/);
+  });
+
+  it("rejects a plugin directory whose manifest entry is missing instead of falling back to index", async () => {
+    const pluginDirectory = join(directory, "broken-plugin");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(pluginDirectory, "market-manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "dev.broken", name: "Broken Plugin", version: "0.1.0", publisherId: "local" },
+        pi: { entry: "payload/index.ts", extensionApi: "@earendil-works/pi-coding-agent" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: [],
+      }),
+      "utf8",
+    );
+    const before = await service.getConfig();
+
+    await expect(
+      service.approveDevelopmentEntry(
+        { requestId: "approve-broken", expectedRevision: before.revision },
+        pluginDirectory,
+      ),
+    ).rejects.toThrow(/pi\.entry file is missing/);
+  });
+
   it("persists curated enablement and removes development approvals", async () => {
     await mkdir(directory, { recursive: true });
     const entryPath = join(directory, "local-extension.ts");

@@ -152,7 +152,7 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
       <legend>兼容性</legend>
       <div className="models-compat-grid">
         {BOOLEAN_FIELDS.map(({ key, label, hint }) => (
-          <label key={key} title={key}>
+          <label key={key}>
             <span>{label}</span>
             <ModelsOptionSelect
               value={draft.config[key] === undefined ? "unset" : String(draft.config[key])}
@@ -162,7 +162,7 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
             <small>{hint}</small>
           </label>
         ))}
-        <label title="maxTokensField">
+        <label>
           <span>最大 token 字段名</span>
           <ModelsOptionSelect
             value={draft.config.maxTokensField ?? "unset"}
@@ -179,7 +179,7 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
           />
           <small>请求中携带最大输出 token 数所用的字段名。默认按 Base URL 自动检测</small>
         </label>
-        <label title="thinkingFormat">
+        <label>
           <span>思考参数格式</span>
           <ModelsOptionSelect
             value={draft.config.thinkingFormat ?? "unset"}
@@ -206,7 +206,7 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
           />
           <small>思考 / 推理参数的请求格式，不同服务商各不相同。默认 openai</small>
         </label>
-        <label title="cacheControlFormat">
+        <label>
           <span>缓存标记格式</span>
           <ModelsOptionSelect
             value={draft.config.cacheControlFormat ?? "unset"}
@@ -226,7 +226,7 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
           />
           <small>提示词缓存标记的风格。anthropic 表示按 Anthropic 风格打 cache_control 标记</small>
         </label>
-        <label title="sessionAffinityFormat">
+        <label>
           <span>会话亲和头格式</span>
           <ModelsOptionSelect
             value={draft.config.sessionAffinityFormat ?? "unset"}

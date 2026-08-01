@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import type {
   DesktopExtensionDefinition,
@@ -8,6 +8,7 @@ import type {
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
 } from "../../shared/desktop-extension-contracts.ts";
+import { resolveDevelopmentEntry } from "./desktop-extension-directory.ts";
 
 export const MISSING_DESKTOP_EXTENSION_SETTINGS_REVISION = "missing:desktop-extensions-v1";
 
@@ -16,6 +17,7 @@ export interface StoredDevelopmentExtension {
   displayName: string;
   entryPath: string;
   enabled: boolean;
+  displayPath?: string;
 }
 
 export interface InternalDesktopExtensionSettings {
@@ -44,8 +46,6 @@ interface DesktopExtensionSettingsServiceOptions {
   builtinDefinitions?: DesktopExtensionDefinition[];
   curatedDefinitions?: DesktopExtensionDefinition[];
 }
-
-const ALLOWED_ENTRY_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts"]);
 
 /** Owns Desktop-controlled extension approvals and never exposes loadable paths to renderer snapshots. */
 export class DesktopExtensionSettingsService {
@@ -139,7 +139,7 @@ export class DesktopExtensionSettingsService {
       this.requestResults.set(input.requestId, result);
       return result;
     }
-    const canonicalPath = await validateDevelopmentEntry(selectedPath);
+    const resolved = await resolveDevelopmentEntry(selectedPath);
     return this.withLock(async () => {
       const cached = this.requestResults.get(input.requestId);
       if (cached) return cached;
@@ -150,7 +150,7 @@ export class DesktopExtensionSettingsService {
         return result;
       }
       const internal = internalFromCurrent(current);
-      const existing = internal.developmentEntries.find((entry) => entry.entryPath === canonicalPath);
+      const existing = internal.developmentEntries.find((entry) => entry.entryPath === resolved.entryPath);
       if (existing?.enabled) {
         const result: SaveDesktopExtensionSettingsResult = { status: "saved", snapshot: this.snapshot(current) };
         this.requestResults.set(input.requestId, result);
@@ -162,9 +162,10 @@ export class DesktopExtensionSettingsService {
             ...internal.developmentEntries,
             {
               id: `development:${this.createId()}`,
-              displayName: basename(canonicalPath),
-              entryPath: canonicalPath,
+              displayName: resolved.displayName,
+              entryPath: resolved.entryPath,
               enabled: true,
+              ...(resolved.displayPath ? { displayPath: resolved.displayPath } : {}),
             },
           ];
       await this.atomicWrite({
@@ -245,7 +246,7 @@ export class DesktopExtensionSettingsService {
       enabled: internal.developerMode && entry.enabled,
       configuredEnabled: entry.enabled,
       capabilities: [],
-      displayPath: basename(entry.entryPath),
+      displayPath: entry.displayPath ?? basename(entry.entryPath),
     }));
     return {
       revision: current.revision,
@@ -341,17 +342,6 @@ function internalFromCurrent(current: CurrentExtensionSettingsSource): InternalD
   };
 }
 
-async function validateDevelopmentEntry(selectedPath: string): Promise<string> {
-  if (!ALLOWED_ENTRY_EXTENSIONS.has(extname(selectedPath).toLowerCase())) {
-    throw new Error("Development extension entry must be a JavaScript or TypeScript file");
-  }
-  const info = await lstat(selectedPath);
-  if (info.isSymbolicLink() || !info.isFile()) {
-    throw new Error("Development extension entry must be a regular non-symlink file");
-  }
-  return realpath(selectedPath);
-}
-
 function assertMutationInput(input: SaveDesktopExtensionSettingsInput): void {
   if (
     !input ||
@@ -387,7 +377,8 @@ function assertSettingsFile(value: unknown): asserts value is ExtensionSettingsF
         typeof entry.id !== "string" ||
         typeof entry.displayName !== "string" ||
         typeof entry.entryPath !== "string" ||
-        typeof entry.enabled !== "boolean"
+        typeof entry.enabled !== "boolean" ||
+        (entry.displayPath !== undefined && typeof entry.displayPath !== "string")
       ) {
         throw new Error("extensions.json development entry is invalid");
       }

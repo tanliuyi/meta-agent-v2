@@ -50,8 +50,8 @@ export function ComposerFileTrigger({ projectId, onOpenChange }: ComposerFileTri
                 ) : (
                   <File className="composer-file-item-icon" size={17} />
                 )}
-                <strong title={item.label}>{item.label}</strong>
-                {item.description ? <span title={item.description}>{item.description}</span> : null}
+                <strong>{item.label}</strong>
+                {item.description ? <span>{item.description}</span> : null}
               </ComposerPrimitive.Unstable_TriggerPopoverItem>
             ))
           ) : isLoading ? (

@@ -327,7 +327,6 @@ export function FilePanel() {
                     type="button"
                     className="file-tab-close"
                     aria-label={`关闭 ${label}`}
-                    title={`关闭 ${label}`}
                     onClick={() => closeFile(path)}
                   >
                     <X size={13} aria-hidden="true" />
@@ -424,7 +423,6 @@ export function FilePanel() {
           tabIndex={fileTreeCollapsed ? 0 : -1}
           aria-hidden={!fileTreeCollapsed}
           aria-label="展开文件树"
-          title="展开文件树"
           onClick={() => updateWorkbench({ fileTreeCollapsed: false })}
         />
         <div id={fileTreeContentId} className="file-tree-surface">
@@ -445,7 +443,6 @@ export function FilePanel() {
               aria-label={fileTreeCollapsed ? "固定展开文件树" : "收起文件树"}
               aria-controls={fileTreeContentId}
               aria-expanded={!fileTreeCollapsed}
-              title={fileTreeCollapsed ? "固定展开文件树" : "收起文件树"}
               onClick={() => updateWorkbench({ fileTreeCollapsed: !fileTreeCollapsed })}
             >
               {fileTreeCollapsed ? (

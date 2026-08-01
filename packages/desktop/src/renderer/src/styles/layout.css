@@ -141,6 +141,48 @@ body.is-resizing-column .sidebar {
   padding-left: 132px;
 }
 
+/* 侧边栏收起后悬停窗口左缘的浮出预览。 */
+.floating-sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  z-index: var(--stack-sidebar-floating);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.floating-sidebar-trigger {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+}
+
+.floating-sidebar-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  max-width: 100vw;
+  overflow: hidden;
+  background: hsl(var(--sidebar));
+  border-right: 1px solid hsl(var(--border));
+  box-shadow: var(--elevation-sidebar-floating);
+  transform: translateX(-100%);
+  transition: transform var(--motion-duration-standard) var(--motion-ease-emphasized);
+}
+
+.floating-sidebar-panel[data-open="true"] {
+  transform: translateX(0);
+}
+
+.app-frame[data-platform="darwin"] .sidebar[data-floating="true"] .sidebar-content {
+  padding-top: 0;
+}
+
 .sidebar-content {
   display: flex;
   width: 100%;
@@ -196,6 +238,20 @@ body.is-resizing-column .sidebar {
   z-index: calc(var(--stack-sticky-control) + 1);
 }
 
+.app-frame[data-platform="linux"] .topbar > .sidebar-toggle {
+  top: 10px;
+  left: 16px;
+}
+
+/* 非 darwin 平台侧边栏内展开/收起按钮行，高度与顶栏对齐。 */
+.sidebar-toggle-row {
+  display: flex;
+  flex: 0 0 var(--layout-topbar-height);
+  height: var(--layout-topbar-height);
+  align-items: center;
+  padding-left: 8px;
+}
+
 .sidebar-toggle {
   color: hsl(var(--muted-foreground));
   -webkit-app-region: no-drag;
@@ -203,20 +259,24 @@ body.is-resizing-column .sidebar {
 }
 
 .panel-toggle-icon path {
+  transform-origin: center;
+  transform: scaleY(0.9);
   transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .panel-toggle-icon-left[data-collapsed="true"] path {
-  transform: translateX(-3px);
+  transform: translateX(-2px) scaleY(0.6);
 }
 
 .panel-toggle-icon-right[data-collapsed="true"] path {
-  transform: translateX(3px);
+  transform: translateX(2px) scaleY(0.6);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar,
   .topbar,
+  .workspace,
+  .floating-sidebar-panel,
   .panel-toggle-icon path {
     transition: none;
   }
@@ -399,12 +459,23 @@ body.is-resizing-column .sidebar {
   grid-template-rows: var(--layout-topbar-height) minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
+  margin: 0 8px 8px 0;
   border: 1px solid hsl(var(--border));
-  border-radius: 16px 0 0 16px;
+  border-radius: 16px;
   box-shadow: var(--workspace-edge-shadow);
   /* 内容卡片保持 --background 表面，与外壳的 --sidebar 面板色区分。 */
   background: hsl(var(--background));
   overflow: hidden;
+  /* 与侧边栏宽度动画同速，衔接收起/展开时圆角与阴影的过渡。 */
+  transition:
+    border-radius var(--motion-duration-standard) var(--motion-ease-emphasized),
+    box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
+}
+
+.app-frame[data-platform="win32"] .sidebar[data-collapsed="true"] ~ .workspace {
+  border-radius: 8px;
+  box-shadow: none;
+  margin-left: 8px;
 }
 
 .workspace:has(> .workbench-panel) {
@@ -489,7 +560,7 @@ body.is-resizing-column .sidebar {
 .topbar-actions {
   position: fixed;
   top: 10px;
-  right: 10px;
+  right: 18px;
   z-index: calc(var(--stack-workbench-overlay) + 1);
   display: flex;
   align-items: center;

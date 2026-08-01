@@ -71,7 +71,7 @@ export function WorkbenchTabList({ tabs, activeKey, onActivate, onCloseTab }: Wo
           );
         const active = key === activeKey;
         return (
-          <div key={key} className="panel-tab-item" data-active={active || undefined} title={label}>
+          <div key={key} className="panel-tab-item" data-active={active || undefined}>
             <button
               type="button"
               className="panel-tab-trigger"

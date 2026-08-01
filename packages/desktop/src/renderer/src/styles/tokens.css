@@ -119,6 +119,7 @@
 
     --stack-resize-handle: 5;
     --stack-sticky-control: 10;
+    --stack-sidebar-floating: 20;
     --stack-workbench-overlay: 30;
     --stack-suggestions: 40;
     --stack-popover: 50;
@@ -203,6 +204,7 @@
     --scrollbar-thumb-hover: hsl(var(--foreground) / 0.3);
     --elevation-popover: 0 10px 30px hsl(var(--foreground) / 0.12);
     --elevation-workbench: -12px 0 30px hsl(var(--foreground) / 0.08);
+    --elevation-sidebar-floating: 12px 0 30px hsl(var(--foreground) / 0.1);
     --elevation-composer: 0 4px 16px -8px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
     --elevation-composer-focus: 0 6px 24px -8px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.05);
   }
@@ -266,6 +268,7 @@
     --scrollbar-thumb-hover: hsl(var(--foreground) / 0.38);
     --elevation-popover: 0 12px 32px rgb(0 0 0 / 0.42);
     --elevation-workbench: -12px 0 30px rgb(0 0 0 / 0.3);
+    --elevation-sidebar-floating: 12px 0 30px rgb(0 0 0 / 0.32);
     --elevation-composer: 0 1px 2px rgb(0 0 0 / 0.3);
     --elevation-composer-focus: 0 2px 10px rgb(0 0 0 / 0.35);
   }

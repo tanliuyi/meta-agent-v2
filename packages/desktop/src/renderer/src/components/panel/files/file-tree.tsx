@@ -48,7 +48,6 @@ export function FileTree({ nodes, children, expanded, active, onOpen, depth = 0,
               className="file-row"
               data-node-type={node.type}
               data-active={active === node.path || undefined}
-              title={node.path}
               style={
                 {
                   "--file-tree-depth": depth,

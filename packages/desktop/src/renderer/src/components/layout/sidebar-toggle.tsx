@@ -5,10 +5,17 @@ import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 
 let transferSidebarToggleFocus = false;
 
-export function SidebarToggle({ location }: { location: "sidebar" | "topbar" }) {
+export function SidebarToggle({
+  location,
+  floating = false,
+}: {
+  location: "sidebar" | "topbar" | "window-header";
+  /** 浮出预览内始终可见,用于将侧边栏固定为展开。 */
+  floating?: boolean;
+}) {
   const { sidebarOpen, toggleSidebar } = useLayout();
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const visible = location === "sidebar" ? sidebarOpen : !sidebarOpen;
+  const visible = floating ? true : location === "sidebar" ? sidebarOpen : location === "topbar" ? !sidebarOpen : true;
 
   useEffect(() => {
     if (!visible || !transferSidebarToggleFocus) return;
@@ -16,14 +23,15 @@ export function SidebarToggle({ location }: { location: "sidebar" | "topbar" }) 
     buttonRef.current?.focus();
   }, [visible]);
 
-  if (window.desktop.platform !== "darwin" || !visible) return null;
+  if (window.desktop.platform === "win32" && location === "topbar") return null;
+  if (!visible) return null;
 
   return (
     <TooltipIconButton
       ref={buttonRef}
       variant="ghost"
       size="icon"
-      className="sidebar-toggle size-6"
+      className="sidebar-toggle size-6 fixed z-999"
       aria-label={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
       aria-controls="sidebar-content"
       aria-expanded={sidebarOpen}

@@ -114,8 +114,8 @@ export function ComposerCommandTrigger({ commands, onOpenChange }: ComposerComma
                         data-command-source={source}
                       >
                         <Icon className="composer-command-item-icon" size={15} />
-                        <strong title={item.label}>{item.label}</strong>
-                        {item.description ? <span title={item.description}>{item.description}</span> : <span />}
+                        <strong>{item.label}</strong>
+                        {item.description ? <span>{item.description}</span> : <span />}
                       </ComposerPrimitive.Unstable_TriggerPopoverItem>
                     ))}
                   </div>

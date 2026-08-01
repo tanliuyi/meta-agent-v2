@@ -312,15 +312,13 @@ export function registerIpc(
       CHANNELS.extensionsChooseDevelopmentEntry,
       async (event, input: ApproveDevelopmentExtensionInput) => {
         const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+        const dialogOptions: Electron.OpenDialogOptions = {
+          properties: ["openFile", "openDirectory"],
+          filters: [{ name: "Pi extension", extensions: ["ts", "js", "mjs", "cjs"] }],
+        };
         const result = owner
-          ? await dialog.showOpenDialog(owner, {
-              properties: ["openFile"],
-              filters: [{ name: "Pi extension", extensions: ["ts", "js", "mjs", "cjs"] }],
-            })
-          : await dialog.showOpenDialog({
-              properties: ["openFile"],
-              filters: [{ name: "Pi extension", extensions: ["ts", "js", "mjs", "cjs"] }],
-            });
+          ? await dialog.showOpenDialog(owner, dialogOptions)
+          : await dialog.showOpenDialog(dialogOptions);
         const saved = await extensions.approveDevelopmentEntry(
           input,
           result.canceled ? undefined : result.filePaths[0],

@@ -42,7 +42,7 @@ export function FilePathBreadcrumb({ path, children, expanded, onDirectoryOpen, 
                   }}
                 >
                   <PopoverTrigger asChild>
-                    <button type="button" className="file-breadcrumb-trigger" title={segment.path}>
+                    <button type="button" className="file-breadcrumb-trigger">
                       <Folder size={13} aria-hidden="true" />
                       <span>{segment.label}</span>
                     </button>
@@ -69,7 +69,7 @@ export function FilePathBreadcrumb({ path, children, expanded, onDirectoryOpen, 
                   </PopoverContent>
                 </Popover>
               ) : (
-                <span className="file-breadcrumb-current" title={segment.path} aria-current="page">
+                <span className="file-breadcrumb-current" aria-current="page">
                   <FileCode2 size={13} aria-hidden="true" />
                   <span>{segment.label}</span>
                 </span>

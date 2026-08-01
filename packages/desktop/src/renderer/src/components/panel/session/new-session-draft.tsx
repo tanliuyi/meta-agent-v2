@@ -13,6 +13,11 @@ import {
   selectDraftModel,
   selectDraftThinkingLevel,
 } from "../../../state/draft-creation.ts";
+import {
+  applyStoredDraftSelection,
+  persistDraftSelection,
+  writeStoredDraftProject,
+} from "../../../state/draft-selection-preference.ts";
 import { useSessionCache } from "../../../state/session-cache-context.tsx";
 import { useSessionDraft } from "../../../state/session-draft-context.tsx";
 import { workbenchPanelTabKey } from "../../../state/workbench-tab-context.tsx";
@@ -42,6 +47,7 @@ export function NewSessionDraft() {
   useEffect(() => {
     if (!draft) return;
     const projectId = draft.parent.projectId;
+    writeStoredDraftProject(projectId);
     let active = true;
     draft.setConfig(null);
     draft.setLoadError(null);
@@ -50,7 +56,7 @@ export function NewSessionDraft() {
       .getDraftConfig(projectId)
       .then((next) => {
         if (!active) return;
-        draft.setConfig(next);
+        draft.setConfig(applyStoredDraftSelection(next, projectId));
         draft.setLoadError(
           next.extensions.diagnostics.length > 0
             ? next.extensions.diagnostics
@@ -72,11 +78,15 @@ export function NewSessionDraft() {
   }
 
   const selectModel = (provider: string, modelId: string): void => {
-    draft.setConfig(selectDraftModel(draft.config, provider, modelId));
+    const next = selectDraftModel(draft.config, provider, modelId);
+    persistDraftSelection(draft.parent.projectId, next);
+    draft.setConfig(next);
   };
 
   const selectThinking = (thinkingLevel: ThinkingLevel): void => {
-    draft.setConfig(selectDraftThinkingLevel(draft.config, thinkingLevel));
+    const next = selectDraftThinkingLevel(draft.config, thinkingLevel);
+    persistDraftSelection(draft.parent.projectId, next);
+    draft.setConfig(next);
   };
 
   const submit = async (): Promise<void> => {

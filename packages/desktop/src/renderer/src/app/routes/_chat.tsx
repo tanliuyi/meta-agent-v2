@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { FloatingSidebar } from "../../components/layout/floating-sidebar.tsx";
 import { Sidebar } from "../../components/layout/sidebar.tsx";
 import { ThreadSidebarDropZone } from "../../components/layout/thread-sidebar-drop-zone.tsx";
 import { ShellRuntimeGate } from "../../features/shell-runtime/shell-runtime-gate.tsx";
@@ -20,6 +21,7 @@ export function ChatLayout() {
           <ShellRuntimeGate />
           <ThreadDragProvider>
             <Sidebar />
+            <FloatingSidebar />
             <DesktopErrorToast />
             <section className="workspace">
               <Outlet />

@@ -1,21 +1,24 @@
+import { useLocation } from "@tanstack/react-router";
 import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import Minus from "lucide-react/dist/esm/icons/minus.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { useEffect, useState } from "react";
+import { SidebarToggle } from "./sidebar-toggle.tsx";
 
 /** 无边框 BrowserWindow 的 Windows 标题栏。 */
 export function WindowsHeader() {
   const [maximized, setMaximized] = useState(false);
+  const { pathname } = useLocation();
+  // 设置页没有侧边栏，隐藏展开/收起按钮。
+  const showSidebarToggle = !pathname.startsWith("/settings");
 
   useEffect(() => window.desktop.windowControls.onMaximizedChanged(setMaximized), []);
 
   return (
     <header className="windows-header">
       <div className="windows-header-title">
-        <span className="windows-header-mark" aria-hidden="true">
-          Pi
-        </span>
+        {showSidebarToggle ? <SidebarToggle location="window-header" /> : null}
       </div>
       <div className="windows-header-controls" aria-label="窗口控制">
         <button

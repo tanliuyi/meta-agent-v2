@@ -41,7 +41,7 @@ export function ReadOnlySessionStatus({
           {syncing ? "正在同步子智能体会话" : SUBAGENT_PHASE_LABELS[phase]}
         </span>
         {!syncing && model ? (
-          <span className="flex min-w-0 max-w-full items-center gap-1.5" title={`${model.provider}/${model.id}`}>
+          <span className="flex min-w-0 max-w-full items-center gap-1.5">
             <Cpu className="size-3.5 shrink-0" aria-hidden="true" />
             <span className="truncate">模型：{model.name}</span>
             <span className="shrink-0 text-muted-foreground/70">({model.provider})</span>

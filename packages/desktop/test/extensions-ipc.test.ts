@@ -100,7 +100,9 @@ describe("extensions IPC", () => {
 
     await electron.handles.get(CHANNELS.extensionsChooseDevelopmentEntry)?.({ sender: {} }, input);
 
-    expect(electron.showOpenDialog).toHaveBeenCalledWith(expect.objectContaining({ properties: ["openFile"] }));
+    expect(electron.showOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ properties: ["openFile", "openDirectory"] }),
+    );
     expect(extensions.approveDevelopmentEntry).toHaveBeenCalledWith(input, "/approved/extension.ts");
     expect(sessions.extensionSettingsChanged).toHaveBeenCalledOnce();
   });

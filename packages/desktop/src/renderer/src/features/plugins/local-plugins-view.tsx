@@ -64,6 +64,7 @@ export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
           <Button
             variant="outline"
             disabled={!snapshot?.developerMode || controller.mutating}
+            title="选择扩展入口文件或包含 market-manifest.json 的插件目录"
             onClick={() => void controller.chooseDevelopmentEntry()}
           >
             <FolderPlus />

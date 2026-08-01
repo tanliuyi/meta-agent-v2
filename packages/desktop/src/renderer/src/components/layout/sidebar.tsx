@@ -21,10 +21,10 @@ import { UpdateBanner } from "./update-banner.tsx";
 
 /** 侧边栏行统一样式:新建任务、插件中心、设置共用,保证字号与高亮一致。 */
 const sidebarRowClass =
-  "hover:bg-muted data-active:bg-muted aria-[current=page]:bg-muted h-8 w-full justify-start gap-2 rounded-xl px-2.5 text-sm font-normal";
+  "hover:bg-foreground/[0.055] active:bg-foreground/[0.09] data-active:bg-foreground/[0.085] aria-[current=page]:bg-foreground/[0.085] h-8 w-full justify-start gap-2 rounded-xl px-2.5 text-sm font-normal";
 
-/** Codex Desktop 风格的 Project 与 session 主导航。 */
-export const Sidebar = memo(function Sidebar() {
+/** Codex Desktop 风格的 Project 与 session 主导航。floating 模式用于收起后的悬停浮出预览。 */
+export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: boolean }) {
   const actions = useDesktopActions();
   const draftMaterializing = useSessionDraftMaterializing();
   const { sidebarOpen, sidebarWidth, setSidebarWidth } = useLayout();
@@ -72,37 +72,51 @@ export const Sidebar = memo(function Sidebar() {
     <aside
       ref={resize.regionRef}
       className="sidebar"
-      data-collapsed={!sidebarOpen}
+      data-collapsed={floating ? false : !sidebarOpen}
+      data-floating={floating || undefined}
       style={
         {
           "--resizable-region-size": `${resize.initialSize}px`,
         } as CSSProperties
       }
     >
-      {window.desktop.platform === "darwin" ? (
+      {floating ? (
+        <div className="sidebar-toggle-row">{/* <SidebarToggle location="sidebar" floating /> */}</div>
+      ) : window.desktop.platform === "darwin" ? (
         <div className="macos-titlebar-space">
           <SidebarToggle location="sidebar" />
         </div>
       ) : null}
+      {floating ? null : (
+        <div
+          ref={resize.separatorRef}
+          className="resize-handle resize-handle-sidebar"
+          role="separator"
+          tabIndex={sidebarOpen ? 0 : -1}
+          aria-hidden={!sidebarOpen}
+          aria-label="调整侧边栏宽度"
+          aria-controls="sidebar-content"
+          aria-orientation="vertical"
+          aria-valuemin={SIDEBAR_MIN_WIDTH}
+          aria-valuemax={resize.initialMax}
+          aria-valuenow={resize.initialSize}
+          aria-valuetext={`${resize.initialSize} 像素`}
+          onPointerDown={resize.onPointerDown}
+          onKeyDown={resize.onKeyDown}
+        />
+      )}
       <div
-        ref={resize.separatorRef}
-        className="resize-handle resize-handle-sidebar"
-        role="separator"
-        tabIndex={sidebarOpen ? 0 : -1}
-        aria-hidden={!sidebarOpen}
-        aria-label="调整侧边栏宽度"
-        aria-controls="sidebar-content"
-        aria-orientation="vertical"
-        aria-valuemin={SIDEBAR_MIN_WIDTH}
-        aria-valuemax={resize.initialMax}
-        aria-valuenow={resize.initialSize}
-        aria-valuetext={`${resize.initialSize} 像素`}
-        onPointerDown={resize.onPointerDown}
-        onKeyDown={resize.onKeyDown}
-      />
-      <div id="sidebar-content" className="sidebar-content" hidden={!sidebarOpen}>
-        {sidebarOpen ? (
+        id={floating ? "floating-sidebar-content" : "sidebar-content"}
+        className="sidebar-content"
+        hidden={floating ? false : !sidebarOpen}
+      >
+        {floating || sidebarOpen ? (
           <>
+            {floating ? null : window.desktop.platform === "linux" ? (
+              <div className="sidebar-toggle-row">
+                <SidebarToggle location="sidebar" />
+              </div>
+            ) : null}
             <nav className="sidebar-actions mt-2" aria-label="主要操作">
               <Button
                 variant="ghost"

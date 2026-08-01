@@ -97,6 +97,22 @@ describe("draft navigation", () => {
     expect(resolveDraftProjectId(projects, undefined, null, false)).toBeNull();
   });
 
+  it("无内存选择时恢复持久化的最近项目，显式选择优先", () => {
+    const projects = [{ id: "project-a" }, { id: "project-b" }];
+
+    expect(resolveDraftProjectId(projects, undefined, null, true, "project-b")).toBe("project-b");
+    expect(resolveDraftProjectId(projects, undefined, "project-a", true, "project-b")).toBe("project-a");
+    expect(resolveDraftProjectId(projects, "project-b", null, true, "project-a")).toBe("project-b");
+    expect(resolveDraftProjectId(projects, undefined, null, false, "project-b")).toBeNull();
+  });
+
+  it("持久化的项目已不存在时忽略并继续兜底", () => {
+    const projects = [{ id: GENERAL_WORKSPACE_ID }, { id: "project-b" }];
+
+    expect(resolveDraftProjectId(projects, undefined, null, true, "removed-project")).toBe(GENERAL_WORKSPACE_ID);
+    expect(resolveDraftProjectId(projects, undefined, null, true, "project-b")).toBe("project-b");
+  });
+
   it("通用工作区存在时不拦截显式用户 Project 选择", () => {
     const projects = [{ id: GENERAL_WORKSPACE_ID }, { id: "project-b" }];
 
