@@ -1,6 +1,6 @@
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { Suspense } from "react";
-import { useSessionControlSelector } from "../session-context.tsx";
+import { useSessionControlSelector } from "../../session-context.tsx";
 import { LazyTerminalView } from "./lazy-terminal-view.tsx";
 
 /** Workbench terminal is scoped to the cached session record. */

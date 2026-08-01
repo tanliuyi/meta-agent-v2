@@ -83,11 +83,10 @@ describe("ProjectStore general workspace", () => {
   it("getWorkbench / setWorkbench 支持通用工作区", async () => {
     const { store } = await createStore();
     const wb = store.getWorkbench(GENERAL_WORKSPACE_ID, "thread-1");
-    expect(wb.panel).toBe("chat");
+    expect(wb.panelOpen).toBe(false);
 
-    await store.setWorkbench({ ...wb, panel: "files", panelOpen: true });
+    await store.setWorkbench({ ...wb, panelOpen: true });
     const updated = store.getWorkbench(GENERAL_WORKSPACE_ID, "thread-1");
-    expect(updated.panel).toBe("files");
     expect(updated.panelOpen).toBe(true);
   });
 
@@ -118,7 +117,6 @@ describe("ProjectStore general workspace", () => {
     const wb = {
       projectId: "nonexistent-project",
       threadId: "t1",
-      panel: "chat" as const,
       panelOpen: false,
       panelWidth: 360,
       terminalOpen: false,

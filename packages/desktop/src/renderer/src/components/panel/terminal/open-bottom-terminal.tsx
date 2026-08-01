@@ -4,7 +4,7 @@ import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type CSSProperties, Suspense, useRef } from "react";
-import { useSessionScope } from "../session-context.tsx";
+import { useSessionScope } from "../../session-context.tsx";
 import { LazyTerminalView } from "./lazy-terminal-view.tsx";
 import type { TerminalViewHandle } from "./terminal-view.tsx";
 

@@ -6,7 +6,12 @@ import { toPiImageInputs } from "../runtime/image-attachments.ts";
 import { selectProjects } from "../state/desktop-selectors.ts";
 import { dispatchDesktop } from "../state/desktop-store.ts";
 import { useDesktopStore } from "../state/desktop-store-context.tsx";
-import { isStaleExtensionSetError, materializeDraftSession } from "../state/draft-creation.ts";
+import {
+  isStaleExtensionSetError,
+  materializeDraftSession,
+  selectDraftModel,
+  selectDraftThinkingLevel,
+} from "../state/draft-creation.ts";
 import { useDraftSession } from "../state/draft-session-context.tsx";
 import { useSessionCache } from "../state/session-cache-context.tsx";
 import { resolveDraftProjectId, useDraftSearchParams } from "../state/session-navigation.ts";
@@ -121,24 +126,11 @@ export function NewSessionSurface() {
   }
 
   function selectModel(provider: string, modelId: string) {
-    setConfig((current) => {
-      const model = current?.models.find((entry) => entry.provider === provider && entry.id === modelId);
-      if (!current || !model) return current;
-      const thinkingLevel = model.thinkingLevels.includes(current.thinkingLevel)
-        ? current.thinkingLevel
-        : (model.thinkingLevels[0] ?? "off");
-      return {
-        ...current,
-        model: { provider: model.provider, id: model.id, name: model.name },
-        thinkingLevel,
-        thinkingLevels: model.thinkingLevels,
-        readiness: { state: "ready" },
-      };
-    });
+    setConfig((current) => selectDraftModel(current, provider, modelId));
   }
 
   function selectThinking(thinkingLevel: ThinkingLevel) {
-    setConfig((current) => (current?.thinkingLevels.includes(thinkingLevel) ? { ...current, thinkingLevel } : current));
+    setConfig((current) => selectDraftThinkingLevel(current, thinkingLevel));
   }
 
   async function submit() {

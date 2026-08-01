@@ -227,7 +227,6 @@ export class ProjectStore {
       this.desktopState.workbenches[workbenchKey(projectId, threadId)] ?? {
         projectId,
         threadId,
-        panel: "chat",
         panelOpen: false,
         panelWidth: 360,
         terminalOpen: false,

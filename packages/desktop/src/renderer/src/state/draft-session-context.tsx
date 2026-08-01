@@ -22,6 +22,17 @@ const EMPTY_MESSAGES: readonly ThreadMessage[] = [];
 
 export type DraftPhase = "loading" | "editing" | "materializing" | "no-project";
 
+/** 草稿的 assistant-ui 外部 store adapter：文本/附件由 composer 持有，发送必须显式提交。 */
+export function createDraftRuntimeAdapter(): ExternalStoreAdapter<ThreadMessage> {
+  return {
+    messages: EMPTY_MESSAGES,
+    isSendDisabled: true,
+    onNew: rejectUnexpectedDraftSend,
+    adapters: { attachments: imageAttachmentAdapter },
+    unstable_enableToolInvocations: false,
+  };
+}
+
 interface MutableValue<T> {
   current: T;
 }
@@ -50,16 +61,7 @@ const DraftSessionContext = createContext<DraftSessionContextValue | null>(null)
 
 /** Owns the window-scoped draft runtime and configuration across route unmounts. */
 export function DraftSessionProvider({ children }: { children: ReactNode }) {
-  const adapter = useMemo<ExternalStoreAdapter<ThreadMessage>>(
-    () => ({
-      messages: EMPTY_MESSAGES,
-      isSendDisabled: true,
-      onNew: rejectUnexpectedDraftSend,
-      adapters: { attachments: imageAttachmentAdapter },
-      unstable_enableToolInvocations: false,
-    }),
-    [],
-  );
+  const adapter = useMemo<ExternalStoreAdapter<ThreadMessage>>(createDraftRuntimeAdapter, []);
   const runtime = useExternalStoreRuntime(adapter);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [config, setConfig] = useState<DraftSessionConfig | null>(null);

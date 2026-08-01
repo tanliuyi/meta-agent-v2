@@ -204,6 +204,27 @@ export function normalizeThreadTitle(title: string): string | null {
   return value.length > 0 ? value : null;
 }
 
+/**
+ * 判断 candidateThreadId 是否为 ancestorThreadId 的后代（沿 parentThreadId 链上溯）。
+ * 用于限定侧边栏会话只能在其父/祖先 session 的侧边栏中打开。
+ */
+export function isThreadDescendantOf(
+  threads: readonly Thread[],
+  candidateThreadId: string,
+  ancestorThreadId: string,
+): boolean {
+  const byId = new Map(threads.map((thread) => [thread.id, thread] as const));
+  let current = byId.get(candidateThreadId);
+  const visited = new Set<string>();
+  while (current?.parentThreadId) {
+    if (current.parentThreadId === ancestorThreadId) return true;
+    if (visited.has(current.parentThreadId)) return false;
+    visited.add(current.parentThreadId);
+    current = byId.get(current.parentThreadId);
+  }
+  return false;
+}
+
 export function shouldOpenThread(activeThreadId: string | null, threadId: string): boolean {
   return activeThreadId !== threadId;
 }

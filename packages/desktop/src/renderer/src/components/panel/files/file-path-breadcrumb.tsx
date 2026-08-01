@@ -2,12 +2,12 @@ import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
 import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import { Fragment, useMemo, useState } from "react";
-import type { FileNode } from "../../../../shared/contracts.ts";
-import { Popover } from "../../shared/ui/popover.tsx";
-import { PopoverContent } from "../../shared/ui/popover-content.tsx";
-import { PopoverTrigger } from "../../shared/ui/popover-trigger.tsx";
+import type { FileNode } from "../../../../../shared/contracts.ts";
+import { Popover } from "../../../shared/ui/popover.tsx";
+import { PopoverContent } from "../../../shared/ui/popover-content.tsx";
+import { PopoverTrigger } from "../../../shared/ui/popover-trigger.tsx";
+import { filePathSegments } from "../panel-model.ts";
 import { FileTree } from "./file-tree.tsx";
-import { filePathSegments } from "./panel-model.ts";
 
 interface FilePathBreadcrumbProps {
   path: string;

@@ -17,21 +17,19 @@ describe("ProjectStore", () => {
     const second = store.getWorkbench(project.id, "second");
 
     await Promise.all([
-      store.setWorkbench({ ...first, panel: "files", panelOpen: true, openFiles: ["README.md"] }),
-      store.setWorkbench({ ...second, panel: "tasks", panelOpen: true, terminalOpen: true }),
+      store.setWorkbench({ ...first, panelOpen: true, openFiles: ["README.md"] }),
+      store.setWorkbench({ ...second, panelOpen: true, terminalOpen: true }),
     ]);
 
     const restored = new ProjectStore(file);
     await restored.load();
     expect(restored.getWorkbench(project.id, "first")).toMatchObject({
       threadId: "first",
-      panel: "files",
       openFiles: ["README.md"],
       terminalOpen: false,
     });
     expect(restored.getWorkbench(project.id, "second")).toMatchObject({
       threadId: "second",
-      panel: "tasks",
       openFiles: [],
       terminalOpen: true,
     });

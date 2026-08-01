@@ -1,7 +1,42 @@
-import type { ImageInput, SessionBootstrap, SessionCreateInput, SessionIdentity } from "../../../shared/contracts.ts";
+import type {
+  DraftSessionConfig,
+  ImageInput,
+  SessionBootstrap,
+  SessionCreateInput,
+  SessionIdentity,
+  ThinkingLevel,
+} from "../../../shared/contracts.ts";
 import type { DesktopApi } from "../../../shared/desktop-api.ts";
 import { sessionRecordKey } from "../runtime/pi-session-store.ts";
 import type { SessionCacheController } from "./session-cache-context.tsx";
+
+/** 选中草稿模型：同步 thinking 级别与 readiness；模型不存在时保持不变。 */
+export function selectDraftModel(
+  config: DraftSessionConfig | null,
+  provider: string,
+  modelId: string,
+): DraftSessionConfig | null {
+  const model = config?.models.find((entry) => entry.provider === provider && entry.id === modelId);
+  if (!config || !model) return config;
+  const thinkingLevel = model.thinkingLevels.includes(config.thinkingLevel)
+    ? config.thinkingLevel
+    : (model.thinkingLevels[0] ?? "off");
+  return {
+    ...config,
+    model: { provider: model.provider, id: model.id, name: model.name },
+    thinkingLevel,
+    thinkingLevels: model.thinkingLevels,
+    readiness: { state: "ready" },
+  };
+}
+
+/** 选中草稿 thinking 级别；模型不支持该级别时保持不变。 */
+export function selectDraftThinkingLevel(
+  config: DraftSessionConfig | null,
+  thinkingLevel: ThinkingLevel,
+): DraftSessionConfig | null {
+  return config?.thinkingLevels.includes(thinkingLevel) ? { ...config, thinkingLevel } : config;
+}
 
 export function ensureDraftCreateRequestId(
   requestIds: Map<string, string>,

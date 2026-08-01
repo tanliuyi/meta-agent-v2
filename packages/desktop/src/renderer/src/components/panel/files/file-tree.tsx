@@ -4,7 +4,7 @@ import File from "lucide-react/dist/esm/icons/file.mjs";
 import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
 import type { CSSProperties } from "react";
-import type { FileNode } from "../../../../shared/contracts.ts";
+import type { FileNode } from "../../../../../shared/contracts.ts";
 import { handleFileTreeKeyDown, setFileTreeRovingTabStop } from "./file-tree-navigation.ts";
 
 interface FileTreeProps {

@@ -94,11 +94,9 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
           recordsDirtyRef.current = true;
           forceRender((n) => n + 1);
         }
-        void transportManager.ensure(record).catch((error: unknown) => {
-          if (recordsRef.current.get(key) !== record || transportManager.getConnectionState(key) === null) return;
-          console.error(`Session attach failed for ${identity.projectId}/${identity.threadId}`, error);
-          record.stores.connection.setState("error");
-          record.stores.summary.set({ connectionState: "error" });
+        void transportManager.ensure(record).catch(() => {
+          // 传输层失败时已将连接置为 recovering；fire-and-forget 的 rejection 仅需吞掉，
+          // 重试由 SessionContent / 主会话的恢复循环负责（重复日志会高频刷屏）。
         });
         record.lastAccessedAt = Date.now();
         return record;

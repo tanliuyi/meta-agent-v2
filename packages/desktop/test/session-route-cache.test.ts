@@ -279,7 +279,6 @@ describe("SessionTransportManager", () => {
           get: vi.fn(async () => ({
             projectId: "p1",
             threadId: "t1",
-            panel: "chat",
             panelOpen: false,
             panelWidth: 420,
             terminalOpen: false,
@@ -305,7 +304,7 @@ describe("SessionTransportManager", () => {
     expect(manager.getConnectionState(record.key)).toBe("ready");
   });
 
-  it("首次 attach 连续失败后停止重试并进入 error", async () => {
+  it("首次 attach 连续失败后进入 recovering 交由上层重试", async () => {
     const record = createSessionRecord({ projectId: "p1", threadId: "t1" });
     const attach = vi.fn().mockRejectedValue(new Error("worker unavailable"));
     vi.stubGlobal("window", {
@@ -323,7 +322,8 @@ describe("SessionTransportManager", () => {
     await expect(manager.ensure(record)).rejects.toThrow("worker unavailable");
 
     expect(attach).toHaveBeenCalledTimes(2);
-    expect(manager.getConnectionState(record.key)).toBe("error");
+    // 临时性失败以 recovering 呈现，由 SessionContent/主会话的恢复循环重试，不显示“会话连接失败”。
+    expect(manager.getConnectionState(record.key)).toBe("recovering");
   });
 
   it("首次 attach 的序列化 AbortError 不会重试", async () => {
@@ -345,7 +345,7 @@ describe("SessionTransportManager", () => {
     await expect(manager.ensure(record)).rejects.toMatchObject({ name: "AbortError" });
 
     expect(attach).toHaveBeenCalledTimes(1);
-    expect(manager.getConnectionState(record.key)).toBe("error");
+    expect(manager.getConnectionState(record.key)).toBe("recovering");
   });
 
   it("首次 attach 重试等待期间 detach 不会启动第二个 lease", async () => {
@@ -515,7 +515,6 @@ function workbenchState(): WorkbenchState {
   return {
     projectId: "p1",
     threadId: "t1",
-    panel: "chat",
     panelOpen: false,
     panelWidth: 420,
     terminalOpen: false,

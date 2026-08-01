@@ -19,6 +19,19 @@ interface KeyState {
   tombstoned: boolean;
 }
 
+/**
+ * key -> 被 detach/retire 中断后仍在收尾的 attach 完成信号。
+ * 收尾期间（含主进程 detach IPC 的发出）必须串行化后续 attach，
+ * 否则主进程会因残留 subscription 拒绝 "Session already attached"。
+ * invalidated 表示 retire 已使等待该收尾的排队 ensure 失效。
+ */
+interface SettlingEntry {
+  promise: Promise<void>;
+  invalidated: boolean;
+  /** 收尾所属的 record：只对同一 record 的排队 ensure 生效。 */
+  record: CachedSessionRecord;
+}
+
 const INITIAL_ATTACH_RETRY_DELAY_MS = 100;
 
 function isAbortError(error: unknown): boolean {
@@ -35,9 +48,19 @@ function delay(ms: number): Promise<void> {
  */
 export class SessionTransportManager {
   private readonly keyStates = new Map<string, KeyState>();
+  private readonly settling = new Map<string, SettlingEntry>();
 
   async ensure(record: CachedSessionRecord): Promise<SessionAttachment> {
     const key = record.key;
+    // 前一次 attach 被中断后仍在收尾：等其 abort 清理（含主进程 detach IPC）完成再发起新 attach。
+    const settling = this.settling.get(key);
+    if (settling) {
+      await settling.promise;
+      // retire 使等待中的 ensure 失效：已 retire 的 record 不允许重建 attachment。
+      if (settling.invalidated && settling.record === record) {
+        throw new Error(`Session record ${key} is retired`);
+      }
+    }
     let state = this.keyStates.get(key);
     if (!state) {
       state = { record, pending: null, committed: null, resyncAfterPending: false, tombstoned: false };
@@ -72,8 +95,36 @@ export class SessionTransportManager {
       if (!state.resyncAfterPending) return this.ensure(record);
       state.resyncAfterPending = false;
       if (state.pending) return state.pending;
+      // 等待期间的 attach 已成功提交租约（ready）：本次 resync 已满足，
+      // 直接返回已提交租约，不再发起第二次替换 attach（否则 transport 直接 resync
+      // 与 UI 恢复循环并发时会链式产生多个顺序替换 attach）。
+      if (record.stores.connection.getSnapshot() === "ready") return this.ensure(record);
     }
     return this.startAttach(state, state.committed?.attachmentId);
+  }
+
+  private recordSettling(
+    key: string,
+    pending: Promise<unknown> | null,
+    record: CachedSessionRecord,
+    invalidated: boolean,
+  ): void {
+    const entry: SettlingEntry = {
+      invalidated,
+      record,
+      promise: (async () => {
+        try {
+          // 被中断的 attach 在其内部收尾时会同步发出 abort detach IPC。
+          await pending;
+        } catch {
+          // Detaching/retiring intentionally invalidates any in-flight attach.
+        }
+      })(),
+    };
+    this.settling.set(key, entry);
+    void entry.promise.finally(() => {
+      if (this.settling.get(key) === entry) this.settling.delete(key);
+    });
   }
 
   async detach(key: string): Promise<void> {
@@ -88,42 +139,51 @@ export class SessionTransportManager {
     state.committed = null;
     this.keyStates.delete(key);
     if (attachmentId) window.desktop.sessions.detach(attachmentId);
-    try {
-      await state.pending;
-    } catch {
-      // Detaching intentionally invalidates any in-flight attach.
-    }
+    this.recordSettling(key, state.pending, state.record, false);
+    await state.pending?.catch(() => undefined);
   }
 
   async retire(key: string): Promise<void> {
     const state = this.keyStates.get(key);
-    if (!state) return;
-    state.tombstoned = true;
-    state.resyncAfterPending = false;
-    state.record.generation += 1;
-    state.record.stores.connection.setState("error");
-    state.record.stores.summary.set({ connectionState: "error" });
-    const attachmentId = state.committed?.attachmentId;
-    state.committed = null;
-    this.keyStates.delete(key);
-    if (attachmentId) window.desktop.sessions.detach(attachmentId);
-    try {
-      await state.pending;
-    } catch {
-      // A retiring record intentionally invalidates any in-flight attach.
+    if (state) {
+      state.tombstoned = true;
+      state.resyncAfterPending = false;
+      state.record.generation += 1;
+      state.record.stores.connection.setState("error");
+      state.record.stores.summary.set({ connectionState: "error" });
+      const attachmentId = state.committed?.attachmentId;
+      state.committed = null;
+      this.keyStates.delete(key);
+      if (attachmentId) window.desktop.sessions.detach(attachmentId);
+      this.recordSettling(key, state.pending, state.record, true);
+      await state.pending?.catch(() => undefined);
+      return;
+    }
+    // detach 已移除 keyState 但收尾仍在进行：失效等待中的 ensure，防止为已 retire 的 record 重建 attachment。
+    const settling = this.settling.get(key);
+    if (settling) {
+      settling.invalidated = true;
+      await settling.promise;
     }
   }
 
   async retireProject(projectId: string): Promise<void> {
-    await Promise.all(
-      [...this.keyStates.values()]
+    const keys = new Set<string>([
+      ...[...this.keyStates.values()]
         .filter((state) => state.record.identity.projectId === projectId)
-        .map((state) => this.retire(state.record.key)),
-    );
+        .map((state) => state.record.key),
+      ...[...this.settling.entries()]
+        .filter(([, entry]) => entry.record.identity.projectId === projectId)
+        .map(([key]) => key),
+    ]);
+    await Promise.all([...keys].map((key) => this.retire(key)));
   }
 
   async detachAll(): Promise<void> {
-    await Promise.all([...this.keyStates.keys()].map((key) => this.retire(key)));
+    // 同时覆盖 keyStates 与收尾中的 settling：detach 进行中排队的 ensure
+    // 也会被失效，避免窗口卸载后仍重建 attachment。
+    const keys = new Set<string>([...this.keyStates.keys(), ...this.settling.keys()]);
+    await Promise.all([...keys].map((key) => this.retire(key)));
   }
 
   getConnectionState(key: string): SessionConnectionState | null {
@@ -140,6 +200,18 @@ export class SessionTransportManager {
   getCommittedAttachmentId(record: CachedSessionRecord): string | null {
     const committed = this.keyStates.get(record.key)?.committed;
     return committed?.generation === record.generation ? committed.attachmentId : null;
+  }
+
+  /**
+   * 恢复连接：无已提交租约时走 ensure（复用 in-flight attach 或发起首次 attach）；
+   * 有已提交租约时走 resync 替换租约（resync 失败后 committed 仍在，ensure 只会返回旧租约）。
+   */
+  async recover(record: CachedSessionRecord): Promise<SessionAttachment> {
+    const state = this.keyStates.get(record.key);
+    if (!state) return this.ensure(record);
+    if (state.record !== record || state.tombstoned) throw new Error(`Session record ${record.key} is retired`);
+    if (!state.committed || state.committed.generation !== record.generation) return this.ensure(record);
+    return this.resync(record);
   }
 
   private startAttach(state: KeyState, replaceAttachmentId: string | undefined): Promise<SessionAttachment> {
@@ -229,8 +301,9 @@ export class SessionTransportManager {
           }
         }
         if (!state.tombstoned && this.keyStates.get(record.key) === state && state.record === record) {
-          record.stores.connection.setState("error");
-          record.stores.summary.set({ connectionState: "error" });
+          // 临时性失败以 recovering 呈现，由调用方（SessionContent/主会话）重试恢复，不显示“会话连接失败”。
+          record.stores.connection.setState("recovering");
+          record.stores.summary.set({ connectionState: "recovering" });
         }
         throw error;
       }

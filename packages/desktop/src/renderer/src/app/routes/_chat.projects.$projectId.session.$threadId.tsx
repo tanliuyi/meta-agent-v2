@@ -5,7 +5,8 @@ import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
 import { SessionCacheHost } from "../../components/session-cache-host.tsx";
 import { SessionRoutePending } from "../../components/session-route-pending.tsx";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
-import type { DesktopState } from "../../state/desktop-model.ts";
+import { selectSessionCatalogStatus } from "../../state/desktop-selectors.ts";
+import { dispatchDesktop } from "../../state/desktop-store.ts";
 import { useDesktopStore } from "../../state/desktop-store-context.tsx";
 import {
   useSessionCache,
@@ -21,20 +22,6 @@ export const Route = createFileRoute("/_chat/projects/$projectId/session/$thread
 });
 
 type ValidationState = "loading" | "ready" | "invalid";
-type SessionCatalogStatus = "project-unavailable" | "threads-unloaded" | "thread-invalid" | "ready";
-
-export function selectSessionCatalogStatus(
-  state: DesktopState,
-  projectId: string,
-  threadId: string,
-): SessionCatalogStatus {
-  if (!state.projects.find(({ id }) => id === projectId)?.available) return "project-unavailable";
-  const threads = state.threadCatalogs[projectId];
-  if (!threads) return "threads-unloaded";
-  return threads.some((thread) => thread.id === threadId && thread.projectId === projectId && !thread.archived)
-    ? "ready"
-    : "thread-invalid";
-}
 
 /** Validates catalog identity, then activates one cached record. */
 function SessionRoute() {
@@ -47,6 +34,17 @@ function SessionRoute() {
   const records = useSessionCacheRecords();
   const cacheActiveKey = useSessionCacheActiveKey();
   const [validation, setValidation] = useState<ValidationState>("loading");
+  const viewedCompleted = useStore(
+    store,
+    (state) =>
+      state.threadCatalogs[projectId]?.some(({ id, completed }) => id === threadId && completed === true) === true,
+  );
+
+  // 打开会话即视为已查看：清除运行完成标记，并覆盖“正在查看时运行结束”的竞态。
+  useEffect(() => {
+    if (!viewedCompleted) return;
+    dispatchDesktop(store, { type: "thread-viewed", projectId, threadId });
+  }, [projectId, store, threadId, viewedCompleted]);
 
   useEffect(() => {
     if (catalogLoading) return;

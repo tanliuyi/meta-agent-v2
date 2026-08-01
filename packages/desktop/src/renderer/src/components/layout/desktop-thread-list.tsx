@@ -13,15 +13,17 @@ import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/co
 import { sessionRecordKey } from "../../runtime/pi-session-store.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
+import { dispatchDesktop } from "../../state/desktop-store.ts";
+import { useDesktopStore } from "../../state/desktop-store-context.tsx";
 import {
   useSessionCache,
   useSessionCacheActiveKey,
   useSessionDraftMaterializing,
 } from "../../state/session-cache-context.tsx";
-import { useSidebarSessions } from "../../state/sidebar-session-context.tsx";
 import {
   COLLAPSED_THREAD_COUNT,
   flattenVisibleThreadTree,
+  isThreadDescendantOf,
   isThreadListExpanded,
   nextThreadVisibleLimit,
   normalizeThreadTitle,
@@ -29,6 +31,7 @@ import {
   threadDescendantIds,
   threadTreeByArchiveState,
 } from "../../state/thread-list-commands.ts";
+import { useWorkbenchTabs } from "../../state/workbench-tab-context.tsx";
 import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
 import { ThreadListToggle } from "./thread-list-toggle.tsx";
 
@@ -47,8 +50,9 @@ interface RenameState {
 export function DesktopThreadList({ project, threads, compactRoot = false }: DesktopThreadListProps) {
   const actions = useDesktopActions();
   const navigate = useNavigate();
-  const sidebarSessions = useSidebarSessions();
+  const workbenchTabs = useWorkbenchTabs();
   const cache = useSessionCache();
+  const store = useDesktopStore();
   const activeSessionKey = useSessionCacheActiveKey();
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const activeThreadId = params.projectId === project.id ? (params.threadId ?? null) : null;
@@ -118,15 +122,21 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
 
   const openThreadInSidebar = useCallback(
     (thread: Thread) => {
-      sidebarSessions.openInSidebar({
+      // 侧边栏会话只能属于活动主 session 的子/孙会话（沿 parentThreadId 链上溯）。
+      if (!activeSessionKey || activeThreadId === null || !isThreadDescendantOf(threads, thread.id, activeThreadId)) {
+        return;
+      }
+      workbenchTabs.openSessionTab(activeSessionKey, {
+        kind: "session",
         key: sessionRecordKey(project.id, thread.id),
         projectId: project.id,
         threadId: thread.id,
         agentName: thread.agentName,
         displayName: thread.agentName ? builtinSubagentDisplayName(thread.agentName) : thread.title || "新会话",
       });
+      dispatchDesktop(store, { type: "thread-viewed", projectId: project.id, threadId: thread.id });
       // 打开当前活动会话的 workbench panel 以承载侧边栏 tab。
-      const record = activeSessionKey ? cache.get(activeSessionKey) : undefined;
+      const record = cache.get(activeSessionKey);
       const workbench = record?.stores.workbench.getSnapshot();
       if (record && workbench) {
         const next = { ...workbench, panelOpen: true };
@@ -134,7 +144,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
         void window.desktop.workbench.update(next);
       }
     },
-    [activeSessionKey, cache, project.id, sidebarSessions],
+    [activeSessionKey, activeThreadId, cache, project.id, store, threads, workbenchTabs],
   );
 
   const toggleThread = useCallback((threadId: string) => {
@@ -199,7 +209,10 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               onOpen={openThread}
               onOpenInSidebar={openThreadInSidebar}
               sidebarOpenDisabled={
-                activeSessionKey === null || activeSessionKey === sessionRecordKey(project.id, thread.id)
+                activeSessionKey === null ||
+                activeSessionKey === sessionRecordKey(project.id, thread.id) ||
+                activeThreadId === null ||
+                !isThreadDescendantOf(threads, thread.id, activeThreadId)
               }
               onArchive={archiveThread}
               onDelete={setPendingDelete}

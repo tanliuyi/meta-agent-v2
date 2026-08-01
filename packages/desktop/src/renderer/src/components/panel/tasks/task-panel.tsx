@@ -1,4 +1,4 @@
-import { useSessionControlSelector, useSessionTimelineSelector } from "../session-context.tsx";
+import { useSessionControlSelector, useSessionTimelineSelector } from "../../session-context.tsx";
 
 /** Session diagnostics derive from the record's timeline and control stores. */
 export function TaskPanel() {

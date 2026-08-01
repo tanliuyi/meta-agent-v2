@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSameTerminalGrid } from "../src/renderer/src/components/panel/terminal-view.tsx";
+import { isSameTerminalGrid } from "../src/renderer/src/components/panel/terminal/terminal-view.tsx";
 import { limitSize } from "../src/renderer/src/shared/hooks/use-resizable-region.ts";
 
 describe("limitSize", () => {

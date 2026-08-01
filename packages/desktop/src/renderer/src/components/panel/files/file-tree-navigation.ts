@@ -1,5 +1,5 @@
 import type { FocusEvent, KeyboardEvent } from "react";
-import type { FileNode } from "../../../../shared/contracts.ts";
+import type { FileNode } from "../../../../../shared/contracts.ts";
 
 const TREE_ITEM_SELECTOR = '[role="treeitem"]';
 

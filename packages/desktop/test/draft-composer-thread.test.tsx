@@ -65,6 +65,74 @@ describe("DraftComposerThread", () => {
     expect(markup).toContain('data-draft-composer="true"');
   });
 
+  it("compact 模式隐藏标题并靠下对齐（侧边栏草稿）", () => {
+    function TestCompactSurface() {
+      const runtime = useExternalStoreRuntime<ThreadMessage>({
+        messages: [],
+        isSendDisabled: true,
+        onNew: async () => {},
+      });
+      return (
+        <TooltipProvider>
+          <AssistantRuntimeProvider runtime={runtime}>
+            <DraftComposerThread
+              projects={[project]}
+              project={project}
+              config={config}
+              configLoading={false}
+              phase="editing"
+              fixedProject
+              compact
+              onProjectChange={vi.fn()}
+              onModelChange={vi.fn()}
+              onThinkingChange={vi.fn()}
+              onSubmit={vi.fn()}
+            />
+          </AssistantRuntimeProvider>
+        </TooltipProvider>
+      );
+    }
+
+    const markup = renderToStaticMarkup(createElement(TestCompactSurface));
+
+    expect(markup).not.toContain("做什么");
+    expect(markup).toContain("bg-background justify-end");
+    expect(markup).not.toContain("bg-background justify-center");
+    expect(markup).toContain('data-draft-composer="true"');
+  });
+
+  it("非 compact 模式保留标题与居中（路由新会话）", () => {
+    function TestRoutedSurface() {
+      const runtime = useExternalStoreRuntime<ThreadMessage>({
+        messages: [],
+        isSendDisabled: true,
+        onNew: async () => {},
+      });
+      return (
+        <TooltipProvider>
+          <AssistantRuntimeProvider runtime={runtime}>
+            <DraftComposerThread
+              projects={[project]}
+              project={project}
+              config={config}
+              configLoading={false}
+              phase="editing"
+              onProjectChange={vi.fn()}
+              onModelChange={vi.fn()}
+              onThinkingChange={vi.fn()}
+              onSubmit={vi.fn()}
+            />
+          </AssistantRuntimeProvider>
+        </TooltipProvider>
+      );
+    }
+
+    const markup = renderToStaticMarkup(createElement(TestRoutedSurface));
+
+    expect(markup).toContain("做什么");
+    expect(markup).toContain("bg-background justify-center");
+  });
+
   it("模型列表为空时仍允许展开以触发刷新", () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>

@@ -8,6 +8,8 @@ import type {
 } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
+import type { SessionWorkbenchTabs, WorkbenchSessionTab } from "../state/workbench-tab-context.tsx";
+import { useWorkbenchTabs } from "../state/workbench-tab-context.tsx";
 
 interface SessionScope {
   record: CachedSessionRecord;
@@ -72,6 +74,26 @@ export function useSessionConnection() {
 export function useSessionSummary() {
   const { record } = useSessionScope();
   return useExternalStoreSelector(record.stores.summary, selectSnapshot);
+}
+
+/**
+ * 绑定到当前主 session 的 workbench tab 状态与操作：
+ * 每个主 session 的 tab 集合互相隔离，切换 session 不串台。
+ */
+export function useSessionWorkbenchTabs(): SessionWorkbenchTabs {
+  const { record } = useSessionScope();
+  const windowTabs = useWorkbenchTabs();
+  return useMemo(
+    () => ({
+      ...windowTabs.getState(record.key),
+      openSessionTab: (tab: WorkbenchSessionTab) => windowTabs.openSessionTab(record.key, tab),
+      openPanelTab: (panel: string) => windowTabs.openPanelTab(record.key, panel),
+      activate: (key: string | null) => windowTabs.activate(record.key, key),
+      closeTab: (key: string) => windowTabs.closeTab(record.key, key),
+      openNewPanel: () => windowTabs.openNewPanel(record.key),
+    }),
+    [windowTabs, record.key],
+  );
 }
 
 function selectSnapshot<T>(snapshot: T): T {

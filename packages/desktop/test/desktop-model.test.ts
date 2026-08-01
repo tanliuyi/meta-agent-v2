@@ -258,6 +258,100 @@ describe("desktop catalog reducer", () => {
     expect(state.threadCatalogs[project.id]).toBeUndefined();
     expect(state.threadCatalogs[other.id]).toHaveLength(1);
   });
+
+  it("control 摘要 running 从 true 变 false 时标记运行完成", () => {
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [{ ...thread, running: true }],
+    });
+
+    state = desktopReducer(state, {
+      type: "thread-summary-updated",
+      projectId: project.id,
+      threadId: thread.id,
+      title: thread.title,
+      updatedAt: 2,
+      running: false,
+    });
+
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({ running: false, completed: true });
+  });
+
+  it("upsert 摘要 running 从 true 变 false 时标记运行完成，运行中再次 upsert 保留标记", () => {
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [{ ...thread, running: true }],
+    });
+
+    state = desktopReducer(state, {
+      type: "thread-catalog-upserted",
+      thread: { ...thread, running: false, updatedAt: 2 },
+    });
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({ running: false, completed: true });
+
+    // 未查看前重新运行并再次完成，标记保持。
+    state = desktopReducer(state, {
+      type: "thread-catalog-upserted",
+      thread: { ...thread, running: true, updatedAt: 3 },
+    });
+    state = desktopReducer(state, {
+      type: "thread-catalog-upserted",
+      thread: { ...thread, running: false, updatedAt: 4 },
+    });
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({ running: false, completed: true });
+  });
+
+  it("thread-viewed 清除运行完成标记，未标记时保持原引用", () => {
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [{ ...thread, running: true }],
+    });
+    state = desktopReducer(state, {
+      type: "thread-summary-updated",
+      projectId: project.id,
+      threadId: thread.id,
+      title: thread.title,
+      updatedAt: 2,
+      running: false,
+    });
+    const marked = state.threadCatalogs[project.id]?.[0];
+    expect(marked?.completed).toBe(true);
+
+    state = desktopReducer(state, { type: "thread-viewed", projectId: project.id, threadId: thread.id });
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({ running: false });
+    expect(state.threadCatalogs[project.id]?.[0]?.completed).toBeUndefined();
+
+    const viewed = state.threadCatalogs[project.id]?.[0];
+    expect(desktopReducer(state, { type: "thread-viewed", projectId: project.id, threadId: thread.id })).toBe(state);
+    expect(state.threadCatalogs[project.id]?.[0]).toBe(viewed);
+  });
+
+  it("后台重新加载 thread catalog 时保留未查看的运行完成标记", () => {
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [{ ...thread, running: true }],
+    });
+    state = desktopReducer(state, {
+      type: "thread-summary-updated",
+      projectId: project.id,
+      threadId: thread.id,
+      title: thread.title,
+      updatedAt: 2,
+      running: false,
+    });
+
+    state = desktopReducer(state, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [{ ...thread, updatedAt: 2 }],
+    });
+
+    expect(state.threadCatalogs[project.id]?.[0]).toMatchObject({ completed: true });
+  });
 });
 
 function createBootstrap(): SessionBootstrap {

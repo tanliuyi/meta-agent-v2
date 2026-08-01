@@ -5,7 +5,8 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  background: hsl(var(--background));
+  /* 窗口外壳使用 --sidebar 面板色（浅色冷灰蓝 / 深色近黑），与工作区卡片形成层次。 */
+  background: hsl(var(--sidebar));
 }
 
 .app-frame[data-platform="win32"] {
@@ -182,15 +183,15 @@ body.is-resizing-column .sidebar {
 }
 
 .macos-titlebar-space > .sidebar-toggle {
-  position: absolute;
-  top: 11px;
+  position: fixed;
+  top: 10px;
   left: 92px;
   z-index: calc(var(--stack-sticky-control) + 1);
 }
 
 .topbar > .sidebar-toggle {
-  position: absolute;
-  top: 9px;
+  position: fixed;
+  top: 10px;
   left: 92px;
   z-index: calc(var(--stack-sticky-control) + 1);
 }
@@ -215,6 +216,7 @@ body.is-resizing-column .sidebar {
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar,
+  .topbar,
   .panel-toggle-icon path {
     transition: none;
   }
@@ -373,6 +375,15 @@ body.is-resizing-column .sidebar {
   animation: spin var(--motion-duration-spinner) var(--motion-ease-linear) infinite;
 }
 
+.completed-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: var(--shape-radius-round);
+  background: hsl(var(--info));
+  box-shadow: 0 0 0 2px hsl(var(--info) / 0.18);
+}
+
 .sidebar-footer {
   flex-shrink: 0;
   flex-direction: column;
@@ -391,6 +402,8 @@ body.is-resizing-column .sidebar {
   border: 1px solid hsl(var(--border));
   border-radius: 16px 0 0 16px;
   box-shadow: var(--workspace-edge-shadow);
+  /* 内容卡片保持 --background 表面，与外壳的 --sidebar 面板色区分。 */
+  background: hsl(var(--background));
   overflow: hidden;
 }
 
@@ -425,6 +438,9 @@ body.is-resizing-column .sidebar {
   justify-content: space-between;
   min-width: 0;
   padding: 0 10px 0 16px;
+  /* 与侧边栏宽度动画同速,避免展开/收起时 darwin 标题缩进跳变。 */
+  transition: padding-left var(--motion-duration-standard) var(--motion-ease-emphasized);
+  background: hsl(var(--background));
 }
 
 .topbar::after {
@@ -472,7 +488,7 @@ body.is-resizing-column .sidebar {
 }
 .topbar-actions {
   position: fixed;
-  top: 9px;
+  top: 10px;
   right: 10px;
   z-index: calc(var(--stack-workbench-overlay) + 1);
   display: flex;
@@ -487,7 +503,7 @@ body.is-resizing-column .sidebar {
 }
 
 .app-frame[data-platform="win32"] .topbar-actions {
-  top: calc(var(--layout-window-header-height) + 9px);
+  top: calc(var(--layout-window-header-height) + 10px);
 }
 .branch-label {
   display: flex;
@@ -611,6 +627,8 @@ body.is-resizing-column .sidebar {
   border: 1px solid hsl(var(--border));
   border-radius: 16px 0 0 16px;
   box-shadow: var(--workspace-edge-shadow);
+  /* 内容卡片保持 --background 表面，与外壳的 --sidebar 面板色区分。 */
+  background: hsl(var(--background));
   overflow: hidden;
 }
 

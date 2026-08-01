@@ -1,6 +1,6 @@
 import { ChatThread } from "./chat/chat-thread.tsx";
 import { Topbar } from "./layout/topbar.tsx";
-import { BottomTerminal } from "./panel/bottom-terminal.tsx";
+import { BottomTerminal } from "./panel/terminal/bottom-terminal.tsx";
 import { WorkbenchPanel } from "./panel/workbench-panel.tsx";
 import { useSessionScope } from "./session-context.tsx";
 

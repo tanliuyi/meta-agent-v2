@@ -55,15 +55,18 @@ body.is-resizing-column .workbench-panel {
   width: 8px;
   cursor: col-resize;
 }
+
 .resize-handle-panel {
   left: 0;
 }
+
 .resize-handle-panel::after,
 .resize-handle-file-tree::after {
   top: 0;
   bottom: 0;
   width: 2px;
 }
+
 .resize-handle-panel::after {
   left: 0;
 }
@@ -91,7 +94,7 @@ body.is-resizing-column .workbench-panel {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 76px 0 8px;
+  padding: 0 68px 0 8px;
 }
 /* topbar-actions 悬浮于右侧留白上方，需从 drag 矩形中挖洞保持可交互。 */
 .panel-tabs-safe-area {
@@ -99,7 +102,7 @@ body.is-resizing-column .workbench-panel {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 76px;
+  width: 68px;
 }
 .app-frame[data-platform="darwin"] .panel-tabs {
   -webkit-app-region: drag;
@@ -117,29 +120,99 @@ body.is-resizing-column .workbench-panel {
 .panel-tab-list {
   display: flex;
   min-width: 0;
+  flex: 1;
   align-items: center;
   gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  outline: 0;
 }
-.panel-tab {
+.panel-tab-list::-webkit-scrollbar {
+  display: none;
+}
+/* workbench-panel 中动态注册的 tab：内置 Panel 与会话统一为可关闭的 pill。 */
+.panel-tab-item {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
   height: 28px;
-  padding: 0 10px;
-  border: 0;
+  min-width: 0;
+  max-width: 160px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 10px;
   border-radius: var(--shape-radius-xl);
   background: transparent;
   color: hsl(var(--muted-foreground));
   font-size: var(--type-size-control);
-  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
 }
-.panel-tab:hover,
-.panel-tab[data-state="active"] {
+.panel-tab-item:hover {
+  background: hsl(var(--muted) / 0.65);
+  color: hsl(var(--foreground));
+}
+.panel-tab-item[data-active] {
   background: hsl(var(--accent));
   color: hsl(var(--foreground));
+  font-weight: 500;
+}
+.panel-tab-trigger {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--type-size-control);
+  cursor: pointer;
+}
+.panel-tab-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-tab-trigger:focus-visible {
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+.panel-tab-close {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  margin-right: 1px;
+  padding: 0;
+  flex: 0 0 18px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--shape-radius-xl);
+  outline: 0;
+  background: transparent;
+  color: currentColor;
+  opacity: 0;
+  cursor: pointer;
+}
+.panel-tab-item:hover .panel-tab-close,
+.panel-tab-item[data-active] .panel-tab-close,
+.panel-tab-close:focus-visible {
+  opacity: 0.72;
+}
+.panel-tab-close:hover {
+  background: hsl(var(--foreground) / 0.09);
+  opacity: 1;
+}
+.panel-tab-close:focus-visible {
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
 }
 .panel-add {
   margin-left: auto;
+  flex: 0 0 auto;
 }
 .panel-add[data-active] {
   background: hsl(var(--accent));
@@ -152,6 +225,11 @@ body.is-resizing-column .workbench-panel {
   place-content: center;
   justify-items: center;
   padding: 24px;
+}
+.sidebar-new-panel-options {
+  display: grid;
+  min-width: 220px;
+  gap: 8px;
 }
 .sidebar-new-session-option {
   display: inline-flex;
@@ -185,101 +263,6 @@ body.is-resizing-column .workbench-panel {
 }
 .sidebar-new-session-draft .composer-error {
   margin: 8px;
-}
-
-/* workbench-panel 中动态注册的 subagent 会话 tab。 */
-.panel-sidebar-tabs {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
-  margin-left: 6px;
-  padding-left: 6px;
-  border-left: 1px solid hsl(var(--border));
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-.panel-sidebar-tabs::-webkit-scrollbar {
-  display: none;
-}
-.panel-sidebar-tab {
-  display: inline-flex;
-  height: 28px;
-  min-width: 0;
-  max-width: 160px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 4px;
-  padding: 0 4px 0 10px;
-  border-radius: var(--shape-radius-xl);
-  background: transparent;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--type-size-control);
-  transition:
-    background-color 150ms ease,
-    color 150ms ease;
-}
-.panel-sidebar-tab:hover {
-  background: hsl(var(--muted) / 0.65);
-  color: hsl(var(--foreground));
-}
-.panel-sidebar-tab[data-active] {
-  background: hsl(var(--accent));
-  color: hsl(var(--foreground));
-  font-weight: 500;
-}
-.panel-sidebar-tab-trigger {
-  display: flex;
-  min-width: 0;
-  height: 100%;
-  flex: 1;
-  align-items: center;
-  gap: 5px;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: inherit;
-  font-size: var(--type-size-control);
-  cursor: pointer;
-}
-.panel-sidebar-tab-trigger > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.panel-sidebar-tab-trigger:focus-visible {
-  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
-}
-.panel-sidebar-tab-close {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  margin-right: 1px;
-  padding: 0;
-  flex: 0 0 18px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--shape-radius-xl);
-  outline: 0;
-  background: transparent;
-  color: currentColor;
-  opacity: 0;
-  cursor: pointer;
-}
-.panel-sidebar-tab:hover .panel-sidebar-tab-close,
-.panel-sidebar-tab[data-active] .panel-sidebar-tab-close,
-.panel-sidebar-tab-close:focus-visible {
-  opacity: 0.72;
-}
-.panel-sidebar-tab-close:hover {
-  background: hsl(var(--foreground) / 0.09);
-  opacity: 1;
-}
-.panel-sidebar-tab-close:focus-visible {
-  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
 }
 
 /* subagent 会话内容：chat 行占满 panel 内容区。 */
@@ -922,10 +905,8 @@ html[data-theme="dark"] .file-preview-token {
 }
 
 @container workbench-panel (max-width: 440px) {
-  .panel-tab {
-    width: 30px;
-    padding: 0;
-    justify-content: center;
+  .panel-tab-item {
+    padding: 0 2px 0 8px;
   }
 
   .panel-tab-label {

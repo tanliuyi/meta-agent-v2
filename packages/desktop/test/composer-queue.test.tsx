@@ -8,7 +8,7 @@ import {
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { ComposerQueue } from "../src/renderer/src/components/chat/composer-queue.tsx";
+import { ComposerQueue } from "../src/renderer/src/components/chat/composer/composer-queue.tsx";
 import type { PiQueueItem } from "../src/shared/contracts.ts";
 
 describe("ComposerQueue", () => {

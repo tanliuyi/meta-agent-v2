@@ -2,6 +2,7 @@ import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionControlState, ThinkingLevel, WorkbenchState } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
+import { createRecoveryLoop } from "../runtime/session-recovery.ts";
 import { useTransportManager } from "../runtime/session-transport-context.tsx";
 import { usePiSessionRuntime } from "../runtime/use-pi-session-runtime.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
@@ -20,6 +21,18 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
   const interaction = useExternalStoreSelector(record.stores.control, selectInteraction);
   const commandsReady =
     active && connection === "ready" && interaction !== "read-only" && transport.hasCommittedLease(record);
+
+  // 主会话 attach/resync 失败后自动恢复：订阅连接状态，recovering 时按退避重试，
+  // 响应 ready 之后的后续 recovering 转换（如 resync 失败），避免停留在“会话连接失败”。
+  useEffect(() => {
+    if (!active) return;
+    const loop = createRecoveryLoop({
+      getState: () => record.stores.connection.getSnapshot(),
+      subscribe: (listener) => record.stores.connection.subscribe(listener),
+      ensure: () => transport.recover(record),
+    });
+    return () => loop.dispose();
+  }, [active, record, transport]);
   const modelsRefreshRequested = useRef(false);
   const modelsRefreshRequest = useRef<Promise<void> | null>(null);
   const [modelsRefreshing, setModelsRefreshing] = useState(false);

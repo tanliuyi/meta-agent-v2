@@ -1,4 +1,4 @@
-import { useSessionControlSelector, useSessionScope, useSessionWorkbenchSelector } from "../session-context.tsx";
+import { useSessionControlSelector, useSessionScope, useSessionWorkbenchSelector } from "../../session-context.tsx";
 import { OpenBottomTerminal } from "./open-bottom-terminal.tsx";
 
 /** Bottom terminal identity and layout state persist in the cached session activity. */

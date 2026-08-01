@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectSessionCatalogStatus } from "../src/renderer/src/app/routes/_chat.projects.$projectId.session.$threadId.tsx";
+import { selectSessionCatalogStatus } from "../src/renderer/src/state/desktop-selectors.ts";
 import { createDesktopStore, dispatchDesktop } from "../src/renderer/src/state/desktop-store.ts";
 import type { Project, Thread } from "../src/shared/contracts.ts";
 

@@ -9,7 +9,7 @@ vi.mock("../src/renderer/src/components/chat/chat-thread.tsx", () => ({
 vi.mock("../src/renderer/src/components/layout/topbar.tsx", () => ({
   Topbar: () => <header data-slot="topbar" />,
 }));
-vi.mock("../src/renderer/src/components/panel/bottom-terminal.tsx", () => ({
+vi.mock("../src/renderer/src/components/panel/terminal/bottom-terminal.tsx", () => ({
   BottomTerminal: () => <section data-slot="bottom" />,
 }));
 vi.mock("../src/renderer/src/components/panel/workbench-panel.tsx", () => ({

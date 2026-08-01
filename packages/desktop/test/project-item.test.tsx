@@ -1,6 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectItem } from "../src/renderer/src/components/layout/project-item.tsx";
 import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
 import type { DesktopActions } from "../src/renderer/src/state/desktop-actions.ts";
@@ -17,6 +17,17 @@ const project: Project = {
   available: true,
 };
 
+beforeEach(() => {
+  vi.stubGlobal("window", {
+    desktop: { platform: "win32" },
+    localStorage: { getItem: () => null },
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("ProjectItem", () => {
   it("当前会话路由所属 Project 首帧保持展开", () => {
     const markup = renderProjectItem(true);
@@ -30,18 +41,15 @@ describe("ProjectItem", () => {
 
   it("首帧优先恢复持久化的收起状态", () => {
     vi.stubGlobal("window", {
+      desktop: { platform: "win32" },
       localStorage: {
         getItem: () => JSON.stringify({ version: 1, projects: [[project.id, false]] }),
       },
     });
 
-    try {
-      const markup = renderProjectItem(true);
-      expect(markup).toContain('aria-expanded="false"');
-      expect(markup).toContain('id="project-threads-project" hidden=""');
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    const markup = renderProjectItem(true);
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('id="project-threads-project" hidden=""');
   });
 
   it("收起时用 loading 标记项目中正在运行的任务", () => {
@@ -68,6 +76,31 @@ describe("ProjectItem", () => {
     const markup = renderProjectItem(false, [{ ...runningThread, archived: true }]);
 
     expect(markup).not.toContain('aria-label="Project 中有任务正在运行"');
+  });
+
+  it("收起时用完成点标记项目中已结束且未查看的任务", () => {
+    const markup = renderProjectItem(false, [{ ...runningThread, running: false, completed: true }]);
+
+    expect(markup).toContain('aria-label="Project 中有任务已完成"');
+    expect(markup).toContain('class="completed-dot"');
+    expect(markup).not.toContain('aria-label="Project 中有任务正在运行"');
+  });
+
+  it("收起时优先显示运行指示而非完成点", () => {
+    const markup = renderProjectItem(false, [{ ...runningThread, running: false, completed: true }, runningThread]);
+
+    expect(markup).toContain('aria-label="Project 中有任务正在运行"');
+    expect(markup).not.toContain('aria-label="Project 中有任务已完成"');
+  });
+
+  it("收起时忽略已归档或仍在运行的完成点任务", () => {
+    const archivedMarkup = renderProjectItem(false, [
+      { ...runningThread, running: false, completed: true, archived: true },
+    ]);
+    expect(archivedMarkup).not.toContain('aria-label="Project 中有任务已完成"');
+
+    const runningMarkup = renderProjectItem(false, [{ ...runningThread, completed: true }]);
+    expect(runningMarkup).not.toContain('aria-label="Project 中有任务已完成"');
   });
 });
 

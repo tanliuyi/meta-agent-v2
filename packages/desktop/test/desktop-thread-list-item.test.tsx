@@ -21,12 +21,18 @@ const baseThread: Thread = {
 
 function renderThread(
   thread: Thread,
-  options: { depth?: number; childCount?: number; runningChildCount?: number; compactRoot?: boolean } = {},
+  options: {
+    depth?: number;
+    childCount?: number;
+    runningChildCount?: number;
+    compactRoot?: boolean;
+    active?: boolean;
+  } = {},
 ): string {
   return renderToStaticMarkup(
     <DesktopThreadListItem
       thread={thread}
-      active={false}
+      active={options.active ?? false}
       isSwitching={false}
       isRenamingPending={false}
       isStopPending={false}
@@ -98,5 +104,28 @@ describe("DesktopThreadListItem", () => {
     expect(renderThread(rootThread, { depth: 0, childCount: 1, compactRoot: true })).toContain(
       "padding-inline-start:32px",
     );
+  });
+
+  it("shows the completion dot for a finished run that was not viewed yet", () => {
+    const markup = renderThread({ ...baseThread, completed: true });
+
+    expect(markup).toContain('class="completed-dot"');
+    expect(markup).toContain('aria-label="运行已完成"');
+  });
+
+  it("hides the elapsed time while the completion dot is shown", () => {
+    const markup = renderThread({ ...baseThread, completed: true });
+
+    expect(markup).not.toContain('aria-label="更新时间"');
+    expect(markup).not.toContain("thread-time");
+  });
+
+  it("hides the completion dot while the thread is running or active", () => {
+    expect(renderThread({ ...baseThread, completed: true, running: true })).not.toContain("completed-dot");
+    expect(renderThread({ ...baseThread, completed: true }, { active: true })).not.toContain("completed-dot");
+  });
+
+  it("hides the completion dot for a thread without a finished run", () => {
+    expect(renderThread(baseThread)).not.toContain("completed-dot");
   });
 });

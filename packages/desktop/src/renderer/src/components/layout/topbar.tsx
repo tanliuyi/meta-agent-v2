@@ -9,7 +9,6 @@ export function Topbar() {
   const { updateWorkbench } = useSessionScope();
   const title = useSessionControlSelector((control) => control?.extensionHost.windowTitle ?? control?.title ?? "");
   const workbenchAvailable = useSessionWorkbenchSelector((workbench) => workbench !== null);
-  const panel = useSessionWorkbenchSelector((workbench) => workbench?.panel);
   const panelOpen = useSessionWorkbenchSelector((workbench) => workbench?.panelOpen ?? false);
   const terminalOpen = useSessionWorkbenchSelector((workbench) => workbench?.terminalOpen ?? false);
   return (
@@ -41,12 +40,13 @@ export function Topbar() {
           className="size-6"
           aria-pressed={panelOpen}
           disabled={!workbenchAvailable}
-          onClick={() =>
-            updateWorkbench({
-              panelOpen: !panelOpen,
-              panel: panel === "chat" ? "files" : (panel ?? "files"),
-            })
-          }
+          onClick={() => {
+            if (panelOpen) {
+              updateWorkbench({ panelOpen: false });
+              return;
+            }
+            updateWorkbench({ panelOpen: true });
+          }}
         >
           <PanelRight className="panel-toggle-icon panel-toggle-icon-right size-4!" data-collapsed={!panelOpen} />
         </TooltipIconButton>

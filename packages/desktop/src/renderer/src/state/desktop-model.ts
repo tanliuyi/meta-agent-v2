@@ -26,6 +26,7 @@ export type DesktopAction =
   | { type: "thread-catalog-upserted"; thread: Thread }
   | { type: "project-removed"; projectId: string }
   | { type: "thread-renamed"; projectId: string; threadId: string; title: string }
+  | { type: "thread-viewed"; projectId: string; threadId: string }
   | { type: "thread-archived"; projectId: string; threadId: string; archived: boolean }
   | { type: "thread-removed"; projectId: string; threadId: string }
   | {
@@ -150,7 +151,13 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
       const current = threads[index];
       if (!current) return state;
       const title = liveThreadTitle(current, action.title);
-      if (current.title === title && current.updatedAt === action.updatedAt && current.running === action.running) {
+      const completed = current.running && !action.running ? true : current.completed;
+      if (
+        current.title === title &&
+        current.updatedAt === action.updatedAt &&
+        current.running === action.running &&
+        current.completed === completed
+      ) {
         return state;
       }
       const next = [...threads];
@@ -159,8 +166,21 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
         title,
         updatedAt: action.updatedAt,
         running: action.running,
+        ...(completed ? { completed: true } : {}),
       };
       next.sort((left, right) => right.updatedAt - left.updatedAt);
+      return { ...state, threadCatalogs: { ...state.threadCatalogs, [action.projectId]: next } };
+    }
+    case "thread-viewed": {
+      const threads = state.threadCatalogs[action.projectId];
+      if (!threads) return state;
+      const index = threads.findIndex(({ id }) => id === action.threadId);
+      const current = threads[index];
+      if (!current || !current.completed) return state;
+      const next = [...threads];
+      const thread = { ...current };
+      delete thread.completed;
+      next[index] = thread;
       return { ...state, threadCatalogs: { ...state.threadCatalogs, [action.projectId]: next } };
     }
     case "loading":
@@ -210,7 +230,15 @@ function reuseThreadCatalog(previous: Thread[] | undefined, next: Thread[]): Thr
   const previousById = new Map(previous.map((thread) => [thread.id, thread]));
   const stable = next.map((thread) => {
     const current = previousById.get(thread.id);
-    return current && current.title !== thread.title ? { ...thread, title: current.title } : thread;
+    if (!current) return thread;
+    if (current.title !== thread.title || current.completed) {
+      return {
+        ...thread,
+        title: current.title,
+        ...(current.completed ? { completed: true } : {}),
+      };
+    }
+    return thread;
   });
   return previous.length === stable.length && previous.every((thread, index) => equalThread(thread, stable[index]))
     ? previous
@@ -221,11 +249,13 @@ function mergeCatalogThread(current: Thread, update: Thread): Thread {
   const parentThreadId = update.parentThreadId ?? current.parentThreadId;
   const origin = update.origin ?? current.origin;
   const agentName = update.agentName ?? current.agentName;
+  const completed = current.running && !update.running ? true : current.completed;
   return {
     ...update,
     title: liveThreadTitle(current, update.title),
     preview: current.parentThreadId ? current.preview : update.preview,
     archived: current.archived,
+    ...(completed ? { completed: true } : {}),
     ...(parentThreadId ? { parentThreadId } : {}),
     ...(origin ? { origin } : {}),
     ...(agentName !== undefined ? { agentName } : {}),
@@ -248,6 +278,7 @@ function equalThread(left: Thread, right: Thread | undefined): boolean {
     left.preview === right.preview &&
     left.archived === right.archived &&
     left.running === right.running &&
+    left.completed === right.completed &&
     left.parentThreadId === right.parentThreadId &&
     left.origin === right.origin &&
     left.agentName === right.agentName

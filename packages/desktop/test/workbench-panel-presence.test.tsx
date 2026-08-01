@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { OpenWorkbenchPanel } from "../src/renderer/src/components/panel/open-workbench-panel.tsx";
 import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
+import { registerWorkbenchPanelTab } from "../src/renderer/src/state/panel-tab-registry.ts";
+import type { WorkbenchTab } from "../src/renderer/src/state/workbench-tab-context.tsx";
 
 vi.mock("@renderer/shared/hooks/use-resizable-region", () => ({
   useResizableRegion: () => ({
@@ -14,30 +16,39 @@ vi.mock("@renderer/shared/hooks/use-resizable-region", () => ({
     onKeyDown: vi.fn(),
   }),
 }));
-vi.mock("../src/renderer/src/components/panel/file-panel.tsx", () => ({
+vi.mock("../src/renderer/src/components/panel/files/file-panel.tsx", () => ({
   FilePanel: () => <div data-slot="files" />,
 }));
-vi.mock("../src/renderer/src/components/panel/task-panel.tsx", () => ({
+vi.mock("../src/renderer/src/components/panel/tasks/task-panel.tsx", () => ({
   TaskPanel: () => <div data-slot="tasks" />,
 }));
-vi.mock("../src/renderer/src/components/panel/terminal-panel.tsx", () => ({
+vi.mock("../src/renderer/src/components/panel/terminal/terminal-panel.tsx", () => ({
   TerminalPanel: () => <div data-slot="terminal" />,
 }));
-vi.mock("../src/renderer/src/components/panel/sidebar-session-content.tsx", () => ({
-  SidebarSessionContent: () => <div data-slot="sidebar-session" />,
+vi.mock("../src/renderer/src/components/panel/session/session-content.tsx", () => ({
+  SessionContent: () => <div data-slot="sidebar-session" />,
 }));
-vi.mock("../src/renderer/src/components/panel/sidebar-new-session-draft.tsx", () => ({
-  SidebarNewSessionDraft: () => <div data-slot="draft" />,
+vi.mock("../src/renderer/src/components/panel/session/new-session-draft.tsx", () => ({
+  NewSessionDraft: () => <div data-slot="draft" />,
 }));
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
   useSessionScope: () => ({ updateWorkbench: vi.fn() }),
   useSessionWorkbench: () => null,
 }));
 
+const baseProps = {
+  tabs: [] as WorkbenchTab[],
+  activeKey: null,
+  onActivate: vi.fn(),
+  onCloseTab: vi.fn(),
+  onOpenNewPanel: vi.fn(),
+  onOpenPanelTab: vi.fn(),
+};
+
 describe("OpenWorkbenchPanel presence", () => {
   it("keeps only an inert collapsed shell when closed", () => {
     const markup = renderToStaticMarkup(
-      React.createElement(OpenWorkbenchPanel, { open: false, width: 420, panel: "files" }),
+      React.createElement(OpenWorkbenchPanel, { ...baseProps, open: false, width: 420 }),
     );
 
     expect(markup).toContain('class="workbench-panel"');
@@ -53,7 +64,7 @@ describe("OpenWorkbenchPanel presence", () => {
       React.createElement(
         TooltipProvider,
         null,
-        React.createElement(OpenWorkbenchPanel, { open: true, width: 420, panel: "files" }),
+        React.createElement(OpenWorkbenchPanel, { ...baseProps, open: true, width: 420 }),
       ),
     );
 
@@ -63,23 +74,140 @@ describe("OpenWorkbenchPanel presence", () => {
     expect(markup).toContain('id="workbench-panel-content"');
   });
 
-  it("renders the subagent session without selecting any fixed tab", () => {
+  it("renders every registered tab with a close button", () => {
     const markup = renderToStaticMarkup(
       React.createElement(
         TooltipProvider,
         null,
         React.createElement(OpenWorkbenchPanel, {
+          ...baseProps,
           open: true,
           width: 420,
-          panel: "files",
-          subagentTabs: [{ key: "s1", projectId: "p", threadId: "t1", displayName: "执行者", agentName: "worker" }],
-          activeSubagentKey: "s1",
+          tabs: [
+            { kind: "panel", panel: "files" },
+            { kind: "panel", panel: "terminal" },
+            { kind: "session", key: "s1", projectId: "p", threadId: "t1", displayName: "执行者", agentName: "worker" },
+          ],
+          activeKey: "panel:terminal",
+        }),
+      ),
+    );
+
+    expect(markup).toContain('data-slot="terminal"');
+    expect(markup).toContain("资源管理");
+    expect(markup).toContain("终端");
+    expect(markup).toContain("执行者");
+    expect(markup).toContain("关闭 资源管理");
+    expect(markup).toContain("关闭 终端");
+    expect(markup).toContain("关闭 执行者");
+    expect(markup).toContain('aria-selected="true"');
+    expect(markup).toContain('data-active="true"');
+  });
+
+  it("renders the session tab content when a session tab is active", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(OpenWorkbenchPanel, {
+          ...baseProps,
+          open: true,
+          width: 420,
+          tabs: [
+            { kind: "session", key: "s1", projectId: "p", threadId: "t1", displayName: "执行者", agentName: "worker" },
+          ],
+          activeKey: "s1",
         }),
       ),
     );
 
     expect(markup).toContain('data-slot="sidebar-session"');
-    expect(markup).not.toContain('data-state="active"');
+  });
+
+  it("shows the new-panel options from the registry when no tab is registered", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(OpenWorkbenchPanel, { ...baseProps, open: true, width: 420 }),
+      ),
+    );
+
+    expect(markup).toContain("新会话");
+    expect(markup).toContain("资源管理");
+    expect(markup).toContain("终端");
+    expect(markup).toContain("侧边任务");
+    // 未选中任何 tab 时缺省页即当前视图，新建 Panel 按钮呈按下态。
+    expect(markup).toContain('data-active="true"');
     expect(markup).toContain('aria-pressed="true"');
+  });
+
+  it("renders a registered extension panel through the registry", () => {
+    const unregister = registerWorkbenchPanelTab({
+      kind: "custom-extension",
+      label: "自定义面板",
+      icon: null,
+      component: () => <div data-slot="custom-extension" />,
+      order: 99,
+    });
+    try {
+      const markup = renderToStaticMarkup(
+        React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(OpenWorkbenchPanel, {
+            ...baseProps,
+            open: true,
+            width: 420,
+            tabs: [{ kind: "panel", panel: "custom-extension" }],
+            activeKey: "panel:custom-extension",
+          }),
+        ),
+      );
+
+      expect(markup).toContain('data-slot="custom-extension"');
+      expect(markup).toContain("自定义面板");
+      expect(markup).toContain("关闭 自定义面板");
+    } finally {
+      unregister();
+    }
+  });
+
+  it("renders the draft through the registered new-session panel kind", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(OpenWorkbenchPanel, {
+          ...baseProps,
+          open: true,
+          width: 420,
+          tabs: [{ kind: "panel", panel: "draft" }],
+          activeKey: "panel:draft",
+        }),
+      ),
+    );
+
+    expect(markup).toContain('data-slot="draft"');
+    expect(markup).toContain("关闭 新会话");
+  });
+
+  it("falls back to the kind label for an unregistered panel tab", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(OpenWorkbenchPanel, {
+          ...baseProps,
+          open: true,
+          width: 420,
+          tabs: [{ kind: "panel", panel: "gone-extension" }],
+          activeKey: "panel:gone-extension",
+        }),
+      ),
+    );
+
+    expect(markup).toContain("面板未注册：gone-extension");
+    expect(markup).toContain("关闭 gone-extension");
   });
 });

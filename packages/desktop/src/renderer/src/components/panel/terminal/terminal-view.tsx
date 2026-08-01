@@ -8,11 +8,11 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { TerminalEvent } from "../../../../shared/contracts.ts";
-import { errorMessage } from "../../shared/lib/error-message.ts";
-import { useFont } from "../../state/font.tsx";
-import { useTheme } from "../../state/theme.tsx";
-import { useSessionScope } from "../session-context.tsx";
+import type { TerminalEvent } from "../../../../../shared/contracts.ts";
+import { errorMessage } from "../../../shared/lib/error-message.ts";
+import { useFont } from "../../../state/font.tsx";
+import { useTheme } from "../../../state/theme.tsx";
+import { useSessionScope } from "../../session-context.tsx";
 
 export interface TerminalViewHandle {
   restart(): Promise<void>;

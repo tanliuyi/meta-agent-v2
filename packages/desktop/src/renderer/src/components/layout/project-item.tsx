@@ -50,6 +50,9 @@ export const ProjectItem = memo(function ProjectItem({
   const wasActive = useRef(active);
   const threadListId = `project-threads-${project.id}`;
   const showRunningIndicator = !expanded && threads?.some(({ archived, running }) => !archived && running) === true;
+  const showCompletedIndicator =
+    !expanded &&
+    threads?.some(({ archived, completed, running }) => !archived && !running && completed === true) === true;
 
   useEffect(() => {
     const becameActive = active && !wasActive.current;
@@ -136,6 +139,13 @@ export const ProjectItem = memo(function ProjectItem({
                     aria-label={`${project.name} 中有任务正在运行`}
                   >
                     <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+                  </span>
+                ) : showCompletedIndicator ? (
+                  <span
+                    className="text-muted-foreground/60 grid size-6 shrink-0 place-items-center"
+                    aria-label={`${project.name} 中有任务已完成`}
+                  >
+                    <span className="completed-dot" aria-hidden="true" />
                   </span>
                 ) : null}
                 <TooltipIconButton

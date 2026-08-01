@@ -49,6 +49,8 @@ export interface Thread {
   preview: string;
   archived: boolean;
   running: boolean;
+  /** 渲染器本地标记：运行完成（成功或失败）后尚未被用户查看。主进程从不发送该字段。 */
+  completed?: boolean;
   parentThreadId?: string;
   origin?: "branch" | "subagent";
   /** Configured agent identity for subagent sessions; independent from the user-editable title. */
@@ -525,7 +527,6 @@ export type TerminalEvent =
 export interface WorkbenchState {
   projectId: string;
   threadId: string;
-  panel: "chat" | "terminal" | "files" | "tasks";
   panelOpen: boolean;
   panelWidth: number;
   fileTreeWidth?: number;

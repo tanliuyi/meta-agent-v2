@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COLLAPSED_THREAD_COUNT,
   flattenVisibleThreadTree,
+  isThreadDescendantOf,
   threadDescendantIds,
   threadTreeByArchiveState,
 } from "../src/renderer/src/state/thread-list-commands.ts";
@@ -191,3 +192,35 @@ function thread(id: string, updatedAt: number, options: { parentThreadId?: strin
     ...(options.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
   };
 }
+
+describe("isThreadDescendantOf", () => {
+  const threads: Thread[] = [
+    thread("root", 1),
+    thread("child", 2, { parentThreadId: "root" }),
+    thread("grandchild", 3, { parentThreadId: "child" }),
+    thread("unrelated", 4),
+    thread("broken", 5, { parentThreadId: "missing-parent" }),
+  ];
+
+  it("直接子会话属于父 session", () => {
+    expect(isThreadDescendantOf(threads, "child", "root")).toBe(true);
+  });
+
+  it("孙会话属于祖先 session", () => {
+    expect(isThreadDescendantOf(threads, "grandchild", "root")).toBe(true);
+    expect(isThreadDescendantOf(threads, "grandchild", "child")).toBe(true);
+  });
+
+  it("无关联会话不属于任何其他 session", () => {
+    expect(isThreadDescendantOf(threads, "unrelated", "root")).toBe(false);
+    expect(isThreadDescendantOf(threads, "root", "child")).toBe(false);
+  });
+
+  it("自身不属于自身", () => {
+    expect(isThreadDescendantOf(threads, "root", "root")).toBe(false);
+  });
+
+  it("父链断裂（目录中缺节点）时视为无关联", () => {
+    expect(isThreadDescendantOf(threads, "broken", "root")).toBe(false);
+  });
+});

@@ -165,6 +165,8 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             ) : null}
             {thread.running ? (
               <span className="running-dot" aria-label="运行中" />
+            ) : thread.completed === true && !props.active ? (
+              <span className="completed-dot" aria-label="运行已完成" />
             ) : (
               <ThreadElapsedTime updatedAt={thread.updatedAt} />
             )}
@@ -183,6 +185,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         ) : null}
         <ContextMenuItem
           disabled={props.isSwitching || props.sidebarOpenDisabled}
+          title={props.sidebarOpenDisabled ? "仅可在其父/祖先会话的侧边栏中打开" : undefined}
           onSelect={() => props.onOpenInSidebar(thread)}
         >
           <PanelRight /> 在侧边栏打开
