@@ -29,10 +29,7 @@ export function AssistantMessageContent({
   );
 
   return (
-    <div
-      data-aui-quote-selectable=""
-      className="flex flex-col gap-3 text-sm leading-relaxed text-foreground wrap-break-word"
-    >
+    <div data-aui-quote-selectable="" className="flex flex-col gap-3 text-sm/6  text-foreground wrap-break-word">
       {isRunActivityRunning && !hasGroupedRunActivity ? (
         <RunActivityGroup
           running

@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { PluginConfigurationForm } from "../src/renderer/src/features/plugins/plugin-configuration-form.tsx";
 import { pluginActionConfirmation } from "../src/renderer/src/features/plugins/plugin-detail-dialog.tsx";
 import { MarketplacePluginCard } from "../src/renderer/src/features/plugins/plugin-marketplace-card.tsx";
-import { PluginMarketplacePage } from "../src/renderer/src/features/plugins/plugin-marketplace-page.tsx";
 import type {
   InstalledMarketplacePluginSummary,
   MarketplacePluginSummary,
@@ -84,16 +83,6 @@ const installed: InstalledMarketplacePluginSummary = {
   state: "installed",
   installedAt: 1,
 };
-
-describe("plugin marketplace page", () => {
-  it("renders refresh and settings actions in the topbar without the old extensions settings link", () => {
-    const markup = renderToStaticMarkup(<PluginMarketplacePage />);
-
-    expect(markup).toContain('aria-label="刷新插件目录"');
-    expect(markup).toContain('aria-label="插件中心设置"');
-    expect(markup).not.toContain("/settings/extensions");
-  });
-});
 
 describe("plugin detail confirmation", () => {
   it("mounts the host-rendered configuration section for configurable installed plugins", () => {

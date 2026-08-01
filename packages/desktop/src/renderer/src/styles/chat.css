@@ -391,7 +391,7 @@
 }
 
 [data-slot="session-message-content"] {
-  padding-bottom: calc(var(--thread-composer-overlap) + var(--space-4));
+  padding-bottom: calc(var(--thread-composer-overlap) + 64px);
 }
 [data-slot="session-composer-footer"] {
   position: relative;

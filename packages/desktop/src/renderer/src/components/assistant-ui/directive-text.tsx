@@ -64,7 +64,7 @@ export const DirectiveText: TextMessagePartComponent = memo(function DirectiveTe
             data-directive-type={segment.type}
             data-directive-id={segment.id}
             aria-label={`${segment.type}: ${displayLabel}`}
-            className="aui-directive-chip mx-0.5 inline-flex items-baseline gap-1 rounded-xl bg-primary/10 px-1.5 py-0.5 text-(length:--type-size-ui) leading-none text-primary [&_svg]:size-3 [&_svg]:shrink-0 [&_svg]:self-center"
+            className="aui-directive-chip mx-0.5 inline-flex items-baseline gap-1 rounded-sm bg-primary/10 px-1 py-1 text-(length:--type-size-ui) leading-none text-primary [&_svg]:size-3 [&_svg]:shrink-0 [&_svg]:self-center"
           >
             <DirectiveIcon type={segment.type} />
             {displayLabel}

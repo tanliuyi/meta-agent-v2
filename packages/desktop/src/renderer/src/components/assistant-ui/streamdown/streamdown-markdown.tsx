@@ -5,7 +5,7 @@ import { LINK_SAFETY, SHIKI_THEMES, STREAMDOWN_PLUGINS } from "./streamdown-conf
 
 export const StreamdownMarkdown = memo(function StreamdownMarkdown({ children }: { children: string }) {
   return (
-    <div className="aui-md">
+    <div className="aui-md text-sm/6">
       <Streamdown
         components={STREAMDOWN_COMPONENTS}
         linkSafety={LINK_SAFETY}

@@ -66,7 +66,7 @@ export function Messages() {
     getItemKey,
     getScrollElement: () => scrollerRef.current,
     initialRect: { height: 800, width: 800 },
-    overscan: 8,
+    overscan: 6,
     rangeExtractor,
     scrollToFn: (offset, options, instance) => {
       const element = instance.scrollElement;
