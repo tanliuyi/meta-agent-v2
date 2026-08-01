@@ -131,7 +131,7 @@ export function reduceWorkbenchTabStates(
   return { ...states, [change.sessionKey]: next };
 }
 
-interface WorkbenchTabContextValue {
+export interface WorkbenchTabContextValue {
   /** 读取指定主 session 的 tab 状态。 */
   getState(sessionKey: string): WorkbenchTabState;
   /** 在指定主 session 中注册会话 tab 并选中；重复注册只做选中。 */

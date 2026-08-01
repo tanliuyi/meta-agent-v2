@@ -32,8 +32,26 @@ vi.mock("../src/renderer/src/components/panel/session/new-session-draft.tsx", ()
   NewSessionDraft: () => <div data-slot="draft" />,
 }));
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
-  useSessionScope: () => ({ updateWorkbench: vi.fn() }),
+  useSessionScope: () => ({ updateWorkbench: vi.fn(), record: { key: "session-key" } }),
   useSessionWorkbench: () => null,
+  useSessionWorkbenchTabs: () => ({
+    tabs: [],
+    activeKey: null,
+    openSessionTab: vi.fn(),
+    openPanelTab: vi.fn(),
+    activate: vi.fn(),
+    closeTab: vi.fn(),
+    openNewPanel: vi.fn(),
+  }),
+}));
+vi.mock("../src/renderer/src/state/session-cache-context.tsx", () => ({
+  useSessionCache: () => ({ get: () => undefined }),
+}));
+vi.mock("../src/renderer/src/state/desktop-store-context.tsx", () => ({
+  useDesktopStore: () => ({}),
+}));
+vi.mock("../src/renderer/src/state/desktop-context.tsx", () => ({
+  useDesktopSelector: () => undefined,
 }));
 
 const baseProps = {

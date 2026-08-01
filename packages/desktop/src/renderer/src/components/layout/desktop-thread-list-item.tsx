@@ -8,11 +8,12 @@ import PanelRight from "lucide-react/dist/esm/icons/panel-right.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { memo } from "react";
+import { memo, useRef } from "react";
 import type { Thread } from "../../../../shared/contracts.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { ContextMenuContent } from "../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../shared/ui/context-menu-item.tsx";
+import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context.tsx";
 import { Badge } from "../assistant-ui/badge.tsx";
 import { ThreadElapsedTime } from "./thread-elapsed-time.tsx";
 
@@ -42,6 +43,8 @@ interface DesktopThreadListItemProps {
   onOpenInSidebar(thread: Thread): void;
   /** 主工作区无活动会话或该会话已是活动会话时禁用侧边栏打开。 */
   sidebarOpenDisabled: boolean;
+  /** 禁用时的 tooltip 文案（可选，默认“无法在侧边栏打开”）。 */
+  sidebarOpenDisabledReason?: string;
   onArchive(thread: Thread, archived: boolean): void;
   onDelete(thread: Thread): void;
 }
@@ -49,6 +52,8 @@ interface DesktopThreadListItemProps {
 /** 使用语义化 list、link 和 ContextMenu 实现的可访问性等效项。 */
 export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: DesktopThreadListItemProps) {
   const { thread } = props;
+  const { setDragged } = useThreadDrag();
+  const dragImageRef = useRef<HTMLDivElement | null>(null);
   const subagentDisplayName = thread.agentName ? builtinSubagentDisplayName(thread.agentName) : undefined;
   const activeSubagent = thread.origin === "subagent" && thread.running;
   const isPending =
@@ -68,6 +73,20 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           data-active={props.active || undefined}
           data-pending={isPending || undefined}
           data-depth={props.depth}
+          draggable
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "copy";
+            event.dataTransfer.setData(THREAD_DRAG_MIME, thread.id);
+            setDragged({
+              projectId: thread.projectId,
+              threadId: thread.id,
+              title: thread.title || "新会话",
+              agentName: thread.agentName,
+            });
+            const image = dragImageRef.current;
+            if (image) event.dataTransfer.setDragImage(image, 16, 14);
+          }}
+          onDragEnd={() => setDragged(null)}
         >
           {props.depth > 0 ? (
             <span aria-hidden="true" className="pointer-events-none absolute inset-0">
@@ -171,6 +190,11 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
               <ThreadElapsedTime updatedAt={thread.updatedAt} />
             )}
           </button>
+          <div ref={dragImageRef} className="thread-drag-image" aria-hidden="true">
+            <PanelRight className="size-3.5 shrink-0" />
+            <span className="thread-drag-image-title">{thread.title || "新会话"}</span>
+            <span className="thread-drag-image-hint">在侧边栏打开</span>
+          </div>
         </div>
       </ContextMenu.Trigger>
       <ContextMenuContent>
@@ -185,7 +209,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         ) : null}
         <ContextMenuItem
           disabled={props.isSwitching || props.sidebarOpenDisabled}
-          title={props.sidebarOpenDisabled ? "仅可在其父/祖先会话的侧边栏中打开" : undefined}
+          title={props.sidebarOpenDisabled ? (props.sidebarOpenDisabledReason ?? "无法在侧边栏打开") : undefined}
           onSelect={() => props.onOpenInSidebar(thread)}
         >
           <PanelRight /> 在侧边栏打开

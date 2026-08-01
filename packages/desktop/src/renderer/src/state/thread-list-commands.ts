@@ -206,7 +206,6 @@ export function normalizeThreadTitle(title: string): string | null {
 
 /**
  * 判断 candidateThreadId 是否为 ancestorThreadId 的后代（沿 parentThreadId 链上溯）。
- * 用于限定侧边栏会话只能在其父/祖先 session 的侧边栏中打开。
  */
 export function isThreadDescendantOf(
   threads: readonly Thread[],

@@ -11,9 +11,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/contracts.ts";
 import { sessionRecordKey } from "../../runtime/pi-session-store.ts";
-import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
-import { dispatchDesktop } from "../../state/desktop-store.ts";
 import { useDesktopStore } from "../../state/desktop-store-context.tsx";
 import {
   useSessionCache,
@@ -31,6 +29,7 @@ import {
   threadDescendantIds,
   threadTreeByArchiveState,
 } from "../../state/thread-list-commands.ts";
+import { openThreadAsSidebarTab } from "../../state/thread-sidebar-open.ts";
 import { useWorkbenchTabs } from "../../state/workbench-tab-context.tsx";
 import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
 import { ThreadListToggle } from "./thread-list-toggle.tsx";
@@ -120,31 +119,34 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     [navigate, project.id],
   );
 
+  /** 侧边栏会话只能属于活动主 session 自身或其子/孙会话（沿 parentThreadId 链上溯）。 */
+  const sidebarOpenDisabledFor = useCallback(
+    (thread: Thread) => {
+      if (activeSessionKey === null || activeSessionKey === sessionRecordKey(project.id, thread.id)) return true;
+      return activeThreadId === null || !isThreadDescendantOf(threads, thread.id, activeThreadId);
+    },
+    [activeSessionKey, activeThreadId, project.id, threads],
+  );
+
   const openThreadInSidebar = useCallback(
     (thread: Thread) => {
-      // 侧边栏会话只能属于活动主 session 的子/孙会话（沿 parentThreadId 链上溯）。
-      if (!activeSessionKey || activeThreadId === null || !isThreadDescendantOf(threads, thread.id, activeThreadId)) {
-        return;
-      }
-      workbenchTabs.openSessionTab(activeSessionKey, {
-        kind: "session",
-        key: sessionRecordKey(project.id, thread.id),
-        projectId: project.id,
-        threadId: thread.id,
-        agentName: thread.agentName,
-        displayName: thread.agentName ? builtinSubagentDisplayName(thread.agentName) : thread.title || "新会话",
-      });
-      dispatchDesktop(store, { type: "thread-viewed", projectId: project.id, threadId: thread.id });
-      // 打开当前活动会话的 workbench panel 以承载侧边栏 tab。
-      const record = cache.get(activeSessionKey);
-      const workbench = record?.stores.workbench.getSnapshot();
-      if (record && workbench) {
-        const next = { ...workbench, panelOpen: true };
-        record.stores.workbench.replace(next);
-        void window.desktop.workbench.update(next);
-      }
+      if (!activeSessionKey || sidebarOpenDisabledFor(thread)) return;
+      openThreadAsSidebarTab(
+        {
+          workbenchTabs: { openSessionTab: (tab) => workbenchTabs.openSessionTab(activeSessionKey, tab) },
+          cache,
+          store,
+          activeSessionKey,
+        },
+        {
+          projectId: thread.projectId,
+          threadId: thread.id,
+          title: thread.title,
+          agentName: thread.agentName,
+        },
+      );
     },
-    [activeSessionKey, activeThreadId, cache, project.id, store, threads, workbenchTabs],
+    [activeSessionKey, cache, sidebarOpenDisabledFor, store, workbenchTabs],
   );
 
   const toggleThread = useCallback((threadId: string) => {
@@ -175,7 +177,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   }, [actions, pendingStop, project.id, runAction]);
 
   return (
-    <div className="thread-list mb-1" role="tree" aria-label={`${project.name} 会话`}>
+    <div className="thread-list mt-1" role="tree" aria-label={`${project.name} 会话`}>
       {visibleThreads.map(
         ({
           thread,
@@ -208,11 +210,13 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               onStop={setPendingStop}
               onOpen={openThread}
               onOpenInSidebar={openThreadInSidebar}
-              sidebarOpenDisabled={
-                activeSessionKey === null ||
-                activeSessionKey === sessionRecordKey(project.id, thread.id) ||
-                activeThreadId === null ||
-                !isThreadDescendantOf(threads, thread.id, activeThreadId)
+              sidebarOpenDisabled={sidebarOpenDisabledFor(thread)}
+              sidebarOpenDisabledReason={
+                activeSessionKey === null
+                  ? "无活动会话时无法在侧边栏打开"
+                  : activeSessionKey === sessionRecordKey(project.id, thread.id)
+                    ? "当前会话已在主工作区打开"
+                    : "仅可在其父/祖先会话的侧边栏中打开"
               }
               onArchive={archiveThread}
               onDelete={setPendingDelete}

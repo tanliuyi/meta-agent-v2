@@ -1,11 +1,19 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useRef, useState } from "react";
+import { parseSessionRecordKey } from "../../runtime/pi-session-store.ts";
+import { useDesktopSelector } from "../../state/desktop-context.tsx";
+import { selectProjectThreads } from "../../state/desktop-selectors.ts";
+import { useDesktopStore } from "../../state/desktop-store-context.tsx";
 import { getWorkbenchPanelTabDefinition, useWorkbenchPanelTabs } from "../../state/panel-tab-registry.ts";
+import { useSessionCache } from "../../state/session-cache-context.tsx";
+import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context.tsx";
+import { isThreadDescendantOf } from "../../state/thread-list-commands.ts";
+import { openThreadAsSidebarTab } from "../../state/thread-sidebar-open.ts";
 import type { WorkbenchTab, WorkbenchTabState } from "../../state/workbench-tab-context.tsx";
 import { workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
-import { useSessionScope } from "../session-context.tsx";
+import { useSessionScope, useSessionWorkbenchTabs } from "../session-context.tsx";
 import { registerBuiltinPanelTabs } from "./builtin-panel-tabs.tsx";
 import { WorkbenchTabList } from "./panel-tab.tsx";
 import { SessionContent } from "./session/session-content.tsx";
@@ -38,7 +46,7 @@ export function OpenWorkbenchPanel({
   onOpenNewPanel,
   onOpenPanelTab,
 }: OpenWorkbenchPanelProps) {
-  const { updateWorkbench } = useSessionScope();
+  const { updateWorkbench, record } = useSessionScope();
   const definitions = useWorkbenchPanelTabs();
   const resize = useResizableRegion<HTMLDivElement>({
     value: width,
@@ -53,15 +61,66 @@ export function OpenWorkbenchPanel({
   // 未选中任何 tab 时展示新建缺省页；选项来自注册表中 addable 的面板定义。
   const newPanelOptions = definitions.filter((definition) => definition.addable !== false);
 
+  // 侧边栏已打开时承接会话拖拽：悬停高亮，drop 后将会话作为 tab 打开（不再显示右缘占位条）。
+  const { dragged } = useThreadDrag();
+  const sessionWorkbenchTabs = useSessionWorkbenchTabs();
+  const cache = useSessionCache();
+  const store = useDesktopStore();
+  const dropDepthRef = useRef(0);
+  const [dropOver, setDropOver] = useState(false);
+  const activeIdentity = parseSessionRecordKey(record.key);
+  const activeThreadId = activeIdentity?.threadId ?? null;
+  const activeProjectThreads =
+    useDesktopSelector((state) =>
+      activeIdentity ? selectProjectThreads(state, activeIdentity.projectId) : undefined,
+    ) ?? [];
+  // 仅属于活动主 session（自身或其子/孙）的 thread 才能拖入本会话侧边栏。
+  const canDrop =
+    dragged !== null &&
+    activeThreadId !== null &&
+    isThreadDescendantOf(activeProjectThreads, dragged.threadId, activeThreadId);
+  const acceptsDrag = (types: readonly string[]): boolean => Array.from(types).includes(THREAD_DRAG_MIME);
+  const clearDrop = () => {
+    dropDepthRef.current = 0;
+    setDropOver(false);
+  };
+
   return (
     <div
       ref={resize.regionRef}
       className="workbench-panel"
       style={{ "--resizable-region-size": `${resize.initialSize}px` } as CSSProperties}
       data-collapsed={!open || undefined}
+      data-drop-active={dropOver || undefined}
       aria-hidden={!open}
       role="complementary"
       aria-label="工作台 Panel"
+      onDragEnter={(event) => {
+        if (!canDrop || !acceptsDrag(event.dataTransfer.types)) return;
+        event.preventDefault();
+        dropDepthRef.current += 1;
+        setDropOver(true);
+      }}
+      onDragOver={(event) => {
+        if (!canDrop || !acceptsDrag(event.dataTransfer.types)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDropOver(true);
+      }}
+      onDragLeave={() => {
+        dropDepthRef.current = Math.max(0, dropDepthRef.current - 1);
+        if (dropDepthRef.current === 0) setDropOver(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        clearDrop();
+        if (!canDrop || !dragged) return;
+        openThreadAsSidebarTab(
+          { workbenchTabs: sessionWorkbenchTabs, cache, store, activeSessionKey: record.key },
+          dragged,
+        );
+      }}
+      onDragEnd={clearDrop}
     >
       {open ? (
         <>

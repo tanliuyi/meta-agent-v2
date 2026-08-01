@@ -843,7 +843,7 @@ html[data-theme="dark"] .file-preview-token {
   min-width: 0;
   min-height: 0;
   height: 100%;
-  padding: 8px 6px 4px 10px;
+  padding: 4px;
   overflow: hidden;
 }
 .terminal-xterm {
@@ -933,4 +933,68 @@ html[data-theme="dark"] .file-preview-token {
   .workbench-panel:not([data-collapsed]) {
     box-shadow: var(--elevation-workbench);
   }
+}
+
+/* 会话拖拽到侧边栏的 VS Code 式落点蒙层（渲染在工作区右缘）。
+   宽度为工作区的 50%，让用户看到侧边栏展开后的实际范围；纯蒙层，无图标/文字。 */
+.thread-drop-zone {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--stack-workbench-overlay);
+  width: 50%;
+  border-left: 1px dashed hsl(var(--border));
+  background: hsl(var(--muted) / 0.45);
+  opacity: 0.6;
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-standard),
+    background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.thread-drop-zone[data-active] {
+  border-left-style: solid;
+  border-left-color: hsl(var(--ring));
+  background: hsl(var(--muted));
+  opacity: 1;
+}
+
+.thread-drop-zone[data-invalid] {
+  opacity: 0.3;
+}
+
+/* 侧边栏已打开时承接会话拖拽：整个 panel 作为落点，悬停时内描边高亮。 */
+.workbench-panel[data-drop-active] {
+  box-shadow: inset 0 0 0 2px hsl(var(--ring) / 0.7);
+}
+
+/* 拖拽源的自定义拖拽图像：离屏渲染，仅作为 setDragImage 快照。 */
+.thread-drag-image {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-lg);
+  background: hsl(var(--background));
+  box-shadow: var(--workspace-edge-shadow);
+  pointer-events: none;
+}
+
+.thread-drag-image-title {
+  overflow: hidden;
+  font-size: var(--type-size-ui);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-drag-image-hint {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-caption);
 }

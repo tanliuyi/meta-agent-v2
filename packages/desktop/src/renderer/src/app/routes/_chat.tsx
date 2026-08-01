@@ -1,8 +1,10 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { Sidebar } from "../../components/layout/sidebar.tsx";
+import { ThreadSidebarDropZone } from "../../components/layout/thread-sidebar-drop-zone.tsx";
 import { ShellRuntimeGate } from "../../features/shell-runtime/shell-runtime-gate.tsx";
 import { ToastProvider } from "../../shared/ui/toast-provider.tsx";
 import { DesktopCatalogProvider } from "../../state/desktop-catalog-provider.tsx";
+import { ThreadDragProvider } from "../../state/thread-drag-context.tsx";
 import { DesktopErrorToast } from "../desktop-error-toast.tsx";
 import { DesktopWindowTitle } from "../desktop-window-title.tsx";
 
@@ -16,11 +18,14 @@ export function ChatLayout() {
       <div className="app-shell">
         <DesktopCatalogProvider>
           <ShellRuntimeGate />
-          <Sidebar />
-          <DesktopErrorToast />
-          <section className="workspace">
-            <Outlet />
-          </section>
+          <ThreadDragProvider>
+            <Sidebar />
+            <DesktopErrorToast />
+            <section className="workspace">
+              <Outlet />
+              <ThreadSidebarDropZone />
+            </section>
+          </ThreadDragProvider>
         </DesktopCatalogProvider>
       </div>
     </ToastProvider>

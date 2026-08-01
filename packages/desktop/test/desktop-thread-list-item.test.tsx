@@ -68,6 +68,14 @@ describe("DesktopThreadListItem", () => {
     expect(markup).toContain(">Inspect the renderer tree</span>");
   });
 
+  it("renders the row as a draggable sidebar-session source with a drag image", () => {
+    const markup = renderThread(baseThread);
+
+    expect(markup).toContain('draggable="true"');
+    expect(markup).toContain('class="thread-drag-image"');
+    expect(markup).toContain(">在侧边栏打开</span>");
+  });
+
   it("keeps custom subagent names unchanged", () => {
     const markup = renderThread({ ...baseThread, agentName: "security-review" });
 
