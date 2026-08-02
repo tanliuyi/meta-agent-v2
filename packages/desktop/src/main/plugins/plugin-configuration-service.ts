@@ -13,7 +13,7 @@ import {
   type SavePluginConfigurationResult,
   validatePluginConfigurationValue,
 } from "../../shared/plugin-configuration-contracts.ts";
-import type { InstalledMarketplacePluginRecord, MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
+import type { MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
 
 export interface PluginConfigurationSecretStorage {
   isAvailable(): boolean;
@@ -38,8 +38,14 @@ interface PluginConfigurationServiceOptions {
 }
 
 const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
+const DEVELOPMENT_PLUGIN_ID = /^development:[a-z0-9][a-z0-9._-]*$/;
 const REQUEST_ID = /^[a-zA-Z0-9._-]{1,128}$/;
 const MAX_REQUEST_RESULTS = 256;
+
+interface ConfigurablePlugin {
+  id: string;
+  configurationSchema: PluginConfigurationSchema;
+}
 
 export class PluginConfigurationService {
   private readonly root: string;
@@ -63,15 +69,42 @@ export class PluginConfigurationService {
 
   async getConfig(pluginId: string): Promise<PluginConfigurationSnapshot> {
     const plugin = await this.getConfigurablePlugin(pluginId);
-    return this.snapshot(plugin, await this.readCurrent(pluginId));
+    return this.getConfigFor(plugin, pluginId);
+  }
+
+  async getDevelopmentConfig(
+    pluginId: string,
+    schema: PluginConfigurationSchema,
+  ): Promise<PluginConfigurationSnapshot> {
+    assertDevelopmentPluginId(pluginId);
+    return this.getConfigFor({ id: pluginId, configurationSchema: schema }, pluginId);
   }
 
   async getRuntimeConfiguration(
     pluginId: string,
   ): Promise<{ revision: string; values: Record<string, PluginConfigurationValue> }> {
     const plugin = await this.getConfigurablePlugin(pluginId);
+    return this.getRuntimeConfigurationFor(plugin, pluginId);
+  }
+
+  async getDevelopmentRuntimeConfiguration(
+    pluginId: string,
+    schema: PluginConfigurationSchema,
+  ): Promise<{ revision: string; values: Record<string, PluginConfigurationValue> }> {
+    assertDevelopmentPluginId(pluginId);
+    return this.getRuntimeConfigurationFor({ id: pluginId, configurationSchema: schema }, pluginId);
+  }
+
+  private async getConfigFor(plugin: ConfigurablePlugin, pluginId: string): Promise<PluginConfigurationSnapshot> {
+    return this.snapshot(plugin, await this.readCurrent(pluginId));
+  }
+
+  private async getRuntimeConfigurationFor(
+    plugin: ConfigurablePlugin,
+    pluginId: string,
+  ): Promise<{ revision: string; values: Record<string, PluginConfigurationValue> }> {
     const current = await this.readCurrent(pluginId);
-    const schema = plugin.configurationSchema!;
+    const schema = plugin.configurationSchema;
     const values = safeStoredPublicValues(schema, current.data.values ?? {});
     for (const field of schema.fields) {
       if (field.type !== "secret") continue;
@@ -98,7 +131,29 @@ export class PluginConfigurationService {
     const cacheKey = `${input.pluginId}\0${input.requestId}`;
     const cached = this.requestResults.get(cacheKey);
     if (cached) return Promise.resolve(cached);
-    const operation = this.saveTail.then(() => this.saveConfigLocked(input, cacheKey));
+    const operation = this.saveTail.then(async () => {
+      const plugin = await this.getConfigurablePlugin(input.pluginId);
+      return this.saveConfigLocked(input, cacheKey, plugin);
+    });
+    this.saveTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
+  saveDevelopmentConfig(
+    input: SavePluginConfigurationInput,
+    schema: PluginConfigurationSchema,
+  ): Promise<SavePluginConfigurationResult> {
+    assertSaveInput(input);
+    assertDevelopmentPluginId(input.pluginId);
+    const cacheKey = `${input.pluginId}\0${input.requestId}`;
+    const cached = this.requestResults.get(cacheKey);
+    if (cached) return Promise.resolve(cached);
+    const operation = this.saveTail.then(() =>
+      this.saveConfigLocked(input, cacheKey, { id: input.pluginId, configurationSchema: schema }),
+    );
     this.saveTail = operation.then(
       () => undefined,
       () => undefined,
@@ -109,8 +164,8 @@ export class PluginConfigurationService {
   private async saveConfigLocked(
     input: SavePluginConfigurationInput,
     cacheKey: string,
+    plugin: ConfigurablePlugin,
   ): Promise<SavePluginConfigurationResult> {
-    const plugin = await this.getConfigurablePlugin(input.pluginId);
     const path = this.pathFor(input.pluginId);
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const release = await lockfile.lock(path, {
@@ -126,7 +181,7 @@ export class PluginConfigurationService {
           current: this.snapshot(plugin, current),
         });
       }
-      const prepared = this.prepareSave(plugin.configurationSchema!, current.data, input);
+      const prepared = this.prepareSave(plugin.configurationSchema, current.data, input);
       if (prepared.errors.length > 0) {
         return this.cacheResult(cacheKey, {
           status: "invalid",
@@ -143,7 +198,7 @@ export class PluginConfigurationService {
       if (!sameConfiguration(current.data, next)) await this.atomicWrite(path, next);
       return this.cacheResult(cacheKey, {
         status: "saved",
-        snapshot: await this.getConfig(input.pluginId),
+        snapshot: await this.getConfigFor(plugin, input.pluginId),
       });
     } finally {
       await release();
@@ -207,11 +262,8 @@ export class PluginConfigurationService {
     return { values, secrets: selectKnownSecrets(schema, secrets), errors };
   }
 
-  private snapshot(
-    plugin: InstalledMarketplacePluginRecord,
-    current: CurrentPluginConfiguration,
-  ): PluginConfigurationSnapshot {
-    const schema = plugin.configurationSchema!;
+  private snapshot(plugin: ConfigurablePlugin, current: CurrentPluginConfiguration): PluginConfigurationSnapshot {
+    const schema = plugin.configurationSchema;
     const secrets: Record<string, boolean> = {};
     for (const field of schema.fields) {
       if (field.type === "secret") secrets[field.key] = current.data.secrets?.[field.key] !== undefined;
@@ -226,16 +278,17 @@ export class PluginConfigurationService {
     };
   }
 
-  private async getConfigurablePlugin(pluginId: string): Promise<InstalledMarketplacePluginRecord> {
+  private async getConfigurablePlugin(pluginId: string): Promise<ConfigurablePlugin> {
     if (!PLUGIN_ID.test(pluginId) || pluginId.length > 200) throw new Error("Plugin configuration ID is invalid");
     const plugin = (await this.registry.getInternalSnapshot()).plugins.find((candidate) => candidate.id === pluginId);
     if (!plugin || plugin.state !== "installed") throw new Error(`Marketplace plugin is not installed: ${pluginId}`);
     if (!plugin.configurationSchema) throw new Error(`Marketplace plugin is not configurable: ${pluginId}`);
-    return plugin;
+    return { id: plugin.id, configurationSchema: plugin.configurationSchema };
   }
 
   private pathFor(pluginId: string): string {
-    return join(this.root, `${pluginId}.json`);
+    const fileId = pluginId.startsWith("development:") ? encodeURIComponent(pluginId) : pluginId;
+    return join(this.root, `${fileId}.json`);
   }
 
   private async readCurrent(pluginId: string): Promise<CurrentPluginConfiguration> {
@@ -335,6 +388,12 @@ function sameConfiguration(current: PluginConfigurationFile, next: PluginConfigu
     JSON.stringify(current.values ?? {}) === JSON.stringify(next.values ?? {}) &&
     JSON.stringify(current.secrets ?? {}) === JSON.stringify(next.secrets ?? {})
   );
+}
+
+function assertDevelopmentPluginId(pluginId: string): void {
+  if (!DEVELOPMENT_PLUGIN_ID.test(pluginId) || pluginId.length > 200) {
+    throw new Error("Development plugin configuration ID is invalid");
+  }
 }
 
 function assertSaveInput(input: SavePluginConfigurationInput): void {

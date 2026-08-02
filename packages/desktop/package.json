@@ -1,5 +1,5 @@
 {
-  "name": "@earendil-works/pi-desktop",
+  "name": "meta-agent-desktop",
   "version": "0.0.31",
   "private": true,
   "description": "Meta Agent desktop application",
@@ -32,6 +32,7 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
+    "@rc-component/image": "1.10.0",
     "@tanstack/react-virtual": "3.14.9",
     "electron-devtools-installer": "4.0.0",
     "electron-updater": "6.8.9",
@@ -40,6 +41,7 @@
     "jsonc-parser": "3.3.1",
     "node-pty": "1.1.0",
     "proper-lockfile": "4.1.2",
+    "safe-regex2": "5.1.1",
     "semver": "7.8.0"
   },
   "devDependencies": {
@@ -66,15 +68,15 @@
     "@streamdown/math": "1.0.2",
     "@streamdown/mermaid": "1.0.2",
     "@tailwindcss/vite": "4.3.2",
+    "@tanstack/react-router": "1.170.18",
+    "@tanstack/router-cli": "1.167.21",
+    "@tanstack/router-plugin": "1.168.23",
     "@tiptap/core": "3.29.2",
     "@tiptap/extension-link": "3.29.2",
     "@tiptap/extension-placeholder": "3.29.2",
     "@tiptap/markdown": "3.29.2",
     "@tiptap/react": "3.29.2",
     "@tiptap/starter-kit": "3.29.2",
-    "@tanstack/react-router": "1.170.18",
-    "@tanstack/router-cli": "1.167.21",
-    "@tanstack/router-plugin": "1.168.23",
     "@types/node": "24.12.4",
     "@types/proper-lockfile": "4.1.4",
     "@types/react": "19.2.17",

@@ -1,9 +1,15 @@
+import safeRegex from "safe-regex2";
+
 export type PluginConfigurationValue = string | number | boolean;
 
 interface PluginConfigurationFieldBase {
   key: string;
   label: string;
   description?: string;
+  group?: string;
+  order?: number;
+  deprecated?: boolean;
+  deprecatedMessage?: string;
   required?: boolean;
 }
 
@@ -13,6 +19,8 @@ export interface PluginTextConfigurationField extends PluginConfigurationFieldBa
   placeholder?: string;
   minLength?: number;
   maxLength?: number;
+  pattern?: string;
+  patternMessage?: string;
 }
 
 export interface PluginSecretConfigurationField extends PluginConfigurationFieldBase {
@@ -20,6 +28,8 @@ export interface PluginSecretConfigurationField extends PluginConfigurationField
   placeholder?: string;
   minLength?: number;
   maxLength?: number;
+  pattern?: string;
+  patternMessage?: string;
 }
 
 export interface PluginNumberConfigurationField extends PluginConfigurationFieldBase {
@@ -38,7 +48,7 @@ export interface PluginBooleanConfigurationField extends PluginConfigurationFiel
 export interface PluginSelectConfigurationField extends PluginConfigurationFieldBase {
   type: "select";
   defaultValue?: string;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; label: string; description?: string }>;
 }
 
 export type PluginConfigurationField =
@@ -63,6 +73,7 @@ export interface PluginConfigurationFieldError {
     | "step"
     | "min-length"
     | "max-length"
+    | "pattern"
     | "option"
     | "secret-storage";
   message: string;
@@ -98,6 +109,12 @@ const MAX_DESCRIPTION_LENGTH = 1_000;
 const MAX_PLACEHOLDER_LENGTH = 240;
 const MAX_TEXT_LENGTH = 64 * 1024;
 const MAX_OPTIONS = 100;
+const MAX_GROUP_LENGTH = 64;
+const MAX_ORDER = 100_000;
+const MAX_DEPRECATED_MESSAGE_LENGTH = 240;
+const MAX_PATTERN_LENGTH = 512;
+const MAX_PATTERN_MESSAGE_LENGTH = 240;
+const MAX_OPTION_DESCRIPTION_LENGTH = 240;
 
 export function parsePluginConfigurationSchema(value: unknown): PluginConfigurationSchema | undefined {
   if (value === undefined) return undefined;
@@ -186,6 +203,11 @@ export function validatePluginConfigurationValue(
   if (field.maxLength !== undefined && value.length > field.maxLength) {
     return fieldError(field, "max-length", `${field.label}最多允许 ${field.maxLength} 个字符`);
   }
+  if (field.pattern !== undefined && value.length > 0) {
+    if (!safeRegex(field.pattern) || !new RegExp(field.pattern).test(value)) {
+      return fieldError(field, "pattern", field.patternMessage ?? `${field.label}不符合要求`);
+    }
+  }
   return undefined;
 }
 
@@ -249,14 +271,20 @@ function parseField(value: unknown): PluginConfigurationField {
         option.value.length > 240 ||
         typeof option.label !== "string" ||
         option.label.length === 0 ||
-        option.label.length > MAX_LABEL_LENGTH
+        option.label.length > MAX_LABEL_LENGTH ||
+        (option.description !== undefined &&
+          (typeof option.description !== "string" || option.description.length > MAX_OPTION_DESCRIPTION_LENGTH))
       ) {
         throw new Error(`Plugin configuration field option is invalid: ${base.key}`);
       }
-      assertAllowedKeys(option, new Set(["value", "label"]), `configuration option ${base.key}`);
+      assertAllowedKeys(option, new Set(["value", "label", "description"]), `configuration option ${base.key}`);
       if (optionValues.has(option.value)) throw new Error(`Plugin configuration option is duplicated: ${base.key}`);
       optionValues.add(option.value);
-      return { value: option.value, label: option.label };
+      return {
+        value: option.value,
+        label: option.label,
+        ...(typeof option.description === "string" ? { description: option.description } : {}),
+      };
     });
     if (
       value.defaultValue !== undefined &&
@@ -280,6 +308,8 @@ function parseField(value: unknown): PluginConfigurationField {
         "placeholder",
         "minLength",
         "maxLength",
+        "pattern",
+        "patternMessage",
       ]),
       `configuration field ${base.key}`,
     );
@@ -289,12 +319,36 @@ function parseField(value: unknown): PluginConfigurationField {
     if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) {
       throw new Error(`Plugin configuration field length range is invalid: ${base.key}`);
     }
-    if (value.type === "secret") return { ...base, type: "secret", ...defined({ placeholder, minLength, maxLength }) };
+    const pattern = optionalBoundedString(value.pattern, MAX_PATTERN_LENGTH, base.key);
+    if (pattern !== undefined) {
+      try {
+        if (!safeRegex(pattern)) throw new Error("unsafe pattern");
+        new RegExp(pattern);
+      } catch {
+        throw new Error(`Plugin configuration field pattern is invalid: ${base.key}`);
+      }
+    }
+    const patternMessage = optionalBoundedString(value.patternMessage, MAX_PATTERN_MESSAGE_LENGTH, base.key);
+    if (value.type === "secret") {
+      return { ...base, type: "secret", ...defined({ placeholder, minLength, maxLength, pattern, patternMessage }) };
+    }
     const defaultValue = optionalBoundedString(value.defaultValue, maxLength ?? MAX_TEXT_LENGTH, base.key);
     if (defaultValue !== undefined && minLength !== undefined && defaultValue.length < minLength) {
       throw new Error(`Plugin configuration field default is too short: ${base.key}`);
     }
-    return { ...base, type: value.type, ...defined({ defaultValue, placeholder, minLength, maxLength }) };
+    if (
+      defaultValue !== undefined &&
+      defaultValue.length > 0 &&
+      pattern !== undefined &&
+      !new RegExp(pattern).test(defaultValue)
+    ) {
+      throw new Error(`Plugin configuration field default does not match its pattern: ${base.key}`);
+    }
+    return {
+      ...base,
+      type: value.type,
+      ...defined({ defaultValue, placeholder, minLength, maxLength, pattern, patternMessage }),
+    };
   }
   throw new Error(`Plugin configuration field type is unsupported: ${value.type}`);
 }
@@ -311,6 +365,16 @@ function parseFieldBase(value: Record<string, unknown>): PluginConfigurationFiel
     value.label.length > MAX_LABEL_LENGTH ||
     (value.description !== undefined &&
       (typeof value.description !== "string" || value.description.length > MAX_DESCRIPTION_LENGTH)) ||
+    (value.group !== undefined && (typeof value.group !== "string" || value.group.length > MAX_GROUP_LENGTH)) ||
+    (value.order !== undefined &&
+      (typeof value.order !== "number" ||
+        !Number.isSafeInteger(value.order) ||
+        value.order < 0 ||
+        value.order > MAX_ORDER)) ||
+    (value.deprecated !== undefined && typeof value.deprecated !== "boolean") ||
+    (value.deprecatedMessage !== undefined &&
+      (typeof value.deprecatedMessage !== "string" ||
+        value.deprecatedMessage.length > MAX_DEPRECATED_MESSAGE_LENGTH)) ||
     (value.required !== undefined && typeof value.required !== "boolean")
   ) {
     throw new Error("Plugin configuration field metadata is invalid");
@@ -319,6 +383,10 @@ function parseFieldBase(value: Record<string, unknown>): PluginConfigurationFiel
     key: value.key,
     label: value.label,
     ...(typeof value.description === "string" ? { description: value.description } : {}),
+    ...(typeof value.group === "string" ? { group: value.group } : {}),
+    ...(typeof value.order === "number" ? { order: value.order } : {}),
+    ...(typeof value.deprecated === "boolean" ? { deprecated: value.deprecated } : {}),
+    ...(typeof value.deprecatedMessage === "string" ? { deprecatedMessage: value.deprecatedMessage } : {}),
     ...(typeof value.required === "boolean" ? { required: value.required } : {}),
   };
 }
@@ -332,7 +400,7 @@ function fieldError(
 }
 
 function baseKeys(): string[] {
-  return ["key", "label", "description", "required", "type"];
+  return ["key", "label", "description", "group", "order", "deprecated", "deprecatedMessage", "required", "type"];
 }
 
 function optionalFiniteNumber(value: unknown, key: string): number | undefined {

@@ -1,8 +1,25 @@
+import safeRegex from "safe-regex2";
 import type { PluginConfigurationField, PluginConfigurationSchema } from "./contracts.ts";
 
 const FIELD_KEY = /^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/;
 const TEXT_TYPES = new Set(["text", "textarea", "path", "secret"]);
-const BASE_KEYS = ["key", "label", "description", "required", "type"];
+const BASE_KEYS = [
+	"key",
+	"label",
+	"description",
+	"required",
+	"type",
+	"group",
+	"order",
+	"deprecated",
+	"deprecatedMessage",
+];
+const MAX_GROUP_LENGTH = 64;
+const MAX_ORDER = 100_000;
+const MAX_DEPRECATED_MESSAGE_LENGTH = 240;
+const MAX_PATTERN_LENGTH = 512;
+const MAX_PATTERN_MESSAGE_LENGTH = 240;
+const MAX_OPTION_DESCRIPTION_LENGTH = 240;
 
 export function parsePluginConfigurationSchema(value: unknown): PluginConfigurationSchema | undefined {
 	if (value === undefined) return undefined;
@@ -68,14 +85,20 @@ function parseField(value: unknown): PluginConfigurationField {
 				option.value.length > 240 ||
 				typeof option.label !== "string" ||
 				option.label.length === 0 ||
-				option.label.length > 120
+				option.label.length > 120 ||
+				(option.description !== undefined &&
+					(typeof option.description !== "string" || option.description.length > MAX_OPTION_DESCRIPTION_LENGTH))
 			) {
 				throw new Error(`configuration option is invalid: ${base.key}`);
 			}
-			assertKeys(option, ["value", "label"]);
+			assertKeys(option, ["value", "label", "description"]);
 			if (seen.has(option.value)) throw new Error(`configuration option is duplicated: ${base.key}`);
 			seen.add(option.value);
-			return { value: option.value, label: option.label };
+			return {
+				value: option.value,
+				label: option.label,
+				...(typeof option.description === "string" ? { description: option.description } : {}),
+			};
 		});
 		if (
 			value.defaultValue !== undefined &&
@@ -97,21 +120,44 @@ function parseField(value: unknown): PluginConfigurationField {
 			"placeholder",
 			"minLength",
 			"maxLength",
+			"pattern",
+			"patternMessage",
 		]);
 		const placeholder = optionalString(value.placeholder, 240, base.key);
 		const minLength = optionalInteger(value.minLength, 0, 65_536, base.key);
 		const maxLength = optionalInteger(value.maxLength, 1, 65_536, base.key);
 		if (minLength !== undefined && maxLength !== undefined && minLength > maxLength)
 			throw new Error(`configuration length range is invalid: ${base.key}`);
+		const pattern = optionalString(value.pattern, MAX_PATTERN_LENGTH, base.key);
+		if (pattern !== undefined) {
+			try {
+				if (!safeRegex(pattern)) throw new Error("unsafe pattern");
+				new RegExp(pattern);
+			} catch {
+				throw new Error(`configuration pattern is invalid: ${base.key}`);
+			}
+		}
+		const patternMessage = optionalString(value.patternMessage, MAX_PATTERN_MESSAGE_LENGTH, base.key);
 		if (value.type === "secret")
-			return { ...base, type: "secret", ...defined({ placeholder, minLength, maxLength }) };
+			return {
+				...base,
+				type: "secret",
+				...defined({ placeholder, minLength, maxLength, pattern, patternMessage }),
+			};
 		const defaultValue = optionalString(value.defaultValue, maxLength ?? 65_536, base.key);
 		if (defaultValue !== undefined && minLength !== undefined && defaultValue.length < minLength)
 			throw new Error(`configuration default is too short: ${base.key}`);
+		if (
+			defaultValue !== undefined &&
+			defaultValue.length > 0 &&
+			pattern !== undefined &&
+			!new RegExp(pattern).test(defaultValue)
+		)
+			throw new Error(`configuration default does not match its pattern: ${base.key}`);
 		return {
 			...base,
 			type: value.type as "text" | "textarea" | "path",
-			...defined({ defaultValue, placeholder, minLength, maxLength }),
+			...defined({ defaultValue, placeholder, minLength, maxLength, pattern, patternMessage }),
 		};
 	}
 	throw new Error(`configuration field type is unsupported: ${value.type}`);
@@ -126,6 +172,16 @@ function parseBase(value: Record<string, unknown>) {
 		value.label.length === 0 ||
 		value.label.length > 120 ||
 		(value.description !== undefined && (typeof value.description !== "string" || value.description.length > 1000)) ||
+		(value.group !== undefined && (typeof value.group !== "string" || value.group.length > MAX_GROUP_LENGTH)) ||
+		(value.order !== undefined &&
+			(typeof value.order !== "number" ||
+				!Number.isSafeInteger(value.order) ||
+				value.order < 0 ||
+				value.order > MAX_ORDER)) ||
+		(value.deprecated !== undefined && typeof value.deprecated !== "boolean") ||
+		(value.deprecatedMessage !== undefined &&
+			(typeof value.deprecatedMessage !== "string" ||
+				value.deprecatedMessage.length > MAX_DEPRECATED_MESSAGE_LENGTH)) ||
 		(value.required !== undefined && typeof value.required !== "boolean")
 	) {
 		throw new Error("configuration field metadata is invalid");
@@ -134,6 +190,10 @@ function parseBase(value: Record<string, unknown>) {
 		key: value.key,
 		label: value.label,
 		...(typeof value.description === "string" ? { description: value.description } : {}),
+		...(typeof value.group === "string" ? { group: value.group } : {}),
+		...(typeof value.order === "number" ? { order: value.order } : {}),
+		...(typeof value.deprecated === "boolean" ? { deprecated: value.deprecated } : {}),
+		...(typeof value.deprecatedMessage === "string" ? { deprecatedMessage: value.deprecatedMessage } : {}),
 		...(typeof value.required === "boolean" ? { required: value.required } : {}),
 	};
 }

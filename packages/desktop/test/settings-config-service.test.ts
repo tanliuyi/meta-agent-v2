@@ -6,6 +6,11 @@ import {
   MISSING_SETTINGS_CONFIG_REVISION,
   SettingsConfigService,
 } from "../src/main/settings/settings-config-service.ts";
+import {
+  MESSAGE_WIDTH_DEFAULT,
+  MESSAGE_WIDTH_MAX,
+  MESSAGE_WIDTH_MIN,
+} from "../src/shared/settings-config-contracts.ts";
 
 const SOURCE = `${JSON.stringify({ version: 1, showThinking: false, futureSetting: { enabled: true } }, null, 2)}\n`;
 
@@ -31,7 +36,14 @@ describe("SettingsConfigService", () => {
       path: configPath,
       exists: false,
       revision: MISSING_SETTINGS_CONFIG_REVISION,
-      settings: { showThinking: true, autoExpandRunning: true },
+      settings: {
+        showThinking: true,
+        autoExpandRunning: true,
+        showAvatars: true,
+        messageWidth: MESSAGE_WIDTH_DEFAULT,
+        userName: "用户",
+        userAvatarPath: null,
+      },
     });
     await expect(lstat(configPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -41,17 +53,38 @@ describe("SettingsConfigService", () => {
 
     const result = await service.saveConfig({
       expectedRevision: snapshot.revision,
-      settings: { showThinking: false, autoExpandRunning: false },
+      settings: {
+        showThinking: false,
+        autoExpandRunning: false,
+        showAvatars: false,
+        messageWidth: 960,
+        userName: "Tan",
+        userAvatarPath: "/Users/tan/avatar.png",
+      },
     });
 
     expect(result).toMatchObject({
       status: "saved",
-      snapshot: { exists: true, settings: { showThinking: false, autoExpandRunning: false } },
+      snapshot: {
+        exists: true,
+        settings: {
+          showThinking: false,
+          autoExpandRunning: false,
+          showAvatars: false,
+          messageWidth: 960,
+          userName: "Tan",
+          userAvatarPath: "/Users/tan/avatar.png",
+        },
+      },
     });
     expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
       version: 1,
       showThinking: false,
       autoExpandRunning: false,
+      showAvatars: false,
+      messageWidth: 960,
+      userName: "Tan",
+      userAvatarPath: "/Users/tan/avatar.png",
     });
   });
 
@@ -62,7 +95,14 @@ describe("SettingsConfigService", () => {
 
     const result = await service.saveConfig({
       expectedRevision: snapshot.revision,
-      settings: { showThinking: true, autoExpandRunning: false },
+      settings: {
+        showThinking: true,
+        autoExpandRunning: false,
+        showAvatars: true,
+        messageWidth: 960,
+        userName: "用户",
+        userAvatarPath: null,
+      },
     });
 
     expect(result.status).toBe("saved");
@@ -71,6 +111,10 @@ describe("SettingsConfigService", () => {
       showThinking: true,
       futureSetting: { enabled: true },
       autoExpandRunning: false,
+      showAvatars: true,
+      messageWidth: 960,
+      userName: "用户",
+      userAvatarPath: null,
     });
     if (process.platform !== "win32") {
       expect((await lstat(configPath)).mode & 0o777).toBe(0o600);
@@ -85,12 +129,28 @@ describe("SettingsConfigService", () => {
 
     const result = await service.saveConfig({
       expectedRevision: snapshot.revision,
-      settings: { showThinking: false, autoExpandRunning: false },
+      settings: {
+        showThinking: false,
+        autoExpandRunning: false,
+        showAvatars: true,
+        messageWidth: 810,
+        userName: "用户",
+        userAvatarPath: null,
+      },
     });
 
     expect(result).toMatchObject({
       status: "conflict",
-      current: { settings: { showThinking: true, autoExpandRunning: true } },
+      current: {
+        settings: {
+          showThinking: true,
+          autoExpandRunning: true,
+          showAvatars: true,
+          messageWidth: MESSAGE_WIDTH_DEFAULT,
+          userName: "用户",
+          userAvatarPath: null,
+        },
+      },
     });
     expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ version: 1, showThinking: true });
   });
@@ -99,7 +159,40 @@ describe("SettingsConfigService", () => {
     await expect(
       service.saveConfig({
         expectedRevision: MISSING_SETTINGS_CONFIG_REVISION,
-        settings: { showThinking: "false", autoExpandRunning: true },
+        settings: {
+          showThinking: "false",
+          autoExpandRunning: true,
+          showAvatars: true,
+          messageWidth: 810,
+          userName: "用户",
+          userAvatarPath: null,
+        },
+      } as never),
+    ).rejects.toThrow("Invalid settings save input");
+    await expect(
+      service.saveConfig({
+        expectedRevision: MISSING_SETTINGS_CONFIG_REVISION,
+        settings: {
+          showThinking: false,
+          autoExpandRunning: true,
+          showAvatars: true,
+          messageWidth: "960",
+          userName: "用户",
+          userAvatarPath: null,
+        },
+      } as never),
+    ).rejects.toThrow("Invalid settings save input");
+    await expect(
+      service.saveConfig({
+        expectedRevision: MISSING_SETTINGS_CONFIG_REVISION,
+        settings: {
+          showThinking: false,
+          autoExpandRunning: true,
+          showAvatars: "yes",
+          messageWidth: 810,
+          userName: "用户",
+          userAvatarPath: null,
+        },
       } as never),
     ).rejects.toThrow("Invalid settings save input");
     await expect(lstat(directory)).rejects.toMatchObject({ code: "ENOENT" });
@@ -107,6 +200,102 @@ describe("SettingsConfigService", () => {
     await mkdir(directory, { recursive: true });
     await writeFile(configPath, "{ invalid", "utf8");
     await expect(service.getConfig()).rejects.toThrow("settings.json JSON syntax invalid");
+  });
+
+  test("读取时夹取消息宽度、保留满屏并拒绝非数字值", async () => {
+    await mkdir(directory, { recursive: true });
+    await writeFile(configPath, `${JSON.stringify({ version: 1, messageWidth: 99999 }, null, 2)}\n`, "utf8");
+    expect((await service.getConfig()).settings.messageWidth).toBe(MESSAGE_WIDTH_MAX);
+
+    await writeFile(configPath, `${JSON.stringify({ version: 1, messageWidth: 100 }, null, 2)}\n`, "utf8");
+    expect((await service.getConfig()).settings.messageWidth).toBe(MESSAGE_WIDTH_MIN);
+
+    await writeFile(configPath, `${JSON.stringify({ version: 1, messageWidth: null }, null, 2)}\n`, "utf8");
+    expect((await service.getConfig()).settings.messageWidth).toBeNull();
+
+    await writeFile(configPath, `${JSON.stringify({ version: 1, messageWidth: "wide" }, null, 2)}\n`, "utf8");
+    await expect(service.getConfig()).rejects.toThrow("settings.json messageWidth must be a finite number or null");
+  });
+
+  test("保存前归一化消息宽度", async () => {
+    const snapshot = await service.getConfig();
+
+    const result = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      settings: {
+        ...snapshot.settings,
+        messageWidth: 555.5,
+      },
+    });
+
+    expect(result).toMatchObject({ status: "saved", snapshot: { settings: { messageWidth: 560 } } });
+    expect(JSON.parse(await readFile(configPath, "utf8")).messageWidth).toBe(560);
+  });
+  test("保存满屏宽度", async () => {
+    const snapshot = await service.getConfig();
+
+    const result = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      settings: {
+        showThinking: true,
+        autoExpandRunning: true,
+        showAvatars: true,
+        messageWidth: null,
+        userName: "用户",
+        userAvatarPath: null,
+      },
+    });
+
+    expect(result).toMatchObject({ status: "saved", snapshot: { settings: { messageWidth: null } } });
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({
+      version: 1,
+      showThinking: true,
+      autoExpandRunning: true,
+      showAvatars: true,
+      messageWidth: null,
+      userName: "用户",
+      userAvatarPath: null,
+    });
+  });
+
+  test("保存用户名与外部头像路径，不把图片内容写入配置", async () => {
+    const snapshot = await service.getConfig();
+    const avatarPath = process.platform === "win32" ? "C:\\Users\\tan\\avatar.webp" : "/Users/tan/avatar.webp";
+
+    const result = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      settings: { ...snapshot.settings, userName: "Tan", userAvatarPath: avatarPath },
+    });
+
+    expect(result).toMatchObject({
+      status: "saved",
+      snapshot: { settings: { userName: "Tan", userAvatarPath: avatarPath } },
+    });
+    const source = await readFile(configPath, "utf8");
+    expect(source).toContain(avatarPath.replaceAll("\\", "\\\\"));
+    expect(source).not.toContain("data:image/");
+  });
+
+  test("拒绝无效用户名及非外部图片路径", async () => {
+    const snapshot = await service.getConfig();
+    await expect(
+      service.saveConfig({
+        expectedRevision: snapshot.revision,
+        settings: { ...snapshot.settings, userName: " ", userAvatarPath: null },
+      }),
+    ).rejects.toThrow("Invalid settings save input");
+    await expect(
+      service.saveConfig({
+        expectedRevision: snapshot.revision,
+        settings: { ...snapshot.settings, userName: "用户", userAvatarPath: "avatar.png" },
+      }),
+    ).rejects.toThrow("Invalid settings save input");
+    await expect(
+      service.saveConfig({
+        expectedRevision: snapshot.revision,
+        settings: { ...snapshot.settings, userName: "用户", userAvatarPath: "/tmp/avatar.svg" },
+      }),
+    ).rejects.toThrow("Invalid settings save input");
   });
 
   test("拒绝符号链接和非普通文件", async () => {
