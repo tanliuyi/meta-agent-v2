@@ -9,9 +9,10 @@
   position: relative;
   display: inline-block;
   padding-inline: 0.02em;
-  font-family: "Segoe Print", "Bradley Hand", "Noteworthy", "Comic Sans MS", cursive;
+  /* Long Cang 的松散笔触突出项目名，霞鹜文楷负责缺字回退。 */
+  font-family: "Long Cang", "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", "DFKai-SB", "楷体", cursive;
   font-size: 1.125em;
-  font-weight: 600;
+  font-weight: 400;
   text-decoration: none;
   transform: rotate(-0.8deg) translateY(-0.15em);
 }

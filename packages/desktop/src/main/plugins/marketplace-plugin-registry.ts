@@ -10,6 +10,7 @@ import {
 import type {
   InstalledMarketplacePluginSummary,
   InstalledMarketplacePluginsSnapshot,
+  MarketplacePluginScope,
 } from "../../shared/plugin-marketplace-contracts.ts";
 
 export const MISSING_MARKETPLACE_REGISTRY_REVISION = "missing:marketplace-installed-v1";
@@ -85,6 +86,35 @@ export class MarketplacePluginRegistry {
     pluginId: string,
   ): Promise<{ status: "saved" | "conflict" | "not-installed"; snapshot: InstalledMarketplacePluginsSnapshot }> {
     const operation = this.saveTail.then(() => this.commitUninstallLocked(expectedRevision, pluginId));
+    this.saveTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
+  commitScope(
+    expectedRevision: string,
+    pluginId: string,
+    scope: MarketplacePluginScope,
+    projectIds: string[] | undefined,
+  ): Promise<{ status: "saved" | "conflict" | "not-installed"; snapshot: InstalledMarketplacePluginsSnapshot }> {
+    const operation = this.saveTail.then(async () => {
+      if (scope !== "global" && scope !== "project") throw new Error("Marketplace plugin scope is invalid");
+      if (scope === "project") {
+        if (!projectIds || projectIds.length === 0) {
+          throw new Error("Marketplace project plugin requires at least one project");
+        }
+        if (
+          projectIds.some(
+            (projectId) => typeof projectId !== "string" || projectId.length === 0 || projectId.length > 200,
+          )
+        ) {
+          throw new Error("Marketplace project plugin has an invalid project ID");
+        }
+      }
+      return this.commitScopeLocked(expectedRevision, pluginId, scope, projectIds);
+    });
     this.saveTail = operation.then(
       () => undefined,
       () => undefined,
@@ -194,6 +224,38 @@ export class MarketplacePluginRegistry {
     }
   }
 
+  private async commitScopeLocked(
+    expectedRevision: string,
+    pluginId: string,
+    scope: MarketplacePluginScope,
+    projectIds: string[] | undefined,
+  ): Promise<{ status: "saved" | "conflict" | "not-installed"; snapshot: InstalledMarketplacePluginsSnapshot }> {
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    const release = await this.lockRegistry();
+    try {
+      const current = await this.readCurrent();
+      if (current.revision !== expectedRevision) return { status: "conflict", snapshot: snapshot(current) };
+      const existing = current.data.plugins?.find((plugin) => plugin.id === pluginId);
+      if (!existing) return { status: "not-installed", snapshot: snapshot(current) };
+      await this.atomicWrite({
+        ...current.data,
+        version: 1,
+        plugins: (current.data.plugins ?? []).map((plugin) =>
+          plugin.id === pluginId
+            ? cloneRecord({
+                ...existing,
+                scope,
+                projectIds: scope === "project" ? dedupeProjectIds(projectIds!) : undefined,
+              })
+            : cloneRecord(plugin),
+        ),
+      });
+      return { status: "saved", snapshot: await this.getSnapshot() };
+    } finally {
+      await release();
+    }
+  }
+
   private async reconcilePluginLocked(
     pluginId: string,
     expectedArtifactHash: string,
@@ -241,7 +303,8 @@ export class MarketplacePluginRegistry {
       throw new Error("installed.json JSON syntax invalid");
     }
     assertRegistryFile(value);
-    return { revision: createHash("sha256").update(bytes).digest("hex"), data: value };
+    const plugins = (value.plugins ?? []).map(normalizeRecord);
+    return { revision: createHash("sha256").update(bytes).digest("hex"), data: { ...value, plugins } };
   }
 
   private async atomicWrite(data: RegistryFileData): Promise<void> {
@@ -301,6 +364,28 @@ function cloneRecord(record: InstalledMarketplacePluginRecord): InstalledMarketp
   };
 }
 
+type NormalizedInstalledMarketplacePluginRecord = InstalledMarketplacePluginRecord & { projectId?: undefined };
+
+/** 旧版本 registry 记录没有 scope 字段；读取时归一为 global，并清理 global 记录的残留项目列表。 */
+function normalizeRecord(
+  record: InstalledMarketplacePluginRecord & { projectId?: string },
+): NormalizedInstalledMarketplacePluginRecord {
+  const { projectId: legacyProjectId, ...recordWithoutLegacyProjectId } = record;
+  const scope = record.scope === "project" ? "project" : "global";
+  if (scope !== "project") {
+    return { ...recordWithoutLegacyProjectId, scope, projectId: undefined, projectIds: undefined };
+  }
+  const projectIds = dedupeProjectIds([
+    ...(record.projectIds ?? []),
+    ...(typeof legacyProjectId === "string" && legacyProjectId.length > 0 ? [legacyProjectId] : []),
+  ]);
+  return { ...recordWithoutLegacyProjectId, scope, projectId: undefined, projectIds };
+}
+
+function dedupeProjectIds(projectIds: string[]): string[] {
+  return [...new Set(projectIds)];
+}
+
 function assertRegistryFile(value: unknown): asserts value is RegistryFileData {
   if (!isPlainObject(value)) throw new Error("installed.json must be an object");
   if (value.version !== undefined && value.version !== 1) throw new Error("installed.json version is unsupported");
@@ -323,7 +408,23 @@ function assertRegistryFile(value: unknown): asserts value is RegistryFileData {
       !plugin.capabilities.every((capability) => typeof capability === "string") ||
       typeof plugin.containsNativeCode !== "boolean" ||
       (plugin.state !== "installed" && plugin.state !== "broken") ||
-      typeof plugin.installedAt !== "number"
+      typeof plugin.installedAt !== "number" ||
+      (plugin.scope !== undefined && plugin.scope !== "global" && plugin.scope !== "project") ||
+      (plugin.scope === "project" && !Array.isArray(plugin.projectIds) && typeof plugin.projectId !== "string") ||
+      (plugin.scope === "project" &&
+        Array.isArray(plugin.projectIds) &&
+        (plugin.projectIds.length === 0 ||
+          !plugin.projectIds.every(
+            (projectId) => typeof projectId === "string" && projectId.length > 0 && projectId.length <= 200,
+          ))) ||
+      (plugin.scope === "project" &&
+        typeof plugin.projectId === "string" &&
+        (plugin.projectId.length === 0 || plugin.projectId.length > 200)) ||
+      (plugin.scope === "project" &&
+        plugin.projectIds !== undefined &&
+        (!Array.isArray(plugin.projectIds) ||
+          !plugin.projectIds.every((projectId: unknown) => typeof projectId === "string"))) ||
+      (plugin.scope !== "project" && plugin.projectIds !== undefined && !Array.isArray(plugin.projectIds))
     ) {
       throw new Error("installed.json plugin entry is invalid");
     }

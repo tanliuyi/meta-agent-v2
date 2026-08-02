@@ -198,6 +198,7 @@ export class MarketplacePluginInstaller {
         ...(verified.configurationSchema ? { configurationSchema: verified.configurationSchema } : {}),
         state: "installed",
         installedAt: this.now(),
+        scope: "global",
         entryPath,
         rootPath,
       };

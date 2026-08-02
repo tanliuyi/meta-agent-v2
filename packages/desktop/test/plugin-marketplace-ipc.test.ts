@@ -29,7 +29,7 @@ describe("plugin marketplace IPC", () => {
     getExtensionState: vi.fn(),
     applyExtensionSet: vi.fn(),
   };
-  const registry = { getSnapshot: vi.fn() };
+  const registry = { getSnapshot: vi.fn(), commitScope: vi.fn() };
   const installer = {
     install: vi.fn(),
     update: vi.fn(),
@@ -316,5 +316,82 @@ describe("plugin marketplace IPC", () => {
       },
     });
     expect(sessions.extensionSettingsChanged).not.toHaveBeenCalled();
+  });
+
+  it("applies a plugin scope change and invalidates extension settings", async () => {
+    const input = {
+      requestId: "scope",
+      expectedRevision: "one",
+      pluginId: "dev.meta-agent.plugin",
+      scope: "project",
+      projectIds: ["project-a", "project-b"],
+    };
+    const snapshot = { revision: "two", plugins: [] };
+    registry.commitScope.mockResolvedValue({ status: "saved", snapshot });
+
+    const result = await electron.handles.get(CHANNELS.marketplaceSetPluginScope)?.({}, input);
+
+    expect(registry.commitScope).toHaveBeenCalledWith("one", "dev.meta-agent.plugin", "project", [
+      "project-a",
+      "project-b",
+    ]);
+    expect(sessions.extensionSettingsChanged).toHaveBeenCalledOnce();
+    expect(result).toEqual({ status: "saved", snapshot });
+  });
+
+  it("clears the bound project when a plugin scope reverts to global", async () => {
+    const input = {
+      requestId: "scope-global",
+      expectedRevision: "one",
+      pluginId: "dev.meta-agent.plugin",
+      scope: "global",
+    };
+    const snapshot = { revision: "two", plugins: [] };
+    registry.commitScope.mockResolvedValue({ status: "saved", snapshot });
+
+    await electron.handles.get(CHANNELS.marketplaceSetPluginScope)?.({}, input);
+
+    expect(registry.commitScope).toHaveBeenCalledWith("one", "dev.meta-agent.plugin", "global", undefined);
+  });
+
+  it("applies a scope change directly to the requested current session", async () => {
+    const input = {
+      requestId: "scope-apply",
+      expectedRevision: "one",
+      pluginId: "dev.meta-agent.plugin",
+      scope: "project",
+      projectIds: ["project-a"],
+      applyToCurrentSession: { projectId: "project", threadId: "thread" },
+    };
+    registry.commitScope.mockResolvedValue({ status: "saved", snapshot: { revision: "two", plugins: [] } });
+    sessions.getExtensionState.mockResolvedValue({ desiredGeneration: "generation-two" });
+    sessions.applyExtensionSet.mockResolvedValue({ status: "applied", generation: "generation-two" });
+
+    const result = await electron.handles.get(CHANNELS.marketplaceSetPluginScope)?.({}, input);
+
+    expect(sessions.applyExtensionSet).toHaveBeenCalledWith("project", "thread", "generation-two", undefined);
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: "saved",
+        application: { status: "applied", generation: "generation-two" },
+      }),
+    );
+  });
+
+  it("keeps the scope unchanged when the registry conflicts", async () => {
+    const input = {
+      requestId: "scope-conflict",
+      expectedRevision: "stale",
+      pluginId: "dev.meta-agent.plugin",
+      scope: "global",
+    };
+    const current = { revision: "two", plugins: [] };
+    registry.commitScope.mockResolvedValue({ status: "conflict", snapshot: current });
+
+    const result = await electron.handles.get(CHANNELS.marketplaceSetPluginScope)?.({}, input);
+
+    expect(result).toEqual({ status: "conflict", current });
+    expect(sessions.extensionSettingsChanged).not.toHaveBeenCalled();
+    expect(sessions.applyExtensionSet).not.toHaveBeenCalled();
   });
 });

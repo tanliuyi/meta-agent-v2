@@ -363,6 +363,128 @@ describe("DesktopExtensionSettingsService", () => {
     ).rejects.toThrow(/pi\.entry file is missing/);
   });
 
+  it("scopes a development plugin to selected projects and reverts to global", async () => {
+    await mkdir(directory, { recursive: true });
+    const entryPath = join(directory, "local-extension.ts");
+    await writeFile(entryPath, "export default function () {}\n", "utf8");
+    const approved = await service.approveDevelopmentEntry(
+      { requestId: "approve-scope", expectedRevision: (await service.getConfig()).revision },
+      entryPath,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+
+    const scoped = await service.saveConfig({
+      requestId: "scope",
+      expectedRevision: approved.snapshot.revision,
+      mutation: {
+        type: "set-development-scope",
+        extensionId: "development:entry-id",
+        scope: "project",
+        projectIds: ["project-a", "project-b", "project-a"],
+      },
+    });
+
+    expect(scoped).toMatchObject({ status: "saved" });
+    if (scoped.status !== "saved") throw new Error("scope mutation failed");
+    expect(scoped.snapshot.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "development:entry-id",
+          scope: "project",
+          projectIds: ["project-a", "project-b"],
+        }),
+      ]),
+    );
+    expect(JSON.parse(await readFile(join(directory, "extensions.json"), "utf8"))).toMatchObject({
+      developmentEntries: [
+        expect.objectContaining({
+          id: "development:entry-id",
+          scope: "project",
+          projectIds: ["project-a", "project-b"],
+        }),
+      ],
+    });
+
+    const global = await service.saveConfig({
+      requestId: "scope-global",
+      expectedRevision: scoped.snapshot.revision,
+      mutation: { type: "set-development-scope", extensionId: "development:entry-id", scope: "global" },
+    });
+
+    expect(global).toMatchObject({ status: "saved" });
+    if (global.status !== "saved") throw new Error("scope mutation failed");
+    expect(global.snapshot.entries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "development:entry-id", scope: "global" })]),
+    );
+    expect(global.snapshot.entries.find((entry) => entry.id === "development:entry-id")).not.toHaveProperty(
+      "projectIds",
+    );
+  });
+
+  it("rejects an invalid development scope mutation", async () => {
+    await mkdir(directory, { recursive: true });
+    const entryPath = join(directory, "local-extension.ts");
+    await writeFile(entryPath, "export default function () {}\n", "utf8");
+    const approved = await service.approveDevelopmentEntry(
+      { requestId: "approve-scope-invalid", expectedRevision: (await service.getConfig()).revision },
+      entryPath,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+
+    await expect(
+      service.saveConfig({
+        requestId: "scope-empty",
+        expectedRevision: approved.snapshot.revision,
+        mutation: {
+          type: "set-development-scope",
+          extensionId: "development:entry-id",
+          scope: "project",
+          projectIds: [],
+        },
+      }),
+    ).rejects.toThrow("at least one project");
+    await expect(
+      service.saveConfig({
+        requestId: "scope-non-string",
+        expectedRevision: approved.snapshot.revision,
+        mutation: {
+          type: "set-development-scope",
+          extensionId: "development:entry-id",
+          scope: "project",
+          projectIds: [123] as unknown as string[],
+        },
+      }),
+    ).rejects.toThrow("invalid project ID");
+    await expect(
+      service.saveConfig({
+        requestId: "scope-unknown",
+        expectedRevision: approved.snapshot.revision,
+        mutation: { type: "set-development-scope", extensionId: "missing.plugin", scope: "global" },
+      }),
+    ).rejects.toThrow("Unknown development extension");
+  });
+
+  it("normalizes legacy development entries to global scope in snapshots", async () => {
+    await mkdir(directory, { recursive: true });
+    const entryPath = join(directory, "legacy-extension.ts");
+    await writeFile(entryPath, "export default function () {}\n", "utf8");
+    const approved = await service.approveDevelopmentEntry(
+      { requestId: "approve-legacy", expectedRevision: (await service.getConfig()).revision },
+      entryPath,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    const file = JSON.parse(await readFile(join(directory, "extensions.json"), "utf8"));
+    delete file.developmentEntries[0].scope;
+    await writeFile(join(directory, "extensions.json"), `${JSON.stringify(file, null, 2)}\n`, "utf8");
+
+    const config = await service.getConfig();
+
+    expect(config.entries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "development:entry-id", scope: "global" })]),
+    );
+    expect(config.entries.find((entry) => entry.id === "development:entry-id")).not.toHaveProperty("projectIds");
+  });
+
   it("persists curated enablement and removes development approvals", async () => {
     await mkdir(directory, { recursive: true });
     const entryPath = join(directory, "local-extension.ts");

@@ -46,8 +46,8 @@ describe("ComposerQuotes UI", () => {
   it("默认显示数量，并为每条引用保留 hover 预览与删除入口", () => {
     const markup = renderToStaticMarkup(<ComposerQuotes />);
 
-    expect(markup).toContain('aria-label="2 条注释"');
-    expect(markup).toContain("2 条注释");
+    expect(markup).toContain('aria-label="2 条引用"');
+    expect(markup).toContain("2 条引用");
     expect(markup).toContain("composer-quotes-trigger");
     expect(markup).toContain("composer-quotes-preview");
     expect(markup).toContain("1.");

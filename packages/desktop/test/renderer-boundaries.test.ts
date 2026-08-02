@@ -34,6 +34,7 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
     "styles/index.css": [
       "@layer theme, base, components, utilities, overrides;",
       '@import "./tokens.css";',
+      '@import "./fonts.css";',
       '@import "./base.css";',
       '@import "./components.css" layer(components);',
       '@import "./layout.css" layer(components);',
@@ -45,12 +46,14 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
       '@import "./memory-settings.css" layer(components);',
       '@import "./providers-settings.css" layer(components);',
       '@import "./chat.css" layer(components);',
+      '@import "./image-preview.css";',
       '@import "./markdown.css" layer(components);',
       '@import "./panel.css" layer(components);',
       '@import "./utilities.css";',
       '@import "./overrides.css" layer(overrides);',
     ].join("\n"),
     "styles/tokens.css": "@layer theme { :root { --foreground: 0 0% 10%; } }",
+    "styles/fonts.css": '@font-face { font-family: "Example"; src: url("../assets/example.woff2"); }',
     "styles/base.css": [
       "@layer base {",
       "  @media (forced-colors: active) {",
@@ -70,6 +73,7 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
     "styles/chat.css": '.chat[data-state="open"] { color: hsl(var(--foreground)); }',
     "styles/markdown.css": ".markdown { color: hsl(var(--foreground)); }",
     "styles/panel.css": ".panel { color: hsl(var(--foreground)); }",
+    "styles/image-preview.css": ".image-preview { color: hsl(var(--foreground)); }",
     "styles/utilities.css": "@layer utilities {}",
     "styles/overrides.css": [
       "/* 移除条件：第三方包装节点允许直接配置尺寸。 */",

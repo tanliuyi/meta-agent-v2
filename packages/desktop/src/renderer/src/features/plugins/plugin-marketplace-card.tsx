@@ -46,6 +46,18 @@ export function MarketplacePluginCard({ plugin, installed, onOpen }: Marketplace
       <span className="plugin-marketplace-card-description">{description}</span>
       <span className="plugin-marketplace-card-footer">
         <span>{version ? `v${version}` : "无兼容版本"}</span>
+        {installed ? (
+          <span
+            className="plugin-marketplace-scope-badge"
+            title={
+              installed.scope === "project"
+                ? `仅以下项目的会话可加载此插件：${(installed.projectIds ?? []).join("、")}`
+                : "所有项目的会话均可加载此插件"
+            }
+          >
+            {installed.scope === "project" ? "指定项目" : "全部项目"}
+          </span>
+        ) : null}
         {plugin?.categories[0] ? <span>{plugin.categories[0]}</span> : null}
         {plugin?.containsNativeCode || installed?.containsNativeCode ? (
           <span className="plugin-marketplace-native-badge">Native</span>

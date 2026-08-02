@@ -2,6 +2,8 @@ import type { PluginConfigurationSchema, PluginConfigurationValue } from "./plug
 
 export const DESKTOP_EXTENSION_HOST_PROFILE_VERSION = 1 as const;
 
+export type ExtensionScope = "global" | "project";
+
 export type DesktopExtensionCapability =
   | "events.subscribe"
   | "configuration.read"
@@ -101,6 +103,9 @@ export interface DesktopExtensionListEntry {
   capabilities: DesktopExtensionCapability[];
   displayPath?: string;
   configurationSchema?: PluginConfigurationSchema;
+  /** 生效范围：global 对所有项目生效；project 仅对 projectIds 指定的项目生效。 */
+  scope: ExtensionScope;
+  projectIds?: string[];
 }
 
 export interface DesktopExtensionSettingsSnapshot {
@@ -117,6 +122,7 @@ export type DesktopExtensionSettingsMutation =
   | { type: "set-developer-mode"; enabled: boolean }
   | { type: "set-curated-enabled"; extensionId: string; enabled: boolean }
   | { type: "set-development-enabled"; extensionId: string; enabled: boolean }
+  | { type: "set-development-scope"; extensionId: string; scope: ExtensionScope; projectIds?: string[] }
   | { type: "remove-development-entry"; extensionId: string };
 
 export interface SaveDesktopExtensionSettingsInput {

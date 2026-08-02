@@ -1,3 +1,6 @@
+# 语言要求
+请始终用中文进行思考推理（reasoning）和回复，包括思维链部分
+
 # TanStack Router Context
 
 - Scaffold command used in scratch: `npx @tanstack/cli@latest create my-tanstack-app --agent --package-manager pnpm --tailwind`.

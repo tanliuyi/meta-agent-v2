@@ -190,3 +190,115 @@ async function pathExists(path: string): Promise<boolean> {
     throw error;
   }
 }
+
+describe("MarketplacePluginRegistry scope", () => {
+  it("normalizes legacy records without a scope field to global", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+
+    expect(installed.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, scope: "global" });
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [{ id: harness.record.id, scope: "global" }],
+    });
+  });
+
+  it("migrates legacy single-project records to a project list", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+    const file = JSON.parse(await readFile(harness.registry.path, "utf8"));
+    file.plugins[0].scope = "project";
+    file.plugins[0].projectId = "legacy-project";
+    await writeFile(harness.registry.path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+
+    const snapshot = await harness.registry.getInternalSnapshot();
+
+    expect(snapshot.plugins[0]).toMatchObject({
+      id: harness.record.id,
+      scope: "project",
+      projectIds: ["legacy-project"],
+      projectId: undefined,
+    });
+  });
+
+  it("switches an installed plugin between global and project scope", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+
+    const project = await harness.registry.commitScope(installed.snapshot.revision, harness.record.id, "project", [
+      "project-a",
+      "project-b",
+    ]);
+    expect(project).toMatchObject({ status: "saved" });
+    if (project.status !== "saved") throw new Error("Expected scope commit");
+    expect(project.snapshot.plugins[0]).toMatchObject({
+      id: harness.record.id,
+      scope: "project",
+      projectIds: ["project-a", "project-b"],
+    });
+
+    const global = await harness.registry.commitScope(
+      project.snapshot.revision,
+      harness.record.id,
+      "global",
+      undefined,
+    );
+    expect(global).toMatchObject({ status: "saved" });
+    if (global.status !== "saved") throw new Error("Expected scope commit");
+    expect(global.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, scope: "global", projectIds: undefined });
+  });
+
+  it("deduplicates project IDs in a project-scoped commit", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+
+    const project = await harness.registry.commitScope(installed.snapshot.revision, harness.record.id, "project", [
+      "project-a",
+      "project-b",
+      "project-a",
+    ]);
+    expect(project).toMatchObject({ status: "saved" });
+    if (project.status !== "saved") throw new Error("Expected scope commit");
+    expect(project.snapshot.plugins[0]).toMatchObject({ projectIds: ["project-a", "project-b"] });
+  });
+
+  it("rejects a project scope without projects or with invalid IDs", async () => {
+    const harness = await createHarness();
+    await expect(harness.registry.commitScope("revision", harness.record.id, "project", undefined)).rejects.toThrow(
+      "at least one project",
+    );
+    await expect(harness.registry.commitScope("revision", harness.record.id, "project", [])).rejects.toThrow(
+      "at least one project",
+    );
+    await expect(harness.registry.commitScope("revision", harness.record.id, "project", [""])).rejects.toThrow(
+      "invalid project ID",
+    );
+    await expect(
+      harness.registry.commitScope("revision", harness.record.id, "project", [123] as unknown as string[]),
+    ).rejects.toThrow("invalid project ID");
+    await expect(harness.registry.commitScope("revision", harness.record.id, "invalid", undefined)).rejects.toThrow(
+      "scope is invalid",
+    );
+  });
+
+  it("reports conflict and not-installed scope commits without touching other plugins", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+
+    const conflict = await harness.registry.commitScope("stale-revision", harness.record.id, "global", undefined);
+    expect(conflict).toEqual({ status: "conflict", snapshot: installed.snapshot });
+
+    const missing = await harness.registry.commitScope(
+      installed.snapshot.revision,
+      "missing.plugin",
+      "global",
+      undefined,
+    );
+    expect(missing).toMatchObject({ status: "not-installed" });
+    await expect(harness.registry.getSnapshot()).resolves.toEqual(installed.snapshot);
+  });
+});

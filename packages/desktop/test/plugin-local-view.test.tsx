@@ -1,10 +1,18 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalPluginDetailContent } from "../src/renderer/src/features/plugins/local-plugin-detail-content.tsx";
 import { LocalPluginsView } from "../src/renderer/src/features/plugins/local-plugins-view.tsx";
 import type { LocalPluginsController } from "../src/renderer/src/features/plugins/use-local-plugins.ts";
 import type { DesktopExtensionListEntry } from "../src/shared/desktop-extension-contracts.ts";
+
+vi.mock("../src/renderer/src/state/desktop-context.tsx", () => ({
+  useDesktopSelector: () => [],
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 function controller(): LocalPluginsController {
   return {
@@ -31,6 +39,7 @@ function controller(): LocalPluginsController {
           enabled: true,
           configuredEnabled: true,
           capabilities: [],
+          scope: "global",
         },
       ],
     },
@@ -52,6 +61,7 @@ function entry(): DesktopExtensionListEntry {
     enabled: true,
     configuredEnabled: true,
     capabilities: [],
+    scope: "global",
   };
 }
 
@@ -86,8 +96,10 @@ describe("local plugin detail dialog", () => {
             message: "插件加载失败",
           },
         ]}
+        projects={[]}
         mutating={false}
         onToggleEnabled={vi.fn()}
+        onScopeChange={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
@@ -121,8 +133,10 @@ describe("local plugin detail dialog", () => {
       <LocalPluginDetailContent
         plugin={configurable}
         diagnostics={[]}
+        projects={[]}
         mutating={false}
         onToggleEnabled={vi.fn()}
+        onScopeChange={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
@@ -137,12 +151,41 @@ describe("local plugin detail dialog", () => {
       <LocalPluginDetailContent
         plugin={entry()}
         diagnostics={[]}
+        projects={[]}
         mutating={false}
         onToggleEnabled={vi.fn()}
+        onScopeChange={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
 
     expect(markup).not.toContain("诊断");
+  });
+
+  it("renders scope settings with the available projects", () => {
+    const scoped: DesktopExtensionListEntry = {
+      ...entry(),
+      scope: "project",
+      projectIds: ["project-a"],
+    };
+    const markup = renderToStaticMarkup(
+      <LocalPluginDetailContent
+        plugin={scoped}
+        diagnostics={[]}
+        projects={[
+          { id: "project-a", kind: "project", name: "Alpha", cwd: "/alpha", lastOpenedAt: 1, available: true },
+        ]}
+        mutating={false}
+        onToggleEnabled={vi.fn()}
+        onScopeChange={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain("作用域");
+    expect(markup).toContain("全部项目");
+    expect(markup).toContain("指定项目");
+    expect(markup).toContain('type="checkbox"');
+    expect(markup).toContain("Alpha");
   });
 });

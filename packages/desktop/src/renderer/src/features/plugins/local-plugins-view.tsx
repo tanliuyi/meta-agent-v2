@@ -1,6 +1,8 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Switch } from "@renderer/shared/ui/switch";
 import { Toast } from "@renderer/shared/ui/toast";
+import { useDesktopSelector } from "@renderer/state/desktop-context";
+import { selectProjects } from "@renderer/state/desktop-selectors";
 import FolderPlus from "lucide-react/dist/esm/icons/folder-plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useState } from "react";
@@ -13,6 +15,7 @@ interface LocalPluginsViewProps {
 
 export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
   const snapshot = controller.snapshot;
+  const projects = useDesktopSelector(selectProjects);
   const plugins = snapshot?.entries.filter((entry) => entry.source === "development") ?? [];
   const [selectedId, setSelectedId] = useState<string>();
   const selected = plugins.find((plugin) => plugin.id === selectedId);
@@ -131,11 +134,15 @@ export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
         <LocalPluginDetailDialog
           plugin={selected}
           diagnostics={selectedDiagnostics}
+          projects={projects}
           open
           mutating={controller.mutating}
           onClose={() => setSelectedId(undefined)}
           onToggleEnabled={(enabled) =>
             void controller.mutate({ type: "set-development-enabled", extensionId: selected.id, enabled })
+          }
+          onScopeChange={(scope, projectIds) =>
+            void controller.mutate({ type: "set-development-scope", extensionId: selected.id, scope, projectIds })
           }
           onRemove={() =>
             void controller

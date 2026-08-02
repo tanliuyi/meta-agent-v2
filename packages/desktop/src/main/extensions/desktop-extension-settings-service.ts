@@ -7,6 +7,7 @@ import type {
   DesktopExtensionDefinition,
   DesktopExtensionDiagnostic,
   DesktopExtensionSettingsSnapshot,
+  ExtensionScope,
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
 } from "../../shared/desktop-extension-contracts.ts";
@@ -28,6 +29,8 @@ export interface StoredDevelopmentExtension {
   displayPath?: string;
   capabilities: DesktopExtensionCapability[];
   configurationSchema?: PluginConfigurationSchema;
+  scope?: ExtensionScope;
+  projectIds?: string[];
 }
 
 export interface InternalDesktopExtensionSettings {
@@ -288,6 +291,7 @@ export class DesktopExtensionSettingsService {
       enabled: true,
       configuredEnabled: true,
       capabilities: [...definition.capabilities],
+      scope: "global" as const,
     }));
     const curated = this.curatedDefinitions.map((definition) => {
       const configuredEnabled = internal.curatedEnabled[definition.id] ?? true;
@@ -298,20 +302,26 @@ export class DesktopExtensionSettingsService {
         enabled: configuredEnabled,
         configuredEnabled,
         capabilities: [...definition.capabilities],
+        scope: "global" as const,
       };
     });
-    const development = internal.developmentEntries.map((entry) => ({
-      id: entry.id,
-      displayName: entry.displayName,
-      source: "development" as const,
-      enabled: internal.developerMode && entry.enabled,
-      configuredEnabled: entry.enabled,
-      capabilities: [...entry.capabilities],
-      displayPath: entry.displayPath ?? basename(entry.entryPath),
-      ...(entry.configurationSchema
-        ? { configurationSchema: clonePluginConfigurationSchema(entry.configurationSchema) }
-        : {}),
-    }));
+    const development = internal.developmentEntries.map((entry) => {
+      const scope: ExtensionScope = entry.scope === "project" ? "project" : "global";
+      return {
+        id: entry.id,
+        displayName: entry.displayName,
+        source: "development" as const,
+        enabled: internal.developerMode && entry.enabled,
+        configuredEnabled: entry.enabled,
+        capabilities: [...entry.capabilities],
+        displayPath: entry.displayPath ?? basename(entry.entryPath),
+        scope,
+        ...(scope === "project" ? { projectIds: dedupeProjectIds(entry.projectIds ?? []) } : {}),
+        ...(entry.configurationSchema
+          ? { configurationSchema: clonePluginConfigurationSchema(entry.configurationSchema) }
+          : {}),
+      };
+    });
     return {
       revision: current.revision,
       developerMode: internal.developerMode,
@@ -396,6 +406,40 @@ function applyMutation(
       if (!changed) return undefined;
       break;
     }
+    case "set-development-scope": {
+      if (mutation.scope !== "global" && mutation.scope !== "project") {
+        throw new Error("Development extension scope is invalid");
+      }
+      if (mutation.scope === "project") {
+        if (!mutation.projectIds || mutation.projectIds.length === 0) {
+          throw new Error("Development project extension requires at least one project");
+        }
+        if (
+          mutation.projectIds.some(
+            (projectId) => typeof projectId !== "string" || projectId.length === 0 || projectId.length > 200,
+          )
+        ) {
+          throw new Error("Development project extension has an invalid project ID");
+        }
+      }
+      let found = false;
+      let changed = false;
+      developmentEntries = developmentEntries.map((entry) => {
+        if (entry.id !== mutation.extensionId) return entry;
+        found = true;
+        const next =
+          mutation.scope === "project"
+            ? { ...entry, scope: mutation.scope, projectIds: dedupeProjectIds(mutation.projectIds!) }
+            : { ...entry, scope: mutation.scope, projectIds: undefined };
+        changed =
+          entry.scope !== next.scope ||
+          JSON.stringify(entry.projectIds ?? []) !== JSON.stringify(next.projectIds ?? []);
+        return changed ? next : entry;
+      });
+      if (!found) throw new Error(`Unknown development extension: ${mutation.extensionId}`);
+      if (!changed) return undefined;
+      break;
+    }
     case "remove-development-entry": {
       const next = developmentEntries.filter((entry) => entry.id !== mutation.extensionId);
       if (next.length === developmentEntries.length) {
@@ -459,7 +503,16 @@ function assertSettingsFile(value: unknown): asserts value is ExtensionSettingsF
         (entry.displayPath !== undefined && typeof entry.displayPath !== "string") ||
         (entry.capabilities !== undefined &&
           (!Array.isArray(entry.capabilities) ||
-            !entry.capabilities.every((capability) => typeof capability === "string")))
+            !entry.capabilities.every((capability) => typeof capability === "string"))) ||
+        (entry.scope !== undefined && entry.scope !== "global" && entry.scope !== "project") ||
+        (entry.scope === "project" &&
+          (!Array.isArray(entry.projectIds) ||
+            entry.projectIds.length === 0 ||
+            !entry.projectIds.every(
+              (projectId) => typeof projectId === "string" && projectId.length > 0 && projectId.length <= 200,
+            ))) ||
+        (entry.projectIds !== undefined &&
+          (!Array.isArray(entry.projectIds) || !entry.projectIds.every((projectId) => typeof projectId === "string")))
       ) {
         throw new Error("extensions.json development entry is invalid");
       }
@@ -472,6 +525,10 @@ function assertSettingsFile(value: unknown): asserts value is ExtensionSettingsF
 
 function hashBytes(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function dedupeProjectIds(projectIds: string[]): string[] {
+  return [...new Set(projectIds)];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

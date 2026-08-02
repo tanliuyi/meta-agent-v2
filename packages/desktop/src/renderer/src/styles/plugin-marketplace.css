@@ -551,6 +551,108 @@ button.plugin-local-row-main:hover strong {
   margin-left: auto;
 }
 
+.plugin-marketplace-card-footer .plugin-marketplace-scope-badge {
+  padding: 0 var(--space-2);
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+  white-space: nowrap;
+}
+
+.plugin-marketplace-scope-options {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.plugin-marketplace-scope-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.plugin-marketplace-scope-option[data-selected] {
+  border-color: hsl(var(--ring));
+}
+
+.plugin-marketplace-scope-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.plugin-marketplace-scope-option input {
+  margin-top: calc(var(--space-1) / 2);
+  accent-color: hsl(var(--ring));
+}
+
+.plugin-marketplace-scope-option > span {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.plugin-marketplace-scope-option strong {
+  font-size: var(--type-size-control);
+  font-weight: 650;
+}
+
+.plugin-marketplace-scope-option > span > span {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+  line-height: var(--type-line-normal);
+}
+
+.plugin-marketplace-scope-projects {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+
+.plugin-marketplace-scope-project {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.plugin-marketplace-scope-project[data-selected] {
+  border-color: hsl(var(--ring));
+}
+
+.plugin-marketplace-scope-project:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.plugin-marketplace-scope-project input {
+  accent-color: hsl(var(--ring));
+}
+
+.plugin-marketplace-scope-project > span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--type-size-control);
+}
+
+.plugin-marketplace-scope-project .plugin-marketplace-scope-warning {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.plugin-marketplace-scope-warning {
+  color: hsl(var(--warning));
+  font-size: var(--type-size-meta);
+}
+
 .plugin-marketplace-empty {
   padding: var(--space-8) 0;
   text-align: center;

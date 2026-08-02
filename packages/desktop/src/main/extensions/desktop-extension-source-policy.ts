@@ -61,6 +61,10 @@ export class DesktopExtensionSourcePolicy {
       fingerprintParts.push(marketplace.revision);
       for (const plugin of marketplace.plugins) {
         if (!plugin.enabled || plugin.state !== "installed") continue;
+        if (plugin.scope === "project" && !(plugin.projectIds ?? []).includes(projectId)) {
+          fingerprintParts.push(`${plugin.id}:out-of-scope:${(plugin.projectIds ?? []).join(",")}`);
+          continue;
+        }
         try {
           if (!this.options.marketplaceRoot) throw new Error(`Marketplace extension root is unavailable: ${plugin.id}`);
           const entryPath = await validateInstalledMarketplacePlugin(plugin, this.options.marketplaceRoot);
@@ -68,7 +72,9 @@ export class DesktopExtensionSourcePolicy {
             plugin.configurationSchema && plugin.capabilities.includes("configuration.read")
               ? await this.options.pluginConfigurations?.getRuntimeConfiguration(plugin.id)
               : undefined;
-          fingerprintParts.push(`${plugin.id}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`);
+          fingerprintParts.push(
+            `${plugin.id}:${plugin.scope}:${(plugin.projectIds ?? []).join(",")}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`,
+          );
           pathEntries.push({
             id: plugin.id,
             displayName: plugin.displayName,
@@ -93,6 +99,10 @@ export class DesktopExtensionSourcePolicy {
     if (settings.developerMode) {
       for (const entry of settings.developmentEntries) {
         if (!entry.enabled) continue;
+        if (entry.scope === "project" && !(entry.projectIds ?? []).includes(projectId)) {
+          fingerprintParts.push(`${entry.id}:out-of-scope:${(entry.projectIds ?? []).join(",")}`);
+          continue;
+        }
         try {
           const info = await lstat(entry.entryPath);
           if (!info.isFile() || info.isSymbolicLink()) throw new Error("entry is not a regular non-symlink file");
@@ -104,7 +114,9 @@ export class DesktopExtensionSourcePolicy {
                   entry.configurationSchema,
                 )
               : undefined;
-          fingerprintParts.push(`${entry.id}:${entryPath}:${configuration?.revision ?? "unconfigured"}`);
+          fingerprintParts.push(
+            `${entry.id}:${entry.scope ?? "global"}:${(entry.projectIds ?? []).join(",")}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
+          );
           pathEntries.push({
             id: entry.id,
             displayName: entry.displayName,

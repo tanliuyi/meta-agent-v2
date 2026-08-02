@@ -1,6 +1,12 @@
-import type { ApplyDesktopExtensionSetResult, DesktopExtensionCapability } from "./desktop-extension-contracts.ts";
+import type {
+  ApplyDesktopExtensionSetResult,
+  DesktopExtensionCapability,
+  ExtensionScope,
+} from "./desktop-extension-contracts.ts";
 
 export const MARKETPLACE_PROTOCOL_VERSION = 1 as const;
+
+export type MarketplacePluginScope = ExtensionScope;
 
 export interface MarketplaceEndpointRecord {
   marketplaceId: string;
@@ -84,6 +90,9 @@ export interface InstalledMarketplacePluginSummary {
   configurable: boolean;
   state: "installed" | "broken";
   installedAt: number;
+  /** 生效范围：global 对所有项目生效；project 仅对 projectIds 指定的项目生效。 */
+  scope: MarketplacePluginScope;
+  projectIds?: string[];
 }
 
 export interface InstalledMarketplacePluginsSnapshot {
@@ -154,6 +163,26 @@ export type UninstallMarketplacePluginResult =
       snapshot: InstalledMarketplacePluginsSnapshot;
       reloadRequired: true;
       recoveryPending?: boolean;
+      application?: ApplyDesktopExtensionSetResult;
+      applicationError?: string;
+    }
+  | { status: "conflict"; current: InstalledMarketplacePluginsSnapshot }
+  | { status: "not-installed"; snapshot: InstalledMarketplacePluginsSnapshot };
+
+export interface SetMarketplacePluginScopeInput {
+  requestId: string;
+  expectedRevision: string;
+  pluginId: string;
+  scope: MarketplacePluginScope;
+  /** scope 为 "project" 时的目标项目列表。 */
+  projectIds?: string[];
+  applyToCurrentSession?: ApplyMarketplaceMutationTarget;
+}
+
+export type SetMarketplacePluginScopeResult =
+  | {
+      status: "saved";
+      snapshot: InstalledMarketplacePluginsSnapshot;
       application?: ApplyDesktopExtensionSetResult;
       applicationError?: string;
     }

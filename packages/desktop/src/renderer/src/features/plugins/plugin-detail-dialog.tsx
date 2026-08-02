@@ -10,18 +10,22 @@ import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useState } from "react";
+import type { Project } from "../../../../shared/contracts.ts";
 import type {
   InstalledMarketplacePluginSummary,
+  MarketplacePluginScope,
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
 import { PluginConfigurationForm } from "./plugin-configuration-form.tsx";
 import { cardState, formatDate, statusLabel, statusTone, updateAvailable } from "./plugin-marketplace-utils.ts";
+import { PluginScopeSettings } from "./plugin-scope-settings.tsx";
 import { canInstallMarketplacePlugin } from "./use-plugin-marketplace.ts";
 
 interface PluginDetailDialogProps {
   plugin?: MarketplacePluginSummary;
   installed?: InstalledMarketplacePluginSummary;
   marketplaceId?: string;
+  projects: readonly Project[];
   open: boolean;
   mutationPending: boolean;
   installing: boolean;
@@ -31,6 +35,7 @@ interface PluginDetailDialogProps {
   onInstall(plugin: MarketplacePluginSummary): void;
   onUpdate(plugin: MarketplacePluginSummary): void;
   onUninstall(id: string): void;
+  onSetScope(id: string, scope: MarketplacePluginScope, projectIds?: string[]): void;
 }
 
 type PendingAction = "install" | "update" | "uninstall";
@@ -39,6 +44,7 @@ export function PluginDetailDialog({
   plugin,
   installed,
   marketplaceId,
+  projects,
   open,
   mutationPending,
   installing,
@@ -48,6 +54,7 @@ export function PluginDetailDialog({
   onInstall,
   onUpdate,
   onUninstall,
+  onSetScope,
 }: PluginDetailDialogProps) {
   const [pendingAction, setPendingAction] = useState<PendingAction>();
   if (!plugin && !installed) return null;
@@ -205,6 +212,17 @@ export function PluginDetailDialog({
                 </div>
               </dl>
             </section>
+          ) : null}
+
+          {installed ? (
+            <PluginScopeSettings
+              pluginId={installed.id}
+              scope={installed.scope}
+              projectIds={installed.projectIds ?? []}
+              projects={projects}
+              mutationPending={mutationPending}
+              onSetScope={(scope, projectIds) => onSetScope(installed.id, scope, projectIds)}
+            />
           ) : null}
         </div>
 

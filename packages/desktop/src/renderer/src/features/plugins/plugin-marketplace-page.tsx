@@ -2,6 +2,8 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
 import { Toast } from "@renderer/shared/ui/toast";
+import { useDesktopSelector } from "@renderer/state/desktop-context";
+import { selectProjects } from "@renderer/state/desktop-selectors";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
@@ -19,6 +21,7 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
   const [settingsOpen, setSettingsOpen] = useState(false);
   const controller = usePluginMarketplace(activeView === "marketplace");
   const localController = useLocalPlugins(returnSession?.projectId, returnSession?.threadId);
+  const projects = useDesktopSelector(selectProjects);
   const [selectedPluginId, setSelectedPluginId] = useState<string>();
   const selectedPlugin = controller.page?.plugins.find((plugin) => plugin.id === selectedPluginId);
   const selectedInstalled = controller.installed?.plugins.find((plugin) => plugin.id === selectedPluginId);
@@ -28,7 +31,8 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
   const mutationPending =
     controller.installingId !== undefined ||
     controller.updatingId !== undefined ||
-    controller.uninstallingId !== undefined;
+    controller.uninstallingId !== undefined ||
+    controller.settingScopeId !== undefined;
 
   return (
     <>
@@ -191,6 +195,7 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
         plugin={selectedPlugin}
         installed={selectedInstalled}
         marketplaceId={controller.page?.marketplaceId}
+        projects={projects}
         open={selectedPluginId !== undefined && (selectedPlugin !== undefined || selectedInstalled !== undefined)}
         mutationPending={mutationPending}
         installing={controller.installingId === selectedPluginId}
@@ -200,6 +205,7 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
         onInstall={(plugin) => void controller.install(plugin)}
         onUpdate={(plugin) => void controller.update(plugin)}
         onUninstall={(id) => void controller.uninstall(id)}
+        onSetScope={(id, scope, projectIds) => void controller.setScope(id, scope, projectIds)}
       />
     </>
   );

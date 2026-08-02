@@ -1,4 +1,5 @@
 import * as Tabs from "@radix-ui/react-tabs";
+import { resolveTokenStyle } from "@renderer/components/assistant-ui/streamdown/streamdown-code-line";
 import { TooltipIconButton } from "@renderer/components/assistant-ui/tooltip-icon-button";
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import type { HighlightResult } from "@streamdown/code";
@@ -15,7 +16,6 @@ import { Streamdown } from "streamdown";
 import type { FileNode, TextFile } from "../../../../../shared/contracts.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
 import { STREAMDOWN_COMPONENTS } from "../../assistant-ui/streamdown/streamdown-code.tsx";
-import { resolveTokenStyle } from "../../assistant-ui/streamdown/streamdown-code-block.tsx";
 import { LINK_SAFETY, SHIKI_THEMES, STREAMDOWN_PLUGINS } from "../../assistant-ui/streamdown/streamdown-config.ts";
 import { useSessionScope, useSessionWorkbench } from "../../session-context.tsx";
 import { closeWorkbenchFile, replaceActiveWorkbenchFile } from "../panel-model.ts";

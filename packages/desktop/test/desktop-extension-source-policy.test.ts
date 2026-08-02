@@ -302,11 +302,206 @@ describe("DesktopExtensionSourcePolicy", () => {
     ]);
   });
 
+  it("loads project-scoped development entries only in the bound projects", async () => {
+    const harness = await createHarness();
+    const developmentPath = join(harness.root, "scoped-development.ts");
+    await writeFile(developmentPath, "export default function () {}\n", "utf8");
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve-scoped", expectedRevision: initial.revision },
+      developmentPath,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    const enabled = await harness.settings.saveConfig({
+      requestId: "enable-mode",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+    if (enabled.status !== "saved") throw new Error("enable failed");
+    const scoped = await harness.settings.saveConfig({
+      requestId: "scope",
+      expectedRevision: enabled.snapshot.revision,
+      mutation: {
+        type: "set-development-scope",
+        extensionId: "development:development",
+        scope: "project",
+        projectIds: ["bound-project", "second-project"],
+      },
+    });
+    if (scoped.status !== "saved") throw new Error("scope failed");
+
+    const bound = await harness.policy.resolve("bound-project");
+    expect(bound.entries.map(({ id }) => id)).toEqual(["curated", "development:development", "builtin"]);
+
+    const second = await harness.policy.resolve("second-project");
+    expect(second.entries.map(({ id }) => id)).toEqual(["curated", "development:development", "builtin"]);
+
+    const other = await harness.policy.resolve("other-project");
+    expect(other.entries.map(({ id }) => id)).toEqual(["curated", "builtin"]);
+    expect(other.diagnostics).toEqual([]);
+  });
+
+  it("generates a new set generation when a development entry scope changes", async () => {
+    const harness = await createHarness();
+    const developmentPath = join(harness.root, "re-scoped-development.ts");
+    await writeFile(developmentPath, "export default function () {}\n", "utf8");
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve-rescope", expectedRevision: initial.revision },
+      developmentPath,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    const enabled = await harness.settings.saveConfig({
+      requestId: "enable-mode",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+    if (enabled.status !== "saved") throw new Error("enable failed");
+    const scoped = await harness.settings.saveConfig({
+      requestId: "scope",
+      expectedRevision: enabled.snapshot.revision,
+      mutation: {
+        type: "set-development-scope",
+        extensionId: "development:development",
+        scope: "project",
+        projectIds: ["bound-project"],
+      },
+    });
+    if (scoped.status !== "saved") throw new Error("scope failed");
+
+    const first = await harness.policy.resolve("bound-project");
+    const generation = first.generation;
+    expect(first.entries.some(({ id }) => id === "development:development")).toBe(true);
+
+    const config = await harness.settings.getConfig();
+    const global = await harness.settings.saveConfig({
+      requestId: "scope-global",
+      expectedRevision: config.revision,
+      mutation: { type: "set-development-scope", extensionId: "development:development", scope: "global" },
+    });
+    if (global.status !== "saved") throw new Error("global scope failed");
+    const after = await harness.policy.resolve("bound-project");
+
+    expect(after.generation).not.toBe(generation);
+  });
+
   it("rejects duplicate IDs across controlled sources", async () => {
     const harness = await createHarness({ builtinId: "curated" });
     await expect(harness.policy.resolve("project")).rejects.toThrow("Duplicate Desktop extension ID: curated");
   });
+
+  it("loads project-scoped marketplace entries only in the bound projects", async () => {
+    const harness = await createHarness();
+    let scopeGeneration = 0;
+    const [globalPlugin, projectPlugin] = await createMarketplacePlugins(harness.root, [
+      {
+        id: "publisher.global",
+        displayName: "Global Plugin",
+        scope: "global",
+      },
+      {
+        id: "publisher.bound",
+        displayName: "Bound Plugin",
+        scope: "project",
+        projectIds: ["bound-project", "second-project"],
+      },
+    ]);
+    harness.policy = new DesktopExtensionSourcePolicy({
+      settings: harness.settings,
+      getBuiltinDefinitions: () => harness.builtin,
+      getCuratedDefinitions: () => harness.curated,
+      getMarketplaceExtensions: async () => ({ revision: "market-scope", plugins: [globalPlugin, projectPlugin] }),
+      marketplaceRoot: join(harness.root, "marketplace"),
+      curatedRoot: harness.curatedRoot,
+      createGeneration: () => `scope-generation-${++scopeGeneration}`,
+    });
+
+    const bound = await harness.policy.resolve("bound-project");
+    expect(bound.entries.map(({ id }) => id)).toEqual(["curated", "publisher.global", "publisher.bound", "builtin"]);
+
+    const second = await harness.policy.resolve("second-project");
+    expect(second.entries.map(({ id }) => id)).toEqual(["curated", "publisher.global", "publisher.bound", "builtin"]);
+
+    const other = await harness.policy.resolve("other-project");
+    expect(other.entries.map(({ id }) => id)).toEqual(["curated", "publisher.global", "builtin"]);
+    expect(other.diagnostics).toEqual([]);
+  });
+
+  it("generates a new set generation when a plugin scope changes", async () => {
+    const harness = await createHarness();
+    const [plugin] = await createMarketplacePlugins(harness.root, [
+      { id: "publisher.scoped", displayName: "Scoped Plugin", scope: "global" },
+    ]);
+    const revision = "market-1";
+    let scopeGeneration = 0;
+    harness.policy = new DesktopExtensionSourcePolicy({
+      settings: harness.settings,
+      getBuiltinDefinitions: () => harness.builtin,
+      getCuratedDefinitions: () => harness.curated,
+      getMarketplaceExtensions: async () => ({ revision, plugins: [plugin] }),
+      marketplaceRoot: join(harness.root, "marketplace"),
+      curatedRoot: harness.curatedRoot,
+      createGeneration: () => `scope-generation-${++scopeGeneration}`,
+    });
+
+    const first = await harness.policy.resolve("bound-project");
+    expect(first.entries.some(({ id }) => id === "publisher.scoped")).toBe(true);
+
+    plugin.scope = "project";
+    plugin.projectIds = ["bound-project"];
+    const afterProject = await harness.policy.resolve("bound-project");
+    expect(afterProject.entries.some(({ id }) => id === "publisher.scoped")).toBe(true);
+    expect(afterProject.generation).not.toBe(first.generation);
+
+    plugin.projectIds = ["other-project"];
+    const rebound = await harness.policy.resolve("bound-project");
+    expect(rebound.entries.some(({ id }) => id === "publisher.scoped")).toBe(false);
+    expect(rebound.generation).not.toBe(afterProject.generation);
+
+    const other = await harness.policy.resolve("other-project");
+    expect(other.entries.some(({ id }) => id === "publisher.scoped")).toBe(true);
+  });
 });
+
+interface MarketplacePluginFixtureSpec {
+  id: string;
+  displayName: string;
+  scope?: "global" | "project";
+  projectIds?: string[];
+}
+
+async function createMarketplacePlugins(
+  root: string,
+  specs: MarketplacePluginFixtureSpec[],
+): Promise<InstalledMarketplacePluginRecord[]> {
+  return Promise.all(
+    specs.map(async (spec) => {
+      const pluginRoot = join(root, "marketplace", spec.id);
+      const entryPath = join(pluginRoot, ".versions", "hash", "payload", "index.ts");
+      await mkdir(join(entryPath, ".."), { recursive: true });
+      await writeFile(entryPath, "export default function () {}\n", "utf8");
+      const plugin: InstalledMarketplacePluginRecord = {
+        id: spec.id,
+        displayName: spec.displayName,
+        marketplaceId: "local.market",
+        version: "1.0.0",
+        artifactId: "universal",
+        artifactHash: "hash",
+        enabled: true,
+        capabilities: [],
+        containsNativeCode: false,
+        state: "installed",
+        installedAt: 1,
+        scope: spec.scope ?? "global",
+        ...(spec.scope === "project" ? { projectIds: spec.projectIds ?? [] } : {}),
+        entryPath,
+        rootPath: pluginRoot,
+      };
+      await writeMarketplaceProjection(plugin);
+      return plugin;
+    }),
+  );
+}
 
 async function createHarness(options: { builtinId?: string } = {}) {
   const root = join(tmpdir(), `desktop-extension-policy-${Date.now()}-${Math.random().toString(36).slice(2)}`);

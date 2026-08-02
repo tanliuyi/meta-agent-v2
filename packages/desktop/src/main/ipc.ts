@@ -51,6 +51,8 @@ import type {
   InstallMarketplacePluginInput,
   ListMarketplacePluginsInput,
   SaveMarketplaceEndpointInput,
+  SetMarketplacePluginScopeInput,
+  SetMarketplacePluginScopeResult,
   TestMarketplaceEndpointInput,
   UninstallMarketplacePluginInput,
   UpdateMarketplacePluginInput,
@@ -298,6 +300,22 @@ export function registerIpc(
         );
         return { ...result, ...application };
       });
+      ipcMain.handle(
+        CHANNELS.marketplaceSetPluginScope,
+        async (_event, input: SetMarketplacePluginScopeInput): Promise<SetMarketplacePluginScopeResult> => {
+          const result = await marketplaceRegistry.commitScope(
+            input.expectedRevision,
+            input.pluginId,
+            input.scope,
+            input.scope === "project" ? input.projectIds : undefined,
+          );
+          if (result.status === "conflict") return { status: "conflict", current: result.snapshot };
+          if (result.status !== "saved") return { status: "not-installed", snapshot: result.snapshot };
+          await sessions.extensionSettingsChanged();
+          const application = await applyMarketplaceMutation(sessions, input.applyToCurrentSession, undefined);
+          return { status: "saved", snapshot: result.snapshot, ...application };
+        },
+      );
     }
   }
   if (extensions) {

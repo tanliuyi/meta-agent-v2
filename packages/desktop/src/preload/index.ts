@@ -216,6 +216,7 @@ const desktopApi: DesktopApi = {
     installPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceInstallPlugin, input),
     updatePlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUpdatePlugin, input),
     uninstallPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUninstallPlugin, input),
+    setPluginScope: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSetPluginScope, input),
   },
   subagents: {
     getSnapshot: (input) => ipcRenderer.invoke(CHANNELS.subagentsGetSnapshot, input),

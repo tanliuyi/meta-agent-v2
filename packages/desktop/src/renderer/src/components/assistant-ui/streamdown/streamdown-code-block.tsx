@@ -4,6 +4,7 @@ import Check from "lucide-react/dist/esm/icons/check.mjs";
 import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import Download from "lucide-react/dist/esm/icons/download.mjs";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { CodeLine } from "./streamdown-code-line.tsx";
 import { SHIKI_THEMES } from "./streamdown-config.ts";
 
 const FILE_EXTENSIONS: Readonly<Record<string, string>> = {
@@ -91,31 +92,20 @@ export function MarkdownCodeBlock({ code, language }: { code: string; language: 
       >
         <code className="markdown-code-content">
           {lines.map((line, lineIndex) => (
-            <span className="markdown-code-line" key={`${lineIndex}:${line.map((token) => token.content).join("")}`}>
-              <span className="markdown-code-line-number" aria-hidden="true">
-                {lineIndex + 1}
-              </span>
-              <span className="markdown-code-line-text">
-                {line.length === 0
-                  ? " "
-                  : line.map((token, tokenIndex) => (
-                      <span
-                        className="markdown-code-token"
-                        key={`${tokenIndex}:${token.offset}`}
-                        style={resolveTokenStyle(token)}
-                        {...token.htmlAttrs}
-                      >
-                        {token.content}
-                      </span>
-                    ))}
-              </span>
-            </span>
+            <CodeLine
+              key={`${lineIndex}:${line.map((token) => token.content).join("")}`}
+              line={line}
+              lineIndex={lineIndex}
+            />
           ))}
         </code>
       </pre>
     </section>
   );
 }
+
+const HIGHLIGHT_BATCH_LINES = 10;
+const HIGHLIGHT_SETTLE_MS = 250;
 
 function useHighlightedCode(code: string, language: string): HighlightedCode | undefined {
   const [highlighted, setHighlighted] = useState<HighlightedCode | undefined>(undefined);
@@ -129,26 +119,82 @@ function useHighlightedCode(code: string, language: string): HighlightedCode | u
       };
     }
 
-    const applyResult = (result: HighlightResult | undefined) => {
-      if (active) setHighlighted(result ? { code, language, result } : undefined);
+    const action = streamingHighlightAction(highlighted, code, language, HIGHLIGHT_BATCH_LINES);
+    if (action.kind === "none") return;
+
+    let cancelHighlight: () => void = () => undefined;
+    const runHighlight = () => {
+      if (!active) return;
+      cancelHighlight = startHighlightRequest(
+        codeHighlighter.highlight,
+        { code, language: language as CodeLanguage, themes: SHIKI_THEMES },
+        (result) => {
+          if (active) setHighlighted(result ? { code, language, result } : undefined);
+        },
+      );
     };
 
-    try {
-      const immediate = codeHighlighter.highlight(
-        { code, language: language as CodeLanguage, themes: SHIKI_THEMES },
-        applyResult,
-      );
-      applyResult(immediate ?? undefined);
-    } catch {
-      applyResult(undefined);
+    let timer: number | undefined;
+    if (action.kind === "highlight") {
+      runHighlight();
+    } else {
+      // 流式尾部：等待代码块停止增长后再高亮，保证完成的代码块不会残留纯文本尾部。
+      timer = window.setTimeout(runHighlight, HIGHLIGHT_SETTLE_MS);
     }
-
     return () => {
       active = false;
+      cancelHighlight();
+      window.clearTimeout(timer);
     };
-  }, [code, language]);
+  }, [code, highlighted, language]);
 
   return highlighted;
+}
+
+type HighlightRequest = typeof codeHighlighter.highlight;
+
+/** 保留加载中的旧高亮，并允许 effect cleanup 阻止过期异步结果回写。 */
+export function startHighlightRequest(
+  highlight: HighlightRequest,
+  options: Parameters<HighlightRequest>[0],
+  applyResult: (result: HighlightResult | undefined) => void,
+): () => void {
+  let active = true;
+  const applyIfActive = (result: HighlightResult | undefined) => {
+    if (active) applyResult(result);
+  };
+  try {
+    const immediate = highlight(options, applyIfActive);
+    if (immediate !== null) applyIfActive(immediate);
+  } catch {
+    applyIfActive(undefined);
+  }
+  return () => {
+    active = false;
+  };
+}
+
+/**
+ * 流式高亮调度：流式追加的代码只按整行批量重新高亮，避免每个 delta 都重新 tokenize 整个代码块。
+ * - "highlight": 立即高亮（首次渲染、内容被替换、或新增了足够的完整行）
+ * - "settle": 等待流停止后补一次最终高亮（尾部不足一批时）
+ * - "none": 已是最新高亮结果
+ */
+export function streamingHighlightAction(
+  highlighted: HighlightedCode | undefined,
+  code: string,
+  language: string,
+  batchLines: number,
+): { kind: "none" } | { kind: "highlight" } | { kind: "settle" } {
+  if (highlighted === undefined) return { kind: "highlight" };
+  if (highlighted.code === code && highlighted.language === language) {
+    return { kind: "none" };
+  }
+  if (highlighted.language !== language || !code.startsWith(highlighted.code)) {
+    return { kind: "highlight" };
+  }
+  const completedTailLines = (code.slice(highlighted.code.length).match(/\n/g) ?? []).length;
+  return completedTailLines >= batchLines ? { kind: "highlight" } : { kind: "settle" };
 }
 
 export function resolveHighlightedTokens(
@@ -156,19 +202,52 @@ export function resolveHighlightedTokens(
   code: string,
   language: string,
 ): HighlightResult["tokens"] | undefined {
-  return highlighted?.code === code && highlighted.language === language ? highlighted.result.tokens : undefined;
+  if (!highlighted || highlighted.language !== language) return undefined;
+  if (highlighted.code === code) return highlighted.result.tokens;
+  if (code.startsWith(highlighted.code)) {
+    return mergeStreamingPrefix(highlighted.result.tokens, highlighted.code, code);
+  }
+  return undefined;
+}
+
+/** 高亮结果落后于当前流式代码时，保留已高亮的前缀行，尾部按纯文本行补齐。 */
+function mergeStreamingPrefix(
+  prefixTokens: HighlightResult["tokens"],
+  prefixCode: string,
+  code: string,
+): HighlightResult["tokens"] {
+  const tail = code.slice(prefixCode.length);
+  if (tail === "") return prefixTokens;
+  const lines = [...prefixTokens];
+  const [firstTailLine, ...restTailLines] = tail.split("\n");
+  if (firstTailLine !== "") {
+    if (prefixCode.endsWith("\n")) {
+      const lastLine = lines.at(-1);
+      const replacement = [{ content: firstTailLine, offset: 0 }];
+      if (lastLine !== undefined && lastLine.every((token) => token.content === "")) {
+        lines[lines.length - 1] = replacement;
+      } else {
+        lines.push(replacement);
+      }
+    } else {
+      const lastLine = lines.at(-1);
+      if (lastLine !== undefined && lastLine.length > 0) {
+        const lastToken = lastLine.at(-1)!;
+        lines[lines.length - 1] = [
+          ...lastLine,
+          { content: firstTailLine, offset: lastToken.offset + lastToken.content.length },
+        ];
+      } else {
+        lines.push([{ content: firstTailLine, offset: 0 }]);
+      }
+    }
+  }
+  for (const line of restTailLines) {
+    lines.push([{ content: line, offset: 0 }]);
+  }
+  return lines;
 }
 
 function plainTokens(code: string): HighlightResult["tokens"] {
   return (code || " ").split("\n").map((line) => [{ content: line, offset: 0 }]);
-}
-
-export function resolveTokenStyle(token: HighlightResult["tokens"][number][number]): CSSProperties {
-  const { backgroundColor, color, ...htmlStyle } = token.htmlStyle ?? {};
-  const style: Record<string, string | number> = { ...htmlStyle };
-  const lightColor = token.color ?? color;
-  const lightBackground = token.bgColor ?? backgroundColor;
-  if (lightColor) style["--markdown-code-token-color"] = lightColor;
-  if (lightBackground) style["--markdown-code-token-background"] = lightBackground;
-  return style as CSSProperties;
 }

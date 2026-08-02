@@ -13,6 +13,7 @@ const LUCIDE_PER_ICON_MODULE = /^lucide-react\/dist\/esm\/icons\/(?!index\.mjs$)
 const CSS_LAYER_ORDER = "@layer theme, base, components, utilities, overrides;";
 const LOCAL_STYLE_IMPORTS = new Map([
 	["tokens.css", '@import "./tokens.css";'],
+	["fonts.css", '@import "./fonts.css";'],
 	["base.css", '@import "./base.css";'],
 	["components.css", '@import "./components.css" layer(components);'],
 	["layout.css", '@import "./layout.css" layer(components);'],

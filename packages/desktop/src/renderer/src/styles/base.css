@@ -48,6 +48,23 @@
     height: 12px;
   }
 
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  textarea::-webkit-resizer {
+    background: linear-gradient(
+      135deg,
+      transparent 0 56%,
+      var(--scrollbar-thumb) 56% 62%,
+      transparent 62% 70%,
+      var(--scrollbar-thumb) 70% 76%,
+      transparent 76% 84%,
+      var(--scrollbar-thumb) 84% 90%,
+      transparent 90%
+    );
+  }
+
   ::-webkit-scrollbar-thumb {
     border: 3px solid transparent;
     border-radius: var(--shape-radius-md);

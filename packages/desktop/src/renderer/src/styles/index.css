@@ -6,6 +6,7 @@
 @import "katex/dist/katex.min.css" layer(components);
 @import "@xterm/xterm/css/xterm.css" layer(components);
 @import "./tokens.css";
+@import "./fonts.css";
 @import "./base.css";
 @import "./components.css" layer(components);
 @import "./layout.css" layer(components);

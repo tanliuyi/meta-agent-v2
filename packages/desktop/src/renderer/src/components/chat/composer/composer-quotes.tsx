@@ -42,13 +42,13 @@ export function ComposerQuotes() {
         <PopoverTrigger asChild>
           <div
             className="composer-quotes-anchor"
-            aria-label={`${quotes.length} 条注释`}
+            aria-label={`${quotes.length} 条引用`}
             onBlur={scheduleClose}
             tabIndex={0}
           >
             <div className="composer-quotes-trigger" onPointerEnter={showPreview} onPointerLeave={scheduleClose}>
               <MessageSquareMore aria-hidden="true" className="composer-quotes-icon size-3!" />
-              <span className="text-xs color-muted-foreground">{quotes.length} 条注释</span>
+              <span className="text-xs color-muted-foreground">{quotes.length} 条引用</span>
               <div className="composer-quotes-dismiss">
                 <button type="button" aria-label="移除全部引用" onClick={() => aui.composer().setQuote(undefined)}>
                   <X aria-hidden="true" className="size-4" />

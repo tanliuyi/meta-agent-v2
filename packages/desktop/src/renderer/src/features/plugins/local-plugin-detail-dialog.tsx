@@ -2,29 +2,35 @@ import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
+import type { Project } from "../../../../shared/contracts.ts";
 import type {
   DesktopExtensionDiagnostic,
   DesktopExtensionListEntry,
+  ExtensionScope,
 } from "../../../../shared/desktop-extension-contracts.ts";
 import { LocalPluginDetailContent } from "./local-plugin-detail-content.tsx";
 
 interface LocalPluginDetailDialogProps {
   plugin: DesktopExtensionListEntry;
   diagnostics: DesktopExtensionDiagnostic[];
+  projects: readonly Project[];
   open: boolean;
   mutating: boolean;
   onClose(): void;
   onToggleEnabled(enabled: boolean): void;
+  onScopeChange(scope: ExtensionScope, projectIds?: string[]): void;
   onRemove(): void;
 }
 
 export function LocalPluginDetailDialog({
   plugin,
   diagnostics,
+  projects,
   open,
   mutating,
   onClose,
   onToggleEnabled,
+  onScopeChange,
   onRemove,
 }: LocalPluginDetailDialogProps) {
   return (
@@ -35,8 +41,10 @@ export function LocalPluginDetailDialog({
         <LocalPluginDetailContent
           plugin={plugin}
           diagnostics={diagnostics}
+          projects={projects}
           mutating={mutating}
           onToggleEnabled={onToggleEnabled}
+          onScopeChange={onScopeChange}
           onRemove={onRemove}
         />
       </DialogContent>
