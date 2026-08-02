@@ -1,12 +1,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import {
-  createImageGenSettings,
-  listConfiguredProviders,
-  listKnownModelIds,
-  resolveModel,
-} from "./src/config.ts";
+import { createImageGenSettings, resolveModel } from "./src/config.ts";
 import { IMAGE_GEN_CONFIGURATION_SCHEMA, IMAGE_GEN_CONFIGURATION_SCHEMA_JSON } from "./src/configuration.ts";
 import { errorMessageForUser, toLogSummary } from "./src/errors.ts";
 import { generateImage } from "./src/generate.ts";
@@ -69,32 +64,6 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("image-gen", {
-    description: "Inspect image generation configuration or generate an image",
-    handler: async (args, ctx) => {
-      const raw = args.trim();
-      if (raw === "" || raw === "list") {
-        ctx.ui.notify(formatConfiguration(settings), "info");
-        return;
-      }
-      if (raw.startsWith("generate ")) {
-        const prompt = raw.slice("generate ".length).trim();
-        if (!prompt) {
-          ctx.ui.notify("Usage: /image-gen generate <prompt>", "error");
-          return;
-        }
-        try {
-          const result = await generateImage({ prompt }, { cwd: ctx.cwd, settings, signal: ctx.signal });
-          ctx.ui.notify(formatCommandSummary(result), "info");
-        } catch (error) {
-          console.error(`[pi-image-gen] command failed: ${toLogSummary(error)}`);
-          ctx.ui.notify(`Image generation failed: ${errorMessageForUser(error)}`, "error");
-        }
-        return;
-      }
-      ctx.ui.notify("Usage: /image-gen [list|generate <prompt>]", "error");
-    },
-  });
 }
 
 function resolveImageToolCapabilities(settings: ImageGenSettings): ImageToolCapabilities {
@@ -170,23 +139,6 @@ function sizeDescription(api: ApiStyle | null): string {
   return 'Provider-specific image size such as "1024x1024".';
 }
 
-function formatConfiguration(settings: ImageGenSettings): string {
-  const resolved = resolveModel(settings.defaultModel, settings);
-  const route =
-    "error" in resolved
-      ? resolved.error
-      : `${resolved.provider.name} (${resolved.provider.api}), API key ${resolved.provider.apiKey ? "configured" : "missing"}`;
-  const configured = listConfiguredProviders(settings).map((provider) => provider.name).join(", ") || "none";
-  return [
-    `Default model: ${settings.defaultModel}`,
-    `Route: ${route}`,
-    `Output directory: ${settings.outputDir ?? ".pi/images"}`,
-    `Providers with keys: ${configured}`,
-    `Known models: ${listKnownModelIds().join(", ")}`,
-    "Configuration: edit in Desktop plugin detail settings, or set provider environment variables.",
-  ].join("\n");
-}
-
 function formatToolResultText(result: ImageGenResult): string {
   return [
     `Generated ${result.images.length} image(s) via ${result.provider} (${result.model}). Render these lines verbatim in the final response:`,
@@ -197,13 +149,6 @@ function formatToolResultText(result: ImageGenResult): string {
         ? [markdown, `> revised prompt: ${image.revisedPrompt}`]
         : [markdown];
     }),
-  ].join("\n");
-}
-
-function formatCommandSummary(result: ImageGenResult): string {
-  return [
-    `Generated ${result.images.length} image(s) via ${result.provider} (${result.model}):`,
-    ...result.images.map((image) => image.path),
   ].join("\n");
 }
 

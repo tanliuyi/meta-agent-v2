@@ -7,7 +7,6 @@ under the Apache-2.0 license.
 ## Behavior
 
 - Registers the `image_generate` tool.
-- Registers `/image-gen list` and `/image-gen generate <prompt>`.
 - Defaults to the exact model ID `gpt-image-2`. There is no `image2` alias.
 - Supports OpenAI, Gemini, DashScope, Volcengine Ark, and OpenRouter.
 - Reads local or HTTP(S) reference images and writes generated images without overwriting existing files.
@@ -68,7 +67,6 @@ npx tsx -e "import { IMAGE_GEN_CONFIGURATION_SCHEMA_JSON } from './packages/plug
    get. Selecting the bare `index.ts` file also works but skips the manifest and
    therefore the configuration form.
 4. Apply the extension set. Desktop replaces the session worker; it does not hot-reload the entry in place.
-5. Run `/image-gen list` to verify the selected model and credential state.
 
 Secrets saved in the local configuration form are encrypted with the same
 system credential store as marketplace plugins. The environment variable

@@ -231,19 +231,16 @@ describe("extension contract", () => {
     let registeredTool:
       | { name: string; execute: (...args: unknown[]) => Promise<unknown> }
       | undefined;
-    const commands: string[] = [];
     const mockApi = {
       getConfig: () => ({ openaiApiKey: "bad-key" }),
       on: vi.fn(),
       registerTool: (tool: unknown) => {
         registeredTool = tool as { name: string; execute: (...args: unknown[]) => Promise<unknown> };
       },
-      registerCommand: (name: string) => commands.push(name),
     } as unknown as ExtensionAPI;
     imageGenPlugin(mockApi);
 
     expect(registeredTool?.name).toBe("image_generate");
-    expect(commands).toEqual(["image-gen"]);
 
     vi.stubGlobal(
       "fetch",

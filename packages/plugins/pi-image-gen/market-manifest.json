@@ -224,8 +224,7 @@
   "capabilities": [
     "events.subscribe",
     "configuration.read",
-    "tools.register",
-    "commands.register"
+    "tools.register"
   ],
   "nativeModules": [],
   "executables": [],
