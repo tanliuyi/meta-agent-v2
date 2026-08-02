@@ -122,13 +122,6 @@ describe("DesktopThreadListItem", () => {
     expect(markup).toContain('aria-label="运行已完成"');
   });
 
-  it("hides the elapsed time while the completion dot is shown", () => {
-    const markup = renderThread({ ...baseThread, completed: true });
-
-    expect(markup).not.toContain('aria-label="更新时间"');
-    expect(markup).not.toContain("thread-time");
-  });
-
   it("hides the completion dot while the thread is running or active", () => {
     expect(renderThread({ ...baseThread, completed: true, running: true })).not.toContain("completed-dot");
     expect(renderThread({ ...baseThread, completed: true }, { active: true })).not.toContain("completed-dot");

@@ -11,6 +11,31 @@ import {
 } from "../src/renderer/src/components/chat/composer/composer-suggestion-model.ts";
 import type { SlashCommand } from "../src/shared/contracts.ts";
 
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return { left, top, right: left + width, bottom: top + height, width, height } as DOMRect;
+}
+
+function suggestionContainer(
+  containerRect: DOMRect,
+  itemRect: DOMRect,
+  labelRect: DOMRect | null,
+  scrollIntoView = vi.fn(),
+): HTMLElement & { scrollTop: number } {
+  return {
+    scrollTop: 0,
+    getBoundingClientRect: () => containerRect,
+    querySelector: (selector: string) => {
+      if (selector === '[aria-selected="true"], [data-highlighted]') {
+        return { getBoundingClientRect: () => itemRect, scrollIntoView };
+      }
+      if (selector === ".composer-command-group-label") {
+        return labelRect ? { getBoundingClientRect: () => labelRect } : null;
+      }
+      return null;
+    },
+  } as unknown as HTMLElement & { scrollTop: number };
+}
+
 describe("ComposerSuggestions", () => {
   it("不截断排在十条之后的 extension 命令", () => {
     const commands: SlashCommand[] = Array.from({ length: 12 }, (_, index) => ({
@@ -24,15 +49,59 @@ describe("ComposerSuggestions", () => {
     expect(suggestions.at(-1)).toMatchObject({ label: "/command-12", text: "/command-12 " });
   });
 
-  it("键盘选择变化时将活动项滚动到可视区域", () => {
+  it("键盘选择变化时只滚动建议列表露出下方条目", () => {
     const scrollIntoView = vi.fn();
-    const querySelector = vi.fn(() => ({ scrollIntoView }));
-    const container = { querySelector } as unknown as HTMLElement;
+    const container = suggestionContainer(rect(0, 0, 300, 200), rect(0, 200, 300, 32), null, scrollIntoView);
 
     scrollSelectedSuggestion(container);
 
-    expect(querySelector).toHaveBeenCalledWith('[aria-selected="true"], [data-highlighted]');
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(container.scrollTop).toBe(32);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("向上滚动时避开吸顶分组标签，避免高亮项被遮挡", () => {
+    const container = suggestionContainer(rect(0, 0, 300, 200), rect(0, 20, 300, 32), rect(0, 0, 300, 36));
+    container.scrollTop = 100;
+
+    scrollSelectedSuggestion(container);
+
+    // 条目顶部 20 位于标签（高 36）覆盖区：向上滚 16，对齐到标签之下。
+    expect(container.scrollTop).toBe(84);
+  });
+
+  it("条目在视口上方时对齐到吸顶标签之下", () => {
+    const container = suggestionContainer(rect(0, 0, 300, 200), rect(0, -40, 300, 32), rect(0, 0, 300, 36));
+    container.scrollTop = 100;
+
+    scrollSelectedSuggestion(container);
+
+    // 条目顶部 -40 对齐到容器顶部 + 标签高 36：向上滚 76。
+    expect(container.scrollTop).toBe(24);
+  });
+
+  it("条目完全可见时不滚动", () => {
+    const scrollIntoView = vi.fn();
+    const container = suggestionContainer(
+      rect(0, 0, 300, 200),
+      rect(0, 72, 300, 32),
+      rect(0, 0, 300, 36),
+      scrollIntoView,
+    );
+    container.scrollTop = 100;
+
+    scrollSelectedSuggestion(container);
+
+    expect(container.scrollTop).toBe(100);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("无分组标签的列表向上滚动时对齐容器顶部", () => {
+    const container = suggestionContainer(rect(0, 0, 300, 200), rect(0, -40, 300, 32), null);
+    container.scrollTop = 100;
+
+    scrollSelectedSuggestion(container);
+
+    expect(container.scrollTop).toBe(60);
   });
 
   it("忽略大小写与分隔符并优先返回名称匹配", () => {
@@ -53,8 +122,16 @@ describe("ComposerSuggestions", () => {
     ]);
   });
 
-  it("仅本地化内置扩展命令，技能与提示词保持原样", () => {
-    expect(slashCommandDisplayName({ name: "reload", source: "builtin" })).toBe("reload");
+  it("本地化 Desktop 内置命令和内置扩展命令，技能与提示词保持原样", () => {
+    expect(slashCommandDisplayName({ name: "reload", source: "builtin" })).toBe("重新加载");
+    expect(
+      slashCommandDisplayDescription({
+        name: "reload",
+        description: "Reload extensions, skills, prompts, and context files",
+        source: "builtin",
+      }),
+    ).toBe("重新加载扩展、技能、提示词和上下文文件");
+    expect(slashCommandDisplayName({ name: "reload", source: "extension" })).toBe("reload");
     expect(slashCommandDisplayName({ name: "skill:add-llm-provider", source: "skill" })).toBe("add-llm-provider");
     expect(slashCommandDisplayName({ name: "memory-interview", source: "extension" })).toBe("记忆访谈");
     expect(slashCommandDisplayName({ name: "subagents", source: "extension" })).toBe("subagents");

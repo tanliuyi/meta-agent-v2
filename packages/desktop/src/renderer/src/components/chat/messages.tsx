@@ -345,22 +345,38 @@ function useThreadTurnSummaryResolver(
 
 function messageSummary(message: ThreadMessage | undefined): MessageNavigationSummary[] {
   if (!message) return [];
-  const textParts: string[] = [];
-  for (const part of message.content) {
-    if ("text" in part && typeof part.text === "string") textParts.push(part.text);
-  }
-  const text = textParts.join("\n\n").trim();
+  const text =
+    message.role === "assistant"
+      ? assistantFinalResponseText(message)
+      : messageText(message.content).replace(/\s+/g, " ");
   if (!text) return [];
   const markdown = message.role === "assistant";
   return [
     {
       markdown,
       text: truncateMessageNavigationPreview(
-        markdown ? text : text.replace(/\s+/g, " "),
+        text,
         markdown ? MESSAGE_NAVIGATION_ASSISTANT_PREVIEW_MAX_CHARS : MESSAGE_NAVIGATION_USER_PREVIEW_MAX_CHARS,
       ),
     },
   ];
+}
+
+function assistantFinalResponseText(message: ThreadMessage): string {
+  const lastRunPartIndex = message.content.findLastIndex(
+    (part) => part.type === "reasoning" || part.type === "tool-call",
+  );
+  return messageText(message.content.slice(lastRunPartIndex + 1));
+}
+
+function messageText(parts: readonly unknown[]): string {
+  const textParts: string[] = [];
+  for (const part of parts) {
+    if (typeof part === "object" && part !== null && "text" in part && typeof part.text === "string") {
+      textParts.push(part.text);
+    }
+  }
+  return textParts.join("\n\n").trim();
 }
 
 function truncateMessageNavigationPreview(text: string, maxLength: number): string {

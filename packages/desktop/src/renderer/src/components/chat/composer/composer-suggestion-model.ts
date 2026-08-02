@@ -31,14 +31,20 @@ const COMMAND_SOURCE_SEARCH_TERMS: Record<SlashCommand["source"], string> = {
   skill: "skill 技能",
 };
 
+const BUILTIN_COMMAND_LOCALIZATIONS: Readonly<Record<string, { name: string; description: string }>> = {
+  reload: { name: "重新加载", description: "重新加载扩展、技能、提示词和上下文文件" },
+};
+
 const BUILTIN_EXTENSION_COMMAND_LOCALIZATIONS: Readonly<Record<string, { name: string; description: string }>> = {
   "memory-interview": { name: "记忆访谈", description: "回答问题并预先填写用户资料，以便跨会话记住你" },
   "learn-memory-tool": { name: "了解记忆工具", description: "在对话中查看记忆工具使用指南" },
   "memory-consolidate": { name: "整理记忆", description: "使用当前模型合并重复或过期记忆" },
 };
 
-function builtinExtensionCommandLocalization(command: SlashCommand) {
-  return command.source === "extension" ? BUILTIN_EXTENSION_COMMAND_LOCALIZATIONS[command.name] : undefined;
+function commandLocalization(command: SlashCommand) {
+  if (command.source === "builtin") return BUILTIN_COMMAND_LOCALIZATIONS[command.name];
+  if (command.source === "extension") return BUILTIN_EXTENSION_COMMAND_LOCALIZATIONS[command.name];
+  return undefined;
 }
 
 function normalizedSearchTerms(value: string): string[] {
@@ -54,7 +60,7 @@ function commandSearchScore(command: SlashCommand, terms: readonly string[]): nu
   if (terms.length === 0) return 0;
   const name = command.name.toLocaleLowerCase();
   const normalizedName = normalizedSearchTerms(name).join(" ");
-  const localization = builtinExtensionCommandLocalization(command);
+  const localization = commandLocalization(command);
   const displayName = localization?.name.toLocaleLowerCase() ?? "";
   const description = command.description?.toLocaleLowerCase() ?? "";
   const displayDescription = localization?.description.toLocaleLowerCase() ?? "";
@@ -75,16 +81,16 @@ function commandSearchScore(command: SlashCommand, terms: readonly string[]): nu
   return 100 + terms.reduce((score, term) => score + searchable.indexOf(term), 0);
 }
 
-/** 本地化内置扩展命令，其他资源仅移除技能协议前缀。 */
+/** 本地化 Desktop 内置命令和内置扩展命令，其他资源仅移除技能协议前缀。 */
 export function slashCommandDisplayName(command: SlashCommand): string {
   return (
-    builtinExtensionCommandLocalization(command)?.name ??
+    commandLocalization(command)?.name ??
     (command.source === "skill" ? command.name.replace(/^skill:/, "") : command.name)
   );
 }
 
 export function slashCommandDisplayDescription(command: SlashCommand): string | undefined {
-  return builtinExtensionCommandLocalization(command)?.description ?? command.description;
+  return commandLocalization(command)?.description ?? command.description;
 }
 
 /** 规范化命令名、来源和说明并按名称相关度排序。 */
@@ -145,7 +151,19 @@ export function composerSuggestionOptionId(listboxId: string, index: number): st
 
 /** 键盘选择变化时只滚动建议列表，不影响 Thread viewport。 */
 export function scrollSelectedSuggestion(container: HTMLElement | null): void {
-  container
-    ?.querySelector<HTMLElement>('[aria-selected="true"], [data-highlighted]')
-    ?.scrollIntoView({ block: "nearest" });
+  if (!container) return;
+  const item = container.querySelector<HTMLElement>('[aria-selected="true"], [data-highlighted]');
+  if (!item) return;
+  const containerRect = container.getBoundingClientRect();
+  const itemRect = item.getBoundingClientRect();
+  // 吸顶的分组标签（.composer-command-group-label）会盖住滚到其下方的条目：
+  // 顶部处于标签覆盖区或上方的条目需对齐到标签之下，否则键盘移动时高亮项会被遮挡。
+  const labelHeight = container.querySelector(".composer-command-group-label")?.getBoundingClientRect().height ?? 0;
+  if (itemRect.top < containerRect.top + labelHeight) {
+    container.scrollTop -= containerRect.top + labelHeight - itemRect.top;
+    return;
+  }
+  if (itemRect.bottom > containerRect.bottom) {
+    container.scrollTop += itemRect.bottom - containerRect.bottom;
+  }
 }

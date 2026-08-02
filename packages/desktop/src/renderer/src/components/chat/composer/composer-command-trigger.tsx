@@ -41,7 +41,7 @@ interface ComposerCommandTriggerProps {
 
 /** Slash command picker; selection is handled outside the editor so commands never become directive chips. */
 export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: ComposerCommandTriggerProps) {
-  const list = useRef<HTMLDivElement>(null);
+  const scrollContainer = useRef<HTMLDivElement>(null);
   const adapter = useMemo(
     () => ({
       categories: () => [],
@@ -60,7 +60,6 @@ export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: Com
 
   return (
     <ComposerPrimitive.Unstable_TriggerPopover
-      ref={list}
       char="/"
       adapter={adapter}
       className="composer-suggestions"
@@ -74,8 +73,11 @@ export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: Com
         }}
       />
       <ComposerTriggerState onOpenChange={onOpenChange} />
-      <ComposerCommandScrollSync container={list} />
-      <ComposerPrimitive.Unstable_TriggerPopoverItems className="composer-suggestions-scroll">
+      <ComposerCommandScrollSync container={scrollContainer} />
+      <ComposerPrimitive.Unstable_TriggerPopoverItems
+        ref={scrollContainer}
+        className="composer-suggestions-scroll composer-command-suggestions-scroll"
+      >
         {(items) =>
           items.length > 0 ? (
             <div className="composer-command-groups">

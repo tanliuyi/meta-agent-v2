@@ -15,7 +15,6 @@ import { ContextMenuContent } from "../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../shared/ui/context-menu-item.tsx";
 import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context.tsx";
 import { Badge } from "../assistant-ui/badge.tsx";
-import { ThreadElapsedTime } from "./thread-elapsed-time.tsx";
 
 const TREE_GUIDE_START = 16;
 const TREE_LEVEL_INDENT = 16;
@@ -186,9 +185,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
               <span className="running-dot" aria-label="运行中" />
             ) : thread.completed === true && !props.active ? (
               <span className="completed-dot" aria-label="运行已完成" />
-            ) : (
-              <ThreadElapsedTime updatedAt={thread.updatedAt} />
-            )}
+            ) : null}
           </button>
           <div ref={dragImageRef} className="thread-drag-image" aria-hidden="true">
             <PanelRight className="size-3.5 shrink-0" />

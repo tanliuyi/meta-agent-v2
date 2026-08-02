@@ -430,17 +430,10 @@ body.is-resizing-column .sidebar {
 .thread-row button:disabled {
   cursor: wait;
 }
-.thread-time {
-  flex: 0 0 auto;
-  color: hsl(var(--muted-foreground) / 0.65);
-  font-size: var(--type-size-caption);
-  white-space: nowrap;
-}
-
 .running-dot {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 12px;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
   border: 2px solid hsl(var(--muted-foreground) / 0.35);
   border-top-color: hsl(var(--foreground));
   border-radius: var(--shape-radius-round);

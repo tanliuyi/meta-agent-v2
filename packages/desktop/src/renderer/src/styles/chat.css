@@ -13,6 +13,7 @@
   font-size: 1.125em;
   font-weight: 600;
   text-decoration: none;
+  transform: rotate(-0.8deg) translateY(-0.15em);
 }
 .draft-project-name::before,
 .draft-project-name::after {
@@ -827,6 +828,10 @@
   overflow-x: hidden;
   overflow-y: auto;
   scroll-padding-block: 7px;
+}
+.composer-command-suggestions-scroll {
+  padding-top: 0;
+  scroll-padding-top: 0;
 }
 .composer-suggestions button {
   display: grid;
