@@ -11,11 +11,12 @@ interface DialogContentProps extends React.ComponentPropsWithoutRef<typeof Dialo
 
 /** 在 Radix Portal 中组合遮罩、内容与统一关闭按钮，保持焦点管理契约完整。 */
 export const DialogContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.Content>, DialogContentProps>(
-  ({ className, closeButtonClassName, children, ...props }, ref) => (
+  ({ className, closeButtonClassName, children, style, ...props }, ref) => (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
         ref={ref}
+        style={{ maxHeight: "var(--layout-dialog-max-height)", ...style }}
         className={cn(
           "fixed left-[50%] top-[50%] z-(--stack-dialog) grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-(--elevation-popover) duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:animate-none sm:rounded-lg",
           className,

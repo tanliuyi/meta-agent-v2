@@ -10,7 +10,13 @@ import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope } from "../../session-context.tsx";
 import { hasFinalResponseText } from "../message-part-grouping.ts";
 
-export function AssistantMessageActionBar() {
+export function AssistantMessageActionBar({
+  autohide = "not-last",
+  compact = false,
+}: {
+  autohide?: "not-last" | "never";
+  compact?: boolean;
+}) {
   const visible = useAuiState((state) => {
     const pi = state.message.metadata.custom.pi;
     return (
@@ -56,35 +62,37 @@ export function AssistantMessageActionBar() {
   if (!visible) return null;
 
   return (
-    <div className="flex min-h-7 items-center pt-1">
+    <div className={compact ? "flex min-h-7 items-center" : "flex min-h-7 items-center pt-1"}>
       <ActionBarPrimitive.Root
         data-slot="assistant-message-action-bar"
-        autohide="not-last"
+        autohide={autohide}
         className="animate-in fade-in flex gap-1 text-muted-foreground duration-200"
       >
         <ActionBarPrimitive.Copy asChild>
           <TooltipIconButton tooltip="复制消息" side="top">
             <AuiIf condition={(state) => state.message.isCopied}>
-              <Check className="animate-in zoom-in-50 fade-in" />
+              <Check className="animate-in zoom-in-50 fade-in opacity-60" />
             </AuiIf>
             <AuiIf condition={(state) => !state.message.isCopied}>
-              <Copy className="animate-in zoom-in-75 fade-in" />
+              <Copy className="animate-in zoom-in-75 fade-in opacity-60" />
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
+
         <TooltipIconButton
           tooltip="从这里分支"
           side="top"
           disabled={!active || !commandsReady || branching}
           onClick={onBranch}
         >
-          <Split className={branching ? "animate-in fade-in" : undefined} />
+          <Split className={branching ? "animate-in fade-in opacity-60" : "opacity-60"} />
         </TooltipIconButton>
+
         {/* 产品约束：非最终回复不展示入口；assistant-ui reload 链路保持注册。 */}
         <AuiIf condition={(state) => state.message.isLast && state.message.status?.type === "complete"}>
           <ActionBarPrimitive.Reload asChild>
             <TooltipIconButton tooltip="重新生成" side="top">
-              <RotateCcw />
+              <RotateCcw className="animate-in fade-in opacity-60" />
             </TooltipIconButton>
           </ActionBarPrimitive.Reload>
         </AuiIf>

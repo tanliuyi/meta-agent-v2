@@ -69,7 +69,7 @@ describe("plugin marketplace renderer errors", () => {
 
   it("explains that a 404 URL is not a marketplace service root", () => {
     expect(marketplaceEndpointErrorMessage("Marketplace request failed with HTTP 404")).toBe(
-      "该地址不是有效的插件市场 API。请填写市场服务根地址，而不是 Desktop 或 Renderer 地址。",
+      "该地址不是有效的插件市场 API。请填写市场服务根地址，而不是应用界面地址。",
     );
   });
 

@@ -233,6 +233,8 @@ export class ProjectStore {
         terminalHeight: 280,
         openFiles: [],
         expandedPaths: [],
+        tabs: [],
+        activeTabKey: null,
       }
     );
   }

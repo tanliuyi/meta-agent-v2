@@ -6,6 +6,7 @@ import { Textarea } from "@renderer/shared/ui/textarea";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import type { ChangeEvent } from "react";
 import type { PluginConfigurationField } from "../../../../shared/plugin-configuration-contracts.ts";
+import { PluginConfigurationFieldLabelRow } from "./plugin-configuration-field-label-row.tsx";
 import type { PluginConfigurationController } from "./use-plugin-configuration.ts";
 
 export function PluginConfigurationFieldControl({
@@ -22,9 +23,9 @@ export function PluginConfigurationFieldControl({
   const describedBy = [descriptionId, errorId].filter(Boolean).join(" ") || undefined;
   if (field.type === "boolean") {
     return (
-      <div className="plugin-configuration-toggle-field">
+      <div className="plugin-configuration-toggle-field" data-deprecated={field.deprecated ? "true" : undefined}>
         <div>
-          <label htmlFor={id}>{field.label}</label>
+          <PluginConfigurationFieldLabelRow id={id} field={field} controller={controller} />
           {field.description ? <span id={descriptionId}>{field.description}</span> : null}
           {error ? (
             <span id={errorId} className="plugin-configuration-field-error">
@@ -45,10 +46,14 @@ export function PluginConfigurationFieldControl({
   if (field.type === "secret") {
     const configured = controller.snapshot?.secrets[field.key] === true && !controller.clearedSecrets.has(field.key);
     return (
-      <div className="plugin-configuration-field">
+      <div className="plugin-configuration-field" data-deprecated={field.deprecated ? "true" : undefined}>
         <div className="plugin-configuration-label-row">
           <label htmlFor={id}>{field.label}</label>
-          <span>{configured ? "已配置" : "未配置"}</span>
+          {field.deprecated ? <span className="plugin-configuration-deprecated-badge">已弃用</span> : null}
+          {field.deprecatedMessage ? (
+            <span className="plugin-configuration-deprecated-message">{field.deprecatedMessage}</span>
+          ) : null}
+          <span className="plugin-configuration-field-status">{configured ? "已配置" : "未配置"}</span>
         </div>
         {field.description ? <span id={descriptionId}>{field.description}</span> : null}
         <div className="plugin-configuration-secret-row">
@@ -59,6 +64,7 @@ export function PluginConfigurationFieldControl({
             placeholder={configured ? "输入新值以替换" : field.placeholder}
             minLength={field.minLength}
             maxLength={field.maxLength}
+            pattern={field.pattern}
             disabled={!controller.snapshot?.secretStorageAvailable}
             autoComplete="new-password"
             aria-describedby={describedBy}
@@ -90,16 +96,18 @@ export function PluginConfigurationFieldControl({
   }
   if (field.type === "select") {
     return (
-      <div className="plugin-configuration-field">
-        <label id={`${id}-label`}>{field.label}</label>
+      <div className="plugin-configuration-field" data-deprecated={field.deprecated ? "true" : undefined}>
+        <PluginConfigurationFieldLabelRow id={id} labelId={`${id}-label`} field={field} controller={controller} />
         {field.description ? <span id={descriptionId}>{field.description}</span> : null}
         <Select
           className="plugin-configuration-select"
+          id={id}
           value={String(controller.values[field.key] ?? "")}
           options={field.options}
           placeholder="选择一个选项"
           aria-labelledby={`${id}-label`}
           aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
           onValueChange={(value) => controller.setValue(field.key, value)}
         />
         {error ? (
@@ -114,6 +122,7 @@ export function PluginConfigurationFieldControl({
     id,
     value: String(controller.values[field.key] ?? ""),
     placeholder: field.type === "number" ? undefined : field.placeholder,
+    pattern: field.type === "textarea" || field.type === "number" ? undefined : field.pattern,
     minLength: field.type === "number" ? undefined : field.minLength,
     maxLength: field.type === "number" ? undefined : field.maxLength,
     required: field.required,
@@ -123,8 +132,8 @@ export function PluginConfigurationFieldControl({
       controller.setValue(field.key, event.currentTarget.value),
   };
   return (
-    <div className="plugin-configuration-field">
-      <label htmlFor={id}>{field.label}</label>
+    <div className="plugin-configuration-field" data-deprecated={field.deprecated ? "true" : undefined}>
+      <PluginConfigurationFieldLabelRow id={id} field={field} controller={controller} />
       {field.description ? <span id={descriptionId}>{field.description}</span> : null}
       {field.type === "textarea" ? (
         <Textarea {...common} />

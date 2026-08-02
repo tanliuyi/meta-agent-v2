@@ -1,7 +1,7 @@
+import { providerIcon } from "@renderer/shared/lib/provider-icons";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
 import { memo } from "react";
 import type { ProviderEntry } from "../../../../shared/providers-config-contracts.ts";
-import { providerIcon } from "./provider-icon.tsx";
 
 interface ProviderCardProps {
   entry: ProviderEntry;

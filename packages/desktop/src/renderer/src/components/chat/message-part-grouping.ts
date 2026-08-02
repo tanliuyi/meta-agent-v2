@@ -1,4 +1,4 @@
-import { type GroupByContext, groupPartByType, type PartState } from "@assistant-ui/react";
+import { type GroupByContext, groupPartByType, type MessageState, type PartState } from "@assistant-ui/react";
 
 const GROUP_BY_MEMO_KEY = Symbol.for("@assistant-ui/groupBy.memoKey");
 const RUN_GROUP_MEMO_KEY = "pi-run-activity:v1";
@@ -44,6 +44,21 @@ function isNonCompactionNotice(part: PartState): boolean {
 
 export function hasFinalResponseText(parts: readonly PartState[]): boolean {
   return findFinalResponseTextIndex(parts) >= 0;
+}
+
+export function hasFinalResponseInRun(messages: readonly MessageState[], messageId: string): boolean {
+  const messageIndex = messages.findIndex((message) => message.id === messageId);
+  if (messageIndex < 0) return false;
+
+  let startIndex = messageIndex;
+  while (startIndex > 0 && messages[startIndex - 1]?.role !== "user") startIndex -= 1;
+
+  let endIndex = messageIndex + 1;
+  while (endIndex < messages.length && messages[endIndex]?.role !== "user") endIndex += 1;
+
+  return messages
+    .slice(startIndex, endIndex)
+    .some((message) => message.role === "assistant" && hasFinalResponseText(message.parts));
 }
 
 function findFinalResponseTextIndex(parts: readonly PartState[]): number {

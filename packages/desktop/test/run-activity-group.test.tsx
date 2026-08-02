@@ -68,7 +68,7 @@ describe("RunActivityGroup", () => {
     expect(markup).toContain("4m5s");
   });
 
-  it("历史 run 默认折叠且不使用当前时间伪造处理耗时", () => {
+  it("历史 run 默认折叠并隐藏中间过程，且不使用当前时间伪造处理耗时", () => {
     const now = Date.now();
     const markup = renderToStaticMarkup(
       <RunActivityGroup running={false} startedAt={now - (4 * 60 + 5) * 1_000} hasContent stateKey="run">
@@ -79,6 +79,41 @@ describe("RunActivityGroup", () => {
     expect(markup).toContain('data-state="closed"');
     expect(markup).not.toContain('disabled=""');
     expect(markup).not.toContain("04m 05s");
+    expect(markup).not.toContain("step content");
+  });
+
+  it("完成后配置为默认展开时保留折叠入口", () => {
+    const markup = renderToStaticMarkup(
+      <RunActivityGroup running={false} startedAt={Date.now()} hasContent defaultOpenWhenComplete stateKey="run">
+        <span>step content</span>
+      </RunActivityGroup>,
+    );
+
+    expect(markup).toContain('data-state="open"');
+    expect(markup).not.toContain('disabled=""');
+    expect(markup).toContain('data-slot="reasoning-trigger-chevron"');
+    expect(markup).toContain("step content");
+  });
+
+  it("完成后默认展开时尊重历史收起状态", () => {
+    const disclosure = createSessionRecordStores().disclosure;
+    disclosure.set("message:run", false);
+    const markup = renderToStaticMarkup(
+      <ReasoningDisclosureStateProvider store={disclosure}>
+        <RunActivityGroup
+          running={false}
+          startedAt={Date.now()}
+          hasContent
+          defaultOpenWhenComplete
+          stateKey="message:run"
+        >
+          <span>step content</span>
+        </RunActivityGroup>
+      </ReasoningDisclosureStateProvider>,
+    );
+
+    expect(markup).toContain('data-state="closed"');
+    expect(markup).not.toContain('disabled=""');
     expect(markup).not.toContain("step content");
   });
 

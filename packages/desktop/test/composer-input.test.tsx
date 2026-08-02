@@ -100,6 +100,7 @@ describe("ComposerInput", () => {
         isRunning={false}
         isCancelable={false}
         materializing={false}
+        onCommandSelect={() => undefined}
         onSubmit={onSubmit}
         onSubmitRunning={onSubmitRunning}
         onEscapeCancelPendingChange={() => undefined}
@@ -142,6 +143,7 @@ describe("ComposerInput", () => {
         isRunning={true}
         isCancelable={true}
         materializing={false}
+        onCommandSelect={() => undefined}
         onSubmit={() => undefined}
         onSubmitRunning={() => undefined}
         onEscapeCancelPendingChange={onEscapeCancelPendingChange}

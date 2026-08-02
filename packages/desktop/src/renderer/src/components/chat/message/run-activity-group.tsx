@@ -10,6 +10,7 @@ export function RunActivityGroup({
   startedAt,
   completedAt,
   hasContent,
+  defaultOpenWhenComplete = false,
   stateKey,
   children,
 }: {
@@ -17,6 +18,7 @@ export function RunActivityGroup({
   startedAt: number;
   completedAt?: number;
   hasContent: boolean;
+  defaultOpenWhenComplete?: boolean;
   stateKey: string;
   children: ReactNode;
 }) {
@@ -28,7 +30,7 @@ export function RunActivityGroup({
 
   useEffect(() => {
     if (!running) {
-      if (previousRunning.current) setOpen(false);
+      if (previousRunning.current) setOpen(defaultOpenWhenComplete);
       setElapsedSeconds(
         completedAt === undefined && previousRunning.current
           ? elapsedDuration(startedAt, Date.now())
@@ -36,7 +38,7 @@ export function RunActivityGroup({
       );
     }
     previousRunning.current = running;
-  }, [completedAt, running, setOpen, startedAt]);
+  }, [completedAt, defaultOpenWhenComplete, running, setOpen, startedAt]);
 
   useEffect(() => {
     if (!running) return;
@@ -53,7 +55,7 @@ export function RunActivityGroup({
     <ReasoningRoot
       variant="ghost"
       className="aui-run-activity-root w-full"
-      open={running || storedOpen === true}
+      open={running || (storedOpen ?? defaultOpenWhenComplete)}
       onOpenChange={(nextOpen) => {
         if (!running && hasContent) setOpen(nextOpen);
       }}

@@ -1,9 +1,4 @@
-import {
-  ComposerPrimitive,
-  type Unstable_DirectiveFormatter,
-  type Unstable_DirectiveSegment,
-  type Unstable_TriggerItem,
-} from "@assistant-ui/react";
+import { ComposerPrimitive, type Unstable_TriggerItem } from "@assistant-ui/react";
 import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import FileText from "lucide-react/dist/esm/icons/file-text.mjs";
 import Sparkles from "lucide-react/dist/esm/icons/sparkles.mjs";
@@ -18,8 +13,6 @@ import {
 } from "./composer-suggestion-model.ts";
 import { ComposerTriggerState } from "./composer-trigger-state.tsx";
 
-const SLASH_COMMAND_RE = /(^|\s)\/([^\s/]+)/gu;
-
 const COMMAND_GROUPS = [
   { source: "builtin", label: "内置命令", icon: TerminalSquare },
   { source: "extension", label: "扩展命令", icon: Blocks },
@@ -31,39 +24,24 @@ const COMMAND_GROUPS = [
   icon: typeof TerminalSquare;
 }[];
 
-export function createSlashCommandFormatter(commands: readonly SlashCommand[]): Unstable_DirectiveFormatter {
-  const commandNames = new Set(commands.map((command) => command.name));
-  return {
-    serialize(item) {
-      return `/${item.id}`;
-    },
-    parse(text) {
-      const segments: Unstable_DirectiveSegment[] = [];
-      let lastIndex = 0;
-      for (const match of text.matchAll(SLASH_COMMAND_RE)) {
-        const name = match[2]!;
-        if (!commandNames.has(name)) continue;
+export function slashCommandAcceptsArguments(command: SlashCommand): boolean {
+  return command.acceptsArguments !== false;
+}
 
-        const commandStart = (match.index ?? 0) + match[1]!.length;
-        if (commandStart > lastIndex) segments.push({ kind: "text", text: text.slice(lastIndex, commandStart) });
-        segments.push({ kind: "mention", type: "command", label: `/${name}`, id: name });
-        lastIndex = commandStart + name.length + 1;
-      }
-      if (lastIndex < text.length) segments.push({ kind: "text", text: text.slice(lastIndex) });
-      return segments.length === 0 ? [{ kind: "text", text }] : segments;
-    },
-  };
+export function slashCommandText(command: SlashCommand, args: string): string {
+  const trimmedArgs = args.trim();
+  return `/${command.name}${trimmedArgs ? ` ${trimmedArgs}` : ""}`;
 }
 
 interface ComposerCommandTriggerProps {
   commands: readonly SlashCommand[];
+  onSelect(command: SlashCommand): void;
   onOpenChange(open: boolean): void;
 }
 
-/** Official assistant-ui / trigger that preserves Pi's /command text protocol. */
-export function ComposerCommandTrigger({ commands, onOpenChange }: ComposerCommandTriggerProps) {
+/** Slash command picker; selection is handled outside the editor so commands never become directive chips. */
+export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: ComposerCommandTriggerProps) {
   const list = useRef<HTMLDivElement>(null);
-  const formatter = useMemo(() => createSlashCommandFormatter(commands), [commands]);
   const adapter = useMemo(
     () => ({
       categories: () => [],
@@ -88,7 +66,13 @@ export function ComposerCommandTrigger({ commands, onOpenChange }: ComposerComma
       className="composer-suggestions"
       aria-label="命令建议"
     >
-      <ComposerPrimitive.Unstable_TriggerPopover.Directive formatter={formatter} />
+      <ComposerPrimitive.Unstable_TriggerPopover.Action
+        removeOnExecute
+        onExecute={(item) => {
+          const command = commands.find(({ name }) => name === item.id);
+          if (command) onSelect(command);
+        }}
+      />
       <ComposerTriggerState onOpenChange={onOpenChange} />
       <ComposerCommandScrollSync container={list} />
       <ComposerPrimitive.Unstable_TriggerPopoverItems className="composer-suggestions-scroll">

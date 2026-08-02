@@ -27,7 +27,7 @@ export function HostRequestDialog({ request, projectId, threadId }: HostRequestD
         onEscapeKeyDown={(event) => event.preventDefault()}
       >
         <p className="text-xs font-medium text-muted-foreground uppercase">
-          {request.toolCallId ? `工具 ${request.toolCallId}` : "Pi 扩展请求"}
+          {request.toolCallId ? `工具 ${request.toolCallId}` : "扩展请求"}
         </p>
         <DialogTitle>{request.title}</DialogTitle>
         {request.message ? <DialogDescription>{request.message}</DialogDescription> : null}

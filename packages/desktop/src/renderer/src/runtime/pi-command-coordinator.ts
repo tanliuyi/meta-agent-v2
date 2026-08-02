@@ -1,4 +1,4 @@
-import type { AppendMessage, CreateAttachment } from "@assistant-ui/react";
+import type { AppendMessage, CreateAttachment, QuoteInfo } from "@assistant-ui/react";
 import type {
   ClearedQueue,
   PiQueueItem,
@@ -8,6 +8,7 @@ import type {
   SessionCommandResult,
   SessionPromptInput,
 } from "../../../shared/contracts.ts";
+import { getComposerQuotes, getMessageQuotes, parseQuoteValue, toComposerQuote } from "./composer-quotes.ts";
 import { toComposerAttachmentInput, toPiImageInputs } from "./image-attachments.ts";
 
 interface SessionTarget {
@@ -17,8 +18,9 @@ interface SessionTarget {
 }
 
 interface ComposerTarget {
-  getState(): { text: string };
+  getState(): { text: string; quote?: QuoteInfo };
   setText(text: string): void;
+  setQuote?(quote: QuoteInfo | undefined): void;
   addAttachment(attachment: File | CreateAttachment): Promise<void>;
 }
 
@@ -224,6 +226,10 @@ export class PiCommandCoordinator {
       composer.getState().text,
     ];
     composer.setText(texts.filter((value) => value.trim()).join("\n\n"));
+    restoreComposerQuotes(
+      composer,
+      restored.flatMap(({ message }) => (message ? getMessageQuotes(message.metadata?.custom) : [])),
+    );
     for (const { message } of restored) {
       if (!message) continue;
       for (const attachment of message.attachments ?? []) {
@@ -256,6 +262,7 @@ export class PiCommandCoordinator {
     const composer = this.getComposer();
     if (!composer || message.role !== "user") return;
     composer.setText(messageText(message));
+    restoreComposerQuotes(composer, getMessageQuotes(message.metadata?.custom));
     for (const attachment of message.attachments ?? []) {
       await composer.addAttachment(toComposerAttachmentInput(attachment));
     }
@@ -281,7 +288,8 @@ async function promptInput(
   requestId: string = crypto.randomUUID(),
 ): Promise<SessionPromptInput> {
   if (message.role !== "user") throw new Error(`Pi Composer 只接受 user message: ${message.role}`);
-  const messageQuote = quote(message);
+  const messageQuotes = quotes(message);
+  const messageQuote = messageQuotes.length === 1 ? messageQuotes[0] : undefined;
   return {
     requestId,
     projectId: target.projectId,
@@ -289,6 +297,7 @@ async function promptInput(
     text: messageText(message),
     images: await toPiImageInputs(message.attachments ?? []),
     ...(messageQuote ? { quote: messageQuote } : {}),
+    ...(messageQuotes.length > 1 ? { quotes: messageQuotes } : {}),
     ...(desiredMode ? { desiredMode } : {}),
   };
 }
@@ -297,19 +306,17 @@ function messageText(message: AppendMessage): string {
   return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
 }
 
-function quote(message: AppendMessage): PiQuote | undefined {
-  const value = message.metadata?.custom?.quote;
-  if (
-    !value ||
-    typeof value !== "object" ||
-    !("text" in value) ||
-    typeof value.text !== "string" ||
-    !("messageId" in value) ||
-    typeof value.messageId !== "string"
-  )
-    return undefined;
-  const text = value.text.trim();
-  return text ? { text, messageId: value.messageId } : undefined;
+function quotes(message: AppendMessage): PiQuote[] {
+  const custom = message.metadata?.custom;
+  if (!custom || typeof custom !== "object") return [];
+  const value = "quotes" in custom ? custom.quotes : "quote" in custom ? custom.quote : undefined;
+  return parseQuoteValue(value);
+}
+
+function restoreComposerQuotes(composer: ComposerTarget, quotes: readonly QuoteInfo[]): void {
+  if (!composer.setQuote || quotes.length === 0) return;
+  const current = getComposerQuotes(composer.getState().quote);
+  composer.setQuote(toComposerQuote([...current, ...quotes]));
 }
 
 export function resolveReloadUserEntry(snapshot: PiThreadSnapshot, parentId: string | null): string | null {

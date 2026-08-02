@@ -5,8 +5,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import imageGenPlugin from "../index.ts";
 import { createImageGenSettings, resolveModel } from "../src/config.ts";
+import {
+  IMAGE_GEN_CONFIGURATION_SCHEMA,
+  IMAGE_GEN_CONFIGURATION_SCHEMA_JSON,
+} from "../src/configuration.ts";
 import { generateImage } from "../src/generate.ts";
 import { readImageResponse, resolveImageInputs } from "../src/image-input.ts";
+import { BUILT_IN_MODELS } from "../src/models.ts";
 import type { BuiltInProviderId, ImageGenSettings } from "../src/types.ts";
 
 const PNG_BYTES = Buffer.from(
@@ -41,6 +46,93 @@ describe("configuration", () => {
     if ("error" in openai || "error" in gemini) throw new Error("Expected models to resolve");
     expect(openai.provider.apiKey).toBe("openai-host-key");
     expect(gemini.provider.apiKey).toBe("gemini-env-key");
+  });
+});
+
+describe("configuration schema", () => {
+  it("declares every field the runtime consumes and no unknown ones", () => {
+    const expected = new Set([
+      "defaultModel",
+      "customModel",
+      "outputDir",
+      "openaiApiKey",
+      "openaiBaseUrl",
+      "geminiApiKey",
+      "geminiBaseUrl",
+      "dashscopeApiKey",
+      "dashscopeBaseUrl",
+      "arkApiKey",
+      "arkBaseUrl",
+      "openrouterApiKey",
+      "openrouterBaseUrl",
+    ]);
+    const keys = IMAGE_GEN_CONFIGURATION_SCHEMA.fields.map((field) => field.key);
+    expect(new Set(keys)).toEqual(expected);
+  });
+
+  it("declares defaults that match runtime behavior", () => {
+    const settings = createImageGenSettings({});
+    const defaultModel = IMAGE_GEN_CONFIGURATION_SCHEMA.fields.find((field) => field.key === "defaultModel");
+    if (defaultModel?.type !== "select") throw new Error("defaultModel field is missing");
+    expect(defaultModel).toMatchObject({ required: true, defaultValue: "gpt-image-2" });
+    expect(defaultModel.options).toHaveLength(BUILT_IN_MODELS.length + 1);
+    expect(defaultModel.options.at(-1)).toEqual({ value: "custom", label: "自定义模型…" });
+    for (const option of defaultModel.options.slice(0, -1)) {
+      expect(option.description).toBeTruthy();
+    }
+    expect(settings.defaultModel).toBe(defaultModel.defaultValue);
+    const customModel = IMAGE_GEN_CONFIGURATION_SCHEMA.fields.find((field) => field.key === "customModel");
+    if (customModel?.type !== "text") throw new Error("customModel field is missing");
+    expect(customModel.placeholder).toBe("openrouter/<厂商>/<模型>");
+    const outputDir = IMAGE_GEN_CONFIGURATION_SCHEMA.fields.find((field) => field.key === "outputDir");
+    if (outputDir?.type !== "path") throw new Error("outputDir field is missing");
+    expect(outputDir).toMatchObject({ defaultValue: ".pi/images" });
+    expect(createImageGenSettings({ outputDir: outputDir.defaultValue })).toMatchObject({
+      outputDir: ".pi/images",
+    });
+  });
+
+  it("prefers a custom model only when the built-in select is set to custom", () => {
+    expect(createImageGenSettings({ defaultModel: "custom" })).toMatchObject({ defaultModel: "gpt-image-2" });
+    expect(createImageGenSettings({ defaultModel: "custom", customModel: "openrouter/deepseek/deepseek-chat" })).toMatchObject(
+      { defaultModel: "openrouter/deepseek/deepseek-chat" },
+    );
+    expect(createImageGenSettings({ defaultModel: "gemini-3-pro-image", customModel: "nano-banana" })).toMatchObject(
+      { defaultModel: "gemini-3-pro-image" },
+    );
+  });
+
+  it("keeps secret fields free of defaults and validates base URLs with a pattern", () => {
+    for (const field of IMAGE_GEN_CONFIGURATION_SCHEMA.fields) {
+      if (field.type !== "secret") continue;
+      expect("defaultValue" in field).toBe(false);
+      expect(field.key.endsWith("ApiKey")).toBe(true);
+    }
+    for (const field of IMAGE_GEN_CONFIGURATION_SCHEMA.fields) {
+      if (field.type !== "text" || !field.key.endsWith("BaseUrl")) continue;
+      expect(field.pattern).toBe("^https?://");
+      expect(field.patternMessage).toBe("必须以 http:// 或 https:// 开头");
+      expect(() => new RegExp(field.pattern!)).not.toThrow();
+    }
+  });
+
+  it("round-trips through the JSON form used when publishing", () => {
+    expect(JSON.parse(IMAGE_GEN_CONFIGURATION_SCHEMA_JSON)).toEqual(IMAGE_GEN_CONFIGURATION_SCHEMA);
+  });
+
+  it("orders provider groups after the common configuration fields", () => {
+    const orders = IMAGE_GEN_CONFIGURATION_SCHEMA.fields.map((field) => field.order);
+    expect(orders).toEqual([...orders].sort((left, right) => (left ?? 0) - (right ?? 0)));
+    expect(new Set(orders).size).toBe(orders.length);
+  });
+
+  it("matches the market-manifest.json used by Desktop Developer Mode", async () => {
+    const manifest = JSON.parse(await readFile(join(import.meta.dirname, "..", "market-manifest.json"), "utf8"));
+    expect(manifest.schemaVersion).toBe(1);
+    expect(manifest.desktop.hostProfileVersion).toBe(1);
+    expect(manifest.pi.entry).toBe("index.ts");
+    expect(manifest.capabilities).toContain("configuration.read");
+    expect(manifest.configuration).toEqual(IMAGE_GEN_CONFIGURATION_SCHEMA);
   });
 });
 

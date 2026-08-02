@@ -14,6 +14,7 @@ describe("PiCommandCoordinator", () => {
   const cancel = vi.fn();
   const clearQueue = vi.fn();
   const setText = vi.fn();
+  const setQuote = vi.fn();
   const addAttachment = vi.fn();
   const getState = vi.fn(() => ({ text: "current draft" }));
   const resolveReloadTarget = vi.fn((parentId: string | null) => parentId);
@@ -114,6 +115,24 @@ describe("PiCommandCoordinator", () => {
     );
   });
 
+  it("将多条 assistant-ui quote metadata 作为结构化 IPC 数组发送", async () => {
+    const coordinator = createCoordinator();
+    const quotes = [
+      { text: "第一段", messageId: "assistant-1" },
+      { text: "第二段", messageId: "assistant-2" },
+    ];
+    coordinator.enqueue(
+      {
+        ...userMessage("请比较这两段内容"),
+        metadata: { custom: { quote: { ...quotes[0], quotes } } },
+      },
+      { steer: false },
+    );
+
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ text: "请比较这两段内容", quotes }));
+  });
+
   it("void queue callback 自行捕获 preflight rejection 并恢复当前 Composer", async () => {
     const error = new Error("preflight failed");
     prompt.mockRejectedValueOnce(error);
@@ -123,6 +142,26 @@ describe("PiCommandCoordinator", () => {
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledWith(error));
     expect(setText).toHaveBeenCalledWith("retry me");
+  });
+
+  it("preflight 失败时恢复当前 Composer 的多条引用", async () => {
+    prompt.mockRejectedValueOnce(new Error("preflight failed"));
+    const coordinator = createCoordinator();
+    const quotes = [
+      { text: "第一段", messageId: "assistant-1" },
+      { text: "第二段", messageId: "assistant-2" },
+    ];
+
+    coordinator.enqueue(
+      {
+        ...userMessage("retry me"),
+        metadata: { custom: { quote: { ...quotes[0], quotes } } },
+      },
+      { steer: false },
+    );
+
+    await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
+    expect(setQuote).toHaveBeenCalledWith(expect.objectContaining({ quotes }));
   });
 
   it("accepted false 结果按 preflight rejection 恢复当前 Composer", async () => {
@@ -214,9 +253,14 @@ describe("PiCommandCoordinator", () => {
   it("显式 clear 使用 Pi 返回顺序恢复文本，并为 Desktop-origin item 恢复附件", async () => {
     const coordinator = createCoordinator();
     prompt.mockResolvedValueOnce({ accepted: true, queued: true });
+    const quotes = [
+      { text: "第一段", messageId: "assistant-1" },
+      { text: "第二段", messageId: "assistant-2" },
+    ];
     const message: AppendMessage = {
       ...userMessage("queued"),
       attachments: [imageAttachment()],
+      metadata: { custom: { quote: { ...quotes[0], quotes } } },
     };
     coordinator.enqueue(message, { steer: true });
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
@@ -233,6 +277,7 @@ describe("PiCommandCoordinator", () => {
     ]);
 
     expect(setText).toHaveBeenCalledWith("queued\n\ncurrent draft");
+    expect(setQuote).toHaveBeenCalledWith(expect.objectContaining({ quotes }));
     expect(addAttachment).toHaveBeenCalledWith(
       expect.objectContaining({ id: "image", content: [{ type: "image", image: "data:image/png;base64,aW1hZ2U=" }] }),
     );
@@ -327,7 +372,7 @@ describe("PiCommandCoordinator", () => {
   function createCoordinator(): PiCommandCoordinator {
     return new PiCommandCoordinator({
       getTarget: () => target,
-      getComposer: () => ({ getState, setText, addAttachment }),
+      getComposer: () => ({ getState, setText, setQuote, addAttachment }),
       getPhase: () => phase,
       resolveReloadTarget,
       notify,

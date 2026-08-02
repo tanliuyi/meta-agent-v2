@@ -4,6 +4,7 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 export interface SelectOption {
   value: string;
   label: ReactNode;
+  description?: ReactNode;
   textValue?: string;
   disabled?: boolean;
 }
@@ -16,4 +17,8 @@ export interface SelectProps
   placeholder?: string;
   tooltip?: string;
   className?: string;
+  id?: string;
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
 }

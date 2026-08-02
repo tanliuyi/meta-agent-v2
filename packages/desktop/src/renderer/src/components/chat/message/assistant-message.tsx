@@ -1,14 +1,36 @@
-import { MessagePrimitive, useAuiState } from "@assistant-ui/react";
-import { useEffect, useState } from "react";
+import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
+import { cn } from "@renderer/shared/lib/cn";
+import { useThinkingVisibility } from "@renderer/state/thinking-visibility";
+import { useCallback, useEffect, useState } from "react";
+import { appendComposerQuote } from "../../../runtime/composer-quotes.ts";
+import { MarkdownImageReferenceProvider } from "../../assistant-ui/streamdown/streamdown-image-reference.tsx";
 import { useSessionScope } from "../../session-context.tsx";
 import { AssistantMessageActionBar } from "./assistant-message-action-bar.tsx";
 import { AssistantMessageContent } from "./assistant-message-content.tsx";
+import { MessageAvatar } from "./message-avatar.tsx";
+
+export interface PiMessageProvenance {
+  provider: string;
+  model: string;
+}
 
 export function AssistantMessage() {
+  const aui = useAui();
+  const messageId = useAuiState((state) => state.message.id);
   const threadRunning = useAuiState((state) => state.thread.isRunning);
   const isLast = useAuiState((state) => state.message.isLast);
   const messageRunning = useAuiState((state) => isPiAssistantRunning(state.message.metadata.custom));
   const runActivity = useSessionScope().record.stores.runActivity;
+  const { showAvatars } = useThinkingVisibility();
+  // 一轮（完整 run）只显示一个头像：仅在用户消息后或线程首条 assistant 消息展示。
+  const isTurnFirst = useAuiState((state) => {
+    const messages = state.thread.messages;
+    const index = messages.findIndex((message) => message.id === state.message.id);
+    if (index <= 0) return index === 0;
+    return messages[index - 1]?.role === "user";
+  });
+  const provenanceProvider = useAuiState((state) => piAssistantProvenance(state.message.metadata.custom)?.provider);
+  const provenanceModel = useAuiState((state) => piAssistantProvenance(state.message.metadata.custom)?.model);
   const [participatedInRun, setParticipatedInRun] = useState(() => messageRunning || runActivity.hasParticipated());
 
   useEffect(() => {
@@ -18,14 +40,31 @@ export function AssistantMessage() {
   }, [messageRunning, runActivity, threadRunning]);
 
   const isRunActivityRunning = threadRunning && isLast && (messageRunning || participatedInRun);
+  const referenceImage = useCallback(
+    (markdown: string) => appendComposerQuote(aui.thread().composer(), { text: markdown, messageId }),
+    [aui, messageId],
+  );
   return (
     <MessagePrimitive.Root
       data-slot="aui-assistant-message-root"
       data-role="assistant"
-      className="fade-in slide-in-from-bottom-1 animate-in relative -mb-7 pb-7 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
+      className={cn(
+        "fade-in slide-in-from-bottom-1 animate-in relative -mb-7 pb-7 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]",
+        showAvatars && "aui-assistant-message-avatar-mode",
+      )}
     >
-      <AssistantMessageContent isRunActivityRunning={isRunActivityRunning} isMessageRunning={messageRunning} />
-      <AssistantMessageActionBar />
+      {showAvatars && isTurnFirst && provenanceProvider !== undefined && provenanceModel !== undefined ? (
+        <div data-slot="message-avatar-header" className="flex min-w-0 items-center gap-2 pb-1">
+          <MessageAvatar provider={provenanceProvider} />
+          <div className="message-avatar-name">{provenanceModel}</div>
+        </div>
+      ) : null}
+      <div data-slot="assistant-message-content-wrapper" className="min-w-0">
+        <MarkdownImageReferenceProvider onReference={referenceImage}>
+          <AssistantMessageContent isRunActivityRunning={isRunActivityRunning} isMessageRunning={messageRunning} />
+        </MarkdownImageReferenceProvider>
+        <AssistantMessageActionBar autohide={"not-last"} compact={showAvatars} />
+      </div>
     </MessagePrimitive.Root>
   );
 }
@@ -36,6 +75,25 @@ export function isPiAssistantRunning(custom: unknown): boolean {
   if (!pi || typeof pi !== "object" || !("status" in pi)) return false;
   const status = pi.status;
   return Boolean(status && typeof status === "object" && "type" in status && status.type === "running");
+}
+
+/** 从消息 custom 元数据提取生成该消息的 provider 与模型；notice 等无 provenance 消息返回 undefined。 */
+export function piAssistantProvenance(custom: unknown): PiMessageProvenance | undefined {
+  if (!custom || typeof custom !== "object" || !("pi" in custom)) return undefined;
+  const pi = custom.pi;
+  if (!pi || typeof pi !== "object" || !("provenance" in pi)) return undefined;
+  const provenance = pi.provenance;
+  if (
+    !provenance ||
+    typeof provenance !== "object" ||
+    !("provider" in provenance) ||
+    !("model" in provenance) ||
+    typeof provenance.provider !== "string" ||
+    typeof provenance.model !== "string"
+  ) {
+    return undefined;
+  }
+  return { provider: provenance.provider, model: provenance.model };
 }
 
 export function reduceRunActivityParticipation(

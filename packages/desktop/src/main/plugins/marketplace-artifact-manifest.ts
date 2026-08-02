@@ -50,7 +50,7 @@ interface Manifest {
   files: Record<string, { mode?: "0644" | "0755" }>;
 }
 
-const CAPABILITIES = new Set<DesktopExtensionCapability>([
+export const CAPABILITIES = new Set<DesktopExtensionCapability>([
   "events.subscribe",
   "configuration.read",
   "tools.register",

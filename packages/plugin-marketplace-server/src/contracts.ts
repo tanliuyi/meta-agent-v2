@@ -25,6 +25,10 @@ interface PluginConfigurationFieldBase {
 	key: string;
 	label: string;
 	description?: string;
+	group?: string;
+	order?: number;
+	deprecated?: boolean;
+	deprecatedMessage?: string;
 	required?: boolean;
 }
 
@@ -35,12 +39,16 @@ export type PluginConfigurationField =
 			placeholder?: string;
 			minLength?: number;
 			maxLength?: number;
+			pattern?: string;
+			patternMessage?: string;
 	  })
 	| (PluginConfigurationFieldBase & {
 			type: "secret";
 			placeholder?: string;
 			minLength?: number;
 			maxLength?: number;
+			pattern?: string;
+			patternMessage?: string;
 	  })
 	| (PluginConfigurationFieldBase & {
 			type: "number";
@@ -53,7 +61,7 @@ export type PluginConfigurationField =
 	| (PluginConfigurationFieldBase & {
 			type: "select";
 			defaultValue?: string;
-			options: Array<{ value: string; label: string }>;
+			options: Array<{ value: string; label: string; description?: string }>;
 	  });
 
 export interface PluginConfigurationSchema {

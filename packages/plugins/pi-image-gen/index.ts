@@ -7,6 +7,7 @@ import {
   listKnownModelIds,
   resolveModel,
 } from "./src/config.ts";
+import { IMAGE_GEN_CONFIGURATION_SCHEMA, IMAGE_GEN_CONFIGURATION_SCHEMA_JSON } from "./src/configuration.ts";
 import { errorMessageForUser, toLogSummary } from "./src/errors.ts";
 import { generateImage } from "./src/generate.ts";
 import type {
@@ -182,6 +183,7 @@ function formatConfiguration(settings: ImageGenSettings): string {
     `Output directory: ${settings.outputDir ?? ".pi/images"}`,
     `Providers with keys: ${configured}`,
     `Known models: ${listKnownModelIds().join(", ")}`,
+    "Configuration: edit in Desktop plugin detail settings, or set provider environment variables.",
   ].join("\n");
 }
 
@@ -213,4 +215,5 @@ function altFromPath(path: string): string {
 
 export { createImageGenSettings, resolveModel } from "./src/config.ts";
 export { generateImage } from "./src/generate.ts";
+export { IMAGE_GEN_CONFIGURATION_SCHEMA, IMAGE_GEN_CONFIGURATION_SCHEMA_JSON } from "./src/configuration.ts";
 export type { DesktopImageGenConfig, GenerateImageParams, ImageGenResult } from "./src/types.ts";

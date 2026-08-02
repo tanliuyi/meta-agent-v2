@@ -1,7 +1,7 @@
 import { ComposerPrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
-import Quote from "lucide-react/dist/esm/icons/quote.mjs";
+import Command from "lucide-react/dist/esm/icons/command.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
-import { type FormEvent, useCallback, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import type { SessionControlState } from "../../../../../shared/contracts.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
 import { ComposerAddAttachment } from "../../assistant-ui/attachment/composer-add-attachment.tsx";
@@ -9,10 +9,13 @@ import { ComposerAttachments } from "../../assistant-ui/attachment/composer-atta
 import { ModelSelect } from "../model-select.tsx";
 import { ProjectSelect } from "../project-select.tsx";
 import { ThinkingSelect } from "../thinking-select.tsx";
+import { slashCommandAcceptsArguments, slashCommandText } from "./composer-command-trigger.tsx";
 import { ComposerExtensionCommand } from "./composer-extension-command.tsx";
 import { ComposerInput } from "./composer-input.tsx";
 import { ComposerQueue } from "./composer-queue.tsx";
+import { ComposerQuotes } from "./composer-quotes.tsx";
 import { ComposerSubmitControl } from "./composer-submit-control.tsx";
+import { slashCommandDisplayName } from "./composer-suggestion-model.ts";
 import type { ComposerProps } from "./composer-types.ts";
 import { ComposerWidgets } from "./composer-widgets.tsx";
 
@@ -28,6 +31,8 @@ export function Composer(props: ComposerProps) {
   const [sending, setSending] = useState(false);
   const [escapeCancelPending, setEscapeCancelPending] = useState(false);
   const [selectingProject, setSelectingProject] = useState(false);
+  const [selectedCommand, setSelectedCommand] = useState<SessionControlState["commands"][number] | null>(null);
+  const selectedCommandRef = useRef(selectedCommand);
   const [error, setError] = useState<string | null>(null);
   const materializing = props.mode === "draft" && props.phase === "materializing";
   const isRunning = useAuiState((state) => state.thread.isRunning);
@@ -49,12 +54,27 @@ export function Composer(props: ComposerProps) {
     setError(errorMessage(value));
   }, []);
 
+  const selectCommand = useCallback((command: SessionControlState["commands"][number] | null) => {
+    selectedCommandRef.current = command;
+    setSelectedCommand(command);
+  }, []);
+
+  const materializeSelectedCommand = useCallback(() => {
+    const command = selectedCommandRef.current;
+    if (!command) return;
+    const args = aui.composer().getState().text;
+    aui.composer().setText(slashCommandText(command, args));
+    selectCommand(null);
+  }, [aui, selectCommand]);
+
   useAuiEvent("composer.attachmentAddError", ({ message }) => {
     setError(message);
   });
 
   const submitRunning = useCallback(() => {
-    if (props.mode !== "session" || aui.composer().getState().text.trim().length === 0 || sending) return;
+    if (props.mode !== "session" || sending) return;
+    materializeSelectedCommand();
+    if (aui.composer().getState().text.trim().length === 0) return;
     setSending(true);
     setError(null);
     try {
@@ -64,11 +84,12 @@ export function Composer(props: ComposerProps) {
     } finally {
       setSending(false);
     }
-  }, [aui, mode, props.mode, reportError, sending]);
+  }, [aui, materializeSelectedCommand, mode, props.mode, reportError, sending]);
 
   const submitDraft = async () => {
+    if (props.mode !== "draft") return;
+    materializeSelectedCommand();
     if (
-      props.mode !== "draft" ||
       !props.project?.available ||
       !props.config?.model ||
       props.config.readiness.state !== "ready" ||
@@ -96,9 +117,26 @@ export function Composer(props: ComposerProps) {
       void submitDraft();
       return;
     }
-    if (!isRunning) return;
+    if (!isRunning) {
+      materializeSelectedCommand();
+      return;
+    }
     event.preventDefault();
     submitRunning();
+  };
+
+  const handleCommandSelect = (command: SessionControlState["commands"][number]) => {
+    setError(null);
+    selectCommand(null);
+    if (slashCommandAcceptsArguments(command)) {
+      selectCommand(command);
+      return;
+    }
+
+    aui.composer().setText(slashCommandText(command, ""));
+    if (props.mode === "draft") void submitDraft();
+    else if (isRunning) submitRunning();
+    else aui.composer().send();
   };
 
   const readiness = props.mode === "draft" ? props.config?.readiness : props.readiness;
@@ -129,17 +167,7 @@ export function Composer(props: ComposerProps) {
         <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
           <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
             <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-(--composer-background) p-(--composer-padding) shadow-(--elevation-composer) transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-(--elevation-composer-focus) data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
-              <ComposerPrimitive.Quote className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
-                <Quote aria-hidden="true" className="size-3.5 shrink-0" />
-                <ComposerPrimitive.QuoteText className="min-w-0 truncate" />
-                <ComposerPrimitive.QuoteDismiss
-                  type="button"
-                  aria-label="移除引用"
-                  className="ms-auto flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  <X aria-hidden="true" className="size-3.5" />
-                </ComposerPrimitive.QuoteDismiss>
-              </ComposerPrimitive.Quote>
+              <ComposerQuotes />
               <ComposerWidgets widgets={aboveWidgets} />
               <ComposerAttachments disabled={attachmentsDisabled} />
               <ComposerInput
@@ -149,13 +177,42 @@ export function Composer(props: ComposerProps) {
                 isRunning={isRunning}
                 isCancelable={isCancelable}
                 materializing={materializing}
-                onSubmit={props.mode === "draft" ? () => void submitDraft() : () => aui.composer().send()}
+                onCommandSelect={handleCommandSelect}
+                onSubmit={
+                  props.mode === "draft"
+                    ? () => void submitDraft()
+                    : () => {
+                        materializeSelectedCommand();
+                        aui.composer().send();
+                      }
+                }
                 onSubmitRunning={submitRunning}
                 onEscapeCancelPendingChange={setEscapeCancelPending}
               />
               <div className="flex min-h-8 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                   <ComposerAddAttachment disabled={attachmentsDisabled} />
+                  {selectedCommand ? (
+                    <div className="min-w-0 border-l border-border/70 pl-2">
+                      <div className="group flex h-7 min-w-0 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-within:bg-accent focus-within:text-accent-foreground">
+                        <button
+                          type="button"
+                          aria-label={`移除命令 ${slashCommandDisplayName(selectedCommand)}`}
+                          className="relative size-4 shrink-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          onClick={() => selectCommand(null)}
+                        >
+                          <Command
+                            aria-hidden="true"
+                            className="absolute inset-0 size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+                          />
+                          <span className="absolute inset-0 flex size-4 items-center justify-center rounded-full bg-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                            <X aria-hidden="true" className="size-3 text-background" />
+                          </span>
+                        </button>
+                        <span className="max-w-40 truncate">{slashCommandDisplayName(selectedCommand)}</span>
+                      </div>
+                    </div>
+                  ) : null}
                   {props.mode === "draft" && !props.fixedProject ? (
                     <ProjectSelect
                       projects={props.projects}
@@ -163,6 +220,7 @@ export function Composer(props: ComposerProps) {
                       disabled={disabled}
                       onValueChange={(projectId) => {
                         setError(null);
+                        selectCommand(null);
                         setSelectingProject(true);
                         void props.onProjectChange(projectId).then(
                           () => setSelectingProject(false),

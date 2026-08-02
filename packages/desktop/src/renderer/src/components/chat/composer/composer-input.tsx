@@ -47,6 +47,7 @@ interface ComposerInputProps {
   isRunning: boolean;
   isCancelable: boolean;
   materializing: boolean;
+  onCommandSelect(command: SlashCommand): void;
   onSubmit(): void;
   onSubmitRunning(): void;
   onEscapeCancelPendingChange(pending: boolean): void;
@@ -63,6 +64,7 @@ export function ComposerInput({
   isRunning,
   isCancelable,
   materializing,
+  onCommandSelect,
   onSubmit,
   onSubmitRunning,
   onEscapeCancelPendingChange,
@@ -179,7 +181,7 @@ export function ComposerInput({
       {projectId && !materializing ? (
         <ComposerFileTrigger projectId={projectId} onOpenChange={setFileTriggerOpen} />
       ) : null}
-      <ComposerCommandTrigger commands={commands} onOpenChange={setCommandTriggerOpen} />
+      <ComposerCommandTrigger commands={commands} onSelect={onCommandSelect} onOpenChange={setCommandTriggerOpen} />
       <LexicalComposerInput
         ref={editorRef}
         className="caret-primary text-foreground max-h-32 min-h-10 w-full bg-transparent px-1 py-1 text-sm leading-relaxed outline-none [&_.aui-lexical-input]:min-h-8 [&_.aui-lexical-input]:outline-none"

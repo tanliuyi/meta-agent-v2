@@ -14,7 +14,7 @@ export function AboutSettingsPage() {
     <div className="settings-content about-settings">
       <header className="about-product">
         <div className="about-product-mark" aria-hidden="true">
-          Pi
+          MA
         </div>
         <div>
           <h2>Meta Agent</h2>

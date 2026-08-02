@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
+import type { WorkbenchSessionTab } from "../../../../../shared/contracts.ts";
 import { createCompletedMarkerAutoClear } from "../../../state/completed-marker-auto-clear.ts";
 import { dispatchDesktop } from "../../../state/desktop-store.ts";
 import { useDesktopStore } from "../../../state/desktop-store-context.tsx";
 import { useSessionCache, useSessionCacheRecords } from "../../../state/session-cache-context.tsx";
-import type { WorkbenchSessionTab } from "../../../state/workbench-tab-context.tsx";
 import { ChatThread } from "../../chat/chat-thread.tsx";
 import { SessionProvider } from "../../session-provider.tsx";
 

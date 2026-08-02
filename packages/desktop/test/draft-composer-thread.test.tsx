@@ -63,6 +63,8 @@ describe("DraftComposerThread", () => {
     const markup = renderToStaticMarkup(createElement(TestSurface));
 
     expect(markup).toContain('data-draft-composer="true"');
+    expect(markup).toContain("max-w-(--layout-draft-composer-max-width)");
+    expect(markup).not.toContain("max-w-(--layout-thread-max-width)");
   });
 
   it("compact 模式隐藏标题并靠下对齐（侧边栏草稿）", () => {
@@ -130,6 +132,7 @@ describe("DraftComposerThread", () => {
     const markup = renderToStaticMarkup(createElement(TestRoutedSurface));
 
     expect(markup).toContain("做什么");
+    expect(markup).toContain('class="draft-project-name"');
     expect(markup).toContain("bg-background justify-center");
   });
 

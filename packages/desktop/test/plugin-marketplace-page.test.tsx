@@ -96,7 +96,7 @@ describe("plugin detail confirmation", () => {
     expect(pluginActionConfirmation("install", plugin.name, plugin)).toEqual({
       title: "安装 Example Tools？",
       description:
-        "市场插件是全信任 Pi Extension，可读写本机文件、访问网络并执行进程，不受能力声明限制。该版本包含原生模块或平台二进制。声明能力：tools.register。",
+        "市场插件以全信任方式运行，可读写本机文件、访问网络并执行进程，不受能力声明限制。该版本包含原生模块或平台二进制。声明能力：tools.register。",
       confirmLabel: "确认安装",
     });
     expect(pluginActionConfirmation("uninstall", plugin.name, plugin)).toEqual({

@@ -4,6 +4,7 @@ export type BuiltInProviderId = ApiStyle;
 
 export type DesktopImageGenConfig = {
   defaultModel?: string;
+  customModel?: string;
   outputDir?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;

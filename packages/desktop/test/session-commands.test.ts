@@ -6,7 +6,7 @@ describe("session commands", () => {
   it("合并 Desktop 支持的 builtin 与 Pi public resource 命令", () => {
     const commands = getSessionCommands({
       extensionRunner: {
-        getRegisteredCommands: () => [{ invocationName: "review", description: "审查代码" }],
+        getRegisteredCommands: () => [{ invocationName: "review", description: "审查代码", acceptsArguments: false }],
       },
       promptTemplates: [{ name: "fix", description: "修复问题" }],
       resourceLoader: {
@@ -19,10 +19,11 @@ describe("session commands", () => {
         name: "reload",
         description: "Reload extensions, skills, prompts, and context files",
         source: "builtin",
+        acceptsArguments: false,
       },
-      { name: "review", description: "审查代码", source: "extension" },
-      { name: "fix", description: "修复问题", source: "prompt" },
-      { name: "skill:frontend", description: "前端设计", source: "skill" },
+      { name: "review", description: "审查代码", source: "extension", acceptsArguments: false },
+      { name: "fix", description: "修复问题", source: "prompt", acceptsArguments: true },
+      { name: "skill:frontend", description: "前端设计", source: "skill", acceptsArguments: true },
     ]);
     expect(commands.filter(({ source }) => source === "builtin")).toHaveLength(1);
   });
@@ -52,8 +53,9 @@ describe("session commands", () => {
         name: "reload",
         description: "Reload extensions, skills, prompts, and context files",
         source: "builtin",
+        acceptsArguments: false,
       },
-      { name: "run:2", description: "Run a user workflow", source: "extension" },
+      { name: "run:2", description: "Run a user workflow", source: "extension", acceptsArguments: true },
     ]);
   });
 
@@ -71,10 +73,10 @@ describe("session commands", () => {
     } as unknown as ResourceLoader;
 
     expect(getDraftCommands(resourceLoader)).toEqual([
-      { name: "memory:1", description: "Memory command", source: "extension" },
-      { name: "memory:2", description: "Other memory command", source: "extension" },
-      { name: "fix", description: "Fix prompt", source: "prompt" },
-      { name: "skill:review", description: "Review skill", source: "skill" },
+      { name: "memory:1", description: "Memory command", source: "extension", acceptsArguments: true },
+      { name: "memory:2", description: "Other memory command", source: "extension", acceptsArguments: true },
+      { name: "fix", description: "Fix prompt", source: "prompt", acceptsArguments: true },
+      { name: "skill:review", description: "Review skill", source: "skill", acceptsArguments: true },
     ]);
   });
 
@@ -100,7 +102,7 @@ describe("session commands", () => {
     } as unknown as ResourceLoader;
 
     expect(getDraftCommands(resourceLoader)).toEqual([
-      { name: "run:2", description: "Run a user workflow", source: "extension" },
+      { name: "run:2", description: "Run a user workflow", source: "extension", acceptsArguments: true },
     ]);
   });
 });

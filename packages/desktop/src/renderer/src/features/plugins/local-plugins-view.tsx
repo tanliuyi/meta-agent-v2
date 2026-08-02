@@ -3,6 +3,8 @@ import { Switch } from "@renderer/shared/ui/switch";
 import { Toast } from "@renderer/shared/ui/toast";
 import FolderPlus from "lucide-react/dist/esm/icons/folder-plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import { useState } from "react";
+import { LocalPluginDetailDialog } from "./local-plugin-detail-dialog.tsx";
 import type { LocalPluginsController } from "./use-local-plugins.ts";
 
 interface LocalPluginsViewProps {
@@ -12,13 +14,17 @@ interface LocalPluginsViewProps {
 export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
   const snapshot = controller.snapshot;
   const plugins = snapshot?.entries.filter((entry) => entry.source === "development") ?? [];
+  const [selectedId, setSelectedId] = useState<string>();
+  const selected = plugins.find((plugin) => plugin.id === selectedId);
+  const selectedDiagnostics =
+    snapshot?.diagnostics.filter((diagnostic) => diagnostic.extensionId === selected?.id) ?? [];
 
   return (
     <>
       <header className="plugin-marketplace-page-heading plugin-local-heading">
         <div>
           <h2>本地插件</h2>
-          <span>开发和管理当前设备上的 Pi Extension。</span>
+          <span>开发和管理当前设备上的插件。</span>
         </div>
       </header>
 
@@ -76,13 +82,19 @@ export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
           <div className="plugin-local-list">
             {plugins.map((plugin) => (
               <div className="plugin-local-row" key={plugin.id}>
-                <div className="plugin-local-row-main">
+                <button
+                  type="button"
+                  className="plugin-local-row-main"
+                  aria-label={`查看 ${plugin.displayName} 详情`}
+                  title="查看详情"
+                  onClick={() => setSelectedId(plugin.id)}
+                >
                   <div className="plugin-local-row-title">
                     <strong>{plugin.displayName}</strong>
                     <span>Development</span>
                   </div>
                   <span>{plugin.displayPath ?? "本地扩展入口"}</span>
-                </div>
+                </button>
                 <div className="plugin-local-row-actions">
                   <Switch
                     checked={plugin.configuredEnabled}
@@ -114,6 +126,24 @@ export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
           </div>
         )}
       </section>
+
+      {selected ? (
+        <LocalPluginDetailDialog
+          plugin={selected}
+          diagnostics={selectedDiagnostics}
+          open
+          mutating={controller.mutating}
+          onClose={() => setSelectedId(undefined)}
+          onToggleEnabled={(enabled) =>
+            void controller.mutate({ type: "set-development-enabled", extensionId: selected.id, enabled })
+          }
+          onRemove={() =>
+            void controller
+              .mutate({ type: "remove-development-entry", extensionId: selected.id })
+              .then(() => setSelectedId(undefined))
+          }
+        />
+      ) : null}
     </>
   );
 }

@@ -132,10 +132,17 @@
     --layout-window-header-height: 40px;
     --layout-window-control-width: 46px;
     --layout-topbar-height: 42px;
+    --layout-dialog-max-height: calc(
+      100dvh -
+      var(--layout-window-header-height) -
+      var(--layout-topbar-height) -
+      var(--space-9)
+    );
     --layout-sidebar-width: 280px;
     --layout-sidebar-min-width: 220px;
     --layout-sidebar-max-width: 420px;
     --layout-thread-max-width: 810px;
+    --layout-draft-composer-max-width: 810px;
     --composer-radius: 24px;
     --composer-padding: var(--space-4);
     --composer-background: color-mix(in oklab, hsl(var(--muted)) 30%, hsl(var(--background)));
@@ -148,6 +155,16 @@
 
     --focus-ring-width: 2px;
     --focus-ring-offset: 1px;
+
+    /* 仅供调色板光谱使用，不参与应用语义色。 */
+    --color-picker-black: 0 0% 0%;
+    --color-picker-white: 0 0% 100%;
+    --color-picker-red: 0 100% 50%;
+    --color-picker-yellow: 60 100% 50%;
+    --color-picker-green: 120 100% 50%;
+    --color-picker-cyan: 180 100% 50%;
+    --color-picker-blue: 240 100% 50%;
+    --color-picker-magenta: 300 100% 50%;
   }
 
   html[data-theme="light"],
@@ -159,8 +176,8 @@
     --card-foreground: 220 10% 10%;
     --popover: 0 0% 100%;
     --popover-foreground: 220 10% 10%;
-    --primary: 220 9% 14%;
-    --primary-foreground: 0 0% 98%;
+    --primary: var(--theme-accent, 220 9% 14%);
+    --primary-foreground: var(--theme-accent-foreground, 0 0% 98%);
     --secondary: 220 14% 96%;
     --secondary-foreground: 220 9% 14%;
     --muted: 220 14% 96%;
@@ -176,8 +193,10 @@
     --info-foreground: 0 0% 100%;
     --border: 220 13% 89%;
     --input: 220 13% 89%;
-    --ring: 220 9% 24%;
+    --ring: var(--theme-accent, 220 9% 24%);
     --sidebar: 220 14% 97%;
+    --app-frame-background: color-mix(in oklab, hsl(var(--sidebar)) 97%, hsl(var(--primary)));
+    --app-frame-background-accent: color-mix(in oklab, hsl(var(--sidebar)) 94%, hsl(var(--primary)));
     --terminal-background: 220 20% 98%;
     --terminal-foreground: 220 15% 18%;
     --terminal-muted: 220 8% 45%;
@@ -192,8 +211,8 @@
     --window-close-foreground: 0 0% 100%;
     --overlay: 220 10% 10%;
     --focus-ring-color: hsl(var(--ring) / 0.35);
-    --settings-accent: 211 100% 43%;
-    --settings-accent-foreground: 0 0% 100%;
+    --settings-accent: var(--theme-accent, 211 100% 43%);
+    --settings-accent-foreground: var(--theme-accent-foreground, 0 0% 100%);
     --provider-icon-background: 0 0% 100%;
     --settings-group-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
     --settings-control-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
@@ -217,8 +236,8 @@
     --card-foreground: 0 0% 92%;
     --popover: 0 0% 14%;
     --popover-foreground: 0 0% 92%;
-    --primary: 0 0% 92%;
-    --primary-foreground: 0 0% 10%;
+    --primary: var(--theme-accent, 0 0% 92%);
+    --primary-foreground: var(--theme-accent-foreground, 0 0% 10%);
     --secondary: 0 0% 17%;
     --secondary-foreground: 0 0% 92%;
     --muted: 0 0% 16%;
@@ -234,8 +253,10 @@
     --info-foreground: 220 30% 10%;
     --border: 0 0% 23%;
     --input: 0 0% 25%;
-    --ring: 0 0% 72%;
+    --ring: var(--theme-accent, 0 0% 72%);
     --sidebar: 0 0% 8%;
+    --app-frame-background: color-mix(in oklab, hsl(var(--sidebar)) 96%, hsl(var(--primary)));
+    --app-frame-background-accent: color-mix(in oklab, hsl(var(--sidebar)) 93%, hsl(var(--primary)));
     --terminal-background: 225 17% 7%;
     --terminal-foreground: 220 15% 86%;
     --terminal-muted: 217 11% 65%;
@@ -257,8 +278,8 @@
     --markdown-code-line-number: #6e7681;
     --overlay: 0 0% 0%;
     --focus-ring-color: hsl(var(--ring) / 0.5);
-    --settings-accent: 211 100% 62%;
-    --settings-accent-foreground: 220 30% 10%;
+    --settings-accent: var(--theme-accent, 211 100% 62%);
+    --settings-accent-foreground: var(--theme-accent-foreground, 220 30% 10%);
     --settings-group-shadow: 0 1px 2px rgb(0 0 0 / 0.28);
     --settings-control-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
     --workspace-edge-shadow: -2px 0 6px rgb(0 0 0 / 0.3);

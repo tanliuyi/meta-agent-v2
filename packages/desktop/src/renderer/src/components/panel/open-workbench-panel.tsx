@@ -1,6 +1,7 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import { type CSSProperties, useRef, useState } from "react";
+import type { WorkbenchTab } from "../../../../shared/contracts.ts";
 import { parseSessionRecordKey } from "../../runtime/pi-session-store.ts";
 import { useDesktopSelector } from "../../state/desktop-context.tsx";
 import { selectProjectThreads } from "../../state/desktop-selectors.ts";
@@ -10,7 +11,7 @@ import { useSessionCache } from "../../state/session-cache-context.tsx";
 import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context.tsx";
 import { isThreadDescendantOf } from "../../state/thread-list-commands.ts";
 import { openThreadAsSidebarTab } from "../../state/thread-sidebar-open.ts";
-import type { WorkbenchTab, WorkbenchTabState } from "../../state/workbench-tab-context.tsx";
+import type { WorkbenchTabState } from "../../state/workbench-tab-context.tsx";
 import { workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../session-context.tsx";

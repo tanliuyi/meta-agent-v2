@@ -19,7 +19,7 @@ function SettingsRoute() {
   }, [sessionCache]);
 
   return (
-    <ToastProvider label="Meta Agent 设置通知" swipeDirection="right">
+    <ToastProvider label="设置通知" swipeDirection="right">
       <DesktopWindowTitle />
       <div className="app-shell">
         <SettingsPage />

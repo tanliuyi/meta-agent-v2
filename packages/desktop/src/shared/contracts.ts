@@ -106,6 +106,8 @@ export interface SlashCommand {
   name: string;
   description?: string;
   source: "builtin" | "extension" | "prompt" | "skill";
+  /** false 表示选择后无需填写参数，可直接执行。 */
+  acceptsArguments?: boolean;
 }
 
 /** 输入给 Pi 的图片。 */
@@ -171,7 +173,10 @@ export interface PiQuote {
 export interface PiUserMessage extends PiTimelineNodeBase {
   kind: "user";
   content: PiUserContentPart[];
+  /** Legacy single quote retained for persisted sessions. */
   quote?: PiQuote;
+  /** Multiple selected text references attached to a user prompt. */
+  quotes?: PiQuote[];
   delivery: { state: "live"; requestId?: string; queueId?: string } | { state: "persisted" };
 }
 
@@ -433,7 +438,10 @@ export interface SessionPromptInput {
   threadId: string;
   text: string;
   images: ImageInput[];
+  /** Legacy single quote retained for older renderer callers. */
   quote?: PiQuote;
+  /** Multiple selected text references attached to this prompt. */
+  quotes?: PiQuote[];
   desiredMode?: "steer" | "followUp";
 }
 
@@ -523,6 +531,28 @@ export type TerminalEvent =
       exitCode: number;
     });
 
+/** 在 workbench-panel 中注册的一个会话 tab。 */
+export interface WorkbenchSessionTab {
+  kind: "session";
+  /** 会话定位键，等于 sessionRecordKey(projectId, threadId)。 */
+  key: string;
+  projectId: string;
+  threadId: string;
+  /** subagent 会话的 agent 身份（原始名称）；普通会话缺省。 */
+  agentName?: string;
+  /** Tab 展示名（subagent 为内置中文名或原始名称，普通会话为标题）。 */
+  displayName: string;
+}
+
+/** 在 workbench-panel 中注册的一个内置/扩展 Panel tab。 */
+export interface WorkbenchPanelTab {
+  kind: "panel";
+  panel: string;
+}
+
+/** workbench-panel 中注册的 tab：会话或面板（含新会话草稿），均可关闭。 */
+export type WorkbenchTab = WorkbenchSessionTab | WorkbenchPanelTab;
+
 /** 每个 session 独立持有的 Workbench Panel 布局状态。 */
 export interface WorkbenchState {
   projectId: string;
@@ -538,4 +568,8 @@ export interface WorkbenchState {
   openFiles: string[];
   activeFile?: string;
   expandedPaths: string[];
+  /** 已打开的 workbench panel tab（会话/面板）；由渲染进程写入，跨刷新/重启持久化。 */
+  tabs?: WorkbenchTab[];
+  /** 当前选中的 tab 键；null 表示展示新建 Panel 缺省页。 */
+  activeTabKey?: string | null;
 }

@@ -8,6 +8,7 @@ import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context
 import { isThreadDescendantOf } from "../../state/thread-list-commands.ts";
 import { openThreadAsSidebarTab } from "../../state/thread-sidebar-open.ts";
 import { useWorkbenchTabs } from "../../state/workbench-tab-context.tsx";
+import { ThreadSidebarDropZoneSkeleton } from "./thread-sidebar-drop-zone-skeleton.tsx";
 
 /**
  * 会话拖拽到侧边栏的落点：渲染在工作区右缘（VS Code 式占位）。
@@ -62,6 +63,7 @@ export function ThreadSidebarDropZone() {
         event.preventDefault();
         setOver(false);
         if (!canDrop || !acceptsDrag(event.dataTransfer.types) || activeSessionKey === null) return;
+        const panelWidth = Math.round(event.currentTarget.getBoundingClientRect().width);
         openThreadAsSidebarTab(
           {
             workbenchTabs: { openSessionTab: (tab) => workbenchTabs.openSessionTab(activeSessionKey, tab) },
@@ -70,10 +72,13 @@ export function ThreadSidebarDropZone() {
             activeSessionKey,
           },
           dragged,
+          panelWidth,
         );
       }}
       onDragEnd={() => setOver(false)}
       aria-hidden="true"
-    />
+    >
+      <ThreadSidebarDropZoneSkeleton />
+    </div>
   );
 }

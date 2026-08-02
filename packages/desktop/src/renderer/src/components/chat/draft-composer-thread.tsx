@@ -30,12 +30,12 @@ export function DraftComposerThread({ compact = false, ...props }: DraftComposer
     >
       {compact ? null : (
         <h1 className="text-center mb-[68px] text-[32px]">
-          在 <span className="underline decoration-dashed decoration-1">{props.project?.name}</span> 做什么？
+          在 <span className="draft-project-name">{props.project?.name}</span> 做什么？
         </h1>
       )}
 
       <div className="thread-footer relative shrink-0 bg-background">
-        <div className="relative mx-auto flex w-full max-w-(--layout-thread-max-width) flex-col gap-2 px-4 pb-4">
+        <div className="relative mx-auto flex w-full max-w-(--layout-draft-composer-max-width) flex-col gap-2 px-4 pb-4">
           <Composer mode="draft" {...props} />
         </div>
       </div>

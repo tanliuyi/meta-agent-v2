@@ -30,6 +30,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
   },
   renderer: {
+    optimizeDeps: {
+      include: ["@rc-component/image"],
+    },
     resolve: {
       alias: {
         "@renderer": resolve("src/renderer/src"),

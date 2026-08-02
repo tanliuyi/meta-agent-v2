@@ -4,25 +4,25 @@ import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import SquarePen from "lucide-react/dist/esm/icons/square-pen.mjs";
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
 
-export function UserMessageActionBar() {
+export function UserMessageActionBar({ autohide = "always" }: { autohide?: "always" | "never" }) {
   return (
     <ActionBarPrimitive.Root
-      autohide="always"
+      autohide={autohide}
       className="aui-user-action-bar-root animate-in fade-in flex items-center gap-1 text-muted-foreground duration-200"
     >
       <ActionBarPrimitive.Edit asChild>
         <TooltipIconButton tooltip="编辑消息" className="aui-user-action-edit" side="top">
-          <SquarePen />
+          <SquarePen className="animate-in zoom-in-75 fade-in opacity-60" />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
 
       <ActionBarPrimitive.Copy asChild>
         <TooltipIconButton tooltip="复制消息" side="top">
           <AuiIf condition={(state) => state.message.isCopied}>
-            <Check className="animate-in zoom-in-50 fade-in" />
+            <Check className="animate-in zoom-in-50 fade-in opacity-60" />
           </AuiIf>
           <AuiIf condition={(state) => !state.message.isCopied}>
-            <Copy className="animate-in zoom-in-75 fade-in" />
+            <Copy className="animate-in zoom-in-75 fade-in opacity-60" />
           </AuiIf>
         </TooltipIconButton>
       </ActionBarPrimitive.Copy>

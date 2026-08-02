@@ -2,21 +2,24 @@ import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const setQuote = vi.hoisted(() => vi.fn());
 const messageState = vi.hoisted(() => ({
   threadRunning: true,
   isLast: true,
   status: "complete" as "complete" | "running",
   piStatus: "complete" as "complete" | "running",
   runActivityParticipated: false,
+  messages: [{ id: "assistant-1", role: "assistant" }] as Array<{ id: string; role: string }>,
 }));
 
 vi.mock("@assistant-ui/react", () => ({
   MessagePrimitive: {
     Root: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   },
+  useAui: () => ({ thread: () => ({ composer: () => ({ setQuote }) }) }),
   useAuiState: (selector: (state: unknown) => unknown) =>
     selector({
-      thread: { isRunning: messageState.threadRunning },
+      thread: { isRunning: messageState.threadRunning, messages: messageState.messages },
       message: {
         id: "assistant-1",
         isLast: messageState.isLast,
@@ -24,6 +27,10 @@ vi.mock("@assistant-ui/react", () => ({
         metadata: { custom: { pi: { status: { type: messageState.piStatus } } } },
       },
     }),
+}));
+
+vi.mock("../src/renderer/src/state/thinking-visibility.tsx", () => ({
+  useThinkingVisibility: () => ({ showAvatars: true }),
 }));
 
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
@@ -66,6 +73,7 @@ describe("AssistantMessage running state", () => {
     messageState.status = "complete";
     messageState.piStatus = "complete";
     messageState.runActivityParticipated = false;
+    setQuote.mockReset();
   });
 
   it("新 run 启动时不展开尚未参与本次运行的历史 assistant", () => {

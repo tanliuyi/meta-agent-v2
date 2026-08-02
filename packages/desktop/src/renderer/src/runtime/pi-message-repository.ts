@@ -98,10 +98,10 @@ export class PiMessageRepositoryConverter {
         }
       }
 
-      const projectedId = node.id;
+      const projectedId = resolveProjectedId(previous, nodes, startIndex, node);
       for (const member of members) displayIds.set(member.id, projectedId);
       const item = {
-        message: this.convertGroup(members),
+        message: this.convertGroup(members, projectedId),
         parentId: displayId(displayIds, node.parentId),
       };
       entries.push({ startIndex, endIndex: index, members, item });
@@ -113,14 +113,14 @@ export class PiMessageRepositoryConverter {
     return projection;
   }
 
-  private convertGroup(nodes: readonly PiTimelineNode[]): ThreadMessage {
+  private convertGroup(nodes: readonly PiTimelineNode[], projectedId: string): ThreadMessage {
     const first = nodes[0];
     if (!first) throw new Error("assistant-ui message group 不能为空");
-    if (nodes.length === 1) return this.convert(first);
+    if (nodes.length === 1) return this.convert(first, projectedId);
     if (first.kind !== "assistant") throw new Error("assistant-ui message group 必须以 assistant 开始");
 
     const cached = this.assistantGroups.get(first);
-    if (cached && sameMembers(cached.members, nodes)) return cached.message;
+    if (cached && cached.message.id === projectedId && sameMembers(cached.members, nodes)) return cached.message;
     const lastAssistant = nodes.findLast((node): node is PiAssistantMessage => node.kind === "assistant");
     if (!lastAssistant) throw new Error("assistant-ui message group 缺少 assistant");
     const message = this.assistantMessage(
@@ -133,20 +133,21 @@ export class PiMessageRepositoryConverter {
             : [],
       ),
       lastAssistant,
+      projectedId,
     );
     this.assistantGroups.set(first, { members: [...nodes], message });
     return message;
   }
 
-  private convert(node: PiTimelineNode): ThreadMessage {
+  private convert(node: PiTimelineNode, projectedId: string): ThreadMessage {
     const cached = this.messages.get(node);
-    if (cached) return cached;
+    if (cached?.id === projectedId) return cached;
     const message =
       node.kind === "assistant"
-        ? this.assistantMessage(node, node.content, node)
+        ? this.assistantMessage(node, node.content, node, projectedId)
         : node.kind === "user"
-          ? userMessage(node)
-          : noticeMessage(node);
+          ? userMessage(node, projectedId)
+          : noticeMessage(node, projectedId);
     this.messages.set(node, message);
     return message;
   }
@@ -182,9 +183,10 @@ export class PiMessageRepositoryConverter {
     first: PiAssistantMessage,
     parts: readonly (PiAssistantPart | PiNoticePart)[],
     last: PiAssistantMessage,
+    projectedId: string,
   ): ThreadMessage {
     return {
-      id: first.id,
+      id: projectedId,
       role: "assistant",
       createdAt: new Date(first.createdAt),
       content: parts.flatMap((part) => {
@@ -224,6 +226,23 @@ function projectionDirtyFrom(previous: ProjectionCache | undefined, nodes: reado
   let index = 0;
   while (index < sharedLength && previous.nodes[index] === nodes[index]) index += 1;
   return index;
+}
+
+/** canonical rekey 只更新 timeline identity；assistant-ui display identity 必须跨该边界稳定。 */
+function resolveProjectedId(
+  previous: ProjectionCache | undefined,
+  nodes: readonly PiTimelineNode[],
+  index: number,
+  node: PiTimelineNode,
+): string {
+  if (!previous) return node.id;
+  const change = getPiThreadNodesChange(nodes);
+  if (change?.previousNodes !== previous.nodes) return node.id;
+  const previousNode = change.previousNodes[index];
+  if (!previousNode || previousNode.kind !== node.kind) return node.id;
+  if (previousNode.id === node.id) return previous.displayIds.get(node.id) ?? node.id;
+  if (node.sourceEntryId !== node.id) return node.id;
+  return previous.displayIds.get(previousNode.id) ?? node.id;
 }
 
 function projectionRebuildStart(
@@ -280,15 +299,15 @@ function sameMembers(left: readonly PiTimelineNode[], right: readonly PiTimeline
   return left.length === right.length && left.every((node, index) => node === right[index]);
 }
 
-function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>): ThreadMessage {
+function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>, projectedId: string): ThreadMessage {
   const images = node.content.flatMap((part, index) => (part.type === "image" ? [{ part, index }] : []));
   return {
-    id: node.id,
+    id: projectedId,
     role: "user",
     createdAt: new Date(node.createdAt),
     content: node.content.flatMap((part) => (part.type === "text" ? [{ type: "text" as const, text: part.text }] : [])),
     attachments: images.map(({ part, index }) => ({
-      id: `${node.id}:image:${index}`,
+      id: `${projectedId}:image:${index}`,
       type: "image",
       name: imageName(part.mimeType, index),
       contentType: part.mimeType,
@@ -303,7 +322,7 @@ function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>): ThreadMes
     })),
     metadata: {
       custom: {
-        ...(node.quote ? { quote: node.quote } : {}),
+        ...(node.quotes ? { quotes: node.quotes } : node.quote ? { quote: node.quote } : {}),
         pi: {
           kind: "user",
           ...(node.sourceEntryId ? { sourceEntryId: node.sourceEntryId } : {}),
@@ -315,9 +334,9 @@ function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>): ThreadMes
   };
 }
 
-function noticeMessage(node: Extract<PiTimelineNode, { kind: "notice" }>): ThreadMessage {
+function noticeMessage(node: Extract<PiTimelineNode, { kind: "notice" }>, projectedId: string): ThreadMessage {
   return {
-    id: node.id,
+    id: projectedId,
     role: "assistant",
     createdAt: new Date(node.createdAt),
     content: [{ type: "data", name: "pi-notice", data: node }],

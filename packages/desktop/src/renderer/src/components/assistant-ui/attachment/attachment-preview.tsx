@@ -1,133 +1,125 @@
+import Image from "@rc-component/image";
 import { cn } from "@renderer/shared/lib/cn";
-import { type PointerEvent, useCallback, useRef, useState, type WheelEvent } from "react";
+import {
+  type CSSProperties,
+  cloneElement,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
+import { flushSync } from "react-dom";
+import "@rc-component/image/assets/index.css";
+import {
+  MAX_IMAGE_PREVIEW_SCALE,
+  MIN_IMAGE_PREVIEW_SCALE,
+  renderImagePreviewToolbar,
+} from "./image-preview-toolbar.tsx";
 
-const MIN_SCALE = 0.25;
-const MAX_SCALE = 10;
-const WHEEL_ZOOM_SPEED = 0.002;
-
-type Position = {
-  x: number;
-  y: number;
+type AttachmentPreviewProps = {
+  children: ReactElement;
+  src: string;
 };
 
-type ViewTransform = Position & {
-  scale: number;
+type ImagePreviewElementProps = {
+  className?: string;
+  style?: CSSProperties;
 };
 
-const INITIAL_TRANSFORM: ViewTransform = { x: 0, y: 0, scale: 1 };
+const IMAGE_PREVIEW_TRANSITION_TYPE = "aui-image-preview";
+const INVALID_VIEW_TRANSITION_NAME_CHARACTERS = /[^a-zA-Z0-9_-]/g;
 
-export function AttachmentPreview({ src }: { src: string }) {
-  const imageRef = useRef<HTMLImageElement>(null);
-  const transformRef = useRef(INITIAL_TRANSFORM);
-  const dragRef = useRef<(Position & { pointerId: number; originX: number; originY: number }) | null>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [transform, setTransform] = useState(INITIAL_TRANSFORM);
-
-  const updateTransform = useCallback((next: ViewTransform) => {
-    transformRef.current = next;
-    setTransform(next);
-  }, []);
-
-  const handleLoad = useCallback(() => {
-    setIsLoaded(true);
-    updateTransform(INITIAL_TRANSFORM);
-  }, [updateTransform]);
-
-  const handleWheel = useCallback(
-    (event: WheelEvent<HTMLDivElement>) => {
-      const image = imageRef.current;
-      if (!image) return;
-
-      event.preventDefault();
-      const current = transformRef.current;
-      const nextScale = Math.min(
-        MAX_SCALE,
-        Math.max(MIN_SCALE, current.scale * Math.exp(-event.deltaY * WHEEL_ZOOM_SPEED)),
-      );
-      if (nextScale === current.scale) return;
-
-      const imageRect = image.getBoundingClientRect();
-      const ratio = nextScale / current.scale;
-      updateTransform({
-        scale: nextScale,
-        x: current.x + (event.clientX - imageRect.left) * (1 - ratio),
-        y: current.y + (event.clientY - imageRect.top) * (1 - ratio),
-      });
+export function AttachmentPreview({ children, src }: AttachmentPreviewProps) {
+  const heroName = `aui-image-preview-hero-${useId().replaceAll(INVALID_VIEW_TRANSITION_NAME_CHARACTERS, "")}`;
+  const transitionRef = useRef<ViewTransition | null>(null);
+  const [open, setOpen] = useState(false);
+  const triggerElement = children as ReactElement<ImagePreviewElementProps>;
+  const trigger = cloneElement(triggerElement, {
+    className: cn(triggerElement.props.className, "aui-image-preview-hero"),
+    style: {
+      ...triggerElement.props.style,
+      viewTransitionName: open ? "none" : heroName,
     },
-    [updateTransform],
+  });
+
+  const renderPreviewImage = useCallback(
+    (originalNode: ReactElement) => {
+      const imageElement = originalNode as ReactElement<ImagePreviewElementProps>;
+      const previewImage = cloneElement(imageElement, {
+        className: cn(imageElement.props.className, "aui-image-preview-hero"),
+        style: {
+          ...imageElement.props.style,
+          viewTransitionName: open ? heroName : "none",
+        },
+      });
+      return <div className="aui-image-preview-image-stage">{previewImage}</div>;
+    },
+    [heroName, open],
   );
 
-  const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !imageRef.current) return;
+  const updateOpen = useCallback((nextOpen: boolean) => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!document.startViewTransition || reducedMotion) {
+      setOpen(nextOpen);
+      return;
+    }
 
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const current = transformRef.current;
-    dragRef.current = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      originX: current.x,
-      originY: current.y,
-    };
-    setIsDragging(true);
-  }, []);
-
-  const handlePointerMove = useCallback(
-    (event: PointerEvent<HTMLDivElement>) => {
-      const drag = dragRef.current;
-      if (!drag || drag.pointerId !== event.pointerId) return;
-
-      updateTransform({
-        ...transformRef.current,
-        x: drag.originX + event.clientX - drag.x,
-        y: drag.originY + event.clientY - drag.y,
+    transitionRef.current?.skipTransition();
+    const transition = document.startViewTransition({
+      types: [IMAGE_PREVIEW_TRANSITION_TYPE],
+      update: () => flushSync(() => setOpen(nextOpen)),
+    });
+    transitionRef.current = transition;
+    void transition.finished
+      .catch(() => undefined)
+      .finally(() => {
+        if (transitionRef.current !== transition) return;
+        transitionRef.current = null;
       });
-    },
-    [updateTransform],
-  );
-
-  const stopDragging = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    setIsDragging(false);
   }, []);
 
-  const zoomed = transform.scale !== 1;
+  useEffect(
+    () => () => {
+      transitionRef.current?.skipTransition();
+      transitionRef.current = null;
+    },
+    [],
+  );
 
   return (
-    <div
-      onWheel={handleWheel}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={stopDragging}
-      onPointerCancel={stopDragging}
-      className={cn(
-        "aui-attachment-preview relative flex h-full w-full touch-none select-none items-center justify-center overflow-hidden",
-        isLoaded && (isDragging ? "cursor-grabbing" : "cursor-grab"),
-      )}
-    >
-      {zoomed ? (
-        <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-xl bg-background/80 px-2 py-1 text-xs font-medium tabular-nums text-muted-foreground shadow-(--elevation-popover) backdrop-blur-sm">
-          {Math.round(transform.scale * 100)}%
-        </div>
-      ) : null}
-      <img
-        ref={imageRef}
-        src={src}
-        alt="Attachment preview"
-        draggable={false}
-        className={cn(
-          "block h-auto max-h-[calc(100dvh-2rem)] w-auto max-w-[calc(100vw-2rem)] object-contain will-change-transform",
-          isLoaded ? "aui-attachment-preview-image-loaded" : "aui-attachment-preview-image-loading invisible",
-        )}
-        style={{
-          transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
-          transformOrigin: "top left",
-        }}
-        onLoad={handleLoad}
-      />
-    </div>
+    <Image
+      src={src}
+      alt=""
+      aria-label="预览图片"
+      tabIndex={-1}
+      classNames={{
+        root: "aui-image-preview-trigger",
+        image: "aui-image-preview-trigger-image",
+        cover: "aui-image-preview-trigger-cover",
+        popup: {
+          root: cn(
+            "aui-image-preview",
+            typeof window !== "undefined" && window.desktop.platform === "darwin" && "aui-image-preview-macos",
+          ),
+        },
+      }}
+      preview={{
+        src,
+        closeIcon: false,
+        cover: { coverNode: trigger, placement: "center" },
+        focusTrap: false,
+        imageRender: renderPreviewImage,
+        maskClosable: true,
+        maxScale: MAX_IMAGE_PREVIEW_SCALE,
+        minScale: MIN_IMAGE_PREVIEW_SCALE,
+        motionName: "",
+        onOpenChange: updateOpen,
+        open,
+        scaleStep: 0.25,
+        actionsRender: renderImagePreviewToolbar,
+      }}
+    />
   );
 }

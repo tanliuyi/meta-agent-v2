@@ -3,7 +3,7 @@ import { createSessionRecord } from "../src/renderer/src/runtime/pi-session-stor
 import { createDesktopStore } from "../src/renderer/src/state/desktop-store.ts";
 import type { SessionCacheController } from "../src/renderer/src/state/session-cache-context.tsx";
 import { openThreadAsSidebarTab, type ThreadSidebarTarget } from "../src/renderer/src/state/thread-sidebar-open.ts";
-import type { WorkbenchSessionTab } from "../src/renderer/src/state/workbench-tab-context.tsx";
+import type { WorkbenchSessionTab } from "../src/shared/contracts.ts";
 
 const activeKey = "active\u0000main";
 
@@ -75,8 +75,28 @@ describe("openThreadAsSidebarTab", () => {
     expect(opened[0]?.displayName).toBe("并行任务");
   });
 
-  it("panel 未打开时一并展开，并持久化到 workbench 存储", () => {
+  it("panel 未打开时使用视觉占位宽度展开，并持久化到 workbench 存储", () => {
     const update = stubWindowDesktop();
+    const record = activeRecord(false);
+    openThreadAsSidebarTab(
+      {
+        workbenchTabs: { openSessionTab: () => undefined },
+        cache: { get: () => record } as unknown as SessionCacheController,
+        store: createDesktopStore(),
+        activeSessionKey: activeKey,
+      },
+      { projectId: "active", threadId: "child", title: "子会话" },
+      720,
+    );
+
+    const workbench = record.stores.workbench.getSnapshot();
+    expect(workbench?.panelOpen).toBe(true);
+    expect(workbench?.panelWidth).toBe(720);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ panelOpen: true, panelWidth: 720 }));
+  });
+
+  it("未提供视觉占位宽度时保留原有面板宽度", () => {
+    stubWindowDesktop();
     const record = activeRecord(false);
     openThreadAsSidebarTab(
       {
@@ -88,9 +108,6 @@ describe("openThreadAsSidebarTab", () => {
       { projectId: "active", threadId: "child", title: "子会话" },
     );
 
-    const workbench = record.stores.workbench.getSnapshot();
-    expect(workbench?.panelOpen).toBe(true);
-    expect(workbench?.panelWidth).toBe(480);
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ panelOpen: true }));
+    expect(record.stores.workbench.getSnapshot()?.panelWidth).toBe(480);
   });
 });

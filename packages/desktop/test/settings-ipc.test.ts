@@ -5,6 +5,7 @@ import { CHANNELS } from "../src/shared/channels.ts";
 const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, (...args: unknown[]) => unknown>(),
+  showOpenDialog: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -12,7 +13,7 @@ vi.mock("electron", () => ({
     fromWebContents: () => undefined,
     getAllWindows: () => [],
   },
-  dialog: { showOpenDialog: vi.fn() },
+  dialog: { showOpenDialog: electron.showOpenDialog },
   ipcMain: {
     handle: (channel: string, listener: (...args: unknown[]) => unknown) => electron.handles.set(channel, listener),
     on: (channel: string, listener: (...args: unknown[]) => unknown) => electron.listeners.set(channel, listener),
@@ -45,8 +46,28 @@ describe("settings IPC", () => {
   });
 
   test("映射 settings 配置读写处理器", async () => {
-    const snapshot = { revision: "one", settings: { showThinking: true, autoExpandRunning: true } };
-    const input = { expectedRevision: "one", settings: { showThinking: false, autoExpandRunning: false } };
+    const snapshot = {
+      revision: "one",
+      settings: {
+        showThinking: true,
+        autoExpandRunning: true,
+        showAvatars: true,
+        messageWidth: 810,
+        userName: "用户",
+        userAvatarPath: null,
+      },
+    };
+    const input = {
+      expectedRevision: "one",
+      settings: {
+        showThinking: false,
+        autoExpandRunning: false,
+        showAvatars: false,
+        messageWidth: 810,
+        userName: "Tan",
+        userAvatarPath: "/Users/tan/avatar.png",
+      },
+    };
     settings.getConfig.mockResolvedValue(snapshot);
     settings.saveConfig.mockResolvedValue({ status: "saved", snapshot });
 
@@ -56,5 +77,19 @@ describe("settings IPC", () => {
       snapshot,
     });
     expect(settings.saveConfig).toHaveBeenCalledWith(input);
+  });
+
+  test("选择头像只返回外部图片路径", async () => {
+    electron.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ["/Users/tan/avatar.webp"] });
+
+    await expect(electron.handles.get(CHANNELS.settingsChooseUserAvatar)?.({ sender: {} })).resolves.toBe(
+      "/Users/tan/avatar.webp",
+    );
+    expect(electron.showOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: ["openFile"],
+        filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      }),
+    );
   });
 });

@@ -147,6 +147,135 @@ describe("DesktopExtensionSettingsService", () => {
     });
   });
 
+  it("carries manifest capabilities and configuration schema into the snapshot", async () => {
+    const pluginDirectory = join(directory, "configurable-plugin");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(pluginDirectory, "market-manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "dev.configurable", name: "Configurable", version: "0.1.0", publisherId: "local" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: ["configuration.read", "tools.register"],
+        configuration: {
+          version: 1,
+          fields: [{ key: "endpoint", label: "Endpoint", type: "text", required: true }],
+        },
+      }),
+      "utf8",
+    );
+    const before = await service.getConfig();
+
+    const approved = await service.approveDevelopmentEntry(
+      { requestId: "approve-configurable", expectedRevision: before.revision },
+      pluginDirectory,
+    );
+
+    expect(approved.status).toBe("saved");
+    if (approved.status !== "saved") throw new Error("approval failed");
+    const entry = approved.snapshot.entries.find((candidate) => candidate.id === "development:entry-id");
+    expect(entry).toMatchObject({
+      capabilities: ["configuration.read", "tools.register"],
+      configurationSchema: {
+        version: 1,
+        fields: [{ key: "endpoint", label: "Endpoint", type: "text", required: true }],
+      },
+    });
+    await expect(service.getDevelopmentConfigurationSchema("development:entry-id")).resolves.toMatchObject({
+      version: 1,
+    });
+    await expect(service.getDevelopmentConfigurationSchema("example.configurable")).resolves.toBeUndefined();
+  });
+
+  it("refreshes manifest metadata when an enabled development plugin is approved again", async () => {
+    const pluginDirectory = join(directory, "refreshable-plugin");
+    const manifestPath = join(pluginDirectory, "market-manifest.json");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "dev.refreshable", name: "Before", version: "0.1.0", publisherId: "local" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: ["tools.register"],
+      }),
+      "utf8",
+    );
+    const before = await service.getConfig();
+    const first = await service.approveDevelopmentEntry(
+      { requestId: "approve-refreshable-first", expectedRevision: before.revision },
+      pluginDirectory,
+    );
+    if (first.status !== "saved") throw new Error("first approval failed");
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "dev.refreshable", name: "After", version: "0.2.0", publisherId: "local" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: ["configuration.read"],
+        configuration: {
+          version: 1,
+          fields: [{ key: "endpoint", label: "Endpoint", type: "text" }],
+        },
+      }),
+      "utf8",
+    );
+    const refreshed = await service.approveDevelopmentEntry(
+      { requestId: "approve-refreshable-second", expectedRevision: first.snapshot.revision },
+      pluginDirectory,
+    );
+
+    expect(refreshed).toMatchObject({
+      status: "saved",
+      snapshot: {
+        entries: [
+          { id: "builtin" },
+          { id: "curated" },
+          {
+            id: "development:entry-id",
+            displayName: "After",
+            configuredEnabled: true,
+            capabilities: ["configuration.read"],
+            configurationSchema: {
+              version: 1,
+              fields: [{ key: "endpoint", label: "Endpoint", type: "text" }],
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects a manifest that declares configuration without the configuration.read capability", async () => {
+    const pluginDirectory = join(directory, "bad-plugin");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(pluginDirectory, "market-manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "dev.bad", name: "Bad", version: "0.1.0", publisherId: "local" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: ["tools.register"],
+        configuration: { version: 1, fields: [{ key: "endpoint", label: "Endpoint", type: "text" }] },
+      }),
+      "utf8",
+    );
+    const before = await service.getConfig();
+
+    await expect(
+      service.approveDevelopmentEntry({ requestId: "approve-bad", expectedRevision: before.revision }, pluginDirectory),
+    ).rejects.toThrow("configuration requires the configuration.read capability");
+  });
+
   it("approves a plugin directory without a manifest by resolving an index entry", async () => {
     const pluginDirectory = join(directory, "plain-plugin");
     await mkdir(pluginDirectory, { recursive: true });
@@ -304,6 +433,75 @@ describe("DesktopExtensionSettingsService", () => {
     expect((await service.getConfig()).reloadRequired).toBe(true);
     expect(JSON.parse(await readFile(join(directory, "extensions.json"), "utf8"))).toMatchObject({
       future: { keep: true },
+    });
+  });
+
+  it("loads legacy development entries without capabilities", async () => {
+    await mkdir(directory, { recursive: true });
+    const entryPath = join(directory, "legacy-extension.ts");
+    await writeFile(entryPath, "export default function () {}\n", "utf8");
+    await writeFile(
+      join(directory, "extensions.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          developerMode: true,
+          curatedEnabled: {},
+          developmentEntries: [
+            {
+              id: "development:legacy",
+              displayName: "Legacy Extension",
+              entryPath,
+              enabled: true,
+              displayPath: "legacy-extension.ts",
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await expect(service.getConfig()).resolves.toMatchObject({
+      developerMode: true,
+      entries: [{ id: "builtin" }, { id: "curated" }, { id: "development:legacy", enabled: true, capabilities: [] }],
+    });
+    await expect(service.getInternalConfig()).resolves.toMatchObject({
+      developmentEntries: [{ id: "development:legacy", capabilities: [] }],
+    });
+  });
+
+  it("falls back to builtins when extension settings are invalid", async () => {
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, "extensions.json"),
+      JSON.stringify({
+        version: 1,
+        developerMode: true,
+        curatedEnabled: { curated: true },
+        developmentEntries: [{ id: "development:broken", enabled: true }],
+      }),
+      "utf8",
+    );
+
+    await expect(service.getConfig()).resolves.toMatchObject({
+      developerMode: false,
+      entries: [
+        { id: "builtin", enabled: true },
+        { id: "curated", enabled: false },
+      ],
+      diagnostics: [
+        {
+          code: "DESKTOP_EXTENSION_SETTINGS_INVALID",
+          message: "extensions.json development entry is invalid",
+        },
+      ],
+    });
+    await expect(service.getInternalConfig()).resolves.toMatchObject({
+      developerMode: false,
+      curatedEnabled: { curated: false },
+      developmentEntries: [],
     });
   });
 });

@@ -2,6 +2,70 @@
   margin-bottom: 0;
 }
 
+.markdown-image-block {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+}
+
+.markdown-image-preview-trigger {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--shape-radius-sm);
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.markdown-image-preview-trigger:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.markdown-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: min(70dvh, 720px);
+  object-fit: contain;
+}
+
+.markdown-image-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--background) / 0.88);
+  box-shadow: var(--elevation-popover);
+  opacity: 0;
+  backdrop-filter: blur(8px);
+  transition: opacity 120ms ease;
+}
+
+.markdown-image-block:hover .markdown-image-actions,
+.markdown-image-block:focus-within .markdown-image-actions {
+  opacity: 1;
+}
+
+.markdown-image-action {
+  color: hsl(var(--foreground));
+}
+
+@media (hover: none) {
+  .markdown-image-actions {
+    opacity: 1;
+  }
+}
+
 .markdown-inline-code {
   padding: 0.125em 0.35em;
   border: 1px solid hsl(var(--border) / 0.7);

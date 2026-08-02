@@ -82,7 +82,7 @@ export function DependenciesSettingsPage() {
       <header className="settings-page-heading dependency-page-heading">
         <div>
           <h2>依赖项</h2>
-          <p>管理 Desktop 使用的 Git Bash</p>
+          <p>管理 Git Bash</p>
         </div>
         {window.desktop.platform === "win32" ? (
           <Button variant="outline" size="sm" disabled={busy} onClick={() => void diagnose()}>

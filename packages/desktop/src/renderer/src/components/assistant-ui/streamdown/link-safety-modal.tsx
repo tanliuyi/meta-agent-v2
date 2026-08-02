@@ -27,7 +27,7 @@ export function LinkSafetyModal({ url, isOpen, onClose }: LinkSafetyModalProps) 
               onClose();
             }}
           >
-            继续打开
+            打开
           </Button>
         </DialogFooter>
       </DialogContent>

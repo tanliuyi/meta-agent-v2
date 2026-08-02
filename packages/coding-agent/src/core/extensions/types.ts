@@ -1157,6 +1157,8 @@ export interface RegisteredCommand {
 	name: string;
 	sourceInfo: SourceInfo;
 	description?: string;
+	/** Set to false when selecting the command should execute it immediately without argument input. */
+	acceptsArguments?: boolean;
 	getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
 }

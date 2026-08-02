@@ -5,8 +5,13 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  /* 窗口外壳使用 --sidebar 面板色（浅色冷灰蓝 / 深色近黑），与工作区卡片形成层次。 */
-  background: hsl(var(--sidebar));
+  /* 中性底色叠加低浓度主题色的斜向变化，避免纯色铺满和高饱和染色。 */
+  background: linear-gradient(
+    145deg,
+    var(--app-frame-background-accent) 0%,
+    var(--app-frame-background) 44%,
+    hsl(var(--sidebar)) 100%
+  );
 }
 
 .app-frame[data-platform="win32"] {
@@ -181,6 +186,13 @@ body.is-resizing-column .sidebar {
 
 .app-frame[data-platform="darwin"] .sidebar[data-floating="true"] .sidebar-content {
   padding-top: 0;
+}
+
+/* 浮出面板为绝对定位、高度确定;侧边栏以 flex 列撑满面板高度,内部 toggle 行与 content 共享高度,底部 footer(设置等)才能贴底。 */
+.floating-sidebar-panel > .sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .sidebar-content {
@@ -470,6 +482,12 @@ body.is-resizing-column .sidebar {
   transition:
     border-radius var(--motion-duration-standard) var(--motion-ease-emphasized),
     box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
+}
+
+.app-frame[data-platform="darwin"] .workspace {
+  margin-bottom: 0;
+  margin-right: 0;
+  border-radius: 16px 0 0 16px;
 }
 
 .app-frame[data-platform="win32"] .sidebar[data-collapsed="true"] ~ .workspace {
@@ -813,6 +831,75 @@ body.is-resizing-column .sidebar {
   line-height: 1.45;
 }
 
+.user-profile-avatar-control,
+.user-profile-name-control {
+  display: flex;
+  width: min(264px, 48%);
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.user-profile-avatar-control {
+  min-width: 228px;
+}
+
+.user-profile-avatar {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+.user-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-profile-avatar-default {
+  border-color: hsl(var(--foreground) / 0.14);
+  background: hsl(var(--foreground) / 0.08);
+  box-shadow: inset 0 1px 0 hsl(var(--background) / 0.6);
+  color: hsl(var(--foreground) / 0.84);
+}
+
+.user-profile-avatar-initial {
+  font-size: var(--type-size-ui);
+  font-weight: 650;
+  line-height: 1;
+}
+
+.user-profile-name-control input {
+  min-width: 0;
+  flex: 1;
+}
+
+.user-profile-status {
+  margin: 0;
+  padding: 8px 16px;
+  border-top: 1px solid hsl(var(--border) / 0.8);
+  font-size: var(--type-size-control);
+  line-height: 1.4;
+  text-align: right;
+}
+
+.user-profile-status:empty {
+  display: none;
+}
+
+.user-profile-status[data-status="error"] {
+  color: hsl(var(--destructive));
+}
+
 .settings-segmented-control {
   display: grid;
   width: min(264px, 48%);
@@ -887,6 +974,120 @@ body.is-resizing-column .sidebar {
   box-shadow: var(--settings-control-shadow);
 }
 
+.theme-color-settings-row {
+  align-items: flex-start;
+  padding-block: 14px;
+}
+
+.theme-color-control {
+  display: flex;
+  width: min(360px, 54%);
+  min-width: 330px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.theme-color-presets {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.theme-color-option {
+  display: flex;
+  width: 48px;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.theme-color-swatch {
+  position: relative;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 2px solid hsl(var(--background));
+  border-radius: var(--shape-radius-round);
+  background: var(--theme-color-swatch);
+  box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.16);
+  transition:
+    transform var(--motion-duration-fast) var(--motion-ease-standard),
+    box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.theme-color-option:hover .theme-color-swatch {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px hsl(var(--foreground) / 0.2);
+}
+
+.theme-color-option:focus-visible {
+  outline: none;
+}
+
+.theme-color-option:focus-visible .theme-color-swatch,
+.theme-color-option[data-state="checked"] .theme-color-swatch {
+  box-shadow:
+    0 0 0 2px hsl(var(--background)),
+    0 0 0 4px hsl(var(--settings-accent));
+}
+
+.theme-color-check {
+  display: none;
+  width: 14px;
+  height: 14px;
+  color: hsl(var(--settings-accent-foreground));
+  filter: drop-shadow(0 1px 1px hsl(var(--overlay) / 0.28));
+  stroke-width: 2.6;
+}
+
+.theme-color-option[data-state="checked"] .theme-color-check {
+  display: block;
+}
+
+.theme-color-option[data-state="checked"] .theme-color-custom-icon {
+  display: none;
+}
+
+.theme-color-custom-icon {
+  width: 13px;
+  height: 13px;
+  color: hsl(var(--settings-accent-foreground));
+  filter: drop-shadow(0 1px 1px hsl(var(--overlay) / 0.24));
+}
+
+.theme-color-option-label {
+  font-size: var(--type-size-caption);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.theme-color-option[data-state="checked"] .theme-color-option-label {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.theme-color-custom-panel {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.theme-color-picker-trigger {
+  width: 118px;
+  justify-content: flex-start;
+  padding-inline: 8px;
+}
+
 @media (max-width: 51.25rem) {
   .settings-content {
     padding: 28px 24px 28px;
@@ -904,9 +1105,17 @@ body.is-resizing-column .sidebar {
   }
 
   .settings-segmented-control,
-  .settings-font-family-control {
+  .settings-font-family-control,
+  .user-profile-avatar-control,
+  .user-profile-name-control,
+  .theme-color-control {
     width: 100%;
     min-width: 0;
+  }
+
+  .theme-color-presets,
+  .theme-color-custom-panel {
+    justify-content: flex-start;
   }
 }
 

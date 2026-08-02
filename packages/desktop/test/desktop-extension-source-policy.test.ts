@@ -1,7 +1,7 @@
 import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesktopExtensionSettingsService } from "../src/main/extensions/desktop-extension-settings-service.ts";
 import { DesktopExtensionSourcePolicy } from "../src/main/extensions/desktop-extension-source-policy.ts";
 import { writeMarketplaceProjection } from "../src/main/plugins/marketplace-installed-plugin.ts";
@@ -95,6 +95,66 @@ describe("DesktopExtensionSourcePolicy", () => {
       }),
     ]);
     expect(JSON.stringify(resolved.diagnostics)).not.toContain(developmentPath);
+  });
+
+  it("injects development configuration from manifest-declared schemas", async () => {
+    const harness = await createHarness();
+    const pluginRoot = join(harness.root, "dev-plugin");
+    await mkdir(pluginRoot, { recursive: true });
+    await writeFile(join(pluginRoot, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(pluginRoot, "market-manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        plugin: { name: "Dev Plugin" },
+        pi: { entry: "index.ts" },
+        capabilities: ["configuration.read", "tools.register"],
+        configuration: {
+          version: 1,
+          fields: [{ key: "endpoint", label: "Endpoint", type: "text", defaultValue: "https://example.test" }],
+        },
+      }),
+      "utf8",
+    );
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve", expectedRevision: initial.revision },
+      pluginRoot,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    await harness.settings.saveConfig({
+      requestId: "enable-mode",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+    const getDevelopmentRuntimeConfiguration = vi.fn(async () => ({
+      revision: "dev-config-1",
+      values: { endpoint: "https://configured.test" },
+    }));
+    harness.policy = new DesktopExtensionSourcePolicy({
+      settings: harness.settings,
+      getBuiltinDefinitions: () => harness.builtin,
+      getCuratedDefinitions: () => harness.curated,
+      pluginConfigurations: { getDevelopmentRuntimeConfiguration },
+      curatedRoot: harness.curatedRoot,
+    });
+
+    const resolved = await harness.policy.resolve("project");
+    const devEntry = resolved.entries.find((entry) => entry.source === "development");
+    expect(devEntry).toEqual(
+      expect.objectContaining({
+        capabilities: ["configuration.read", "tools.register"],
+        configuration: { endpoint: "https://configured.test" },
+      }),
+    );
+    expect(getDevelopmentRuntimeConfiguration).toHaveBeenCalledOnce();
+    expect(getDevelopmentRuntimeConfiguration).toHaveBeenCalledWith(
+      expect.stringContaining("development:"),
+      expect.objectContaining({ version: 1 }),
+    );
+    const second = await harness.policy.resolve("project");
+    expect(second.generation).toBe(resolved.generation);
   });
 
   it("rejects curated entries that escape the bundled resource root", async () => {

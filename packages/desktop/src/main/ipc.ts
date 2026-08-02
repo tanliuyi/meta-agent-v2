@@ -197,6 +197,16 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.providersOpenConfigExternally, async () => openPath(await providers.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
   ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
+  ipcMain.handle(CHANNELS.settingsChooseUserAvatar, async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const options: OpenDialogOptions = {
+      title: "选择用户头像",
+      properties: ["openFile"],
+      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+    };
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
   if (memorySettings) {
     ipcMain.handle(CHANNELS.memorySettingsGetSnapshot, () => memorySettings.getSnapshot());
     ipcMain.handle(CHANNELS.memorySettingsSaveConfig, async (_event, input: SaveMemorySettingsInput) => {
@@ -329,6 +339,23 @@ export function registerIpc(
     );
     ipcMain.handle(CHANNELS.extensionsApply, (_event, input: ApplyDesktopExtensionSetInput) =>
       sessions.applyExtensionSet(input.projectId, input.threadId, input.expectedDesiredGeneration, input.abortRunning),
+    );
+    ipcMain.handle(CHANNELS.extensionsGetPluginConfiguration, async (_event, pluginId: string) => {
+      if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
+      const schema = await extensions.getDevelopmentConfigurationSchema(pluginId);
+      if (!schema) throw new Error(`Development plugin is not configurable: ${pluginId}`);
+      return pluginConfigurations.getDevelopmentConfig(pluginId, schema);
+    });
+    ipcMain.handle(
+      CHANNELS.extensionsSavePluginConfiguration,
+      async (_event, input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult> => {
+        if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
+        const schema = await extensions.getDevelopmentConfigurationSchema(input.pluginId);
+        if (!schema) throw new Error(`Development plugin is not configurable: ${input.pluginId}`);
+        const result = await pluginConfigurations.saveDevelopmentConfig(input, schema);
+        if (result.status === "saved") await sessions.extensionSettingsChanged();
+        return result;
+      },
     );
   }
   ipcMain.on(CHANNELS.memorySettingsSetEditorDirty, (event, dirty: unknown) => {

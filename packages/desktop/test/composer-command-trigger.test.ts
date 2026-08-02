@@ -1,26 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { createSlashCommandFormatter } from "../src/renderer/src/components/chat/composer/composer-command-trigger.tsx";
+import {
+  slashCommandAcceptsArguments,
+  slashCommandText,
+} from "../src/renderer/src/components/chat/composer/composer-command-trigger.tsx";
 import type { SlashCommand } from "../src/shared/contracts.ts";
 
-const COMMANDS: readonly SlashCommand[] = [
-  { name: "help", description: "Show help", source: "builtin" },
-  { name: "skill:review", description: "Review changes", source: "skill" },
-];
+describe("slash command trigger", () => {
+  it("only executes commands immediately when they explicitly reject arguments", () => {
+    const commands: SlashCommand[] = [
+      { name: "reload", source: "builtin", acceptsArguments: false },
+      { name: "review", source: "extension", acceptsArguments: true },
+      { name: "legacy", source: "extension" },
+    ];
 
-describe("slash command formatter", () => {
-  const formatter = createSlashCommandFormatter(COMMANDS);
-
-  it("parses registered commands at text boundaries", () => {
-    expect(formatter.parse("Run /help then /skill:review")).toEqual([
-      { kind: "text", text: "Run " },
-      { kind: "mention", type: "command", label: "/help", id: "help" },
-      { kind: "text", text: " then " },
-      { kind: "mention", type: "command", label: "/skill:review", id: "skill:review" },
-    ]);
+    expect(commands.map(slashCommandAcceptsArguments)).toEqual([false, true, true]);
   });
 
-  it("leaves URLs and file paths as plain text", () => {
-    const text = "See https://example.com/a, src/main.ts, /usr/bin, and /unknown.";
-    expect(formatter.parse(text)).toEqual([{ kind: "text", text }]);
+  it("combines the hidden command with trimmed argument text for Pi", () => {
+    const command: SlashCommand = { name: "review", source: "extension", acceptsArguments: true };
+
+    expect(slashCommandText(command, "  inspect composer  ")).toBe("/review inspect composer");
+    expect(slashCommandText(command, "   ")).toBe("/review");
   });
 });

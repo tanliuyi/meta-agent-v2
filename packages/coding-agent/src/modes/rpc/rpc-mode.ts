@@ -666,6 +666,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					commands.push({
 						name: command.invocationName,
 						description: command.description,
+						acceptsArguments: command.acceptsArguments,
 						source: "extension",
 						sourceInfo: command.sourceInfo,
 					});

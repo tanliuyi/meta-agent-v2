@@ -3,8 +3,9 @@ import {
   reduceWorkbenchTabState,
   reduceWorkbenchTabStates,
   WORKBENCH_TAB_INITIAL_STATE,
-  type WorkbenchSessionTab,
+  workbenchTabsMatch,
 } from "../src/renderer/src/state/workbench-tab-context.tsx";
+import type { WorkbenchSessionTab } from "../src/shared/contracts.ts";
 
 function sessionTab(key: string, displayName = key, agentName?: string): WorkbenchSessionTab {
   return { kind: "session", key, projectId: "p", threadId: key, agentName, displayName };
@@ -197,6 +198,31 @@ describe("reduceWorkbenchTabState", () => {
       "panel:terminal",
     ]);
   });
+
+  it("restore 恢复持久化的 tabs 与选中项", () => {
+    const state = reduceWorkbenchTabState(WORKBENCH_TAB_INITIAL_STATE, {
+      type: "restore",
+      tabs: [{ kind: "panel", panel: "files" }, sessionTab("t1")],
+      activeKey: "t1",
+    });
+    expect(state).toEqual({ tabs: [{ kind: "panel", panel: "files" }, sessionTab("t1")], activeKey: "t1" });
+  });
+
+  it("restore 内容一致时保持原引用", () => {
+    const tabs = [{ kind: "panel", panel: "files" }, sessionTab("t1")];
+    const state = reduceWorkbenchTabState(WORKBENCH_TAB_INITIAL_STATE, { type: "restore", tabs, activeKey: "t1" });
+    expect(reduceWorkbenchTabState(state, { type: "restore", tabs, activeKey: "t1" })).toBe(state);
+  });
+
+  it("restore 覆盖当前状态（重新 attach 后磁盘状态更新）", () => {
+    let state = reduceWorkbenchTabState(WORKBENCH_TAB_INITIAL_STATE, { type: "open-panel-tab", panel: "files" });
+    state = reduceWorkbenchTabState(state, {
+      type: "restore",
+      tabs: [sessionTab("t1")],
+      activeKey: "t1",
+    });
+    expect(state).toEqual({ tabs: [sessionTab("t1")], activeKey: "t1" });
+  });
 });
 
 describe("reduceWorkbenchTabStates", () => {
@@ -264,5 +290,26 @@ describe("reduceWorkbenchTabStates", () => {
     });
     const pruned = reduceWorkbenchTabStates(states, { type: "prune", keep: new Set(["s1"]) });
     expect(pruned).toBe(states);
+  });
+});
+
+describe("workbenchTabsMatch", () => {
+  const workbench = {
+    projectId: "p",
+    threadId: "t",
+    leftSidebarOpen: true,
+    leftSidebarWidth: 280,
+    bottomPanelOpen: false,
+    bottomPanelHeight: 280,
+    terminalHeight: 280,
+    openFiles: [],
+    expandedPaths: [],
+    tabs: [{ kind: "panel" as const, panel: "files" }],
+    activeTabKey: "panel:files",
+  };
+
+  it("recognizes an already persisted state and detects changed tabs", () => {
+    expect(workbenchTabsMatch(workbench, { tabs: workbench.tabs, activeKey: "panel:files" })).toBe(true);
+    expect(workbenchTabsMatch(workbench, { tabs: [], activeKey: null })).toBe(false);
   });
 });

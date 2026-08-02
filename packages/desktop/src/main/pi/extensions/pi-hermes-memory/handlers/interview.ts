@@ -13,6 +13,7 @@ import type { MemoryStore } from "../store/memory-store.ts";
 export function registerInterviewCommand(pi: ExtensionAPI, store: MemoryStore): void {
   pi.registerCommand("memory-interview", {
     description: "Answer a few questions to pre-fill your user profile so the agent remembers you across sessions",
+    acceptsArguments: false,
     handler: async (_args, ctx) => {
       const userEntries = store.getUserEntries();
 

@@ -157,6 +157,7 @@ export interface DesktopApi {
   settings: {
     getConfig(): Promise<SettingsConfigSnapshot>;
     saveConfig(input: SaveSettingsConfigInput): Promise<SaveSettingsConfigResult>;
+    chooseUserAvatar(): Promise<string | null>;
   };
   memorySettings: {
     getSnapshot(): Promise<MemorySettingsSnapshot>;
@@ -170,6 +171,8 @@ export interface DesktopApi {
     saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult>;
     chooseDevelopmentEntry(input: ApproveDevelopmentExtensionInput): Promise<SaveDesktopExtensionSettingsResult>;
     apply(input: ApplyDesktopExtensionSetInput): Promise<ApplyDesktopExtensionSetResult>;
+    getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
+    savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
   };
   marketplace: {
     getEndpointSettings(): Promise<MarketplaceEndpointSettingsSnapshot>;

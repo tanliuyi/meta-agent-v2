@@ -188,6 +188,7 @@ const desktopApi: DesktopApi = {
   settings: {
     getConfig: () => ipcRenderer.invoke(CHANNELS.settingsGetConfig),
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.settingsSaveConfig, input),
+    chooseUserAvatar: () => ipcRenderer.invoke(CHANNELS.settingsChooseUserAvatar),
   },
   memorySettings: {
     getSnapshot: () => ipcRenderer.invoke(CHANNELS.memorySettingsGetSnapshot),
@@ -201,6 +202,8 @@ const desktopApi: DesktopApi = {
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.extensionsSaveConfig, input),
     chooseDevelopmentEntry: (input) => ipcRenderer.invoke(CHANNELS.extensionsChooseDevelopmentEntry, input),
     apply: (input) => ipcRenderer.invoke(CHANNELS.extensionsApply, input),
+    getPluginConfiguration: (pluginId) => ipcRenderer.invoke(CHANNELS.extensionsGetPluginConfiguration, pluginId),
+    savePluginConfiguration: (input) => ipcRenderer.invoke(CHANNELS.extensionsSavePluginConfiguration, input),
   },
   marketplace: {
     getEndpointSettings: () => ipcRenderer.invoke(CHANNELS.marketplaceGetEndpointSettings),

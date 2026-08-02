@@ -26,7 +26,7 @@ const CONFIG_KEYS: Record<
   openrouter: { apiKey: "openrouterApiKey", baseUrl: "openrouterBaseUrl" },
 };
 
-export function createImageGenSettings(config: Readonly<DesktopImageGenConfig>): ImageGenSettings {
+export function createImageGenSettings(config: Readonly<DesktopImageGenConfig> = {}): ImageGenSettings {
   const providers: ImageGenSettings["providers"] = {};
   for (const id of PROVIDER_IDS) {
     const keys = CONFIG_KEYS[id];
@@ -40,11 +40,18 @@ export function createImageGenSettings(config: Readonly<DesktopImageGenConfig>):
     if (Object.keys(override).length > 0) providers[id] = override;
   }
 
+  const configuredDefault = config.defaultModel;
+  const customModel = config.customModel;
+  const requestedModel =
+    configuredDefault === "custom"
+      ? typeof customModel === "string"
+        ? customModel.trim()
+        : ""
+      : typeof configuredDefault === "string"
+        ? configuredDefault.trim()
+        : "";
   const settings: ImageGenSettings = {
-    defaultModel:
-      typeof config.defaultModel === "string" && config.defaultModel.trim()
-        ? config.defaultModel.trim()
-        : "gpt-image-2",
+    defaultModel: requestedModel || "gpt-image-2",
   };
   if (typeof config.outputDir === "string" && config.outputDir.trim()) {
     settings.outputDir = config.outputDir.trim();

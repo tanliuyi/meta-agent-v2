@@ -1,9 +1,13 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { cn } from "@renderer/shared/lib/cn";
 import CheckIcon from "lucide-react/dist/esm/icons/check.mjs";
-import type { ComponentPropsWithoutRef } from "react";
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
-export function SelectItem({ className, children, ...props }: ComponentPropsWithoutRef<typeof SelectPrimitive.Item>) {
+export interface SelectItemProps extends ComponentPropsWithoutRef<typeof SelectPrimitive.Item> {
+  description?: ReactNode;
+}
+
+export function SelectItem({ className, children, description, ...props }: SelectItemProps) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
@@ -20,7 +24,14 @@ export function SelectItem({ className, children, ...props }: ComponentPropsWith
           <CheckIcon className="size-4" />
         </SelectPrimitive.ItemIndicator>
       </span>
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {description ? (
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+          <span className="text-muted-foreground truncate text-xs">{description}</span>
+        </span>
+      ) : (
+        <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      )}
     </SelectPrimitive.Item>
   );
 }

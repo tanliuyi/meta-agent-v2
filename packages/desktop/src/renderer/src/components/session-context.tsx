@@ -4,11 +4,12 @@ import type {
   SessionBranchResult,
   SessionControlState,
   ThinkingLevel,
+  WorkbenchSessionTab,
   WorkbenchState,
 } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
-import type { SessionWorkbenchTabs, WorkbenchSessionTab } from "../state/workbench-tab-context.tsx";
+import type { SessionWorkbenchTabs } from "../state/workbench-tab-context.tsx";
 import { useWorkbenchTabs } from "../state/workbench-tab-context.tsx";
 
 interface SessionScope {

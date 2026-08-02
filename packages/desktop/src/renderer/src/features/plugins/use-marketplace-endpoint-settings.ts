@@ -106,7 +106,7 @@ export function useMarketplaceEndpointSettings(): MarketplaceEndpointSettingsCon
 export function marketplaceEndpointErrorMessage(reason: unknown): string {
   const message = reason instanceof Error ? reason.message : String(reason);
   if (message.includes("HTTP 404")) {
-    return "该地址不是有效的插件市场 API。请填写市场服务根地址，而不是 Desktop 或 Renderer 地址。";
+    return "该地址不是有效的插件市场 API。请填写市场服务根地址，而不是应用界面地址。";
   }
   return message.replace(/^Error invoking remote method '[^']+': Error:\s*/, "");
 }

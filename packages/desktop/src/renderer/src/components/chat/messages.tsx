@@ -216,7 +216,7 @@ export function Messages() {
         <div
           ref={contentRef}
           data-slot="session-message-content"
-          className="mx-auto w-full max-w-(--layout-thread-max-width) px-4"
+          className="mx-auto w-full max-w-(--layout-thread-max-width)"
         >
           <div ref={virtualContentRef} style={{ paddingTop, paddingBottom }}>
             {items.map((item) => {

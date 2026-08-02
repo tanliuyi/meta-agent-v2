@@ -31,6 +31,7 @@ import { PluginConfigurationService } from "./plugins/plugin-configuration-servi
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
+import { handleLocalImageRequests, registerLocalImageSchemes } from "./settings/user-avatar-protocol.ts";
 import { locateGitForWindowsBash, locateManagedBash } from "./sidecar/managed-shell-locator.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
 import { parseRuntimeSetupSelection, runRuntimeSetup } from "./sidecar/runtime-setup.ts";
@@ -69,6 +70,8 @@ const defaultWindowBounds = { width: 1440, height: 920 };
 const minimumWindowBounds = { width: 1024, height: 680 };
 // 开发实例允许并行启动；发布版保持单实例，避免多个主进程同时管理同一份状态。
 const hasSingleInstanceLock = runtimeSetupSelection || !app.isPackaged ? true : app.requestSingleInstanceLock();
+
+registerLocalImageSchemes();
 
 if (!hasSingleInstanceLock) app.quit();
 
@@ -181,6 +184,7 @@ function scheduleMarketplaceGarbageCollection(
 
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
+  handleLocalImageRequests();
   Menu.setApplicationMenu(null);
   const userDataDir = app.getPath("userData");
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi-desk", "agent");

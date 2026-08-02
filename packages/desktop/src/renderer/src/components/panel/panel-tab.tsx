@@ -4,8 +4,9 @@ import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useRef } from "react";
+import type { WorkbenchTab } from "../../../../shared/contracts.ts";
 import { getWorkbenchPanelTabDefinition, useWorkbenchPanelTabs } from "../../state/panel-tab-registry.ts";
-import { type WorkbenchTab, workbenchTabKey } from "../../state/workbench-tab-context.tsx";
+import { workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 
 interface WorkbenchTabListProps {
   tabs: readonly WorkbenchTab[];

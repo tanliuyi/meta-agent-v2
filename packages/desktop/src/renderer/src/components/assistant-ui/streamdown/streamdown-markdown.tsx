@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Streamdown } from "streamdown";
+import { preprocessMarkdownImages } from "../../../../../shared/markdown-image-contracts.ts";
 import { STREAMDOWN_COMPONENTS } from "./streamdown-code.tsx";
 import { LINK_SAFETY, SHIKI_THEMES, STREAMDOWN_PLUGINS } from "./streamdown-config.ts";
 
@@ -13,7 +14,7 @@ export const StreamdownMarkdown = memo(function StreamdownMarkdown({ children }:
         plugins={STREAMDOWN_PLUGINS}
         shikiTheme={SHIKI_THEMES}
       >
-        {children}
+        {preprocessMarkdownImages(children)}
       </Streamdown>
     </div>
   );

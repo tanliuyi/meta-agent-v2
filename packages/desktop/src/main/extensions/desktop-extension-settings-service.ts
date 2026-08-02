@@ -3,11 +3,19 @@ import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promise
 import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import type {
+  DesktopExtensionCapability,
   DesktopExtensionDefinition,
+  DesktopExtensionDiagnostic,
   DesktopExtensionSettingsSnapshot,
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
 } from "../../shared/desktop-extension-contracts.ts";
+import type { PluginConfigurationSchema } from "../../shared/plugin-configuration-contracts.ts";
+import {
+  clonePluginConfigurationSchema,
+  parsePluginConfigurationSchema,
+} from "../../shared/plugin-configuration-contracts.ts";
+import type { ResolvedDevelopmentEntry } from "./desktop-extension-directory.ts";
 import { resolveDevelopmentEntry } from "./desktop-extension-directory.ts";
 
 export const MISSING_DESKTOP_EXTENSION_SETTINGS_REVISION = "missing:desktop-extensions-v1";
@@ -18,6 +26,8 @@ export interface StoredDevelopmentExtension {
   entryPath: string;
   enabled: boolean;
   displayPath?: string;
+  capabilities: DesktopExtensionCapability[];
+  configurationSchema?: PluginConfigurationSchema;
 }
 
 export interface InternalDesktopExtensionSettings {
@@ -31,7 +41,9 @@ interface ExtensionSettingsFileData {
   version?: number;
   developerMode?: boolean;
   curatedEnabled?: Record<string, boolean>;
-  developmentEntries?: StoredDevelopmentExtension[];
+  developmentEntries?: Array<
+    Omit<StoredDevelopmentExtension, "capabilities"> & { capabilities?: DesktopExtensionCapability[] }
+  >;
   [key: string]: unknown;
 }
 
@@ -39,6 +51,7 @@ interface CurrentExtensionSettingsSource {
   exists: boolean;
   revision: string;
   data: ExtensionSettingsFileData;
+  diagnostics: DesktopExtensionDiagnostic[];
 }
 
 interface DesktopExtensionSettingsServiceOptions {
@@ -71,6 +84,13 @@ export class DesktopExtensionSettingsService {
   async getInternalConfig(): Promise<InternalDesktopExtensionSettings> {
     const current = await this.readCurrent();
     return internalFromCurrent(current);
+  }
+
+  async getDevelopmentConfigurationSchema(pluginId: string): Promise<PluginConfigurationSchema | undefined> {
+    if (!pluginId || !pluginId.startsWith("development:")) return undefined;
+    const internal = await this.getInternalConfig();
+    const entry = internal.developmentEntries.find((candidate) => candidate.id === pluginId);
+    return entry?.configurationSchema;
   }
 
   saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult> {
@@ -151,13 +171,26 @@ export class DesktopExtensionSettingsService {
       }
       const internal = internalFromCurrent(current);
       const existing = internal.developmentEntries.find((entry) => entry.entryPath === resolved.entryPath);
-      if (existing?.enabled) {
+      if (existing && developmentApprovalMatches(existing, resolved)) {
         const result: SaveDesktopExtensionSettingsResult = { status: "saved", snapshot: this.snapshot(current) };
         this.requestResults.set(input.requestId, result);
         return result;
       }
       const developmentEntries = existing
-        ? internal.developmentEntries.map((entry) => (entry.id === existing.id ? { ...entry, enabled: true } : entry))
+        ? internal.developmentEntries.map((entry) =>
+            entry.id === existing.id
+              ? {
+                  ...entry,
+                  displayName: resolved.displayName,
+                  displayPath: resolved.displayPath,
+                  enabled: true,
+                  capabilities: [...resolved.capabilities],
+                  ...(resolved.configurationSchema
+                    ? { configurationSchema: resolved.configurationSchema }
+                    : { configurationSchema: undefined }),
+                }
+              : entry,
+          )
         : [
             ...internal.developmentEntries,
             {
@@ -165,7 +198,9 @@ export class DesktopExtensionSettingsService {
               displayName: resolved.displayName,
               entryPath: resolved.entryPath,
               enabled: true,
+              capabilities: [...resolved.capabilities],
               ...(resolved.displayPath ? { displayPath: resolved.displayPath } : {}),
+              ...(resolved.configurationSchema ? { configurationSchema: resolved.configurationSchema } : {}),
             },
           ];
       await this.atomicWrite({
@@ -203,7 +238,7 @@ export class DesktopExtensionSettingsService {
       if (!info.isFile()) throw new Error(`extensions.json is not a regular file: ${this.path}`);
     } catch (error) {
       if (isNodeError(error, "ENOENT")) {
-        return { exists: false, revision: MISSING_DESKTOP_EXTENSION_SETTINGS_REVISION, data: {} };
+        return { exists: false, revision: MISSING_DESKTOP_EXTENSION_SETTINGS_REVISION, data: {}, diagnostics: [] };
       }
       throw error;
     }
@@ -212,10 +247,36 @@ export class DesktopExtensionSettingsService {
     try {
       value = JSON.parse(bytes.toString("utf8"));
     } catch {
-      throw new Error("extensions.json JSON syntax invalid");
+      return this.invalidConfigFallback(bytes, "extensions.json JSON syntax invalid");
     }
-    assertSettingsFile(value);
-    return { exists: true, revision: hashBytes(bytes), data: value };
+    try {
+      assertSettingsFile(value);
+    } catch (error) {
+      return this.invalidConfigFallback(bytes, error instanceof Error ? error.message : "extensions.json is invalid");
+    }
+    return { exists: true, revision: hashBytes(bytes), data: value, diagnostics: [] };
+  }
+
+  private invalidConfigFallback(bytes: Uint8Array, message: string): CurrentExtensionSettingsSource {
+    return {
+      exists: true,
+      revision: hashBytes(bytes),
+      data: {
+        version: 1,
+        developerMode: false,
+        curatedEnabled: Object.fromEntries(this.curatedDefinitions.map((definition) => [definition.id, false])),
+        developmentEntries: [],
+      },
+      diagnostics: [
+        {
+          extensionId: "desktop-extension-settings",
+          source: "development",
+          phase: "resolve",
+          code: "DESKTOP_EXTENSION_SETTINGS_INVALID",
+          message,
+        },
+      ],
+    };
   }
 
   private snapshot(current: CurrentExtensionSettingsSource): DesktopExtensionSettingsSnapshot {
@@ -245,14 +306,17 @@ export class DesktopExtensionSettingsService {
       source: "development" as const,
       enabled: internal.developerMode && entry.enabled,
       configuredEnabled: entry.enabled,
-      capabilities: [],
+      capabilities: [...entry.capabilities],
       displayPath: entry.displayPath ?? basename(entry.entryPath),
+      ...(entry.configurationSchema
+        ? { configurationSchema: clonePluginConfigurationSchema(entry.configurationSchema) }
+        : {}),
     }));
     return {
       revision: current.revision,
       developerMode: internal.developerMode,
       reloadRequired: this.reloadRequired,
-      diagnostics: [],
+      diagnostics: current.diagnostics.map((diagnostic) => ({ ...diagnostic })),
       entries: [...builtin, ...curated, ...development],
     };
   }
@@ -284,6 +348,17 @@ export class DesktopExtensionSettingsService {
       await rm(tempPath, { force: true }).catch(() => undefined);
     }
   }
+}
+
+function developmentApprovalMatches(existing: StoredDevelopmentExtension, resolved: ResolvedDevelopmentEntry): boolean {
+  return (
+    existing.enabled &&
+    existing.displayName === resolved.displayName &&
+    existing.displayPath === resolved.displayPath &&
+    existing.capabilities.length === resolved.capabilities.length &&
+    existing.capabilities.every((capability, index) => capability === resolved.capabilities[index]) &&
+    JSON.stringify(existing.configurationSchema) === JSON.stringify(resolved.configurationSchema)
+  );
 }
 
 function applyMutation(
@@ -338,7 +413,10 @@ function internalFromCurrent(current: CurrentExtensionSettingsSource): InternalD
     revision: current.revision,
     developerMode: current.data.developerMode ?? false,
     curatedEnabled: { ...(current.data.curatedEnabled ?? {}) },
-    developmentEntries: (current.data.developmentEntries ?? []).map((entry) => ({ ...entry })),
+    developmentEntries: (current.data.developmentEntries ?? []).map((entry) => ({
+      ...entry,
+      capabilities: [...(entry.capabilities ?? [])],
+    })),
   };
 }
 
@@ -378,9 +456,15 @@ function assertSettingsFile(value: unknown): asserts value is ExtensionSettingsF
         typeof entry.displayName !== "string" ||
         typeof entry.entryPath !== "string" ||
         typeof entry.enabled !== "boolean" ||
-        (entry.displayPath !== undefined && typeof entry.displayPath !== "string")
+        (entry.displayPath !== undefined && typeof entry.displayPath !== "string") ||
+        (entry.capabilities !== undefined &&
+          (!Array.isArray(entry.capabilities) ||
+            !entry.capabilities.every((capability) => typeof capability === "string")))
       ) {
         throw new Error("extensions.json development entry is invalid");
+      }
+      if (entry.configurationSchema !== undefined) {
+        parsePluginConfigurationSchema(entry.configurationSchema);
       }
     }
   }

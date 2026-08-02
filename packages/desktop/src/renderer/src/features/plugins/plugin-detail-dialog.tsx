@@ -174,7 +174,7 @@ export function PluginDetailDialog({
 
           <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-detail-capabilities">
             <h3 id="plugin-detail-capabilities">能力与风险</h3>
-            <p>市场插件是全信任 Pi Extension，可在你的账户权限下读写文件、访问网络、读取环境变量并执行程序。</p>
+            <p>市场插件以全信任方式运行，可在你的账户权限下读写文件、访问网络、读取环境变量并执行程序。</p>
             {plugin?.containsNativeCode || installed?.containsNativeCode ? (
               <p className="plugin-marketplace-native-warning">此版本包含原生代码或平台二进制。</p>
             ) : null}
@@ -200,7 +200,7 @@ export function PluginDetailDialog({
                   <dd>{installed.state === "broken" ? "已损坏" : "正常"}</dd>
                 </div>
                 <div>
-                  <dt>Desktop 中启用</dt>
+                  <dt>已启用</dt>
                   <dd>{installed.enabled ? "是" : "否"}</dd>
                 </div>
               </dl>
@@ -275,7 +275,7 @@ export function pluginActionConfirmation(
   const capabilities = plugin?.capabilities?.length ? `声明能力：${plugin.capabilities.join("、")}。` : "";
   return {
     title: `${action === "install" ? "安装" : "更新"} ${name}？`,
-    description: `市场插件是全信任 Pi Extension，可读写本机文件、访问网络并执行进程，不受能力声明限制。${nativeWarning}${capabilities}`,
+    description: `市场插件以全信任方式运行，可读写本机文件、访问网络并执行进程，不受能力声明限制。${nativeWarning}${capabilities}`,
     confirmLabel: action === "install" ? "确认安装" : "确认更新",
   };
 }

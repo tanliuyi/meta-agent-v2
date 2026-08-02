@@ -1,5 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyThemeColorPreferences,
+  initializeThemeColor,
+  normalizeHexColor,
+  parseThemeColorPreference,
+  readStoredThemeColorPreferences,
+  THEME_ACCENT_FOREGROUND_PROPERTY,
+  THEME_ACCENT_PROPERTY,
+  themeColorHex,
+} from "../src/renderer/src/state/theme-color-preference.ts";
+import {
   applyThemePreference,
   DARK_MEDIA_QUERY,
   initializeTheme,
@@ -88,5 +98,91 @@ describe("desktop theme", () => {
 
     cleanup();
     expect(removeEventListener).toHaveBeenCalledWith("change", listener);
+  });
+});
+
+describe("desktop theme color", () => {
+  it("只接受受支持的主题色并规范十六进制颜色", () => {
+    expect(parseThemeColorPreference("teal")).toBe("teal");
+    expect(parseThemeColorPreference("custom")).toBe("custom");
+    expect(parseThemeColorPreference("unknown")).toBe("blue");
+    expect(normalizeHexColor(" #1a2b3c ")).toBe("#1A2B3C");
+    expect(normalizeHexColor("#abc")).toBe("#AABBCC");
+    expect(normalizeHexColor("blue")).toBeNull();
+  });
+
+  it("预设为浅色与深色外观提供不同色阶", () => {
+    expect(themeColorHex("blue", "#000000", "light")).toBe("#2563EB");
+    expect(themeColorHex("blue", "#000000", "dark")).toBe("#60A5FA");
+    expect(themeColorHex("custom", "#123456", "dark")).toBe("#123456");
+  });
+
+  it("内置青碧预设保持人工色阶并使用白色前景", () => {
+    const setProperty = vi.fn();
+    const root = { dataset: {} as Record<string, string | undefined>, style: { setProperty } };
+
+    applyThemeColorPreferences(root, { preference: "teal", customColor: "#000000" }, "light");
+
+    const accentCall = setProperty.mock.calls.find(([property]) => property === THEME_ACCENT_PROPERTY);
+    expect(Number.parseFloat(String(accentCall?.[1]).split(" ")[2])).toBeLessThan(30);
+    expect(setProperty).toHaveBeenCalledWith(THEME_ACCENT_FOREGROUND_PROPERTY, "0 0% 100%");
+  });
+
+  it("将主题色收敛为可读的 HSL token", () => {
+    const setProperty = vi.fn();
+    const root = { dataset: {} as Record<string, string | undefined>, style: { setProperty } };
+
+    applyThemeColorPreferences(root, { preference: "custom", customColor: "#000000" }, "dark");
+
+    expect(root.dataset).toEqual({ themeColor: "custom" });
+    expect(setProperty).toHaveBeenCalledWith(THEME_ACCENT_PROPERTY, "0 0% 58%");
+    expect(setProperty).toHaveBeenCalledWith(THEME_ACCENT_FOREGROUND_PROPERTY, "222 47% 11%");
+  });
+
+  it("降低浅色背景上高亮度自定义色的亮度以保留控件边界", () => {
+    const setProperty = vi.fn();
+    const root = { dataset: {} as Record<string, string | undefined>, style: { setProperty } };
+
+    applyThemeColorPreferences(root, { preference: "custom", customColor: "#FFFF00" }, "light");
+
+    const accentCall = setProperty.mock.calls.find(([property]) => property === THEME_ACCENT_PROPERTY);
+    expect(Number.parseFloat(String(accentCall?.[1]).split(" ")[2])).toBeLessThan(34);
+    expect(setProperty).toHaveBeenCalledWith(THEME_ACCENT_FOREGROUND_PROPERTY, "222 47% 11%");
+  });
+
+  it("在 React 启动前恢复主题色", () => {
+    const setProperty = vi.fn();
+    const root = { dataset: {} as Record<string, string | undefined>, style: { setProperty } };
+
+    const preferences = initializeThemeColor({
+      root,
+      resolvedTheme: "light",
+      readStoredPreference: () => "rose",
+      readStoredCustomColor: () => "#123456",
+    });
+
+    expect(preferences).toEqual({ preference: "rose", customColor: "#123456" });
+    expect(root.dataset.themeColor).toBe("rose");
+    expect(setProperty).toHaveBeenCalledTimes(2);
+  });
+
+  it("存储不可用或值无效时回退默认主题色", () => {
+    expect(
+      readStoredThemeColorPreferences(
+        () => "invalid",
+        () => "invalid",
+      ),
+    ).toEqual({
+      preference: "blue",
+      customColor: "#2563EB",
+    });
+    expect(
+      readStoredThemeColorPreferences(
+        () => {
+          throw new Error("storage unavailable");
+        },
+        () => null,
+      ),
+    ).toEqual({ preference: "blue", customColor: "#2563EB" });
   });
 });

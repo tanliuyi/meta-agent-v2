@@ -1,4 +1,4 @@
-import type { PluginConfigurationValue } from "./plugin-configuration-contracts.ts";
+import type { PluginConfigurationSchema, PluginConfigurationValue } from "./plugin-configuration-contracts.ts";
 
 export const DESKTOP_EXTENSION_HOST_PROFILE_VERSION = 1 as const;
 
@@ -96,6 +96,7 @@ export interface DesktopExtensionListEntry {
   configuredEnabled: boolean;
   capabilities: DesktopExtensionCapability[];
   displayPath?: string;
+  configurationSchema?: PluginConfigurationSchema;
 }
 
 export interface DesktopExtensionSettingsSnapshot {

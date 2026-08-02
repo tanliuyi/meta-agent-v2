@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OpenWorkbenchPanel } from "../src/renderer/src/components/panel/open-workbench-panel.tsx";
 import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
 import { registerWorkbenchPanelTab } from "../src/renderer/src/state/panel-tab-registry.ts";
-import type { WorkbenchTab } from "../src/renderer/src/state/workbench-tab-context.tsx";
+import type { WorkbenchTab } from "../src/shared/contracts.ts";
 
 vi.mock("@renderer/shared/hooks/use-resizable-region", () => ({
   useResizableRegion: () => ({

@@ -223,6 +223,47 @@ describe("PiMessageRepositoryConverter", () => {
     });
   });
 
+  it("canonical rekey 后保留 assistant-ui message id", () => {
+    const user = userNode("user", null);
+    const live = {
+      ...assistantNode("live:assistant", "user"),
+      content: [{ id: "live:assistant:reasoning:0", type: "reasoning" as const, text: "thinking" }],
+      status: { type: "running" as const },
+    };
+    const store = new PiThreadStore(snapshot([user, live], live.id));
+    const converter = new PiMessageRepositoryConverter();
+    const running = converter.build(store.getSnapshot());
+    const canonical = {
+      ...live,
+      id: "canonical-assistant",
+      sourceEntryId: "canonical-assistant",
+      content: [{ id: "canonical-assistant:reasoning:0", type: "reasoning" as const, text: "thinking" }],
+    };
+
+    store.apply(batch(1, { type: "node-rekeyed", previousId: live.id, node: canonical }));
+    const rekeyed = converter.build(store.getSnapshot());
+    store.apply(
+      batch(2, {
+        type: "reasoning-delta",
+        messageId: canonical.id,
+        partId: canonical.content[0].id,
+        delta: " more",
+      }),
+    );
+    const updated = converter.build(store.getSnapshot());
+
+    expect(running.messages[1]?.message.id).toBe(live.id);
+    expect(rekeyed.messages[1]?.message.id).toBe(live.id);
+    expect(rekeyed.headId).toBe(live.id);
+    expect(rekeyed.messages[1]?.message.metadata.custom).toMatchObject({
+      pi: { sourceEntryId: canonical.id },
+    });
+    expect(updated.messages[1]?.message).toMatchObject({
+      id: live.id,
+      content: [{ type: "reasoning", text: "thinking more" }],
+    });
+  });
+
   it("将同一轮连续 assistant 节点合并，使两个 text 之间的 reasoning/tool 保持相邻", () => {
     const user = userNode("u", null);
     const first = {

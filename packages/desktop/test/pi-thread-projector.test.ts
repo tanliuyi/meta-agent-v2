@@ -248,6 +248,24 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("将多条 prompt quote 作为 user node 数组 metadata 保留", () => {
+    const entries: SessionEntry[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const quotes = [
+      { text: "第一行", messageId: "assistant-1" },
+      { text: "第二行", messageId: "assistant-2" },
+    ];
+    const user = userMessage("> 第一行\n\n> 第二行\n\n比较两段", 1);
+
+    projector.beginPrompt("request", undefined, false, "比较两段", undefined, quotes);
+    projector.markPromptPreflight("request", true);
+    projector.handle({ type: "message_start", message: user });
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({ kind: "user", quotes });
+    projector.dispose();
+  });
+
   it("assistant rekey 时保留 live tool part identity", async () => {
     const entries: SessionEntry[] = [];
     const { session } = sessionHarness(entries);

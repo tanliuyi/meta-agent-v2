@@ -3,7 +3,7 @@ import AlertCircle from "lucide-react/dist/esm/icons/circle-alert.mjs";
 import { useMemo } from "react";
 import { useThinkingVisibility } from "../../../state/thinking-visibility.tsx";
 import { StreamdownText } from "../../assistant-ui/streamdown/streamdown-text.tsx";
-import { createRunGroupPart, hasTextAfterGroup } from "../message-part-grouping.ts";
+import { createRunGroupPart, hasFinalResponseInRun, hasTextAfterGroup } from "../message-part-grouping.ts";
 import { PiNoticeView } from "../pi-notice-view.tsx";
 import { ToolView } from "../tool-view.tsx";
 import { ChainOfThoughtGroup } from "./chain-of-thought-group.tsx";
@@ -16,26 +16,36 @@ export function AssistantMessageContent({
   isRunActivityRunning: boolean;
   isMessageRunning: boolean;
 }) {
-  const { showThinking, autoExpandRunning } = useThinkingVisibility();
+  const { showThinking, autoExpandRunning, showAvatars } = useThinkingVisibility();
   const messageParts = useAuiState((state) => state.message.parts);
   const messageId = useAuiState((state) => state.message.id);
   const toolUIs = useAuiState((state) => state.tools.toolUIs);
   const runStartedAt = useAuiState((state) => state.message.createdAt.getTime());
   const runCompletedAt = useAuiState((state) => piCompletedAt(state.message.metadata.custom));
+  const runHasFinalResponse = useAuiState((state) => hasFinalResponseInRun(state.thread.messages, state.message.id));
   const groupMessagePart = useMemo(() => createRunGroupPart(messageParts), [messageParts]);
+  const defaultOpenCompletedActivity = showAvatars && !runHasFinalResponse;
   const hasGroupedRunActivity = useMemo(
     () => messageParts.some((part) => groupMessagePart(part, { toolUIs })[0] === "group-runActivity"),
     [groupMessagePart, messageParts, toolUIs],
   );
 
   return (
-    <div data-aui-quote-selectable="" className="flex flex-col gap-3 text-sm/6  text-foreground wrap-break-word">
+    <div
+      data-aui-quote-selectable=""
+      className={
+        showAvatars
+          ? "flex flex-col gap-2 text-sm/6 text-foreground wrap-break-word"
+          : "flex flex-col gap-3 text-sm/6 text-foreground wrap-break-word"
+      }
+    >
       {isRunActivityRunning && !hasGroupedRunActivity ? (
         <RunActivityGroup
           running
           startedAt={runStartedAt}
           completedAt={runCompletedAt}
           hasContent={false}
+          defaultOpenWhenComplete={defaultOpenCompletedActivity}
           stateKey={`${messageId}:run-activity`}
         >
           {null}
@@ -51,6 +61,7 @@ export function AssistantMessageContent({
                   startedAt={runStartedAt}
                   completedAt={runCompletedAt}
                   hasContent={showThinking || part.indices.some((index) => messageParts[index]?.type !== "reasoning")}
+                  defaultOpenWhenComplete={defaultOpenCompletedActivity}
                   stateKey={`${messageId}:run-activity`}
                 >
                   {children}

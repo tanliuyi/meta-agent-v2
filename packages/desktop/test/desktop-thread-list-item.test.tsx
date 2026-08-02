@@ -49,6 +49,7 @@ function renderThread(
       onRenameStart={vi.fn()}
       onStop={vi.fn()}
       onOpen={vi.fn()}
+      onOpenInSidebar={vi.fn()}
       onArchive={vi.fn()}
       onDelete={vi.fn()}
     />,

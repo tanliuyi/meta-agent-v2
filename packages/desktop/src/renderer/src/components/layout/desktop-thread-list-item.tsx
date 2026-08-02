@@ -198,15 +198,6 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         </div>
       </ContextMenu.Trigger>
       <ContextMenuContent>
-        {activeSubagent ? (
-          <ContextMenuItem
-            variant="destructive"
-            disabled={props.isSwitching || props.isStopPending}
-            onSelect={() => props.onStop(thread)}
-          >
-            <Square /> 停止运行
-          </ContextMenuItem>
-        ) : null}
         <ContextMenuItem
           disabled={props.isSwitching || props.sidebarOpenDisabled}
           title={props.sidebarOpenDisabled ? (props.sidebarOpenDisabledReason ?? "无法在侧边栏打开") : undefined}
@@ -220,6 +211,18 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         <ContextMenuItem disabled={props.isSwitching || activeSubagent} onSelect={() => props.onArchive(thread, true)}>
           <Archive /> 归档
         </ContextMenuItem>
+        {activeSubagent ? (
+          <>
+            <ContextMenu.Separator className="bg-border -mx-1 my-1 h-px" />
+            <ContextMenuItem
+              variant="destructive"
+              disabled={props.isSwitching || props.isStopPending}
+              onSelect={() => props.onStop(thread)}
+            >
+              <Square /> 停止运行
+            </ContextMenuItem>
+          </>
+        ) : null}
         <ContextMenuItem
           variant="destructive"
           disabled={props.isSwitching || activeSubagent}

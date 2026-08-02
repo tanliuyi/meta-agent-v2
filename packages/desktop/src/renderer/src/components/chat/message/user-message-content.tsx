@@ -5,6 +5,7 @@ import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronUp from "lucide-react/dist/esm/icons/chevron-up.mjs";
 import Quote from "lucide-react/dist/esm/icons/quote.mjs";
 import { useLayoutEffect, useRef, useState } from "react";
+import { getMessageQuotes } from "../../../runtime/composer-quotes.ts";
 import { cn } from "../../../shared/lib/cn.ts";
 
 const COLLAPSED_USER_MESSAGE_HEIGHT = 160;
@@ -14,6 +15,8 @@ export function UserMessageContent() {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLong, setIsLong] = useState(false);
+  const custom = useAuiState((state) => state.message.metadata.custom);
+  const quotes = getMessageQuotes(custom);
   const hasContent = useAuiState((state) =>
     state.message.parts.some((part) => part.type !== "text" || part.text.trim().length > 0),
   );
@@ -31,16 +34,14 @@ export function UserMessageContent() {
   if (!hasContent) return null;
 
   return (
-    <div className="aui-user-message-content bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word text-sm">
+    <div className="aui-user-message-content text-foreground rounded-xl px-4 py-2 wrap-break-word text-sm">
       <div ref={contentRef} className={cn(!isExpanded && "max-h-40 overflow-hidden")}>
-        <MessagePrimitive.Quote>
-          {({ text }) => (
-            <div className="mb-2 flex items-start gap-1.5">
-              <Quote aria-hidden="true" className="mt-0.5 size-3 shrink-0 text-muted-foreground/60" />
-              <p className="line-clamp-2 min-w-0 text-sm italic text-muted-foreground/80">{text}</p>
-            </div>
-          )}
-        </MessagePrimitive.Quote>
+        {quotes.map((quote, index) => (
+          <div key={`${quote.messageId}:${index}`} className="mb-2 flex min-w-0 items-start gap-1.5">
+            <Quote aria-hidden="true" className="mt-0.5 size-3 shrink-0 text-muted-foreground/60" />
+            <p className="line-clamp-2 min-w-0 wrap-break-word text-sm italic text-muted-foreground/80">{quote.text}</p>
+          </div>
+        ))}
         <MessagePrimitive.Parts components={USER_MESSAGE_PARTS} />
       </div>
       {isLong ? (

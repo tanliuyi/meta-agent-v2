@@ -255,6 +255,28 @@ describe("PiCompatibilityAdapter", () => {
     expect(prompt).toHaveBeenCalledWith("> 第一行\n> 第二行\n\n解释这段话", expect.any(Object));
   });
 
+  it("将多条结构化 quote 合并为独立 Markdown 上下文块", async () => {
+    const prompt = vi.fn(async (_text: string, options: { preflightResult(success: boolean): void }) => {
+      options.preflightResult(true);
+    });
+    const quotes = [
+      { text: "第一段", messageId: "assistant-1" },
+      { text: "第二段", messageId: "assistant-2" },
+    ];
+    const adapter = new PiCompatibilityAdapter({ session: createSession({ prompt }), projector: createProjector() });
+
+    await adapter.prompt({
+      requestId: "request",
+      projectId: "project",
+      threadId: "thread",
+      text: "比较两段",
+      images: [],
+      quotes,
+    });
+
+    expect(prompt).toHaveBeenCalledWith("> 第一段\n\n> 第二段\n\n比较两段", expect.any(Object));
+  });
+
   it("prompt 在 preflight 成功后立即返回，不等待完整 agent run", async () => {
     const run = deferred<void>();
     const prompt = vi.fn(async (_text: string, options: { preflightResult(success: boolean): void }) => {

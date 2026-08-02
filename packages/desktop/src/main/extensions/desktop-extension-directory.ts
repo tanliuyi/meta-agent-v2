@@ -1,11 +1,17 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import type { DesktopExtensionCapability } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
+import type { PluginConfigurationSchema } from "../../shared/plugin-configuration-contracts.ts";
+import { parsePluginConfigurationSchema } from "../../shared/plugin-configuration-contracts.ts";
+import { CAPABILITIES } from "../plugins/marketplace-artifact-manifest.ts";
 
 export interface ResolvedDevelopmentEntry {
   entryPath: string;
   displayName: string;
   displayPath: string;
+  capabilities: DesktopExtensionCapability[];
+  configurationSchema?: PluginConfigurationSchema;
 }
 
 const ALLOWED_ENTRY_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts"]);
@@ -15,6 +21,8 @@ const MANIFEST_FILE_NAME = "market-manifest.json";
 interface DesktopDevelopmentManifest {
   plugin: { name: string };
   pi: { entry: string };
+  capabilities: DesktopExtensionCapability[];
+  configuration?: PluginConfigurationSchema;
 }
 
 /** Resolves a main-selected development entry: a regular entry file or a plugin directory. */
@@ -27,7 +35,7 @@ export async function resolveDevelopmentEntry(selectedPath: string): Promise<Res
     }
     const entryPath = await realpath(selectedPath);
     const name = basename(entryPath);
-    return { entryPath, displayName: name, displayPath: name };
+    return { entryPath, displayName: name, displayPath: name, capabilities: [] };
   }
   if (!info.isDirectory()) throw new Error("Development extension entry must be a regular file or directory");
   return resolveDevelopmentDirectory(selectedPath);
@@ -46,6 +54,8 @@ async function resolveDevelopmentDirectory(directory: string): Promise<ResolvedD
       entryPath,
       displayName: manifest.plugin.name,
       displayPath: basename(directory),
+      capabilities: [...manifest.capabilities],
+      ...(manifest.configuration ? { configurationSchema: manifest.configuration } : {}),
     };
   }
   for (const candidate of CONVENTIONAL_ENTRY_NAMES) {
@@ -55,7 +65,7 @@ async function resolveDevelopmentDirectory(directory: string): Promise<ResolvedD
       if (info.isFile() && !info.isSymbolicLink()) {
         const canonical = await realpath(entryPath);
         const name = basename(directory);
-        return { entryPath: canonical, displayName: name, displayPath: name };
+        return { entryPath: canonical, displayName: name, displayPath: name, capabilities: [] };
       }
     } catch (error) {
       if (!isNodeError(error, "ENOENT")) throw error;
@@ -107,7 +117,32 @@ function parseDesktopManifest(value: unknown): DesktopDevelopmentManifest {
   if (!isPlainObject(pi) || typeof pi.entry !== "string" || !pi.entry.trim()) {
     throw new Error("market-manifest.json pi.entry is missing");
   }
-  return { plugin: { name: plugin.name.trim() }, pi: { entry: pi.entry } };
+  const capabilities = parseCapabilities(value.capabilities);
+  const configuration = parsePluginConfigurationSchema(value.configuration);
+  if (configuration && !capabilities.includes("configuration.read")) {
+    throw new Error("market-manifest.json configuration requires the configuration.read capability");
+  }
+  return {
+    plugin: { name: plugin.name.trim() },
+    pi: { entry: pi.entry },
+    capabilities,
+    ...(configuration ? { configuration } : {}),
+  };
+}
+
+function parseCapabilities(value: unknown): DesktopExtensionCapability[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const capabilities: DesktopExtensionCapability[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !CAPABILITIES.has(item as DesktopExtensionCapability)) {
+      throw new Error(`market-manifest.json declares an unsupported capability: ${String(item)}`);
+    }
+    if (seen.has(item)) throw new Error(`market-manifest.json capability is duplicated: ${item}`);
+    seen.add(item);
+    capabilities.push(item as DesktopExtensionCapability);
+  }
+  return capabilities;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

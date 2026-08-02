@@ -14,7 +14,7 @@ export const Route = createFileRoute("/_chat")({ component: ChatLayout });
 /** Shared shell for chat routes; the workspace element persists while the leaf outlet changes. */
 export function ChatLayout() {
   return (
-    <ToastProvider label="Meta Agent 通知" swipeDirection="right">
+    <ToastProvider label="通知" swipeDirection="right">
       <DesktopWindowTitle />
       <div className="app-shell">
         <DesktopCatalogProvider>

@@ -78,7 +78,7 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
             <Tabs.Content value="marketplace" className="plugin-center-tab-content">
               <header className="plugin-marketplace-page-heading">
                 <h2>插件</h2>
-                <span>安装、更新和管理标准 Pi Extension。</span>
+                <span>安装、更新和管理标准插件。</span>
               </header>
               <div className="plugin-marketplace-toolbar" data-has-options={returnSession ? "true" : undefined}>
                 <div className="plugin-marketplace-search-field">

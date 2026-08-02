@@ -94,7 +94,7 @@ body.is-resizing-column .workbench-panel {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 68px 0 8px;
+  padding: 0 78px 0 8px;
 }
 /* topbar-actions 悬浮于右侧留白上方，需从 drag 矩形中挖洞保持可交互。 */
 .panel-tabs-safe-area {
@@ -900,7 +900,7 @@ html[data-theme="dark"] .file-preview-token {
 }
 
 /* 会话拖拽到侧边栏的 VS Code 式落点蒙层（渲染在工作区右缘）。
-   宽度为工作区的 50%，让用户看到侧边栏展开后的实际范围；纯蒙层，无图标/文字。 */
+   宽度为工作区的 50%，骨架轮廓预示侧边工作台展开后的结构。 */
 .thread-drop-zone {
   position: absolute;
   top: 0;
@@ -908,23 +908,107 @@ html[data-theme="dark"] .file-preview-token {
   bottom: 0;
   z-index: var(--stack-workbench-overlay);
   width: 50%;
-  border-left: 1px dashed hsl(var(--border));
-  background: hsl(var(--muted) / 0.45);
-  opacity: 0.6;
+  overflow: hidden;
+  border-left: 1px dashed hsl(var(--primary) / 0.32);
+  background: color-mix(in oklab, hsl(var(--background)) 95%, hsl(var(--primary)));
   transition:
-    opacity var(--motion-duration-fast) var(--motion-ease-standard),
+    border-color var(--motion-duration-fast) var(--motion-ease-standard),
     background-color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .thread-drop-zone[data-active] {
   border-left-style: solid;
-  border-left-color: hsl(var(--ring));
-  background: hsl(var(--muted));
-  opacity: 1;
+  border-left-color: hsl(var(--primary) / 0.78);
+  background: color-mix(in oklab, hsl(var(--background)) 91%, hsl(var(--primary)));
 }
 
 .thread-drop-zone[data-invalid] {
   opacity: 0.3;
+}
+
+.thread-drop-zone-skeleton {
+  display: grid;
+  grid-template-rows: 42px minmax(0, 1fr) 68px;
+  width: 100%;
+  height: 100%;
+  color: hsl(var(--primary));
+  opacity: 0.48;
+  pointer-events: none;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.thread-drop-zone[data-active] .thread-drop-zone-skeleton {
+  opacity: 0.72;
+}
+
+.thread-drop-zone-skeleton-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid hsl(var(--primary) / 0.12);
+}
+
+.thread-drop-zone-skeleton-icon {
+  flex: 0 0 auto;
+  border: 1px solid hsl(var(--primary) / 0.18);
+  background: hsl(var(--primary) / 0.1);
+}
+
+.thread-drop-zone-skeleton-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--shape-radius-xs);
+}
+
+.thread-drop-zone-skeleton-line {
+  display: block;
+  height: 8px;
+  border-radius: var(--shape-radius-round);
+  background: color-mix(in oklab, hsl(var(--muted)) 74%, hsl(var(--primary)));
+}
+
+.thread-drop-zone-skeleton-title {
+  width: min(38%, 160px);
+  margin-right: auto;
+}
+
+.thread-drop-zone-skeleton-body {
+  padding: clamp(28px, 7vh, 64px) clamp(20px, 6%, 48px);
+}
+
+.thread-drop-zone-skeleton-group {
+  display: flex;
+  width: min(100%, 420px);
+  flex-direction: column;
+  gap: 12px;
+}
+
+.thread-drop-zone-skeleton-group .thread-drop-zone-skeleton-line:nth-child(1) {
+  width: 42%;
+}
+
+.thread-drop-zone-skeleton-group .thread-drop-zone-skeleton-line:nth-child(2) {
+  width: 88%;
+}
+
+.thread-drop-zone-skeleton-group .thread-drop-zone-skeleton-line:nth-child(3) {
+  width: 68%;
+}
+
+.thread-drop-zone-skeleton-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 12px 12px;
+  padding: 0 12px;
+  border: 1px solid hsl(var(--primary) / 0.14);
+  border-radius: var(--shape-radius-xl);
+  background: hsl(var(--background) / 0.5);
+}
+
+.thread-drop-zone-skeleton-footer .thread-drop-zone-skeleton-line {
+  width: min(52%, 220px);
 }
 
 /* 侧边栏已打开时承接会话拖拽：整个 panel 作为落点，悬停时内描边高亮。 */

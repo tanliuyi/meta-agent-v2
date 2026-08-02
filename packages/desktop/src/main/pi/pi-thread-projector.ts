@@ -44,6 +44,7 @@ interface PendingPrompt {
   queueEligible: boolean;
   text?: string;
   quote?: PiQuote;
+  quotes?: readonly PiQuote[];
   accepted: boolean;
   createdAt: number;
 }
@@ -113,13 +114,16 @@ export class PiThreadProjector {
     queueEligible: boolean,
     text?: string,
     quote?: PiQuote,
+    quotes?: readonly PiQuote[],
   ): void {
+    const pendingQuotes = quotes?.length ? [...quotes] : quote ? [quote] : undefined;
     this.pendingPrompts.push({
       requestId,
       desiredMode,
       queueEligible,
       text,
       quote,
+      ...(pendingQuotes ? { quotes: pendingQuotes } : {}),
       accepted: false,
       createdAt: Date.now(),
     });
@@ -342,6 +346,7 @@ export class PiThreadProjector {
           ? this.pendingPrompts.find((item) => item.requestId === consumed.requestId)
           : this.pendingPrompts.find((item) => item.accepted);
         const id = this.transientId("user");
+        const pendingQuotes = pending?.quotes ?? (pending?.quote ? [pending.quote] : undefined);
         const node = {
           id,
           parentId,
@@ -351,7 +356,7 @@ export class PiThreadProjector {
             pending?.text === undefined
               ? userContent(message.content)
               : userContentWithText(message.content, pending.text),
-          ...(pending?.quote ? { quote: pending.quote } : {}),
+          ...(pendingQuotes && pendingQuotes.length > 0 ? quoteFields(pendingQuotes) : {}),
           delivery: {
             state: "live",
             ...(pending ? { requestId: pending.requestId } : {}),
@@ -478,7 +483,10 @@ export class PiThreadProjector {
         if (!id) return;
         const current = this.byId.get(id);
         if (!current || current.kind !== "user") return;
-        this.replaceNode({ ...current, content: current.quote ? current.content : userContent(message.content) });
+        this.replaceNode({
+          ...current,
+          content: current.quote || current.quotes ? current.content : userContent(message.content),
+        });
         return;
       }
       case "assistant": {
@@ -1184,6 +1192,12 @@ function assistantStatus(message: AssistantMessage): PiAssistantStatus {
   }
 }
 
+function quoteFields(quotes: readonly PiQuote[]): { quote?: PiQuote; quotes?: PiQuote[] } {
+  const first = quotes[0];
+  if (!first) return {};
+  return quotes.length === 1 ? { quote: first } : { quotes: [...quotes] };
+}
+
 function mergeCanonicalNode(current: PiTimelineNode, canonical: PiTimelineNode): PiTimelineNode {
   if (current.kind === "assistant" && canonical.kind === "assistant") {
     return {
@@ -1192,8 +1206,10 @@ function mergeCanonicalNode(current: PiTimelineNode, canonical: PiTimelineNode):
       status: current.status,
     };
   }
-  if (current.kind === "user" && canonical.kind === "user")
+  if (current.kind === "user" && canonical.kind === "user") {
+    if (current.quotes) return { ...canonical, content: current.content, quotes: current.quotes };
     return current.quote ? { ...canonical, content: current.content, quote: current.quote } : canonical;
+  }
   if (current.kind === "notice" && canonical.kind === "notice") return canonical;
   throw new ProjectionError(`rekey kind 不匹配: ${current.kind}/${canonical.kind}`);
 }

@@ -69,7 +69,12 @@ function equalModel(left: ModelOption, right: ModelOption): boolean {
 }
 
 function equalCommand(left: SlashCommand, right: SlashCommand): boolean {
-  return left.name === right.name && left.description === right.description && left.source === right.source;
+  return (
+    left.name === right.name &&
+    left.description === right.description &&
+    left.source === right.source &&
+    left.acceptsArguments === right.acceptsArguments
+  );
 }
 
 function equalHostRequest(left: HostRequest, right: HostRequest): boolean {

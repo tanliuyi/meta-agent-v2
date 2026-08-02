@@ -8,6 +8,7 @@ const DESKTOP_BUILTIN_COMMANDS: SlashCommand[] = [
     name: "reload",
     description: "Reload extensions, skills, prompts, and context files",
     source: "builtin",
+    acceptsArguments: false,
   },
 ];
 
@@ -26,16 +27,19 @@ export function getSessionCommands(session: CommandSession): SlashCommand[] {
       name: command.invocationName,
       description: command.description,
       source: "extension" as const,
+      acceptsArguments: command.acceptsArguments !== false,
     }));
   const prompts = session.promptTemplates.map((prompt) => ({
     name: prompt.name,
     description: prompt.description,
     source: "prompt" as const,
+    acceptsArguments: true,
   }));
   const skills = session.resourceLoader.getSkills().skills.map((skill) => ({
     name: `skill:${skill.name}`,
     description: skill.description,
     source: "skill" as const,
+    acceptsArguments: true,
   }));
   return [...DESKTOP_BUILTIN_COMMANDS, ...extensions, ...prompts, ...skills];
 }
@@ -67,16 +71,19 @@ export function getDraftCommands(resourceLoader: ResourceLoader): SlashCommand[]
       name,
       description: command.description,
       source: "extension" as const,
+      acceptsArguments: command.acceptsArguments !== false,
     }));
   const prompts = resourceLoader.getPrompts().prompts.map((prompt) => ({
     name: prompt.name,
     description: prompt.description,
     source: "prompt" as const,
+    acceptsArguments: true,
   }));
   const skills = resourceLoader.getSkills().skills.map((skill) => ({
     name: `skill:${skill.name}`,
     description: skill.description,
     source: "skill" as const,
+    acceptsArguments: true,
   }));
   return [...extensions, ...prompts, ...skills];
 }

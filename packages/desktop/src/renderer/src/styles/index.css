@@ -17,6 +17,7 @@
 @import "./memory-settings.css" layer(components);
 @import "./providers-settings.css" layer(components);
 @import "./chat.css" layer(components);
+@import "./image-preview.css";
 @import "./markdown.css" layer(components);
 @import "./panel.css" layer(components);
 @import "./utilities.css";

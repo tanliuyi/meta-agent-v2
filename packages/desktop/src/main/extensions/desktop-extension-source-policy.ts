@@ -18,7 +18,10 @@ interface DesktopExtensionSourcePolicyOptions {
   getBuiltinDefinitions(): DesktopExtensionDefinition[];
   getCuratedDefinitions(): DesktopExtensionDefinition[];
   getMarketplaceExtensions?(): Promise<{ revision: string; plugins: InstalledMarketplacePluginRecord[] }>;
-  pluginConfigurations?: Pick<PluginConfigurationService, "getRuntimeConfiguration">;
+  pluginConfigurations?: Pick<
+    PluginConfigurationService,
+    "getRuntimeConfiguration" | "getDevelopmentRuntimeConfiguration"
+  >;
   marketplaceRoot?: string;
   curatedRoot?: string;
   createGeneration?(): string;
@@ -94,14 +97,22 @@ export class DesktopExtensionSourcePolicy {
           const info = await lstat(entry.entryPath);
           if (!info.isFile() || info.isSymbolicLink()) throw new Error("entry is not a regular non-symlink file");
           const entryPath = await realpath(entry.entryPath);
-          fingerprintParts.push(`${entry.id}:${entryPath}`);
+          const configuration =
+            entry.configurationSchema && entry.capabilities.includes("configuration.read")
+              ? await this.options.pluginConfigurations?.getDevelopmentRuntimeConfiguration(
+                  entry.id,
+                  entry.configurationSchema,
+                )
+              : undefined;
+          fingerprintParts.push(`${entry.id}:${entryPath}:${configuration?.revision ?? "unconfigured"}`);
           pathEntries.push({
             id: entry.id,
             displayName: entry.displayName,
             source: "development",
             entryPath,
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-            capabilities: [],
+            capabilities: [...entry.capabilities],
+            ...(configuration ? { configuration: { ...configuration.values } } : {}),
           });
         } catch {
           fingerprintParts.push(`${entry.id}:missing`);

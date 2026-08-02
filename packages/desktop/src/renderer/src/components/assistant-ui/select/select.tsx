@@ -10,12 +10,26 @@ import { SelectItem } from "./select-item.tsx";
 import { SelectRoot } from "./select-root.tsx";
 import type { SelectProps } from "./select-types.ts";
 
-export function Select({ options, placeholder, tooltip, className, ...props }: SelectProps) {
+export function Select({
+  options,
+  placeholder,
+  tooltip,
+  className,
+  id,
+  "aria-labelledby": ariaLabelledby,
+  "aria-describedby": ariaDescribedby,
+  "aria-invalid": ariaInvalid,
+  ...props
+}: SelectProps) {
   const [selectOpen, setSelectOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const selectedOption = options.find((option) => option.value === props.value);
   const trigger = (
     <SelectPrimitive.Trigger
+      id={id}
+      aria-labelledby={ariaLabelledby}
+      aria-describedby={ariaDescribedby}
+      aria-invalid={ariaInvalid}
       className={cn(
         "group flex items-center gap-1 rounded-xl py-1 px-2 text-sm transition-colors outline-none",
         "text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2",
@@ -56,10 +70,11 @@ export function Select({ options, placeholder, tooltip, className, ...props }: S
       )}
 
       <SelectContent>
-        {options.map(({ label, disabled, textValue, ...itemProps }) => (
+        {options.map(({ label, disabled, textValue, description, ...itemProps }) => (
           <SelectItem
             key={itemProps.value}
             {...itemProps}
+            {...(description !== undefined ? { description } : {})}
             {...(disabled !== undefined ? { disabled } : {})}
             textValue={textValue ?? (typeof label === "string" ? label : itemProps.value)}
           >
