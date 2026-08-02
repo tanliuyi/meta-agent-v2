@@ -16,8 +16,8 @@ export interface SessionCacheController {
   ensure(identity: SessionIdentity): CachedSessionRecord;
   ensureAttached(identity: SessionIdentity): Promise<CachedSessionRecord>;
   get(key: string): CachedSessionRecord | undefined;
-  quiesce(key: string): () => void;
-  quiesceProject(projectId: string): () => void;
+  quiesce(key: string): Promise<() => Promise<void>>;
+  quiesceProject(projectId: string): Promise<() => Promise<void>>;
   /** 次级视图（如侧边栏 tab）持有一席：导航切换不会 detach 被持有的会话。 */
   retain(key: string): void;
   /** 释放一席；无其他持有者且非路由活动会话时 detach 租约。 */
@@ -114,25 +114,17 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
         return recordsRef.current.get(key);
       },
 
-      quiesce(key: string) {
+      async quiesce(key: string) {
         const record = recordsRef.current.get(key);
-        if (!record) return () => undefined;
-        const previous = record.stores.connection.getSnapshot();
-        record.stores.connection.setState("recovering");
-        record.stores.summary.set({ connectionState: "recovering" });
-        return () => {
-          if (recordsRef.current.get(key) !== record) return;
-          record.stores.connection.setState(previous);
-          record.stores.summary.set({ connectionState: previous });
-        };
+        if (!record) return async () => undefined;
+        return transportManager.quiesce(record);
       },
 
-      quiesceProject(projectId: string) {
-        const restores = [...recordsRef.current.values()]
-          .filter((record) => record.identity.projectId === projectId)
-          .map((record) => controllerRef.current?.quiesce(record.key) ?? (() => undefined));
-        return () => {
-          for (const restore of restores) restore();
+      async quiesceProject(projectId: string) {
+        const records = [...recordsRef.current.values()].filter((record) => record.identity.projectId === projectId);
+        const restores = await Promise.all(records.map((record) => transportManager.quiesce(record)));
+        return async () => {
+          await Promise.all(restores.map((restore) => restore()));
         };
       },
 

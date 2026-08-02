@@ -114,6 +114,31 @@ describe("SessionTransportManager attach settling", () => {
     vi.unstubAllGlobals();
   });
 
+  it("quiesce 会在删除前释放 lease，并阻止恢复循环重新 attach", async () => {
+    const record = createSessionRecord({ projectId: "p", threadId: "t" });
+    const attach = vi
+      .fn()
+      .mockResolvedValueOnce(attachmentFor(record, "attachment-1"))
+      .mockResolvedValueOnce(attachmentFor(record, "attachment-2"));
+    const desktop = stubWindow(attach);
+    const manager = new SessionTransportManager();
+
+    await manager.ensure(record);
+    const restore = await manager.quiesce(record);
+
+    expect(desktop.sessions.detach).toHaveBeenCalledWith("attachment-1");
+    expect(record.stores.connection.getSnapshot()).toBe("attaching");
+    await expect(manager.ensure(record)).rejects.toThrow(/is quiesced$/);
+    await expect(manager.recover(record)).rejects.toThrow(/is quiesced$/);
+    expect(attach).toHaveBeenCalledTimes(1);
+
+    await restore();
+    expect(attach).toHaveBeenCalledTimes(2);
+    expect(manager.getCommittedAttachmentId(record)).toBe("attachment-2");
+    expect(record.stores.connection.getSnapshot()).toBe("ready");
+    vi.unstubAllGlobals();
+  });
+
   it("detach -> 排队 ensure -> retire -> 收尾：retire 使排队中的 ensure 失效，不重建 attachment", async () => {
     let resolveFirst!: (attachment: SessionAttachment) => void;
     const first = new Promise<SessionAttachment>((done) => {

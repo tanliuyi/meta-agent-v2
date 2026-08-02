@@ -150,11 +150,11 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
         }
       },
       async removeProject(projectId) {
-        const restore = cache.quiesceProject(projectId);
+        const restore = await cache.quiesceProject(projectId);
         try {
           await window.desktop.projects.remove(projectId);
         } catch (error) {
-          restore();
+          await restore();
           reportError(error);
           throw error;
         }
@@ -195,11 +195,11 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
       },
       async setThreadArchived(projectId, threadId, archived) {
         const key = sessionRecordKey(projectId, threadId);
-        const restore = archived ? cache.quiesce(key) : () => undefined;
+        const restore = archived ? await cache.quiesce(key) : async () => undefined;
         try {
           await window.desktop.sessions.archive(projectId, threadId, archived);
         } catch (error) {
-          restore();
+          await restore();
           reportError(error);
           throw error;
         }
@@ -219,12 +219,12 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
       },
       async removeThread(projectId, threadId, policy) {
         const key = sessionRecordKey(projectId, threadId);
-        const restore = cache.quiesce(key);
+        const restore = await cache.quiesce(key);
         let result: Awaited<ReturnType<typeof window.desktop.sessions.remove>>;
         try {
           result = await window.desktop.sessions.remove(projectId, threadId, policy);
         } catch (error) {
-          restore();
+          await restore();
           reportError(error);
           throw error;
         }

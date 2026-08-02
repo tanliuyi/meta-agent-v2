@@ -49,9 +49,11 @@ function delay(ms: number): Promise<void> {
 export class SessionTransportManager {
   private readonly keyStates = new Map<string, KeyState>();
   private readonly settling = new Map<string, SettlingEntry>();
+  private readonly quiesced = new Map<string, CachedSessionRecord>();
 
   async ensure(record: CachedSessionRecord): Promise<SessionAttachment> {
     const key = record.key;
+    if (this.quiesced.get(key) === record) throw new Error(`Session record ${key} is quiesced`);
     // 前一次 attach 被中断后仍在收尾：等其 abort 清理（含主进程 detach IPC）完成再发起新 attach。
     const settling = this.settling.get(key);
     if (settling) {
@@ -127,6 +129,21 @@ export class SessionTransportManager {
     });
   }
 
+  async quiesce(record: CachedSessionRecord): Promise<() => Promise<void>> {
+    const key = record.key;
+    const current = this.quiesced.get(key);
+    if (current && current !== record) throw new Error(`Session record ${key} is retired`);
+    this.quiesced.set(key, record);
+    record.stores.connection.setState("attaching");
+    record.stores.summary.set({ connectionState: "attaching" });
+    await this.detach(key);
+    return async () => {
+      if (this.quiesced.get(key) !== record) return;
+      this.quiesced.delete(key);
+      await this.ensure(record);
+    };
+  }
+
   async detach(key: string): Promise<void> {
     const state = this.keyStates.get(key);
     if (!state) return;
@@ -144,6 +161,7 @@ export class SessionTransportManager {
   }
 
   async retire(key: string): Promise<void> {
+    this.quiesced.delete(key);
     const state = this.keyStates.get(key);
     if (state) {
       state.tombstoned = true;
@@ -180,9 +198,9 @@ export class SessionTransportManager {
   }
 
   async detachAll(): Promise<void> {
-    // 同时覆盖 keyStates 与收尾中的 settling：detach 进行中排队的 ensure
+    // 同时覆盖 keyStates、quiesce 与收尾中的 settling：detach 进行中排队的 ensure
     // 也会被失效，避免窗口卸载后仍重建 attachment。
-    const keys = new Set<string>([...this.keyStates.keys(), ...this.settling.keys()]);
+    const keys = new Set<string>([...this.keyStates.keys(), ...this.quiesced.keys(), ...this.settling.keys()]);
     await Promise.all([...keys].map((key) => this.retire(key)));
   }
 
