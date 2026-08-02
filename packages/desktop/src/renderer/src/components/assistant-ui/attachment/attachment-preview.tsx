@@ -95,7 +95,7 @@ export function AttachmentPreview({ children, src }: AttachmentPreviewProps) {
       aria-label="预览图片"
       tabIndex={-1}
       classNames={{
-        root: "aui-image-preview-trigger",
+        root: "aui-image-preview-trigger mb-2",
         image: "aui-image-preview-trigger-image",
         cover: "aui-image-preview-trigger-cover",
         popup: {
