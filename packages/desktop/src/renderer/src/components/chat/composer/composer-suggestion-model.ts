@@ -99,13 +99,24 @@ export function searchSlashCommands(commands: readonly SlashCommand[], query: st
 
 /** 生成旧 ComposerSuggestions 使用的命令建议。 */
 export function commandSuggestions(commands: readonly SlashCommand[], query: string): ComposerSuggestion[] {
-  return searchSlashCommands(commands, query).map((command) => ({
-    id: `${command.source}:${command.name}`,
-    label: `/${command.source === "extension" ? slashCommandDisplayName(command) : command.name}`,
-    detail: slashCommandDisplayDescription(command),
-    type: "command",
-    text: `/${command.name} `,
-  }));
+  return searchSlashCommands(commands, query).map((command) => {
+    const skill = command.source === "skill";
+    return {
+      id: `${command.source}:${command.name}`,
+      label: skill
+        ? slashCommandDisplayName(command)
+        : `/${command.source === "extension" ? slashCommandDisplayName(command) : command.name}`,
+      detail: slashCommandDisplayDescription(command),
+      type: "command",
+      text: skill
+        ? `${unstable_defaultDirectiveFormatter.serialize({
+            id: command.name,
+            type: "skill",
+            label: slashCommandDisplayName(command),
+          })} `
+        : `/${command.name} `,
+    };
+  });
 }
 
 /** 将 Project 文件结果映射为 assistant-ui directive 引用建议。 */

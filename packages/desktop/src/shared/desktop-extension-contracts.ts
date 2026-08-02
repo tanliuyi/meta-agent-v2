@@ -86,6 +86,10 @@ export interface DesktopExtensionHostState {
     text: string;
   };
   widgets: Array<{ key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" }>;
+  working?: {
+    message?: string;
+    visible?: boolean;
+  };
 }
 
 export interface DesktopExtensionListEntry {

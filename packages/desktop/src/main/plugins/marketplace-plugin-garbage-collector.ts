@@ -7,8 +7,8 @@ import {
   readMarketplaceVersionOwner,
   validateInstalledMarketplacePlugin,
 } from "./marketplace-installed-plugin.ts";
+import { withMarketplacePluginLock } from "./marketplace-plugin-lock.ts";
 import type { MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
-import type { MarketplacePluginTransactionStore } from "./marketplace-plugin-transaction-store.ts";
 
 export interface MarketplacePluginGarbageCollectionResult {
   removedVersions: string[];
@@ -25,24 +25,24 @@ const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 export class MarketplacePluginGarbageCollector {
   private readonly registry: MarketplacePluginRegistry;
-  private readonly transactions: MarketplacePluginTransactionStore;
   private readonly references: Pick<MarketplaceGenerationReferenceTracker, "isReferenced">;
   private readonly marketplaceRoot: string;
+  private readonly lockDirectory: string;
   private readonly now: () => number;
   private readonly retentionMs: number;
   private running?: Promise<MarketplacePluginGarbageCollectionResult>;
 
   constructor(
     registry: MarketplacePluginRegistry,
-    transactions: MarketplacePluginTransactionStore,
     references: Pick<MarketplaceGenerationReferenceTracker, "isReferenced">,
     agentDir: string,
+    lockDirectory: string,
     options: MarketplacePluginGarbageCollectorOptions = {},
   ) {
     this.registry = registry;
-    this.transactions = transactions;
     this.references = references;
     this.marketplaceRoot = join(agentDir, "extensions");
+    this.lockDirectory = lockDirectory;
     this.now = options.now ?? Date.now;
     this.retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
   }
@@ -71,7 +71,7 @@ export class MarketplacePluginGarbageCollector {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
       const pluginId = entry.name;
       if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)+$/.test(pluginId)) continue;
-      await this.transactions.withPluginLock(pluginId, async () => {
+      await withMarketplacePluginLock(this.lockDirectory, pluginId, async () => {
         await this.collectPlugin(pluginId, result);
       });
     }

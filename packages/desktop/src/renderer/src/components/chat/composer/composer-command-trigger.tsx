@@ -25,7 +25,7 @@ const COMMAND_GROUPS = [
 }[];
 
 export function slashCommandAcceptsArguments(command: SlashCommand): boolean {
-  return command.acceptsArguments !== false;
+  return command.source !== "skill" && command.acceptsArguments !== false;
 }
 
 export function slashCommandText(command: SlashCommand, args: string): string {

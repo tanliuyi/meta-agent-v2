@@ -1,202 +1,158 @@
 import type { Dirent } from "node:fs";
-import { readdir, rm, rmdir } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { lstat, readdir, rm, rmdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import {
   markMarketplaceVersionInactive,
-  removeMarketplaceVersionIfOwned,
+  readMarketplaceRootOwnership,
   validateInstalledMarketplacePlugin,
   writeMarketplaceBrokenMarker,
   writeMarketplaceProjection,
   writeMarketplaceUninstallTombstone,
 } from "./marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord, MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
-import type {
-  MarketplacePluginTransaction,
-  MarketplacePluginTransactionStore,
-} from "./marketplace-plugin-transaction-store.ts";
 
 interface MarketplacePluginReconcilerOptions {
   now?(): number;
   log?(message: string): void;
 }
 
+const VERSION_DIRECTORY = ".versions";
+const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
+const ARTIFACT_HASH = /^[a-f0-9]{64}$/;
+
+/**
+ * Startup reconciliation without a durable apply journal.
+ *
+ * The registry is the single commit point. This pass restores the two
+ * crash windows that remain around it:
+ *
+ * - registry committed but projection not written -> rewrite the projection;
+ * - version payload landed but registry never committed -> remove the orphan;
+ * - uninstall committed but tombstone not written -> complete the tombstone.
+ *
+ * Anything that cannot be proven consistent is marked broken instead of being
+ * deleted or guessed.
+ */
 export class MarketplacePluginReconciler {
   private readonly registry: MarketplacePluginRegistry;
-  private readonly transactions: MarketplacePluginTransactionStore;
   private readonly marketplaceRoot: string;
+  private readonly userDataDir: string;
   private readonly now: () => number;
   private readonly log: (message: string) => void;
 
   constructor(
     registry: MarketplacePluginRegistry,
-    transactions: MarketplacePluginTransactionStore,
     agentDir: string,
+    userDataDir: string,
     options: MarketplacePluginReconcilerOptions = {},
   ) {
     this.registry = registry;
-    this.transactions = transactions;
     this.marketplaceRoot = join(agentDir, "extensions");
+    this.userDataDir = userDataDir;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (() => undefined);
   }
 
   async reconcile(): Promise<void> {
-    for (const transaction of await this.transactions.list()) {
-      await this.reconcileTransaction(transaction.operationId);
-    }
     await this.cleanupOrphanStaging();
+    await this.cleanupLegacyTransactionJournal();
+    const internal = await this.registry.getInternalSnapshot();
+    const registered = new Map(internal.plugins.map((plugin) => [plugin.id, plugin]));
+    for (const record of internal.plugins) {
+      await this.reconcileRegistered(record);
+    }
+    for (const entry of await this.marketplaceEntries()) {
+      if (registered.has(entry.name)) continue;
+      await this.reconcileUnownedRoot(entry.name);
+    }
   }
 
-  async reconcileTransaction(operationId: string): Promise<void> {
-    const transaction = (await this.transactions.list()).find((entry) => entry.operationId === operationId);
-    if (!transaction) return;
-    await this.transactions.withPluginLock(transaction.pluginId, async () => {
-      assertTransactionPaths(transaction, this.marketplaceRoot);
-      if (transaction.operation === "install") await this.reconcileInstall(transaction);
-      else if (transaction.operation === "update") await this.reconcileUpdate(transaction);
-      else await this.reconcileUninstall(transaction);
-    });
-  }
-
-  private async reconcileInstall(transaction: MarketplacePluginTransaction): Promise<void> {
-    const after = transaction.after;
-    if (!after) throw new Error(`Install transaction has no after record: ${transaction.operationId}`);
-    const current = await this.currentRecord(transaction.pluginId);
-    if (transaction.phase === "rollback-pending") {
-      if (transaction.removeVersionOnRollback || transaction.removeRootOnRollback) {
-        await this.cleanupInstallFiles(transaction);
-        await this.transactions.complete(transaction);
-        this.log(`Removed uncommitted marketplace install transaction ${transaction.operationId}`);
+  private async reconcileRegistered(record: InstalledMarketplacePluginRecord): Promise<void> {
+    try {
+      await validateInstalledMarketplacePlugin(record, this.marketplaceRoot);
+    } catch (error) {
+      await this.markBroken(record, error);
+      return;
+    }
+    const projection = join(record.rootPath, "index.ts");
+    try {
+      const info = await lstat(projection);
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error("projection is not a regular file");
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) {
+        try {
+          await writeMarketplaceProjection(record);
+          this.log(`Repaired marketplace projection for ${record.id}`);
+        } catch (projectionError) {
+          await this.markBroken(record, projectionError);
+        }
         return;
       }
-      if (current?.artifactHash === after.artifactHash) {
-        await this.registry.reconcilePlugin(transaction.pluginId, after.artifactHash, transaction.before);
-      } else if (current) {
-        throw new Error(`Cannot roll back transaction over a different installed artifact: ${transaction.pluginId}`);
-      }
+      await this.markBroken(record, error);
+    }
+  }
+
+  private async reconcileUnownedRoot(pluginId: string): Promise<void> {
+    const rootPath = resolve(this.marketplaceRoot, pluginId);
+    const ownership = await readMarketplaceRootOwnership(rootPath);
+    if (ownership) {
       const uninstalledAt = this.now();
-      await markMarketplaceVersionInactive(after, uninstalledAt);
-      await writeMarketplaceUninstallTombstone(after, transaction.operationId, uninstalledAt);
-      await this.cleanupInstallFiles(transaction);
-      await this.transactions.complete(transaction);
-      this.log(`Rolled back marketplace install transaction ${transaction.operationId}`);
+      await markMarketplaceVersionInactive(ownership.record, uninstalledAt);
+      await writeMarketplaceUninstallTombstone(ownership.record, "reconcile", uninstalledAt);
+      this.log(`Completed interrupted marketplace uninstall for ${pluginId}`);
       return;
     }
-    if (!current) {
-      await this.cleanupInstallFiles(transaction);
-      await this.transactions.complete(transaction);
-      this.log(`Removed uncommitted marketplace install transaction ${transaction.operationId}`);
-      return;
-    }
-    if (current.artifactHash !== after.artifactHash) {
-      throw new Error(`Marketplace install transaction conflicts with installed artifact: ${transaction.pluginId}`);
-    }
+    await this.removeOrphanVersionRoot(rootPath, pluginId);
+  }
+
+  /**
+   * Removes a version payload that was renamed into place but never committed.
+   * Only a root consisting solely of an installer-owned `.versions` directory
+   * with hex artifact hashes is removed; anything else is preserved.
+   */
+  private async removeOrphanVersionRoot(rootPath: string, pluginId: string): Promise<void> {
     try {
-      await validateInstalledMarketplacePlugin(after, this.marketplaceRoot);
+      const info = await lstat(rootPath);
+      if (!info.isDirectory() || info.isSymbolicLink()) return;
     } catch (error) {
-      const brokenRecord: InstalledMarketplacePluginRecord = { ...after, state: "broken", enabled: false };
-      await this.registry.markBroken(after.id, after.artifactHash);
-      await writeMarketplaceBrokenMarker(brokenRecord);
-      await this.transactions.complete(transaction);
-      this.log(
-        `Marked marketplace plugin broken while reconciling ${transaction.operationId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return;
+      if (isNodeError(error, "ENOENT")) return;
+      throw error;
     }
-    await writeMarketplaceProjection(after);
-    const projected = await this.transactions.setPhase(transaction, "projection-committed");
-    await this.transactions.complete(projected);
-    this.log(`Completed marketplace install transaction ${transaction.operationId}`);
-  }
-
-  private async reconcileUpdate(transaction: MarketplacePluginTransaction): Promise<void> {
-    const before = transaction.before;
-    const after = transaction.after;
-    if (!before || !after) throw new Error(`Update transaction is incomplete: ${transaction.operationId}`);
-    const current = await this.currentRecord(transaction.pluginId);
-    if (transaction.phase === "rollback-pending") {
-      if (current?.artifactHash === after.artifactHash) {
-        await this.registry.reconcilePlugin(transaction.pluginId, after.artifactHash, before);
-      } else if (current?.artifactHash !== before.artifactHash) {
-        throw new Error(`Cannot roll back update over a different artifact: ${transaction.pluginId}`);
-      }
-      await validateInstalledMarketplacePlugin(before, this.marketplaceRoot);
-      await writeMarketplaceProjection(before);
-      await this.cleanupInstallFiles(transaction);
-      await this.transactions.complete(transaction);
-      this.log(`Rolled back marketplace update transaction ${transaction.operationId}`);
-      return;
-    }
-    if (current?.artifactHash === before.artifactHash) {
-      await this.cleanupInstallFiles(transaction);
-      await writeMarketplaceProjection(before);
-      await this.transactions.complete(transaction);
-      this.log(`Removed uncommitted marketplace update transaction ${transaction.operationId}`);
-      return;
-    }
-    if (current?.artifactHash !== after.artifactHash) {
-      throw new Error(`Marketplace update transaction conflicts with installed artifact: ${transaction.pluginId}`);
-    }
-    await markMarketplaceVersionInactive(before, this.now());
+    let entries: Dirent[];
     try {
-      await validateInstalledMarketplacePlugin(after, this.marketplaceRoot);
-    } catch (error) {
-      const brokenRecord: InstalledMarketplacePluginRecord = { ...after, state: "broken", enabled: false };
-      await this.registry.markBroken(after.id, after.artifactHash);
-      await writeMarketplaceBrokenMarker(brokenRecord);
-      await this.transactions.complete(transaction);
-      this.log(
-        `Marked updated marketplace plugin broken while reconciling ${transaction.operationId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      entries = await readdir(rootPath, { withFileTypes: true });
+    } catch {
       return;
     }
-    await writeMarketplaceProjection(after);
-    const projected = await this.transactions.setPhase(transaction, "projection-committed");
-    await this.transactions.complete(projected);
-    this.log(`Completed marketplace update transaction ${transaction.operationId}`);
+    if (entries.length !== 1 || entries[0]?.name !== VERSION_DIRECTORY || !entries[0].isDirectory()) return;
+    const versionsPath = join(rootPath, VERSION_DIRECTORY);
+    let versions: Dirent[];
+    try {
+      versions = await readdir(versionsPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    if (versions.length === 0 || versions.some((entry) => !entry.isDirectory() || !ARTIFACT_HASH.test(entry.name))) {
+      return;
+    }
+    for (const version of versions) {
+      await rm(join(versionsPath, version.name), { recursive: true, force: true });
+    }
+    await rmdir(versionsPath).catch(() => undefined);
+    await rmdir(rootPath).catch(() => undefined);
+    this.log(`Removed uncommitted marketplace version payload for ${pluginId}`);
   }
 
-  private async reconcileUninstall(transaction: MarketplacePluginTransaction): Promise<void> {
-    const before = transaction.before;
-    if (!before) throw new Error(`Uninstall transaction has no before record: ${transaction.operationId}`);
-    const current = await this.currentRecord(transaction.pluginId);
-    if (transaction.phase === "rollback-pending") {
-      if (!current) await this.registry.reconcilePlugin(before.id, before.artifactHash, before);
-      else if (current.artifactHash !== before.artifactHash) {
-        throw new Error(`Cannot restore uninstall over a different artifact: ${transaction.pluginId}`);
-      }
-      await validateInstalledMarketplacePlugin(before, this.marketplaceRoot);
-      await writeMarketplaceProjection(before);
-      await this.transactions.complete(transaction);
-      this.log(`Rolled back marketplace uninstall transaction ${transaction.operationId}`);
-      return;
+  private async markBroken(record: InstalledMarketplacePluginRecord, error: unknown): Promise<void> {
+    try {
+      await this.registry.markBroken(record.id, record.artifactHash);
+      await writeMarketplaceBrokenMarker({ ...record, state: "broken", enabled: false });
+    } catch {
+      // Broken markers are best-effort; the registry state still excludes the plugin.
     }
-    if (current) {
-      if (current.artifactHash !== before.artifactHash) {
-        throw new Error(`Marketplace uninstall transaction conflicts with installed artifact: ${transaction.pluginId}`);
-      }
-      await this.transactions.complete(transaction);
-      this.log(`Discarded uncommitted marketplace uninstall transaction ${transaction.operationId}`);
-      return;
-    }
-    const uninstalledAt = this.now();
-    await markMarketplaceVersionInactive(before, uninstalledAt);
-    await writeMarketplaceUninstallTombstone(before, transaction.operationId, uninstalledAt);
-    const projected = await this.transactions.setPhase(transaction, "projection-committed");
-    await this.transactions.complete(projected);
-    this.log(`Completed marketplace uninstall transaction ${transaction.operationId}`);
-  }
-
-  private async cleanupInstallFiles(transaction: MarketplacePluginTransaction): Promise<void> {
-    if (transaction.stagingPath) await rm(transaction.stagingPath, { recursive: true, force: true });
-    if (transaction.versionPath && transaction.removeVersionOnRollback && transaction.after) {
-      const removed = await removeMarketplaceVersionIfOwned(transaction.after, this.marketplaceRoot);
-      if (!removed) this.log(`Preserved unverified marketplace version path ${transaction.versionPath}`);
-    }
-    if (transaction.removeRootOnRollback) {
-      await rmdir(join(transaction.rootPath, ".versions")).catch(() => undefined);
-      await rmdir(transaction.rootPath).catch(() => undefined);
-    }
+    this.log(
+      `Marked marketplace plugin broken while reconciling ${record.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   private async cleanupOrphanStaging(): Promise<void> {
@@ -215,32 +171,28 @@ export class MarketplacePluginReconciler {
     await rmdir(stagingRoot).catch(() => undefined);
   }
 
-  private async currentRecord(pluginId: string): Promise<InstalledMarketplacePluginRecord | undefined> {
-    return (await this.registry.getInternalSnapshot()).plugins.find((plugin) => plugin.id === pluginId);
+  /** Removes the obsolete durable apply journal directory from earlier versions. */
+  private async cleanupLegacyTransactionJournal(): Promise<void> {
+    const journal = join(this.userDataDir, "plugins", "transactions");
+    try {
+      const info = await lstat(journal);
+      if (!info.isDirectory() || info.isSymbolicLink()) return;
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return;
+      throw error;
+    }
+    await rm(journal, { recursive: true, force: true });
+    this.log("Removed the legacy marketplace transaction journal");
   }
-}
 
-function assertTransactionPaths(transaction: MarketplacePluginTransaction, marketplaceRoot: string): void {
-  const expectedRoot = resolve(marketplaceRoot, transaction.pluginId);
-  if (resolve(transaction.rootPath) !== expectedRoot) {
-    throw new Error(`Marketplace transaction root is outside the managed root: ${transaction.operationId}`);
-  }
-  const artifactHash = transaction.after?.artifactHash ?? transaction.before?.artifactHash;
-  if (
-    transaction.versionPath &&
-    resolve(transaction.versionPath) !== resolve(expectedRoot, ".versions", artifactHash ?? "")
-  ) {
-    throw new Error(`Marketplace transaction version path is invalid: ${transaction.operationId}`);
-  }
-  const expectedStagingRoot = resolve(marketplaceRoot, ".meta-agent-marketplace-staging");
-  const stagingName = transaction.stagingPath ? basename(resolve(transaction.stagingPath)) : undefined;
-  if (
-    transaction.stagingPath &&
-    (dirname(resolve(transaction.stagingPath)) !== expectedStagingRoot ||
-      !stagingName?.startsWith(`${transaction.pluginId}-`) ||
-      !/^[a-zA-Z0-9._-]+$/.test(stagingName))
-  ) {
-    throw new Error(`Marketplace transaction staging path is invalid: ${transaction.operationId}`);
+  private async marketplaceEntries(): Promise<Dirent[]> {
+    try {
+      const entries = await readdir(this.marketplaceRoot, { withFileTypes: true });
+      return entries.filter((entry) => entry.isDirectory() && !entry.isSymbolicLink() && PLUGIN_ID.test(entry.name));
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return [];
+      throw error;
+    }
   }
 }
 

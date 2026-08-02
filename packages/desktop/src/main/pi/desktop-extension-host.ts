@@ -38,7 +38,14 @@ export class DesktopExtensionCompatibilityError extends Error {
   }
 }
 
-/** Declarative Desktop Host Profile v1 for controlled Pi extensions. */
+/**
+ * Declarative Desktop Host Profile v1 for controlled Pi extensions.
+ *
+ * Unsupported display-only surfaces degrade to a warning plus a defined no-op
+ * so extension tool chains are not interrupted. Session-changing actions
+ * (`session.reload`, `session.replace`) and dialogs on a disposed host keep
+ * failing with a stable error instead.
+ */
 export class DesktopExtensionHost {
   private readonly pending = new Map<string, PendingRequest>();
   private state: DesktopExtensionHostState = EMPTY_HOST_STATE;
@@ -52,6 +59,7 @@ export class DesktopExtensionHost {
     type: "info" | "warning" | "error",
     options?: ExtensionUINotificationOptions,
   ) => void;
+  private readonly warn: (message: string) => void;
 
   constructor(
     changed: () => void,
@@ -61,10 +69,12 @@ export class DesktopExtensionHost {
       type: "info" | "warning" | "error",
       options?: ExtensionUINotificationOptions,
     ) => void = () => undefined,
+    warn: (message: string) => void = () => undefined,
   ) {
     this.changed = changed;
     this.activeToolIds = activeToolIds;
     this.publishNotification = publishNotification;
+    this.warn = warn;
   }
 
   get requests(): HostRequest[] {
@@ -88,32 +98,61 @@ export class DesktopExtensionHost {
         this.ask("editor", title, { message: prefill }, undefined, (response) => response.value),
       notify: (message: string, type?: "info" | "warning" | "error", options?: ExtensionUINotificationOptions) =>
         this.notify(message, type, options),
-      onTerminalInput: () => this.unavailable("ui.terminal.input"),
+      onTerminalInput: () => {
+        this.degrade("ui.terminal.input");
+        return () => undefined;
+      },
       setStatus: (key: string, text: string | undefined) => this.setStatus(key, text),
-      setWorkingMessage: () => this.unavailable("ui.working"),
-      setWorkingVisible: () => this.unavailable("ui.working"),
-      setWorkingIndicator: () => this.unavailable("ui.working"),
-      setHiddenThinkingLabel: () => this.unavailable("ui.working"),
+      setWorkingMessage: (message?: string) =>
+        this.patch("ui.working", {
+          working: { ...this.state.working, message, visible: this.state.working?.visible ?? true },
+        }),
+      setWorkingVisible: (visible: boolean) =>
+        this.patch("ui.working", { working: { ...this.state.working, visible } }),
+      setWorkingIndicator: () => this.degrade("ui.working", "working indicator frames are not supported"),
+      setHiddenThinkingLabel: () => this.degrade("ui.working", "hidden thinking labels are not supported"),
       setWidget: (key: string, content: unknown, options?: ExtensionWidgetOptions) =>
         this.setWidget(key, content, options),
-      setFooter: () => this.unavailable("ui.tui.chrome"),
-      setHeader: () => this.unavailable("ui.tui.chrome"),
+      setFooter: () => this.degrade("ui.tui.chrome", "custom footer components are not supported"),
+      setHeader: () => this.degrade("ui.tui.chrome", "custom header components are not supported"),
       setTitle: (title: string) => this.patch("ui.title", { windowTitle: title }),
-      custom: async <T>() => this.unavailable<T>("ui.tui.custom"),
+      custom: async <T>() => {
+        this.degrade("ui.tui.custom");
+        return undefined as T;
+      },
       pasteToEditor: (text: string) => this.sendComposerCommand("append", text),
       setEditorText: (text: string) => this.sendComposerCommand("replace", text),
-      getEditorText: () => this.unavailable<string>("ui.composer.read"),
-      addAutocompleteProvider: () => this.unavailable("ui.tui.editor"),
-      setEditorComponent: () => this.unavailable("ui.tui.editor"),
-      getEditorComponent: () => this.unavailable("ui.tui.editor"),
-      get theme() {
-        return host.unavailable<ExtensionUIContext["theme"]>("ui.tui.theme");
+      getEditorText: () => {
+        this.degrade("ui.composer.read");
+        return undefined as unknown as string;
       },
-      getAllThemes: () => this.unavailable("ui.tui.theme"),
-      getTheme: () => this.unavailable("ui.tui.theme"),
-      setTheme: () => this.unavailable("ui.tui.theme"),
-      getToolsExpanded: () => this.unavailable<boolean>("ui.tui.chrome"),
-      setToolsExpanded: () => this.unavailable("ui.tui.chrome"),
+      addAutocompleteProvider: () => this.degrade("ui.tui.editor", "autocomplete providers are not supported"),
+      setEditorComponent: () => this.degrade("ui.tui.editor", "custom editor components are not supported"),
+      getEditorComponent: () => {
+        this.degrade("ui.tui.editor", "custom editor components are not supported");
+        return undefined;
+      },
+      get theme() {
+        host.degrade("ui.tui.theme");
+        return undefined as unknown as ExtensionUIContext["theme"];
+      },
+      getAllThemes: () => {
+        this.degrade("ui.tui.theme");
+        return [];
+      },
+      getTheme: () => {
+        this.degrade("ui.tui.theme");
+        return undefined;
+      },
+      setTheme: () => {
+        this.degrade("ui.tui.theme", "themes are not supported");
+        return { success: false, error: "Desktop does not support extension themes" };
+      },
+      getToolsExpanded: () => {
+        this.degrade("ui.tui.chrome");
+        return false;
+      },
+      setToolsExpanded: () => this.degrade("ui.tui.chrome"),
     };
   }
 
@@ -218,7 +257,8 @@ export class DesktopExtensionHost {
   private setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
     this.assertActive("ui.widget.text");
     if (content !== undefined && (!Array.isArray(content) || !content.every((line) => typeof line === "string"))) {
-      this.unavailable("ui.tui.custom");
+      this.degrade("ui.tui.custom", "component widgets are not supported");
+      return;
     }
     const widgets = this.state.widgets.filter((widget) => widget.key !== key);
     if (content) {
@@ -243,8 +283,10 @@ export class DesktopExtensionHost {
     }
   }
 
-  private unavailable<T = never>(capability: string): T {
+  private degrade(capability: string, detail?: string): void {
     this.assertActive(capability);
-    throw new DesktopExtensionCompatibilityError("DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE", capability);
+    this.warn(
+      `Desktop extension capability ${capability} is unsupported and was ignored${detail ? ` (${detail})` : ""}`,
+    );
   }
 }

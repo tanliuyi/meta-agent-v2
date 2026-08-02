@@ -1,4 +1,10 @@
-import { ComposerPrimitive, useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
+import {
+  ComposerPrimitive,
+  unstable_defaultDirectiveFormatter,
+  useAui,
+  useAuiEvent,
+  useAuiState,
+} from "@assistant-ui/react";
 import Command from "lucide-react/dist/esm/icons/command.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
@@ -39,6 +45,7 @@ export function Composer(props: ComposerProps) {
   const isCancelable =
     isRunning || (props.mode === "session" && (props.phase === "compacting" || props.phase === "tree-navigation"));
   const extensionWidgets = props.mode === "session" ? props.widgets : EMPTY_WIDGETS;
+  const extensionWorking = props.mode === "session" ? props.working : undefined;
   const aboveWidgets = useMemo(
     () => extensionWidgets?.filter(({ placement }) => placement === "aboveEditor"),
     [extensionWidgets],
@@ -66,6 +73,23 @@ export function Composer(props: ComposerProps) {
     aui.composer().setText(slashCommandText(command, args));
     selectCommand(null);
   }, [aui, selectCommand]);
+
+  const insertSkillDirective = useCallback(
+    (command: SessionControlState["commands"][number]) => {
+      const composer = aui.composer();
+      const text = composer.getState().text;
+      const directive = unstable_defaultDirectiveFormatter.serialize({
+        id: command.name,
+        type: "skill",
+        label: slashCommandDisplayName(command),
+      });
+      const nextText = /(?:^|\s)\/[^\s]*$/.test(text)
+        ? text.replace(/(?:^|\s)\/[^\s]*$/, (match) => `${match.startsWith(" ") ? " " : ""}${directive} `)
+        : `${text.trimEnd()}${text.trim().length > 0 ? " " : ""}${directive} `;
+      composer.setText(nextText);
+    },
+    [aui],
+  );
 
   useAuiEvent("composer.attachmentAddError", ({ message }) => {
     setError(message);
@@ -128,6 +152,10 @@ export function Composer(props: ComposerProps) {
   const handleCommandSelect = (command: SessionControlState["commands"][number]) => {
     setError(null);
     selectCommand(null);
+    if (command.source === "skill") {
+      insertSkillDirective(command);
+      return;
+    }
     if (slashCommandAcceptsArguments(command)) {
       selectCommand(command);
       return;
@@ -168,6 +196,12 @@ export function Composer(props: ComposerProps) {
           <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
             <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-(--composer-background) p-(--composer-padding) shadow-(--elevation-composer) transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-(--elevation-composer-focus) data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
               <ComposerQuotes />
+              {isRunning && extensionWorking?.message && extensionWorking.visible !== false ? (
+                <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground" role="status">
+                  <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-current" aria-hidden="true" />
+                  <span className="min-w-0 truncate">{extensionWorking.message}</span>
+                </div>
+              ) : null}
               <ComposerWidgets widgets={aboveWidgets} />
               <ComposerAttachments disabled={attachmentsDisabled} />
               <ComposerInput
@@ -193,19 +227,19 @@ export function Composer(props: ComposerProps) {
                 <div className="flex min-w-0 items-center gap-2">
                   <ComposerAddAttachment disabled={attachmentsDisabled} />
                   {selectedCommand ? (
-                    <div className="min-w-0 border-l border-border/70 pl-2">
-                      <div className="group flex h-7 min-w-0 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-within:bg-accent focus-within:text-accent-foreground">
+                    <div className="min-w-0 border-l border-border/70 pl-1">
+                      <div className="group flex h-6 min-w-0 items-center gap-1 rounded-xl px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-within:bg-accent focus-within:text-accent-foreground">
                         <button
                           type="button"
                           aria-label={`移除命令 ${slashCommandDisplayName(selectedCommand)}`}
-                          className="relative size-4 shrink-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          className="relative flex flex-row items-center justify-center size-3.5 shrink-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                           onClick={() => selectCommand(null)}
                         >
                           <Command
                             aria-hidden="true"
-                            className="absolute inset-0 size-4 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+                            className="absolute inset-0 size-3.5 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
                           />
-                          <span className="absolute inset-0 flex size-4 items-center justify-center rounded-full bg-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                          <span className="absolute inset-0 flex size-3.5 items-center justify-center rounded-full bg-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                             <X aria-hidden="true" className="size-3 text-background" />
                           </span>
                         </button>

@@ -4,9 +4,18 @@
 最后更新：2026-07-26
 适用范围：`packages/desktop`、Desktop 市场服务与标准 Pi Extension 集成
 
-> 实现简化决策：Desktop 插件市场按受信任远端版本源处理，不再提供 artifact/manifest 签名验证、payload 文件 hash、endpoint fingerprint confirmation、signed revocation、artifact origin allowlist、运行时文件 hash、managed-directory ownership 深校验或 durable apply journal。后文与这些机制冲突的条款、测试要求和验收项均由本决策取代。
+> 实现简化决策一：Desktop 插件市场按受信任远端版本源处理，不再提供 artifact/manifest 签名验证、payload 文件 hash、endpoint fingerprint confirmation、signed revocation、artifact origin allowlist、运行时文件 hash、managed-directory ownership 深校验或 durable apply journal。后文与这些机制冲突的条款、测试要求和验收项均由本决策取代。
 >
 > 当前客户端只保留版本分发所需链路：endpoint 与 catalog、runtime target 选择、受大小限制且不能逃逸 staging 的 ZIP 解包、manifest 入口/兼容信息、registry/projection 原子切换、旧 generation 版本引用和失败时的进程内 worker rollback。`artifactHash` 字段仅作为 immutable version 目录的服务端 artifact key 使用，客户端不校验下载内容 hash。
+>
+> 实现简化决策二（安全模型减负）：
+>
+> 1. 单 endpoint 模型：Settings 只保存一个活动市场 endpoint（marketplaceId + baseUrl + apiRoot）。取消 per-marketplace-ID 的 inactive endpoint/trust record 保留、signing-key fingerprint 确认、key rotation 和按市场 ID 解析更新 endpoint 的机制。切换 endpoint 即替换存储记录；旧市场已安装插件保持可运行。安装与更新都针对当前活动 endpoint 执行：artifact identity 校验只保证制品与其下载来源一致，不校验插件安装时的市场；registry 记录中的 `marketplaceId` 仅作为安装时来源标识，跨市场更新不会被拒绝，也不会改写该字段。
+> 2. 无 durable apply journal：取消 transaction store 与 phase journal。registry 是唯一 commit point；安装先以原子 rename 落位 immutable version payload，再提交 registry，最后写 projection/ownership。崩溃恢复由启动 reconciler 做文件级收敛：registry 记录有效但 projection 缺失时补写；version payload 已落位但 registry 未提交时移除孤儿；卸载已提交但 tombstone 未写时补齐；无法证明一致的状态标记 broken，不猜测删除用户文件。
+> 3. 安装与更新不再维护 per-phase 持久事务；`recoveryPending` 表示 registry 已提交但后续文件写入失败，由 reconciler 修复。
+> 4. Manifest 不再承载签名或逐文件 hash 语义（文件表仅保留 `mode` 用于恢复 executable bit），只校验入口路径、identity、runtime target、ABI/OS 兼容与 capability 声明。
+>
+> 后文与上述四项冲突的条款、测试要求和验收项均由本决策取代。
 
 ## 1. 摘要
 
@@ -20,7 +29,7 @@ Meta Agent Desktop 新增联网插件市场，为用户提供插件发现、详�
 - 插件安装位置继续使用 Pi 的 global/project extension 目录；
 - Pi `ResourceLoader`、extension runner、event dispatch 和 tool execution 语义保持不变；
 - Desktop 不使用 Pi npm/git package manager，不修改 Pi `settings.json` package entries，也不执行 `npm install`；
-- Desktop main 独立负责目录请求、制品下载、签名与哈希校验、安全解包、可恢复安装、更新、卸载和回滚；
+- Desktop main 独立负责目录请求、制品下载、安全解包、可恢复安装、更新、卸载和回滚；
 - 市场后端不绑定到 Desktop 内置 URL，用户可以在 Settings 配置当前 Marketplace API Base URL。
 
 插件采用全信任模型。安装后的 extension 在普通 Node sidecar 中运行，具有 sidecar 用户权限，可以访问文件、网络、环境变量和子进程，也可以加载预构建 `.node` 模块和平台二进制。Desktop 不把 capability disclosure、publisher 签名或 worker 进程描述为安全 sandbox。
@@ -93,8 +102,8 @@ Desktop Host Profile
 - 不复用 Pi npm/git package manager 和 package persistence。
 - 不在用户机器上执行 package lifecycle、dependency install 或源码编译。
 - 下载、安装和更新具备完整性校验、持久事务日志、幂等恢复和故障回滚。
-- 市场 endpoint、trust fingerprint 和连接状态由独立 Desktop settings 管理，不编译绑定后端域名。
-- Renderer 不接触任意文件路径、下载 URL、签名密钥或可执行插件代码。
+- 市场 endpoint 和连接状态由独立 Desktop settings 管理，不编译绑定后端域名。
+- Renderer 不接触任意文件路径、下载 URL 或可执行插件代码。
 - Desktop source policy 仍是 live/draft extension entry 的唯一权威来源。
 - 兼容性选择基于实际 sidecar runtime，而不是 Electron runtime。
 
@@ -189,12 +198,12 @@ Desktop Host Profile
 现有 `/settings/extensions` 保留为高级扩展管理页，负责：
 
 - 当前 extension set 和 diagnostics；
-- Marketplace API Base URL、连接测试、市场 identity 和 signing-key fingerprint；
+- Marketplace API Base URL 与连接测试；
 - Developer Mode；
 - 本地 development entry approval；
 - 市场插件的高级启用状态和应用状态。
 
-首期只支持一个活动市场 endpoint。在未捆绑 distribution 默认市场的构建中，未配置 endpoint 时插件中心显示配置入口，已安装插件管理仍可使用；捆绑默认市场的构建始终存在可用 endpoint，不会出现该状态。发行构建可以提供可覆盖的 distribution default URL 和 pinned public trust root；当前 Desktop distribution 默认使用 Tailscale 市场 `http://100.91.230.10:4317`。该默认值只在没有有效 active endpoint 时生效，已有用户配置优先，用户仍可在 Settings 更换 endpoint。业务逻辑、API client、artifact validator 和 trust model 不得仅依赖固定域名；默认 endpoint 仍必须满足 marketplace ID、key ID、fingerprint、Ed25519 signature、artifact 和 revocation 全部验证。增加多个并行市场属于后续能力。
+首期只支持一个活动市场 endpoint。在未捆绑 distribution 默认市场的构建中，未配置 endpoint 时插件中心显示配置入口，已安装插件管理仍可使用；捆绑默认市场的构建始终存在可用 endpoint，不会出现该状态。发行构建可以提供可覆盖的 distribution default URL；当前 Desktop distribution 默认使用 Tailscale 市场 `http://100.91.230.10:4317`。该默认值只在没有已存储 endpoint 时生效，已有用户配置优先，用户仍可在 Settings 更换 endpoint。业务逻辑、API client 和 artifact validator 不得仅依赖固定域名；默认 endpoint 仍必须满足 well-known discovery 的 marketplace ID 与 protocol version 校验。增加多个并行市场属于后续能力。
 
 插件中心负责发现、详情、安装、更新和卸载。两个页面使用同一个 main-owned snapshot，不建立两个配置源。
 
@@ -203,7 +212,7 @@ Desktop Host Profile
 - “市场”继续使用 marketplace catalog 与 marketplace installation registry；
 - “本地”只投影现有 Desktop Development extension approval，复用 extension settings revision、Developer Mode、entry enablement 和 apply/replacement 流程；
 - 本地 entry 不因出现在插件中心而成为市场安装项，也不写入 marketplace registry；
-- 后续发布能力可以从本地 entry 发起制品准备、校验和提交，但发布后的 market plugin identity、签名 artifact 与本地 development approval 必须保持显式分离。
+- 后续发布能力可以从本地 entry 发起制品准备、校验和提交，但发布后的 market plugin identity、市场 artifact 与本地 development approval 必须保持显式分离。
 
 ### 7.2 插件中心布局
 
@@ -250,22 +259,17 @@ Desktop Host Profile
 
 ## 8. 市场服务合同
 
-### 8.1 Endpoint 配置与信任引导
+### 8.1 Endpoint 配置
 
-Settings 持久化当前活动市场：
+Settings 持久化唯一活动市场：
 
 ```ts
 interface MarketplaceEndpointSettings {
-  activeMarketplaceId?: string;
-  endpoints: Array<{
+  endpoint?: {
     marketplaceId: string;
     baseUrl: string;
-    trustedKeyId: string;
-    trustedKeyFingerprint: string;
-    lastRevocationSequence?: number;
-    lastRevocationCheckedAt?: number;
-    active: boolean;
-  }>;
+    apiRoot: string;
+  };
   revision: string;
 }
 ```
@@ -273,17 +277,14 @@ interface MarketplaceEndpointSettings {
 约束：
 
 - `baseUrl` 是用户可编辑的绝对 URL，保存前由 main 解析和规范化；credentials、query、fragment、非 HTTP(S) scheme 和不安全路径会被拒绝；
-- HTTP 和 HTTPS endpoint 均受支持；是否要求 TLS 由内部部署策略决定，传输 scheme 不改变 signing-key fingerprint 的信任边界；
-- Renderer 提交设置 draft，但不能提交 artifact URL 或伪造已信任 key；
-- main 连接 `<baseUrl>/.well-known/meta-agent-marketplace.json`，读取 protocol version、marketplace ID、API root、artifact origins 和 signing public key；
-- 首次连接或 marketplace ID/key fingerprint 改变时，必须把 fingerprint 展示给用户并通过绑定 endpoint、marketplace ID、key 和短期 token 的二次确认保存；
-- 已信任 key rotation 必须由旧 key 或内置 distribution trust root 签署，不能只因同一 URL 返回新 key 就自动接受；
-- 更换活动 endpoint 不会删除旧 endpoint trust record 或卸载旧市场插件。旧插件继续按其安装时记录的 marketplace ID、base URL、artifact hash 和 key chain 管理；
-- main 为所有仍有 installed plugin 的 marketplace ID 保留 inactive endpoint/trust record，并继续独立刷新其签名撤回快照；用户只能在卸载/解除管理该市场全部插件后删除该 endpoint record；
-- catalog/search 只使用活动 endpoint；旧插件更新使用其 marketplace ID 对应 endpoint，不能由另一个同 plugin ID 市场接管；
-- endpoint settings 使用 revision/CAS、锁和原子写入，测试连接不修改当前配置。
+- HTTP 和 HTTPS endpoint 均受支持；是否要求 TLS 由内部部署策略决定；
+- Renderer 提交设置 draft，但不能提交 artifact URL 或伪造 endpoint 元数据；
+- main 连接 `<baseUrl>/.well-known/meta-agent-marketplace.json`，读取 protocol version、marketplace ID 和 API root；保存前必须通过 discovery，拒绝身份/协议不匹配的 endpoint；
+- 保存新 endpoint 原子替换已存储记录（revision/CAS、锁和原子写入），不保留历史 endpoint/trust record；
+- catalog/search 与安装/更新都使用当前存储的 endpoint；旧市场已安装插件保持可运行；更新针对当前活动 endpoint 执行，artifact identity 校验仅确认制品与下载来源一致，registry 记录中的 `marketplaceId` 保持安装时来源标识不变；
+- 测试连接不修改当前配置。
 
-自定义 endpoint 是明确的供应链信任边界。HTTPS 可保护传输；用户确认的 signing-key fingerprint 负责绑定该市场后续 artifact 和撤回数据，HTTP 部署必须接受其传输不加密的运维边界。
+自定义 endpoint 是明确的供应链信任边界：用户配置的 baseUrl 决定后续 artifact 来源，HTTPS 可保护传输；HTTP 部署必须接受其传输不加密的运维边界。
 
 ### 8.2 API
 
@@ -336,57 +337,26 @@ interface MarketplacePluginSummary {
 }
 ```
 
-详情 DTO 额外包含版本、artifact、capability、asset、changelog、签名和撤回信息。所有 DTO 必须经过 Desktop main runtime validation 后再投影给 renderer。
+详情 DTO 额外包含版本、artifact、capability、asset、changelog 和撤回信息。所有 DTO 必须经过 Desktop main runtime validation 后再投影给 renderer。
 
 ### 8.4 下载 URL
 
 - Renderer 不接收可直接请求的任意 artifact URL；
-- main 只接受该 plugin installation 所属 marketplace ID 对应的已信任 endpoint API 为当前 artifact 返回的 HTTP(S) URL；catalog 新安装使用活动 endpoint，历史市场插件更新使用其保留的 inactive endpoint/trust record；
-- artifact origin 必须属于已由该市场 signing key 签名的 well-known metadata；
-- redirect 每一跳都必须重新验证 scheme 和 signed artifact origin，不使用编译时域名 allowlist；
-- HTTP 和 HTTPS artifact origin 都必须来自已签名 metadata，且 URL 不能包含 credentials 或逃逸已信任 origin/API root；
-- URL 有短期有效期，但 artifact identity 和 hash 永久稳定；
+- main 只接受当前存储 endpoint 的 API 为选定 artifact 返回的 HTTP(S) URL，且必须属于该 endpoint 的 API root（同 origin 与路径前缀）；
+- URL 不能包含 credentials 或逃逸已信任 origin/API root；
+- URL 有短期有效期，但 artifact identity 和 size 在下载元数据中必须与选定 artifact 一致；
 - 下载必须有 connect、idle、total timeout 和最大字节数；
-- HTTP content type 不是安全判断依据，最终以签名、hash 和归档 validator 为准。
+- HTTP content type 不是判断依据，最终以下载大小上限和归档 validator 为准。
 
-### 8.5 签名撤回快照
+### 8.5 撤回快照
 
-`GET /v1/revocations` 返回由当前 trusted market key 签名的完整快照：
-
-```ts
-interface MarketplaceRevocationSnapshot {
-  marketplaceId: string;
-  sequence: number;
-  issuedAt: number;
-  nextUpdateAt: number;
-  revokedKeys: Array<{ keyId: string; reasonCode: string }>;
-  pluginVersions: Array<{
-    pluginId: string;
-    version: string;
-    artifactIds?: string[];
-    status: "withdrawn" | "blocked";
-    reasonCode: string;
-    message: string;
-    replacementVersion?: string;
-  }>;
-  signature: string;
-}
-```
-
-- `sequence` 对同一 marketplace ID 单调递增，客户端拒绝 rollback snapshot；
-- 在线检查时，过期快照必须刷新；刷新失败进入 stale/offline 状态；
-- offline 默认允许已经启用的插件继续运行，但显示最后检查时间；不能使用 stale snapshot 安装、重新启用或更新一个其状态无法确认的版本；
-- 收到 `blocked` 后，Desktop 阻止新 worker 加载该版本，并提示用户停止现有 session、卸载或切换到替代版本；不在 agent run 中途强杀现有 worker；
-- revoked signing key 对尚未安装 artifact 立即失效。已安装版本按 signed snapshot 的 plugin status 处理，不静默删除。
+`GET /v1/revocations` 返回由市场运营方维护的版本状态快照（含 withdrawn/blocked 状态、reason code 和建议版本）。实现简化决策取消客户端对快照的签名验证、单调 sequence 和过期/离线强制刷新；客户端将撤回视为服务端 catalog/详情元数据的一部分，按 §13.4 展示与限制，不依赖独立签名链。
 
 ### 8.6 缓存与离线
 
-- 每个 marketplace ID 使用隔离的 endpoint/trust record、目录、artifact、asset 和 revocation cache；
 - 目录缓存有获取时间、ETag 和 schema version；
 - 网络失败时可以展示最近一次成功目录，但必须标记离线缓存；
-- stale catalog 不能绕过 version withdrawal、revocation sequence 和 signature validation；
-- 已下载且完整验证的 artifact 可以用于明确重试；
-- 离线时安装只允许使用仍有完整元数据、有效签名、未过期撤回快照和 hash 的本地 verified artifact；
+- stale catalog 不能绕过 version withdrawal 状态展示；
 - 市场不可用不影响已安装插件加载。
 
 ## 9. 市场制品格式
@@ -448,14 +418,7 @@ interface MarketplaceArtifactManifest {
     osRelease?: string;
     libc?: string;
   }>;
-  files: Record<
-    string,
-    {
-      sha256: string;
-      size: number;
-      mode: "0644" | "0755";
-    }
-  >;
+  files?: Record<string, { mode?: "0644" | "0755" }>;
 }
 ```
 
@@ -463,15 +426,15 @@ Manifest 要求：
 
 - plugin ID 使用稳定、大小写敏感、不可复用的市场 identity；
 - version 使用合法 semver；
-- `pi.entry` 必须位于 payload 内并出现在 files 中；
+- `pi.entry` 必须位于 payload 内并实际存在；
 - 安装器必须生成 Pi CLI 可发现的根 `index.ts` 投影，该文件只静态 re-export 当前 immutable version 的 `pi.entry`；artifact 自身不得覆盖该 installer-owned projection；
-- 所有 payload regular files 必须声明，不能存在额外文件；
-- `nativeModules[].path` 和 `executables[].path` 必须是 files 的子集；
+- `nativeModules[].path` 和 `executables[].path` 必须在 payload 内实际存在；
 - 每个 native module 必须声明 `node` 或 `napi` ABI kind；Node ABI 要求精确 `modulesAbi`，N-API 要求最低 `minimumNapi`；
 - Linux executable 必须声明 libc baseline，平台 binary 必须声明适用的 OS baseline；
-- executable bit 只允许由 manifest 中的 `0755` 恢复；
+- executable bit 只允许由 `files` 中的 `0755` 恢复；
 - manifest、市场版本元数据和下载 endpoint 中的 identity 必须完全一致；
-- manifest 不包含安装脚本或 post-install command。
+- manifest 不包含安装脚本或 post-install command；
+- 实现简化决策取消逐文件 hash/size 声明与完整性校验；`files` 只用于恢复 executable bit，未声明文件不构成拒绝条件。
 
 ### 9.3 Runtime target
 
@@ -505,18 +468,7 @@ interface MarketplaceRuntimeTarget {
 
 ### 9.4 签名
 
-`signature.json` 至少包含：
-
-- signing algorithm；
-- key ID；
-- artifact manifest hash；
-- payload root hash；
-- signature bytes；
-- signed timestamp。
-
-签名覆盖 canonical manifest 和完整文件表。客户端使用 endpoint 首次连接时确认并持久化的 market key，或发行构建提供的初始 trust root；支持 key rotation 和签名撤回快照。不能仅依赖 TLS、文件名或 publisher 提供的普通 checksum。
-
-平台签名证明来源和完整性，不证明插件行为安全。
+实现简化决策取消 artifact/manifest 签名验证：制品不携带客户端校验的 `signature.json`，客户端不验证签名、key rotation 或撤回链。平台签名（macOS notarization、Windows Authenticode）作为发布渠道要求由市场运营方把关，不作为 Desktop 安装校验。
 
 ## 10. 安装位置与 scope
 
@@ -568,7 +520,7 @@ plugin ID 到目录名使用单一可逆或 registry-backed 映射。不得直�
 - Desktop `ResolvedExtensionSet.entryPath` 直接指向 `.versions/<artifact-hash>/<pi.entry>`，不经过 mutable projection；
 - 安装新版本只新增 immutable version directory，再原子替换 projection/ownership；不得修改旧 version bytes；
 - 已运行 worker generation 持有精确 immutable entry，插件的相对 lazy imports 和 assets 继续来自旧 version directory；
-- `.meta-agent-versions/<artifact-hash>.json` 不属于插件 payload，也不进入 renderer；它保存该 immutable version 的完整 verified file record，供 GC 删除前重新验证 exact files、sizes 和 hashes；
+- `.meta-agent-versions/<artifact-hash>.json` 不属于插件 payload，也不进入 renderer；它保存该 immutable version 的 ownership record 与 inactivity 时间戳，供 GC 判定保留/删除；
 - 只有在没有 live/metadata/pending-apply generation 引用、per-version ownership 验证通过且超过 rollback retention 后才能垃圾回收旧 version；
 - 卸载先移除 active projection并从新 generation 排除插件，仍被 worker 引用的 version 延迟删除；
 - 同一 scope 下一个 plugin ID 只能有一个 active projection。
@@ -619,100 +571,77 @@ interface InstalledMarketplacePlugin {
 - plugin/version/artifact identity；
 - install scope；
 - artifact hash；
-- managed file hashes；
 - installer schema version；
 - installation timestamp。
 
-该文件用于确认 Desktop 对目录有删除和更新权限。不存在有效 ownership record 的目录永远不作为市场插件覆盖或删除。
+该文件用于确认 Desktop 对目录有删除和更新权限，也是 GC 判断卸载 tombstone 的依据。不存在有效 ownership record 的目录永远不作为市场插件覆盖或删除。
 
-### 11.3 Revision、并发与持久恢复
+### 11.3 Revision、并发与崩溃恢复
 
 - registry mutation 使用 request ID 和 expected revision/CAS；
 - main 使用进程内串行队列和跨进程文件锁；
 - scope target 使用 per-plugin install lock；
 - 同一插件的 install/update/uninstall 不并发；
-- app quit 会取消未提交下载；进入 commit 后不能假设进程一定存活，必须依赖下次启动恢复；
+- app quit 会取消未提交下载；进入 registry commit 后不能假设进程一定存活，必须依赖下次启动的文件级收敛；
 - stale renderer response 不覆盖新的 snapshot。
 
-安装器维护 `userData/plugins/transactions/<operation-id>.json` write-ahead record，至少包含 before/after registry、scope、immutable version、projection、ownership 和 phase。事务状态为：
+无 durable apply journal（实现简化决策二）。保证是“registry commit point + 启动文件级收敛”，不是跨多个文件/filesystem 的单次原子事务：
 
-```text
-prepared -> files-ready -> registry-committed -> projection-committed
-                                                      |-> completed
-                                                      |-> apply-pending -> apply-validated -> completed
-                                                      \\-> rollback-pending
-```
+- registry 是 desired-state commit point；安装/更新的文件顺序固定为：staging 原子 rename 落位 immutable version → registry commit → 写 projection/ownership/version owner；卸载顺序固定为：registry commit → 写 uninstall tombstone；
+- 启动时在开放市场 IPC 或 spawn metadata/thread worker 前执行 reconcile：
+  - registry 记录有效但 projection 缺失时补写 projection（覆盖 registry 已提交但投影未写的崩溃窗口）；
+  - registry 记录无法通过目录结构校验（version payload 缺失等）时标记 `broken` 并写 broken marker，禁止加载，不猜测删除用户文件；
+  - 无 registry 记录但存在 installed ownership 的目录视为中断的卸载，补写 version inactive 标记与 uninstall tombstone；
+  - 无 ownership 且根目录只含 installer 命名（`.versions/<64-hex>`）内容的目录视为未提交安装的孤儿 payload，移除；含其他内容的未知根目录一律保留；
+  - 清理 staging 孤儿与旧版 transaction journal 目录；
+- 安装/更新失败时 registry 未提交则移除本次操作创建的 version payload 与根目录（不碰预存在或用户文件）；registry 已提交但后续写入失败返回 `recoveryPending`，由下次启动 reconcile 修复；
+- 无法证明任何状态完整时标记 `broken`，禁止加载并保留诊断。
 
-保证是“crash 后可恢复一致”，不是跨多个文件/filesystem 的单次原子事务：
-
-- 每次 phase 更新使用同目录 temp、fsync、rename 和 parent-directory fsync；
-- registry commit 是 Desktop desired-state commit point；
-- 启动时在开放市场 IPC 或 spawn metadata/thread worker 前执行 transaction reconciliation；
-- registry 已提交但 projection 未提交时按 after state 补齐 projection；
-- registry 未提交时删除未引用新 version 并恢复 before projection；
-- `apply-pending` 可以由与 mutation transaction 内部关联的独立 durable apply journal 承载，但二者必须在 main 内通过 operation identity 绑定；该 identity、journal、worker PID 和 before set 不得投影给 renderer；
-- `apply-pending` 包含目标 project/thread、before generation、expected after generation、旧 worker identity/PID，并在 replacement bootstrap 后记录 replacement identity/PID；写入后才允许停止旧 worker；
-- replacement 发布匹配 expected generation 的 bootstrap 后写 `apply-validated`；
-- main 在 `apply-pending`、尚无 `apply-validated` 时崩溃，下一次启动先确认旧/replacement sidecar writer 均已退出，再保守恢复 before registry/projection 和旧 desired set；任一记录 PID 仍存活时 fail-closed，不启动第二 writer；
-- `apply-validated` 表示新 generation 已完成 startup contract；reconciliation 可以完成 after state，不回滚成功应用；
-- rollback-pending 幂等恢复 before registry/projection；
-- reconciliation 完成后重新校验 ownership、entry hash 和 immutable directory；
-- 无法证明 before/after 任一状态完整时标记 `broken`，禁止加载并保留诊断，不猜测删除用户文件。
-
-## 12. 安装事务
+## 12. 安装与卸载
 
 ### 12.1 阶段
 
 ```text
 resolving
 -> downloading
--> verifying-artifact
 -> extracting
 -> verifying-payload
--> awaiting-confirmation
--> committing
+-> committing (registry)
 -> applying
 -> completed | rolled-back | failed
 ```
 
 ### 12.2 安装与更新流程
 
-1. main 读取当前 market metadata、签名撤回快照和 runtime compatibility；
+1. main 读取当前 endpoint 的 market metadata 和 runtime compatibility；
 2. 解析唯一兼容 artifact；
 3. 检查 publisher、版本、marketplace identity、withdrawal 和 Desktop/Pi compatibility；
-4. 下载到 Desktop cache，并复制到目标 extension root 同 filesystem staging；
-5. 校验 artifact size、hash 和签名；
-6. 以不跟随归档 symlink 的方式解包到新的 staging directory；
-7. 校验 manifest schema、identity、target、文件数、大小和每个文件 hash；
-8. 使用 disposable metadata worker 对 immutable entry 执行 Desktop Host Profile load probe；
-9. 检查目标 ownership 和用户修改；
-10. 获取用户需要的 full-trust/native/update disclosure 确认；
-11. 写入 `prepared` transaction record；
-12. 将 staging 原子 rename 为新的 `.versions/<artifact-hash>` 并 fsync parent；
-13. 写入 `files-ready`；
-14. 原子更新 market registry，写入 `registry-committed` commit point；
-15. 原子替换 Pi CLI `index.ts` projection 和 ownership，写入 `projection-committed`；
-16. 计算新的 `ResolvedExtensionSet`；
-17. 如果用户选择立即应用，先持久化 `apply-pending`，再只 replacement 目标 session；其他 live workers继续引用旧 immutable version；
-18. replacement 发布匹配 expected generation 的 bootstrap 后持久化 `apply-validated`；
-19. 目标 session 启动失败时恢复该 session 的旧 set，并将 transaction 标记为 rollback-pending；main 恢复 before registry/projection，已经引用新 version 的其他 worker允许完成但新 worker不再加载；
-20. 无立即 apply 时 operation 以 `reload-required` 完成，旧 version 按 retention 保留；
-21. 最终写 `completed`，按 generation references 和 retention 清理旧 versions/staging。
+4. 下载到目标 extension root 同 filesystem 的 installer-owned staging（受大小上限约束）；
+5. 校验下载字节数与元数据一致；以不跟随归档 symlink 的方式解包到 staging；
+6. 校验 manifest schema、identity、entry、runtime target、ABI/OS 兼容与 capability 声明；
+7. 对 immutable entry 执行 Desktop Host Profile load probe；
+8. 检查目标 ownership 和用户修改；
+9. 获取用户需要的 full-trust/native/update disclosure 确认；
+10. 将 staging 原子 rename 为新的 `.versions/<artifact-hash>` 并 fsync parent；
+11. 原子更新 market registry（commit point）；
+12. 原子写 version owner、Pi CLI `index.ts` projection 和 ownership；
+13. 计算新的 `ResolvedExtensionSet`；
+14. 如果用户选择立即应用，replacement 目标 session；其他 live workers 继续引用旧 immutable version；目标 session 启动失败时恢复该 session 旧 set；
+15. 无立即 apply 时 operation 以 `reload-required` 完成，旧 version 按 retention 保留；
+16. 按 generation references 和 retention 清理旧 versions/staging。
 
-不能跨 filesystem 依赖 rename 原子性。下载 cache 可以位于 `userData`，但解包后的 commit staging 必须位于目标 extension root 的 installer-owned sibling。所有跨文件状态通过 transaction journal 恢复，不声称 directory、registry、projection 和 worker replacement 是单个原子操作。
+不能跨 filesystem 依赖 rename 原子性。下载 cache 可以位于 `userData`，但解包后的 commit staging 必须位于目标 extension root 的 installer-owned sibling。registry 未提交前的失败移除本次创建的 payload 与根目录；registry 已提交后的失败返回 `recoveryPending` 并由启动 reconcile 修复（见 §11.3）。
 
 ### 12.3 卸载流程
 
-1. 校验 registry、ownership 和 managed file hashes；
-2. 处理用户修改确认；
-3. 写 before/after transaction，其中 after registry 不含该 installation；
-4. 原子提交 registry；
-5. 移除或改名 Pi CLI root `index.ts` projection，使新 Pi/ Desktop worker不再发现；
-6. 保留 ownership tombstone 和仍被 generation 引用的 immutable versions；
-7. 当前 session 立即 apply 时执行 replacement；失败只恢复该 session旧 set，并将 uninstall transaction 回滚到 before registry/projection；
-8. 没有 session 或不立即 apply 时返回 `reload-required`，不是“已从所有运行进程卸载”；
-9. 所有引用释放后删除 immutable versions、ownership 和空 plugin root；
-10. crash 后由相同 transaction reconciliation 幂等继续或回滚。
+1. 校验 registry 与 ownership；
+2. 原子提交 registry（移除该 installation，commit point）；
+3. 标记当前 version inactive 并写 uninstall tombstone（移除 Pi CLI root `index.ts` projection）；
+4. 仍被 generation 引用的 immutable versions 保留；
+5. 当前 session 立即 apply 时执行 replacement；失败只恢复该 session 旧 set，registry 已提交的卸载不回滚；
+6. 没有 session 或不立即 apply 时返回 `reload-required`，不是“已从所有运行进程卸载”；
+7. 所有引用释放后由 GC 删除 immutable versions、ownership 和空 plugin root；
+8. registry 已提交但 tombstone 未写时由启动 reconcile 补齐（见 §11.3）。
 
 ### 12.4 归档安全
 
@@ -724,25 +653,19 @@ resolving
 - NUL、非法编码或 normalization collision；
 - symlink、hardlink、device、FIFO 和 socket archive entry；
 - 大小写不敏感 filesystem 上的文件名 collision；
-- manifest 未声明文件；
 - 文件数、单文件、总压缩大小、总解压大小或压缩比超限；
-- hash、size、mode 或 identity 不一致；
 - entry 不在 payload 内；
-- target 不兼容；
-- signature 无效、过期 key 或 revoked key。
+- target 不兼容。
+
+实现简化决策取消逐文件 hash/signature 校验；下载大小与解压上限仍强制。
 
 ### 12.5 用户修改保护
 
-更新和卸载前重新计算 managed files：
-
-- 全部匹配 ownership record：允许继续；
-- 存在修改、删除或额外文件：默认阻止覆盖/删除；
-- 用户可以选择保留目录并从市场 registry 中解除管理；
-- 强制覆盖或强制卸载必须二次确认，并明确列出受影响文件数量；
+- 更新/卸载不校验或回滚 immutable version 内的用户修改，也不删除未知根目录内容；
+- 更新只新增 immutable version directory 并原子切换 projection，不触碰旧 version bytes；
+- 卸载保留 immutable versions 与 tombstone，由 GC 在无引用后清理；含未知内容的根目录保留不动；
 - 不把用户修改自动复制到新版本；
 - backup 和 diagnostics 不记录文件正文。
-
-## 13. 更新、降级与撤销
 
 ### 13.1 更新检查
 
@@ -763,12 +686,11 @@ resolving
 - 新增 capabilities；
 - 首次加入 native module；
 - 首次加入 executable；
-- scope 改变；
-- signing key 不属于已信任 rotation chain。
+- scope 改变。
 
 ### 13.3 降级
 
-用户只能降级到市场仍提供、签名有效且与当前 runtime 兼容的版本。降级与更新使用同一事务和用户修改保护，不提供任意本地 artifact 选择器。
+用户只能降级到市场仍提供且与当前 runtime 兼容的版本。降级与更新使用同一安装流程，不提供任意本地 artifact 选择器。
 
 ### 13.4 撤回
 
@@ -785,7 +707,7 @@ blocked
 - `withdrawn`：禁止新安装，已安装用户看到高优先级警告；
 - `blocked`：用于确认存在严重风险的版本。Desktop 禁止重新启用或应用该版本，但不静默删除文件；用户可以卸载、解除管理或在明确的离线恢复流程中查看原因；
 - 撤回信息必须包含 stable reason code、说明、发布时间和建议版本；
-- 客户端不能只依赖可过期 catalog cache 判断 blocked 状态，在线时必须读取签名撤回数据。
+- 客户端不能只依赖可过期 catalog cache 判断 blocked 状态，在线时以服务端版本元数据为准。
 
 ## 14. 与 Desktop 受控加载集成
 
@@ -825,11 +747,11 @@ Desktop 继续设置 `noExtensions: true`，不重新打开 Pi 普通 global/pro
 - renderer 不能通过在目录中放文件绕过批准；
 - draft/live 使用相同 marketplace set；
 - blocked、broken 或未确认更新不能加载；
-- generation 对应精确 marketplace ID、plugin ID、version、immutable entry path 和 content hash；
+- generation 对应精确 marketplace ID、plugin ID、version 和 immutable entry path；
 - project marketplace entry 按第 10.4 节遮蔽同 ID global entry；
 - source policy 为每个 generation 注册 immutable version reference，供垃圾回收判断。
 
-`DesktopExtensionSourcePolicy` 验证 marketplace path 必须位于对应 scope 的标准 Pi extension root 下 `.versions/<artifact-hash>`，ownership、registry、entry hash 和 artifact identity 必须一致。
+`DesktopExtensionSourcePolicy` 验证 marketplace path 必须位于对应 scope 的标准 Pi extension root 下 `.versions/<artifact-hash>`，ownership、registry 和 artifact identity 必须一致。
 
 ### 14.3 Pi CLI 可见性
 
@@ -905,7 +827,7 @@ Marketplace extension 可以：
 
 ### 15.4 Native code
 
-- native artifact 必须由市场 artifact 签名和 file hash 覆盖；
+- native artifact 的来源与完整性由市场运营方审核与发布流程把关；
 - macOS native code 应满足当前发布渠道所需 code signing/notarization；
 - Windows binary 应支持 Authenticode publisher verification，市场仍以 artifact 签名为安装权威；
 - Linux artifact 必须声明 libc 和 OS baseline；
@@ -926,7 +848,7 @@ src/main/plugins/plugin-artifact-validator.ts
 src/main/plugins/plugin-installer.ts
 src/main/plugins/plugin-registry-service.ts
 src/main/plugins/plugin-target-matcher.ts
-src/main/plugins/plugin-transaction-reconciler.ts
+src/main/plugins/marketplace-plugin-reconciler.ts
 src/main/plugins/marketplace-endpoint-settings-service.ts
 ```
 
@@ -934,11 +856,11 @@ src/main/plugins/marketplace-endpoint-settings-service.ts
 
 - marketplace service 只处理远端 catalog DTO 和 cache；
 - downloader 只处理受控 URL、限额和进度；
-- validator 只处理 schema、signature、archive 和 file integrity；
-- installer 只处理 staging、ownership、journaled commit 和 rollback；
+- validator 只处理 schema、archive 与 target 兼容校验；
+- installer 只处理 staging、ownership、registry commit 和 projection/rollback；
 - registry service 只处理本地 revision/CAS state；
-- transaction reconciler 在 worker 启动前恢复未完成事务；
-- endpoint settings service 处理活动/历史 Base URL、well-known discovery、连接测试、fingerprint confirmation、per-market revocation refresh 和 CAS；
+- reconciler 在 worker 启动前做 registry 与目录的文件级收敛（§11.3）；
+- endpoint settings service 处理唯一 Base URL、well-known discovery、连接测试和 CAS；
 - source policy 只把已验证 registry 投影为 `ResolvedExtensionSet`。
 
 ### 16.2 Shared contracts
@@ -968,11 +890,10 @@ interface DesktopPluginMarketplaceApi {
 }
 ```
 
-Endpoint save 使用 request ID、expected settings revision 和 fingerprint confirmation token；插件 mutation 使用 request ID、expected registry revision 和明确 scope。Renderer 可以提交 Marketplace API Base URL draft，但不传：
+Endpoint save 使用 request ID 和 expected settings revision；插件 mutation 使用 request ID、expected registry revision 和明确 scope。Renderer 可以提交 Marketplace API Base URL draft，但不传：
 
 - filesystem path；
 - artifact URL；
-- raw signing public/private key；
 - raw manifest；
 - executable command；
 - resolved extension entry。
@@ -1030,23 +951,16 @@ operation-error
 稳定错误 code 至少包括：
 
 - `MARKETPLACE_ENDPOINT_INVALID`；
-- `MARKETPLACE_ENDPOINT_UNTRUSTED`；
-- `MARKETPLACE_IDENTITY_CHANGED`；
-- `MARKETPLACE_KEY_CONFIRMATION_REQUIRED`；
+- `MARKETPLACE_ENDPOINT_NOT_CONFIGURED`；
 - `MARKETPLACE_UNAVAILABLE`；
 - `MARKETPLACE_RESPONSE_INVALID`；
-- `MARKETPLACE_REVOCATION_STALE`；
-- `MARKETPLACE_REVOCATION_ROLLBACK`；
 - `PLUGIN_NOT_FOUND`；
 - `PLUGIN_VERSION_WITHDRAWN`；
 - `PLUGIN_VERSION_BLOCKED`；
 - `PLUGIN_ARTIFACT_INCOMPATIBLE`；
 - `PLUGIN_ARTIFACT_TOO_LARGE`；
-- `PLUGIN_ARTIFACT_SIGNATURE_INVALID`；
-- `PLUGIN_ARTIFACT_INTEGRITY_MISMATCH`；
 - `PLUGIN_ARCHIVE_UNSAFE`；
 - `PLUGIN_TARGET_OCCUPIED`；
-- `PLUGIN_INSTALLATION_MODIFIED`；
 - `PLUGIN_REGISTRY_CONFLICT`；
 - `PLUGIN_INSTALL_ROLLED_BACK`；
 - `PLUGIN_APPLY_ROLLED_BACK`；
@@ -1087,10 +1001,9 @@ operation-error
 - scope 类型，不记录 project path；
 - phase 和 duration；
 - target compatibility 摘要；
-- hash 前缀；
 - result code 和 rollback 状态。
 
-不记录完整下载 URL query、签名 secret、文件正文、环境变量或插件 stdout 全量内容。
+不记录完整下载 URL query、文件正文、环境变量或插件 stdout 全量内容。
 
 ### 18.3 产品指标
 
@@ -1100,7 +1013,7 @@ operation-error
 - 搜索到详情转化；
 - install/update/uninstall 成功率；
 - target incompatible 比例；
-- signature/integrity failure；
+- archive/install failure；
 - apply rollback；
 - native 与 pure JS artifact 占比。
 
@@ -1115,14 +1028,13 @@ operation-error
 - publisher identity 已登记；
 - manifest 和版本合法；
 - artifact 可重复关联到提交或发布源；
-- 每个 target artifact 完成 signature/hash；
 - pure JS 和 native content 都经过自动扫描；
 - native artifact 有明确 build provenance；
 - 插件说明披露外部服务、credential 和 destructive behavior；
 - 至少通过对应 Desktop Host Profile smoke；
 - 已知恶意、混淆规避审核或下载二阶段未声明可执行代码的插件拒绝发布。
 
-市场运营方审核降低风险，但不改变客户端 full-trust 声明。Desktop 通过用户确认的 marketplace identity/key fingerprint 建立信任，不因 endpoint 使用自定义域名而降低 artifact validation。
+市场运营方审核降低风险，但不改变客户端 full-trust 声明。Desktop 通过用户配置的 endpoint 建立供应链信任（实现简化决策），不因 endpoint 使用自定义域名而降低归档安全校验。
 
 ### 19.2 不可变性
 
@@ -1134,23 +1046,19 @@ operation-error
 
 ### 19.3 Key rotation
 
-- 发行构建可以内置初始建议市场 trust root，但自定义 endpoint 使用首次确认并持久化的 fingerprint；
-- 新 signing key 通过该 marketplace 已信任旧 key 或 distribution trust root 的 rotation statement 引入；
-- compromised key 可以被单调签名撤回快照撤销；
-- endpoint 更换、marketplace ID 变化和未签名 key replacement 必须重新确认；
-- 离线客户端不会获得虚假的“仍安全”保证，UI 显示撤回状态最后检查时间。
+实现简化决策取消客户端 signing-key 管理：无 fingerprint confirmation、无 key rotation 链、无签名撤回。key 管理属于市场运营方的服务端职责；客户端信任边界由用户配置的 endpoint 定义。
 
 ## 20. 分阶段实施
 
 ### Phase 0：规范与 compatibility fixtures
 
 - 修订受控扩展和 sidecar spec 冲突，并将同步修订作为 Phase 0 exit gate；
-- 固化 market manifest、signature 和 runtime target schema；
+- 固化 market manifest 和 runtime target schema；
 - 建立 sidecar `RuntimeCompatibility` target fixtures；
 - 建立纯 JS、N-API、Node ABI 和 executable 示例 artifacts；
 - 确认 global/project path 与 `PI_CODING_AGENT_DIR`；
-- 固化可配置 endpoint well-known、fingerprint confirmation 和 signed revocation schema；
-- 固化 immutable version projection、transaction journal 和 startup reconciliation。
+- 固化可配置 endpoint well-known discovery；
+- 固化 immutable version projection 与启动 reconcile 的文件级收敛。
 
 完成条件：服务端和客户端对相同 fixture 给出一致 target 选择和拒绝原因；既有 normative specs 已同步修改，不再禁止市场、预构建依赖或 native artifact。
 
@@ -1179,7 +1087,7 @@ operation-error
 - 新增 `/plugins` 和详情路由；
 - 实现搜索、分类、已安装、可更新；
 - 实现 full-trust/native disclosure；
-- 实现 Marketplace API URL、连接测试、fingerprint confirmation、scope、progress、diagnostics 和 apply；
+- 实现 Marketplace API URL、连接测试、scope、progress、diagnostics 和 apply；
 - 实现受控 market asset protocol/cache；
 - 保持 settings route 不 attach session。
 
@@ -1190,7 +1098,7 @@ operation-error
 - 实现周期 update check；
 - 实现 deprecated/withdrawn/blocked；
 - 实现批量更新与新增风险确认；
-- 实现 publisher/key revocation；
+- 实现版本撤回治理；
 - 补齐发布审核和操作手册。
 
 完成条件：已发布风险版本可以被可靠阻止新安装并通知已安装用户。
@@ -1217,12 +1125,9 @@ operation-error
 - symlink、hardlink、device 和 FIFO；
 - Unicode normalization 和 case collision；
 - zip bomb 和 size/file-count limit；
-- undeclared/missing file；
-- file size/hash/mode mismatch；
+- missing entry file；
 - invalid entry；
-- valid `.node` 和 executable；
-- invalid/revoked signature；
-- key rotation。
+- valid `.node` 和 executable。
 
 ### 21.3 Installer
 
@@ -1233,7 +1138,7 @@ operation-error
 - idempotent request ID；
 - revision conflict；
 - concurrent same-plugin mutation；
-- app interruption in every transaction phase；
+- 崩溃窗口：payload 落位后 registry 提交前（移除孤儿、保留用户文件）、registry 提交后 projection 写失败（recoveryPending + 启动修复）、卸载提交后 tombstone 缺失（补齐）；
 - fsync/rename/write failure；
 - staging cleanup；
 - ownership creation；
@@ -1241,7 +1146,6 @@ operation-error
 - update/downgrade/uninstall；
 - old directory rollback；
 - registry and directory consistency recovery；
-- journal recovery from every persisted phase, including apply-pending/apply-validated crash boundaries；
 - immutable version retention and generation-aware garbage collection；
 - uninstall with no session、deferred apply and delayed deletion。
 
@@ -1250,7 +1154,7 @@ operation-error
 - marketplace source merge/order/duplicate ID；
 - disabled/broken/blocked exclusion；
 - scope root validation；
-- ownership/hash mismatch；
+- ownership/identity mismatch；
 - draft/live consistency；
 - stale draft generation；
 - metadata worker load failure；
@@ -1266,15 +1170,15 @@ operation-error
 
 - API schema validation；
 - endpoint URL normalization、HTTP/HTTPS、credentials/query/fragment 和不安全路径拒绝；
-- well-known discovery、marketplace identity 和 first-connect fingerprint confirmation；
+- well-known discovery、marketplace identity 和 protocol version 校验；
 - endpoint/settings revision conflict and test-without-save；
-- active endpoint switching preserves inactive endpoint/trust/revocation records for installed plugins；
-- signed artifact origins、redirect validation and endpoint switching；
+- 保存新 endpoint 原子替换旧记录，旧市场插件保持可运行；更新针对活动 endpoint 执行，不按插件来源市场拒绝；
+- artifact URL 逃逸 API root、credentials 拒绝；
 - pagination/search/category；
 - timeout 和 max size；
 - ETag/stale/offline cache；
-- signed monotonic revocation snapshot、expiry、rollback attack 和 blocked active-worker behavior；
-- renderer 只能通过 settings contract 提交 Base URL，不能提交 artifact URL/raw key；
+- withdrawn/blocked 状态展示与阻止加载；
+- renderer 只能通过 settings contract 提交 Base URL，不能提交 artifact URL/raw manifest；
 - progress isolation by webContents；
 - destroyed window cleanup；
 - bounded sanitized errors。
@@ -1282,7 +1186,7 @@ operation-error
 ### 21.6 Renderer
 
 - route/provider 生命周期且不 attach session；
-- Settings endpoint URL、connection test、fingerprint confirmation、identity/key change and conflict；
+- Settings endpoint URL、connection test、identity change and conflict；
 - catalog loading/ready/stale/offline；
 - search、category、installed 和 updates；
 - detail compatibility/native disclosure；
@@ -1327,28 +1231,28 @@ git diff --check
 全部满足才视为首期联网插件市场完成：
 
 1. 插件中心可以使用 Settings 中配置的 Marketplace API Base URL 联网搜索、浏览和查看插件详情，业务实现不绑定固定域名。
-2. Endpoint 配置支持 HTTP/HTTPS URL 规范化、结构安全校验、连接测试、marketplace identity、首次 signing-key fingerprint 确认和 revision/CAS。
+2. Endpoint 配置支持 HTTP/HTTPS URL 规范化、结构安全校验、连接测试、well-known discovery（marketplace identity 与 protocol version）和 revision/CAS。
 3. 市场只使用应用自有 API/artifact，不调用 Pi npm/git package manager。
 4. 安装过程不运行 npm、lifecycle script 或源码构建。
 5. 安装后的插件仍是标准 Pi Extension，Pi extension loader/runner 无市场专用分支。
 6. Global/project payload 位于 Pi 标准 extension 目录的 immutable version 下，并支持 custom agentDir 和 project trust。
 7. Desktop 继续关闭普通 extension auto-discovery，只加载 registry 批准的 marketplace immutable entry。
 8. Installer 生成根 `index.ts` projection，真实 Pi CLI discovery fixture 证明普通 Pi CLI 可以发现当前版本。
-9. Renderer 不能提交路径、artifact URL、raw signing key 或 resolved entry。
-10. Artifact 经过已确认 market key 的签名、总 hash、manifest 和逐文件校验。
-11. Archive traversal、link、collision、bomb 和 undeclared file 被拒绝。
+9. Renderer 不能提交路径、artifact URL 或 resolved entry。
+10. Artifact 下载受大小上限约束，归档经过路径/链接/炸弹防护，manifest 经过 identity、target 与兼容性校验。
+11. Archive traversal、link、collision 和 bomb 被拒绝。
 12. Pure JS、N-API、Node ABI `.node` 和平台 executable 都有明确 target matching。
 13. 不兼容 artifact 不安装、不编译、不猜测降级。
-14. 安装、更新和卸载使用 revision、lock、same-filesystem staging、write-ahead journal、commit point 和 startup reconciliation，提供 crash 后可恢复一致而非虚假跨文件原子性。
+14. 安装、更新和卸载使用 revision、lock、same-filesystem staging、registry commit point 和启动文件级 reconcile，提供 crash 后可恢复一致而非虚假跨文件原子性。
 15. 用户修改过的 managed directory 不会被静默覆盖或删除。
 16. Worker generation 引用 immutable version；旧 generation 的 lazy import/assets 在更新后仍可用，垃圾回收等待全部引用释放。
-17. 新版本 apply 失败后恢复目标 session 旧 set，并由 transaction rollback 恢复 desired registry/projection。
+17. 新版本 apply 失败后恢复目标 session 旧 set；registry 已提交的 mutation 不回滚，由启动 reconcile 补齐文件状态。
 18. Global/project 同 ID 使用 project-over-global，disabled project override 不回退 global。
 19. Marketplace extension 支持并测试 `providers.register`，同时不扩展未实现的 TUI Host API。
 20. 安装前准确展示 full-trust 和 native code 风险，不使用 sandbox 误导文案。
 21. Capability disclosure 不被描述为 Node/OS 权限限制。
 22. 市场不可用不影响已安装插件和聊天功能。
-23. Signed monotonic revocation snapshot 对 withdrawn/blocked、offline、expiry 和 rollback attack 有稳定行为。
+23. withdrawn/blocked 状态从 catalog 元数据展示并阻止新安装/重新启用，离线不静默删除已安装插件。
 24. 插件代码不进入 Electron main、preload 或 renderer。
 25. Draft/live 使用相同 marketplace extension set 和 generation。
 26. 页面、endpoint settings、service、validator、installer、reconciler、IPC、source policy 和 worker rollback 有 focused tests。

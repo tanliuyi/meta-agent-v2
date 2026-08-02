@@ -80,16 +80,12 @@ export class MarketplaceCatalogService {
 
   private async activeEndpoint(): Promise<MarketplaceEndpointRecord> {
     const snapshot = await this.endpoints.getSettings();
-    if (!snapshot.activeMarketplaceId) {
+    if (!snapshot.endpoint) {
       throw Object.assign(new Error("Marketplace API URL is not configured"), {
         code: "MARKETPLACE_ENDPOINT_NOT_CONFIGURED",
       });
     }
-    const endpoint = snapshot.endpoints.find(
-      (entry) => entry.marketplaceId === snapshot.activeMarketplaceId && entry.active,
-    );
-    if (!endpoint) throw new Error("Active marketplace endpoint record is unavailable");
-    return endpoint;
+    return snapshot.endpoint;
   }
 
   private async fetchCatalog(url: URL): Promise<CatalogResponse> {

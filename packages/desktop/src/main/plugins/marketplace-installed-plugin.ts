@@ -38,6 +38,41 @@ export interface MarketplaceVersionOwner {
   inactiveAt?: number;
 }
 
+export interface MarketplaceRootOwnership {
+  record: InstalledMarketplacePluginRecord;
+}
+
+/** Reads the active installation ownership record from a plugin root, if present. */
+export async function readMarketplaceRootOwnership(rootPath: string): Promise<MarketplaceRootOwnership | undefined> {
+  const path = resolve(rootPath, ".meta-agent-market.json");
+  try {
+    const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink()) return undefined;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (
+    !isObject(value) ||
+    value.version !== 1 ||
+    value.state !== "installed" ||
+    !isObject(value.record) ||
+    typeof value.record.id !== "string" ||
+    typeof value.record.artifactHash !== "string" ||
+    typeof value.record.rootPath !== "string" ||
+    typeof value.record.entryPath !== "string"
+  ) {
+    return undefined;
+  }
+  return { record: value.record as unknown as InstalledMarketplacePluginRecord };
+}
+
 export async function readMarketplaceVersionOwner(
   rootPath: string,
   artifactHash: string,

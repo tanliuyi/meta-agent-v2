@@ -67,6 +67,40 @@ describe("DesktopExtensionSourcePolicy", () => {
     expect(enabled.entries.map(({ source }) => source)).toEqual(["curated", "development", "builtin"]);
   });
 
+  it("passes development entries with a providers.register capability through unchanged", async () => {
+    const harness = await createHarness();
+    const developmentRoot = join(harness.root, "provider-dev");
+    await mkdir(developmentRoot, { recursive: true });
+    await writeFile(join(developmentRoot, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(developmentRoot, "market-manifest.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        plugin: { name: "Provider Dev" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: ["providers.register"],
+      })}\n`,
+      "utf8",
+    );
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve-provider", expectedRevision: initial.revision },
+      developmentRoot,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    await harness.settings.saveConfig({
+      requestId: "enable-mode",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+
+    const resolved = await harness.policy.resolve("project");
+    const development = resolved.entries.find((entry) => entry.source === "development");
+
+    expect(development?.capabilities).toContain("providers.register");
+  });
+
   it("reports a missing development entry without loading it", async () => {
     const harness = await createHarness();
     const developmentPath = join(harness.root, "development.ts");

@@ -23,6 +23,7 @@ export function SessionComposer() {
   const readiness = useSessionControlSelector((control) => control?.readiness);
   const widgets = useSessionControlSelector((control) => control?.extensionHost.widgets ?? EMPTY_WIDGETS);
   const composerCommand = useSessionControlSelector((control) => control?.extensionHost.composerCommand);
+  const working = useSessionControlSelector((control) => control?.extensionHost.working);
   const phase = useSessionTimelineSelector((timeline) => timeline.phase);
   const queue = useSessionTimelineSelector((timeline) => timeline.queue);
   const confirmStop = useCallback(() => {
@@ -70,6 +71,7 @@ export function SessionComposer() {
       queue={queue}
       widgets={widgets}
       composerCommand={composerCommand}
+      working={working}
       commandsReady={commandsReady}
       modelsLoading={modelsRefreshing}
       onClearQueue={clearQueue}

@@ -6,13 +6,11 @@ export interface MarketplaceEndpointRecord {
   marketplaceId: string;
   baseUrl: string;
   apiRoot: string;
-  active: boolean;
 }
 
 export interface MarketplaceEndpointSettingsSnapshot {
   revision: string;
-  activeMarketplaceId?: string;
-  endpoints: MarketplaceEndpointRecord[];
+  endpoint?: MarketplaceEndpointRecord;
 }
 
 export interface TestMarketplaceEndpointInput {

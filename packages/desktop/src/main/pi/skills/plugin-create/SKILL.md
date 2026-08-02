@@ -56,16 +56,17 @@ Do not retain placeholder tools or comments in the finished plugin.
 Prefer surfaces supported by Desktop Host Profile v1:
 
 - Standard extension events, tools, commands, custom messages, session reads, and abort. Use compaction only when the installed Desktop characterization covers the exact flow; Host Profile v1 treats it as conditionally supported.
-- `pi.getConfig()` returns the immutable, host-validated configuration scoped to the current extension. Marketplace configuration schemas are signed artifact metadata; Desktop renders their fields, stores non-secret values in an owner-only settings file, encrypts secret values with Electron `safeStorage`, and never returns secret plaintext to the renderer.
+- `pi.getConfig()` returns the immutable, host-validated configuration scoped to the current extension. Marketplace configuration schemas are artifact metadata; Desktop renders their fields, stores non-secret values in an owner-only settings file, encrypts secret values with Electron `safeStorage`, and never returns secret plaintext to the renderer.
 - `ctx.ui.select`, `confirm`, `input`, `editor`, `notify`, `setStatus`, `setTitle`, `setEditorText`, and `pasteToEditor`.
 - `ctx.ui.setWidget` only with `string[]` content.
+- `ctx.ui.setWorkingMessage` and `setWorkingVisible`; the working message is shown above the composer while the session is running.
 - Provider registration only when the plugin genuinely supplies a provider; verify it against the installed Pi types and Desktop marketplace compatibility.
 
 Do not use these unsupported Desktop surfaces:
 
 - `ctx.ui.custom`, TUI component renderers, themes, headers, footers, custom editors, terminal input, or autocomplete providers.
 - `pi.registerShortcut()` and `pi.registerFlag()` as Desktop user entry points; Desktop does not expose Pi TUI keybindings or Pi CLI flag parsing.
-- `getEditorText`, working-indicator customization, hidden-thinking labels, or tools-expanded state.
+- `getEditorText` (returns undefined with a warning), working-indicator frames, hidden-thinking labels, or tools-expanded state.
 - Session replacement methods such as `newSession`, `fork`, `navigateTree`, or `switchSession`.
 - `ctx.reload` as part of the plugin workflow. Desktop applies extension-set changes by replacing the worker.
 

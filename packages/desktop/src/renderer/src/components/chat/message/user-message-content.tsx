@@ -42,7 +42,9 @@ export function UserMessageContent() {
             <p className="line-clamp-2 min-w-0 wrap-break-word text-sm italic text-muted-foreground/80">{quote.text}</p>
           </div>
         ))}
-        <MessagePrimitive.Parts components={USER_MESSAGE_PARTS} />
+        <div data-aui-quote-selectable="" className="contents">
+          <MessagePrimitive.Parts components={USER_MESSAGE_PARTS} />
+        </div>
       </div>
       {isLong ? (
         <Button

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -19,6 +19,25 @@ vi.mock("@assistant-ui/react", () => ({
     thread: () => ({ composer: () => ({ getState: () => ({ quote: fixture.quote }), setQuote: vi.fn() }) }),
   }),
   useAuiState: (selector: (state: unknown) => unknown) => selector({ composer: { quote: fixture.quote } }),
+}));
+
+vi.mock("@radix-ui/react-popover", () => ({
+  Root: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  Trigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Portal: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Content: ({
+    children,
+    className,
+    "aria-label": ariaLabel,
+  }: {
+    children?: ReactNode;
+    className?: string;
+    "aria-label"?: string;
+  }) => (
+    <div className={className} aria-label={ariaLabel}>
+      {children}
+    </div>
+  ),
 }));
 
 import { ComposerQuotes } from "../src/renderer/src/components/chat/composer/composer-quotes.tsx";

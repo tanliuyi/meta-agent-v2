@@ -350,7 +350,7 @@ metadata worker 将 load diagnostics 放入 draft response。metadata worker 进
 | `configuration.read` | `pi.getConfig()` | 支持；仅返回当前 extension 的宿主配置快照 |
 | `tools.register` | `pi.registerTool(...)` | 支持 |
 | `commands.register` | `pi.registerCommand(...)` | 支持 |
-| `providers.register` | `pi.registerProvider(...)` | 仅内建/精选 extension |
+| `providers.register` | `pi.registerProvider(...)` | 支持（内建/精选/市场/开发） |
 | `messages.enqueue` | `pi.sendUserMessage(...)` | 支持，遵循 Pi queue 语义 |
 | `messages.custom` | custom message/session entry API | 支持 |
 | `session.read` | public session/model/context getters | 支持 |
@@ -359,7 +359,7 @@ metadata worker 将 load diagnostics 放入 draft response。metadata worker 进
 | `session.reload` | `ctx.reload()` | v1 不支持 |
 | `session.replace` | new/fork/switch/navigate | v1 不支持 |
 
-`providers.register` 会影响 model registry 和凭据行为，只对内建/精选 extension 做产品支持和回归测试。该限制不是 v1 的运行时安全边界：当前 Pi runner 的共享 registration callback 不能可靠归因所有动态 provider registration，Developer Mode 代码仍可能调用 Pi public API。其失败或副作用属于开发模式风险。若未来要求硬性禁止，必须先提供 extension-scoped registration context。
+`providers.register` 会影响 model registry 和凭据行为，对全部来源（内建、精选、市场、开发）提供产品支持与 contract tests。该支持不是 v1 的运行时安全边界：当前 Pi runner 的共享 registration callback 不能可靠归因所有动态 provider registration。provider credential、OAuth 和 model side effects 遵循 Pi public API 与现有 Desktop provider/auth contracts。若未来要求逐来源禁止，必须先提供 extension-scoped registration context。
 
 ### 8.2 UI 能力
 
@@ -371,8 +371,8 @@ metadata worker 将 load diagnostics 放入 draft response。metadata worker 进
 | `ui.widget.text` | string-array widget | 支持 |
 | `ui.title` | `setTitle` | 支持 |
 | `ui.composer.write` | `setEditorText/pasteToEditor` | 支持单向写入 |
-| `ui.composer.read` | `getEditorText` | v1 不支持 |
-| `ui.working` | working message/visibility/indicator | v1 不支持 |
+| `ui.composer.read` | `getEditorText` | 降级：警告并返回 undefined |
+| `ui.working` | working message/visibility | 支持 message 与 visible；indicator 帧与 hidden-thinking label 降级 |
 | `ui.tui.custom` | `custom()` | 不支持 |
 | `ui.tui.theme` | theme methods | 不支持 |
 | `ui.tui.chrome` | header/footer/tools expanded | 不支持 |
@@ -385,7 +385,10 @@ metadata worker 将 load diagnostics 放入 draft response。metadata worker 进
 
 ### 8.3 不支持能力的行为
 
-Desktop 内建和精选 extension 调用不支持能力时必须得到稳定错误：
+不支持能力分为两类，两类都作用于全部来源（共享 runner 无法按调用者归因）：
+
+1. **display/read 类表面降级为“警告 + 定义 no-op”**：调用不抛错，产生一条 `DESKTOP_EXTENSION_CAPABILITY_DEGRADED` runtime diagnostic（去重后进入 extension diagnostics），并按定义返回无害值。覆盖 `ui.tui.custom`、`ui.tui.theme`、`ui.tui.chrome`、`ui.tui.editor`、`ui.terminal.input`、`ui.working` 的 indicator/hidden-label 部分、`ui.composer.read`（返回 undefined）以及 component widget（忽略并保留原状态）。
+2. **session-changing 与 disposed-host 保持稳定错误**：
 
 ```ts
 interface DesktopExtensionCompatibilityError {
@@ -397,18 +400,20 @@ interface DesktopExtensionCompatibilityError {
 }
 ```
 
+覆盖 `session.reload`、`session.replace`（newSession/fork/navigateTree/switchSession）以及 disposed host 上的任何调用。
+
 不得：
 
-- 返回成功但不执行 session action；
+- 对 session-changing action 返回成功但不执行；
 - 为 TUI-only API 跨进程保存无消费者状态；
 - 返回伪造 theme/component；
-- 吞掉 component widget 并假装成功。
+- 吞掉 component widget 并假装成功（component widget 必须产生诊断）。
 
 Developer Mode extension 同样使用该 Host Profile。其 UI API 不因“开发模式”而扩大。
 
 ### 8.4 声明式插件配置
 
-Marketplace artifact 可以在已签名 `market-manifest.json` 中声明版本化的 `configuration` schema。Desktop 只接受受限字段联合，不接受任意 renderer 组件或可执行 JSON Schema 扩展。v1 支持 `text`、`textarea`、`path`、`number`、`boolean`、`select` 和 `secret` 字段，并限制字段数、文本长度、选项数、默认值及数值范围。
+Marketplace artifact 可以在 `market-manifest.json` 中声明版本化的 `configuration` schema。Desktop 只接受受限字段联合，不接受任意 renderer 组件或可执行 JSON Schema 扩展。v1 支持 `text`、`textarea`、`path`、`number`、`boolean`、`select` 和 `secret` 字段，并限制字段数、文本长度、选项数、默认值及数值范围。
 
 配置由 Desktop main 进程验证并按插件 ID 独立持久化。普通值写入 owner-only 文件；`secret` 值使用 Electron `safeStorage` 加密，renderer snapshot 只包含是否已配置，不包含明文。保存使用 request ID、revision/CAS、文件锁和原子替换。
 
@@ -420,8 +425,8 @@ main 在解析 `ResolvedExtensionSet` 时读取并验证配置，将配置 revis
 
 - 维护未完成的声明式 dialog requests；
 - 发布 extension notifications；
-- 维护 status、text widgets、title 和 composer write commands；
-- 拒绝不支持的 UI surface；
+- 维护 status、text widgets、title、composer write commands 和 working message/visibility；
+- 不支持的 display/read surface 降级为警告 + 定义 no-op（§8.3）；
 - 在 session dispose 时取消 pending requests；
 - 不保存 TUI 状态；
 - 不实现 theme 或 component renderer。
@@ -443,13 +448,15 @@ interface DesktopExtensionHostState {
     lines: string[];
     placement: "aboveEditor" | "belowEditor";
   }>;
+  working?: {
+    message?: string;
+    visible?: boolean;
+  };
 }
 ```
 
 应从当前 contracts 删除：
 
-- `workingMessage`；
-- `workingVisible`；
 - `hiddenThinkingLabel`；
 - `toolsExpanded`；
 - `HostRequest.type === "notify"` 的不可达分支；
@@ -647,7 +654,8 @@ UI 必须：
 - live extension crash 被限制在对应 thread worker 故障域，draft discovery crash 被限制在 metadata worker；
 - worker replacement 使用 generation/CAS；
 - 不在 runtime 执行 package installation lifecycle；
-- 不支持 TUI component 跨进程渲染。
+- 不支持 TUI component 跨进程渲染；
+- display/read 能力缺失以“警告 + 定义 no-op”降级，session-changing 能力保持硬失败，不存在静默成功。
 
 ### 14.3 v1 不提供的保证
 

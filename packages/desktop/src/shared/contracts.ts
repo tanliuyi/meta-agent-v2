@@ -189,6 +189,8 @@ export interface PiAssistantProvenance {
   api: string;
   provider: string;
   model: string;
+  /** 该轮 run 使用的思考等级（由 projector 按会话 thinking_level_change 记录回放）。 */
+  thinkingLevel?: ThinkingLevel;
   responseModel?: string;
   responseId?: string;
 }

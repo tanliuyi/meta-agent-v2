@@ -1,5 +1,5 @@
 import type { AgentSession, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PiThreadProjector, ProjectionError } from "../src/main/pi/pi-thread-projector.ts";
 import type { PiThreadEventBatch } from "../src/shared/contracts.ts";
 
@@ -263,6 +263,100 @@ describe("PiThreadProjector", () => {
     projector.handle({ type: "message_start", message: user });
 
     expect(projector.snapshot().nodes[0]).toMatchObject({ kind: "user", quotes });
+    projector.dispose();
+  });
+
+  it("rebuild 从持久化 custom 引用附件恢复 chip 并剥离块引用前缀", () => {
+    const quotes = [{ text: "第一行\n第二行", messageId: "assistant" }];
+    const entries: SessionEntry[] = [
+      messageEntry("user-1", null, userMessage("> 第一行\n> 第二行\n\n解释这段话", 1)),
+      {
+        type: "custom",
+        id: "quotes-1",
+        parentId: "user-1",
+        timestamp: iso(2),
+        customType: "desktop-quote-attachment",
+        data: { userEntryId: "user-1", requestId: "request", quotes },
+      },
+    ];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      kind: "user",
+      content: [{ type: "text", text: "解释这段话" }],
+      quote: { text: "第一行\n第二行", messageId: "assistant" },
+    });
+    projector.dispose();
+  });
+
+  it("rebuild 时非法引用附件数据降级为无 chip 且不剥离文本", () => {
+    const entries: SessionEntry[] = [
+      messageEntry("user-1", null, userMessage("> 第一行\n\n解释这段话", 1)),
+      {
+        type: "custom",
+        id: "quotes-1",
+        parentId: "user-1",
+        timestamp: iso(2),
+        customType: "desktop-quote-attachment",
+        data: { userEntryId: "user-1", requestId: "request", quotes: [{ text: "" }] },
+      },
+    ];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      kind: "user",
+      content: [{ type: "text", text: "> 第一行\n\n解释这段话" }],
+    });
+    projector.dispose();
+  });
+
+  it("queued prompt 在 finishPrompt 清理 pending 后仍保留引用并剥离块引用前缀", () => {
+    const entries: SessionEntry[] = [];
+    const { session, followUp } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const quotes = [{ text: "第一行", messageId: "assistant" }];
+    projector.beginPrompt("request", "followUp", true, "比较", undefined, quotes);
+    followUp.push("> 第一行\n\n比较");
+    projector.handle({ type: "queue_update", steering: [], followUp: [...followUp] });
+    projector.markPromptPreflight("request", true);
+    projector.finishPrompt("request");
+    followUp.pop();
+    projector.handle({ type: "queue_update", steering: [], followUp: [] });
+
+    projector.handle({ type: "message_start", message: userMessage("> 第一行\n\n比较", 1) });
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      kind: "user",
+      content: [{ type: "text", text: "比较" }],
+      quote: { text: "第一行", messageId: "assistant" },
+      delivery: { state: "live", requestId: "request" },
+    });
+    projector.dispose();
+  });
+
+  it("user entry 落盘后回调 onUserEntryPersisted 并清理 pending 引用", async () => {
+    const entries: SessionEntry[] = [];
+    const onUserEntryPersisted = vi.fn();
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    projector.onUserEntryPersisted = onUserEntryPersisted;
+    const quotes = [{ text: "第一行\n第二行", messageId: "assistant" }];
+    projector.beginPrompt("request", undefined, false, "解释这段话", undefined, quotes);
+    projector.markPromptPreflight("request", true);
+    const user = userMessage("> 第一行\n> 第二行\n\n解释这段话", 1);
+    projector.handle({ type: "message_start", message: user });
+    projector.handle({ type: "message_end", message: user });
+    entries.push(messageEntry("user-1", null, user));
+    await Promise.resolve();
+
+    expect(onUserEntryPersisted).toHaveBeenCalledTimes(1);
+    expect(onUserEntryPersisted).toHaveBeenCalledWith("user-1", "request", quotes);
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      id: "user-1",
+      quote: { text: "第一行\n第二行", messageId: "assistant" },
+    });
     projector.dispose();
   });
 
@@ -719,15 +813,100 @@ describe("PiThreadProjector", () => {
     expect(node.content).toEqual([{ id: "assistant:text:1", type: "text", text: "visible" }]);
     projector.dispose();
   });
+
+  it("重建时按 thinking_level_change 入口顺序回放 provenance 思考等级", () => {
+    const entries: SessionEntry[] = [
+      { type: "thinking_level_change", id: "level-1", parentId: null, timestamp: iso(1), thinkingLevel: "high" },
+      messageEntry("assistant-1", "level-1", assistantMessage("stop", 2, [])),
+      {
+        type: "thinking_level_change",
+        id: "level-2",
+        parentId: "assistant-1",
+        timestamp: iso(3),
+        thinkingLevel: "off",
+      },
+      messageEntry("assistant-2", "level-2", assistantMessage("stop", 4, [])),
+    ];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    const [first, second] = projector.snapshot().nodes;
+    expect(first).toMatchObject({
+      kind: "assistant",
+      provenance: expect.objectContaining({ thinkingLevel: "high" }),
+    });
+    expect(second).toMatchObject({
+      kind: "assistant",
+      provenance: expect.objectContaining({ thinkingLevel: "off" }),
+    });
+    projector.dispose();
+  });
+
+  it("live thinking_level_changed 事件推进后续 assistant 消息的思考等级", async () => {
+    const entries: SessionEntry[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const first = assistantMessage("stop", 2, [{ type: "text", text: "一" }]);
+    const second = assistantMessage("stop", 4, [{ type: "text", text: "二" }]);
+
+    projector.handle({ type: "thinking_level_changed", level: "max" });
+    projector.handle({ type: "message_start", message: first });
+    projector.handle({ type: "message_end", message: first });
+    entries.push(messageEntry("canonical-1", null, first));
+    await Promise.resolve();
+    projector.handle({ type: "thinking_level_changed", level: "low" });
+    projector.handle({ type: "message_start", message: second });
+    projector.handle({ type: "message_end", message: second });
+    entries.push(messageEntry("canonical-2", "canonical-1", second));
+    await Promise.resolve();
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      kind: "assistant",
+      provenance: expect.objectContaining({ thinkingLevel: "max" }),
+    });
+    expect(projector.snapshot().nodes[1]).toMatchObject({
+      kind: "assistant",
+      provenance: expect.objectContaining({ thinkingLevel: "low" }),
+    });
+    projector.dispose();
+  });
+
+  it("rekey 后的 canonical 保留与入口回放一致的思考等级", async () => {
+    const entries: SessionEntry[] = [
+      { type: "thinking_level_change", id: "level", parentId: null, timestamp: iso(1), thinkingLevel: "xhigh" },
+    ];
+    const { session } = sessionHarness(entries, "xhigh");
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const started = assistantMessage("stop", 2, [{ type: "text", text: "" }]);
+    const finished = assistantMessage("stop", 2, [{ type: "text", text: "回答" }]);
+
+    projector.handle({ type: "message_start", message: started });
+    const liveNode = projector.snapshot().nodes[0];
+    expect(liveNode).toMatchObject({
+      kind: "assistant",
+      provenance: expect.objectContaining({ thinkingLevel: "xhigh" }),
+    });
+
+    projector.handle({ type: "message_end", message: finished });
+    entries.push(messageEntry("canonical", "level", finished));
+    await Promise.resolve();
+
+    expect(projector.snapshot().nodes[0]).toMatchObject({
+      id: "canonical",
+      provenance: expect.objectContaining({ thinkingLevel: "xhigh" }),
+    });
+    projector.dispose();
+  });
 });
 
-function sessionHarness(entries: SessionEntry[]) {
+function sessionHarness(entries: SessionEntry[], thinkingLevel?: string) {
   const steering: string[] = [];
   const followUp: string[] = [];
   const byId = () => new Map(entries.map((entry) => [entry.id, entry]));
   const session = {
     sessionId: "thread",
     isStreaming: false,
+    thinkingLevel,
     getSteeringMessages: () => steering,
     getFollowUpMessages: () => followUp,
     sessionManager: {

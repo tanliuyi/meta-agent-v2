@@ -47,6 +47,20 @@ describe("DirectiveText", () => {
     expect(markup).toContain(">directive-text.tsx</span>");
   });
 
+  it("renders skill directive chips with the skill icon", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ComposerDirectiveChip, {
+        directiveId: "skill:frontend",
+        directiveType: "skill",
+        label: "frontend",
+      }),
+    );
+
+    expect(markup).toContain('data-directive-type="skill"');
+    expect(markup).toContain('data-directive-id="skill:frontend"');
+    expect(markup).toContain(">frontend</span>");
+  });
+
   it("leaves non-file directive labels unchanged", () => {
     expect(directiveDisplayLabel("command", "packages/desktop/src/renderer/src/components/assistant-ui")).toBe(
       "packages/desktop/src/renderer/src/components/assistant-ui",

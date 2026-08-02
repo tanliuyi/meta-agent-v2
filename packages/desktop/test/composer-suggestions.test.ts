@@ -77,8 +77,8 @@ describe("ComposerSuggestions", () => {
     ];
 
     expect(commandSuggestions(commands, "trigger cleanup").map(({ label }) => label)).toEqual(["/整理记忆"]);
-    expect(commandSuggestions(commands, "技能 provider").map(({ label }) => label)).toEqual([
-      "/skill:add-llm-provider",
+    expect(commandSuggestions(commands, "技能 provider").map(({ label, text }) => ({ label, text }))).toEqual([
+      { label: "add-llm-provider", text: ":skill[add-llm-provider]{name=skill:add-llm-provider} " },
     ]);
   });
 

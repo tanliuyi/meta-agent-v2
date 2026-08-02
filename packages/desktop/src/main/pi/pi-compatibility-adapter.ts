@@ -10,6 +10,7 @@ import type {
   SessionReloadInput,
 } from "../../shared/contracts.ts";
 import type { PiThreadProjector } from "./pi-thread-projector.ts";
+import { type PiQuoteAttachmentData, QUOTE_ATTACHMENT_CUSTOM_TYPE, withQuoteContext } from "./quote-context.ts";
 
 interface CompatibilityAdapterOptions {
   session: AgentSession;
@@ -25,6 +26,9 @@ export class PiCompatibilityAdapter {
     assertCompatiblePi(options.session);
     this.session = options.session;
     this.projector = options.projector;
+    // user entry 落盘后追加持久化引用附件，供会话重建时恢复结构化引用（UI 无需解析块引用文本）。
+    this.projector.onUserEntryPersisted = (entryId, requestId, quotes) =>
+      this.persistQuoteAttachment(entryId, requestId, quotes);
   }
 
   prompt(input: SessionPromptInput): Promise<SessionCommandResult> {
@@ -72,6 +76,12 @@ export class PiCompatibilityAdapter {
     const header = branchManager.getHeader();
     if (!header?.id) throw new Error(`Pi branch 新 session header 无效: ${branchSessionFile}`);
     return { branchThreadId: header.id, branchSessionFile };
+  }
+
+  /** 将结构化引用作为 session custom entry 持久化（custom 类型默认不进 LLM 上下文）。 */
+  private persistQuoteAttachment(entryId: string, requestId: string, quotes: readonly PiQuote[]): void {
+    const data: PiQuoteAttachmentData = { userEntryId: entryId, requestId, quotes: [...quotes] };
+    this.session.sessionManager.appendCustomEntry(QUOTE_ATTACHMENT_CUSTOM_TYPE, data);
   }
 
   async cancel(): Promise<ClearedQueue> {
@@ -238,6 +248,7 @@ function assertCompatiblePi(session: AgentSession): void {
       "getHeader",
       "isPersisted",
       "createBranchedSession",
+      "appendCustomEntry",
     ] as const)
       if (typeof managerSurface[key] !== "function") missing.push(`sessionManager.${key}`);
   }
@@ -255,14 +266,6 @@ function userInput(content: Extract<AgentSession["messages"][number], { role: "u
       part.type === "image" ? [{ name: `image-${index + 1}`, data: part.data, mimeType: part.mimeType }] : [],
     ),
   };
-}
-
-function withQuoteContext(text: string, quotes: readonly PiQuote[]): string {
-  if (quotes.length === 0) return text;
-  const context = quotes
-    .map((quote) => `> ${quote.text.replace(/\r\n?/gu, "\n").replace(/\n/gu, "\n> ")}`)
-    .join("\n\n");
-  return `${context}\n\n${text}`;
 }
 
 function errorMessage(value: unknown): string {

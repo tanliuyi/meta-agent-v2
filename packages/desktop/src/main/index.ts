@@ -26,7 +26,6 @@ import { MarketplacePluginGarbageCollector } from "./plugins/marketplace-plugin-
 import { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
 import { MarketplacePluginReconciler } from "./plugins/marketplace-plugin-reconciler.ts";
 import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
-import { MarketplacePluginTransactionStore } from "./plugins/marketplace-plugin-transaction-store.ts";
 import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { MemorySettingsService } from "./settings/memory-settings-service.ts";
@@ -242,24 +241,21 @@ app.whenReady().then(async () => {
     defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
   });
   const marketplaceRegistry = new MarketplacePluginRegistry(userDataDir);
+  const marketplaceLockDirectory = join(userDataDir, "plugins", "locks");
   const pluginConfigurations = new PluginConfigurationService(userDataDir, marketplaceRegistry, {
     isAvailable: () => safeStorage.isEncryptionAvailable(),
     encrypt: (value) => safeStorage.encryptString(value).toString("base64"),
     decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
   });
-  const marketplaceTransactions = new MarketplacePluginTransactionStore(userDataDir);
   const marketplaceGenerationReferences = new MarketplaceGenerationReferenceTracker();
-  const marketplaceReconciler = new MarketplacePluginReconciler(
-    marketplaceRegistry,
-    marketplaceTransactions,
-    agentDir,
-    { log: (text) => sidecarLog?.write("marketplace", text) },
-  );
+  const marketplaceReconciler = new MarketplacePluginReconciler(marketplaceRegistry, agentDir, userDataDir, {
+    log: (text) => sidecarLog?.write("marketplace", text),
+  });
   const marketplaceGarbageCollector = new MarketplacePluginGarbageCollector(
     marketplaceRegistry,
-    marketplaceTransactions,
     marketplaceGenerationReferences,
     agentDir,
+    marketplaceLockDirectory,
   );
   const marketplaceReconciliation = marketplaceReconciler.reconcile();
   const [authModelRuntime] = await Promise.all([
@@ -294,7 +290,7 @@ app.whenReady().then(async () => {
   const marketplacePluginInstaller = new MarketplacePluginInstaller(
     marketplaceEndpoints,
     marketplaceRegistry,
-    marketplaceTransactions,
+    marketplaceLockDirectory,
     agentDir,
     app.getVersion(),
     runtimeManifest.compatibility,

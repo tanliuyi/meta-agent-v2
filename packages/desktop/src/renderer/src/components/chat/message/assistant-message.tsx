@@ -1,7 +1,9 @@
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { cn } from "@renderer/shared/lib/cn";
+import { getThinkingLevelLabel } from "@renderer/shared/lib/thinking-level-label";
 import { useThinkingVisibility } from "@renderer/state/thinking-visibility";
 import { useCallback, useEffect, useState } from "react";
+import type { ThinkingLevel } from "../../../../../shared/contracts.ts";
 import { appendComposerQuote } from "../../../runtime/composer-quotes.ts";
 import { MarkdownImageReferenceProvider } from "../../assistant-ui/streamdown/streamdown-image-reference.tsx";
 import { useSessionScope } from "../../session-context.tsx";
@@ -12,6 +14,7 @@ import { MessageAvatar } from "./message-avatar.tsx";
 export interface PiMessageProvenance {
   provider: string;
   model: string;
+  thinkingLevel?: ThinkingLevel;
 }
 
 export function AssistantMessage() {
@@ -31,6 +34,9 @@ export function AssistantMessage() {
   });
   const provenanceProvider = useAuiState((state) => piAssistantProvenance(state.message.metadata.custom)?.provider);
   const provenanceModel = useAuiState((state) => piAssistantProvenance(state.message.metadata.custom)?.model);
+  const provenanceThinking = useAuiState(
+    (state) => piAssistantProvenance(state.message.metadata.custom)?.thinkingLevel,
+  );
   const [participatedInRun, setParticipatedInRun] = useState(() => messageRunning || runActivity.hasParticipated());
 
   useEffect(() => {
@@ -56,7 +62,14 @@ export function AssistantMessage() {
       {showAvatars && isTurnFirst && provenanceProvider !== undefined && provenanceModel !== undefined ? (
         <div data-slot="message-avatar-header" className="flex min-w-0 items-center gap-2 pb-1">
           <MessageAvatar provider={provenanceProvider} />
-          <div className="message-avatar-name">{provenanceModel}</div>
+          <div className="min-w-0 flex flex-col gap-1">
+            <div className="message-avatar-name">{provenanceModel}</div>
+            {provenanceThinking !== undefined ? (
+              <div className="message-avatar-thinking text-xs text-muted-foreground">
+                思考：{getThinkingLevelLabel(provenanceThinking)}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
       <div data-slot="assistant-message-content-wrapper" className="min-w-0">
@@ -77,7 +90,7 @@ export function isPiAssistantRunning(custom: unknown): boolean {
   return Boolean(status && typeof status === "object" && "type" in status && status.type === "running");
 }
 
-/** 从消息 custom 元数据提取生成该消息的 provider 与模型；notice 等无 provenance 消息返回 undefined。 */
+/** 从消息 custom 元数据提取生成该消息的 provider、模型与思考等级；notice 等无 provenance 消息返回 undefined。 */
 export function piAssistantProvenance(custom: unknown): PiMessageProvenance | undefined {
   if (!custom || typeof custom !== "object" || !("pi" in custom)) return undefined;
   const pi = custom.pi;
@@ -93,7 +106,12 @@ export function piAssistantProvenance(custom: unknown): PiMessageProvenance | un
   ) {
     return undefined;
   }
-  return { provider: provenance.provider, model: provenance.model };
+  const thinkingLevel = "thinkingLevel" in provenance ? provenance.thinkingLevel : undefined;
+  return {
+    provider: provenance.provider,
+    model: provenance.model,
+    ...(typeof thinkingLevel === "string" ? { thinkingLevel: thinkingLevel as ThinkingLevel } : {}),
+  };
 }
 
 export function reduceRunActivityParticipation(

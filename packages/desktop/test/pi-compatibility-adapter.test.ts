@@ -2,6 +2,7 @@ import { type AgentSession, SessionManager } from "@earendil-works/pi-coding-age
 import { describe, expect, it, vi } from "vitest";
 import { PiCompatibilityAdapter } from "../src/main/pi/pi-compatibility-adapter.ts";
 import type { PiThreadProjector } from "../src/main/pi/pi-thread-projector.ts";
+import type { PiQuote } from "../src/shared/contracts.ts";
 
 describe("PiCompatibilityAdapter", () => {
   it("edit preflight 失败时返回 rejected result 并恢复旧 leaf", async () => {
@@ -138,6 +139,7 @@ describe("PiCompatibilityAdapter", () => {
         getHeader: () => ({ id: "thread" }),
         isPersisted: () => true,
         createBranchedSession: () => "/sessions/branch.jsonl",
+        appendCustomEntry: vi.fn(),
       },
       navigateTree: vi.fn(async () => ({ cancelled: false })),
     });
@@ -277,6 +279,25 @@ describe("PiCompatibilityAdapter", () => {
     expect(prompt).toHaveBeenCalledWith("> 第一段\n\n> 第二段\n\n比较两段", expect.any(Object));
   });
 
+  it("user entry 落盘后将结构化引用写入 session custom entry 供重建恢复", () => {
+    const appendCustomEntry = vi.fn();
+    const session = createSession({ sessionManager: createSessionManager({ appendCustomEntry }) });
+    const projector = createProjector();
+    new PiCompatibilityAdapter({ session, projector });
+
+    const onUserEntryPersisted = projector.onUserEntryPersisted as unknown as
+      | ((entryId: string, requestId: string, quotes: readonly PiQuote[]) => void)
+      | undefined;
+    expect(onUserEntryPersisted).toBeTypeOf("function");
+    onUserEntryPersisted?.("user-1", "request", [{ text: "第一行\n第二行", messageId: "assistant" }]);
+
+    expect(appendCustomEntry).toHaveBeenCalledWith("desktop-quote-attachment", {
+      userEntryId: "user-1",
+      requestId: "request",
+      quotes: [{ text: "第一行\n第二行", messageId: "assistant" }],
+    });
+  });
+
   it("prompt 在 preflight 成功后立即返回，不等待完整 agent run", async () => {
     const run = deferred<void>();
     const prompt = vi.fn(async (_text: string, options: { preflightResult(success: boolean): void }) => {
@@ -337,6 +358,7 @@ function createSessionManager(overrides: Record<string, unknown> = {}): AgentSes
     getHeader: () => ({ id: "thread", timestamp: "2026-07-22T07:00:00.000Z" }),
     isPersisted: () => true,
     createBranchedSession: () => "/sessions/branch.jsonl",
+    appendCustomEntry: vi.fn(),
     ...overrides,
   } as unknown as AgentSession["sessionManager"];
 }

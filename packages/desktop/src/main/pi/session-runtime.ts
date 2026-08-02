@@ -123,6 +123,7 @@ export class SessionRuntime {
       () => this.publishControl(),
       () => [...this.session.state.pendingToolCalls],
       (message, type, options) => this.projector.notify(message, type, options),
+      (message) => this.recordCapabilityDegradation(message),
     );
     this.compatibility = new PiCompatibilityAdapter({ session, projector: this.projector });
     this.summaryState = createSummary(session, initialUpdatedAt);
@@ -597,6 +598,24 @@ export class SessionRuntime {
   private publishControl(): void {
     this.revision += 1;
     this.push({ type: "control", projectId: this.projectId, threadId: this.id, control: this.control() });
+  }
+
+  /** Records an unsupported-capability degradation as a runtime diagnostic (deduplicated). */
+  private recordCapabilityDegradation(message: string): void {
+    const diagnostic: DesktopExtensionDiagnostic = {
+      extensionId: "unknown",
+      source: "development",
+      extensionSetGeneration: this.extensionSet.generation,
+      projectId: this.projectId,
+      threadId: this.id,
+      phase: "runtime",
+      code: "DESKTOP_EXTENSION_CAPABILITY_DEGRADED",
+      message,
+    };
+    const last = this.extensionDiagnostics[this.extensionDiagnostics.length - 1];
+    if (last?.code === diagnostic.code && last.message === diagnostic.message) return;
+    this.extensionDiagnostics = [...this.extensionDiagnostics, diagnostic];
+    this.publishControl();
   }
 
   private runCommand(requestId: string, command: () => Promise<SessionCommandResult>): Promise<SessionCommandResult> {

@@ -35,6 +35,7 @@ export type ComposerProps =
       queue: readonly PiQueueItem[];
       widgets: SessionControlState["extensionHost"]["widgets"];
       composerCommand: SessionControlState["extensionHost"]["composerCommand"];
+      working?: SessionControlState["extensionHost"]["working"];
       commandsReady: boolean;
       modelsLoading: boolean;
       onClearQueue(): Promise<void>;

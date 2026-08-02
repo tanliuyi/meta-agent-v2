@@ -797,6 +797,7 @@ function createSession(streaming = false): AgentSession & {
       getHeader: () => ({ id: "thread" }),
       isPersisted: () => true,
       createBranchedSession: () => "/sessions/branch.jsonl",
+      appendCustomEntry: vi.fn(),
     },
     prompt,
     reload: vi.fn(async () => undefined),

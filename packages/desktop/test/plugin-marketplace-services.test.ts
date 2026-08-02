@@ -87,14 +87,11 @@ describe("MarketplaceEndpointSettingsService", () => {
 
     await expect(service.getSettings()).resolves.toEqual({
       revision: MISSING_MARKETPLACE_ENDPOINT_REVISION,
-      activeMarketplaceId: "meta-agent-development",
-      endpoints: [
-        expect.objectContaining({
-          marketplaceId: "meta-agent-development",
-          baseUrl: "http://100.91.230.10:4317/",
-          active: true,
-        }),
-      ],
+      endpoint: {
+        marketplaceId: "meta-agent-development",
+        baseUrl: "http://100.91.230.10:4317/",
+        apiRoot: "http://100.91.230.10:4317/v1/",
+      },
     });
     await expect(service.getActiveEndpoint()).resolves.toMatchObject({
       apiRoot: "http://100.91.230.10:4317/v1/",
@@ -111,7 +108,7 @@ describe("MarketplaceEndpointSettingsService", () => {
       createId: () => `id-${++nextId}`,
     });
     const initial = await service.getSettings();
-    expect(initial).toEqual({ revision: MISSING_MARKETPLACE_ENDPOINT_REVISION, endpoints: [] });
+    expect(initial).toEqual({ revision: MISSING_MARKETPLACE_ENDPOINT_REVISION });
 
     const tested = await service.testEndpoint({ baseUrl: "https://market.example" });
     expect(tested).toMatchObject({
@@ -127,7 +124,7 @@ describe("MarketplaceEndpointSettingsService", () => {
     });
     expect(saved).toMatchObject({
       status: "saved",
-      snapshot: { activeMarketplaceId: "example.market", endpoints: [{ active: true }] },
+      snapshot: { endpoint: { marketplaceId: "example.market" } },
     });
     if (saved.status !== "saved") throw new Error("endpoint save failed");
     const endpointPath = join(directory, "plugins", "marketplace-endpoints.json");
@@ -135,7 +132,7 @@ describe("MarketplaceEndpointSettingsService", () => {
     expect(saved.snapshot.revision).toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(JSON.stringify(saved)).not.toContain("publicKey");
     const source = JSON.parse(bytes.toString("utf8"));
-    expect(source.endpoints[0]).not.toHaveProperty("privateKey");
+    expect(source.endpoint).not.toHaveProperty("privateKey");
     expect(fetch).toHaveBeenCalledWith(
       new URL("https://market.example/.well-known/meta-agent-marketplace.json"),
       expect.objectContaining({ redirect: "error" }),
@@ -148,11 +145,7 @@ describe("MarketplaceEndpointSettingsService", () => {
       defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
     });
     await expect(restartedWithDefault.getSettings()).resolves.toMatchObject({
-      activeMarketplaceId: "example.market",
-      endpoints: [
-        { marketplaceId: "example.market", active: true },
-        { marketplaceId: "meta-agent-development", active: false },
-      ],
+      endpoint: { marketplaceId: "example.market" },
     });
   });
 
@@ -163,19 +156,17 @@ describe("MarketplaceEndpointSettingsService", () => {
       marketplaceId: "fixture.market",
       baseUrl: "https://fixture.example/",
       apiRoot: "https://fixture.example/v1/",
-      active: true,
     };
     const build = (defaultEndpoint: MarketplaceEndpoint) =>
       new MarketplaceEndpointSettingsService(directory, { defaultEndpoint });
 
     expect(() => build(valid)).not.toThrow();
-    expect(() => build({ ...valid, active: false })).toThrow("Default marketplace endpoint must be active");
     expect(() => build({ ...valid, apiRoot: "https://fixture.example/v1" })).toThrow(
       "Default marketplace API root is not normalized",
     );
   });
 
-  it("does not persist the injected default marketplace when saving another endpoint", async () => {
+  it("replaces the stored endpoint when saving another endpoint", async () => {
     const directory = join(tmpdir(), `marketplace-default-persist-${Date.now()}-${Math.random()}`);
     directories.push(directory);
     const service = new MarketplaceEndpointSettingsService(directory, {
@@ -183,7 +174,7 @@ describe("MarketplaceEndpointSettingsService", () => {
       defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
     });
     const initial = await service.getSettings();
-    expect(initial.activeMarketplaceId).toBe("meta-agent-development");
+    expect(initial.endpoint?.marketplaceId).toBe("meta-agent-development");
 
     const tested = await service.testEndpoint({ baseUrl: "https://market.example" });
     if (tested.status !== "ready") throw new Error("endpoint test failed");
@@ -196,14 +187,14 @@ describe("MarketplaceEndpointSettingsService", () => {
     ).resolves.toMatchObject({ status: "saved" });
 
     const source = JSON.parse(await readFile(join(directory, "plugins", "marketplace-endpoints.json"), "utf8"));
-    expect(source.activeMarketplaceId).toBe("example.market");
-    expect(source.endpoints).toEqual([expect.objectContaining({ marketplaceId: "example.market", active: true })]);
-    await expect(service.getEndpoint("meta-agent-development")).resolves.toMatchObject({
-      active: false,
+    expect(source.endpoint).toEqual({
+      marketplaceId: "example.market",
+      baseUrl: "https://market.example/",
+      apiRoot: "https://market.example/v1/",
     });
   });
 
-  it("injects the default over a dangling active pointer and preserves stored endpoints across a save", async () => {
+  it("migrates a dangling legacy active pointer to the default and replaces records on save", async () => {
     const directory = join(tmpdir(), `marketplace-default-dangling-${Date.now()}-${Math.random()}`);
     directories.push(directory);
     const stored = {
@@ -224,13 +215,7 @@ describe("MarketplaceEndpointSettingsService", () => {
     });
 
     const settings = await service.getSettings();
-    expect(settings).toMatchObject({
-      activeMarketplaceId: "meta-agent-development",
-      endpoints: [
-        { marketplaceId: "example.market", active: false },
-        { marketplaceId: "meta-agent-development", active: true },
-      ],
-    });
+    expect(settings.endpoint?.marketplaceId).toBe("meta-agent-development");
 
     const tested = await service.testEndpoint({ baseUrl: "https://mirror.example" });
     if (tested.status !== "ready") throw new Error("endpoint test failed");
@@ -243,11 +228,11 @@ describe("MarketplaceEndpointSettingsService", () => {
     ).resolves.toMatchObject({ status: "saved" });
 
     const source = JSON.parse(await readFile(join(directory, "plugins", "marketplace-endpoints.json"), "utf8"));
-    expect(source.activeMarketplaceId).toBe("mirror.market");
-    expect(source.endpoints).toEqual([
-      stored,
-      expect.objectContaining({ marketplaceId: "mirror.market", active: true }),
-    ]);
+    expect(source.endpoint).toEqual({
+      marketplaceId: "mirror.market",
+      baseUrl: "https://mirror.example/",
+      apiRoot: "https://mirror.example/v1/",
+    });
   });
 
   it("requires the current settings revision", async () => {
@@ -270,7 +255,7 @@ describe("MarketplaceEndpointSettingsService", () => {
     await mkdir(join(directory, "plugins"), { recursive: true });
     await writeFile(
       join(directory, "plugins", "marketplace-endpoints.json"),
-      `${JSON.stringify({ version: 1, endpoints: [] })}\n`,
+      `${JSON.stringify({ version: 1 })}\n`,
       "utf8",
     );
     await expect(
@@ -333,13 +318,11 @@ describe("MarketplaceCatalogService", () => {
       marketplaceId: "example.market",
       baseUrl: "https://market.example/",
       apiRoot: "https://market.example/v1/",
-      active: true,
     };
     const endpoints = {
       getSettings: vi.fn(async () => ({
         revision: "one",
-        activeMarketplaceId: endpoint.marketplaceId,
-        endpoints: [endpoint],
+        endpoint,
       })),
     };
     const page = {
@@ -398,10 +381,9 @@ describe("MarketplaceCatalogService", () => {
 
   it("does not fetch without a saved active endpoint", async () => {
     const fetch = vi.fn();
-    const service = new MarketplaceCatalogService(
-      { getSettings: async () => ({ revision: "missing", endpoints: [] }) } as never,
-      { fetch },
-    );
+    const service = new MarketplaceCatalogService({ getSettings: async () => ({ revision: "missing" }) } as never, {
+      fetch,
+    });
     await expect(service.list()).rejects.toMatchObject({ code: "MARKETPLACE_ENDPOINT_NOT_CONFIGURED" });
     expect(fetch).not.toHaveBeenCalled();
   });

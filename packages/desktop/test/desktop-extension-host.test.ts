@@ -86,36 +86,46 @@ describe("DesktopExtensionHost", () => {
     expect(host.requests).toEqual([]);
   });
 
-  it("rejects every unsupported TUI and editor-read surface with a stable error", async () => {
+  it("supports the working message and visibility state", () => {
     const host = new DesktopExtensionHost(
       () => undefined,
       () => [],
     );
     const ui = host.createContext();
-    const assertions = [
-      () => ui.setWorkingMessage("working"),
-      () => ui.setWorkingVisible(false),
-      () => ui.setHiddenThinkingLabel("hidden"),
-      () => ui.getEditorText(),
-      () => ui.getToolsExpanded(),
-      () => ui.setFooter(undefined),
-      () => ui.getAllThemes(),
-      () => ui.onTerminalInput(() => undefined),
-      () => (ui.setWidget as (key: string, content: unknown) => void)("component", () => undefined),
-    ];
 
-    for (const call of assertions) {
-      expect(call).toThrow(
-        expect.objectContaining({
-          name: "DesktopExtensionCompatibilityError",
-          code: "DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE",
-        }),
-      );
-    }
-    await expect(ui.custom(() => ({ render: () => [], invalidate: () => undefined }))).rejects.toMatchObject({
-      code: "DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE",
-      capability: "ui.tui.custom",
-    });
+    ui.setWorkingMessage("analyzing workspace");
+    expect(host.hostState.working).toEqual({ message: "analyzing workspace", visible: true });
+    ui.setWorkingVisible(false);
+    expect(host.hostState.working).toEqual({ message: "analyzing workspace", visible: false });
+    ui.setWorkingMessage(undefined);
+    expect(host.hostState.working).toMatchObject({ message: undefined, visible: false });
+  });
+
+  it("degrades unsupported TUI and editor-read surfaces with a warning instead of throwing", async () => {
+    const warnings: string[] = [];
+    const host = new DesktopExtensionHost(
+      () => undefined,
+      () => [],
+      () => undefined,
+      (message) => warnings.push(message),
+    );
+    const ui = host.createContext();
+
+    ui.setWorkingIndicator({ frames: ["*"] });
+    ui.setHiddenThinkingLabel("hidden");
+    ui.getToolsExpanded();
+    ui.setFooter(undefined);
+    ui.setHeader(undefined);
+    ui.getAllThemes();
+    ui.getTheme();
+    ui.onTerminalInput(() => undefined);
+    (ui.setWidget as (key: string, content: unknown) => void)("component", () => undefined);
+    ui.getEditorText();
+    await expect(ui.custom(() => ({ render: () => [], invalidate: () => undefined }))).resolves.toBeUndefined();
+
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.every((message) => message.includes("unsupported"))).toBe(true);
+    expect(host.hostState.widgets).toEqual([]);
   });
 
   it("rejects pending host requests and clears state on reset", async () => {

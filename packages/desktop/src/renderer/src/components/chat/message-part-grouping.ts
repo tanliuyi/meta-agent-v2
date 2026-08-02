@@ -42,7 +42,12 @@ function isNonCompactionNotice(part: PartState): boolean {
   );
 }
 
-export function hasFinalResponseText(parts: readonly PartState[]): boolean {
+type FinalResponsePart = {
+  readonly type: string;
+  readonly text?: string;
+};
+
+export function hasFinalResponseText(parts: readonly FinalResponsePart[]): boolean {
   return findFinalResponseTextIndex(parts) >= 0;
 }
 
@@ -58,12 +63,12 @@ export function hasFinalResponseInRun(messages: readonly MessageState[], message
 
   return messages
     .slice(startIndex, endIndex)
-    .some((message) => message.role === "assistant" && hasFinalResponseText(message.parts));
+    .some((message) => message.role === "assistant" && hasFinalResponseText(message.content));
 }
 
-function findFinalResponseTextIndex(parts: readonly PartState[]): number {
+function findFinalResponseTextIndex(parts: readonly FinalResponsePart[]): number {
   const lastStepIndex = parts.findLastIndex((part) => part.type === "reasoning" || part.type === "tool-call");
-  const lastTextIndex = parts.findLastIndex((part) => part.type === "text" && part.text.trim().length > 0);
+  const lastTextIndex = parts.findLastIndex((part) => part.type === "text" && (part.text?.trim().length ?? 0) > 0);
   return lastTextIndex > lastStepIndex ? lastTextIndex : -1;
 }
 

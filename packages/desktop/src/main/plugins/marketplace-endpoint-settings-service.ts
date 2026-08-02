@@ -16,19 +16,19 @@ import { readBoundedJsonResponse } from "./marketplace-http.ts";
 export const MISSING_MARKETPLACE_ENDPOINT_REVISION = "missing:marketplace-endpoints-v1";
 export type MarketplaceEndpoint = MarketplaceEndpointRecord;
 
-type StoredMarketplaceEndpointRecord = MarketplaceEndpointRecord;
-
 interface MarketplaceEndpointFileData {
   version?: number;
+  endpoint?: MarketplaceEndpointRecord;
+  /** Legacy multi-endpoint records, migrated to the single active endpoint on read. */
   activeMarketplaceId?: string;
-  endpoints?: StoredMarketplaceEndpointRecord[];
+  endpoints?: Array<MarketplaceEndpointRecord & { active?: boolean }>;
   [key: string]: unknown;
 }
 
 interface CurrentEndpointSource {
   revision: string;
   data: MarketplaceEndpointFileData;
-  injectedMarketplaceId?: string;
+  endpoint?: MarketplaceEndpointRecord;
 }
 
 interface MarketplaceWellKnown {
@@ -49,7 +49,7 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_REQUEST_RESULTS = 256;
 
-/** Stores the selected marketplace endpoint and resolves its API metadata. */
+/** Stores the single active marketplace endpoint and resolves its API metadata. */
 export class MarketplaceEndpointSettingsService {
   readonly path: string;
   private saveTail: Promise<void> = Promise.resolve();
@@ -69,7 +69,6 @@ export class MarketplaceEndpointSettingsService {
     if (options.defaultEndpoint) {
       assertEndpointRecord(options.defaultEndpoint);
       assertEndpointUrls(options.defaultEndpoint);
-      if (!options.defaultEndpoint.active) throw new Error("Default marketplace endpoint must be active");
       this.defaultEndpoint = cloneEndpoint(options.defaultEndpoint);
     }
   }
@@ -78,27 +77,17 @@ export class MarketplaceEndpointSettingsService {
     return snapshotFromCurrent(await this.readCurrent());
   }
 
-  async getEndpoint(marketplaceId: string): Promise<MarketplaceEndpoint> {
-    const current = await this.readCurrent();
-    const endpoint = current.data.endpoints?.find((entry) => entry.marketplaceId === marketplaceId);
-    if (!endpoint) throw new Error(`Marketplace endpoint is unavailable: ${marketplaceId}`);
-    return cloneEndpoint(endpoint);
-  }
-
   async getActiveEndpoint(): Promise<MarketplaceEndpoint> {
     const current = await this.readCurrent();
-    const active = current.data.endpoints?.find(
-      (endpoint) => endpoint.marketplaceId === current.data.activeMarketplaceId && endpoint.active,
-    );
-    if (!active) throw new Error("Marketplace API URL is not configured");
-    return cloneEndpoint(active);
+    if (!current.endpoint) throw new Error("Marketplace API URL is not configured");
+    return cloneEndpoint(current.endpoint);
   }
 
   async testEndpoint(input: TestMarketplaceEndpointInput): Promise<TestMarketplaceEndpointResult> {
     assertTestInput(input);
     try {
       const endpoint = await this.discover(normalizeBaseUrl(input.baseUrl));
-      return { status: "ready", endpoint: endpointSnapshot(endpoint) };
+      return { status: "ready", endpoint };
     } catch (error) {
       return {
         status: "invalid",
@@ -139,19 +128,7 @@ export class MarketplaceEndpointSettingsService {
         });
       }
       const endpoint = await this.discover(baseUrl);
-      const endpoints = (current.data.endpoints ?? [])
-        .filter(
-          (entry) =>
-            entry.marketplaceId !== endpoint.marketplaceId && entry.marketplaceId !== current.injectedMarketplaceId,
-        )
-        .map((entry) => ({ ...entry, active: false }));
-      endpoints.push({ ...endpoint, active: true });
-      await this.atomicWrite({
-        ...current.data,
-        version: 1,
-        activeMarketplaceId: endpoint.marketplaceId,
-        endpoints,
-      });
+      await this.atomicWrite({ ...current.data, version: 1, endpoint });
       return this.cacheResult(input.requestId, {
         status: "saved",
         snapshot: snapshotFromCurrent(await this.readCurrent()),
@@ -161,7 +138,7 @@ export class MarketplaceEndpointSettingsService {
     }
   }
 
-  private async discover(baseUrl: string): Promise<StoredMarketplaceEndpointRecord> {
+  private async discover(baseUrl: string): Promise<MarketplaceEndpointRecord> {
     const wellKnownUrl = new URL(".well-known/meta-agent-marketplace.json", baseUrl);
     const value = await this.fetchJson(wellKnownUrl, this.maxResponseBytes);
     const document = parseWellKnown(unwrapEnvelope(value));
@@ -169,7 +146,6 @@ export class MarketplaceEndpointSettingsService {
       marketplaceId: document.marketplaceId,
       baseUrl,
       apiRoot: normalizeDiscoveredUrl(document.apiRoot, baseUrl),
-      active: true,
     };
   }
 
@@ -196,10 +172,7 @@ export class MarketplaceEndpointSettingsService {
       if (!info.isFile()) throw new Error(`marketplace-endpoints.json is not a regular file: ${this.path}`);
     } catch (error) {
       if (isNodeError(error, "ENOENT")) {
-        return {
-          revision: MISSING_MARKETPLACE_ENDPOINT_REVISION,
-          ...withDefaultEndpoint({}, this.defaultEndpoint),
-        };
+        return { revision: MISSING_MARKETPLACE_ENDPOINT_REVISION, data: {}, ...defaultSource(this.defaultEndpoint) };
       }
       throw error;
     }
@@ -211,7 +184,9 @@ export class MarketplaceEndpointSettingsService {
       throw new Error("marketplace-endpoints.json JSON syntax invalid");
     }
     assertEndpointFile(value);
-    return { revision: hashBytes(bytes), ...withDefaultEndpoint(value, this.defaultEndpoint) };
+    const data = value;
+    const endpoint = migrateEndpoint(data) ?? this.defaultEndpoint;
+    return { revision: hashBytes(bytes), data, ...(endpoint ? { endpoint } : {}) };
   }
 
   private cacheResult(requestId: string, result: SaveMarketplaceEndpointResult): SaveMarketplaceEndpointResult {
@@ -252,34 +227,15 @@ export class MarketplaceEndpointSettingsService {
   }
 }
 
-function withDefaultEndpoint(
-  data: MarketplaceEndpointFileData,
-  defaultEndpoint: MarketplaceEndpoint | undefined,
-): { data: MarketplaceEndpointFileData; injectedMarketplaceId?: string } {
-  if (!defaultEndpoint) return { data };
-  const active = data.endpoints?.find(
-    (endpoint) => endpoint.active && endpoint.marketplaceId === data.activeMarketplaceId,
-  );
-  if (active) {
-    if (data.endpoints?.some((endpoint) => endpoint.marketplaceId === defaultEndpoint.marketplaceId)) return { data };
-    return {
-      data: { ...data, endpoints: [...(data.endpoints ?? []), { ...cloneEndpoint(defaultEndpoint), active: false }] },
-      injectedMarketplaceId: defaultEndpoint.marketplaceId,
-    };
-  }
-  const endpoints = (data.endpoints ?? [])
-    .filter((endpoint) => endpoint.marketplaceId !== defaultEndpoint.marketplaceId)
-    .map((endpoint) => ({ ...cloneEndpoint(endpoint), active: false }));
-  endpoints.push(cloneEndpoint(defaultEndpoint));
-  return {
-    data: {
-      ...data,
-      version: data.version ?? 1,
-      activeMarketplaceId: defaultEndpoint.marketplaceId,
-      endpoints,
-    },
-    injectedMarketplaceId: defaultEndpoint.marketplaceId,
-  };
+function defaultSource(defaultEndpoint: MarketplaceEndpoint | undefined): { endpoint?: MarketplaceEndpointRecord } {
+  return defaultEndpoint ? { endpoint: cloneEndpoint(defaultEndpoint) } : {};
+}
+
+/** Migrates legacy multi-endpoint records to the single active endpoint. */
+function migrateEndpoint(data: MarketplaceEndpointFileData): MarketplaceEndpointRecord | undefined {
+  if (data.endpoint) return cloneEndpoint(data.endpoint);
+  const active = data.endpoints?.find((entry) => entry.marketplaceId === data.activeMarketplaceId && entry.active);
+  return active ? cloneEndpoint(active) : undefined;
 }
 
 function cloneEndpoint(endpoint: MarketplaceEndpoint): MarketplaceEndpoint {
@@ -329,8 +285,7 @@ function assertEndpointUrls(endpoint: MarketplaceEndpoint): void {
 function snapshotFromCurrent(current: CurrentEndpointSource): MarketplaceEndpointSettingsSnapshot {
   return {
     revision: current.revision,
-    ...(current.data.activeMarketplaceId ? { activeMarketplaceId: current.data.activeMarketplaceId } : {}),
-    endpoints: (current.data.endpoints ?? []).map(endpointSnapshot),
+    ...(current.endpoint ? { endpoint: cloneEndpoint(current.endpoint) } : {}),
   };
 }
 
@@ -358,6 +313,7 @@ function assertEndpointFile(value: unknown): asserts value is MarketplaceEndpoin
   if (value.version !== undefined && value.version !== 1) {
     throw new Error("marketplace-endpoints.json version is unsupported");
   }
+  if (value.endpoint !== undefined) assertEndpointRecord(value.endpoint);
   if (value.activeMarketplaceId !== undefined && typeof value.activeMarketplaceId !== "string") {
     throw new Error("marketplace-endpoints.json activeMarketplaceId must be a string");
   }
@@ -367,13 +323,13 @@ function assertEndpointFile(value: unknown): asserts value is MarketplaceEndpoin
   }
 }
 
-function assertEndpointRecord(value: unknown): asserts value is StoredMarketplaceEndpointRecord {
+function assertEndpointRecord(value: unknown): asserts value is MarketplaceEndpointRecord {
   if (
     !isPlainObject(value) ||
     typeof value.marketplaceId !== "string" ||
     typeof value.baseUrl !== "string" ||
     typeof value.apiRoot !== "string" ||
-    typeof value.active !== "boolean"
+    (value.active !== undefined && typeof value.active !== "boolean")
   ) {
     throw new Error("marketplace-endpoints.json endpoint is invalid");
   }
@@ -395,10 +351,6 @@ function assertSaveInput(input: SaveMarketplaceEndpointInput): void {
   ) {
     throw new TypeError("Invalid marketplace endpoint save input");
   }
-}
-
-function endpointSnapshot(endpoint: StoredMarketplaceEndpointRecord): MarketplaceEndpointRecord {
-  return cloneEndpoint(endpoint);
 }
 
 function endpointErrorCode(error: unknown): string {

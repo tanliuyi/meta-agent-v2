@@ -52,7 +52,8 @@ function mergeExtensionHost(
     statuses === previous.statuses &&
     widgets === previous.widgets &&
     previous.windowTitle === incoming.windowTitle &&
-    equalOptionalRecord(previous.composerCommand, incoming.composerCommand)
+    equalOptionalRecord(previous.composerCommand, incoming.composerCommand) &&
+    equalOptionalRecord(previous.working, incoming.working)
   )
     return previous;
   return { ...incoming, statuses, widgets };

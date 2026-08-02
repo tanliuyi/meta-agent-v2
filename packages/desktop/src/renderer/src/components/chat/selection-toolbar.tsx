@@ -86,6 +86,8 @@ export function readSelectionInfo(selection: Selection | null, root: HTMLElement
   if (!selection || selection.isCollapsed || !root) return null;
   const text = selection.toString().trim();
   if (!text || !root.contains(selection.anchorNode) || !root.contains(selection.focusNode)) return null;
+  // 仅 AI 回复文本与用户 prompt 允许引用：锚点与焦点都必须在标记了 data-aui-quote-selectable 的区域里。
+  if (!isQuoteSelectable(selection.anchorNode) || !isQuoteSelectable(selection.focusNode)) return null;
 
   const anchorId = findMessageId(selection.anchorNode, root);
   const focusId = findMessageId(selection.focusNode, root);
@@ -93,6 +95,11 @@ export function readSelectionInfo(selection: Selection | null, root: HTMLElement
 
   const range = selection.getRangeAt(0);
   return { text, messageId: anchorId, rect: range.getBoundingClientRect() };
+}
+
+function isQuoteSelectable(node: Node | null): boolean {
+  const element = node && node.nodeType === 1 ? (node as Element) : (node?.parentElement ?? null);
+  return Boolean(element?.closest("[data-aui-quote-selectable]"));
 }
 
 function findMessageId(node: Node | null, root: HTMLElement): string | null {

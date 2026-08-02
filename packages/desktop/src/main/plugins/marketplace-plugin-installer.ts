@@ -22,16 +22,12 @@ import type { MarketplaceEndpointSettingsService } from "./marketplace-endpoint-
 import { appendMarketplaceRuntimeQuery, readBoundedJsonResponse } from "./marketplace-http.ts";
 import {
   markMarketplaceVersionInactive,
-  removeMarketplaceVersionIfOwned,
   validateInstalledMarketplacePlugin,
   writeMarketplaceProjection,
   writeMarketplaceUninstallTombstone,
 } from "./marketplace-installed-plugin.ts";
+import { withMarketplacePluginLock } from "./marketplace-plugin-lock.ts";
 import type { InstalledMarketplacePluginRecord, MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
-import type {
-  MarketplacePluginTransaction,
-  MarketplacePluginTransactionStore,
-} from "./marketplace-plugin-transaction-store.ts";
 
 interface ArtifactMetadata {
   id: string;
@@ -57,6 +53,8 @@ interface InstallerOptions {
   downloadTimeoutMs?: number;
   maxArtifactBytes?: number;
   reservedExtensionIds?: ReadonlySet<string>;
+  /** Test seam: invoked after the version payload landed and before the registry commit. */
+  beforeRegistryCommit?(rootPath: string): Promise<void>;
 }
 
 const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
@@ -64,10 +62,18 @@ const REQUEST_ID = /^[a-zA-Z0-9._-]{1,128}$/;
 const MAX_METADATA_BYTES = 2 * 1024 * 1024;
 const MAX_COMPLETED_MUTATIONS = 256;
 
+/**
+ * Installs, updates and uninstalls marketplace plugins.
+ *
+ * Crash recovery is intentionally file-level: the registry is the single commit
+ * point, version payloads land by atomic rename before the registry commit, and
+ * the startup reconciler validates or repairs projections afterwards. There is
+ * no durable apply journal.
+ */
 export class MarketplacePluginInstaller {
   private readonly endpoints: MarketplaceEndpointSettingsService;
   private readonly registry: MarketplacePluginRegistry;
-  private readonly transactions: MarketplacePluginTransactionStore;
+  private readonly lockDirectory: string;
   private readonly agentDir: string;
   private readonly desktopVersion: string;
   private readonly runtime: RuntimeCompatibility;
@@ -78,6 +84,7 @@ export class MarketplacePluginInstaller {
   private readonly downloadTimeoutMs: number;
   private readonly maxArtifactBytes: number;
   private readonly reservedExtensionIds: ReadonlySet<string>;
+  private readonly beforeRegistryCommit?: (rootPath: string) => Promise<void>;
   private readonly completedInstalls = new CompletedMutationMap<InstallMarketplacePluginResult>();
   private readonly completedUpdates = new CompletedMutationMap<UpdateMarketplacePluginResult>();
   private readonly completedUninstalls = new CompletedMutationMap<UninstallMarketplacePluginResult>();
@@ -85,7 +92,7 @@ export class MarketplacePluginInstaller {
   constructor(
     endpoints: MarketplaceEndpointSettingsService,
     registry: MarketplacePluginRegistry,
-    transactions: MarketplacePluginTransactionStore,
+    lockDirectory: string,
     agentDir: string,
     desktopVersion: string,
     runtime: RuntimeCompatibility,
@@ -93,7 +100,7 @@ export class MarketplacePluginInstaller {
   ) {
     this.endpoints = endpoints;
     this.registry = registry;
-    this.transactions = transactions;
+    this.lockDirectory = lockDirectory;
     this.agentDir = agentDir;
     this.desktopVersion = desktopVersion;
     this.runtime = runtime;
@@ -104,18 +111,19 @@ export class MarketplacePluginInstaller {
     this.downloadTimeoutMs = options.downloadTimeoutMs ?? 120_000;
     this.maxArtifactBytes = options.maxArtifactBytes ?? 128 * 1024 * 1024;
     this.reservedExtensionIds = options.reservedExtensionIds ?? new Set();
+    this.beforeRegistryCommit = options.beforeRegistryCommit;
   }
 
   install(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult> {
-    return this.transactions.withPluginLock(input.pluginId, () => this.installSerialized(input));
+    return withMarketplacePluginLock(this.lockDirectory, input.pluginId, () => this.installSerialized(input));
   }
 
   update(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult> {
-    return this.transactions.withPluginLock(input.pluginId, () => this.updateSerialized(input));
+    return withMarketplacePluginLock(this.lockDirectory, input.pluginId, () => this.updateSerialized(input));
   }
 
   uninstall(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult> {
-    return this.transactions.withPluginLock(input.pluginId, () => this.uninstallSerialized(input));
+    return withMarketplacePluginLock(this.lockDirectory, input.pluginId, () => this.uninstallSerialized(input));
   }
 
   clearCompletedMutation(requestId: string): void {
@@ -140,7 +148,6 @@ export class MarketplacePluginInstaller {
     if (this.reservedExtensionIds.has(input.pluginId)) {
       throw new Error(`Marketplace plugin ID conflicts with a Desktop-managed extension: ${input.pluginId}`);
     }
-    await this.assertNoPendingMutation(input.pluginId);
     const initial = await this.registry.getSnapshot();
     if (initial.revision !== input.expectedRevision) return { status: "conflict", current: initial };
     if (initial.plugins.some((plugin) => plugin.id === input.pluginId)) {
@@ -158,7 +165,7 @@ export class MarketplacePluginInstaller {
     const stagingPath = createStagingPath(this.agentDir, input.pluginId, this.createId());
     await prepareStagingPath(stagingPath);
     let rootCreated = false;
-    let transaction: MarketplacePluginTransaction | undefined;
+    let versionCreated = false;
     let registryCommitted = false;
     try {
       const archive = await this.downloadAndExtract(artifactUrl, artifact, stagingPath);
@@ -196,46 +203,34 @@ export class MarketplacePluginInstaller {
       };
       const versionExists = await pathExists(versionPath);
       if (versionExists) await validateInstalledMarketplacePlugin(record, join(this.agentDir, "extensions"));
-      transaction = await this.transactions.prepare({
-        requestId: input.requestId,
-        operation: "install",
-        pluginId: input.pluginId,
-        after: record,
-        rootPath,
-        versionPath,
-        stagingPath,
-        removeVersionOnRollback: !versionExists,
-        removeRootOnRollback: rootCreated,
-      });
       await mkdir(rootPath, { recursive: true, mode: 0o700 });
       await mkdir(dirname(versionPath), { recursive: true, mode: 0o700 });
-      if (versionExists) await rm(stagingPath, { recursive: true, force: true });
-      else await rename(stagingPath, versionPath);
+      if (versionExists) {
+        await rm(stagingPath, { recursive: true, force: true });
+      } else {
+        await rename(stagingPath, versionPath);
+        versionCreated = true;
+      }
       await syncDirectory(dirname(stagingPath));
       await syncDirectory(dirname(versionPath));
       await syncDirectory(rootPath);
       if (rootCreated) await syncDirectory(dirname(rootPath));
-      transaction = await this.transactions.setPhase(transaction, "files-ready");
+      await this.beforeRegistryCommit?.(rootPath);
       const saved = await this.registry.commitInstall(input.expectedRevision, record);
       if (saved.status === "conflict" || saved.status === "already-installed") {
-        transaction = await this.transactions.setPhase(transaction, "rollback-pending");
-        await cleanupInstallPaths(transaction);
-        await this.transactions.complete(transaction);
+        await cleanupUncommittedInstall(rootPath, versionPath, versionCreated, rootCreated);
         return saved.status === "conflict"
           ? { status: "conflict", current: saved.snapshot }
           : { status: "already-installed", snapshot: saved.snapshot };
       }
       registryCommitted = true;
-      transaction = await this.transactions.setPhase(transaction, "registry-committed");
       await writeMarketplaceProjection(record);
-      transaction = await this.transactions.setPhase(transaction, "projection-committed");
-      await this.transactions.complete(transaction);
       const result: InstallMarketplacePluginResult = { status: "installed", snapshot: saved.snapshot };
       this.completedInstalls.set(input.requestId, result);
       return result;
     } catch (error) {
-      if (!registryCommitted && transaction?.after) {
-        registryCommitted = await this.registryPointsTo(transaction.pluginId, transaction.after.artifactHash);
+      if (!registryCommitted) {
+        registryCommitted = await this.registryPointsTo(input.pluginId, artifact.sha256);
       }
       if (registryCommitted) {
         const result: InstallMarketplacePluginResult = {
@@ -246,14 +241,8 @@ export class MarketplacePluginInstaller {
         this.completedInstalls.set(input.requestId, result);
         return result;
       }
-      if (!transaction || transaction.phase === "prepared" || transaction.phase === "files-ready") {
-        if (transaction) {
-          await cleanupInstallPaths(transaction);
-          await this.transactions.complete(transaction);
-        } else {
-          await rm(stagingPath, { recursive: true, force: true });
-        }
-      }
+      await cleanupUncommittedInstall(rootPath, versionPath, versionCreated, rootCreated);
+      await rm(stagingPath, { recursive: true, force: true });
       throw error;
     }
   }
@@ -271,7 +260,6 @@ export class MarketplacePluginInstaller {
     ) {
       throw new Error("Marketplace update input is invalid");
     }
-    await this.assertNoPendingMutation(input.pluginId);
     const initial = await this.registry.getInternalSnapshot();
     if (initial.revision !== input.expectedRevision) {
       return { status: "conflict", current: await this.registry.getSnapshot() };
@@ -287,7 +275,7 @@ export class MarketplacePluginInstaller {
       this.completedUpdates.set(input.requestId, result);
       return result;
     }
-    const endpoint = await this.endpoints.getEndpoint(before.marketplaceId);
+    const endpoint = await this.endpoints.getActiveEndpoint();
     const artifact = await this.selectArtifact(endpoint.apiRoot, input.pluginId, input.version);
     const download = await this.getDownloadMetadata(endpoint.apiRoot, artifact, input.pluginId, input.version);
     const artifactUrl = validateArtifactUrl(download.url);
@@ -295,7 +283,7 @@ export class MarketplacePluginInstaller {
     const versionPath = join(rootPath, ".versions", artifact.sha256);
     const stagingPath = createStagingPath(this.agentDir, input.pluginId, this.createId());
     await prepareStagingPath(stagingPath);
-    let transaction: MarketplacePluginTransaction | undefined;
+    let versionCreated = false;
     let registryCommitted = false;
     try {
       const archive = await this.downloadAndExtract(artifactUrl, artifact, stagingPath);
@@ -330,46 +318,33 @@ export class MarketplacePluginInstaller {
       };
       const versionExists = await pathExists(versionPath);
       if (versionExists) await validateInstalledMarketplacePlugin(after, join(this.agentDir, "extensions"));
-      transaction = await this.transactions.prepare({
-        requestId: input.requestId,
-        operation: "update",
-        pluginId: input.pluginId,
-        before,
-        after,
-        rootPath,
-        versionPath,
-        stagingPath,
-        removeVersionOnRollback: !versionExists,
-        removeRootOnRollback: false,
-      });
-      if (versionExists) await rm(stagingPath, { recursive: true, force: true });
-      else await rename(stagingPath, versionPath);
+      if (versionExists) {
+        await rm(stagingPath, { recursive: true, force: true });
+      } else {
+        await rename(stagingPath, versionPath);
+        versionCreated = true;
+      }
       await syncDirectory(dirname(stagingPath));
       await syncDirectory(dirname(versionPath));
       await syncDirectory(rootPath);
-      transaction = await this.transactions.setPhase(transaction, "files-ready");
+      await this.beforeRegistryCommit?.(rootPath);
       const saved = await this.registry.commitUpdate(input.expectedRevision, before.artifactHash, after);
       if (saved.status !== "saved") {
-        transaction = await this.transactions.setPhase(transaction, "rollback-pending");
-        await cleanupInstallPaths(transaction);
-        await this.transactions.complete(transaction);
+        await cleanupUncommittedInstall(rootPath, versionPath, versionCreated, false);
         if (saved.status === "conflict") return { status: "conflict", current: saved.snapshot };
         const result = { status: "not-installed", snapshot: saved.snapshot } as const;
         this.completedUpdates.set(input.requestId, result);
         return result;
       }
       registryCommitted = true;
-      transaction = await this.transactions.setPhase(transaction, "registry-committed");
       await markMarketplaceVersionInactive(before, this.now());
       await writeMarketplaceProjection(after);
-      transaction = await this.transactions.setPhase(transaction, "projection-committed");
-      await this.transactions.complete(transaction);
       const result = { status: "updated", snapshot: saved.snapshot, reloadRequired: true } as const;
       this.completedUpdates.set(input.requestId, result);
       return result;
     } catch (error) {
-      if (!registryCommitted && transaction?.after) {
-        registryCommitted = await this.registryPointsTo(transaction.pluginId, transaction.after.artifactHash);
+      if (!registryCommitted) {
+        registryCommitted = await this.registryPointsTo(input.pluginId, artifact.sha256);
       }
       if (registryCommitted) {
         const result: UpdateMarketplacePluginResult = {
@@ -381,12 +356,8 @@ export class MarketplacePluginInstaller {
         this.completedUpdates.set(input.requestId, result);
         return result;
       }
-      if (transaction) {
-        await cleanupInstallPaths(transaction);
-        await this.transactions.complete(transaction);
-      } else {
-        await rm(stagingPath, { recursive: true, force: true });
-      }
+      await cleanupUncommittedInstall(rootPath, versionPath, versionCreated, false);
+      await rm(stagingPath, { recursive: true, force: true });
       throw error;
     }
   }
@@ -403,7 +374,6 @@ export class MarketplacePluginInstaller {
     ) {
       throw new Error("Marketplace uninstall input is invalid");
     }
-    await this.assertNoPendingMutation(input.pluginId);
     const initial = await this.registry.getInternalSnapshot();
     if (initial.revision !== input.expectedRevision) {
       return { status: "conflict", current: await this.registry.getSnapshot() };
@@ -414,47 +384,17 @@ export class MarketplacePluginInstaller {
       this.completedUninstalls.set(input.requestId, result);
       return result;
     }
-    let transaction = await this.transactions.prepare({
-      requestId: input.requestId,
-      operation: "uninstall",
-      pluginId: input.pluginId,
-      before: record,
-      rootPath: record.rootPath,
-      versionPath: join(record.rootPath, ".versions", record.artifactHash),
-    });
-    let saved: Awaited<ReturnType<MarketplacePluginRegistry["commitUninstall"]>>;
-    try {
-      saved = await this.registry.commitUninstall(input.expectedRevision, input.pluginId);
-    } catch (error) {
-      if (!(await this.registry.getInternalSnapshot()).plugins.some((plugin) => plugin.id === input.pluginId)) {
-        const result: UninstallMarketplacePluginResult = {
-          status: "uninstalled",
-          snapshot: await this.registry.getSnapshot(),
-          reloadRequired: true,
-          recoveryPending: true,
-        };
-        this.completedUninstalls.set(input.requestId, result);
-        return result;
-      }
-      throw error;
-    }
-    if (saved.status === "conflict") {
-      await this.transactions.complete(transaction);
-      return { status: "conflict", current: saved.snapshot };
-    }
+    const saved = await this.registry.commitUninstall(input.expectedRevision, input.pluginId);
+    if (saved.status === "conflict") return { status: "conflict", current: saved.snapshot };
     if (saved.status === "not-installed") {
-      await this.transactions.complete(transaction);
       const result = { status: "not-installed", snapshot: saved.snapshot } as const;
       this.completedUninstalls.set(input.requestId, result);
       return result;
     }
     try {
-      transaction = await this.transactions.setPhase(transaction, "registry-committed");
       const uninstalledAt = this.now();
       await markMarketplaceVersionInactive(record, uninstalledAt);
-      await writeMarketplaceUninstallTombstone(record, transaction.operationId, uninstalledAt);
-      transaction = await this.transactions.setPhase(transaction, "projection-committed");
-      await this.transactions.complete(transaction);
+      await writeMarketplaceUninstallTombstone(record, `uninstall-${input.requestId}`, uninstalledAt);
     } catch {
       const result = {
         status: "uninstalled",
@@ -468,12 +408,6 @@ export class MarketplacePluginInstaller {
     const result = { status: "uninstalled", snapshot: saved.snapshot, reloadRequired: true } as const;
     this.completedUninstalls.set(input.requestId, result);
     return result;
-  }
-
-  private async assertNoPendingMutation(pluginId: string): Promise<void> {
-    if ((await this.transactions.list()).some((transaction) => transaction.pluginId === pluginId)) {
-      throw new Error(`Marketplace plugin mutation recovery is pending: ${pluginId}`);
-    }
   }
 
   private async registryPointsTo(pluginId: string, artifactHash: string): Promise<boolean> {
@@ -664,14 +598,17 @@ async function prepareInstallRoot(root: string): Promise<boolean> {
   return false;
 }
 
-async function cleanupInstallPaths(transaction: MarketplacePluginTransaction): Promise<void> {
-  if (transaction.stagingPath) await rm(transaction.stagingPath, { recursive: true, force: true });
-  if (transaction.versionPath && transaction.removeVersionOnRollback && transaction.after) {
-    await removeMarketplaceVersionIfOwned(transaction.after, dirname(transaction.rootPath));
-  }
-  if (transaction.removeRootOnRollback) {
-    await rmdir(join(transaction.rootPath, ".versions")).catch(() => undefined);
-    await rmdir(transaction.rootPath).catch(() => undefined);
+/** Removes a version payload and root only when this operation created them. */
+async function cleanupUncommittedInstall(
+  rootPath: string,
+  versionPath: string,
+  versionCreated: boolean,
+  rootCreated: boolean,
+): Promise<void> {
+  if (versionCreated) await rm(versionPath, { recursive: true, force: true });
+  if (rootCreated) {
+    await rmdir(join(rootPath, ".versions")).catch(() => undefined);
+    await rmdir(rootPath).catch(() => undefined);
   }
 }
 

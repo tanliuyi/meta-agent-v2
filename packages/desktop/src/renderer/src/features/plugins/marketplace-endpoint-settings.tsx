@@ -14,9 +14,7 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
   const controller = useMarketplaceEndpointSettings();
   const [baseUrl, setBaseUrl] = useState("");
   const [dirty, setDirty] = useState(false);
-  const active = controller.snapshot?.endpoints.find(
-    (endpoint) => endpoint.marketplaceId === controller.snapshot?.activeMarketplaceId,
-  );
+  const active = controller.snapshot?.endpoint;
 
   useEffect(() => {
     // 只同步未编辑的输入；快照刷新（保存冲突、后台重载）不覆盖用户正在输入的地址。

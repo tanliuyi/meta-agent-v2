@@ -6,14 +6,15 @@ import {
 import type { SlashCommand } from "../src/shared/contracts.ts";
 
 describe("slash command trigger", () => {
-  it("only executes commands immediately when they explicitly reject arguments", () => {
+  it("only shows the argument command marker for non-skill commands that accept arguments", () => {
     const commands: SlashCommand[] = [
       { name: "reload", source: "builtin", acceptsArguments: false },
       { name: "review", source: "extension", acceptsArguments: true },
       { name: "legacy", source: "extension" },
+      { name: "skill:frontend", source: "skill", acceptsArguments: true },
     ];
 
-    expect(commands.map(slashCommandAcceptsArguments)).toEqual([false, true, true]);
+    expect(commands.map(slashCommandAcceptsArguments)).toEqual([false, true, true, false]);
   });
 
   it("combines the hidden command with trimmed argument text for Pi", () => {

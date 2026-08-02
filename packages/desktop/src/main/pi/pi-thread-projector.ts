@@ -20,7 +20,9 @@ import {
   type PiToolCallPart,
   type PiUserContentPart,
   PROTOCOL_VERSION,
+  type ThinkingLevel,
 } from "../../shared/contracts.ts";
+import { parseQuoteAttachmentData, QUOTE_ATTACHMENT_CUSTOM_TYPE, stripQuotePrefix } from "./quote-context.ts";
 
 type AgentMessage = AgentSession["messages"][number];
 type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
@@ -49,11 +51,21 @@ interface PendingPrompt {
   createdAt: number;
 }
 
+interface PendingQuoteAttachment {
+  entryId: string;
+  requestId: string;
+  quotes: readonly PiQuote[];
+}
+
 /** 将 Pi public session tree 与 live events 投影为 Desktop timeline。 */
 export class PiThreadProjector {
   private readonly projectId: string;
   private readonly session: AgentSession;
   private readonly publish: (batch: PiThreadEventBatch) => void;
+  /** user entry 落盘后回调（仅当该 prompt 带结构化引用时触发），由 adapter 注入以追加持久化引用附件。 */
+  onUserEntryPersisted?: (entryId: string, requestId: string, quotes: readonly PiQuote[]) => void;
+  /** requestId → 结构化引用；在 user entry 落盘（或 prompt 被拒/清空）前一直保留，覆盖 queued prompt 消费晚于 finishPrompt 的情况。 */
+  private readonly pendingQuoteAttachments = new Map<string, readonly PiQuote[]>();
   private nodeIds: string[] = [];
   private nodeSnapshot: PiTimelineNode[] | undefined;
   private readonly byId = new Map<string, PiTimelineNode>();
@@ -74,6 +86,8 @@ export class PiThreadProjector {
   private transientCounter = 0;
   private queueCounter = 0;
   private queueClearInProgress = false;
+  /** 当前 thinking 等级：live 阶段随 agent 状态/thinking_level_changed 事件推进，重建时从 "off" 回放会话入口记录。 */
+  private thinkingLevel: ThinkingLevel = "off";
   private pending: PiThreadEventEnvelope[] = [];
   private timer?: ReturnType<typeof setTimeout>;
   private checkpointScheduled = false;
@@ -83,6 +97,8 @@ export class PiThreadProjector {
     this.session = options.session;
     this.publish = options.publish;
     this.rebuildBranch(false);
+    // agent 状态是后续 live run 的实际依据；重建回放只负责补全历史消息的 provenance。
+    this.thinkingLevel = options.session.thinkingLevel ?? "off";
     this.queueItems = reconcileQueue(
       [],
       this.session.getSteeringMessages(),
@@ -117,6 +133,7 @@ export class PiThreadProjector {
     quotes?: readonly PiQuote[],
   ): void {
     const pendingQuotes = quotes?.length ? [...quotes] : quote ? [quote] : undefined;
+    if (pendingQuotes) this.pendingQuoteAttachments.set(requestId, pendingQuotes);
     this.pendingPrompts.push({
       requestId,
       desiredMode,
@@ -134,6 +151,7 @@ export class PiThreadProjector {
     if (!prompt) return;
     prompt.accepted = accepted;
     if (accepted) return;
+    this.pendingQuoteAttachments.delete(requestId);
     let replaced = false;
     this.queueItems = this.queueItems.map((item) => {
       if (item.requestId !== requestId) return item;
@@ -280,7 +298,9 @@ export class PiThreadProjector {
         this.synchronizePersistedBranch();
         return;
       case "session_info_changed":
+        return;
       case "thinking_level_changed":
+        this.thinkingLevel = event.level;
         return;
       case "auto_retry_start":
         this.setPhase("retrying", true);
@@ -314,6 +334,8 @@ export class PiThreadProjector {
 
   endQueueClear(): void {
     this.queueClearInProgress = false;
+    // 清空的 prompt 由 renderer 连同引用恢复到 composer，未落盘的引用附件随之作废。
+    this.pendingQuoteAttachments.clear();
   }
 
   flush(): void {
@@ -345,8 +367,12 @@ export class PiThreadProjector {
         const pending = consumed?.requestId
           ? this.pendingPrompts.find((item) => item.requestId === consumed.requestId)
           : this.pendingPrompts.find((item) => item.accepted);
+        const requestId = consumed?.requestId ?? pending?.requestId;
+        const pendingQuotes =
+          pending?.quotes ??
+          (pending?.quote ? [pending.quote] : undefined) ??
+          (requestId ? this.pendingQuoteAttachments.get(requestId) : undefined);
         const id = this.transientId("user");
-        const pendingQuotes = pending?.quotes ?? (pending?.quote ? [pending.quote] : undefined);
         const node = {
           id,
           parentId,
@@ -354,12 +380,14 @@ export class PiThreadProjector {
           kind: "user",
           content:
             pending?.text === undefined
-              ? userContent(message.content)
+              ? pendingQuotes && pendingQuotes.length > 0
+                ? userContentWithQuoteStrip(message.content, pendingQuotes)
+                : userContent(message.content)
               : userContentWithText(message.content, pending.text),
           ...(pendingQuotes && pendingQuotes.length > 0 ? quoteFields(pendingQuotes) : {}),
           delivery: {
             state: "live",
-            ...(pending ? { requestId: pending.requestId } : {}),
+            ...(requestId ? { requestId } : {}),
             ...(consumed ? { queueId: consumed.id } : {}),
           },
         } satisfies PiTimelineNode;
@@ -369,7 +397,7 @@ export class PiThreadProjector {
       }
       case "assistant": {
         const id = this.transientId("assistant");
-        const node = assistantNode(id, parentId, message, true);
+        const node = assistantNode(id, parentId, message, true, undefined, undefined, this.thinkingLevel);
         this.activeAssistantId = id;
         this.addNode(node, message);
         this.liveMessages.add(message);
@@ -494,7 +522,7 @@ export class PiThreadProjector {
         if (!id) throw new ProjectionError("assistant message_end 缺少 owner");
         const current = this.byId.get(id);
         if (!current || current.kind !== "assistant") throw new ProjectionError(`assistant owner 不存在: ${id}`);
-        const canonical = assistantNode(id, current.parentId, message, true);
+        const canonical = assistantNode(id, current.parentId, message, true, undefined, undefined, this.thinkingLevel);
         canonical.sourceEntryId = current.sourceEntryId;
         canonical.content = mergeAssistantContent(canonical.content, current.content);
         this.finalAssistantMessages.set(id, message);
@@ -558,11 +586,18 @@ export class PiThreadProjector {
       this.rebuildBranch(true);
       return;
     }
-    for (const entry of branch.slice(this.branchIds.length)) this.appendPersistedEntry(entry);
+    const attachments: PendingQuoteAttachment[] = [];
+    for (const entry of branch.slice(this.branchIds.length)) this.appendPersistedEntry(entry, attachments);
     this.branchIds = branch.map((entry) => entry.id);
+    // 延后到 sync 循环结束后再追加引用附件：保证单 prompt 时 leaf 仍是被引用的 user entry，
+    // 批量消费时也不会把附件插进 user/assistant 之间。
+    for (const attachment of attachments) {
+      this.onUserEntryPersisted?.(attachment.entryId, attachment.requestId, attachment.quotes);
+    }
   }
 
-  private appendPersistedEntry(entry: SessionEntry): void {
+  private appendPersistedEntry(entry: SessionEntry, attachments?: PendingQuoteAttachment[]): void {
+    this.applyThinkingLevelChange(entry);
     const parentId = entry.parentId ? (this.visibleByEntryId.get(entry.parentId) ?? null) : null;
     const slashRequestId = slashResultRequestId(entry);
     const slashNodeId = slashRequestId ? this.slashResultNodes.get(slashRequestId) : undefined;
@@ -573,7 +608,21 @@ export class PiThreadProjector {
       return;
     }
 
-    const projected = projectEntry(entry, parentId);
+    // 持久化的引用附件：按 data.userEntryId 精确挂到 user node（live 路径已由 startMessage 挂载，这里幂等兜底）。
+    if (entry.type === "custom" && entry.customType === QUOTE_ATTACHMENT_CUSTOM_TYPE) {
+      const parsed = parseQuoteAttachmentData(entry.data);
+      if (parsed) {
+        const userNodeId = this.visibleByEntryId.get(parsed.userEntryId);
+        const userNode = userNodeId ? this.byId.get(userNodeId) : undefined;
+        if (userNode?.kind === "user" && !userNode.quote && !userNode.quotes) {
+          this.replaceNode({ ...userNode, ...quoteFields(parsed.quotes) });
+        }
+      }
+      this.visibleByEntryId.set(entry.id, parentId);
+      return;
+    }
+
+    const projected = projectEntry(entry, parentId, this.thinkingLevel);
     if (!projected) {
       if (entry.type === "message" && entry.message.role === "toolResult") this.foldToolResult(entry.message);
       if (entry.type === "label") this.applyLabel(entry.targetId);
@@ -585,6 +634,16 @@ export class PiThreadProjector {
       entry.type === "message"
         ? (this.messageNodeIds.get(entry.message) ?? this.findLiveEntryMatch(entry, projected))
         : this.findLiveEntryMatch(entry, projected);
+    // rekey 会把 byId 中的节点换成 persisted 形态（delivery 不带 requestId），先捕获 live 节点的 requestId。
+    const liveUser =
+      entry.type === "message" && entry.message.role === "user" && liveId ? this.byId.get(liveId) : undefined;
+    const requestId =
+      liveUser?.kind === "user" && liveUser.delivery.state === "live" ? liveUser.delivery.requestId : undefined;
+    const quotes = requestId ? this.pendingQuoteAttachments.get(requestId) : undefined;
+    if (requestId && quotes && quotes.length > 0) {
+      this.pendingQuoteAttachments.delete(requestId);
+      attachments?.push({ entryId: entry.id, requestId, quotes });
+    }
     if (liveId && this.byId.has(liveId)) {
       this.rekeyNode(liveId, projected);
     } else {
@@ -606,6 +665,12 @@ export class PiThreadProjector {
         })
       : [];
     const branch = this.session.sessionManager.getBranch();
+    const quoteAttachments = new Map<string, readonly PiQuote[]>();
+    for (const entry of branch) {
+      if (entry.type !== "custom" || entry.customType !== QUOTE_ATTACHMENT_CUSTOM_TYPE) continue;
+      const parsed = parseQuoteAttachmentData(entry.data);
+      if (parsed) quoteAttachments.set(parsed.userEntryId, parsed.quotes);
+    }
     this.nodeIds = [];
     this.nodeSnapshot = undefined;
     this.byId.clear();
@@ -613,7 +678,10 @@ export class PiThreadProjector {
     this.messageNodeIds.clear();
     this.toolOwners.clear();
     this.slashResultNodes.clear();
+    // 等级历史只以入口为准，重建时从 off 回放，避免复用 live 阶段的当前值。
+    this.thinkingLevel = "off";
     for (const entry of branch) {
+      this.applyThinkingLevelChange(entry);
       const parentId = entry.parentId ? (this.visibleByEntryId.get(entry.parentId) ?? null) : null;
       const slashRequestId = slashResultRequestId(entry);
       const slashNodeId = slashRequestId ? this.slashResultNodes.get(slashRequestId) : undefined;
@@ -623,7 +691,7 @@ export class PiThreadProjector {
         this.visibleByEntryId.set(entry.id, slashNodeId);
         continue;
       }
-      const node = projectEntry(entry, parentId);
+      const node = projectEntry(entry, parentId, this.thinkingLevel, quoteAttachments.get(entry.id));
       if (!node) {
         if (entry.type === "message" && entry.message.role === "toolResult") this.foldToolResult(entry.message, false);
         this.visibleByEntryId.set(entry.id, parentId);
@@ -660,6 +728,11 @@ export class PiThreadProjector {
     const eventSequence = this.sequence + 1;
     const snapshot = { ...this.snapshot(), cursor: eventSequence };
     this.emit({ type: "branch-replaced", snapshot }, true);
+  }
+
+  private applyThinkingLevelChange(entry: SessionEntry): void {
+    if (entry.type !== "thinking_level_change") return;
+    this.thinkingLevel = entry.thinkingLevel as ThinkingLevel;
   }
 
   private rekeyNode(previousId: string, canonical: PiTimelineNode): void {
@@ -944,11 +1017,16 @@ function updateCustomNotice(
   };
 }
 
-function projectEntry(entry: SessionEntry, parentId: string | null): PiTimelineNode | undefined {
+function projectEntry(
+  entry: SessionEntry,
+  parentId: string | null,
+  thinkingLevel: ThinkingLevel,
+  quotes?: readonly PiQuote[],
+): PiTimelineNode | undefined {
   const createdAt = timestamp(entry.timestamp);
   switch (entry.type) {
     case "message":
-      return projectPersistedMessage(entry.id, parentId, createdAt, entry.message);
+      return projectPersistedMessage(entry.id, parentId, createdAt, entry.message, thinkingLevel, quotes);
     case "custom_message":
       return entry.display
         ? {
@@ -1016,6 +1094,8 @@ function projectPersistedMessage(
   parentId: string | null,
   completedAt: number,
   message: AgentMessage,
+  thinkingLevel: ThinkingLevel,
+  quotes?: readonly PiQuote[],
 ): PiTimelineNode | undefined {
   switch (message.role) {
     case "user":
@@ -1025,11 +1105,12 @@ function projectPersistedMessage(
         parentId,
         createdAt: completedAt,
         kind: "user",
-        content: userContent(message.content),
+        content: quotes?.length ? userContentWithQuoteStrip(message.content, quotes) : userContent(message.content),
         delivery: { state: "persisted" },
+        ...(quotes?.length ? quoteFields(quotes) : {}),
       };
     case "assistant":
-      return assistantNode(id, parentId, message, false, id, completedAt);
+      return assistantNode(id, parentId, message, false, id, completedAt, thinkingLevel);
     case "bashExecution":
       return {
         id,
@@ -1090,6 +1171,7 @@ function assistantNode(
   running: boolean,
   sourceEntryId?: string,
   completedAt?: number,
+  thinkingLevel?: ThinkingLevel,
 ): PiAssistantMessage {
   return {
     id,
@@ -1112,6 +1194,7 @@ function assistantNode(
       api: message.api,
       provider: message.provider,
       model: message.model,
+      ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
       ...(message.responseModel ? { responseModel: message.responseModel } : {}),
       ...(message.responseId ? { responseId: message.responseId } : {}),
     },
@@ -1255,6 +1338,19 @@ function assistantPartKey(part: PiAssistantPart): string | undefined {
   if (part.type === "tool-call") return `tool:${part.toolCallId}`;
   const contentIndex = part.id.slice(part.id.lastIndexOf(":") + 1);
   return `${part.type}:${contentIndex}`;
+}
+
+function userContentWithQuoteStrip(
+  content: string | readonly unknown[],
+  quotes: readonly PiQuote[],
+): PiUserContentPart[] {
+  const parts = userContent(content);
+  const first = parts[0];
+  if (!first || first.type !== "text") return parts;
+  const stripped = stripQuotePrefix(first.text, quotes);
+  if (stripped === first.text) return parts;
+  const rest = parts.slice(1);
+  return stripped.length === 0 ? rest : [{ type: "text", text: stripped }, ...rest];
 }
 
 function userContentWithText(content: string | readonly unknown[], text: string): PiUserContentPart[] {

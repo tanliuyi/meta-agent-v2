@@ -1,11 +1,10 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarketplacePluginInstaller } from "../src/main/plugins/marketplace-plugin-installer.ts";
 import { MarketplacePluginRegistry } from "../src/main/plugins/marketplace-plugin-registry.ts";
-import { MarketplacePluginTransactionStore } from "../src/main/plugins/marketplace-plugin-transaction-store.ts";
 import type { RuntimeCompatibility } from "../src/shared/sidecar-contracts.ts";
 
 const runtime: RuntimeCompatibility = {
@@ -72,7 +71,7 @@ describe("MarketplacePluginInstaller", () => {
     const restarted = new MarketplacePluginInstaller(
       harness.endpoints as never,
       new MarketplacePluginRegistry(harness.userDataDir),
-      new MarketplacePluginTransactionStore(harness.userDataDir),
+      join(harness.userDataDir, "plugins", "locks"),
       harness.agentDir,
       "0.0.31",
       runtime,
@@ -123,7 +122,7 @@ describe("MarketplacePluginInstaller", () => {
     ).rejects.toThrow("configuration requires configuration.read capability");
   });
 
-  it("completes the install transaction before immediate apply", async () => {
+  it("completes the install before immediate apply", async () => {
     const harness = await createHarness();
     const initial = await harness.registry.getSnapshot();
 
@@ -137,7 +136,6 @@ describe("MarketplacePluginInstaller", () => {
     });
 
     expect(result.status).toBe("installed");
-    await expect(harness.transactions.list()).resolves.toEqual([]);
   });
 
   it("updates and downgrades by switching immutable versions without deleting the previous version", async () => {
@@ -151,7 +149,8 @@ describe("MarketplacePluginInstaller", () => {
       confirmFullTrust: true,
     });
     if (installed.status !== "installed") throw new Error("Expected installation to succeed");
-    harness.endpoints.getActiveEndpoint.mockRejectedValue(new Error("another marketplace is active"));
+    const updateEndpoint = vi.fn(async () => harness.endpoint);
+    harness.endpoints.getActiveEndpoint.mockImplementation(updateEndpoint);
 
     const updated = await harness.installer.update({
       requestId: "update-to-2",
@@ -170,7 +169,7 @@ describe("MarketplacePluginInstaller", () => {
         }),
       }),
     );
-    expect(harness.endpoints.getEndpoint).toHaveBeenCalledWith("local.market");
+    expect(updateEndpoint).toHaveBeenCalled();
     const pluginRoot = join(harness.agentDir, "extensions", "dev.meta-agent.example-tools");
     await expect(
       readFile(join(pluginRoot, ".versions", harness.artifactHash, "payload", "index.ts"), "utf8"),
@@ -195,7 +194,6 @@ describe("MarketplacePluginInstaller", () => {
       }),
     );
     await expect(readFile(join(pluginRoot, "index.ts"), "utf8")).resolves.toContain(harness.artifactHash);
-    await expect(harness.transactions.list()).resolves.toEqual([]);
   });
 
   it("uninstalls through the registry commit point while retaining immutable files", async () => {
@@ -232,7 +230,6 @@ describe("MarketplacePluginInstaller", () => {
     await expect(
       readFile(join(pluginRoot, ".versions", harness.artifactHash, "payload", "index.ts"), "utf8"),
     ).resolves.toContain("pi.registerTool");
-    await expect(harness.transactions.list()).resolves.toEqual([]);
 
     if (result.status !== "uninstalled") throw new Error("Expected uninstall to succeed");
     const reinstalled = await harness.installer.install({
@@ -281,13 +278,16 @@ describe("MarketplacePluginInstaller", () => {
     await expect(readFile(entry, "utf8")).resolves.toBe("modified\n");
   });
 
-  it("never removes committed files when the registry phase journal write fails", async () => {
-    const harness = await createHarness({ failJournalPhase: "registry-committed" });
+  it("keeps committed files and returns recovery pending when the projection write fails", async () => {
+    const harness = await createHarness();
     const initial = await harness.registry.getSnapshot();
+    const pluginRoot = join(harness.agentDir, "extensions", "dev.meta-agent.example-tools");
+    await mkdir(join(pluginRoot, ".versions"), { recursive: true });
+    await writeFile(join(pluginRoot, ".meta-agent-versions"), "blocks the version owner write", "utf8");
 
     await expect(
       harness.installer.install({
-        requestId: "install-journal-failure",
+        requestId: "install-projection-failure",
         expectedRevision: initial.revision,
         pluginId: "dev.meta-agent.example-tools",
         version: "1.0.0",
@@ -312,9 +312,6 @@ describe("MarketplacePluginInstaller", () => {
         "utf8",
       ),
     ).resolves.toContain("pi.registerTool");
-    await expect(harness.transactions.list()).resolves.toEqual([
-      expect.objectContaining({ phase: "files-ready", operation: "install" }),
-    ]);
   });
 
   it("recovers a pre-journal extraction orphan from the main-owned same-filesystem staging area", async () => {
@@ -382,10 +379,12 @@ describe("MarketplacePluginInstaller", () => {
     await expect(readFile(join(pluginRoot, "user-note.txt"), "utf8")).resolves.toBe("preserve me");
   });
 
-  it("does not delete unknown files when rolling back a newly created plugin root", async () => {
+  it("preserves user files when an install fails after its version payload landed", async () => {
     const harness = await createHarness({
-      failJournalPhase: "files-ready",
-      writeUnknownRootOnJournalFailure: true,
+      beforeRegistryCommit: async (pluginRoot) => {
+        await writeFile(join(pluginRoot, "user-note.txt"), "preserve me", "utf8");
+        throw new Error("simulated crash before registry commit");
+      },
     });
     const initial = await harness.registry.getSnapshot();
 
@@ -397,12 +396,48 @@ describe("MarketplacePluginInstaller", () => {
         version: "1.0.0",
         confirmFullTrust: true,
       }),
-    ).rejects.toThrow("simulated journal failure");
+    ).rejects.toThrow("simulated crash before registry commit");
 
     const pluginRoot = join(harness.agentDir, "extensions", "dev.meta-agent.example-tools");
     await expect(readFile(join(pluginRoot, "user-note.txt"), "utf8")).resolves.toBe("preserve me");
+    await expect(
+      lstat(join(pluginRoot, ".versions", harness.artifactHash)).catch((error: unknown) =>
+        error instanceof Error && "code" in error && error.code === "ENOENT" ? undefined : Promise.reject(error),
+      ),
+    ).resolves.toBeUndefined();
     await expect(harness.registry.getSnapshot()).resolves.toEqual(initial);
-    await expect(harness.transactions.list()).resolves.toEqual([]);
+  });
+
+  it("rejects an update when the active endpoint does not own the installed plugin", async () => {
+    const harness = await createHarness();
+    const initial = await harness.registry.getSnapshot();
+    const installed = await harness.installer.install({
+      requestId: "install-before-endpoint-switch",
+      expectedRevision: initial.revision,
+      pluginId: "dev.meta-agent.example-tools",
+      version: "1.0.0",
+      confirmFullTrust: true,
+    });
+    if (installed.status !== "installed") throw new Error("Expected installation to succeed");
+    harness.endpoints.getActiveEndpoint.mockResolvedValue({
+      marketplaceId: "other.market",
+      baseUrl: "https://other.test/",
+      apiRoot: "https://other.test/v1/",
+    });
+
+    await expect(
+      harness.installer.update({
+        requestId: "update-endpoint-mismatch",
+        expectedRevision: installed.snapshot.revision,
+        pluginId: "dev.meta-agent.example-tools",
+        version: "2.0.0",
+        confirmFullTrust: true,
+      }),
+    ).rejects.toThrow("Marketplace API URL escapes the trusted API root");
+
+    await expect(
+      readFile(join(harness.agentDir, "extensions", "dev.meta-agent.example-tools", "index.ts"), "utf8"),
+    ).resolves.toContain(harness.artifactHash);
   });
 
   it("aborts an open artifact response when the download exceeds its declared size", async () => {
@@ -534,8 +569,7 @@ describe("MarketplacePluginInstaller", () => {
 async function createHarness(
   options: {
     omitConfigurationCapability?: boolean;
-    failJournalPhase?: string;
-    writeUnknownRootOnJournalFailure?: boolean;
+    beforeRegistryCommit?(pluginRoot: string): Promise<void>;
     artifactResponse?(archive: Uint8Array, init?: RequestInit): Response;
     artifactKey?: string;
     runtimeCompatibility?: RuntimeCompatibility;
@@ -647,45 +681,15 @@ async function createHarness(
     marketplaceId: "local.market",
     baseUrl: "https://market.test/",
     apiRoot,
-    active: true,
   };
   const endpoints = {
     getActiveEndpoint: vi.fn(async () => trustedEndpoint),
-    getEndpoint: vi.fn(async (marketplaceId: string) => {
-      if (marketplaceId !== trustedEndpoint.marketplaceId) throw new Error("Marketplace trust record is unavailable");
-      return trustedEndpoint;
-    }),
   };
   const registry = new MarketplacePluginRegistry(userDataDir, { createId: () => "registry-revision" });
-  const transactions = new MarketplacePluginTransactionStore(userDataDir, {
-    createId: () => "operation-1",
-    now: () => 1_800_000_000_000,
-  });
-  const transactionApi = options.failJournalPhase
-    ? {
-        prepare: transactions.prepare.bind(transactions),
-        setPhase: async (...args: Parameters<MarketplacePluginTransactionStore["setPhase"]>) => {
-          if (args[1] === options.failJournalPhase) {
-            if (options.writeUnknownRootOnJournalFailure) {
-              await writeFile(
-                join(agentDir, "extensions", "dev.meta-agent.example-tools", "user-note.txt"),
-                "preserve me",
-                "utf8",
-              );
-            }
-            throw new Error("simulated journal failure");
-          }
-          return transactions.setPhase(...args);
-        },
-        complete: transactions.complete.bind(transactions),
-        list: transactions.list.bind(transactions),
-        withPluginLock: transactions.withPluginLock.bind(transactions),
-      }
-    : transactions;
   const installer = new MarketplacePluginInstaller(
     endpoints as never,
     registry,
-    transactionApi as MarketplacePluginTransactionStore,
+    join(userDataDir, "plugins", "locks"),
     agentDir,
     "0.0.31",
     harnessRuntime,
@@ -693,6 +697,12 @@ async function createHarness(
       fetch: fetchImpl as typeof fetch,
       createId: () => "staging",
       now: () => 1_800_000_000_000,
+      ...(options.beforeRegistryCommit
+        ? {
+            beforeRegistryCommit: () =>
+              options.beforeRegistryCommit(join(agentDir, "extensions", "dev.meta-agent.example-tools")),
+          }
+        : {}),
     },
   );
   return {
@@ -700,10 +710,10 @@ async function createHarness(
     agentDir,
     endpoints,
     registry,
-    transactions,
     installer,
     artifactHash,
     updateArtifactHash,
     fetchImpl,
+    endpoint: trustedEndpoint,
   };
 }

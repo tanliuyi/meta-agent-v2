@@ -13,7 +13,6 @@ import {
   MarketplacePluginRegistry,
   MISSING_MARKETPLACE_REGISTRY_REVISION,
 } from "../src/main/plugins/marketplace-plugin-registry.ts";
-import { MarketplacePluginTransactionStore } from "../src/main/plugins/marketplace-plugin-transaction-store.ts";
 
 const roots: string[] = [];
 const pluginSource = "export default function plugin() {}\n";
@@ -43,9 +42,9 @@ describe("MarketplacePluginGarbageCollector", () => {
     let referenceHeld = true;
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: (path) => referenceHeld && path === referenced },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 10_000, retentionMs: 0 },
     );
 
@@ -75,9 +74,9 @@ describe("MarketplacePluginGarbageCollector", () => {
 
     const firstCollector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: () => false },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 10_000, retentionMs: 2_000 },
     );
     await expect(firstCollector.run()).resolves.toMatchObject({ removedVersions: [] });
@@ -85,9 +84,9 @@ describe("MarketplacePluginGarbageCollector", () => {
 
     const restartedCollector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: () => false },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 11_001, retentionMs: 2_000 },
     );
     await expect(restartedCollector.run()).resolves.toMatchObject({ removedVersions: [inactive] });
@@ -107,9 +106,9 @@ describe("MarketplacePluginGarbageCollector", () => {
     await writeFile(join(modified, "payload", "index.ts"), "modified by user\n", "utf8");
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: () => false },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 10_000, retentionMs: 0 },
     );
 
@@ -130,9 +129,9 @@ describe("MarketplacePluginGarbageCollector", () => {
     let referenced = true;
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: (path) => referenced && path === versionRoot },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 10_000, retentionMs: 0 },
     );
 
@@ -150,9 +149,9 @@ describe("MarketplacePluginGarbageCollector", () => {
     const harness = await createHarness("plugin.orphan");
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: () => false },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 10_000, retentionMs: 0 },
     );
 
@@ -167,9 +166,9 @@ describe("MarketplacePluginGarbageCollector", () => {
     await writeFile(join(harness.pluginRoot, "user-note.txt"), "preserve me", "utf8");
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: () => false },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 10_000, retentionMs: 0 },
     );
 
@@ -190,9 +189,9 @@ describe("MarketplacePluginGarbageCollector", () => {
     await writeMarketplaceUninstallTombstone(record, "uninstall", 1);
     const collector = new MarketplacePluginGarbageCollector(
       harness.registry,
-      harness.transactions,
       { isReferenced: () => false },
       harness.agentDir,
+      harness.lockDirectory,
       { now: () => 10_000, retentionMs: 0 },
     );
 
@@ -216,7 +215,7 @@ async function createHarness(pluginId: string) {
     agentDir,
     pluginRoot,
     registry: new MarketplacePluginRegistry(userDataDir),
-    transactions: new MarketplacePluginTransactionStore(userDataDir),
+    lockDirectory: join(userDataDir, "plugins", "locks"),
   };
 }
 
