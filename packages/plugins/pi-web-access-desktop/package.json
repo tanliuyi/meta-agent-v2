@@ -2,7 +2,7 @@
   "name": "pi-web-access-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Desktop Host Profile adapter for pi-web-access",
+  "description": "为桌面端提供联网能力的插件：网页搜索、网页内容抓取、GitHub 克隆、PDF 提取与视频理解",
   "type": "module",
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",

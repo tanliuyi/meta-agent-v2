@@ -2,6 +2,12 @@
 
 这是 [`pi-web-access`](https://github.com/nicobailon/pi-web-access) 的 Meta Agent Desktop Host Profile v1 适配入口。
 
+## Marketplace 描述
+
+发布到插件市场时使用的描述（marketplace ID `meta-agent-development`，publisher `admin`，插件 `pi.web-access`）：
+
+> 为桌面端提供联网能力：网页搜索（OpenAI、Brave、Parallel、Tavily、SERPdive、SearXNG、AnySearch、Exa、Perplexity、Gemini）、网页内容抓取、GitHub 仓库克隆、PDF 文本提取、YouTube 与本地视频理解。内置 /websearch、/search、/curator、/google-account 命令与浏览器端 Search Curator。
+
 ## 功能
 
 保留上游扩展的核心功能：

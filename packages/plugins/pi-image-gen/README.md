@@ -4,6 +4,12 @@ A Meta Agent Desktop extension derived from
 [`@amaster.ai/pi-image-gen`](https://github.com/TGYD-helige/pi/tree/master/packages/pi-image-gen)
 under the Apache-2.0 license.
 
+## Marketplace 描述
+
+发布到插件市场时使用的描述（marketplace ID `meta-agent-development`，publisher `admin`，插件 `pi.image-gen`）：
+
+> 在会话中生成或编辑光栅图像。支持 OpenAI、Google Gemini、阿里云 DashScope、火山方舟（Ark）和 OpenRouter 等提供商；可将本地文件路径或 http(s) 链接作为参考图用于编辑和风格参考。生成的文件不会覆盖已有文件。
+
 ## Behavior
 
 - Registers the `image_generate` tool.
