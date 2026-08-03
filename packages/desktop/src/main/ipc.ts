@@ -63,6 +63,7 @@ import type { AuthConfigService } from "./auth/auth-config-service.ts";
 import { OauthLoginCoordinator } from "./auth/oauth-login-coordinator.ts";
 import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import type { FileService } from "./files/file-service.ts";
+import type { ProjectFileWatcher } from "./files/file-watcher.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
 import type { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
@@ -88,6 +89,7 @@ export function registerIpc(
   projects: ProjectStore,
   sessions: SessionSupervisor,
   files: FileService,
+  fileWatcher: ProjectFileWatcher,
   terminals: TerminalSupervisor,
   models: ModelsConfigService,
   auth: AuthConfigService,
@@ -574,6 +576,11 @@ export function registerIpc(
     files.list(projectId, path, query, `${event.sender.id}\0${requestGroup ?? "default"}`),
   );
   ipcMain.handle(CHANNELS.filesRead, (_event, projectId: string, path: string) => files.read(projectId, path));
+  ipcMain.handle(CHANNELS.filesReadImage, (_event, projectId: string, path: string) =>
+    files.readImage(projectId, path),
+  );
+  ipcMain.handle(CHANNELS.filesWatch, (_event, projectId: string) => fileWatcher.watch(projectId));
+  ipcMain.handle(CHANNELS.filesUnwatch, (_event, projectId: string) => fileWatcher.unwatch(projectId));
   ipcMain.handle(CHANNELS.filesResolvePath, (_event, projectId: string, path: string) =>
     resolveFilePath(projectId, path, projects),
   );

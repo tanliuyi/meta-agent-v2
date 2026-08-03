@@ -506,10 +506,17 @@
 
 [data-slot="session-message-content"],
 [data-slot="session-composer-content"] {
-  padding-inline: clamp(16px, 5%, 48px);
+  padding-left: clamp(16px, 5%, 48px);
+  /* 滚动条出现在 aui_thread-viewport 右侧（scrollbar-gutter: stable 预留，
+     composer 由 session-composer-footer 的 pr-(--thread-scrollbar-width) 预留），
+     右侧 padding 减去滚动条宽度，保证有/无滚动时左右空白一致且消息与 composer 对齐。 */
+  padding-right: calc(clamp(16px, 5%, 48px) - var(--scrollbar-size));
 }
 [data-slot="session-message-content"] {
   padding-bottom: calc(var(--thread-composer-overlap) + 64px);
+}
+[data-slot="aui_thread-viewport"] {
+  scrollbar-gutter: stable;
 }
 .message-navigation {
   position: sticky;
@@ -637,6 +644,39 @@
 }
 .composer-wrap {
   width: 100%;
+  container-name: composer;
+  container-type: inline-size;
+}
+.composer-toolbar-start {
+  flex: 0 1 auto;
+}
+.composer-toolbar-end {
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+.composer-toolbar-end > button {
+  flex: 0 0 auto;
+}
+.composer-toolbar-end > [data-slot="model-selector-trigger"] {
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.composer-toolbar-start .project-select-trigger {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+/* 窄容器（如侧边栏面板中的草稿 composer）下收紧内边距，并缩短可变宽度控件。 */
+@container composer (max-width: 560px) {
+  .composer-surface {
+    --composer-padding: var(--space-3);
+  }
+}
+@container composer (max-width: 440px) {
+  .composer-wrap .project-select-trigger {
+    max-width: 112px;
+  }
 }
 .composer-quotes {
   position: relative;
@@ -976,6 +1016,7 @@
   background: transparent;
   color: hsl(var(--muted-foreground));
   font-size: var(--type-size-meta);
+  white-space: nowrap;
 }
 .mode-control button[data-state="on"] {
   background: hsl(var(--accent));

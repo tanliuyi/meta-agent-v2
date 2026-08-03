@@ -1,7 +1,16 @@
-import type { FocusEvent, KeyboardEvent } from "react";
+import type { FocusEvent } from "react";
 import type { FileNode } from "../../../../../shared/contracts.ts";
 
 const TREE_ITEM_SELECTOR = '[role="treeitem"]';
+
+/** 虚拟化树的扁平行：节点行或目录加载占位行。 */
+export interface FileTreeRow {
+  kind: "node" | "loading";
+  path: string;
+  depth: number;
+  open: boolean;
+  node?: FileNode;
+}
 
 /** 将最近聚焦的 treeitem 设为唯一 Tab 停靠点，不触发 React render。 */
 export function setFileTreeRovingTabStop(event: FocusEvent<HTMLButtonElement>): void {
@@ -11,44 +20,45 @@ export function setFileTreeRovingTabStop(event: FocusEvent<HTMLButtonElement>): 
   event.currentTarget.tabIndex = 0;
 }
 
-/** 实现 ARIA tree 的方向键、Home/End 与目录展开收起契约。 */
-export function handleFileTreeKeyDown(
-  event: KeyboardEvent<HTMLButtonElement>,
-  node: FileNode,
-  onOpen: (node: FileNode) => void,
-): void {
-  const tree = event.currentTarget.closest<HTMLElement>('[role="tree"]');
-  if (!tree) return;
-  const items = [...tree.querySelectorAll<HTMLButtonElement>(TREE_ITEM_SELECTOR)];
-  const index = items.indexOf(event.currentTarget);
-  if (index === -1) return;
+export type FileTreeNavigationAction = { kind: "move"; index: number } | { kind: "toggle" } | null;
 
-  let target: HTMLButtonElement | undefined;
-  if (event.key === "ArrowDown") target = items[index + 1];
-  else if (event.key === "ArrowUp") target = items[index - 1];
-  else if (event.key === "Home") target = items[0];
-  else if (event.key === "End") target = items.at(-1);
-  else if (event.key === "ArrowRight" && node.type === "directory") {
-    if (event.currentTarget.getAttribute("aria-expanded") === "false") onOpen(node);
-    else if (
-      Number(items[index + 1]?.getAttribute("aria-level")) > Number(event.currentTarget.getAttribute("aria-level"))
-    ) {
-      target = items[index + 1];
-    }
-  } else if (event.key === "ArrowLeft") {
-    if (node.type === "directory" && event.currentTarget.getAttribute("aria-expanded") === "true") onOpen(node);
-    else {
-      const level = Number(event.currentTarget.getAttribute("aria-level"));
-      target = items
-        .slice(0, index)
-        .toReversed()
-        .find((item) => Number(item.getAttribute("aria-level")) < level);
-    }
-  } else return;
+/** 键盘翻页步长（PageUp/PageDown 一次移动的行数）。 */
+export const FILE_TREE_PAGE_SIZE = 20;
 
-  event.preventDefault();
-  if (!target) return;
-  for (const item of items) item.tabIndex = -1;
-  target.tabIndex = 0;
-  target.focus();
+/**
+ * 基于扁平行数组实现 ARIA tree 的方向键、Home/End、翻页与目录展开收起契约。
+ * 与 DOM 渲染无关，可在虚拟滚动下直接使用。
+ */
+export function fileTreeKeyNavigation(
+  rows: readonly FileTreeRow[],
+  index: number,
+  key: string,
+): FileTreeNavigationAction {
+  const row = rows[index];
+  if (!row || row.kind !== "node" || !row.node) return null;
+
+  const isDirectory = row.node.type === "directory";
+  if (key === "ArrowDown") return moveIfInRange(rows, index + 1);
+  if (key === "ArrowUp") return moveIfInRange(rows, index - 1);
+  if (key === "PageDown") return moveIfInRange(rows, index + FILE_TREE_PAGE_SIZE);
+  if (key === "PageUp") return moveIfInRange(rows, index - FILE_TREE_PAGE_SIZE);
+  if (key === "Home") return rows.length > 0 ? { kind: "move", index: 0 } : null;
+  if (key === "End") return rows.length > 0 ? { kind: "move", index: rows.length - 1 } : null;
+  if (key === "ArrowRight") {
+    if (!isDirectory) return null;
+    if (!row.open) return { kind: "toggle" };
+    return moveIfInRange(rows, index + 1);
+  }
+  if (key === "ArrowLeft") {
+    if (isDirectory && row.open) return { kind: "toggle" };
+    for (let candidate = index - 1; candidate >= 0; candidate--) {
+      if (rows[candidate].depth < row.depth) return { kind: "move", index: candidate };
+    }
+    return null;
+  }
+  return null;
+}
+
+function moveIfInRange(rows: readonly FileTreeRow[], index: number): FileTreeNavigationAction {
+  return index >= 0 && index < rows.length ? { kind: "move", index } : null;
 }

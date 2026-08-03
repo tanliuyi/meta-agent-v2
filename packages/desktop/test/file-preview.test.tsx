@@ -1,0 +1,52 @@
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { FilePreview } from "../src/renderer/src/components/panel/files/file-preview.tsx";
+import type { TextFile } from "../src/shared/contracts.ts";
+
+const file: TextFile = {
+  path: "src/index.ts",
+  content: "const a = 1;\n\nconsole.log(a);\n",
+  language: "typescript",
+};
+
+function render(props: Partial<React.ComponentProps<typeof FilePreview>> = {}): string {
+  return renderToStaticMarkup(<FilePreview file={file} wrap={false} onScrollChange={() => {}} {...props} />);
+}
+
+describe("FilePreview", () => {
+  it("渲染行号与文件内容", () => {
+    const markup = render();
+    expect(markup).toContain("const a = 1;");
+    expect(markup).toContain("console.log(a);");
+    // 4 行内容：1..4 行号
+    expect(markup).toContain(">1</span>");
+    expect(markup).toContain(">4</span>");
+  });
+
+  it("高亮结果按行渲染 token", () => {
+    const tokens = file.content
+      .split("\n")
+      .map((line) => (line ? [{ content: line, offset: 0, color: "#D8DEE9" }] : []));
+    const markup = render({
+      highlight: { file, tokens: { tokens, fg: "#D8DEE9" } as never },
+    });
+    expect(markup).toContain("file-preview-token");
+  });
+
+  it("大文件降级时显示提示", () => {
+    const markup = render({ degraded: true });
+    expect(markup).toContain("文件较大，已禁用语法高亮");
+  });
+
+  it("空行渲染占位空格", () => {
+    const markup = render();
+    expect(markup).toContain("> </span>");
+  });
+
+  it("渲染代码缩略图容器", () => {
+    const markup = render();
+    expect(markup).toContain('class="file-minimap"');
+    expect(markup).toContain("代码缩略图");
+  });
+});

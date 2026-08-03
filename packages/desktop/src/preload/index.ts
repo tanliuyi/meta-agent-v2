@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { AuthOauthLoginEvent } from "../shared/auth-config-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
+  FileChangeSet,
   SessionAttachInput,
   SessionAttachment,
   SessionCreateIpcResult,
@@ -347,8 +348,18 @@ const desktopApi: DesktopApi = {
     list: (projectId, path, query, requestGroup) =>
       ipcRenderer.invoke(CHANNELS.filesList, projectId, path, query, requestGroup),
     read: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesRead, projectId, path),
+    readImage: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesReadImage, projectId, path),
     resolvePath: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, projectId, path),
     open: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesOpen, projectId, path),
+    watch: (projectId) => ipcRenderer.invoke(CHANNELS.filesWatch, projectId),
+    unwatch: (projectId) => ipcRenderer.invoke(CHANNELS.filesUnwatch, projectId),
+    onChanged(projectId, listener) {
+      const handler = (_event: Electron.IpcRendererEvent, change: FileChangeSet) => {
+        if (change.projectId === projectId) listener(change);
+      };
+      ipcRenderer.on(CHANNELS.filesChanged, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.filesChanged, handler);
+    },
   },
   terminals: {
     open: (projectId, threadId, terminalId, cols, rows) =>

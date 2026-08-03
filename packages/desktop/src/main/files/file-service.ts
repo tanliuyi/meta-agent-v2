@@ -1,11 +1,27 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, relative, resolve, sep } from "node:path";
-import type { FileNode, TextFile } from "../../shared/contracts.ts";
+import type { FileImage, FileNode, TextFile } from "../../shared/contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
+import { fuzzyMatch } from "./fuzzy.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_SEARCH_RESULTS = 200;
+/** 排序前放宽的候选收集上限，避免 DFS 顺序导致高分结果被截断。 */
+const MAX_SEARCH_CANDIDATES = 400;
 const SEARCH_YIELD_INTERVAL_MS = 8;
+
+const IMAGE_MIME: Record<string, string> = {
+  avif: "image/avif",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  ico: "image/x-icon",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  svg: "image/svg+xml",
+  webp: "image/webp",
+};
 
 /** 只允许访问已注册 Project cwd 内部文件的工作区文件服务。 */
 export class FileService {
@@ -71,11 +87,28 @@ export class FileService {
     };
   }
 
+  /** 读取 Project 内的图片文件为 data URL（用于只读预览）。 */
+  async readImage(projectId: string, path: string): Promise<FileImage> {
+    const cwd = this.projects.getCwd(projectId);
+    const target = resolveInside(cwd, path);
+    const info = await stat(target);
+    if (!info.isFile()) throw new Error("目标不是文件");
+    const mime = IMAGE_MIME[extname(target).slice(1).toLowerCase()];
+    if (!mime) throw new Error("不是支持的图片格式");
+    if (info.size > MAX_IMAGE_BYTES) throw new Error("图片超过 10 MiB，无法预览");
+    const buffer = await readFile(target);
+    return {
+      path: normalizeRelative(relative(cwd, target)),
+      mime,
+      dataUrl: `data:${mime};base64,${buffer.toString("base64")}`,
+    };
+  }
+
   private async search(cwd: string, query: string, isCancelled: () => boolean): Promise<FileNode[]> {
-    const results: FileNode[] = [];
+    const results: Array<{ node: FileNode; score: number }> = [];
     const pending = [cwd];
     let nextYieldAt = performance.now() + SEARCH_YIELD_INTERVAL_MS;
-    while (pending.length > 0 && results.length < MAX_SEARCH_RESULTS) {
+    while (pending.length > 0 && results.length < MAX_SEARCH_CANDIDATES) {
       if (isCancelled()) return [];
       const folder = pending.pop();
       if (!folder) break;
@@ -85,14 +118,18 @@ export class FileService {
         if (entry.name === ".git" || entry.name === "node_modules") continue;
         const target = resolve(folder, entry.name);
         if (entry.isDirectory()) pending.push(target);
-        if (entry.name.toLowerCase().includes(query)) {
+        const score = fuzzyMatch(query, entry.name);
+        if (score !== null) {
           results.push({
-            name: entry.name,
-            path: normalizeRelative(relative(cwd, target)),
-            type: entry.isDirectory() ? "directory" : "file",
-            hasChildren: entry.isDirectory(),
+            node: {
+              name: entry.name,
+              path: normalizeRelative(relative(cwd, target)),
+              type: entry.isDirectory() ? "directory" : "file",
+              hasChildren: entry.isDirectory(),
+            },
+            score,
           });
-          if (results.length >= MAX_SEARCH_RESULTS) break;
+          if (results.length >= MAX_SEARCH_CANDIDATES) break;
         }
         if (performance.now() < nextYieldAt) continue;
         await yieldToEventLoop();
@@ -100,7 +137,15 @@ export class FileService {
         nextYieldAt = performance.now() + SEARCH_YIELD_INTERVAL_MS;
       }
     }
-    return results;
+    return results
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          Number(right.node.type === "directory") - Number(left.node.type === "directory") ||
+          left.node.name.localeCompare(right.node.name),
+      )
+      .slice(0, MAX_SEARCH_RESULTS)
+      .map(({ node }) => node);
   }
 }
 

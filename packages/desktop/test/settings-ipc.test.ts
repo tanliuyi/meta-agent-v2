@@ -35,6 +35,7 @@ describe("settings IPC", () => {
       { list: vi.fn(), getActive: vi.fn() } as never,
       {} as never,
       {} as never,
+      {} as never,
       { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
       {} as never,
       {} as never,

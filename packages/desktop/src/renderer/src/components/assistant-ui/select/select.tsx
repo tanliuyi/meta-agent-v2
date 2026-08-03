@@ -38,7 +38,7 @@ export function Select({
         className,
       )}
     >
-      <span>{selectedOption?.label ?? placeholder}</span>
+      <span className="min-w-0 truncate">{selectedOption?.label ?? placeholder}</span>
       <SelectPrimitive.Icon asChild>
         <ChevronDownIcon className="size-4 opacity-50 transition-transform group-data-[state=open]:rotate-180" />
       </SelectPrimitive.Icon>

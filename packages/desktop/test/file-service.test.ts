@@ -43,6 +43,33 @@ describe("FileService", () => {
     expect(second).toMatchObject([{ name: "second-target.txt", type: "file" }]);
     await expect(files.list(project.id, "", "ignored-target")).resolves.toEqual([]);
   });
+
+  it("模糊搜索按匹配质量排序：词首连续匹配优先，分散子序列也能命中", async () => {
+    const { files, project } = await createService();
+    await mkdir(join(project.cwd, "config"));
+    await writeFile(join(project.cwd, "config", "deep-config.json"), "{}");
+    await writeFile(join(project.cwd, "fig-leaf.txt"), "x");
+
+    const results = await files.list(project.id, "", "fig");
+    expect(results.map((node) => node.name)).toEqual([
+      "fig-leaf.txt", // 词首连续子串
+      "config", // 目录：c-o-n-f-i-g 中的分散 f-i-g
+      "first-target.txt", // f-i 连续 + 尾部 g
+      "deep-config.json", // 更分散且位置靠后
+    ]);
+  });
+
+  it("读取图片返回 data URL，非图片格式拒绝", async () => {
+    const { files, project } = await createService();
+    await writeFile(join(project.cwd, "pixel.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    const image = await files.readImage(project.id, "pixel.png");
+    expect(image.path).toBe("pixel.png");
+    expect(image.mime).toBe("image/png");
+    expect(image.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+
+    await expect(files.readImage(project.id, "first-target.txt")).rejects.toThrow("不是支持的图片格式");
+  });
 });
 
 async function createService() {

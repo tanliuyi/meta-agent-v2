@@ -133,10 +133,12 @@ body.is-resizing-column .workbench-panel {
   -webkit-app-region: drag;
   app-region: drag;
   user-select: none;
+  padding: 0 78px 0 8px;
 }
 .app-frame[data-platform="darwin"] .panel-tabs-safe-area {
   -webkit-app-region: no-drag;
   app-region: no-drag;
+  width: 78px;
 }
 .app-frame[data-platform="darwin"] .panel-tabs :is(button, input, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
@@ -212,20 +214,33 @@ body.is-resizing-column .workbench-panel {
   flex: 0 0 16px;
   place-items: center;
 }
-.panel-tab-agent-icon::before {
+.panel-tab-agent-icon::before,
+.panel-tab-agent-icon::after {
   position: absolute;
-  inset: -2px;
-  border: 1px solid transparent;
+  inset: -3px;
   border-radius: var(--shape-radius-round);
   content: "";
   pointer-events: none;
 }
-.panel-tab-agent-icon[data-running]::before {
-  border-color: hsl(var(--primary) / 0.62);
-  animation: panel-tab-agent-pulse 1.2s var(--motion-ease-standard) infinite;
+.panel-tab-agent-icon[data-running] {
+  color: hsl(var(--info));
 }
-.panel-tab-agent-icon[data-running] > svg {
-  animation: panel-tab-agent-breathe 1.2s var(--motion-ease-standard) infinite;
+.panel-tab-agent-icon[data-running]::before {
+  background: hsl(var(--info) / 0.08);
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--info) / 0.18),
+    0 0 4px hsl(var(--info) / 0.12);
+}
+.panel-tab-agent-icon[data-running]::after {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 42%,
+    hsl(var(--info) / 0.16) 55%,
+    hsl(var(--info) / 0.88) 81%,
+    transparent 82%
+  );
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), hsl(var(--foreground)) 0);
+  animation: panel-tab-agent-orbit 1.2s linear infinite;
 }
 .panel-tab-trigger:focus-visible {
   box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
@@ -267,25 +282,9 @@ body.is-resizing-column .workbench-panel {
   color: hsl(var(--foreground));
 }
 
-@keyframes panel-tab-agent-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.82);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes panel-tab-agent-breathe {
-  0%,
-  100% {
-    opacity: 0.62;
-  }
-  50% {
-    opacity: 1;
+@keyframes panel-tab-agent-orbit {
+  to {
+    transform: rotate(1turn);
   }
 }
 
@@ -526,6 +525,10 @@ body.is-resizing-column .workbench-panel {
   color: hsl(var(--foreground));
   font-weight: 500;
 }
+.file-tab-item[data-preview] .file-tab-trigger > span {
+  font-style: italic;
+  font-weight: 400;
+}
 .file-tab-trigger {
   display: flex;
   min-width: 0;
@@ -581,14 +584,177 @@ body.is-resizing-column .workbench-panel {
 .file-tab-close:focus-visible {
   box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
 }
+.file-tab-pin {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex: 0 0 18px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--shape-radius-xl);
+  outline: 0;
+  background: transparent;
+  color: currentColor;
+  opacity: 0.72;
+  cursor: pointer;
+}
+.file-tab-pin:hover {
+  background: hsl(var(--foreground) / 0.09);
+  opacity: 1;
+}
+.file-tab-pin:focus-visible {
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
 .file-preview-content {
   min-width: 0;
   min-height: 0;
   flex: 1;
   overflow: hidden;
 }
-.file-preview-content > pre {
+.file-preview-stack {
+  display: flex;
   height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+.file-preview-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+.file-minimap {
+  position: relative;
+  /* 内容驱动目标宽度（组件计算 --file-minimap-target-width）；容器只通过 flex shrink 与 max-width 限制，窄布局保留约 56px 下限。 */
+  width: min(var(--file-minimap-target-width, 96px), 100%);
+  flex: 0 1 auto;
+  min-width: 56px;
+  max-width: 96px;
+  border-left: 1px solid hsl(var(--border) / 0.6);
+  outline: 0;
+  background: hsl(var(--background));
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.file-minimap:hover,
+.file-minimap:focus-visible {
+  background: color-mix(in oklab, hsl(var(--background)) 96%, hsl(var(--foreground)));
+}
+.file-minimap:focus-visible {
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+.file-minimap[data-dragging] {
+  cursor: grabbing;
+}
+.file-minimap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.file-minimap-viewport {
+  opacity: 0.58;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.file-minimap:hover .file-minimap-viewport,
+.file-minimap:focus-visible .file-minimap-viewport,
+.file-minimap[data-dragging] .file-minimap-viewport {
+  opacity: 1;
+}
+.file-minimap-hover {
+  position: absolute;
+  right: 100%;
+  z-index: 3;
+  margin-right: 6px;
+  padding: 2px 8px;
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
+  box-shadow: var(--elevation-popover);
+  font-size: var(--type-size-meta);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.file-minimap-hover[hidden] {
+  display: none;
+}
+.file-find-bar {
+  display: flex;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-control);
+}
+.file-find-bar input {
+  min-width: 0;
+  width: 200px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: var(--type-size-control);
+}
+.file-find-count {
+  min-width: 48px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+  text-align: center;
+}
+.file-find-nav,
+.file-find-close,
+.file-find-case {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex: 0 0 22px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--shape-radius-sm);
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+.file-find-nav:hover,
+.file-find-close:hover,
+.file-find-case:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+.file-find-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.file-find-case {
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.file-find-case[data-active] {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+.file-preview-match {
+  border-radius: 2px;
+  background: hsl(var(--warning) / 0.22);
+}
+.file-preview-match[data-active] {
+  background: hsl(var(--warning) / 0.5);
+  outline: 1px solid hsl(var(--warning) / 0.55);
+}
+.file-preview-body > pre {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
   margin: 0;
   padding: 16px 16px 16px 0;
   overflow: auto;
@@ -597,11 +763,34 @@ body.is-resizing-column .workbench-panel {
   font-size: var(--type-size-control);
   line-height: 1.6;
 }
+.file-preview-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
 .file-preview-line {
   display: flex;
   width: max-content;
   min-width: 100%;
   min-height: 1.6em;
+}
+.file-preview-line[data-current],
+.file-preview-line[data-current] .file-preview-line-number {
+  background: hsl(var(--muted));
+}
+.file-preview-note {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 1;
+  padding: 4px 10px;
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--warning) / 0.14);
+  color: hsl(var(--warning));
+  font-size: var(--type-size-meta);
+  pointer-events: none;
+  user-select: none;
 }
 .file-preview-line-number {
   position: sticky;
@@ -627,12 +816,12 @@ html[data-theme="dark"] .file-preview-token {
   color: var(--shiki-dark, var(--markdown-code-token-color, inherit));
   background: var(--shiki-dark-bg, var(--markdown-code-token-background, transparent));
 }
-.file-preview-content > pre[data-wrap] .file-preview-line {
+.file-preview-body > pre[data-wrap] .file-preview-line {
   /* width: max-content 会让每行宽度等于最长行宽度，pre-wrap 永远不会触发换行，
      因此开启换行时改为拉伸到容器宽度。 */
   width: auto;
 }
-.file-preview-content > pre[data-wrap] .file-preview-line-text {
+.file-preview-body > pre[data-wrap] .file-preview-line-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -648,7 +837,24 @@ html[data-theme="dark"] .file-preview-token {
   overflow: auto;
   padding: 16px 20px;
   color: hsl(var(--foreground));
+  /* 正文字号跟随个性化「界面字号」；内容排版与桌面消息共用 StreamdownMarkdown。 */
+  font-size: var(--type-size-body);
+  overflow-wrap: anywhere;
   overscroll-behavior-y: contain;
+}
+.file-preview-image-wrap {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  padding: 16px;
+  overflow: auto;
+}
+.file-preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--shape-radius-md);
+  box-shadow: var(--elevation-card);
+  object-fit: contain;
 }
 .file-markdown-preview-toggle[data-active] {
   background: hsl(var(--muted));
@@ -799,9 +1005,17 @@ html[data-theme="dark"] .file-preview-token {
 }
 .file-tree {
   height: calc(100% - 46px);
-  padding: 1px 4px 12px;
-  overflow: auto;
+  overflow: hidden;
   isolation: isolate;
+}
+.file-tree-virtual {
+  /* 滚动容器高度固定为视口（父级 .file-tree 确定高度），内容溢出时由容器滚动。
+     不能设成内容高度（rows × 行高），否则容器永远等于内容、无法滚动。 */
+  height: 100%;
+  overflow: auto;
+}
+.file-breadcrumb-tree .file-tree-virtual {
+  max-height: min(390px, calc(100vh - 110px));
 }
 .file-tree-status {
   margin: 10px 8px;
@@ -809,14 +1023,13 @@ html[data-theme="dark"] .file-preview-token {
   font-size: var(--type-size-meta);
 }
 .file-tree-branch-status {
-  height: 24px;
+  height: 28px;
   padding-left: calc(25px + var(--file-tree-depth, 0) * 14px);
   color: hsl(var(--muted-foreground) / 0.72);
   font-size: var(--type-size-meta);
-  line-height: 24px;
+  line-height: 28px;
 }
 .file-row {
-  position: sticky;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -825,7 +1038,6 @@ html[data-theme="dark"] .file-preview-token {
   padding-right: 8px;
   padding-left: calc(6px + var(--file-tree-depth, 0) * 14px);
   border: 0;
-  border-radius: var(--shape-radius-md);
   background: hsl(var(--popover));
   color: hsl(var(--foreground) / 0.88);
   font-size: var(--type-size-control);
@@ -973,13 +1185,10 @@ html[data-theme="dark"] .file-preview-token {
     transition: none;
   }
 
-  .panel-tab-agent-icon[data-running]::before,
-  .panel-tab-agent-icon[data-running] > svg {
+  .panel-tab-agent-icon[data-running]::after {
     animation: none;
-  }
-
-  .panel-tab-agent-icon[data-running]::before {
-    opacity: 0.8;
+    background: none;
+    box-shadow: inset 0 0 0 1px hsl(var(--info) / 0.72);
   }
 }
 

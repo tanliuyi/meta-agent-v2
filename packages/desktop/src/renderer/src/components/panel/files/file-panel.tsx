@@ -1,5 +1,5 @@
+import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Tabs from "@radix-ui/react-tabs";
-import { resolveTokenStyle } from "@renderer/components/assistant-ui/streamdown/streamdown-code-line";
 import { TooltipIconButton } from "@renderer/components/assistant-ui/tooltip-icon-button";
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import type { HighlightResult } from "@streamdown/code";
@@ -8,22 +8,35 @@ import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
 import PanelRightClose from "lucide-react/dist/esm/icons/panel-right-close.mjs";
 import PanelRightOpen from "lucide-react/dist/esm/icons/panel-right-open.mjs";
+import Pin from "lucide-react/dist/esm/icons/pin.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import WrapText from "lucide-react/dist/esm/icons/wrap-text.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
-import type { FileNode, TextFile } from "../../../../../shared/contracts.ts";
+import type { FileImage, FileNode, TextFile } from "../../../../../shared/contracts.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
-import { STREAMDOWN_COMPONENTS } from "../../assistant-ui/streamdown/streamdown-code.tsx";
-import { LINK_SAFETY, SHIKI_THEMES, STREAMDOWN_PLUGINS } from "../../assistant-ui/streamdown/streamdown-config.ts";
+import { ContextMenuContent } from "../../../shared/ui/context-menu-content.tsx";
+import { ContextMenuItem } from "../../../shared/ui/context-menu-item.tsx";
+import { SHIKI_THEMES } from "../../assistant-ui/streamdown/streamdown-config.ts";
+import { StreamdownMarkdown } from "../../assistant-ui/streamdown/streamdown-markdown.tsx";
 import { useSessionScope, useSessionWorkbench } from "../../session-context.tsx";
-import { closeWorkbenchFile, replaceActiveWorkbenchFile } from "../panel-model.ts";
+import {
+  closeWorkbenchFile,
+  filePathSegments,
+  isImagePath,
+  openWorkbenchFileAsPreview,
+  parentPath,
+  pinWorkbenchFile,
+  replaceActiveWorkbenchFile,
+} from "../panel-model.ts";
 import { highlightFileCode } from "./file-highlight-client.ts";
 import { FilePathBreadcrumb } from "./file-path-breadcrumb.tsx";
+import { FilePreview } from "./file-preview.tsx";
 import { FileTree } from "./file-tree.tsx";
 
 const FILE_SEARCH_DELAY = 180;
+/** 超过该字符数的文件跳过语法高亮（对齐 VS Code largeFileOptimizations）。 */
+const LARGE_FILE_HIGHLIGHT_CHARS = 128 * 1024;
 const FILE_TREE_DEFAULT_WIDTH = 240;
 const FILE_TREE_MIN_WIDTH = 180;
 const FILE_TREE_MAX_WIDTH = 360;
@@ -38,6 +51,7 @@ export function FilePanel() {
   const projectId = record.identity.projectId;
   const activeFile = workbench?.activeFile ?? null;
   const openFiles = workbench?.openFiles ?? [];
+  const previewFile = workbench?.previewFile;
   const expandedPaths = workbench?.expandedPaths ?? [];
   const fileTreeWidth = workbench?.fileTreeWidth ?? FILE_TREE_DEFAULT_WIDTH;
   const fileWrap = workbench?.fileWrapMode ?? false;
@@ -49,11 +63,12 @@ export function FilePanel() {
   const [query, setQuery] = useState("");
   const [roots, setRoots] = useState<FileNode[]>([]);
   const [children, setChildren] = useState<Record<string, FileNode[]>>({});
-  const [file, setFile] = useState<TextFile | null>(null);
+  const [file, setFile] = useState<TextFile | FileImage | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
   const [highlight, setHighlight] = useState<{ file: TextFile; tokens: HighlightResult } | null>(null);
+  const [fileRevision, setFileRevision] = useState(0);
   const treeGeneration = useRef(0);
   const fileGeneration = useRef(0);
   const highlightGeneration = useRef(0);
@@ -140,20 +155,24 @@ export function FilePanel() {
       return;
     }
     setFile(null);
-    void window.desktop.files
-      .read(projectId, activeFile)
+    const request = isImagePath(activeFile)
+      ? window.desktop.files.readImage(projectId, activeFile)
+      : window.desktop.files.read(projectId, activeFile);
+    void request
       .then((value) => {
         if (generation === fileGeneration.current) setFile(value);
       })
       .catch((value: unknown) => {
         if (generation === fileGeneration.current) setFileError(errorMessage(value));
       });
-  }, [activeFile, projectId]);
+  }, [activeFile, fileRevision, projectId]);
 
   useEffect(() => {
     const generation = ++highlightGeneration.current;
     setHighlight(null);
-    if (!file) return;
+    if (!file || "dataUrl" in file) return;
+    // 大文件降级：跳过 Shiki 全量 tokenize（对齐 VS Code largeFileOptimizations）。
+    if (file.content.length > LARGE_FILE_HIGHLIGHT_CHARS) return;
     void highlightFileCode(file.content, file.language, SHIKI_THEMES).then((tokens) => {
       if (generation === highlightGeneration.current && tokens) {
         setHighlight({ file, tokens });
@@ -163,106 +182,57 @@ export function FilePanel() {
 
   const expanded = useMemo(() => new Set(expandedPaths), [expandedPaths]);
 
+  // 切换 tab 后恢复每个文件各自的滚动位置。
+  // 必须在 preview memo 之前声明：useMemo 工厂同步执行，引用未初始化的块级变量会抛 TDZ 错误。
+  const scrollPositions = useRef(new Map<string, number>());
+
   const preview = useMemo(() => {
     if (!file) return null;
-    if (fileMarkdownPreview && isMarkdown) {
+    if ("dataUrl" in file) {
       return (
-        <div className="file-preview-markdown">
-          <Streamdown
-            mode="static"
-            components={STREAMDOWN_COMPONENTS}
-            plugins={STREAMDOWN_PLUGINS}
-            linkSafety={LINK_SAFETY}
-            shikiTheme={SHIKI_THEMES}
-            className="aui-md"
-          >
-            {file.content}
-          </Streamdown>
+        <div className="file-preview-image-wrap">
+          <img className="file-preview-image" src={file.dataUrl} alt={file.path} />
         </div>
       );
     }
-    const lines = highlight?.file === file ? highlight.tokens.tokens : null;
-    if (lines) {
+    if (fileMarkdownPreview && isMarkdown) {
       return (
-        <pre
-          tabIndex={0}
-          aria-label={`${file.path} 内容`}
-          data-language={file.language}
-          data-wrap={fileWrap || undefined}
-          style={
-            {
-              "--file-preview-line-number-width": `${Math.max(2, String(lines.length).length)}ch`,
-            } as CSSProperties
-          }
-        >
-          {lines.map((tokensOfLine, lineIndex) => (
-            <span className="file-preview-line" key={lineIndex}>
-              <span className="file-preview-line-number" aria-hidden="true">
-                {lineIndex + 1}
-              </span>
-              <span className="file-preview-line-text">
-                {tokensOfLine.length === 0
-                  ? " "
-                  : tokensOfLine.map((token, tokenIndex) => (
-                      <span
-                        className="file-preview-token"
-                        key={`${tokenIndex}:${token.offset}`}
-                        style={resolveTokenStyle(token)}
-                      >
-                        {token.content}
-                      </span>
-                    ))}
-              </span>
-            </span>
-          ))}
-        </pre>
+        <div className="file-preview-markdown">
+          <StreamdownMarkdown>{file.content}</StreamdownMarkdown>
+        </div>
       );
     }
-    const plainLines = file.content.split("\n");
     return (
-      <pre
-        tabIndex={0}
-        aria-label={`${file.path} 内容`}
-        data-language={file.language}
-        data-wrap={fileWrap || undefined}
-        style={
-          {
-            "--file-preview-line-number-width": `${Math.max(2, String(plainLines.length).length)}ch`,
-          } as CSSProperties
-        }
-      >
-        {plainLines.map((line, lineIndex) => (
-          <span className="file-preview-line" key={lineIndex}>
-            <span className="file-preview-line-number" aria-hidden="true">
-              {lineIndex + 1}
-            </span>
-            <span className="file-preview-line-text">{line}</span>
-          </span>
-        ))}
-      </pre>
+      <FilePreview
+        key={file.path}
+        file={file}
+        highlight={highlight}
+        wrap={fileWrap}
+        degraded={file.content.length > LARGE_FILE_HIGHLIGHT_CHARS}
+        initialScrollTop={scrollPositions.current.get(file.path) ?? 0}
+        onScrollChange={(top) => scrollPositions.current.set(file.path, top)}
+      />
     );
   }, [file, fileWrap, fileMarkdownPreview, isMarkdown, highlight]);
 
   const loadDirectory = useCallback(
-    async (path: string) => {
-      if (!projectId || children[path] !== undefined) return;
-      let request = directoryRequests.current.get(path);
-      if (!request) {
-        const created = window.desktop.files.list(projectId, path, "", `file-panel-directory:${path}`);
-        directoryRequests.current.set(path, created);
-        void created
-          .finally(() => {
-            if (directoryRequests.current.get(path) === created) directoryRequests.current.delete(path);
-          })
-          .catch(() => undefined);
-        request = created;
-      }
+    async (path: string, force = false) => {
+      if (!projectId) return;
+      const existing = directoryRequests.current.get(path);
+      if (!force && (existing || children[path] !== undefined)) return;
+      const created = window.desktop.files.list(projectId, path, "", `file-panel-directory:${path}`);
+      directoryRequests.current.set(path, created);
       try {
-        const items = await request;
+        const items = await created;
         if (activeProjectId.current !== projectId) return;
+        if (directoryRequests.current.get(path) !== created) return;
         setChildren((current) => ({ ...current, [path]: items }));
       } catch (value) {
-        if (activeProjectId.current === projectId) setTreeError(errorMessage(value));
+        if (activeProjectId.current === projectId && directoryRequests.current.get(path) === created) {
+          setTreeError(errorMessage(value));
+        }
+      } finally {
+        if (directoryRequests.current.get(path) === created) directoryRequests.current.delete(path);
       }
     },
     [children, projectId],
@@ -271,6 +241,52 @@ export function FilePanel() {
   useEffect(() => {
     for (const path of expandedPaths) void loadDirectory(path);
   }, [expandedPaths, loadDirectory]);
+
+  // 文件监听：已加载目录受新增/删除影响时增量刷新；活动文件被更新时自动重读。
+  useEffect(() => {
+    if (!projectId) return;
+    const unsubscribe = window.desktop.files.onChanged(projectId, (change) => {
+      if (activeFile && change.updated.includes(activeFile)) setFileRevision((revision) => revision + 1);
+      const loaded = new Set<string>(["", ...Object.keys(children)]);
+      const affected = new Set<string>();
+      for (const path of change.added) {
+        const dir = parentPath(path);
+        if (loaded.has(dir)) affected.add(dir);
+      }
+      for (const path of change.deleted) {
+        const dir = parentPath(path);
+        if (loaded.has(dir)) affected.add(dir);
+        if (loaded.has(path)) {
+          // 已展开目录本身被删除：清理其缓存并刷新父目录。
+          setChildren((current) => {
+            const next = { ...current };
+            delete next[path];
+            return next;
+          });
+          const parent = parentPath(path);
+          if (loaded.has(parent)) affected.add(parent);
+        }
+      }
+      for (const dir of affected) void loadDirectory(dir, true);
+    });
+    return unsubscribe;
+  }, [activeFile, children, loadDirectory, projectId]);
+
+  // 窗口重新聚焦时刷新根目录，补偿失焦期间可能丢失的文件事件。
+  useEffect(() => {
+    const onFocus = () => void loadDirectory("", true);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadDirectory]);
+
+  // 面板可见期间保持主进程 watcher 引用。
+  useEffect(() => {
+    if (!projectId) return;
+    void window.desktop.files.watch(projectId);
+    return () => {
+      void window.desktop.files.unwatch(projectId);
+    };
+  }, [projectId]);
 
   const toggleDirectory = useCallback(
     async (node: FileNode) => {
@@ -287,26 +303,49 @@ export function FilePanel() {
     [expandedPaths, loadDirectory, projectId, updateWorkbench],
   );
 
+  // 打开文件时展开其父目录链（对齐 VS Code explorer.autoReveal）。
+  const revealAncestors = useCallback(
+    (path: string): string[] | null => {
+      const missing = filePathSegments(path)
+        .filter((segment) => segment.directory)
+        .map((segment) => segment.path)
+        .filter((parent) => !expandedPaths.includes(parent));
+      if (missing.length === 0) return null;
+      const nextExpanded = [...expandedPaths, ...missing];
+      updateWorkbench({ expandedPaths: nextExpanded });
+      return nextExpanded;
+    },
+    [expandedPaths, updateWorkbench],
+  );
+
   const openNode = useCallback(
     (node: FileNode) => {
       if (node.type === "directory") {
         void toggleDirectory(node);
         return;
       }
-      updateWorkbench({
-        openFiles: openFiles.includes(node.path) ? [...openFiles] : [...openFiles, node.path],
-        activeFile: node.path,
-      });
+      revealAncestors(node.path);
+      updateWorkbench(openWorkbenchFileAsPreview(openFiles, previewFile, node.path));
     },
-    [openFiles, toggleDirectory, updateWorkbench],
+    [openFiles, previewFile, revealAncestors, toggleDirectory, updateWorkbench],
+  );
+
+  const pinNode = useCallback(
+    (node: FileNode) => {
+      if (node.type === "directory") return;
+      const patch = pinWorkbenchFile(previewFile, node.path);
+      if (patch) updateWorkbench(patch);
+    },
+    [previewFile, updateWorkbench],
   );
 
   const closeFile = useCallback(
     (path: string) => {
       const next = closeWorkbenchFile(openFiles, activeFile, path);
-      if (next) updateWorkbench(next);
+      if (!next) return;
+      updateWorkbench({ ...next, ...(path === previewFile ? { previewFile: undefined } : {}) });
     },
-    [activeFile, openFiles, updateWorkbench],
+    [activeFile, openFiles, previewFile, updateWorkbench],
   );
 
   const openBreadcrumbNode = useCallback(
@@ -315,9 +354,42 @@ export function FilePanel() {
         void toggleDirectory(node);
         return;
       }
-      updateWorkbench(replaceActiveWorkbenchFile(openFiles, activeFile, node.path));
+      revealAncestors(node.path);
+      const next = replaceActiveWorkbenchFile(openFiles, activeFile, node.path);
+      // 被替换的若是预览 tab，预览状态跟随新路径。
+      updateWorkbench({
+        ...next,
+        ...(activeFile === previewFile ? { previewFile: node.path } : {}),
+      });
     },
-    [activeFile, openFiles, toggleDirectory, updateWorkbench],
+    [activeFile, openFiles, previewFile, revealAncestors, toggleDirectory, updateWorkbench],
+  );
+
+  // 文件树右键菜单（对齐 VS Code explorer 上下文操作）。
+  const renderFileContextMenu = useCallback(
+    (node: FileNode) => {
+      const isDirectory = node.type === "directory";
+      return (
+        <ContextMenuContent className="min-w-44">
+          <ContextMenuItem
+            onSelect={() => {
+              void window.desktop.files.resolvePath(projectId, node.path).then((absolute) => {
+                void navigator.clipboard.writeText(absolute);
+              });
+            }}
+          >
+            复制路径
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => void window.desktop.files.open(projectId, node.path)}>
+            在系统文件管理器中显示
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => void loadDirectory(isDirectory ? node.path : parentPath(node.path), true)}>
+            刷新
+          </ContextMenuItem>
+        </ContextMenuContent>
+      );
+    },
+    [loadDirectory, projectId],
   );
 
   if (!workbench) return null;
@@ -335,12 +407,37 @@ export function FilePanel() {
           <Tabs.List ref={tabsListRef} className="file-tabs" aria-label="打开的文件">
             {openFiles.map((path) => {
               const label = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
+              const isPreview = path === previewFile;
               return (
-                <div key={path} className="file-tab-item" data-active={activeFile === path || undefined}>
-                  <Tabs.Trigger className="file-tab-trigger" value={path} title={path}>
+                <div
+                  key={path}
+                  className="file-tab-item"
+                  data-active={activeFile === path || undefined}
+                  data-preview={isPreview || undefined}
+                >
+                  <Tabs.Trigger
+                    className="file-tab-trigger"
+                    value={path}
+                    title={path}
+                    onDoubleClick={() => {
+                      const patch = pinWorkbenchFile(previewFile, path);
+                      if (patch) updateWorkbench(patch);
+                    }}
+                  >
                     <FileCode2 size={14} aria-hidden="true" />
                     <span>{label}</span>
                   </Tabs.Trigger>
+                  {isPreview ? (
+                    <button
+                      type="button"
+                      className="file-tab-pin"
+                      aria-label={`固定 ${label}`}
+                      title="固定标签页"
+                      onClick={() => updateWorkbench({ previewFile: undefined })}
+                    >
+                      <Pin size={12} aria-hidden="true" />
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="file-tab-close"
@@ -387,6 +484,7 @@ export function FilePanel() {
             expanded={expanded}
             onDirectoryOpen={(path) => void loadDirectory(path)}
             onOpen={openBreadcrumbNode}
+            onPinOpen={pinNode}
           />
         ) : null}
         {openFiles.map((path) => (
@@ -487,6 +585,8 @@ export function FilePanel() {
                 expanded={expanded}
                 active={activeFile ?? undefined}
                 onOpen={openNode}
+                onPinOpen={pinNode}
+                renderContextMenu={renderFileContextMenu}
               />
             )}
           </div>

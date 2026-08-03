@@ -194,7 +194,7 @@ export function Composer(props: ComposerProps) {
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
           <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
-            <div className="relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-(--composer-background) p-(--composer-padding) shadow-(--elevation-composer) transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-(--elevation-composer-focus) data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
+            <div className="composer-surface relative flex w-full flex-col gap-2 rounded-(--composer-radius) border border-border/60 bg-(--composer-background) p-(--composer-padding) shadow-(--elevation-composer) transition-[border-color,box-shadow] focus-within:border-border focus-within:shadow-(--elevation-composer-focus) data-[dragging=true]:border-dashed data-[dragging=true]:border-ring">
               <ComposerQuotes />
               {isRunning && extensionWorking?.message && extensionWorking.visible !== false ? (
                 <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground" role="status">
@@ -223,8 +223,8 @@ export function Composer(props: ComposerProps) {
                 onSubmitRunning={submitRunning}
                 onEscapeCancelPendingChange={setEscapeCancelPending}
               />
-              <div className="flex min-h-8 items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
+              <div className="composer-toolbar flex min-h-8 items-center justify-between gap-2">
+                <div className="composer-toolbar-start flex min-w-0 items-center gap-2">
                   <ComposerAddAttachment disabled={attachmentsDisabled} />
                   {selectedCommand ? (
                     <div className="min-w-0 border-l border-border/70 pl-1">
@@ -249,6 +249,7 @@ export function Composer(props: ComposerProps) {
                   ) : null}
                   {props.mode === "draft" && !props.fixedProject ? (
                     <ProjectSelect
+                      className="max-w-36 project-select-trigger"
                       projects={props.projects}
                       projectId={props.project?.id ?? null}
                       disabled={disabled}
@@ -267,7 +268,7 @@ export function Composer(props: ComposerProps) {
                     />
                   ) : null}
                   {isRunning ? (
-                    <div className="mode-control" role="group" aria-label="运行中消息模式">
+                    <div className="mode-control shrink-0" role="group" aria-label="运行中消息模式">
                       <button
                         type="button"
                         aria-pressed={mode === "steer"}
@@ -287,7 +288,7 @@ export function Composer(props: ComposerProps) {
                     </div>
                   ) : null}
                 </div>
-                <div className="flex min-w-0 items-center gap-2">
+                <div className="composer-toolbar-end flex min-w-0 flex-1 items-center justify-end gap-2">
                   {props.mode === "draft" ? (
                     <>
                       <ModelSelect

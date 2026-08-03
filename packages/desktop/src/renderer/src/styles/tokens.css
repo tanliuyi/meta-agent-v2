@@ -61,6 +61,13 @@
   }
 }
 
+/* 代码缩略图（minimap）颜色：canvas 无法解析 CSS var()，组件从这些变量读取计算值。 */
+:root {
+  --file-minimap-fallback: hsl(var(--foreground) / 0.55);
+  --file-minimap-viewport: rgb(127 127 127 / 0.32);
+  --file-minimap-viewport-border: rgb(127 127 127 / 0.6);
+}
+
 @layer theme {
   :root {
     --font-family-sans-default: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -155,6 +162,8 @@
 
     --focus-ring-width: 2px;
     --focus-ring-offset: 1px;
+
+    --scrollbar-size: 12px;
 
     /* 仅供调色板光谱使用，不参与应用语义色。 */
     --color-picker-black: 0 0% 0%;

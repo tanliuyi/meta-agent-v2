@@ -9,6 +9,8 @@ import type {
 import type {
   ClearedQueue,
   DraftSessionConfig,
+  FileChangeSet,
+  FileImage,
   FileNode,
   HostResponse,
   Project,
@@ -243,8 +245,13 @@ export interface DesktopApi {
   files: {
     list(projectId: string, path?: string, query?: string, requestGroup?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
+    readImage(projectId: string, path: string): Promise<FileImage>;
     resolvePath(projectId: string, path: string): Promise<string>;
     open(projectId: string, path: string): Promise<void>;
+    watch(projectId: string): Promise<void>;
+    unwatch(projectId: string): Promise<void>;
+    /** 订阅 Project 文件变化；返回取消订阅函数。 */
+    onChanged(projectId: string, listener: (change: FileChangeSet) => void): () => void;
   };
   terminals: {
     open(

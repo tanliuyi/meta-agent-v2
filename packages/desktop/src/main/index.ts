@@ -11,6 +11,7 @@ import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extensi
 import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
+import { ProjectFileWatcher } from "./files/file-watcher.ts";
 import { broadcastTerminalEvent, broadcastThreadCatalogUpdate, registerIpc } from "./ipc.ts";
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
@@ -417,6 +418,11 @@ app.whenReady().then(async () => {
     projects,
     sessions,
     new FileService(projects),
+    new ProjectFileWatcher(projects, (change) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(CHANNELS.filesChanged, change);
+      }
+    }),
     terminals,
     models,
     auth,

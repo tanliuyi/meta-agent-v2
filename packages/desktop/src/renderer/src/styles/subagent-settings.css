@@ -278,7 +278,7 @@
 }
 
 .subagent-agent-dialog {
-  height: min(34rem, calc(100vh - 32px));
+  height: min(80vh, calc(100vh - 32px));
 }
 
 .subagent-editor-header-text h2 {

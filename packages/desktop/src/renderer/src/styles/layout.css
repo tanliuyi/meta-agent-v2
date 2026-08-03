@@ -503,6 +503,27 @@ body.is-resizing-column .sidebar {
     box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
 }
 
+.app-frame[data-platform="darwin"] .workspace:has(> .workbench-panel:not([data-collapsed])) {
+  column-gap: 0;
+}
+
+.app-frame[data-platform="darwin"] .workspace > :is(.session-surface-shell, .workbench-panel) {
+  border-radius: 0;
+}
+
+.app-frame[data-platform="darwin"] .workspace > .workbench-panel {
+  border: 1px solid hsl(var(--border));
+  border-left: 0;
+}
+
+.app-frame[data-platform="darwin"] .workspace > .workbench-panel::before {
+  content: none;
+}
+
+.app-frame[data-platform="darwin"] .workspace > .workbench-panel .resize-handle-panel {
+  left: -4px;
+}
+
 .workspace:has(> .workbench-panel[data-collapsed]) {
   transition:
     column-gap var(--motion-duration-standard) cubic-bezier(0.7, 0, 1, 1),
@@ -551,6 +572,10 @@ body.is-resizing-column .sidebar {
     right: 0;
     bottom: 0;
     z-index: var(--stack-workbench-overlay);
+  }
+
+  .app-frame[data-platform="darwin"] .workspace > .workbench-panel {
+    border-left: 1px solid hsl(var(--border));
   }
 
   .workspace > .workbench-panel:not([data-collapsed]) {
@@ -615,7 +640,7 @@ body.is-resizing-column .sidebar {
 }
 .topbar-actions {
   position: fixed;
-  top: 10px;
+  top: 9px;
   right: 18px;
   z-index: calc(var(--stack-workbench-overlay) + 1);
   display: flex;

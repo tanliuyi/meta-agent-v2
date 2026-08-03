@@ -506,6 +506,21 @@ export interface TextFile {
   language: string;
 }
 
+/** Project 下的图片文件（data URL，用于只读预览）。 */
+export interface FileImage {
+  path: string;
+  mime: string;
+  dataUrl: string;
+}
+
+/** 单个 Project 内一次合并的文件变化事件（相对路径，目录树增量刷新用）。 */
+export interface FileChangeSet {
+  projectId: string;
+  added: string[];
+  deleted: string[];
+  updated: string[];
+}
+
 /** 单个 session 下的 PTY 权威快照。 */
 export interface TerminalSnapshot {
   projectId: string;
@@ -569,6 +584,8 @@ export interface WorkbenchState {
   terminalHeight: number;
   openFiles: string[];
   activeFile?: string;
+  /** 处于“预览”状态的 tab（单击打开，可被下一次单击替换）；固定后为 undefined。 */
+  previewFile?: string;
   expandedPaths: string[];
   /** 已打开的 workbench panel tab（会话/面板）；由渲染进程写入，跨刷新/重启持久化。 */
   tabs?: WorkbenchTab[];

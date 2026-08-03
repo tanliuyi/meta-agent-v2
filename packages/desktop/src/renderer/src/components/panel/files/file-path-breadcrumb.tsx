@@ -15,10 +15,18 @@ interface FilePathBreadcrumbProps {
   expanded: ReadonlySet<string>;
   onDirectoryOpen(path: string): void;
   onOpen(node: FileNode): void;
+  onPinOpen?(node: FileNode): void;
 }
 
 /** 文件路径导航；目录节点通过统一 Popover 展示可继续操作的文件树。 */
-export function FilePathBreadcrumb({ path, children, expanded, onDirectoryOpen, onOpen }: FilePathBreadcrumbProps) {
+export function FilePathBreadcrumb({
+  path,
+  children,
+  expanded,
+  onDirectoryOpen,
+  onOpen,
+  onPinOpen,
+}: FilePathBreadcrumbProps) {
   const [openDirectory, setOpenDirectory] = useState<string | null>(null);
   const segments = useMemo(() => filePathSegments(path), [path]);
 
@@ -59,6 +67,7 @@ export function FilePathBreadcrumb({ path, children, expanded, onDirectoryOpen, 
                             onOpen(node);
                             if (node.type === "file") setOpenDirectory(null);
                           }}
+                          onPinOpen={onPinOpen}
                         />
                       </div>
                     ) : (

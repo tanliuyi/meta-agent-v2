@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   closeWorkbenchFile,
   filePathSegments,
+  isImagePath,
+  openWorkbenchFileAsPreview,
+  pinWorkbenchFile,
   replaceActiveWorkbenchFile,
 } from "../src/renderer/src/components/panel/panel-model.ts";
 
@@ -49,6 +52,74 @@ describe("filePathSegments", () => {
       { label: "src", path: "packages/desktop/src", directory: true },
       { label: "index.ts", path: "packages/desktop/src/index.ts", directory: false },
     ]);
+  });
+});
+
+describe("openWorkbenchFileAsPreview", () => {
+  it("无预览 tab 时追加为新预览 tab", () => {
+    expect(openWorkbenchFileAsPreview(["a.ts"], undefined, "b.ts")).toEqual({
+      openFiles: ["a.ts", "b.ts"],
+      activeFile: "b.ts",
+      previewFile: "b.ts",
+    });
+  });
+
+  it("有预览 tab 时原地替换（VS Code 预览行为）", () => {
+    expect(openWorkbenchFileAsPreview(["a.ts", "b.ts"], "b.ts", "c.ts")).toEqual({
+      openFiles: ["a.ts", "c.ts"],
+      activeFile: "c.ts",
+      previewFile: "c.ts",
+    });
+  });
+
+  it("再次点击同一预览 tab 只切换激活", () => {
+    expect(openWorkbenchFileAsPreview(["a.ts", "b.ts"], "b.ts", "b.ts")).toEqual({
+      openFiles: ["a.ts", "b.ts"],
+      activeFile: "b.ts",
+      previewFile: "b.ts",
+    });
+  });
+
+  it("预览 tab 已固定（无 previewFile）时按普通 tab 追加", () => {
+    expect(openWorkbenchFileAsPreview(["a.ts", "b.ts"], undefined, "c.ts")).toEqual({
+      openFiles: ["a.ts", "b.ts", "c.ts"],
+      activeFile: "c.ts",
+      previewFile: "c.ts",
+    });
+  });
+
+  it("预览路径失效（不在 openFiles）时仍能打开目标", () => {
+    expect(openWorkbenchFileAsPreview(["a.ts"], "ghost.ts", "c.ts")).toEqual({
+      openFiles: ["a.ts", "c.ts"],
+      activeFile: "c.ts",
+      previewFile: "c.ts",
+    });
+  });
+});
+
+describe("pinWorkbenchFile", () => {
+  it("固定当前预览 tab", () => {
+    expect(pinWorkbenchFile("b.ts", "b.ts")).toEqual({ previewFile: undefined });
+  });
+
+  it("非预览目标不操作", () => {
+    expect(pinWorkbenchFile("b.ts", "c.ts")).toBeNull();
+    expect(pinWorkbenchFile(undefined, "b.ts")).toBeNull();
+  });
+});
+
+describe("isImagePath", () => {
+  it("识别常见图片扩展名（不区分大小写）", () => {
+    expect(isImagePath("docs/logo.PNG")).toBe(true);
+    expect(isImagePath("docs/photo.jpg")).toBe(true);
+    expect(isImagePath("assets/icon.svg")).toBe(true);
+    expect(isImagePath("assets/banner.webp")).toBe(true);
+  });
+
+  it("非图片路径返回 false", () => {
+    expect(isImagePath("src/index.ts")).toBe(false);
+    expect(isImagePath("README.md")).toBe(false);
+    expect(isImagePath("no-extension")).toBe(false);
   });
 });
 

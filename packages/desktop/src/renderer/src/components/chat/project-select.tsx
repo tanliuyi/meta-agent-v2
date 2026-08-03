@@ -2,6 +2,7 @@ import { GENERAL_WORKSPACE_ID, type Project } from "../../../../shared/contracts
 import { Select } from "../assistant-ui/select/select.tsx";
 
 interface ProjectSelectProps {
+  className?: string;
   projects: readonly Project[];
   projectId: string | null;
   disabled: boolean;
@@ -9,7 +10,7 @@ interface ProjectSelectProps {
 }
 
 /** 仅供新会话草稿选择目标 Project。包含通用对话选项。 */
-export function ProjectSelect({ projects, projectId, disabled, onValueChange }: ProjectSelectProps) {
+export function ProjectSelect({ className, projects, projectId, disabled, onValueChange }: ProjectSelectProps) {
   const options = projects.flatMap((project) => {
     if (project.id === GENERAL_WORKSPACE_ID) {
       return {
@@ -27,6 +28,7 @@ export function ProjectSelect({ projects, projectId, disabled, onValueChange }: 
 
   return (
     <Select
+      className={className}
       value={projectId ?? ""}
       options={options}
       placeholder="选择会话目标"

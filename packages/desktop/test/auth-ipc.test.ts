@@ -56,6 +56,7 @@ describe("auth IPC", () => {
       } as never,
       {} as never,
       {} as never,
+      {} as never,
       { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
       models as never,
       auth as never,
