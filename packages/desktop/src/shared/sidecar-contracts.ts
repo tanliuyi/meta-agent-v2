@@ -262,7 +262,7 @@ export interface CreationReservation {
 export interface ColdOperationLease {
   projectId: string;
   threadId: string;
-  operation: "rename" | "remove";
+  operation: "rename" | "remove" | "promote";
   nonce: string;
   expiresAt: number;
 }
@@ -287,6 +287,13 @@ export type MetadataSidecarCommand =
       cwd: string;
       threadId: string;
       policy: SessionRemovePolicy;
+      lease: ColdOperationLease;
+    }
+  | {
+      type: "promoteColdSession";
+      projectId: string;
+      cwd: string;
+      threadId: string;
       lease: ColdOperationLease;
     }
   | { type: "recoverCreationReservation"; reservation: CreationReservation }

@@ -990,6 +990,50 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("promotes a child session to root through one metadata mutation", async () => {
+    const harness = createHarness(userDataDir);
+    harness.metadataList.mockResolvedValue([
+      thread("parent"),
+      { ...thread("child"), parentThreadId: "parent" },
+      { ...thread("grandchild"), parentThreadId: "child" },
+    ]);
+    harness.metadataPromoteCold.mockResolvedValue({ removedThreadIds: [], reparentedThreads: [thread("child")] });
+    const begun: string[] = [];
+    const ended: string[] = [];
+    harness.options.beginSubagentTreeMutation = (_projectId, id) => begun.push(id);
+    harness.options.endSubagentTreeMutation = (_projectId, id) => ended.push(id);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await expect(registry.promote("project", "child")).resolves.toEqual({
+      removedThreadIds: [],
+      reparentedThreads: [thread("child")],
+    });
+    expect(harness.metadataPromoteCold).toHaveBeenCalledWith("project", "/workspace", "child");
+    expect(begun).toEqual(["child"]);
+    expect(ended).toEqual(["child"]);
+    await registry.dispose();
+  });
+
+  it("rejects promoting a root session", async () => {
+    const harness = createHarness(userDataDir);
+    harness.metadataList.mockResolvedValue([thread("parent")]);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await expect(registry.promote("project", "parent")).rejects.toThrow("already a root session");
+    expect(harness.metadataPromoteCold).not.toHaveBeenCalled();
+    await registry.dispose();
+  });
+
+  it("rejects promoting a running session", async () => {
+    const harness = createHarness(userDataDir);
+    harness.metadataList.mockResolvedValue([
+      thread("parent"),
+      { ...thread("child"), parentThreadId: "parent", running: true },
+    ]);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await expect(registry.promote("project", "child")).rejects.toThrow("child is running");
+    expect(harness.metadataPromoteCold).not.toHaveBeenCalled();
+    await registry.dispose();
+  });
+
   it("rejects tree deletion while a descendant is running", async () => {
     const harness = createHarness(userDataDir);
     harness.metadataList.mockResolvedValue([
@@ -1024,6 +1068,7 @@ interface Harness {
   metadataRenameCold: ReturnType<typeof vi.fn>;
   metadataList: ReturnType<typeof vi.fn>;
   metadataRemoveCold: ReturnType<typeof vi.fn>;
+  metadataPromoteCold: ReturnType<typeof vi.fn>;
   cleanupSessionCheckpoints: ReturnType<typeof vi.fn>;
   resolveExtensions: ReturnType<typeof vi.fn>;
   resync: ReturnType<typeof vi.fn>;
@@ -1056,6 +1101,10 @@ function createHarness(
     removedThreadIds: policy === "subtree" && threadId === "parent" ? ["parent", "child", "grandchild"] : [threadId],
     reparentedThreads: [],
   }));
+  const metadataPromoteCold = vi.fn(async (_projectId: string, _cwd: string, threadId: string) => ({
+    removedThreadIds: [],
+    reparentedThreads: [{ ...thread(threadId), parentThreadId: undefined }],
+  }));
   const cleanupSessionCheckpoints = vi.fn(async () => undefined);
   const metadata = {
     list: metadataList,
@@ -1072,6 +1121,7 @@ function createHarness(
     upsert: vi.fn(async () => {}),
     renameCold: metadataRenameCold,
     removeCold: metadataRemoveCold,
+    promoteCold: metadataPromoteCold,
     recoverCreationReservation: vi.fn(async () => ({ status: "orphan" as const })),
     invalidateProject: vi.fn(async () => {}),
   } as unknown as MetadataWorkerClient;
@@ -1119,6 +1169,7 @@ function createHarness(
     metadataResolve,
     metadataList,
     metadataRemoveCold,
+    metadataPromoteCold,
     cleanupSessionCheckpoints,
     resolveExtensions,
     resync,

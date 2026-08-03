@@ -210,6 +210,7 @@ const desktopApi: DesktopApi = {
     testEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceTestEndpoint, input),
     saveEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSaveEndpoint, input),
     listPlugins: (input = {}) => ipcRenderer.invoke(CHANNELS.marketplaceListPlugins, input),
+    getPlugin: (pluginId) => ipcRenderer.invoke(CHANNELS.marketplaceGetPlugin, pluginId),
     getInstalled: () => ipcRenderer.invoke(CHANNELS.marketplaceGetInstalled),
     getPluginConfiguration: (pluginId) => ipcRenderer.invoke(CHANNELS.marketplaceGetPluginConfiguration, pluginId),
     savePluginConfiguration: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSavePluginConfiguration, input),
@@ -323,6 +324,7 @@ const desktopApi: DesktopApi = {
     archive: (projectId, threadId, archived) =>
       ipcRenderer.invoke(CHANNELS.sessionsArchive, projectId, threadId, archived),
     remove: (projectId, threadId, policy) => ipcRenderer.invoke(CHANNELS.sessionsRemove, projectId, threadId, policy),
+    promote: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsPromote, projectId, threadId),
     prompt: (input) => ipcRenderer.invoke(CHANNELS.sessionsPrompt, input),
     edit: (input) => ipcRenderer.invoke(CHANNELS.sessionsEdit, input),
     reload: (input) => ipcRenderer.invoke(CHANNELS.sessionsReload, input),

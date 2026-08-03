@@ -7,6 +7,7 @@ import type { DesktopActions } from "../src/renderer/src/state/desktop-actions.t
 import { DesktopActionsContext } from "../src/renderer/src/state/desktop-context.tsx";
 import { INITIAL_STATE } from "../src/renderer/src/state/desktop-model.ts";
 import { DesktopStoreProvider } from "../src/renderer/src/state/desktop-store-context.tsx";
+import { ThreadPinningProvider } from "../src/renderer/src/state/thread-pinning-context.tsx";
 import type { Project, Thread } from "../src/shared/contracts.ts";
 
 const project: Project = {
@@ -50,6 +51,21 @@ describe("ProjectItem", () => {
     const markup = renderProjectItem(true);
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('id="project-threads-project" hidden=""');
+  });
+
+  it("置顶会话不再显示在原项目列表中", () => {
+    const pinned = { ...runningThread, id: "pinned", title: "Pinned thread" };
+    vi.stubGlobal("window", {
+      desktop: { platform: "win32" },
+      localStorage: {
+        getItem: () => JSON.stringify({ version: 1, threads: [[project.id, pinned.id]] }),
+      },
+    });
+
+    const markup = renderProjectItem(true, [pinned]);
+
+    expect(markup).not.toContain("Pinned thread");
+    expect(markup).toContain("没有会话");
   });
 
   it("收起时用 loading 标记项目中正在运行的任务", () => {
@@ -122,9 +138,11 @@ function renderProjectItem(active: boolean, threads?: Thread[]): string {
       initialState={threads ? { ...INITIAL_STATE, threadCatalogs: { [project.id]: threads } } : undefined}
     >
       <DesktopActionsContext.Provider value={desktopActions()}>
-        <TooltipProvider>
-          <ProjectItem project={project} active={active} newTaskDisabled={false} onNewTask={vi.fn()} />
-        </TooltipProvider>
+        <ThreadPinningProvider>
+          <TooltipProvider>
+            <ProjectItem project={project} active={active} newTaskDisabled={false} onNewTask={vi.fn()} />
+          </TooltipProvider>
+        </ThreadPinningProvider>
       </DesktopActionsContext.Provider>
     </DesktopStoreProvider>,
   );

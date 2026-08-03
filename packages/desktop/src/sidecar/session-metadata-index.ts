@@ -40,6 +40,8 @@ export interface SessionRemovalPlan {
     session: IndexedSession;
     previousParentPath: string;
     nextParentPath?: string;
+    /** 提升为根：清除 parentSession header 并写入持久化 promotedRoot 标记。 */
+    promoteToRoot?: boolean;
   }>;
   result: SessionRemoveResult;
 }
@@ -216,6 +218,35 @@ export class SessionMetadataIndex {
       result: {
         removedThreadIds: removedSessions.map(({ id }) => id),
         reparentedThreads: reparentedSessions.map(({ session: { path: _path, ...thread } }) => thread),
+      },
+    };
+  }
+
+  /** 将子会话提升为 root：不删除任何会话，仅清除目标 header 的 parentSession 并同步索引。 */
+  async planPromotion(projectId: string, cwd: string, threadId: string): Promise<SessionRemovalPlan> {
+    const project = await this.requireProject(projectId, cwd);
+    const target = project.sessions.find(({ id }) => id === threadId);
+    if (!target) throw new Error(`Pi session does not exist: ${threadId}`);
+    const parentThreadId = target.parentThreadId;
+    if (!parentThreadId) throw new Error(`Pi session is already a root session: ${threadId}`);
+    const parent = project.sessions.find(({ id }) => id === parentThreadId);
+    if (!parent) throw new Error(`Pi session parent does not exist: ${parentThreadId}`);
+    const promoted = promotedSession(target);
+    const { path: _path, ...thread } = promoted;
+    return {
+      projectId,
+      cwd,
+      removedSessions: [],
+      reparentedSessions: [
+        {
+          session: promoted,
+          previousParentPath: parent.path,
+          promoteToRoot: true,
+        },
+      ],
+      result: {
+        removedThreadIds: [],
+        reparentedThreads: [thread],
       },
     };
   }
@@ -468,6 +499,12 @@ function withParentThreadId(session: IndexedSession, parentThreadId: string | un
   return parentThreadId ? { ...rest, parentThreadId } : rest;
 }
 
+/** 提升为 root 后成为普通会话：清除子会话身份（parent、subagent origin 与 agentName）。 */
+function promotedSession(session: IndexedSession): IndexedSession {
+  const { parentThreadId: _parent, origin: _origin, agentName: _agentName, ...rest } = session;
+  return rest;
+}
+
 function indexedSession(thread: Thread, sessionFile: string, existing?: IndexedSession): IndexedSession {
   const parentThreadId = thread.parentThreadId ?? existing?.parentThreadId;
   const origin = thread.origin ?? existing?.origin;
@@ -620,19 +657,45 @@ async function listNestedSessionInfos(
   for (let index = 0; index < directories.length; index += 10) {
     const batchDirectories = directories.slice(index, index + 10);
     const batch = await Promise.all(batchDirectories.map((directory) => SessionManager.listAll(directory)));
-    batch.forEach((listed, batchIndex) => {
-      const directory = batchDirectories[batchIndex];
-      if (listed.length === 0 && directory && existsSync(join(directory, "session.jsonl"))) complete = false;
-      for (const session of listed) {
-        if (session.parentSessionPath) sessions.push(session);
-        else {
-          const parentSessionPath = inferNestedParentSessionPath(sessionDirectory, session.path);
-          sessions.push(parentSessionPath ? { ...session, parentSessionPath } : session);
+    await Promise.all(
+      batch.map(async (listed, batchIndex) => {
+        const directory = batchDirectories[batchIndex];
+        if (listed.length === 0 && directory && existsSync(join(directory, "session.jsonl"))) complete = false;
+        for (const session of listed) {
+          if (session.parentSessionPath) sessions.push(session);
+          else {
+            const parentSessionPath = inferNestedParentSessionPath(sessionDirectory, session.path);
+            // 提升为根的会话在 header 中持久化 promotedRoot 标记；
+            // 索引丢失重建时不再按嵌套路径挂回原父。
+            sessions.push(
+              parentSessionPath && !(await isPromotedRootSession(session.path))
+                ? { ...session, parentSessionPath }
+                : session,
+            );
+          }
         }
-      }
-    });
+      }),
+    );
   }
   return { sessions, complete };
+}
+
+async function isPromotedRootSession(sessionFile: string): Promise<boolean> {
+  const lines = createInterface({ input: createReadStream(sessionFile, { encoding: "utf8" }), crlfDelay: Infinity });
+  try {
+    for await (const line of lines) {
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        return false;
+      }
+      return isRecord(value) && value.type === "session" && value.promotedRoot === true;
+    }
+  } catch {
+    // 不可读的 session 文件由 SessionManager 列表扫描跳过。
+  }
+  return false;
 }
 
 function inferNestedParentSessionPath(sessionDirectory: string, sessionFile: string): string | undefined {

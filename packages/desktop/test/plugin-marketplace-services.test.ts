@@ -387,4 +387,133 @@ describe("MarketplaceCatalogService", () => {
     await expect(service.list()).rejects.toMatchObject({ code: "MARKETPLACE_ENDPOINT_NOT_CONFIGURED" });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("finds a plugin by id across bounded pagination beyond the default list page", async () => {
+    const endpoints = {
+      getSettings: vi.fn(async () => ({
+        revision: "one",
+        endpoint: {
+          marketplaceId: "example.market",
+          baseUrl: "https://market.example/",
+          apiRoot: "https://market.example/v1/",
+        },
+      })),
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ plugins: [pluginSummary("plugin.one")], nextCursor: "page-2" }))
+      .mockResolvedValueOnce(jsonResponse({ plugins: [pluginSummary("plugin.target")] }));
+    const service = new MarketplaceCatalogService(endpoints as never, { fetch });
+
+    await expect(service.getPlugin("plugin.target")).resolves.toMatchObject({ id: "plugin.target" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const firstUrl = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(firstUrl.searchParams.get("query")).toBe("plugin.target");
+    expect(firstUrl.searchParams.get("limit")).toBe("100");
+    expect(new URL(String(fetch.mock.calls[1]?.[0])).searchParams.get("cursor")).toBe("page-2");
+  });
+
+  it("returns null when the plugin id is not present in the bounded catalog", async () => {
+    const endpoints = {
+      getSettings: vi.fn(async () => ({
+        revision: "one",
+        endpoint: {
+          marketplaceId: "example.market",
+          baseUrl: "https://market.example/",
+          apiRoot: "https://market.example/v1/",
+        },
+      })),
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ plugins: [], nextCursor: "page-2" }))
+      .mockResolvedValueOnce(jsonResponse({ plugins: [] }));
+    const service = new MarketplaceCatalogService(endpoints as never, { fetch });
+
+    await expect(service.getPlugin("plugin.missing")).resolves.toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops plugin lookup at the bounded pagination limit", async () => {
+    const endpoints = {
+      getSettings: vi.fn(async () => ({
+        revision: "one",
+        endpoint: {
+          marketplaceId: "example.market",
+          baseUrl: "https://market.example/",
+          apiRoot: "https://market.example/v1/",
+        },
+      })),
+    };
+    const fetch = vi.fn(async () => jsonResponse({ plugins: [], nextCursor: "repeated-cursor" }));
+    const service = new MarketplaceCatalogService(endpoints as never, { fetch });
+
+    await expect(service.getPlugin("plugin.missing")).resolves.toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(10);
+    expect(new URL(String(fetch.mock.calls[0]?.[0])).searchParams.has("cursor")).toBe(false);
+    expect(new URL(String(fetch.mock.calls[9]?.[0])).searchParams.get("cursor")).toBe("repeated-cursor");
+  });
+
+  it("caches successful plugin lookups and does not refetch the same id", async () => {
+    const endpoints = {
+      getSettings: vi.fn(async () => ({
+        revision: "one",
+        endpoint: {
+          marketplaceId: "example.market",
+          baseUrl: "https://market.example/",
+          apiRoot: "https://market.example/v1/",
+        },
+      })),
+    };
+    const fetch = vi.fn().mockResolvedValue(jsonResponse({ plugins: [pluginSummary("plugin.one")] }));
+    const service = new MarketplaceCatalogService(endpoints as never, { fetch });
+
+    await expect(service.getPlugin("plugin.one")).resolves.toMatchObject({ id: "plugin.one" });
+    await expect(service.getPlugin("plugin.one")).resolves.toMatchObject({ id: "plugin.one" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates cached plugin lookups when the active endpoint changes", async () => {
+    let endpoint = {
+      marketplaceId: "shared.market",
+      baseUrl: "https://market-a.example/",
+      apiRoot: "https://market-a.example/v1/",
+    };
+    const endpoints = {
+      getSettings: vi.fn(async () => ({ revision: "current", endpoint })),
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ plugins: [{ ...pluginSummary("plugin.one"), name: "Plugin from A" }] }))
+      .mockResolvedValueOnce(jsonResponse({ plugins: [{ ...pluginSummary("plugin.one"), name: "Plugin from B" }] }));
+    const service = new MarketplaceCatalogService(endpoints as never, { fetch });
+
+    await expect(service.getPlugin("plugin.one")).resolves.toMatchObject({ name: "Plugin from A" });
+    endpoint = {
+      marketplaceId: "shared.market",
+      baseUrl: "https://market-b.example/",
+      apiRoot: "https://market-b.example/v1/",
+    };
+    await expect(service.getPlugin("plugin.one")).resolves.toMatchObject({ name: "Plugin from B" });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetch.mock.calls[0]?.[0])).origin).toBe("https://market-a.example");
+    expect(new URL(String(fetch.mock.calls[1]?.[0])).origin).toBe("https://market-b.example");
+  });
 });
+
+function pluginSummary(id: string) {
+  return {
+    id,
+    name: id,
+    description: `${id} description`,
+    publisher: { id: "publisher", displayName: "Publisher", verified: true },
+    categories: ["tools"],
+    latestVersion: "1.0.0",
+    compatibleVersion: "1.0.0",
+    containsNativeCode: false,
+    status: "available" as const,
+    publishedAt: 1,
+    updatedAt: 2,
+  };
+}

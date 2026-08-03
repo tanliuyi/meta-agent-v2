@@ -3,7 +3,7 @@ import { SidebarToggle } from "./layout/sidebar-toggle.tsx";
 
 export function SessionRoutePending() {
   return (
-    <>
+    <div className="session-surface-shell">
       <header className="topbar">
         <SidebarToggle location="topbar" />
         <div className="topbar-title">
@@ -15,6 +15,6 @@ export function SessionRoutePending() {
           <SessionBootstrapPendingThread />
         </main>
       </div>
-    </>
+    </div>
   );
 }

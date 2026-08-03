@@ -233,6 +233,10 @@ export class SessionSupervisor {
     }
   }
 
+  promote(projectId: string, threadId: string): Promise<SessionRemoveResult> {
+    return this.workers.promote(projectId, threadId);
+  }
+
   async remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult> {
     this.clearPendingAttachments(projectId, threadId);
     this.clearSessionSubscriptions(projectId, threadId);

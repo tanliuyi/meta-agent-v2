@@ -27,6 +27,7 @@ function renderThread(
     runningChildCount?: number;
     compactRoot?: boolean;
     active?: boolean;
+    pinned?: boolean;
   } = {},
 ): string {
   return renderToStaticMarkup(
@@ -38,6 +39,8 @@ function renderThread(
       isStopPending={false}
       isArchivePending={false}
       isDeletePending={false}
+      isPromotePending={false}
+      isPinned={options.pinned}
       depth={options.depth ?? 1}
       childCount={options.childCount ?? 0}
       runningChildCount={options.runningChildCount ?? 0}
@@ -52,6 +55,8 @@ function renderThread(
       onOpenInSidebar={vi.fn()}
       onArchive={vi.fn()}
       onDelete={vi.fn()}
+      onPromote={vi.fn()}
+      onTogglePin={vi.fn()}
     />,
   );
 }
@@ -75,6 +80,12 @@ describe("DesktopThreadListItem", () => {
     expect(markup).toContain('draggable="true"');
     expect(markup).toContain('class="thread-drag-image"');
     expect(markup).toContain(">在侧边栏打开</span>");
+  });
+
+  it("marks pinned sessions and exposes the unpin action", () => {
+    const markup = renderThread(baseThread, { pinned: true });
+
+    expect(markup).toContain('aria-label="已置顶"');
   });
 
   it("keeps custom subagent names unchanged", () => {

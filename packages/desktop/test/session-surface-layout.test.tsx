@@ -20,11 +20,11 @@ vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
 }));
 
 describe("SessionSurface layout", () => {
-  it("renders the workbench as a workspace column beside all three primary rows", () => {
+  it("groups the topbar and session row before the terminal and workbench", () => {
     const markup = renderToStaticMarkup(React.createElement(SessionSurface));
 
     expect(markup).toContain(
-      '<header data-slot="topbar"></header><div class="workspace-row session-surface" data-session-key="session-1" data-active="true"><main class="chat-workspace"><div data-slot="messages"></div></main></div><section data-slot="bottom"></section><aside data-slot="panel"></aside>',
+      '<div class="session-surface-shell"><header data-slot="topbar"></header><div class="workspace-row session-surface" data-session-key="session-1" data-active="true"><main class="chat-workspace"><div data-slot="messages"></div></main></div></div><section data-slot="bottom"></section><aside data-slot="panel"></aside>',
     );
   });
 });

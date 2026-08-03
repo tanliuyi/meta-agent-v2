@@ -98,14 +98,10 @@ describe("plugin detail confirmation", () => {
   it("keeps install and uninstall warnings in the detail dialog confirmation state", () => {
     expect(pluginActionConfirmation("install", plugin.name, plugin)).toEqual({
       title: "安装 Example Tools？",
-      description:
-        "市场插件以全信任方式运行，可读写本机文件、访问网络并执行进程，不受能力声明限制。该版本包含原生模块或平台二进制。声明能力：tools.register。",
       confirmLabel: "确认安装",
     });
     expect(pluginActionConfirmation("uninstall", plugin.name, plugin)).toEqual({
       title: "卸载 Example Tools？",
-      description:
-        "插件将不再用于新会话。当前运行中的会话会继续使用原版本，直到运行 /reload；本地版本会暂时保留，以保护仍在运行或已修改的文件。",
       confirmLabel: "确认卸载",
     });
   });

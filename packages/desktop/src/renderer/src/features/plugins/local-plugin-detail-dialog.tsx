@@ -35,7 +35,7 @@ export function LocalPluginDetailDialog({
 }: LocalPluginDetailDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className="plugin-marketplace-detail-dialog w-[min(60rem,calc(100vw-48px))] max-w-none gap-0 p-0 sm:max-w-none max-[480px]:w-[calc(100vw-16px)] max-[480px]:max-h-[calc(100dvh-16px)]">
+      <DialogContent className="plugin-marketplace-detail-dialog plugin-marketplace-detail-dialog-local w-[min(60rem,calc(100vw-48px))] max-w-none gap-0 p-0 sm:max-w-none max-[480px]:w-[calc(100vw-16px)] max-[480px]:max-h-[calc(100dvh-16px)]">
         <DialogTitle className="sr-only">{plugin.displayName}</DialogTitle>
         <DialogDescription className="sr-only">{plugin.displayPath ?? "本地扩展入口"}</DialogDescription>
         <LocalPluginDetailContent

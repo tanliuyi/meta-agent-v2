@@ -1,26 +1,18 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Switch } from "@renderer/shared/ui/switch";
 import { Toast } from "@renderer/shared/ui/toast";
-import { useDesktopSelector } from "@renderer/state/desktop-context";
-import { selectProjects } from "@renderer/state/desktop-selectors";
 import FolderPlus from "lucide-react/dist/esm/icons/folder-plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { useState } from "react";
-import { LocalPluginDetailDialog } from "./local-plugin-detail-dialog.tsx";
 import type { LocalPluginsController } from "./use-local-plugins.ts";
 
 interface LocalPluginsViewProps {
   controller: LocalPluginsController;
+  onOpen?(pluginId: string): void;
 }
 
-export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
+export function LocalPluginsView({ controller, onOpen }: LocalPluginsViewProps) {
   const snapshot = controller.snapshot;
-  const projects = useDesktopSelector(selectProjects);
   const plugins = snapshot?.entries.filter((entry) => entry.source === "development") ?? [];
-  const [selectedId, setSelectedId] = useState<string>();
-  const selected = plugins.find((plugin) => plugin.id === selectedId);
-  const selectedDiagnostics =
-    snapshot?.diagnostics.filter((diagnostic) => diagnostic.extensionId === selected?.id) ?? [];
 
   return (
     <>
@@ -90,7 +82,7 @@ export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
                   className="plugin-local-row-main"
                   aria-label={`查看 ${plugin.displayName} 详情`}
                   title="查看详情"
-                  onClick={() => setSelectedId(plugin.id)}
+                  onClick={() => onOpen?.(plugin.id)}
                 >
                   <div className="plugin-local-row-title">
                     <strong>{plugin.displayName}</strong>
@@ -121,6 +113,10 @@ export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
               </div>
             ))}
           </div>
+        ) : controller.error ? (
+          <div className="plugin-marketplace-empty" role="alert">
+            无法载入本地插件
+          </div>
         ) : !controller.loading ? (
           <div className="plugin-marketplace-empty">还没有本地插件</div>
         ) : (
@@ -129,28 +125,6 @@ export function LocalPluginsView({ controller }: LocalPluginsViewProps) {
           </div>
         )}
       </section>
-
-      {selected ? (
-        <LocalPluginDetailDialog
-          plugin={selected}
-          diagnostics={selectedDiagnostics}
-          projects={projects}
-          open
-          mutating={controller.mutating}
-          onClose={() => setSelectedId(undefined)}
-          onToggleEnabled={(enabled) =>
-            void controller.mutate({ type: "set-development-enabled", extensionId: selected.id, enabled })
-          }
-          onScopeChange={(scope, projectIds) =>
-            void controller.mutate({ type: "set-development-scope", extensionId: selected.id, scope, projectIds })
-          }
-          onRemove={() =>
-            void controller
-              .mutate({ type: "remove-development-entry", extensionId: selected.id })
-              .then(() => setSelectedId(undefined))
-          }
-        />
-      ) : null}
     </>
   );
 }

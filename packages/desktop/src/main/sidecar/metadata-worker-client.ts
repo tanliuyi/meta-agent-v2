@@ -101,6 +101,13 @@ export class MetadataWorkerClient {
     });
   }
 
+  promoteCold(projectId: string, cwd: string, threadId: string): Promise<SessionRemoveResult> {
+    return this.enqueue(async () => {
+      const lease = createColdLease(projectId, threadId, "promote");
+      return this.request<SessionRemoveResult>({ type: "promoteColdSession", projectId, cwd, threadId, lease }, null);
+    });
+  }
+
   recoverCreationReservation(reservation: CreationReservation): Promise<{ status: "active" | "committed" | "orphan" }> {
     return this.enqueue(() => this.safeRequest({ type: "recoverCreationReservation", reservation }));
   }

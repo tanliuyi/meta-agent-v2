@@ -13,5 +13,6 @@ export interface DesktopActions {
   stopThread(projectId: string, threadId: string): Promise<void>;
   setThreadArchived(projectId: string, threadId: string, archived: boolean): Promise<void>;
   removeThread(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<void>;
+  promoteThread(projectId: string, threadId: string): Promise<void>;
   clearError(): void;
 }

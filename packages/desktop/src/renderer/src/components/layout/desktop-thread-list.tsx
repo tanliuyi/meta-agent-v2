@@ -27,9 +27,12 @@ import {
   nextThreadVisibleLimit,
   normalizeThreadTitle,
   runPendingThreadAction,
+  type ThreadDisplayFilter,
   threadDescendantIds,
   threadTreeByArchiveState,
 } from "../../state/thread-list-commands.ts";
+import { useThreadPinning } from "../../state/thread-pinning-context.tsx";
+import { pinnedThreadKey } from "../../state/thread-pinning-preference.ts";
 import { openThreadAsSidebarTab } from "../../state/thread-sidebar-open.ts";
 import { useWorkbenchTabs } from "../../state/workbench-tab-context.tsx";
 import { DesktopThreadListItem } from "./desktop-thread-list-item.tsx";
@@ -37,7 +40,11 @@ import { ThreadListToggle } from "./thread-list-toggle.tsx";
 
 interface DesktopThreadListProps {
   project: Project;
+  /** 完整 catalog：父子关系、删除树、侧边栏归属都基于它。 */
   threads: readonly Thread[];
+  /** 子树级显示过滤：keep 只展示这些会话的子树，prune 剪除其余会话的子树。缺省展示全部。 */
+  displayThreads?: readonly Thread[];
+  displayMode?: "keep" | "prune";
   compactRoot?: boolean;
 }
 
@@ -47,7 +54,13 @@ interface RenameState {
 }
 
 /** 使用 Router 导航渲染当前 Project 的 session 列表。 */
-export function DesktopThreadList({ project, threads, compactRoot = false }: DesktopThreadListProps) {
+export function DesktopThreadList({
+  project,
+  threads,
+  displayThreads,
+  displayMode = "prune",
+  compactRoot = false,
+}: DesktopThreadListProps) {
   const actions = useDesktopActions();
   const navigate = useNavigate();
   const workbenchTabs = useWorkbenchTabs();
@@ -57,12 +70,24 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const activeThreadId = params.projectId === project.id ? (params.threadId ?? null) : null;
   const navigationDisabled = useSessionDraftMaterializing();
+  const { pinnedThreadKeys, toggleThread: togglePinnedThread } = useThreadPinning();
+  const displayFilter = useMemo<ThreadDisplayFilter | undefined>(() => {
+    if (!displayThreads) return undefined;
+    const displayIds = new Set(displayThreads.map(({ id }) => id));
+    if (displayMode === "keep") return { mode: "keep", threadIds: displayIds };
+    return {
+      mode: "prune",
+      threadIds: new Set(threads.filter(({ id }) => !displayIds.has(id)).map(({ id }) => id)),
+    };
+  }, [displayMode, displayThreads, threads]);
   const pendingActions = useRef(new Set<string>());
   const [pendingKeys, setPendingKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [renaming, setRenaming] = useState<RenameState | null>(null);
   const [pendingStop, setPendingStop] = useState<Thread | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [pendingPromote, setPendingPromote] = useState<Thread | null>(null);
+  const [promoting, setPromoting] = useState(false);
   const pendingDeleteDescendantIds = useMemo(
     () => (pendingDelete ? threadDescendantIds(threads, pendingDelete.id) : []),
     [pendingDelete, threads],
@@ -72,7 +97,10 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     return threads.some((thread) => descendantIds.has(thread.id) && thread.running);
   }, [pendingDeleteDescendantIds, threads]);
   const [visibleLimit, setVisibleLimit] = useState(COLLAPSED_THREAD_COUNT);
-  const threadTree = useMemo(() => threadTreeByArchiveState(threads, false, Number.MAX_SAFE_INTEGER), [threads]);
+  const threadTree = useMemo(
+    () => threadTreeByArchiveState(threads, false, Number.MAX_SAFE_INTEGER, pinnedThreadKeys, displayFilter),
+    [displayFilter, pinnedThreadKeys, threads],
+  );
   const [expandedThreadIds, setExpandedThreadIds] = useState<ReadonlySet<string>>(() => new Set());
   const [childVisibleLimits, setChildVisibleLimits] = useState<ReadonlyMap<string, number>>(() => new Map());
   const regularThreadCount = threadTree.length;
@@ -83,6 +111,11 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   );
   const hasMoreThreads = regularThreadCount > visibleLimit;
   const isExpanded = isThreadListExpanded(visibleLimit, regularThreadCount);
+
+  const togglePin = useCallback(
+    (thread: Thread) => togglePinnedThread(thread.projectId, thread.id),
+    [togglePinnedThread],
+  );
 
   const runAction = useCallback((key: string, action: () => Promise<void>) => {
     void runPendingThreadAction(pendingActions.current, key, setPendingKeys, action).catch(() => undefined);
@@ -186,6 +219,21 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     runAction(`stop:${thread.id}`, () => actions.stopThread(project.id, thread.id));
   }, [actions, pendingStop, project.id, runAction]);
 
+  /** 提升成功后才关闭确认 Dialog；失败时保持打开，错误已由 action 上报。 */
+  const confirmPromote = useCallback(async () => {
+    const thread = pendingPromote;
+    if (!thread) return;
+    setPromoting(true);
+    try {
+      await runPendingThreadAction(pendingActions.current, `promote:${thread.id}`, setPendingKeys, () =>
+        actions.promoteThread(project.id, thread.id),
+      );
+      setPendingPromote(null);
+    } finally {
+      setPromoting(false);
+    }
+  }, [actions, pendingPromote, project.id]);
+
   return (
     <div className="thread-list mt-1" role="tree" aria-label={`${project.name} 会话`}>
       {visibleThreads.map(
@@ -208,6 +256,8 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               isStopPending={pendingKeys.has(`stop:${thread.id}`)}
               isArchivePending={pendingKeys.has(`archive:${thread.id}`)}
               isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
+              isPromotePending={pendingKeys.has(`promote:${thread.id}`)}
+              isPinned={pinnedThreadKeys.has(pinnedThreadKey(thread.projectId, thread.id))}
               depth={depth}
               childCount={childCount}
               runningChildCount={runningChildCount}
@@ -230,6 +280,8 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
               }
               onArchive={archiveThread}
               onDelete={setPendingDelete}
+              onPromote={setPendingPromote}
+              onTogglePin={togglePin}
             />
             {siblingExpansions?.map((siblingExpansion) => (
               <div
@@ -327,6 +379,16 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
           if (!open) setPendingStop(null);
         }}
         onConfirm={confirmStop}
+      />
+      <ConfirmDialog
+        open={pendingPromote !== null}
+        title="提升为根会话"
+        description={`将“${pendingPromote?.title ?? "该会话"}”移动到第一层显示，其后代会话跟随移动。`}
+        confirmLabel="提升"
+        onOpenChange={(open) => {
+          if (!open && !promoting) setPendingPromote(null);
+        }}
+        onConfirm={confirmPromote}
       />
       <ConfirmDialog
         open={pendingDelete !== null && pendingDeleteDescendantIds.length === 0}

@@ -11,6 +11,7 @@ import { workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 interface WorkbenchTabListProps {
   tabs: readonly WorkbenchTab[];
   activeKey: string | null;
+  runningThreadIds: ReadonlySet<string>;
   onActivate(key: string | null): void;
   onCloseTab(tab: WorkbenchTab): void;
 }
@@ -19,7 +20,7 @@ interface WorkbenchTabListProps {
  * workbench-panel 的 tab 条：面板（经注册表解析展示）与会话 tab 统一为可关闭的 pill。
  * 支持方向键/HOME/END 的 roving focus，激活跟随聚焦（与 Radix Tabs 一致）。
  */
-export function WorkbenchTabList({ tabs, activeKey, onActivate, onCloseTab }: WorkbenchTabListProps) {
+export function WorkbenchTabList({ tabs, activeKey, runningThreadIds, onActivate, onCloseTab }: WorkbenchTabListProps) {
   const definitions = useWorkbenchPanelTabs();
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -62,11 +63,14 @@ export function WorkbenchTabList({ tabs, activeKey, onActivate, onCloseTab }: Wo
         const definition = tab.kind === "panel" ? getWorkbenchPanelTabDefinition(tab.panel) : undefined;
         // 未注册的面板回退到注册键本身，保证已打开 tab 始终可见可关闭。
         const label = tab.kind === "panel" ? (definition?.label ?? tab.panel) : tab.displayName;
+        const agentRunning = tab.kind === "session" && Boolean(tab.agentName) && runningThreadIds.has(tab.threadId);
         const icon: ReactNode =
           tab.kind === "panel" ? (
             (definition?.icon ?? <LayoutPanelLeft className="size-3.5 shrink-0" aria-hidden="true" />)
           ) : tab.agentName ? (
-            <Bot className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="panel-tab-agent-icon" data-running={agentRunning || undefined} aria-hidden="true">
+              <Bot className="size-3.5" />
+            </span>
           ) : (
             <MessageSquare className="size-3.5 shrink-0" aria-hidden="true" />
           );
@@ -80,6 +84,7 @@ export function WorkbenchTabList({ tabs, activeKey, onActivate, onCloseTab }: Wo
               role="tab"
               id={`panel-tab-${key}`}
               aria-selected={active}
+              aria-busy={agentRunning || undefined}
               aria-controls="workbench-panel-content"
               tabIndex={active ? 0 : -1}
               onClick={() => onActivate(key)}

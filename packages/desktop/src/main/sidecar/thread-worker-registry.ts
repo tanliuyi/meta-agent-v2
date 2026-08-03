@@ -777,6 +777,41 @@ export class ThreadWorkerRegistry {
     });
   }
 
+  /** 将子会话提升为 root：清除其 parentSession header，子树跟随目标上移，不删除任何会话。 */
+  async promote(projectId: string, threadId: string): Promise<SessionRemoveResult> {
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
+    this.options.beginSubagentTreeMutation?.(projectId, threadId);
+    try {
+      return await this.promoteThread(projectId, threadId);
+    } finally {
+      this.options.endSubagentTreeMutation?.(projectId, threadId);
+    }
+  }
+
+  private async promoteThread(projectId: string, threadId: string): Promise<SessionRemoveResult> {
+    const catalog = await this.list(projectId);
+    const target = catalog.find(({ id }) => id === threadId);
+    if (!target) throw new Error(`Pi session does not exist: ${threadId}`);
+    if (!target.parentThreadId) throw new Error(`Pi session is already a root session: ${threadId}`);
+    if (target.running) throw new Error(`Cannot promote session while ${threadId} is running`);
+    this.assertNotActiveSubagent(projectId, threadId);
+    return this.withThreadLocks([workerKey(projectId, threadId)], async () => {
+      this.assertProjectAvailable(projectId);
+      const latestCatalog = await this.list(projectId);
+      const latestTarget = latestCatalog.find(({ id }) => id === threadId);
+      if (!latestTarget?.parentThreadId) {
+        throw new Error("Session tree changed while promotion was starting; retry the operation");
+      }
+      if (latestTarget.running) throw new Error(`Cannot promote session while ${threadId} is running`);
+      const record = this.records.get(workerKey(projectId, threadId));
+      if (record && (record.inFlight > 0 || record.summary?.running)) {
+        throw new Error(`Cannot promote busy thread ${projectId}/${threadId}`);
+      }
+      return this.options.metadata.promoteCold(projectId, this.options.getCwd(projectId), threadId);
+    });
+  }
+
   async removeProject(projectId: string): Promise<void> {
     this.assertProjectAvailable(projectId);
     this.drainingProjects.add(projectId);

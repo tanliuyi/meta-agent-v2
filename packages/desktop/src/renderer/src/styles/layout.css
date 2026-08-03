@@ -360,14 +360,16 @@ body.is-resizing-column .sidebar {
   margin-top: 4px;
 }
 
-.sidebar-conversation-control {
+.sidebar-section-control {
   visibility: hidden;
   opacity: 0;
   transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
-.sidebar-conversation-section .sidebar-section-heading:hover .sidebar-conversation-control,
-.sidebar-conversation-section .sidebar-section-heading:focus-within .sidebar-conversation-control {
+.sidebar-project-section .sidebar-section-heading:hover .sidebar-section-control,
+.sidebar-project-section .sidebar-section-heading:focus-within .sidebar-section-control,
+.sidebar-conversation-section .sidebar-section-heading:hover .sidebar-section-control,
+.sidebar-conversation-section .sidebar-section-heading:focus-within .sidebar-section-control {
   visibility: visible;
   opacity: 1;
 }
@@ -462,17 +464,17 @@ body.is-resizing-column .sidebar {
   position: relative;
   display: grid;
   grid-template-rows: var(--layout-topbar-height) minmax(0, 1fr) auto;
+  column-gap: 0;
   min-width: 0;
   min-height: 0;
   margin: 0 8px 8px 0;
-  border: 1px solid hsl(var(--border));
-  border-radius: 16px;
-  box-shadow: var(--workspace-edge-shadow);
-  /* 内容卡片保持 --background 表面，与外壳的 --sidebar 面板色区分。 */
-  background: hsl(var(--background));
+  background: transparent;
   overflow: hidden;
+  container-type: inline-size;
+  container-name: workspace;
   /* 与侧边栏宽度动画同速，衔接收起/展开时圆角与阴影的过渡。 */
   transition:
+    column-gap var(--motion-duration-standard) var(--motion-ease-emphasized),
     border-radius var(--motion-duration-standard) var(--motion-ease-emphasized),
     box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
 }
@@ -493,14 +495,33 @@ body.is-resizing-column .sidebar {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.workspace:has(> .workbench-panel) > .topbar {
-  grid-row: 1;
-  grid-column: 1;
+.workspace:has(> .workbench-panel:not([data-collapsed])) {
+  column-gap: 8px;
+  transition:
+    column-gap var(--motion-duration-standard) var(--motion-ease-emphasized),
+    border-radius var(--motion-duration-standard) var(--motion-ease-emphasized),
+    box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
 }
 
-.workspace:has(> .workbench-panel) > .workspace-row {
-  grid-row: 2;
+.workspace:has(> .workbench-panel[data-collapsed]) {
+  transition:
+    column-gap var(--motion-duration-standard) cubic-bezier(0.7, 0, 1, 1),
+    border-radius var(--motion-duration-standard) var(--motion-ease-emphasized),
+    box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
+}
+
+.workspace > .session-surface-shell {
+  display: grid;
+  grid-row: 1 / span 2;
   grid-column: 1;
+  grid-template-rows: var(--layout-topbar-height) minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  box-shadow: var(--workspace-edge-shadow);
+  background: hsl(var(--background));
 }
 
 .workspace:has(> .workbench-panel) > .bottom-terminal {
@@ -511,6 +532,30 @@ body.is-resizing-column .sidebar {
 .workspace > .workbench-panel {
   grid-row: 1 / -1;
   grid-column: 2;
+}
+
+/* 窄工作区：右侧 Panel 切换为覆盖层，聊天区保持全宽可用，
+   避免最小 360px 面板把会话区挤压到不可用。 */
+@container workspace (max-width: 719px) {
+  .workspace:has(> .workbench-panel) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace:has(> .workbench-panel:not([data-collapsed])) {
+    column-gap: 0;
+  }
+
+  .workspace > .workbench-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--stack-workbench-overlay);
+  }
+
+  .workspace > .workbench-panel:not([data-collapsed]) {
+    box-shadow: var(--elevation-workbench);
+  }
 }
 
 .topbar {

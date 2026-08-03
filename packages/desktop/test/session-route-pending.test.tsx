@@ -17,6 +17,7 @@ describe("session route pending surface", () => {
     const markup = renderToStaticMarkup(createElement(LayoutProvider, null, createElement(SessionRoutePending)));
 
     expect(markup).toContain("workspace-row");
+    expect(markup).toContain("session-surface-shell");
     expect(markup).toContain("session-bootstrap-composer");
     expect(markup).toContain('aria-busy="true"');
     expect(markup).not.toContain("shell-runtime-overlay");

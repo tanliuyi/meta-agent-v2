@@ -237,6 +237,32 @@ describe("desktop catalog reducer", () => {
     ]);
   });
 
+  it("promotes a child session to root without removing anything", () => {
+    const grandparent = { ...thread, id: "grandparent" };
+    const parent = {
+      ...thread,
+      id: "parent",
+      parentThreadId: "grandparent",
+      origin: "subagent",
+      agentName: "reviewer",
+    };
+    const child = { ...thread, id: "child", parentThreadId: "parent" };
+    const grandchild = { ...thread, id: "grandchild", parentThreadId: "child" };
+    let state = desktopReducer(INITIAL_STATE, {
+      type: "project-threads-loaded",
+      projectId: project.id,
+      threads: [grandparent, parent, child, grandchild],
+    });
+    state = desktopReducer(state, {
+      type: "session-tree-removed",
+      projectId: project.id,
+      removedThreadIds: [],
+      reparentedThreads: [{ ...parent, parentThreadId: undefined, origin: undefined, agentName: undefined }],
+    });
+    const { parentThreadId: _removed, origin: _origin, agentName: _agentName, ...promoted } = parent;
+    expect(state.threadCatalogs[project.id]).toEqual([grandparent, promoted, child, grandchild]);
+  });
+
   it("删除 Project 同时删除其 thread catalog，不影响其他 Project", () => {
     const other = { ...project, id: "other" };
     let state = desktopReducer(INITIAL_STATE, {

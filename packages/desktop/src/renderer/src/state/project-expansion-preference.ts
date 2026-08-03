@@ -1,4 +1,5 @@
 export const PROJECT_EXPANSION_STORAGE_KEY = "pi-desktop:project-expansion";
+export const SIDEBAR_PROJECTS_SECTION_ID = "__sidebar-projects__";
 const PROJECT_EXPANSION_STORAGE_VERSION = 1;
 
 type ProjectExpansionEntry = readonly [projectId: string, expanded: boolean];

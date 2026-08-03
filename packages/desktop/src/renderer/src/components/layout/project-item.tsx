@@ -18,11 +18,13 @@ import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { type FormEvent, memo, useEffect, useRef, useState } from "react";
+import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Project } from "../../../../shared/contracts.ts";
 import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
 import { selectProjectThreads } from "../../state/desktop-selectors.ts";
 import { readStoredProjectExpanded, writeStoredProjectExpanded } from "../../state/project-expansion-preference.ts";
+import { useThreadPinning } from "../../state/thread-pinning-context.tsx";
+import { pinnedThreadKey } from "../../state/thread-pinning-preference.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { DesktopThreadList } from "./desktop-thread-list.tsx";
 
@@ -42,6 +44,11 @@ export const ProjectItem = memo(function ProjectItem({
 }: ProjectItemProps) {
   const actions = useDesktopActions();
   const threads = useDesktopSelector((state) => selectProjectThreads(state, project.id));
+  const { pinnedThreadKeys } = useThreadPinning();
+  const visibleThreads = useMemo(
+    () => threads?.filter((thread) => !pinnedThreadKeys.has(pinnedThreadKey(thread.projectId, thread.id))),
+    [pinnedThreadKeys, threads],
+  );
   const [expanded, setExpanded] = useState(() => readStoredProjectExpanded(project.id, active));
   const [loading, setLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState(false);
@@ -49,10 +56,11 @@ export const ProjectItem = memo(function ProjectItem({
   const [deletePending, setDeletePending] = useState(false);
   const wasActive = useRef(active);
   const threadListId = `project-threads-${project.id}`;
-  const showRunningIndicator = !expanded && threads?.some(({ archived, running }) => !archived && running) === true;
+  const showRunningIndicator =
+    !expanded && visibleThreads?.some(({ archived, running }) => !archived && running) === true;
   const showCompletedIndicator =
     !expanded &&
-    threads?.some(({ archived, completed, running }) => !archived && !running && completed === true) === true;
+    visibleThreads?.some(({ archived, completed, running }) => !archived && !running && completed === true) === true;
 
   useEffect(() => {
     const becameActive = active && !wasActive.current;
@@ -175,8 +183,8 @@ export const ProjectItem = memo(function ProjectItem({
         </ContextMenu.Root>
         <CollapsibleContent id={threadListId} animation="height">
           {threads ? (
-            threads.length > 0 ? (
-              <DesktopThreadList project={project} threads={threads} />
+            visibleThreads && visibleThreads.length > 0 ? (
+              <DesktopThreadList project={project} threads={threads} displayThreads={visibleThreads} />
             ) : (
               <div className="flex h-8 items-center gap-2 px-8 text-sm text-muted-foreground" role="status">
                 <span>没有会话</span>

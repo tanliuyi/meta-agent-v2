@@ -70,6 +70,7 @@ import type {
   ListMarketplacePluginsInput,
   MarketplaceEndpointSettingsSnapshot,
   MarketplacePluginPage,
+  MarketplacePluginSummary,
   SaveMarketplaceEndpointInput,
   SaveMarketplaceEndpointResult,
   SetMarketplacePluginScopeInput,
@@ -181,6 +182,8 @@ export interface DesktopApi {
     testEndpoint(input: TestMarketplaceEndpointInput): Promise<TestMarketplaceEndpointResult>;
     saveEndpoint(input: SaveMarketplaceEndpointInput): Promise<SaveMarketplaceEndpointResult>;
     listPlugins(input?: ListMarketplacePluginsInput): Promise<MarketplacePluginPage>;
+    /** 按 pluginId 直达详情；市场目录中不存在时返回 null。 */
+    getPlugin(pluginId: string): Promise<MarketplacePluginSummary | null>;
     getInstalled(): Promise<InstalledMarketplacePluginsSnapshot>;
     getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
     savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
@@ -221,6 +224,7 @@ export interface DesktopApi {
     rename(projectId: string, threadId: string, title: string): Promise<void>;
     archive(projectId: string, threadId: string, archived: boolean): Promise<void>;
     remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult>;
+    promote(projectId: string, threadId: string): Promise<SessionRemoveResult>;
     prompt(input: SessionPromptInput): Promise<SessionCommandResult>;
     edit(input: SessionEditInput): Promise<SessionCommandResult>;
     reload(input: SessionReloadInput): Promise<SessionCommandResult>;

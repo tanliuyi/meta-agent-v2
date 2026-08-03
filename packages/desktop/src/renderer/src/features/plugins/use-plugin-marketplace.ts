@@ -27,10 +27,10 @@ export interface PluginMarketplaceController {
   setScope(pluginId: string, scope: MarketplacePluginScope, projectIds?: string[]): Promise<void>;
 }
 
-export function usePluginMarketplace(enabled = true): PluginMarketplaceController {
+export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginMarketplaceController {
   const [page, setPage] = useState<MarketplacePluginPage>();
   const [installed, setInstalled] = useState<InstalledMarketplacePluginsSnapshot>();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [loading, setLoading] = useState(true);
   const [installingId, setInstallingId] = useState<string>();
   const [updatingId, setUpdatingId] = useState<string>();
@@ -63,6 +63,10 @@ export function usePluginMarketplace(enabled = true): PluginMarketplaceControlle
     setError(resolved.error);
     setLoading(false);
   }, []);
+
+  useEffect(() => {
+    setQuery(initialQuery);
+  }, [initialQuery]);
 
   useEffect(() => {
     mounted.current = true;
@@ -243,6 +247,38 @@ export function canInstallMarketplacePlugin(
   plugin: MarketplacePluginSummary,
 ): plugin is MarketplacePluginSummary & { compatibleVersion: string } {
   return plugin.compatibleVersion !== undefined && (plugin.status === "available" || plugin.status === "deprecated");
+}
+
+/** 详情路由按 pluginId 直达：列表页未命中时仍需要按 ID 查询，不依赖 limit 内的页。 */
+export function needsPluginDetailLookup(page: MarketplacePluginPage | undefined, pluginId: string): boolean {
+  return !page?.plugins.some((entry) => entry.id === pluginId);
+}
+
+export type MarketplacePluginDetailLookup =
+  | { pluginId: string; status: "loading" }
+  | { pluginId: string; status: "found"; plugin: MarketplacePluginSummary }
+  | { pluginId: string; status: "missing" }
+  | { pluginId: string; status: "error"; error: string };
+
+export async function loadMarketplacePluginDetail(
+  pluginId: string,
+  getPlugin: (id: string) => Promise<MarketplacePluginSummary | null>,
+): Promise<MarketplacePluginDetailLookup> {
+  try {
+    const plugin = await getPlugin(pluginId);
+    return plugin ? { pluginId, status: "found", plugin } : { pluginId, status: "missing" };
+  } catch (reason) {
+    return { pluginId, status: "error", error: marketplaceErrorMessage(reason) };
+  }
+}
+
+export function resolveMarketplaceDetailPlugin(
+  page: MarketplacePluginPage | undefined,
+  pluginId: string,
+  lookup: MarketplacePluginDetailLookup | undefined,
+): MarketplacePluginSummary | undefined {
+  const onPage = page?.plugins.find((entry) => entry.id === pluginId);
+  return onPage ?? (lookup?.pluginId === pluginId && lookup.status === "found" ? lookup.plugin : undefined);
 }
 
 export function resolvePluginMarketplaceLoad(

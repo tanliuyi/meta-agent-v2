@@ -170,7 +170,11 @@ export function validateAcceptanceInput(input: unknown, pathLabel = "acceptance"
 	}
 	const value = input as Record<string, unknown>;
 	for (const key of Object.keys(value)) {
-		if (!ACCEPTANCE_CONFIG_KEYS.has(key)) errors.push(`${pathLabel}.${key} is not supported.`);
+		if (!ACCEPTANCE_CONFIG_KEYS.has(key)) {
+			errors.push(key === "commands"
+				? `${pathLabel}.commands is not supported; use ${pathLabel}.verify for runtime verification commands.`
+				: `${pathLabel}.${key} is not supported.`);
+		}
 	}
 	if (value.level === "reviewed") {
 		errors.push(`${pathLabel}.level ${EXPLICIT_REVIEWED_UNAVAILABLE}`);

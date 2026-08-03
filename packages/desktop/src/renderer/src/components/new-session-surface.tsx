@@ -201,7 +201,7 @@ export function NewSessionSurface() {
 
   if (phase === "no-project") {
     return (
-      <>
+      <div className="session-surface-shell">
         <header className="topbar">
           <SidebarToggle location="topbar" />
           <div className="topbar-title">
@@ -216,12 +216,12 @@ export function NewSessionSurface() {
             />
           </main>
         </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="session-surface-shell">
       <header className="topbar">
         <SidebarToggle location="topbar" />
         <div className="topbar-title">
@@ -244,6 +244,6 @@ export function NewSessionSurface() {
         </main>
       </div>
       {loadError ? <div className="composer-error">{loadError}</div> : null}
-    </>
+    </div>
   );
 }

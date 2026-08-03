@@ -252,6 +252,7 @@ export function registerIpc(
     ipcMain.handle(CHANNELS.marketplaceListPlugins, (_event, input: ListMarketplacePluginsInput = {}) =>
       marketplaceCatalog.list(input),
     );
+    ipcMain.handle(CHANNELS.marketplaceGetPlugin, (_event, pluginId: string) => marketplaceCatalog.getPlugin(pluginId));
     if (marketplaceRegistry && marketplaceInstaller) {
       ipcMain.handle(CHANNELS.marketplaceGetInstalled, () => marketplaceRegistry.getSnapshot());
       ipcMain.handle(CHANNELS.marketplaceGetPluginConfiguration, (_event, pluginId: string) => {
@@ -520,6 +521,9 @@ export function registerIpc(
       for (const removedThreadId of result.removedThreadIds) terminals.disposeSession(projectId, removedThreadId);
       return result;
     },
+  );
+  ipcMain.handle(CHANNELS.sessionsPromote, (_event, projectId: string, threadId: string) =>
+    sessions.promote(projectId, threadId),
   );
   ipcMain.handle(CHANNELS.sessionsPrompt, (_event, input: SessionPromptInput) => sessions.prompt(input));
   ipcMain.handle(CHANNELS.sessionsEdit, (_event, input: SessionEditInput) => sessions.edit(input));

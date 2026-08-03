@@ -9,11 +9,13 @@ export function SessionSurface() {
   const { record, active } = useSessionScope();
   return (
     <>
-      <Topbar />
-      <div className="workspace-row session-surface" data-session-key={record.key} data-active={active || undefined}>
-        <main className="chat-workspace">
-          <ChatThread />
-        </main>
+      <div className="session-surface-shell">
+        <Topbar />
+        <div className="workspace-row session-surface" data-session-key={record.key} data-active={active || undefined}>
+          <main className="chat-workspace">
+            <ChatThread />
+          </main>
+        </div>
       </div>
       <BottomTerminal />
       <WorkbenchPanel />

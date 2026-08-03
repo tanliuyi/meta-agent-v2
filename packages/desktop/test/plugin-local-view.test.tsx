@@ -83,7 +83,7 @@ describe("local plugins view", () => {
 });
 
 describe("local plugin detail dialog", () => {
-  it("renders entry metadata, trust warning, configuration note, and diagnostics", () => {
+  it("renders entry metadata, trust warning, diagnostics, and detail tabs", () => {
     const markup = renderToStaticMarkup(
       <LocalPluginDetailContent
         plugin={entry()}
@@ -111,13 +111,16 @@ describe("local plugin detail dialog", () => {
     expect(markup).toContain("Developer Mode 本地插件");
     expect(markup).toContain("以当前账户权限运行");
     expect(markup).toContain("未提供能力声明");
-    expect(markup).toContain("本地插件没有声明配置 Schema");
     expect(markup).toContain("插件加载失败");
+    expect(markup).toContain('aria-label="插件详情"');
+    expect(markup).toContain(">基本信息</button>");
+    expect(markup).toContain(">配置</button>");
+    expect(markup).not.toContain("本地插件没有声明配置 Schema");
     expect(markup).toContain("启用此插件");
     expect(markup).toContain(">移除</button>");
   });
 
-  it("renders the configuration form when the entry declares a schema", () => {
+  it("keeps the configuration panel lazy until its tab is selected", () => {
     const configurable: DesktopExtensionListEntry = {
       ...entry(),
       capabilities: ["configuration.read", "tools.register"],
@@ -141,9 +144,12 @@ describe("local plugin detail dialog", () => {
       />,
     );
 
-    expect(markup).toContain('id="plugin-detail-configuration"');
-    expect(markup).toContain("正在载入配置");
-    expect(markup).not.toContain("本地插件没有声明配置 Schema");
+    expect(markup).toContain('aria-label="插件详情"');
+    expect(markup).toContain(">基本信息</button>");
+    expect(markup).toContain(">配置</button>");
+    expect(markup).toContain('data-state="inactive"');
+    expect(markup).not.toContain('id="plugin-detail-configuration"');
+    expect(markup).not.toContain("正在载入配置");
   });
 
   it("hides the diagnostics section when there are none", () => {

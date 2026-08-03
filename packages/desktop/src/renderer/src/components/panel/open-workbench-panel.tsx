@@ -1,6 +1,6 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
-import { type CSSProperties, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { WorkbenchTab } from "../../../../shared/contracts.ts";
 import { parseSessionRecordKey } from "../../runtime/pi-session-store.ts";
 import { useDesktopSelector } from "../../state/desktop-context.tsx";
@@ -31,7 +31,20 @@ interface OpenWorkbenchPanelProps extends WorkbenchTabState {
   onOpenPanelTab(panel: string): void;
 }
 
-const getPanelMaxSize = () => Math.min(window.innerWidth * 0.68, window.innerWidth * 0.5);
+const getPanelMaxSize = () => {
+  const viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth;
+  const fallback = Math.max(360, viewportWidth * 0.8);
+  if (typeof document === "undefined") return fallback;
+
+  const shell = document.querySelector<HTMLElement>(".session-surface-shell");
+  const workspace = shell?.closest<HTMLElement>(".workspace");
+  if (!shell || !workspace) return fallback;
+
+  const workspaceWidth = workspace.getBoundingClientRect().width;
+  // 窄工作区 Panel 覆盖在聊天区之上，允许占据更大比例；宽工作区限制在 80% 以内。
+  const ratio = workspaceWidth < 720 ? 0.92 : 0.8;
+  return Math.max(360, workspaceWidth * ratio);
+};
 
 /**
  * 渲染已打开的可调整 Workbench；tab 全部为动态注册（会话或经注册表面板），均可关闭。
@@ -49,6 +62,19 @@ export function OpenWorkbenchPanel({
 }: OpenWorkbenchPanelProps) {
   const { updateWorkbench, record } = useSessionScope();
   const definitions = useWorkbenchPanelTabs();
+  const [panelMaxSize, setPanelMaxSize] = useState(getPanelMaxSize);
+  useEffect(() => {
+    const workspace = document.querySelector<HTMLElement>(".workspace");
+    if (!workspace) return;
+    const updateMaxSize = () => {
+      const next = getPanelMaxSize();
+      setPanelMaxSize((current) => (current === next ? current : next));
+    };
+    updateMaxSize();
+    const observer = new ResizeObserver(updateMaxSize);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, [open, width]);
   const resize = useResizableRegion<HTMLDivElement>({
     value: width,
     min: 360,
@@ -75,6 +101,7 @@ export function OpenWorkbenchPanel({
     useDesktopSelector((state) =>
       activeIdentity ? selectProjectThreads(state, activeIdentity.projectId) : undefined,
     ) ?? [];
+  const runningThreadIds = new Set(activeProjectThreads.filter(({ running }) => running).map(({ id }) => id));
   // 仅属于活动主 session（自身或其子/孙）的 thread 才能拖入本会话侧边栏。
   const canDrop =
     dragged !== null &&
@@ -90,7 +117,12 @@ export function OpenWorkbenchPanel({
     <div
       ref={resize.regionRef}
       className="workbench-panel"
-      style={{ "--resizable-region-size": `${resize.initialSize}px` } as CSSProperties}
+      style={
+        {
+          "--resizable-region-size": `${resize.initialSize}px`,
+          "--workbench-max-size": `${Math.round(panelMaxSize)}px`,
+        } as CSSProperties
+      }
       data-collapsed={!open || undefined}
       data-drop-active={dropOver || undefined}
       aria-hidden={!open}
@@ -145,6 +177,7 @@ export function OpenWorkbenchPanel({
             <WorkbenchTabList
               tabs={tabs}
               activeKey={activeTab ? activeKey : null}
+              runningThreadIds={runningThreadIds}
               onActivate={onActivate}
               onCloseTab={onCloseTab}
             />

@@ -26,6 +26,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+/** 按 pluginId 直达详情的有界分页上限（100/页 × 10 页）。 */
+const MAX_PLUGIN_LOOKUP_PAGES = 10;
 
 /** Fetches a bounded, validated catalog only from the saved active endpoint. */
 export class MarketplaceCatalogService {
@@ -37,6 +39,7 @@ export class MarketplaceCatalogService {
   private readonly desktopVersion?: string;
   private readonly runtimeCompatibility?: RuntimeCompatibility;
   private readonly cache = new Map<string, MarketplacePluginPage>();
+  private readonly pluginCache = new Map<string, MarketplacePluginSummary>();
 
   constructor(endpoints: MarketplaceEndpointSettingsService, options: MarketplaceCatalogServiceOptions = {}) {
     this.endpoints = endpoints;
@@ -76,6 +79,39 @@ export class MarketplaceCatalogService {
       if (cached) return { ...clonePage(cached), source: "cache", stale: true };
       throw error;
     }
+  }
+
+  /** 按 pluginId 直达详情：有界翻页查找，不依赖列表页 limit 内的命中。 */
+  async getPlugin(pluginId: string): Promise<MarketplacePluginSummary | null> {
+    if (!pluginId || typeof pluginId !== "string") throw new TypeError("Invalid marketplace plugin id");
+    const endpoint = await this.activeEndpoint();
+    const cacheKey = JSON.stringify([endpoint.marketplaceId, endpoint.apiRoot, pluginId]);
+    const cached = this.pluginCache.get(cacheKey);
+    if (cached) return cached;
+    const found = await this.findPluginById(endpoint, pluginId);
+    if (found) this.pluginCache.set(cacheKey, found);
+    return found;
+  }
+
+  private async findPluginById(
+    endpoint: MarketplaceEndpointRecord,
+    pluginId: string,
+  ): Promise<MarketplacePluginSummary | null> {
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_PLUGIN_LOOKUP_PAGES; page++) {
+      const url = new URL("plugins", endpoint.apiRoot);
+      url.searchParams.set("query", pluginId);
+      if (cursor) url.searchParams.set("cursor", cursor);
+      url.searchParams.set("limit", String(MAX_LIMIT));
+      if (this.desktopVersion) url.searchParams.set("desktopVersion", this.desktopVersion);
+      if (this.runtimeCompatibility) appendMarketplaceRuntimeQuery(url, this.runtimeCompatibility);
+      const response = await this.fetchCatalog(url);
+      const match = response.plugins.find((plugin) => plugin.id === pluginId);
+      if (match) return match;
+      if (!response.nextCursor) return null;
+      cursor = response.nextCursor;
+    }
+    return null;
   }
 
   private async activeEndpoint(): Promise<MarketplaceEndpointRecord> {

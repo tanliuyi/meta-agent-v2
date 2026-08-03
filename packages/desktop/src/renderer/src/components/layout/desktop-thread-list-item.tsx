@@ -1,11 +1,14 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import Archive from "lucide-react/dist/esm/icons/archive.mjs";
+import ArrowUpToLine from "lucide-react/dist/esm/icons/arrow-up-to-line.mjs";
 import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
 import PanelRight from "lucide-react/dist/esm/icons/panel-right.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
+import Pin from "lucide-react/dist/esm/icons/pin.mjs";
+import PinOff from "lucide-react/dist/esm/icons/pin-off.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { memo, useRef } from "react";
@@ -28,6 +31,8 @@ interface DesktopThreadListItemProps {
   isStopPending: boolean;
   isArchivePending: boolean;
   isDeletePending: boolean;
+  isPromotePending: boolean;
+  isPinned?: boolean;
   depth: number;
   childCount: number;
   runningChildCount: number;
@@ -46,6 +51,8 @@ interface DesktopThreadListItemProps {
   sidebarOpenDisabledReason?: string;
   onArchive(thread: Thread, archived: boolean): void;
   onDelete(thread: Thread): void;
+  onPromote(thread: Thread): void;
+  onTogglePin?(thread: Thread): void;
 }
 
 /** 使用语义化 list、link 和 ContextMenu 实现的可访问性等效项。 */
@@ -60,7 +67,8 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
     props.isRenamingPending ||
     props.isStopPending ||
     props.isArchivePending ||
-    props.isDeletePending;
+    props.isDeletePending ||
+    props.isPromotePending;
   const contentIndent =
     props.compactRoot && props.depth === 0 && props.childCount === 0 ? 8 : 32 + props.depth * TREE_LEVEL_INDENT;
   return (
@@ -154,6 +162,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
               if (!props.active) props.onOpen(thread);
             }}
           >
+            {props.isPinned ? <Pin className="text-muted-foreground size-3 shrink-0" aria-label="已置顶" /> : null}
             {thread.origin === "subagent" ? (
               <Bot className="text-muted-foreground size-3.5 shrink-0" aria-label="子智能体会话" />
             ) : thread.origin === "branch" ? (
@@ -195,6 +204,9 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         </div>
       </ContextMenu.Trigger>
       <ContextMenuContent>
+        <ContextMenuItem disabled={props.isSwitching} onSelect={() => props.onTogglePin?.(thread)}>
+          {props.isPinned ? <PinOff /> : <Pin />} {props.isPinned ? "取消置顶" : "置顶"}
+        </ContextMenuItem>
         <ContextMenuItem
           disabled={props.isSwitching || props.sidebarOpenDisabled}
           title={props.sidebarOpenDisabled ? (props.sidebarOpenDisabledReason ?? "无法在侧边栏打开") : undefined}
@@ -208,6 +220,14 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
         <ContextMenuItem disabled={props.isSwitching || activeSubagent} onSelect={() => props.onArchive(thread, true)}>
           <Archive /> 归档
         </ContextMenuItem>
+        {thread.parentThreadId ? (
+          <ContextMenuItem
+            disabled={props.isSwitching || props.isPromotePending || activeSubagent}
+            onSelect={() => props.onPromote(thread)}
+          >
+            <ArrowUpToLine /> 提升为根会话
+          </ContextMenuItem>
+        ) : null}
         {activeSubagent ? (
           <>
             <ContextMenu.Separator className="bg-border -mx-1 my-1 h-px" />

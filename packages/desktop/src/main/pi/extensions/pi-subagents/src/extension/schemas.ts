@@ -66,6 +66,17 @@ const JsonSchemaObject = Type.Unsafe({
 	description: "JSON Schema object for strict structured output. Non-object roots are rejected.",
 });
 
+const ACCEPTANCE_EVIDENCE_KINDS = [
+	"changed-files",
+	"tests-added",
+	"commands-run",
+	"validation-output",
+	"residual-risks",
+	"no-staged-files",
+	"diff-summary",
+	"review-findings",
+	"manual-notes",
+];
 const EXPLICIT_ACCEPTANCE_STRING_LEVELS = ["auto", "attested", "checked", "verified"];
 const EXPLICIT_ACCEPTANCE_OBJECT_LEVELS = ["auto", "none", "attested", "checked", "verified"];
 
@@ -75,11 +86,65 @@ const AcceptanceOverride = Type.Unsafe({
 		{ type: "boolean", enum: [false] },
 		{
 			type: "object",
-			properties: { level: { type: "string", enum: EXPLICIT_ACCEPTANCE_OBJECT_LEVELS } },
+			properties: {
+				level: { type: "string", enum: EXPLICIT_ACCEPTANCE_OBJECT_LEVELS },
+				criteria: {
+					type: "array",
+					items: {
+						anyOf: [
+							{ type: "string" },
+							{
+								type: "object",
+								properties: {
+									id: { type: "string" },
+									must: { type: "string" },
+									evidence: { type: "array", items: { type: "string", enum: ACCEPTANCE_EVIDENCE_KINDS } },
+									severity: { type: "string", enum: ["required", "recommended"] },
+								},
+								required: ["id", "must"],
+								additionalProperties: false,
+							},
+						],
+					},
+				},
+				evidence: { type: "array", items: { type: "string", enum: ACCEPTANCE_EVIDENCE_KINDS } },
+				verify: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							id: { type: "string" },
+							command: { type: "string" },
+							timeoutMs: { type: "integer", minimum: 1 },
+							cwd: { type: "string" },
+							env: { type: "object", additionalProperties: { type: "string" } },
+							allowFailure: { type: "boolean" },
+						},
+						required: ["id", "command"],
+						additionalProperties: false,
+					},
+				},
+				review: {
+					anyOf: [
+						{ type: "boolean", enum: [false] },
+						{
+							type: "object",
+							properties: {
+								agent: { type: "string" },
+								focus: { type: "string" },
+								required: { type: "boolean" },
+							},
+							additionalProperties: false,
+						},
+					],
+				},
+				stopRules: { type: "array", items: { type: "string" } },
+				reason: { type: "string" },
+			},
 			additionalProperties: true,
 		},
 	],
-	description: "Optional acceptance policy. In the current/default contract, omitted means auto-inferred; reviewed is inferred-only and cannot be requested explicitly; verified requires configured runtime commands. With agentContract.version=1, omitted means not requested and acceptance failures are reported separately from execution.",
+	description: "Optional acceptance policy. In the current/default contract, omitted means auto-inferred; reviewed is inferred-only and must never be requested explicitly. Runtime commands belong in acceptance.verify (for example, verify: [{ id: 'tests', command: 'npm run check' }]); acceptance.commands is not supported. With agentContract.version=1, omitted means not requested and acceptance failures are reported separately from execution.",
 });
 
 const AgentContractOverride = Type.Object({

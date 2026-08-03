@@ -6,7 +6,7 @@ import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { GENERAL_WORKSPACE_ID } from "../../../../shared/contracts.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
@@ -14,6 +14,8 @@ import { selectProjectThreads } from "../../state/desktop-selectors.ts";
 import { useDesktopStore } from "../../state/desktop-store-context.tsx";
 import { readStoredProjectExpanded, writeStoredProjectExpanded } from "../../state/project-expansion-preference.ts";
 import { runControlledThreadAction } from "../../state/thread-list-commands.ts";
+import { useThreadPinning } from "../../state/thread-pinning-context.tsx";
+import { pinnedThreadKey } from "../../state/thread-pinning-preference.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { DesktopThreadList } from "./desktop-thread-list.tsx";
 
@@ -38,6 +40,11 @@ export function GeneralConversationSection({
   const generalProject = projects.find(({ id }) => id === GENERAL_WORKSPACE_ID) ?? null;
   const generalAvailable = generalProject?.available === true;
   const generalThreads = useStore(desktopStore, (state) => selectProjectThreads(state, GENERAL_WORKSPACE_ID));
+  const { pinnedThreadKeys } = useThreadPinning();
+  const visibleGeneralThreads = useMemo(
+    () => generalThreads?.filter((thread) => !pinnedThreadKeys.has(pinnedThreadKey(thread.projectId, thread.id))),
+    [generalThreads, pinnedThreadKeys],
+  );
   const [expanded, setExpanded] = useState(() => readStoredProjectExpanded(GENERAL_WORKSPACE_ID, true));
   const [loadState, dispatchLoad] = useReducer(reduceGeneralConversationLoad, { attempted: false, failed: false });
   const wasActive = useRef(active);
@@ -76,9 +83,9 @@ export function GeneralConversationSection({
             <button type="button" className="sidebar-section-toggle">
               <span>对话</span>
               {expanded ? (
-                <ChevronDown className="sidebar-conversation-control" aria-hidden="true" />
+                <ChevronDown className="sidebar-section-control" aria-hidden="true" />
               ) : (
-                <ChevronRight className="sidebar-conversation-control" aria-hidden="true" />
+                <ChevronRight className="sidebar-section-control" aria-hidden="true" />
               )}
             </button>
           </CollapsibleTrigger>
@@ -89,7 +96,7 @@ export function GeneralConversationSection({
             tooltip="新建对话"
             side="top"
             disabled={!generalAvailable || newConversationDisabled}
-            className="sidebar-conversation-control"
+            className="sidebar-section-control"
             onClick={(event) => runControlledThreadAction(event, onNewConversation)}
           >
             <Plus />
@@ -114,7 +121,7 @@ export function GeneralConversationSection({
                   size="icon"
                   aria-label="重试加载对话"
                   tooltip="重试"
-                  className="sidebar-conversation-control"
+                  className="sidebar-section-control"
                   onClick={retryLoad}
                 >
                   <RefreshCw />
@@ -125,8 +132,13 @@ export function GeneralConversationSection({
                 <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
                 <span>加载中</span>
               </div>
-            ) : generalThreads.length > 0 && generalProject ? (
-              <DesktopThreadList project={generalProject} threads={generalThreads} compactRoot />
+            ) : visibleGeneralThreads && visibleGeneralThreads.length > 0 && generalProject ? (
+              <DesktopThreadList
+                project={generalProject}
+                threads={generalThreads}
+                displayThreads={visibleGeneralThreads}
+                compactRoot
+              />
             ) : (
               <div className="flex h-8 items-center gap-2 px-2 text-sm text-muted-foreground" role="status">
                 <span>没有会话</span>

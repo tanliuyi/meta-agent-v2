@@ -1,4 +1,5 @@
 import type { Thread } from "../../../shared/contracts.ts";
+import { pinnedThreadKey } from "./thread-pinning-preference.ts";
 
 export { collectThreadDescendantIds as threadDescendantIds } from "../../../shared/thread-tree.ts";
 
@@ -14,6 +15,15 @@ export interface PreventableThreadActionEvent {
 
 export const COLLAPSED_THREAD_COUNT = 5;
 export const THREAD_EXPANSION_COUNT = 10;
+
+/**
+ * 在完整 catalog 树上做子树级显示过滤，保证父子关系不被拆散。
+ * keep：只显示这些节点及其完整后代子树（置顶区）；
+ * prune：剪除这些节点及其完整后代子树（普通区）。
+ */
+export type ThreadDisplayFilter =
+  | { mode: "keep"; threadIds: ReadonlySet<string> }
+  | { mode: "prune"; threadIds: ReadonlySet<string> };
 
 export interface ThreadTreeNode {
   thread: Thread;
@@ -59,6 +69,8 @@ export function threadTreeByArchiveState(
   threads: readonly Thread[],
   archived: boolean,
   rootLimit: number,
+  pinnedThreadKeys: ReadonlySet<string> = new Set(),
+  displayFilter?: ThreadDisplayFilter,
 ): ThreadTreeNode[] {
   const nodes = new Map<string, ThreadTreeNode>(
     threads.filter((thread) => thread.archived === archived).map((thread) => [thread.id, { thread, children: [] }]),
@@ -69,7 +81,18 @@ export function threadTreeByArchiveState(
     if (parent && !wouldCreateThreadCycle(node.thread.id, parent, nodes)) parent.children.push(node);
     else roots.push(node);
   }
-  for (const node of nodes.values()) node.children.sort(compareChildThreads);
+  if (displayFilter) applyThreadDisplayFilter(nodes, roots, displayFilter);
+  const pinnedThreadIds = new Set<string>();
+  for (const node of nodes.values()) {
+    if (pinnedThreadKeys.has(pinnedThreadKey(node.thread.projectId, node.thread.id)))
+      pinnedThreadIds.add(node.thread.id);
+  }
+  const prioritizedThreadIds = new Set(pinnedThreadIds);
+  for (const root of roots) collectPrioritizedThreadIds(root, prioritizedThreadIds);
+  for (const node of nodes.values()) {
+    node.children.sort((left, right) => compareThreadNodes(left, right, pinnedThreadIds, prioritizedThreadIds));
+  }
+  roots.sort((left, right) => compareThreadNodes(left, right, pinnedThreadIds, prioritizedThreadIds));
   return roots.slice(0, rootLimit);
 }
 
@@ -128,7 +151,76 @@ export function flattenVisibleThreadTree(
   return visible;
 }
 
-function compareChildThreads(left: ThreadTreeNode, right: ThreadTreeNode): number {
+function applyThreadDisplayFilter(
+  nodes: Map<string, ThreadTreeNode>,
+  roots: ThreadTreeNode[],
+  filter: ThreadDisplayFilter,
+): void {
+  if (filter.mode === "prune") {
+    const pruned = new Set<string>();
+    for (const id of filter.threadIds) {
+      const node = nodes.get(id);
+      if (!node || pruned.has(id)) continue;
+      pruned.add(id);
+      collectNodeDescendantIds(node, pruned);
+    }
+    if (pruned.size === 0) return;
+    for (const node of nodes.values()) {
+      node.children = node.children.filter((child) => !pruned.has(child.thread.id));
+    }
+    for (let index = roots.length - 1; index >= 0; index--) {
+      if (pruned.has(roots[index]!.thread.id)) roots.splice(index, 1);
+    }
+    return;
+  }
+  // keep：以 display 集合中最顶层的节点为根，保留其完整后代子树；
+  // display 集合内的后代节点不重复成为根（避免同一子树重复展示）。
+  const kept = filter.threadIds;
+  roots.length = 0;
+  for (const node of nodes.values()) {
+    if (!kept.has(node.thread.id) || hasKeptAncestor(node, nodes, kept)) continue;
+    roots.push(node);
+  }
+}
+
+function collectNodeDescendantIds(node: ThreadTreeNode, collected: Set<string>): void {
+  for (const child of node.children) {
+    collected.add(child.thread.id);
+    collectNodeDescendantIds(child, collected);
+  }
+}
+
+function hasKeptAncestor(
+  node: ThreadTreeNode,
+  nodes: ReadonlyMap<string, ThreadTreeNode>,
+  kept: ReadonlySet<string>,
+): boolean {
+  let parent = node.thread.parentThreadId ? nodes.get(node.thread.parentThreadId) : undefined;
+  while (parent) {
+    if (kept.has(parent.thread.id)) return true;
+    parent = parent.thread.parentThreadId ? nodes.get(parent.thread.parentThreadId) : undefined;
+  }
+  return false;
+}
+
+function collectPrioritizedThreadIds(node: ThreadTreeNode, prioritizedThreadIds: Set<string>): boolean {
+  const hasPinnedDescendant = node.children.some((child) => collectPrioritizedThreadIds(child, prioritizedThreadIds));
+  if (hasPinnedDescendant) prioritizedThreadIds.add(node.thread.id);
+  return prioritizedThreadIds.has(node.thread.id);
+}
+
+function compareThreadNodes(
+  left: ThreadTreeNode,
+  right: ThreadTreeNode,
+  pinnedThreadIds: ReadonlySet<string>,
+  prioritizedThreadIds: ReadonlySet<string>,
+): number {
+  const leftPinned = pinnedThreadIds.has(left.thread.id);
+  const rightPinned = pinnedThreadIds.has(right.thread.id);
+  if (leftPinned !== rightPinned) return leftPinned ? -1 : 1;
+  const leftPrioritized = prioritizedThreadIds.has(left.thread.id);
+  const rightPrioritized = prioritizedThreadIds.has(right.thread.id);
+  if (leftPrioritized !== rightPrioritized) return leftPrioritized ? -1 : 1;
   if (left.thread.running !== right.thread.running) return left.thread.running ? -1 : 1;
   return right.thread.updatedAt - left.thread.updatedAt;
 }

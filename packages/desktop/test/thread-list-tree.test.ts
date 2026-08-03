@@ -6,6 +6,7 @@ import {
   threadDescendantIds,
   threadTreeByArchiveState,
 } from "../src/renderer/src/state/thread-list-commands.ts";
+import { pinnedThreadKey } from "../src/renderer/src/state/thread-pinning-preference.ts";
 import type { Thread } from "../src/shared/contracts.ts";
 
 describe("thread list tree", () => {
@@ -24,6 +25,26 @@ describe("thread list tree", () => {
 
     expect(roots.map(({ thread: item }) => item.id)).toEqual(["parent-a", "parent-b"]);
     expect(roots[0]?.children.map(({ thread: item }) => item.id)).toEqual(["running-child", "newer-child"]);
+  });
+
+  it("将置顶根会话和置顶子会话排在各自同级列表前面", () => {
+    const roots = threadTreeByArchiveState(
+      [
+        thread("recent", 50),
+        thread("pinned-root", 10),
+        thread("parent", 40),
+        thread("recent-child", 30, { parentThreadId: "parent" }),
+        thread("pinned-child", 20, { parentThreadId: "parent" }),
+      ],
+      false,
+      10,
+      new Set([pinnedThreadKey("project", "pinned-root"), pinnedThreadKey("project", "pinned-child")]),
+    );
+
+    expect(roots.map(({ thread: item }) => item.id)).toEqual(["pinned-root", "parent", "recent"]);
+    expect(roots.find(({ thread: item }) => item.id === "parent")?.children.map(({ thread: item }) => item.id)).toEqual(
+      ["pinned-child", "recent-child"],
+    );
   });
 
   it("keeps every root collapsed by default, including roots with running descendants", () => {
@@ -175,6 +196,87 @@ describe("thread list tree", () => {
     );
 
     expect(roots.map(({ thread: item }) => item.id)).toEqual(["orphan", "cycle-a", "cycle-b"]);
+  });
+
+  describe("display filter keeps parent-child subtrees intact", () => {
+    const catalog = [
+      thread("root-a", 50),
+      thread("middle-b", 40, { parentThreadId: "root-a" }),
+      thread("leaf-c", 30, { parentThreadId: "middle-b" }),
+      thread("sibling-d", 20, { parentThreadId: "root-a" }),
+      thread("other-root", 10),
+    ];
+
+    it("keep 置顶根时展示其完整后代子树", () => {
+      const roots = threadTreeByArchiveState(catalog, false, 10, new Set(), {
+        mode: "keep",
+        threadIds: new Set(["root-a"]),
+      });
+
+      expect(roots.map(({ thread: item }) => item.id)).toEqual(["root-a"]);
+      expect(roots[0]?.children.map(({ thread: item }) => item.id)).toEqual(["middle-b", "sibling-d"]);
+      expect(roots[0]?.children[0]?.children.map(({ thread: item }) => item.id)).toEqual(["leaf-c"]);
+    });
+
+    it("keep 置顶中间节点时以其为根，后代不拆散", () => {
+      const roots = threadTreeByArchiveState(catalog, false, 10, new Set(), {
+        mode: "keep",
+        threadIds: new Set(["middle-b"]),
+      });
+
+      expect(roots.map(({ thread: item }) => item.id)).toEqual(["middle-b"]);
+      expect(roots[0]?.children.map(({ thread: item }) => item.id)).toEqual(["leaf-c"]);
+    });
+
+    it("keep 置顶子节点（叶子）时仅展示该节点", () => {
+      const roots = threadTreeByArchiveState(catalog, false, 10, new Set(), {
+        mode: "keep",
+        threadIds: new Set(["leaf-c"]),
+      });
+
+      expect(roots.map(({ thread: item }) => item.id)).toEqual(["leaf-c"]);
+      expect(roots[0]?.children).toEqual([]);
+    });
+
+    it("keep 同时包含父与子时只以最顶层为根，避免重复展示", () => {
+      const roots = threadTreeByArchiveState(catalog, false, 10, new Set(), {
+        mode: "keep",
+        threadIds: new Set(["root-a", "middle-b"]),
+      });
+
+      expect(roots.map(({ thread: item }) => item.id)).toEqual(["root-a"]);
+      expect(roots[0]?.children.map(({ thread: item }) => item.id)).toEqual(["middle-b", "sibling-d"]);
+    });
+
+    it("prune 置顶中间节点时剪除其整棵子树", () => {
+      const roots = threadTreeByArchiveState(catalog, false, 10, new Set(), {
+        mode: "prune",
+        threadIds: new Set(["middle-b"]),
+      });
+
+      expect(roots.map(({ thread: item }) => item.id)).toEqual(["root-a", "other-root"]);
+      expect(roots[0]?.children.map(({ thread: item }) => item.id)).toEqual(["sibling-d"]);
+    });
+
+    it("prune 置顶叶子时仅移除该节点", () => {
+      const roots = threadTreeByArchiveState(catalog, false, 10, new Set(), {
+        mode: "prune",
+        threadIds: new Set(["leaf-c"]),
+      });
+
+      expect(roots.map(({ thread: item }) => item.id)).toEqual(["root-a", "other-root"]);
+      expect(roots[0]?.children.map(({ thread: item }) => item.id)).toEqual(["middle-b", "sibling-d"]);
+      expect(roots[0]?.children[0]?.children).toEqual([]);
+    });
+
+    it("prune 置顶根时移除整棵树", () => {
+      const roots = threadTreeByArchiveState(catalog, false, 10, new Set(), {
+        mode: "prune",
+        threadIds: new Set(["root-a"]),
+      });
+
+      expect(roots.map(({ thread: item }) => item.id)).toEqual(["other-root"]);
+    });
   });
 });
 

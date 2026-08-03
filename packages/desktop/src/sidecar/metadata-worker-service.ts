@@ -4,7 +4,12 @@ import { join, resolve } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
 import { loadDraftSessionConfig } from "../main/pi/session-configuration.ts";
-import type { MetadataSidecarCommand, SidecarBinding, SidecarCommand } from "../shared/sidecar-contracts.ts";
+import type {
+  ColdOperationLease,
+  MetadataSidecarCommand,
+  SidecarBinding,
+  SidecarCommand,
+} from "../shared/sidecar-contracts.ts";
 import { SessionMetadataIndex, type SessionRemovalPlan } from "./session-metadata-index.ts";
 import type { SidecarService } from "./sidecar-host.ts";
 
@@ -65,6 +70,11 @@ export class MetadataWorkerService implements SidecarService {
           throw new Error(`Invalid session removal policy: ${command.policy}`);
         }
         const plan = await this.index.planRemoval(command.projectId, command.cwd, command.threadId, command.policy);
+        return commitSessionRemoval(this.index, plan, this.removalJournalDir);
+      }
+      case "promoteColdSession": {
+        assertColdLease(command.projectId, command.threadId, "promote", command.lease, this.consumedColdLeaseNonces);
+        const plan = await this.index.planPromotion(command.projectId, command.cwd, command.threadId);
         return commitSessionRemoval(this.index, plan, this.removalJournalDir);
       }
       case "recoverCreationReservation": {
@@ -150,10 +160,13 @@ async function commitSessionRemoval(index: SessionMetadataIndex, plan: SessionRe
   }
   let committed = false;
   try {
-    for (const [index, { session, previousParentPath, nextParentPath }] of plan.reparentedSessions.entries()) {
+    for (const [
+      index,
+      { session, previousParentPath, nextParentPath, promoteToRoot },
+    ] of plan.reparentedSessions.entries()) {
       const rewrite = rewrites[index];
       if (!rewrite) throw new Error(`Session removal journal is missing rewrite ${session.id}`);
-      await stageParentRewrite(session.path, previousParentPath, nextParentPath, rewrite);
+      await stageParentRewrite(session.path, previousParentPath, nextParentPath, rewrite, promoteToRoot === true);
     }
     for (const removal of journal.removals) await rename(removal.path, removal.tombstonePath);
     for (const rewrite of rewrites) {
@@ -235,6 +248,7 @@ async function stageParentRewrite(
   previousParentPath: string,
   nextParentPath: string | undefined,
   rewrite: StagedRewrite,
+  promoteToRoot = false,
 ): Promise<void> {
   const content = await readFile(sessionFile, "utf8");
   const newline = content.indexOf("\n");
@@ -252,9 +266,10 @@ async function stageParentRewrite(
   if (currentParent && resolve(currentParent) !== resolve(previousParentPath)) {
     throw new Error(`Pi session parent changed while reparenting: ${sessionFile}`);
   }
-  if (!currentParent && !nextParentPath) return;
+  if (!currentParent && !nextParentPath && !promoteToRoot) return;
   if (nextParentPath) header.parentSession = nextParentPath;
   else delete header.parentSession;
+  if (promoteToRoot) header.promotedRoot = true;
   const remainder = newline === -1 ? "" : content.slice(newline);
   await writeFile(rewrite.temporaryPath, `${JSON.stringify(header)}${remainder}`, { flag: "wx" });
 }
@@ -266,8 +281,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function assertColdLease(
   projectId: string,
   threadId: string,
-  operation: "rename" | "remove",
-  lease: { projectId: string; threadId: string; operation: "rename" | "remove"; nonce: string; expiresAt: number },
+  operation: ColdOperationLease["operation"],
+  lease: {
+    projectId: string;
+    threadId: string;
+    operation: "rename" | "remove" | "promote";
+    nonce: string;
+    expiresAt: number;
+  },
   consumedNonces: Map<string, number>,
 ): void {
   const now = Date.now();

@@ -1,38 +1,42 @@
-import * as Tabs from "@radix-ui/react-tabs";
 import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
+import { Tabs } from "@renderer/shared/ui/tabs";
+import { TabsContent } from "@renderer/shared/ui/tabs-content";
+import { TabsList } from "@renderer/shared/ui/tabs-list";
+import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
 import { Toast } from "@renderer/shared/ui/toast";
-import { useDesktopSelector } from "@renderer/state/desktop-context";
-import { selectProjects } from "@renderer/state/desktop-selectors";
+import { useNavigate } from "@tanstack/react-router";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
 import { LocalPluginsView } from "./local-plugins-view.tsx";
 import { MarketplaceSettingsDialog } from "./marketplace-settings-dialog.tsx";
-import { PluginDetailDialog } from "./plugin-detail-dialog.tsx";
 import { MarketplacePluginCard } from "./plugin-marketplace-card.tsx";
 import { useLocalPlugins } from "./use-local-plugins.ts";
 import { usePluginMarketplace } from "./use-plugin-marketplace.ts";
 
-export function PluginMarketplacePage({ returnSession }: { returnSession?: { projectId: string; threadId: string } }) {
-  const [activeView, setActiveView] = useState<"marketplace" | "local">("marketplace");
+export function PluginMarketplacePage({
+  returnSession,
+  initialQuery = "",
+  initialView = "marketplace",
+}: {
+  returnSession?: { projectId: string; threadId: string };
+  initialQuery?: string;
+  initialView?: "marketplace" | "local";
+}) {
+  const navigate = useNavigate();
+  const [activeView, setActiveView] = useState<"marketplace" | "local">(initialView);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const controller = usePluginMarketplace(activeView === "marketplace");
+  useEffect(() => {
+    setActiveView(initialView);
+  }, [initialView]);
+  const controller = usePluginMarketplace(activeView === "marketplace", initialQuery);
   const localController = useLocalPlugins(returnSession?.projectId, returnSession?.threadId);
-  const projects = useDesktopSelector(selectProjects);
-  const [selectedPluginId, setSelectedPluginId] = useState<string>();
-  const selectedPlugin = controller.page?.plugins.find((plugin) => plugin.id === selectedPluginId);
-  const selectedInstalled = controller.installed?.plugins.find((plugin) => plugin.id === selectedPluginId);
   const orphanedInstalled = controller.installed?.plugins.filter(
     (installed) => !controller.page?.plugins.some((plugin) => plugin.id === installed.id),
   );
-  const mutationPending =
-    controller.installingId !== undefined ||
-    controller.updatingId !== undefined ||
-    controller.uninstallingId !== undefined ||
-    controller.settingScopeId !== undefined;
 
   return (
     <>
@@ -67,19 +71,26 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
       </header>
       <div className="plugin-marketplace-scroll">
         <main className="plugin-marketplace-content">
-          <Tabs.Root
+          <Tabs
             value={activeView}
             onValueChange={(value) => {
               if (value !== "marketplace" && value !== "local") return;
               setActiveView(value);
-              setSelectedPluginId(undefined);
+              void navigate({
+                to: "/plugins",
+                search: (previous) => ({
+                  ...previous,
+                  query: value === "marketplace" ? previous.query : undefined,
+                  view: value,
+                }),
+              });
             }}
           >
-            <Tabs.List className="plugin-center-tabs" aria-label="插件来源">
-              <Tabs.Trigger value="marketplace">市场</Tabs.Trigger>
-              <Tabs.Trigger value="local">本地</Tabs.Trigger>
-            </Tabs.List>
-            <Tabs.Content value="marketplace" className="plugin-center-tab-content">
+            <TabsList className="plugin-center-tabs" aria-label="插件来源">
+              <TabsTrigger value="marketplace">市场</TabsTrigger>
+              <TabsTrigger value="local">本地</TabsTrigger>
+            </TabsList>
+            <TabsContent value="marketplace" className="plugin-center-tab-content">
               <header className="plugin-marketplace-page-heading">
                 <h2>插件</h2>
                 <span>安装、更新和管理标准插件。</span>
@@ -93,7 +104,18 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
                     aria-label="搜索插件"
                     placeholder="搜索插件"
                     style={{ paddingLeft: "2.25rem" }}
-                    onChange={(event) => controller.setQuery(event.currentTarget.value)}
+                    onChange={(event) => {
+                      const query = event.currentTarget.value;
+                      controller.setQuery(query);
+                      void navigate({
+                        to: "/plugins",
+                        search: (previous) => ({
+                          ...previous,
+                          query: query || undefined,
+                          view: "marketplace",
+                        }),
+                      });
+                    }}
                   />
                 </div>
               </div>
@@ -141,7 +163,17 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
                       <MarketplacePluginCard
                         key={installed.id}
                         installed={installed}
-                        onOpen={() => setSelectedPluginId(installed.id)}
+                        onOpen={() =>
+                          void navigate({
+                            to: "/plugins/$pluginId",
+                            params: { pluginId: installed.id },
+                            search: (previous) => ({
+                              ...previous,
+                              query: controller.query || undefined,
+                              view: "marketplace",
+                            }),
+                          })
+                        }
                       />
                     ))}
                   </div>
@@ -164,7 +196,17 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
                         key={plugin.id}
                         plugin={plugin}
                         installed={controller.installed?.plugins.find((installed) => installed.id === plugin.id)}
-                        onOpen={() => setSelectedPluginId(plugin.id)}
+                        onOpen={() =>
+                          void navigate({
+                            to: "/plugins/$pluginId",
+                            params: { pluginId: plugin.id },
+                            search: (previous) => ({
+                              ...previous,
+                              query: controller.query || undefined,
+                              view: "marketplace",
+                            }),
+                          })
+                        }
                       />
                     ))}
                   </div>
@@ -178,34 +220,26 @@ export function PluginMarketplacePage({ returnSession }: { returnSession?: { pro
                   </div>
                 ) : null}
               </section>
-            </Tabs.Content>
-            <Tabs.Content value="local" className="plugin-center-tab-content">
-              <LocalPluginsView controller={localController} />
-            </Tabs.Content>
-          </Tabs.Root>
+            </TabsContent>
+            <TabsContent value="local" className="plugin-center-tab-content">
+              <LocalPluginsView
+                controller={localController}
+                onOpen={(pluginId) =>
+                  void navigate({
+                    to: "/plugins/local/$pluginId",
+                    params: { pluginId },
+                    search: (previous) => ({ ...previous, query: undefined, view: "local" }),
+                  })
+                }
+              />
+            </TabsContent>
+          </Tabs>
         </main>
       </div>
       <MarketplaceSettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         onSaved={() => void controller.refresh()}
-      />
-      <PluginDetailDialog
-        key={selectedPluginId ?? "closed"}
-        plugin={selectedPlugin}
-        installed={selectedInstalled}
-        marketplaceId={controller.page?.marketplaceId}
-        projects={projects}
-        open={selectedPluginId !== undefined && (selectedPlugin !== undefined || selectedInstalled !== undefined)}
-        mutationPending={mutationPending}
-        installing={controller.installingId === selectedPluginId}
-        updating={controller.updatingId === selectedPluginId}
-        uninstalling={controller.uninstallingId === selectedPluginId}
-        onClose={() => setSelectedPluginId(undefined)}
-        onInstall={(plugin) => void controller.install(plugin)}
-        onUpdate={(plugin) => void controller.update(plugin)}
-        onUninstall={(id) => void controller.uninstall(id)}
-        onSetScope={(id, scope, projectIds) => void controller.setScope(id, scope, projectIds)}
       />
     </>
   );

@@ -247,6 +247,15 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
           throw error;
         }
       },
+      async promoteThread(projectId, threadId) {
+        try {
+          const result = await window.desktop.sessions.promote(projectId, threadId);
+          dispatchDesktop(store, { type: "session-tree-removed", projectId, ...result });
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
       clearError() {
         dispatchDesktop(store, { type: "error", error: null });
       },
