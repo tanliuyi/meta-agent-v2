@@ -58,6 +58,7 @@ export function FilePanel() {
   const fileGeneration = useRef(0);
   const highlightGeneration = useRef(0);
   const workspace = useRef<HTMLDivElement>(null);
+  const tabsListRef = useRef<HTMLDivElement>(null);
   const activeProjectId = useRef(projectId);
   const directoryRequests = useRef(new Map<string, Promise<FileNode[]>>());
   const resize = useResizableRegion<HTMLElement>({
@@ -76,6 +77,23 @@ export function FilePanel() {
     },
   });
   activeProjectId.current = projectId;
+
+  useEffect(() => {
+    const tabs = tabsListRef.current;
+    if (!tabs) return;
+    const onWheel = (event: WheelEvent) => {
+      const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+      if (delta === 0) return;
+      const maxScroll = tabs.scrollWidth - tabs.clientWidth;
+      if (maxScroll <= 0) return;
+      const canScroll = delta > 0 ? tabs.scrollLeft < maxScroll : tabs.scrollLeft > 0;
+      if (!canScroll) return;
+      tabs.scrollLeft = Math.max(0, Math.min(maxScroll, tabs.scrollLeft + delta));
+      event.preventDefault();
+    };
+    tabs.addEventListener("wheel", onWheel, { passive: false });
+    return () => tabs.removeEventListener("wheel", onWheel);
+  }, []);
 
   useEffect(() => {
     setRoots([]);
@@ -314,7 +332,7 @@ export function FilePanel() {
         onValueChange={(path) => updateWorkbench({ activeFile: path })}
       >
         {openFiles.length > 0 ? (
-          <Tabs.List className="file-tabs" aria-label="打开的文件">
+          <Tabs.List ref={tabsListRef} className="file-tabs" aria-label="打开的文件">
             {openFiles.map((path) => {
               const label = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
               return (

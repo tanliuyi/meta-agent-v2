@@ -382,10 +382,24 @@ body.is-resizing-column .workbench-panel {
   overflow-x: auto;
   overflow-y: hidden;
   border-bottom: 1px solid hsl(var(--border));
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.file-tabs:hover {
+  scrollbar-color: hsl(var(--border)) transparent;
 }
 .file-tabs::-webkit-scrollbar {
-  display: none;
+  height: 6px;
+}
+.file-tabs::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: transparent;
+}
+.file-tabs:hover::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+}
+.file-tabs::-webkit-scrollbar-track {
+  background: transparent;
 }
 .file-breadcrumb {
   display: flex;
@@ -612,6 +626,11 @@ body.is-resizing-column .workbench-panel {
 html[data-theme="dark"] .file-preview-token {
   color: var(--shiki-dark, var(--markdown-code-token-color, inherit));
   background: var(--shiki-dark-bg, var(--markdown-code-token-background, transparent));
+}
+.file-preview-content > pre[data-wrap] .file-preview-line {
+  /* width: max-content 会让每行宽度等于最长行宽度，pre-wrap 永远不会触发换行，
+     因此开启换行时改为拉伸到容器宽度。 */
+  width: auto;
 }
 .file-preview-content > pre[data-wrap] .file-preview-line-text {
   white-space: pre-wrap;

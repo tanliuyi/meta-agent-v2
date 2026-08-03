@@ -1,5 +1,6 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
+import { useToast } from "@renderer/shared/ui/use-toast";
 import RotateCw from "lucide-react/dist/esm/icons/rotate-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
 import TestTube from "lucide-react/dist/esm/icons/test-tube.mjs";
@@ -12,9 +13,14 @@ interface MarketplaceEndpointSettingsProps {
 
 export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSettingsProps) {
   const controller = useMarketplaceEndpointSettings();
+  const toast = useToast();
   const [baseUrl, setBaseUrl] = useState("");
   const [dirty, setDirty] = useState(false);
   const active = controller.snapshot?.endpoint;
+
+  useEffect(() => {
+    if (controller.error) toast.notify({ message: controller.error, tone: "error" });
+  }, [controller.error, toast]);
 
   useEffect(() => {
     // 只同步未编辑的输入；快照刷新（保存冲突、后台重载）不覆盖用户正在输入的地址。
@@ -93,11 +99,6 @@ export function MarketplaceEndpointSettings({ onSaved }: MarketplaceEndpointSett
         <div className="marketplace-endpoint-result" data-tone="info" role="status">
           <strong>{ready.endpoint.marketplaceId}</strong>
           <span>{ready.endpoint.apiRoot}</span>
-        </div>
-      ) : null}
-      {controller.error ? (
-        <div className="plugin-marketplace-notice" data-tone="error" role="alert">
-          {controller.error}
         </div>
       ) : null}
     </section>

@@ -1,7 +1,8 @@
 import { Button } from "@renderer/shared/ui/button";
+import { useToast } from "@renderer/shared/ui/use-toast";
 import Braces from "lucide-react/dist/esm/icons/braces.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { PluginConfigurationFieldControl } from "./plugin-configuration-field-control.tsx";
 import { PluginConfigurationJsonEditor } from "./plugin-configuration-json-editor.tsx";
 import type { PluginConfigurationSource } from "./use-plugin-configuration.ts";
@@ -15,8 +16,19 @@ export function PluginConfigurationForm({
   source?: PluginConfigurationSource;
 }) {
   const controller = usePluginConfiguration(pluginId, source);
+  const toast = useToast();
   const [jsonMode, setJsonMode] = useState(false);
   const [jsonSaveRequest, setJsonSaveRequest] = useState(0);
+
+  useEffect(() => {
+    if (controller.notice) toast.notify({ message: controller.notice, tone: "success" });
+  }, [controller.notice, toast]);
+
+  useEffect(() => {
+    // 载入失败（无快照）保留页面内联提示；仅提交类错误以 toast 弹层展示
+    if (controller.error && controller.snapshot) toast.notify({ message: controller.error, tone: "error" });
+  }, [controller.error, controller.snapshot, toast]);
+
   if (controller.loading) {
     return (
       <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-detail-configuration">
@@ -68,16 +80,6 @@ export function PluginConfigurationForm({
           </Button>
         </div>
       </div>
-      {controller.error ? (
-        <div className="plugin-configuration-message" data-tone="error" role="alert">
-          {controller.error}
-        </div>
-      ) : null}
-      {controller.notice ? (
-        <div className="plugin-configuration-message" data-tone="success" role="status">
-          {controller.notice}
-        </div>
-      ) : null}
       {jsonMode ? (
         <PluginConfigurationJsonEditor controller={controller} saveRequest={jsonSaveRequest} />
       ) : (
