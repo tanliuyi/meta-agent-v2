@@ -5,7 +5,8 @@ import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
-import { useRef } from "react";
+import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
+import { useRef, useState } from "react";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -14,7 +15,8 @@ interface ConfirmDialogProps {
   confirmLabel?: string;
   onOpenChange?(open: boolean): void;
   onCancel?(): void;
-  onConfirm(): void;
+  /** 可返回 Promise；Dialog 会等待其完成（成功）才关闭，失败时保持打开。 */
+  onConfirm(): void | Promise<void>;
 }
 
 /** Controlled confirmation dialog with separate confirm and cancel effects. */
@@ -28,15 +30,23 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const [pending, setPending] = useState(false);
 
   const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && pending) return;
     onOpenChange?.(nextOpen);
     if (!nextOpen) onCancel?.();
   };
 
-  const handleConfirm = () => {
-    onConfirm();
-    onOpenChange?.(false);
+  const handleConfirm = async () => {
+    if (pending) return;
+    setPending(true);
+    try {
+      await onConfirm();
+      onOpenChange?.(false);
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
@@ -52,11 +62,12 @@ export function ConfirmDialog({
         <DialogDescription>{description}</DialogDescription>
         <DialogFooter variant="actions">
           <DialogClose asChild>
-            <Button ref={cancelRef} variant="ghost">
+            <Button ref={cancelRef} variant="ghost" disabled={pending}>
               取消
             </Button>
           </DialogClose>
-          <Button variant="destructive" onClick={handleConfirm}>
+          <Button variant="destructive" disabled={pending} onClick={() => void handleConfirm().catch(() => undefined)}>
+            {pending ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : null}
             {confirmLabel}
           </Button>
         </DialogFooter>

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import lockfile from "proper-lockfile";
-import { isUserProject, type Project } from "../../shared/contracts.ts";
+import { GENERAL_WORKSPACE_ID, type Project } from "../../shared/contracts.ts";
 import type {
   MemoryEntryCollection,
   MemoryEntryTarget,
@@ -39,6 +39,8 @@ import {
 import type { MemoryConfig, MemoryResult } from "../pi/extensions/pi-hermes-memory/types.ts";
 
 export const MISSING_MEMORY_SETTINGS_REVISION = "missing:hermes-memory-config-v1";
+
+const GENERAL_WORKSPACE_MEMORY_KEY = "__desktop_general_workspace__";
 
 interface CurrentMemorySettingsSource {
   exists: boolean;
@@ -262,11 +264,14 @@ export class MemorySettingsService {
     skills: MemorySkillSummary[];
   }> {
     const projectsRoot = this.projectsRoot(config);
-    const catalogProjects = (await this.listProjects()).filter(isUserProject);
+    const catalogProjects = await this.listProjects();
     const loadedProjects = await Promise.all(
       catalogProjects.map(async (project) => {
-        const memoryKey = basename(resolve(project.cwd));
-        if (!isSafeProjectNameWithinRoot(memoryKey, projectsRoot)) {
+        const memoryKey = resolveProjectMemoryKey(project.id, project.cwd);
+        if (
+          (project.id !== GENERAL_WORKSPACE_ID && memoryKey === GENERAL_WORKSPACE_MEMORY_KEY) ||
+          !isSafeProjectNameWithinRoot(memoryKey, projectsRoot)
+        ) {
           return {
             project: {
               id: project.id,
@@ -374,8 +379,11 @@ export class MemorySettingsService {
     }
     if (!projectId) throw new TypeError("A Desktop project ID is required");
     const projectsRoot = this.projectsRoot(config);
-    const projectMemoryKey = basename(resolve(this.getProjectCwd(projectId)));
-    if (!isSafeProjectNameWithinRoot(projectMemoryKey, projectsRoot)) {
+    const projectMemoryKey = resolveProjectMemoryKey(projectId, this.getProjectCwd(projectId));
+    if (
+      (projectId !== GENERAL_WORKSPACE_ID && projectMemoryKey === GENERAL_WORKSPACE_MEMORY_KEY) ||
+      !isSafeProjectNameWithinRoot(projectMemoryKey, projectsRoot)
+    ) {
       throw new TypeError("The Desktop project cannot be mapped to memory storage");
     }
     const memoryFile = resolveAuthoritativeMemoryFile(projectsRoot, projectMemoryKey);
@@ -576,6 +584,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function resolveProjectMemoryKey(projectId: string, cwd: string): string {
+  return projectId === GENERAL_WORKSPACE_ID ? GENERAL_WORKSPACE_MEMORY_KEY : basename(resolve(cwd));
 }
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {

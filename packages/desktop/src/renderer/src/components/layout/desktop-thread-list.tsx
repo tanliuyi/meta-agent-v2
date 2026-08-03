@@ -8,6 +8,7 @@ import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import { type FormEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/contracts.ts";
 import { sessionRecordKey } from "../../runtime/pi-session-store.ts";
@@ -61,6 +62,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
   const [renaming, setRenaming] = useState<RenameState | null>(null);
   const [pendingStop, setPendingStop] = useState<Thread | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const pendingDeleteDescendantIds = useMemo(
     () => (pendingDelete ? threadDescendantIds(threads, pendingDelete.id) : []),
     [pendingDelete, threads],
@@ -99,14 +101,22 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
     [actions, project.id, renaming, runAction, threads],
   );
 
+  /** 删除完成后才关闭确认 Dialog；失败时保持打开，错误已由 action 上报。 */
   const confirmDelete = useCallback(
-    (policy: SessionRemovePolicy) => {
+    async (policy: SessionRemovePolicy) => {
       const thread = pendingDelete;
       if (!thread) return;
-      setPendingDelete(null);
-      runAction(`delete:${thread.id}`, () => actions.removeThread(project.id, thread.id, policy));
+      setDeleting(true);
+      try {
+        await runPendingThreadAction(pendingActions.current, `delete:${thread.id}`, setPendingKeys, () =>
+          actions.removeThread(project.id, thread.id, policy),
+        );
+        setPendingDelete(null);
+      } finally {
+        setDeleting(false);
+      }
     },
-    [actions, pendingDelete, project.id, runAction],
+    [actions, pendingDelete, project.id],
   );
 
   const openThread = useCallback(
@@ -330,7 +340,7 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
       <Dialog
         open={pendingDelete !== null && pendingDeleteDescendantIds.length > 0}
         onOpenChange={(open) => {
-          if (!open) setPendingDelete(null);
+          if (!open && !deleting) setPendingDelete(null);
         }}
       >
         <DialogContent className="gap-3 sm:max-w-lg">
@@ -346,16 +356,17 @@ export function DesktopThreadList({ project, threads, compactRoot = false }: Des
             </DialogClose>
             <Button
               variant="outline"
-              disabled={pendingDeleteHasRunningDescendant}
-              onClick={() => confirmDelete("reparent")}
+              disabled={pendingDeleteHasRunningDescendant || deleting}
+              onClick={() => void confirmDelete("reparent").catch(() => undefined)}
             >
               保留并提升子会话
             </Button>
             <Button
               variant="destructive"
-              disabled={pendingDeleteHasRunningDescendant}
-              onClick={() => confirmDelete("subtree")}
+              disabled={pendingDeleteHasRunningDescendant || deleting}
+              onClick={() => void confirmDelete("subtree").catch(() => undefined)}
             >
+              {deleting ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : null}
               删除全部 {pendingDeleteDescendantIds.length + 1} 个会话
             </Button>
           </DialogFooter>

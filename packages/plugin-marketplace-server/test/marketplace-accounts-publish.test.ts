@@ -273,6 +273,26 @@ describe("publishing", () => {
 			error: { code: "BODY_INVALID", message: "configuration requires the configuration.read capability" },
 		});
 
+		for (const [version, preferredValues] of [
+			["0.9.2", [false]],
+			["0.9.3", [true, true]],
+		] as const) {
+			const declaration = versionDeclaration(version);
+			declaration.artifacts = preferredValues.map((preferred, index) => ({
+				...declaration.artifacts[0]!,
+				id: `${ARTIFACT_ID}-${index}`,
+				preferred,
+			}));
+			const rejectedPreferredArtifacts = await request(app.getHttpServer())
+				.post(`/v1/publish/plugins/${PLUGIN_ID}/versions`)
+				.set("authorization", `Bearer ${aliceToken}`)
+				.send(declaration)
+				.expect(400);
+			expect(rejectedPreferredArtifacts.body).toMatchObject({
+				error: { code: "BODY_INVALID", message: expect.stringContaining("exactly one preferred entry") },
+			});
+		}
+
 		const draft = await request(app.getHttpServer())
 			.post(`/v1/publish/plugins/${PLUGIN_ID}/versions`)
 			.set("authorization", `Bearer ${aliceToken}`)

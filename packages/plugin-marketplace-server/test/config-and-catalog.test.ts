@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyMarketplacePostgresState, MARKETPLACE_TABLES } from "../scripts/postgres-state.ts";
 import { versionCompatible } from "../src/catalog-query.ts";
+import { parseCatalogDocument } from "../src/catalog-validation.ts";
 import { loadMarketplaceServerConfig } from "../src/config.ts";
 import type { PluginStatus, StoredPluginVersion } from "../src/contracts.ts";
 import { MarketplaceStore } from "../src/database/store.ts";
@@ -247,6 +248,15 @@ describe("catalog startup validation", () => {
 		await reopened.close();
 	});
 
+	it.each([
+		["zero", [false]],
+		["multiple", [true, true]],
+	] as const)("rejects catalogs with %s preferred artifacts", (_label, preferredValues) => {
+		expect(() => parseCatalogDocument(catalogWithPreferredArtifacts(preferredValues))).toThrow(
+			"artifacts must include exactly one preferred entry",
+		);
+	});
+
 	it("rejects unsafe download paths before serving requests", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "marketplace-catalog-"));
 		directories.push(directory);
@@ -304,6 +314,42 @@ async function openStore(catalogPath?: URL): Promise<MarketplaceStore> {
 		marketplaceId: "test-marketplace",
 		clock: () => 1_800_000_000_000,
 	});
+}
+
+function catalogWithPreferredArtifacts(preferredValues: readonly boolean[]) {
+	return {
+		schemaVersion: 1,
+		plugins: [
+			{
+				id: "preferred.test",
+				name: "Preferred Test",
+				description: "Preferred artifact validation fixture",
+				publisher: { id: "publisher", displayName: "Publisher", verified: false },
+				categories: ["test"],
+				publishedAt: 1,
+				updatedAt: 1,
+				versions: [
+					{
+						version: "1.0.0",
+						status: "available",
+						changelog: "fixture",
+						publishedAt: 1,
+						desktop: { hostProfileVersion: 1 },
+						capabilities: [],
+						artifacts: preferredValues.map((preferred, index) => ({
+							id: `artifact-${index}`,
+							target: { platform: "universal", arch: "universal" },
+							sha256: "0".repeat(64),
+							size: 1,
+							downloadPath: `/artifact-${index}`,
+							containsNativeCode: false,
+							preferred,
+						})),
+					},
+				],
+			},
+		],
+	};
 }
 
 function catalogVersion(status: PluginStatus, minimumNapi: string): StoredPluginVersion {

@@ -82,12 +82,10 @@ export const ProjectItem = memo(function ProjectItem({
     writeStoredProjectExpanded(project.id, next);
   };
 
-  const runProjectAction = (action: () => Promise<void>) => {
-    if (pendingAction) return;
+  const runProjectAction = (action: () => Promise<void>): Promise<void> => {
+    if (pendingAction) return Promise.reject(new Error("Project action is already pending"));
     setPendingAction(true);
-    void action()
-      .catch(() => undefined)
-      .finally(() => setPendingAction(false));
+    return action().finally(() => setPendingAction(false));
   };
 
   const commitRename = (event: FormEvent<HTMLFormElement>) => {
@@ -98,13 +96,10 @@ export const ProjectItem = memo(function ProjectItem({
       return;
     }
     setRenameName(null);
-    runProjectAction(() => actions.renameProject(project.id, name));
+    void runProjectAction(() => actions.renameProject(project.id, name)).catch(() => undefined);
   };
 
-  const confirmDelete = () => {
-    setDeletePending(false);
-    runProjectAction(() => actions.removeProject(project.id));
-  };
+  const confirmDelete = () => runProjectAction(() => actions.removeProject(project.id));
 
   return (
     <li className="project-group" data-project-id={project.id}>
@@ -167,7 +162,9 @@ export const ProjectItem = memo(function ProjectItem({
             </ContextMenuItem>
             <ContextMenuItem
               disabled={pendingAction}
-              onSelect={() => runProjectAction(() => actions.openProjectExternally(project.id))}
+              onSelect={() =>
+                void runProjectAction(() => actions.openProjectExternally(project.id)).catch(() => undefined)
+              }
             >
               <FolderOpen /> {window.desktop.platform === "darwin" ? "在 Finder 中打开" : "在资源管理器中打开"}
             </ContextMenuItem>

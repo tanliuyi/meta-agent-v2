@@ -173,7 +173,7 @@ describe("MemorySettingsService", () => {
     await expect(lstat(join(outside, "MEMORY.md"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  test("项目列表只包含 Desktop ProjectStore 中的用户项目", async () => {
+  test("项目列表包含 Desktop ProjectStore 中的全部项目（含通用对话工作区）", async () => {
     const projectsRoot = join(agentDir, "projects-memory");
     await mkdir(join(projectsRoot, "actual"), { recursive: true });
     await mkdir(join(projectsRoot, "orphan-test-artifact"), { recursive: true });
@@ -199,6 +199,110 @@ describe("MemorySettingsService", () => {
     expect(snapshot.collections.filter(({ target }) => target === "project")).toMatchObject([
       { projectId: "actual-id", projectName: "已重命名的项目", entries: [{ content: "实际项目记忆" }] },
     ]);
+  });
+
+  test("通用对话工作区出现在项目列表中并可读写项目记忆", async () => {
+    service = new MemorySettingsService(agentDir, {
+      listProjects: async () => [
+        {
+          id: "__general__",
+          kind: "general",
+          name: "对话",
+          cwd: join(agentDir, "workspaces", "general"),
+          lastOpenedAt: 0,
+          available: true,
+        },
+      ],
+      getProjectCwd: () => join(agentDir, "workspaces", "general"),
+    });
+
+    const snapshot = await service.getSnapshot();
+
+    expect(snapshot.projects).toMatchObject([
+      { id: "__general__", name: "对话", memoryKey: "__desktop_general_workspace__" },
+    ]);
+    expect(snapshot.collections.filter(({ target }) => target === "project")).toMatchObject([
+      { projectId: "__general__", projectName: "对话" },
+    ]);
+
+    const added = await service.mutateEntry({
+      expectedRevision: snapshot.revision,
+      action: "add",
+      target: "project",
+      projectId: "__general__",
+      content: "通用对话工作区记忆",
+    });
+    expect(added.success).toBe(true);
+    expect(added.snapshot?.collections.find(({ target }) => target === "project")).toMatchObject({
+      projectId: "__general__",
+      entries: [{ content: "通用对话工作区记忆" }],
+    });
+    await expect(
+      readFile(join(agentDir, "projects-memory", "__desktop_general_workspace__", "MEMORY.md"), "utf8"),
+    ).resolves.toContain("通用对话工作区记忆");
+  });
+
+  test("通用工作区与 basename 为 general 的用户项目使用独立记忆目录", async () => {
+    const generalCwd = join(agentDir, "workspaces", "general");
+    const projectCwd = join(agentDir, "projects", "general");
+    service = new MemorySettingsService(agentDir, {
+      listProjects: async () => [
+        {
+          id: "__general__",
+          kind: "general",
+          name: "对话",
+          cwd: generalCwd,
+          lastOpenedAt: 0,
+          available: true,
+        },
+        {
+          id: "project-general",
+          kind: "project",
+          name: "General Project",
+          cwd: projectCwd,
+          lastOpenedAt: 0,
+          available: true,
+        },
+      ],
+      getProjectCwd: (projectId) => (projectId === "__general__" ? generalCwd : projectCwd),
+    });
+
+    const snapshot = await service.getSnapshot();
+    expect(snapshot.projects).toMatchObject([
+      { id: "__general__", memoryKey: "__desktop_general_workspace__" },
+      { id: "project-general", memoryKey: "general" },
+    ]);
+
+    const generalAdded = await service.mutateEntry({
+      expectedRevision: snapshot.revision,
+      action: "add",
+      target: "project",
+      projectId: "__general__",
+      content: "通用工作区记忆",
+    });
+    const projectAdded = await service.mutateEntry({
+      expectedRevision: generalAdded.snapshot!.revision,
+      action: "add",
+      target: "project",
+      projectId: "project-general",
+      content: "用户项目记忆",
+    });
+
+    expect(
+      projectAdded.snapshot?.collections.find((item) => item.target === "project" && item.projectId === "__general__")
+        ?.entries,
+    ).toMatchObject([{ content: "通用工作区记忆" }]);
+    expect(
+      projectAdded.snapshot?.collections.find(
+        (item) => item.target === "project" && item.projectId === "project-general",
+      )?.entries,
+    ).toMatchObject([{ content: "用户项目记忆" }]);
+    await expect(
+      readFile(join(agentDir, "projects-memory", "__desktop_general_workspace__", "MEMORY.md"), "utf8"),
+    ).resolves.toContain("通用工作区记忆");
+    await expect(readFile(join(agentDir, "projects-memory", "general", "MEMORY.md"), "utf8")).resolves.toContain(
+      "用户项目记忆",
+    );
   });
 
   test("旧 memory 根配置与扩展一致地解析到 pi-hermes-memory", async () => {

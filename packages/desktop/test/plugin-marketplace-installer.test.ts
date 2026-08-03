@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -440,6 +441,39 @@ describe("MarketplacePluginInstaller", () => {
     ).resolves.toContain(harness.artifactHash);
   });
 
+  it("rejects a same-size artifact whose bytes do not match the declared checksum", async () => {
+    const harness = await createHarness({
+      artifactResponse: (archive) => {
+        const tampered = Buffer.from(archive);
+        const centralDirectoryOffset = tampered.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+        if (centralDirectoryOffset < 0) throw new Error("Expected ZIP central directory");
+        tampered[centralDirectoryOffset + 5] = tampered[centralDirectoryOffset + 5]! ^ 1;
+        return new Response(tampered, { status: 200 });
+      },
+    });
+    const initial = await harness.registry.getSnapshot();
+
+    await expect(
+      harness.installer.install({
+        requestId: "install-checksum-mismatch",
+        expectedRevision: initial.revision,
+        pluginId: "dev.meta-agent.example-tools",
+        version: "1.0.0",
+        confirmFullTrust: true,
+      }),
+    ).rejects.toThrow("checksum does not match metadata");
+
+    await expect(harness.registry.getSnapshot()).resolves.toEqual(initial);
+    await expect(
+      lstat(
+        join(harness.agentDir, "extensions", ".meta-agent-marketplace-staging", "dev.meta-agent.example-tools-staging"),
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(harness.agentDir, "extensions", "dev.meta-agent.example-tools"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("aborts an open artifact response when the download exceeds its declared size", async () => {
     let requestAborted = false;
     let streamCanceled = false;
@@ -631,7 +665,7 @@ async function createHarness(
         { level: 9 },
       ),
     );
-    const sha256 = options.artifactKey ?? (version === "1.0.0" ? "1".repeat(64) : "2".repeat(64));
+    const sha256 = options.artifactKey ?? createHash("sha256").update(archive).digest("hex");
     const downloadEndpoint = `https://market.test/v1/plugins/dev.meta-agent.example-tools/versions/${version}/artifacts/${artifactId}/download`;
     const artifactUrl = `https://artifacts.test/${artifactId}.meta-plugin`;
     return { version, artifactId, archive, sha256, downloadEndpoint, artifactUrl };
