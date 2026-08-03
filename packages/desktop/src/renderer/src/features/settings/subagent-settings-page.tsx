@@ -11,7 +11,6 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
-import { isUserProject } from "../../../../shared/contracts.ts";
 import type { AgentSummary, ChainSummary, SubagentSettingsScope } from "../../../../shared/subagent-contracts.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { SubagentAgentSection } from "./subagent-agent-section.tsx";
@@ -28,8 +27,7 @@ const PROJECT_TAB_PREFIX = "project:";
 
 export function SubagentSettingsPage() {
   const desktopStore = useDesktopStore();
-  const catalogProjects = useStore(desktopStore, selectProjects);
-  const projects = useMemo(() => catalogProjects.filter(isUserProject), [catalogProjects]);
+  const projects = useStore(desktopStore, selectProjects);
   const [selectedTab, setSelectedTab] = useState(USER_TAB);
   const activeTab = resolveSubagentSettingsActiveTab(selectedTab, projects);
   const selectedProjectId = activeTab.startsWith(PROJECT_TAB_PREFIX)

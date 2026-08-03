@@ -21,7 +21,16 @@ export function statusTone(status: MarketplacePluginSummary["status"]): "success
 }
 
 export function statusLabel(status: MarketplacePluginSummary["status"]): string {
-  return status === "available" ? "可用" : "已弃用";
+  switch (status) {
+    case "available":
+      return "可用";
+    case "deprecated":
+      return "已弃用";
+    case "withdrawn":
+      return "已下架";
+    case "blocked":
+      return "已封禁";
+  }
 }
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", {

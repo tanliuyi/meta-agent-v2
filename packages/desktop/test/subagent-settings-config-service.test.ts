@@ -63,6 +63,13 @@ describe("SubagentSettingsConfigService", () => {
     expect(snapshot.projectAgents).toEqual([]);
   });
 
+  test("通用对话工作区项目 ID 解析为项目作用域", async () => {
+    const snapshot = await (await createService()).getSnapshot({ projectId: "__general__" });
+
+    expect(snapshot.projectId).toBe("__general__");
+    expect(snapshot.projectScopeAvailable).toBe(true);
+  });
+
   test("includes authenticated Desktop builtin provider models", async () => {
     const snapshot = await (
       await createService(sourceBuiltinAgentsDir, async (providerId) => providerId === "meta-agent")

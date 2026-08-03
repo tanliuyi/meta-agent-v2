@@ -58,6 +58,8 @@ Publishing (publisher member or admin token):
 - `POST /v1/publish/plugins/:pluginId/versions/:version/deprecate`
 - `DELETE /v1/publish/plugins/:pluginId/versions/:version` — drafts only
 
+A draft version must declare exactly one artifact with `preferred: true`: the Desktop client selects exactly one preferred artifact compatible with the runtime, and rejects a version that yields zero or multiple candidates.
+
 Administration (`MARKETPLACE_ADMIN_TOKEN` bearer token):
 
 - `GET /v1/admin/publishers`

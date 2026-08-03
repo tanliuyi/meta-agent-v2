@@ -260,6 +260,12 @@ function parsePublishVersionRequest(body: unknown): PublishVersionRequest {
 	if (new Set(artifacts.map(({ id }) => id)).size !== artifacts.length) {
 		throw badRequest("BODY_INVALID", "artifacts must have unique ids");
 	}
+	if (artifacts.filter(({ preferred }) => preferred).length !== 1) {
+		throw badRequest(
+			"BODY_INVALID",
+			"artifacts must include exactly one preferred entry (the Desktop client requires a unique preferred artifact per runtime)",
+		);
+	}
 	let configuration: PublishVersionRequest["configuration"];
 	try {
 		configuration = parsePluginConfigurationSchema(record.configuration);

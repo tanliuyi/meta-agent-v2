@@ -79,6 +79,9 @@ function parseVersion(value: unknown, path: string): CatalogPluginVersion {
 		`${path} artifact IDs`,
 	);
 	if (artifacts.length === 0) throw new Error(`${path}.artifacts cannot be empty`);
+	if (artifacts.filter(({ preferred }) => preferred).length !== 1) {
+		throw new Error(`${path}.artifacts must include exactly one preferred entry`);
+	}
 	return {
 		version,
 		status: status as PluginStatus,

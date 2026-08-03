@@ -64,7 +64,8 @@ export interface MarketplacePluginSummary {
   compatibleVersion?: string;
   containsNativeCode: boolean;
   capabilities?: string[];
-  status: "available" | "deprecated";
+  /** available/deprecated 由当前协议产生；withdrawn/blocked 为客户端解析器预留的防御性扩展。 */
+  status: "available" | "deprecated" | "withdrawn" | "blocked";
   publishedAt: number;
   updatedAt: number;
 }

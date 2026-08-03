@@ -93,7 +93,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
                 continues ? (
                   <span
                     key={level}
-                    className="border-border absolute inset-y-0 border-s"
+                    className="border-foreground/15 absolute inset-y-0 border-s"
                     style={{ insetInlineStart: TREE_GUIDE_START + level * TREE_LEVEL_INDENT }}
                   />
                 ) : null,
@@ -101,13 +101,13 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
               <span
                 className={
                   props.isLastChild
-                    ? "border-border absolute top-0 h-1/2 border-s"
-                    : "border-border absolute inset-y-0 border-s"
+                    ? "border-foreground/15 absolute top-0 h-1/2 border-s"
+                    : "border-foreground/15 absolute inset-y-0 border-s"
                 }
                 style={{ insetInlineStart: TREE_GUIDE_START + (props.depth - 1) * TREE_LEVEL_INDENT }}
               />
               <span
-                className="border-border absolute top-1/2 border-t"
+                className="border-foreground/15 absolute top-1/2 border-t"
                 style={{
                   inlineSize: props.childCount > 0 ? TREE_LEVEL_INDENT - TREE_TOGGLE_SIZE / 2 : TREE_LEVEL_INDENT,
                   insetInlineStart: TREE_GUIDE_START + (props.depth - 1) * TREE_LEVEL_INDENT,
@@ -118,7 +118,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           {props.expanded ? (
             <span
               aria-hidden="true"
-              className="border-border pointer-events-none absolute bottom-0 border-s"
+              className="border-foreground/15 pointer-events-none absolute bottom-0 border-s"
               style={{
                 insetInlineStart: TREE_GUIDE_START + props.depth * TREE_LEVEL_INDENT,
                 top: `calc(50% + ${TREE_TOGGLE_SIZE / 2}px)`,

@@ -120,7 +120,7 @@ function normalizeListInput(
   return {
     ...(input.query?.trim() ? { query: input.query.trim().slice(0, 200) } : {}),
     ...(input.category?.trim() ? { category: input.category.trim().slice(0, 100) } : {}),
-    ...(input.cursor?.trim() ? { cursor: input.cursor.trim().slice(0, 500) } : {}),
+    ...(input.cursor?.trim() ? { cursor: input.cursor.trim().slice(0, 256) } : {}),
     limit: input.limit ?? DEFAULT_LIMIT,
   };
 }

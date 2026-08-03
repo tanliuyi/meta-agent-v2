@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, type Hash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { valid } from "semver";
@@ -43,6 +43,7 @@ interface DownloadMetadata {
   version: string;
   artifactId: string;
   url: string;
+  sha256: string;
   size: number;
 }
 interface InstallerOptions {
@@ -445,6 +446,7 @@ export class MarketplacePluginInstaller {
       value.pluginId !== pluginId ||
       value.version !== version ||
       value.artifactId !== artifact.id ||
+      value.sha256 !== artifact.sha256 ||
       value.size !== artifact.size
     ) {
       throw new Error("Marketplace download metadata does not match the selected artifact");
@@ -482,13 +484,18 @@ export class MarketplacePluginInstaller {
       if (!response.ok) throw new Error(`Marketplace artifact request failed with HTTP ${response.status}`);
       if (!response.body) throw new Error("Marketplace artifact response has no body");
       const stream = boundedDownload(response.body, artifact.size, this.maxArtifactBytes);
-      return await extractMarketplaceArchive(stream, stagingPath, {
+      const hash = createHash("sha256");
+      const archive = await extractMarketplaceArchive(hashDownloadStream(stream, hash), stagingPath, {
         maxFiles: 2_000,
         maxCompressedBytes: Math.min(this.maxArtifactBytes, artifact.size),
         maxUncompressedBytes: 512 * 1024 * 1024,
         maxFileBytes: 128 * 1024 * 1024,
         maxPathBytes: 1_024,
       });
+      if (hash.digest("hex") !== artifact.sha256) {
+        throw new Error("Marketplace artifact checksum does not match metadata");
+      }
+      return archive;
     } finally {
       clearTimeout(timeout);
       controller.abort();
@@ -555,10 +562,20 @@ function parseDownload(value: unknown): DownloadMetadata {
     typeof value.version !== "string" ||
     typeof value.artifactId !== "string" ||
     typeof value.url !== "string" ||
+    typeof value.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.sha256) ||
     typeof value.size !== "number"
   )
     throw new Error("Marketplace download metadata is invalid");
   return value as unknown as DownloadMetadata;
+}
+
+/** Feeds download chunks into a running SHA-256 while streaming them to extraction. */
+async function* hashDownloadStream(source: AsyncIterable<Uint8Array>, hash: Hash): AsyncGenerator<Uint8Array> {
+  for await (const chunk of source) {
+    hash.update(chunk);
+    yield chunk;
+  }
 }
 function validateApiUrl(value: string, apiRoot: string): URL {
   const url = new URL(value, apiRoot);

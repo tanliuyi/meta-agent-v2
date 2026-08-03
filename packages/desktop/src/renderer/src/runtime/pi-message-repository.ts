@@ -241,7 +241,7 @@ function resolveProjectedId(
   const previousNode = change.previousNodes[index];
   if (!previousNode || previousNode.kind !== node.kind) return node.id;
   if (previousNode.id === node.id) return previous.displayIds.get(node.id) ?? node.id;
-  if (node.sourceEntryId !== node.id) return node.id;
+  if (change.rekeyedFrom.get(index) !== previousNode.id || node.sourceEntryId !== node.id) return node.id;
   return previous.displayIds.get(previousNode.id) ?? node.id;
 }
 

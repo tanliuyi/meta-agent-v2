@@ -264,6 +264,36 @@ describe("PiMessageRepositoryConverter", () => {
     });
   });
 
+  it("branch replacement 插入同 kind 节点时不复用无关的 display id", () => {
+    const user = userNode("u", null);
+    const assistant = assistantNode("a", "u");
+    const stableUser = userNode("u-stable", "a");
+    const stableAssistant = assistantNode("a-stable", "u-stable");
+    const store = new PiThreadStore(snapshot([user, assistant, stableUser, stableAssistant], "a-stable"));
+    const converter = new PiMessageRepositoryConverter();
+    converter.build(store.getSnapshot());
+
+    const insertedUser = userNode("u-inserted", "a");
+    const insertedAssistant = assistantNode("a-inserted", "u-inserted");
+    const replacement = snapshot(
+      [user, assistant, insertedUser, insertedAssistant, { ...stableUser, parentId: "a-inserted" }, stableAssistant],
+      "a-stable",
+      1,
+    );
+    store.apply(batch(1, { type: "branch-replaced", snapshot: replacement }));
+
+    const repository = converter.build(store.getSnapshot());
+    expect(repository.messages.map(({ message, parentId }) => [message.id, parentId])).toEqual([
+      ["u", null],
+      ["a", "u"],
+      ["u-inserted", "a"],
+      ["a-inserted", "u-inserted"],
+      ["u-stable", "a-inserted"],
+      ["a-stable", "u-stable"],
+    ]);
+    expect(new Set(repository.messages.map(({ message }) => message.id)).size).toBe(repository.messages.length);
+  });
+
   it("将同一轮连续 assistant 节点合并，使两个 text 之间的 reasoning/tool 保持相邻", () => {
     const user = userNode("u", null);
     const first = {

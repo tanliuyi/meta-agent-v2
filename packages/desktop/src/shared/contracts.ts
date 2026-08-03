@@ -10,7 +10,7 @@ export type { DesktopExtensionHostState } from "./desktop-extension-contracts.ts
 /** Desktop 与 renderer 之间使用的协议版本。 */
 export const PROTOCOL_VERSION = 9;
 
-/** Desktop 内部通用对话工作区的稳定 ID。不写入用户 Project 列表。 */
+/** Desktop 内部通用对话工作区的稳定 ID。不出现在主界面项目列表，但参与设置页（子智能体/记忆）的项目作用域。 */
 export const GENERAL_WORKSPACE_ID = "__general__";
 
 /** 判断 Project 是否为内部通用工作区。 */

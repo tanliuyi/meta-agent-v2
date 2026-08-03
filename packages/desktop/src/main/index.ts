@@ -6,7 +6,6 @@ import { app, BrowserWindow, Menu, safeStorage } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
-import { GENERAL_WORKSPACE_ID } from "../shared/contracts.ts";
 import { AuthConfigService } from "./auth/auth-config-service.ts";
 import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extension-registry.ts";
 import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
@@ -412,11 +411,7 @@ app.whenReady().then(async () => {
       if (credential?.type === "oauth" || (credential?.type === "api_key" && Boolean(credential.key))) return true;
       return desktopProviderEnvKeys.get(providerId)?.some((envKey) => Boolean(process.env[envKey])) ?? false;
     },
-    getProjectCwd: (projectId) => {
-      // 通用工作区不是用户项目，不用于 subagent project-scoped 配置
-      if (projectId === GENERAL_WORKSPACE_ID) throw new Error("通用工作区不支持 subagent project scope");
-      return projects.getCwd(projectId);
-    },
+    getProjectCwd: (projectId) => projects.getCwd(projectId),
   });
   registerIpc(
     projects,

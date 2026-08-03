@@ -18,6 +18,7 @@ interface SnapshotIndexes {
 interface PiThreadNodesChange {
   previousNodes: readonly PiTimelineNode[];
   dirtyFrom: number;
+  rekeyedFrom: ReadonlyMap<number, string>;
 }
 
 const nodeChanges = new WeakMap<readonly PiTimelineNode[], PiThreadNodesChange>();
@@ -78,7 +79,7 @@ export class PiThreadStore {
     this.state = snapshot;
     this.nodeIndexes = indexes.nodeIndexes;
     this.partIndexes = indexes.partIndexes;
-    if (previousNodes) recordNodeChange(previousNodes, snapshot.nodes, 0);
+    if (previousNodes) recordNodeChange(previousNodes, snapshot.nodes, 0, new Map());
     this.notify();
   }
 
@@ -104,7 +105,7 @@ export class PiThreadStore {
       if (envelope) mutation.apply(envelope.event, envelope.sequence);
     }
     const result = mutation.finish();
-    recordNodeChange(state.nodes, result.snapshot.nodes, result.dirtyFrom);
+    recordNodeChange(state.nodes, result.snapshot.nodes, result.dirtyFrom, result.rekeyedFrom);
     this.state = result.snapshot;
     this.nodeIndexes = result.nodeIndexes;
     this.partIndexes = result.partIndexes;
@@ -154,6 +155,8 @@ class PiThreadBatchMutation {
   private partIndexes: Map<string, Map<string, number>>;
   private mutableAssistantIndexes = new Set<number>();
   private mutablePartIndexes = new Set<string>();
+  private rekeyedFrom = new Map<number, string>();
+  private trackRekeys = true;
   private dirtyFrom = Number.POSITIVE_INFINITY;
 
   constructor(
@@ -219,6 +222,7 @@ class PiThreadBatchMutation {
     nodeIndexes: Map<string, number>;
     partIndexes: Map<string, Map<string, number>>;
     dirtyFrom: number;
+    rekeyedFrom: ReadonlyMap<number, string>;
   } {
     return {
       snapshot: {
@@ -235,6 +239,7 @@ class PiThreadBatchMutation {
       nodeIndexes: this.nodeIndexes,
       partIndexes: this.partIndexes,
       dirtyFrom: this.dirtyFrom,
+      rekeyedFrom: this.rekeyedFrom,
     };
   }
 
@@ -264,6 +269,9 @@ class PiThreadBatchMutation {
     if (previousId !== node.id && this.nodeIndexes.has(node.id))
       throw new PiThreadStoreError(`rekey 目标已存在: ${node.id}`);
     this.assertParent(node.parentId);
+    if (this.trackRekeys && previousId !== node.id && !this.rekeyedFrom.has(index)) {
+      this.rekeyedFrom.set(index, previousId);
+    }
 
     const nodes = this.ensureNodes();
     for (let currentIndex = 0; currentIndex < nodes.length; currentIndex += 1) {
@@ -345,6 +353,8 @@ class PiThreadBatchMutation {
     this.partIndexesOwned = true;
     this.mutableAssistantIndexes = new Set();
     this.mutablePartIndexes = new Set(indexes.partIndexes.keys());
+    this.rekeyedFrom = new Map();
+    this.trackRekeys = false;
     this.markDirty(0);
   }
 
@@ -462,11 +472,13 @@ function recordNodeChange(
   previousNodes: readonly PiTimelineNode[],
   nextNodes: readonly PiTimelineNode[],
   dirtyFrom: number,
+  rekeyedFrom: ReadonlyMap<number, string>,
 ): void {
   if (previousNodes === nextNodes) return;
   nodeChanges.set(nextNodes, {
     previousNodes,
     dirtyFrom: Number.isFinite(dirtyFrom) ? dirtyFrom : 0,
+    rekeyedFrom,
   });
 }
 
