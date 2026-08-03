@@ -8,6 +8,25 @@
 
 > 为桌面端提供联网能力：网页搜索（OpenAI、Brave、Parallel、Tavily、SERPdive、SearXNG、AnySearch、Exa、Perplexity、Gemini）、网页内容抓取、GitHub 仓库克隆、PDF 文本提取、YouTube 与本地视频理解。内置 /websearch、/search、/curator、/google-account 命令与浏览器端 Search Curator。
 
+## 桌面配置
+
+插件声明了 Marketplace 配置 schema（`WEB_ACCESS_CONFIGURATION_SCHEMA`，34 个字段）。从市场安装后，Desktop 会在 **Plugin detail > 配置** 渲染表单，并把用户保存的值通过 `pi.getConfig()` 交给插件；插件启动时将**显式设置的字段**合并写入上游配置文件 `~/.pi/web-search.json`（0600 权限，不覆盖文件中未涉及的已有配置，如 `toolNames`、`shortcuts`、keychain 凭据）。
+
+字段分组：
+
+| 组 | 字段 | 说明 |
+| --- | --- | --- |
+| 搜索 | `searchProvider`、`searchModel`、`summaryModel`、`workflow`、`curatorTimeoutSeconds`、`webSearch.enabled` | 默认提供商、搜索/汇总模型、工作流模式 |
+| 提供商密钥 | 各提供商 `*ApiKey`、`firecrawlBaseUrl`、`searxngBaseUrl`、`geminiBaseUrl`、`serpdiveModel` | 密钥留空时回退到同名环境变量 |
+| 浏览器与 Gemini Web | `chromeProfile`、`allowBrowserCookies` | 浏览器 cookie 登录态（涉及本机凭据，谨慎开启） |
+| GitHub 克隆 | `githubClone.*` | 仓库大小/超时/缓存目录 |
+| 视频与 YouTube | `video.*`、`youtube.enabled` | 本地视频与 YouTube 理解 |
+| 抓取安全 | `ssrf.allowRanges`、`ssrf.trustEnvProxy`、`fetchContent.domainPolicy.*` | SSRF 网段与域名白/黑名单（textarea 按行拆分） |
+
+嵌套字段（如 `githubClone.enabled`、`ssrf.allowRanges`）以点号 key 在表单中展开，写入时映射为 `web-search.json` 的嵌套结构。空字符串与未设置的值不会写入，避免覆盖用户已有的文件配置。
+
+Developer Mode 本地加载时不提供市场配置表单；直接编辑 `~/.pi/web-search.json` 或使用环境变量。
+
 ## 功能
 
 保留上游扩展的核心功能：

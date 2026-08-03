@@ -9,6 +9,9 @@ test("registers Desktop-compatible tools, commands, and lifecycle handlers", () 
   const events: string[] = [];
   let shortcutRegistrations = 0;
   const pi = {
+    getConfig() {
+      return {};
+    },
     registerTool(tool: ToolDefinition) {
       tools.push(tool);
     },
