@@ -4,6 +4,7 @@ import {
   filePathSegments,
   isImagePath,
   openWorkbenchFileAsPreview,
+  openWorkbenchFilePatch,
   pinWorkbenchFile,
   replaceActiveWorkbenchFile,
 } from "../src/renderer/src/components/panel/panel-model.ts";
@@ -135,6 +136,55 @@ describe("replaceActiveWorkbenchFile", () => {
     expect(replaceActiveWorkbenchFile(["a.ts", "b.ts"], "a.ts", "b.ts")).toEqual({
       openFiles: ["b.ts"],
       activeFile: "b.ts",
+    });
+  });
+});
+
+describe("openWorkbenchFilePatch", () => {
+  const baseWorkbench = {
+    openFiles: [],
+    previewFile: undefined,
+    expandedPaths: [],
+  };
+
+  it("打开文件为预览 tab 并展开全部父目录", () => {
+    expect(openWorkbenchFilePatch(baseWorkbench, "packages/desktop/src/index.ts")).toEqual({
+      openFiles: ["packages/desktop/src/index.ts"],
+      activeFile: "packages/desktop/src/index.ts",
+      previewFile: "packages/desktop/src/index.ts",
+      expandedPaths: ["packages", "packages/desktop", "packages/desktop/src"],
+    });
+  });
+
+  it("已展开的父目录不重复追加", () => {
+    const workbench = { ...baseWorkbench, expandedPaths: ["packages", "packages/desktop"] };
+    expect(openWorkbenchFilePatch(workbench, "packages/desktop/src/index.ts").expandedPaths).toEqual([
+      "packages",
+      "packages/desktop",
+      "packages/desktop/src",
+    ]);
+  });
+
+  it("根目录文件无需展开目录", () => {
+    const patch = openWorkbenchFilePatch(baseWorkbench, "README.md");
+    expect(patch.expandedPaths).toBeUndefined();
+    expect(patch).toEqual({
+      openFiles: ["README.md"],
+      activeFile: "README.md",
+      previewFile: "README.md",
+    });
+  });
+
+  it("已有预览 tab 时原地替换；已展开目录不重复追加", () => {
+    const workbench = {
+      openFiles: ["a.ts"],
+      previewFile: "a.ts",
+      expandedPaths: ["src"],
+    };
+    expect(openWorkbenchFilePatch(workbench, "src/b.ts")).toEqual({
+      openFiles: ["src/b.ts"],
+      activeFile: "src/b.ts",
+      previewFile: "src/b.ts",
     });
   });
 });

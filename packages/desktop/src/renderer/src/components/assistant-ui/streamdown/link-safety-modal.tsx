@@ -6,10 +6,11 @@ import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogFooter } from "@renderer/shared/ui/dialog-footer";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import type { LinkSafetyModalProps } from "streamdown";
-import { useSessionScope } from "../../session-context.tsx";
+import { useOpenWorkbenchFileInPanel, useSessionScope } from "../../session-context.tsx";
 
 export function LinkSafetyModal({ url, isOpen, onClose }: LinkSafetyModalProps) {
   const { record } = useSessionScope();
+  const openInApp = useOpenWorkbenchFileInPanel();
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="gap-3 sm:max-w-lg">
@@ -21,9 +22,16 @@ export function LinkSafetyModal({ url, isOpen, onClose }: LinkSafetyModalProps) 
           </DialogClose>
           <Button
             onClick={() => {
-              void window.desktop.links.open(record.identity.projectId, url).catch((error: unknown) => {
-                console.error("Failed to open link:", error);
-              });
+              void window.desktop.links
+                .open(record.identity.projectId, url)
+                .then((result) => {
+                  if (!result.openInApp || !result.path) return;
+                  // 项目内文件链接：在应用内 workbench 文件面板打开（未选中资源管理 tab 时自动打开并选中）。
+                  openInApp(result.path);
+                })
+                .catch((error: unknown) => {
+                  console.error("Failed to open link:", error);
+                });
               onClose();
             }}
           >

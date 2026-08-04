@@ -28,6 +28,7 @@
   content: "";
   pointer-events: none;
   transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+  z-index: 51;
 }
 
 body.is-resizing-column .workbench-panel {
@@ -96,10 +97,10 @@ body.is-resizing-column .workbench-panel {
   background: hsl(var(--ring));
 }
 .resize-handle-file-tree {
-  left: 0;
+  right: 0;
 }
 .resize-handle-file-tree::after {
-  left: 0;
+  right: 0;
 }
 .resize-handle-terminal {
   top: -4px;
@@ -359,7 +360,7 @@ body.is-resizing-column .workbench-panel {
 
 .file-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
 }
@@ -619,15 +620,21 @@ body.is-resizing-column .workbench-panel {
   flex-direction: column;
 }
 .file-preview-body {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1;
+  --file-preview-scrollbar-width: var(--scrollbar-size);
+  --file-preview-scrollbar-height: 0px;
 }
 .file-minimap {
-  position: relative;
-  /* 内容驱动目标宽度（组件计算 --file-minimap-target-width）；容器只通过 flex shrink 与 max-width 限制，窄布局保留约 56px 下限。 */
+  position: absolute;
+  top: 0;
+  right: var(--file-preview-scrollbar-width);
+  bottom: var(--file-preview-scrollbar-height);
+  z-index: 1;
+  /* 内容驱动目标宽度（组件计算 --file-minimap-target-width）；容器只通过 max-width 限制，窄布局保留约 56px 下限。 */
   width: min(var(--file-minimap-target-width, 96px), 100%);
-  flex: 0 1 auto;
   min-width: 56px;
   max-width: 96px;
   border-left: 1px solid hsl(var(--border) / 0.6);
@@ -637,10 +644,6 @@ body.is-resizing-column .workbench-panel {
   touch-action: none;
   user-select: none;
   transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
-}
-.file-minimap:hover,
-.file-minimap:focus-visible {
-  background: color-mix(in oklab, hsl(var(--background)) 96%, hsl(var(--foreground)));
 }
 .file-minimap:focus-visible {
   box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
@@ -758,6 +761,7 @@ body.is-resizing-column .workbench-panel {
   margin: 0;
   padding: 16px 16px 16px 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   tab-size: 4;
   font-family: var(--font-family-mono);
   font-size: var(--type-size-control);
@@ -884,60 +888,14 @@ html[data-theme="dark"] .file-preview-token {
   min-width: 0;
   min-height: 0;
   overflow: visible;
+  box-shadow: 0 0 12px hsl(var(--overlay) / 0.05);
+  z-index: var(--stack-popover);
 }
 .file-tree-surface {
   position: relative;
   width: 100%;
   height: 100%;
-  border-left: 1px solid hsl(var(--border));
   overflow: hidden;
-  background: color-mix(in oklab, hsl(var(--sidebar)) 62%, hsl(var(--background)));
-}
-.file-tree-edge-trigger {
-  display: none;
-}
-.file-tree-panel[data-collapsed] {
-  width: 0;
-}
-.file-tree-panel[data-collapsed] .resize-handle-file-tree {
-  display: none;
-}
-.file-tree-panel[data-collapsed] .file-tree-edge-trigger {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: var(--stack-resize-handle);
-  display: block;
-  width: 8px;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  cursor: default;
-}
-.file-tree-panel[data-collapsed] .file-tree-edge-trigger:focus-visible {
-  box-shadow: inset -2px 0 var(--focus-ring-color);
-}
-.file-tree-panel[data-collapsed] .file-tree-surface {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: var(--stack-sticky-control);
-  width: 0;
-  border-left: 0;
-  pointer-events: none;
-  transition:
-    width var(--motion-duration-standard) var(--motion-ease-emphasized),
-    box-shadow var(--motion-duration-standard) var(--motion-ease-standard);
-}
-.file-tree-panel[data-collapsed]:hover .file-tree-surface,
-.file-tree-panel[data-collapsed]:focus-within .file-tree-surface {
-  width: var(--resizable-region-size, 240px);
-  border-left: 1px solid hsl(var(--border));
-  pointer-events: auto;
-  box-shadow: var(--elevation-workbench);
 }
 .file-tree-toolbar {
   display: flex;
@@ -946,27 +904,6 @@ html[data-theme="dark"] .file-preview-token {
   align-items: center;
   gap: 4px;
   padding: 8px 6px;
-}
-.file-tree-toggle {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  flex: 0 0 28px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--shape-radius-md);
-  outline: 0;
-  background: transparent;
-  color: hsl(var(--muted-foreground));
-  cursor: pointer;
-}
-.file-tree-toggle:hover {
-  background: hsl(var(--muted));
-  color: hsl(var(--foreground));
-}
-.file-tree-toggle:focus-visible {
-  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
 }
 .file-search {
   display: flex;
@@ -978,7 +915,7 @@ html[data-theme="dark"] .file-preview-token {
   margin: 0;
   padding: 0 8px;
   border: 1px solid hsl(var(--input));
-  border-radius: var(--shape-radius-md);
+  border-radius: var(--shape-radius-xl);
   background: hsl(var(--background) / 0.72);
   color: hsl(var(--muted-foreground));
   transition:
@@ -1038,7 +975,6 @@ html[data-theme="dark"] .file-preview-token {
   padding-right: 8px;
   padding-left: calc(6px + var(--file-tree-depth, 0) * 14px);
   border: 0;
-  background: hsl(var(--popover));
   color: hsl(var(--foreground) / 0.88);
   font-size: var(--type-size-control);
   text-align: left;
@@ -1132,6 +1068,7 @@ html[data-theme="dark"] .file-preview-token {
   min-height: var(--layout-terminal-min-height);
   max-height: var(--layout-terminal-max-height);
   border-top: 1px solid hsl(var(--border));
+  border-radius: 16px;
 }
 .bottom-terminal > header {
   display: flex;

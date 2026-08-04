@@ -1,4 +1,5 @@
-import { isAbsolute, resolve } from "node:path";
+import { statSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell } from "electron";
 import type {
@@ -9,6 +10,7 @@ import type {
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   HostResponse,
+  OpenLinkResult,
   SessionAttachInput,
   SessionBranchInput,
   SessionBranchResult,
@@ -685,36 +687,51 @@ function publicMarketplaceApplication(application: ApplyDesktopExtensionSetResul
     : application;
 }
 
-async function openLink(projectId: string, target: string, projects: ProjectStore): Promise<void> {
+async function openLink(projectId: string, target: string, projects: ProjectStore): Promise<OpenLinkResult> {
   const value = target.trim();
   if (!value) throw new Error("Cannot open an empty link");
 
   const localTarget = value.split(/[?#]/, 1)[0];
   if (!localTarget) throw new Error("Cannot open a link without a file path");
   if (isAbsolute(localTarget)) {
-    await openPath(decodeURIComponent(localTarget));
-    return;
+    return openLocalPath(projectId, decodeURIComponent(localTarget), projects);
   }
 
   let url: URL | undefined;
   try {
     url = new URL(value);
   } catch {
-    await openPath(resolve(projects.getCwd(projectId), decodeURIComponent(localTarget)));
-    return;
+    return openLocalPath(projectId, resolve(projects.getCwd(projectId), decodeURIComponent(localTarget)), projects);
   }
 
   if (url.protocol === "file:") {
-    await openPath(fileURLToPath(url));
-    return;
+    return openLocalPath(projectId, fileURLToPath(url), projects);
   }
 
   if (url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:" || url.protocol === "tel:") {
     await shell.openExternal(url.href);
-    return;
+    return { openInApp: false };
   }
 
   throw new Error(`Unsupported link protocol: ${url.protocol}`);
+}
+
+/** 打开本地文件路径：位于项目 cwd 内时交回应用内打开，否则交给系统默认程序。 */
+async function openLocalPath(projectId: string, absolutePath: string, projects: ProjectStore): Promise<OpenLinkResult> {
+  const cwd = projects.getCwd(projectId);
+  const rel = relative(cwd, absolutePath);
+  if (rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
+    // 目录链接应用内无法打开（文件面板仅支持文件），交回系统文件管理器。
+    let isDirectory = false;
+    try {
+      isDirectory = statSync(resolve(cwd, rel)).isDirectory();
+    } catch {
+      // 路径不存在或不可访问：保持应用内打开，由读取侧报错。
+    }
+    if (!isDirectory) return { openInApp: true, path: rel.split(sep).join("/") };
+  }
+  await openPath(absolutePath);
+  return { openInApp: false };
 }
 
 async function resolveFilePath(projectId: string, path: string, projects: ProjectStore): Promise<string> {

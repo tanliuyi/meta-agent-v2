@@ -1,3 +1,5 @@
+import type { WorkbenchState } from "../../../../shared/contracts.ts";
+
 interface ClosedWorkbenchFileState {
   openFiles: string[];
   activeFile: string | undefined;
@@ -98,4 +100,26 @@ export function openWorkbenchFileAsPreview(
 /** 固定预览 tab（树/标签页双击或 pin 按钮）；非预览目标返回 null。 */
 export function pinWorkbenchFile(previewFile: string | undefined, path: string): { previewFile: undefined } | null {
   return previewFile === path ? { previewFile: undefined } : null;
+}
+
+/** 计算展开给定路径所需的缺失父目录链；已全部展开时返回 null。 */
+export function missingExpandedDirectories(expandedPaths: readonly string[], path: string): string[] | null {
+  const missing = filePathSegments(path)
+    .filter((segment) => segment.directory)
+    .map((segment) => segment.path)
+    .filter((parent) => !expandedPaths.includes(parent));
+  return missing.length > 0 ? missing : null;
+}
+
+/** 打开文件为预览 tab，并展开其父目录链（对齐 VS Code explorer.autoReveal）。 */
+export function openWorkbenchFilePatch(
+  workbench: Pick<WorkbenchState, "openFiles" | "previewFile" | "expandedPaths">,
+  path: string,
+): Partial<WorkbenchState> {
+  const opened = openWorkbenchFileAsPreview(workbench.openFiles, workbench.previewFile, path);
+  const missingDirectories = missingExpandedDirectories(workbench.expandedPaths, path);
+  return {
+    ...opened,
+    ...(missingDirectories ? { expandedPaths: [...workbench.expandedPaths, ...missingDirectories] } : {}),
+  };
 }

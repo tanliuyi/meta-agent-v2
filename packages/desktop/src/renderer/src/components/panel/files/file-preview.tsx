@@ -5,7 +5,7 @@ import ArrowUp from "lucide-react/dist/esm/icons/arrow-up.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import type { CSSProperties, KeyboardEvent, UIEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { TextFile } from "../../../../../shared/contracts.ts";
 import { resolveTokenStyle } from "../../assistant-ui/streamdown/streamdown-code-line.tsx";
 import { findMatches, groupMatchesByLine, splitLineByMatches, splitTokensByMatches } from "./file-find.ts";
@@ -31,6 +31,7 @@ interface FilePreviewProps {
  */
 export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop, onScrollChange }: FilePreviewProps) {
   const preRef = useRef<HTMLPreElement>(null);
+  const previewBodyRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const onScrollChangeRef = useRef(onScrollChange);
   onScrollChangeRef.current = onScrollChange;
@@ -39,6 +40,7 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
   const [findQuery, setFindQuery] = useState("");
   const [findCase, setFindCase] = useState(false);
   const [activeFind, setActiveFind] = useState(0);
+  const [estimatedLineHeight, setEstimatedLineHeight] = useState(FILE_PREVIEW_LINE_HEIGHT);
 
   const lines = useMemo(() => file.content.split("\n"), [file.content]);
   const tokens = highlight?.file === file ? highlight.tokens.tokens : null;
@@ -49,11 +51,16 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => preRef.current,
-    estimateSize: () => FILE_PREVIEW_LINE_HEIGHT,
+    estimateSize: () => estimatedLineHeight,
     overscan: FILE_PREVIEW_OVERSCAN,
     initialRect: { height: 600, width: 600 },
-    measureElement: (element) => element.getBoundingClientRect().height,
+    // 非换行模式行高固定，避免虚拟列表在滚动时逐行测量并改变 scrollHeight。
+    measureElement: (element) => (wrap ? element.getBoundingClientRect().height : estimatedLineHeight),
   });
+
+  useLayoutEffect(() => {
+    virtualizer.measure();
+  }, [estimatedLineHeight, virtualizer]);
 
   // 恢复该文件上次的滚动位置（仅首次挂载；同文件内滚动位置由浏览器保持）。
   useEffect(() => {
@@ -62,6 +69,46 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
     // 只在文件实例挂载时恢复一次。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 行高与滚动条占位随文件内容/换行模式变化重测：文件监听 revision 重读（同路径内容变化）时组件不重挂载，
+  // 不能只依赖 ResizeObserver（body 盒尺寸不变、不触发回调），必须在此直接同步。
+  useLayoutEffect(() => {
+    const body = previewBodyRef.current;
+    const pre = preRef.current;
+    if (!body || !pre) return;
+
+    const lineHeight = Number.parseFloat(getComputedStyle(pre).lineHeight);
+    if (Number.isFinite(lineHeight) && lineHeight > 0) {
+      setEstimatedLineHeight((current) => (Math.abs(current - lineHeight) < 0.1 ? current : lineHeight));
+    }
+
+    body.style.setProperty("--file-preview-scrollbar-width", `${Math.max(0, pre.offsetWidth - pre.clientWidth)}px`);
+    body.style.setProperty("--file-preview-scrollbar-height", `${Math.max(0, pre.offsetHeight - pre.clientHeight)}px`);
+  }, [file.content, wrap]);
+
+  // 滚动条占位随容器尺寸变化持续同步；observer 仅随换行模式重建（文件切换由 key 重挂载重跑 effect）。
+  useLayoutEffect(() => {
+    const body = previewBodyRef.current;
+    const pre = preRef.current;
+    if (!body || !pre) return;
+
+    const syncScrollbarSize = () => {
+      body.style.setProperty("--file-preview-scrollbar-width", `${Math.max(0, pre.offsetWidth - pre.clientWidth)}px`);
+      body.style.setProperty(
+        "--file-preview-scrollbar-height",
+        `${Math.max(0, pre.offsetHeight - pre.clientHeight)}px`,
+      );
+    };
+
+    syncScrollbarSize();
+    const observer = new ResizeObserver(syncScrollbarSize);
+    observer.observe(body);
+    return () => {
+      observer.disconnect();
+      body.style.removeProperty("--file-preview-scrollbar-width");
+      body.style.removeProperty("--file-preview-scrollbar-height");
+    };
+  }, [wrap]);
 
   // 文件内查找（对齐 VS Code find widget）。
   const findMatchesList = useMemo(
@@ -185,7 +232,7 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
           </button>
         </div>
       ) : null}
-      <div className="file-preview-body">
+      <div ref={previewBodyRef} className="file-preview-body">
         <pre
           ref={preRef}
           tabIndex={0}

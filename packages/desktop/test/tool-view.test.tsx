@@ -26,6 +26,7 @@ import {
   parseRenderedToolDiff,
   parseToolResult,
   projectDisplayToolPath,
+  workbenchToolPath,
 } from "../src/renderer/src/components/chat/tools/tool-format.ts";
 
 const chatCss = readFileSync(new URL("../src/renderer/src/styles/chat.css", import.meta.url), "utf8");
@@ -268,6 +269,49 @@ describe("ToolView TUI parity", () => {
     expect(readMarkup).toContain(":120-139");
     expect(grepMarkup).toContain("/ToolView/");
     expect(grepMarkup).toContain("in src (*.tsx)");
+  });
+});
+
+describe("workbenchToolPath", () => {
+  const cwd = "/Users/test/project";
+
+  it("项目内相对路径原样返回", () => {
+    expect(workbenchToolPath("src/main.ts", cwd)).toBe("src/main.ts");
+  });
+
+  it("项目内绝对路径转换为相对路径", () => {
+    expect(workbenchToolPath("/Users/test/project/src/main.ts", cwd)).toBe("src/main.ts");
+    expect(workbenchToolPath("/Users/test/project/packages/desktop/../desktop/a.ts", cwd)).toBe(
+      "packages/desktop/a.ts",
+    );
+  });
+
+  it("反斜杠路径规范化后返回相对路径", () => {
+    expect(workbenchToolPath("src\\main.ts", cwd)).toBe("src/main.ts");
+  });
+
+  it("项目外绝对路径返回 null", () => {
+    expect(workbenchToolPath("/Users/test/other/read.ts", cwd)).toBeNull();
+    expect(workbenchToolPath("/etc/hosts", cwd)).toBeNull();
+  });
+
+  it("项目外相对路径（.. 越界）返回 null", () => {
+    expect(workbenchToolPath("../other/read.ts", cwd)).toBeNull();
+  });
+
+  it("空路径与项目根目录本身返回 null", () => {
+    expect(workbenchToolPath("", cwd)).toBeNull();
+    expect(workbenchToolPath("/Users/test/project", cwd)).toBeNull();
+    expect(workbenchToolPath(".", cwd)).toBeNull();
+  });
+
+  it("Windows 路径按大小写不敏感判断项目内", () => {
+    expect(workbenchToolPath("C:\\Users\\test\\project\\src\\main.ts", "C:\\Users\\test\\project")).toBe("src/main.ts");
+    expect(workbenchToolPath("c:\\users\\TEST\\project\\src\\main.ts", "C:\\Users\\test\\project")).toBe("src/main.ts");
+  });
+
+  it("Windows 项目外路径返回 null", () => {
+    expect(workbenchToolPath("D:\\other\\read.ts", "C:\\Users\\test\\project")).toBeNull();
   });
 });
 

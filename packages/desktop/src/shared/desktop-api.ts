@@ -13,6 +13,7 @@ import type {
   FileImage,
   FileNode,
   HostResponse,
+  OpenLinkResult,
   Project,
   SessionAttachInput,
   SessionAttachment,
@@ -133,7 +134,7 @@ export interface DesktopApi {
     restart(): void;
   };
   links: {
-    open(projectId: string, url: string): Promise<void>;
+    open(projectId: string, url: string): Promise<OpenLinkResult>;
   };
   models: {
     getConfig(): Promise<ModelsConfigSnapshot>;

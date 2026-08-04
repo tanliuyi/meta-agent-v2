@@ -6,8 +6,6 @@ import type { HighlightResult } from "@streamdown/code";
 import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
-import PanelRightClose from "lucide-react/dist/esm/icons/panel-right-close.mjs";
-import PanelRightOpen from "lucide-react/dist/esm/icons/panel-right-open.mjs";
 import Pin from "lucide-react/dist/esm/icons/pin.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import WrapText from "lucide-react/dist/esm/icons/wrap-text.mjs";
@@ -22,9 +20,9 @@ import { StreamdownMarkdown } from "../../assistant-ui/streamdown/streamdown-mar
 import { useSessionScope, useSessionWorkbench } from "../../session-context.tsx";
 import {
   closeWorkbenchFile,
-  filePathSegments,
   isImagePath,
-  openWorkbenchFileAsPreview,
+  missingExpandedDirectories,
+  openWorkbenchFilePatch,
   parentPath,
   pinWorkbenchFile,
   replaceActiveWorkbenchFile,
@@ -41,8 +39,6 @@ const FILE_TREE_DEFAULT_WIDTH = 240;
 const FILE_TREE_MIN_WIDTH = 180;
 const FILE_TREE_MAX_WIDTH = 360;
 const FILE_PREVIEW_MIN_WIDTH = 260;
-/** panel 宽度低于该值时，未显式设置的会话默认收起文件树。 */
-const FILE_TREE_COLLAPSE_BREAKPOINT = 520;
 
 /** session 独立的文件预览和 Project cwd 文件树。 */
 export function FilePanel() {
@@ -57,8 +53,6 @@ export function FilePanel() {
   const fileWrap = workbench?.fileWrapMode ?? false;
   const fileMarkdownPreview = workbench?.fileMarkdownPreview ?? false;
   const isMarkdown = /\.(md|markdown)$/iu.test(activeFile ?? "");
-  const fileTreeCollapsed =
-    workbench?.fileTreeCollapsed ?? (workbench?.panelWidth ?? 360) < FILE_TREE_COLLAPSE_BREAKPOINT;
   const fileTreeContentId = useId();
   const [query, setQuery] = useState("");
   const [roots, setRoots] = useState<FileNode[]>([]);
@@ -67,7 +61,10 @@ export function FilePanel() {
   const [treeError, setTreeError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
-  const [highlight, setHighlight] = useState<{ file: TextFile; tokens: HighlightResult } | null>(null);
+  const [highlight, setHighlight] = useState<{
+    file: TextFile;
+    tokens: HighlightResult;
+  } | null>(null);
   const [fileRevision, setFileRevision] = useState(0);
   const treeGeneration = useRef(0);
   const fileGeneration = useRef(0);
@@ -76,6 +73,8 @@ export function FilePanel() {
   const tabsListRef = useRef<HTMLDivElement>(null);
   const activeProjectId = useRef(projectId);
   const directoryRequests = useRef(new Map<string, Promise<FileNode[]>>());
+  const childrenRef = useRef<Record<string, FileNode[]>>({});
+  const activeFileRef = useRef<string | null>(null);
   const resize = useResizableRegion<HTMLElement>({
     value: fileTreeWidth,
     min: FILE_TREE_MIN_WIDTH,
@@ -84,7 +83,7 @@ export function FilePanel() {
         FILE_TREE_MAX_WIDTH,
         (workspace.current?.clientWidth ?? FILE_TREE_MAX_WIDTH + FILE_PREVIEW_MIN_WIDTH) - FILE_PREVIEW_MIN_WIDTH,
       ),
-    direction: -1,
+    direction: 1,
     orientation: "vertical",
     constraintRef: workspace,
     onCommit: (nextFileTreeWidth) => {
@@ -215,11 +214,18 @@ export function FilePanel() {
     );
   }, [file, fileWrap, fileMarkdownPreview, isMarkdown, highlight]);
 
+  useEffect(() => {
+    childrenRef.current = children;
+    activeFileRef.current = activeFile;
+  }, [activeFile, children]);
+
+  // 目录加载：依赖仅 projectId（children 经 ref 读取），保持身份稳定，
+  // 避免每次目录加载导致下方 onChanged/focus 监听重建。
   const loadDirectory = useCallback(
     async (path: string, force = false) => {
       if (!projectId) return;
       const existing = directoryRequests.current.get(path);
-      if (!force && (existing || children[path] !== undefined)) return;
+      if (!force && (existing || childrenRef.current[path] !== undefined)) return;
       const created = window.desktop.files.list(projectId, path, "", `file-panel-directory:${path}`);
       directoryRequests.current.set(path, created);
       try {
@@ -235,7 +241,7 @@ export function FilePanel() {
         if (directoryRequests.current.get(path) === created) directoryRequests.current.delete(path);
       }
     },
-    [children, projectId],
+    [projectId],
   );
 
   useEffect(() => {
@@ -243,11 +249,14 @@ export function FilePanel() {
   }, [expandedPaths, loadDirectory]);
 
   // 文件监听：已加载目录受新增/删除影响时增量刷新；活动文件被更新时自动重读。
+  // 回调读取 ref，effect 仅在 projectId/loadDirectory 变化时重建。
   useEffect(() => {
     if (!projectId) return;
     const unsubscribe = window.desktop.files.onChanged(projectId, (change) => {
-      if (activeFile && change.updated.includes(activeFile)) setFileRevision((revision) => revision + 1);
-      const loaded = new Set<string>(["", ...Object.keys(children)]);
+      if (activeFileRef.current && change.updated.includes(activeFileRef.current)) {
+        setFileRevision((revision) => revision + 1);
+      }
+      const loaded = new Set<string>(["", ...Object.keys(childrenRef.current)]);
       const affected = new Set<string>();
       for (const path of change.added) {
         const dir = parentPath(path);
@@ -270,7 +279,7 @@ export function FilePanel() {
       for (const dir of affected) void loadDirectory(dir, true);
     });
     return unsubscribe;
-  }, [activeFile, children, loadDirectory, projectId]);
+  }, [loadDirectory, projectId]);
 
   // 窗口重新聚焦时刷新根目录，补偿失焦期间可能丢失的文件事件。
   useEffect(() => {
@@ -304,30 +313,17 @@ export function FilePanel() {
   );
 
   // 打开文件时展开其父目录链（对齐 VS Code explorer.autoReveal）。
-  const revealAncestors = useCallback(
-    (path: string): string[] | null => {
-      const missing = filePathSegments(path)
-        .filter((segment) => segment.directory)
-        .map((segment) => segment.path)
-        .filter((parent) => !expandedPaths.includes(parent));
-      if (missing.length === 0) return null;
-      const nextExpanded = [...expandedPaths, ...missing];
-      updateWorkbench({ expandedPaths: nextExpanded });
-      return nextExpanded;
-    },
-    [expandedPaths, updateWorkbench],
-  );
-
   const openNode = useCallback(
     (node: FileNode) => {
       if (node.type === "directory") {
         void toggleDirectory(node);
         return;
       }
-      revealAncestors(node.path);
-      updateWorkbench(openWorkbenchFileAsPreview(openFiles, previewFile, node.path));
+      if (!workbench) return;
+      // 预览打开 + 父目录链展开合并为一次写入。
+      updateWorkbench(openWorkbenchFilePatch(workbench, node.path));
     },
-    [openFiles, previewFile, revealAncestors, toggleDirectory, updateWorkbench],
+    [toggleDirectory, updateWorkbench, workbench],
   );
 
   const pinNode = useCallback(
@@ -343,7 +339,11 @@ export function FilePanel() {
     (path: string) => {
       const next = closeWorkbenchFile(openFiles, activeFile, path);
       if (!next) return;
-      updateWorkbench({ ...next, ...(path === previewFile ? { previewFile: undefined } : {}) });
+      scrollPositions.current.delete(path);
+      updateWorkbench({
+        ...next,
+        ...(path === previewFile ? { previewFile: undefined } : {}),
+      });
     },
     [activeFile, openFiles, previewFile, updateWorkbench],
   );
@@ -354,15 +354,16 @@ export function FilePanel() {
         void toggleDirectory(node);
         return;
       }
-      revealAncestors(node.path);
+      const missing = missingExpandedDirectories(expandedPaths, node.path);
       const next = replaceActiveWorkbenchFile(openFiles, activeFile, node.path);
-      // 被替换的若是预览 tab，预览状态跟随新路径。
+      // 活动 tab 替换 + 父目录链展开合并为一次写入。
       updateWorkbench({
         ...next,
         ...(activeFile === previewFile ? { previewFile: node.path } : {}),
+        ...(missing ? { expandedPaths: [...expandedPaths, ...missing] } : {}),
       });
     },
-    [activeFile, openFiles, previewFile, revealAncestors, toggleDirectory, updateWorkbench],
+    [activeFile, expandedPaths, openFiles, previewFile, toggleDirectory, updateWorkbench],
   );
 
   // 文件树右键菜单（对齐 VS Code explorer 上下文操作）。
@@ -396,6 +397,68 @@ export function FilePanel() {
 
   return (
     <div ref={workspace} className="file-workspace">
+      <aside
+        ref={resize.regionRef}
+        className="file-tree-panel"
+        style={
+          {
+            "--resizable-region-size": `${resize.initialSize}px`,
+          } as CSSProperties
+        }
+        aria-label="项目文件"
+      >
+        <div
+          ref={resize.separatorRef}
+          className="resize-handle resize-handle-file-tree"
+          role="separator"
+          tabIndex={0}
+          aria-label="调整文件树宽度"
+          aria-controls={fileTreeContentId}
+          aria-orientation="vertical"
+          aria-valuemin={FILE_TREE_MIN_WIDTH}
+          aria-valuemax={resize.initialMax}
+          aria-valuenow={resize.initialSize}
+          aria-valuetext={`${resize.initialSize} 像素`}
+          onPointerDown={resize.onPointerDown}
+          onKeyDown={resize.onKeyDown}
+        />
+        <div id={fileTreeContentId} className="file-tree-surface">
+          <div className="file-tree-toolbar">
+            <label className="file-search">
+              <Search size={14} aria-hidden="true" />
+              <span className="sr-only">筛选文件</span>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="筛选文件..."
+              />
+            </label>
+          </div>
+          {treeError ? (
+            <p className="panel-error" role="alert">
+              {treeError}
+            </p>
+          ) : null}
+          <div className="file-tree" aria-busy={treeLoading}>
+            {treeLoading && roots.length === 0 ? (
+              <p className="file-tree-status" role="status">
+                正在加载文件
+              </p>
+            ) : (
+              <FileTree
+                nodes={roots}
+                children={children}
+                expanded={expanded}
+                active={activeFile ?? undefined}
+                onOpen={openNode}
+                onPinOpen={pinNode}
+                renderContextMenu={renderFileContextMenu}
+              />
+            )}
+          </div>
+        </div>
+      </aside>
       <Tabs.Root
         className="file-preview"
         value={activeFile ?? ""}
@@ -457,7 +520,11 @@ export function FilePanel() {
                   aria-label={fileMarkdownPreview ? "查看源码" : "预览 Markdown"}
                   aria-pressed={fileMarkdownPreview}
                   data-active={fileMarkdownPreview || undefined}
-                  onClick={() => updateWorkbench({ fileMarkdownPreview: !fileMarkdownPreview })}
+                  onClick={() =>
+                    updateWorkbench({
+                      fileMarkdownPreview: !fileMarkdownPreview,
+                    })
+                  }
                 >
                   <Eye size={14} aria-hidden="true" />
                 </TooltipIconButton>
@@ -510,88 +577,6 @@ export function FilePanel() {
           </div>
         ) : null}
       </Tabs.Root>
-      <aside
-        ref={resize.regionRef}
-        className="file-tree-panel"
-        data-collapsed={fileTreeCollapsed || undefined}
-        style={{ "--resizable-region-size": `${resize.initialSize}px` } as CSSProperties}
-        aria-label="项目文件"
-      >
-        <div
-          ref={resize.separatorRef}
-          className="resize-handle resize-handle-file-tree"
-          role="separator"
-          tabIndex={fileTreeCollapsed ? -1 : 0}
-          aria-hidden={fileTreeCollapsed}
-          aria-label="调整文件树宽度"
-          aria-controls={fileTreeContentId}
-          aria-orientation="vertical"
-          aria-valuemin={FILE_TREE_MIN_WIDTH}
-          aria-valuemax={resize.initialMax}
-          aria-valuenow={resize.initialSize}
-          aria-valuetext={`${resize.initialSize} 像素`}
-          onPointerDown={resize.onPointerDown}
-          onKeyDown={resize.onKeyDown}
-        />
-        <button
-          type="button"
-          className="file-tree-edge-trigger"
-          tabIndex={fileTreeCollapsed ? 0 : -1}
-          aria-hidden={!fileTreeCollapsed}
-          aria-label="展开文件树"
-          onClick={() => updateWorkbench({ fileTreeCollapsed: false })}
-        />
-        <div id={fileTreeContentId} className="file-tree-surface">
-          <div className="file-tree-toolbar">
-            <label className="file-search">
-              <Search size={14} aria-hidden="true" />
-              <span className="sr-only">筛选文件</span>
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="筛选文件..."
-              />
-            </label>
-            <button
-              type="button"
-              className="file-tree-toggle"
-              aria-label={fileTreeCollapsed ? "固定展开文件树" : "收起文件树"}
-              aria-controls={fileTreeContentId}
-              aria-expanded={!fileTreeCollapsed}
-              onClick={() => updateWorkbench({ fileTreeCollapsed: !fileTreeCollapsed })}
-            >
-              {fileTreeCollapsed ? (
-                <PanelRightOpen size={15} aria-hidden="true" />
-              ) : (
-                <PanelRightClose size={15} aria-hidden="true" />
-              )}
-            </button>
-          </div>
-          {treeError ? (
-            <p className="panel-error" role="alert">
-              {treeError}
-            </p>
-          ) : null}
-          <div className="file-tree" aria-busy={treeLoading}>
-            {treeLoading && roots.length === 0 ? (
-              <p className="file-tree-status" role="status">
-                正在加载文件
-              </p>
-            ) : (
-              <FileTree
-                nodes={roots}
-                children={children}
-                expanded={expanded}
-                active={activeFile ?? undefined}
-                onOpen={openNode}
-                onPinOpen={pinNode}
-                renderContextMenu={renderFileContextMenu}
-              />
-            )}
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }

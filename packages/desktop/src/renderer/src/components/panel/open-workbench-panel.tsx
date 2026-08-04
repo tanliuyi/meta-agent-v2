@@ -12,9 +12,10 @@ import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context
 import { isThreadDescendantOf } from "../../state/thread-list-commands.ts";
 import { openThreadAsSidebarTab } from "../../state/thread-sidebar-open.ts";
 import type { WorkbenchTabState } from "../../state/workbench-tab-context.tsx";
-import { workbenchTabKey } from "../../state/workbench-tab-context.tsx";
+import { workbenchPanelTabKey, workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../session-context.tsx";
+import { NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { registerBuiltinPanelTabs } from "./builtin-panel-tabs.tsx";
 import { WorkbenchTabList } from "./panel-tab.tsx";
 import { SessionContent } from "./session/session-content.tsx";
@@ -60,7 +61,7 @@ export function OpenWorkbenchPanel({
   onOpenNewPanel,
   onOpenPanelTab,
 }: OpenWorkbenchPanelProps) {
-  const { updateWorkbench, record } = useSessionScope();
+  const { updateWorkbench, record, isDraft } = useSessionScope();
   const definitions = useWorkbenchPanelTabs();
   const [panelMaxSize, setPanelMaxSize] = useState(getPanelMaxSize);
   useEffect(() => {
@@ -86,7 +87,14 @@ export function OpenWorkbenchPanel({
   const activeTab = tabs.find((tab) => workbenchTabKey(tab) === activeKey) ?? null;
   const activeDefinition = activeTab?.kind === "panel" ? getWorkbenchPanelTabDefinition(activeTab.panel) : undefined;
   // 未选中任何 tab 时展示新建缺省页；选项来自注册表中 addable 的面板定义。
-  const newPanelOptions = definitions.filter((definition) => definition.addable !== false);
+  // 新会话草稿尚未固定项目，不提供“新会话”草稿面板入口。
+  const newPanelOptions = definitions.filter(
+    (definition) => definition.addable !== false && !(isDraft && definition.kind === NEW_SESSION_PANEL_KIND),
+  );
+  // 草稿下即使已打开过“新会话”面板 tab 也隐藏（页面级 tab 表理论上不会出现）。
+  const visibleTabs = isDraft
+    ? tabs.filter((tab) => workbenchTabKey(tab) !== workbenchPanelTabKey(NEW_SESSION_PANEL_KIND))
+    : tabs;
 
   // 侧边栏已打开时承接会话拖拽：悬停高亮，drop 后将会话作为 tab 打开（不再显示右缘占位条）。
   const { dragged } = useThreadDrag();
@@ -149,7 +157,12 @@ export function OpenWorkbenchPanel({
         clearDrop();
         if (!canDrop || !dragged) return;
         openThreadAsSidebarTab(
-          { workbenchTabs: sessionWorkbenchTabs, cache, store, activeSessionKey: record.key },
+          {
+            workbenchTabs: sessionWorkbenchTabs,
+            cache,
+            store,
+            activeSessionKey: record.key,
+          },
           dragged,
         );
       }}
@@ -175,7 +188,7 @@ export function OpenWorkbenchPanel({
           <header className="panel-tabs">
             <div className="panel-tabs-safe-area" aria-hidden="true" />
             <WorkbenchTabList
-              tabs={tabs}
+              tabs={visibleTabs}
               activeKey={activeTab ? activeKey : null}
               runningThreadIds={runningThreadIds}
               onActivate={onActivate}

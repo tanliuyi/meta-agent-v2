@@ -63,6 +63,14 @@ export function projectDisplayToolPath(path: string, cwd: string): string {
   return comparablePath.startsWith(prefix) ? absolutePath.slice(prefix.length) : absolutePath;
 }
 
+/** 将工具路径转换为 workbench 文件面板可打开的项目内相对路径；位于项目外时返回 null。 */
+export function workbenchToolPath(path: string, cwd: string): string | null {
+  if (!path) return null;
+  const display = projectDisplayToolPath(path, cwd);
+  if (display === "." || isAbsoluteToolPath(display)) return null;
+  return display;
+}
+
 function isAbsoluteToolPath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:\//.test(path);
 }

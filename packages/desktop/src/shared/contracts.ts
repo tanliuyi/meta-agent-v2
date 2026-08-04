@@ -577,7 +577,6 @@ export interface WorkbenchState {
   panelOpen: boolean;
   panelWidth: number;
   fileTreeWidth?: number;
-  fileTreeCollapsed?: boolean;
   fileWrapMode?: boolean;
   fileMarkdownPreview?: boolean;
   terminalOpen: boolean;
@@ -591,4 +590,12 @@ export interface WorkbenchState {
   tabs?: WorkbenchTab[];
   /** 当前选中的 tab 键；null 表示展示新建 Panel 缺省页。 */
   activeTabKey?: string | null;
+}
+
+/** links.open 的解析结果：项目内文件返回 workbench 相对路径，其余由系统/外部打开。 */
+export interface OpenLinkResult {
+  /** 是否应在应用内（workbench 文件面板）打开。 */
+  openInApp: boolean;
+  /** openInApp 为 true 时，相对项目 cwd 的规范化路径。 */
+  path?: string;
 }

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  NEW_SESSION_PANEL_KIND,
-  registerBuiltinPanelTabs,
-} from "../src/renderer/src/components/panel/builtin-panel-tabs.tsx";
+import { NEW_SESSION_PANEL_KIND } from "../src/renderer/src/components/panel/builtin-panel-kinds.ts";
+import { registerBuiltinPanelTabs } from "../src/renderer/src/components/panel/builtin-panel-tabs.tsx";
 import {
   getWorkbenchPanelTabDefinition,
   listWorkbenchPanelTabs,

@@ -2,11 +2,14 @@ import { Tooltip } from "@renderer/shared/ui/tooltip";
 import { TooltipContent } from "@renderer/shared/ui/tooltip-content";
 import { TooltipTrigger } from "@renderer/shared/ui/tooltip-trigger";
 import { type MouseEvent, useEffect, useState } from "react";
-import { useSessionScope } from "../session-context.tsx";
+import { useOpenWorkbenchFileInPanel, useSessionControlSelector, useSessionScope } from "../session-context.tsx";
+import { workbenchToolPath } from "./tools/tool-format.ts";
 
 export function ToolFileTarget({ path }: { path: string }) {
   const { record } = useSessionScope();
+  const openInApp = useOpenWorkbenchFileInPanel();
   const projectId = record.identity.projectId;
+  const cwd = useSessionControlSelector((control) => control?.cwd);
   const [absolutePath, setAbsolutePath] = useState(path);
 
   useEffect(() => {
@@ -22,11 +25,17 @@ export function ToolFileTarget({ path }: { path: string }) {
     };
   }, [path, projectId]);
 
-  function openFile(event: MouseEvent<HTMLButtonElement>): void {
+  async function openFile(event: MouseEvent<HTMLButtonElement>): Promise<void> {
     event.stopPropagation();
-    void window.desktop.files
-      .open(projectId, path)
-      .catch((error: unknown) => console.error("Failed to open tool file:", error));
+    const workbenchPath = cwd ? workbenchToolPath(path, cwd) : null;
+    // 项目内文件：在应用内 workbench 文件面板打开（对齐文件树单击行为）；
+    // 侧边栏未开或未选中资源管理 tab 时自动打开并选中。
+    if (workbenchPath !== null && openInApp(workbenchPath)) return;
+    try {
+      await window.desktop.files.open(projectId, path);
+    } catch (error: unknown) {
+      console.error("Failed to open tool file:", error);
+    }
   }
 
   return (

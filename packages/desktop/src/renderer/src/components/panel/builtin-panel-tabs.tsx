@@ -2,12 +2,10 @@ import Files from "lucide-react/dist/esm/icons/files.mjs";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { registerWorkbenchPanelTab } from "../../state/panel-tab-registry.ts";
+import { FILES_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { FilePanel } from "./files/file-panel.tsx";
 import { NewSessionDraft } from "./session/new-session-draft.tsx";
 import { TerminalPanel } from "./terminal/terminal-panel.tsx";
-
-/** 新会话草稿面板的注册 kind；提交成功后由草稿组件自行关闭该 tab。 */
-export const NEW_SESSION_PANEL_KIND = "draft";
 
 let registered = false;
 
@@ -30,7 +28,7 @@ export function registerBuiltinPanelTabs(): void {
     order: 1,
   });
   registerWorkbenchPanelTab({
-    kind: "files",
+    kind: FILES_PANEL_KIND,
     label: "资源管理",
     icon: <Files size={14} />,
     component: FilePanel,

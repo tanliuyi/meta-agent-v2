@@ -23,7 +23,7 @@ import { useSessionCache } from "../state/session-cache-context.tsx";
 import { resolveDraftProjectId, useDraftSearchParams } from "../state/session-navigation.ts";
 import { DraftComposerThread } from "./chat/draft-composer-thread.tsx";
 import { EmptyChatState } from "./chat/empty-chat-state.tsx";
-import { SidebarToggle } from "./layout/sidebar-toggle.tsx";
+import { NewSessionShell } from "./new-session-shell.tsx";
 
 /** Loads draft configuration and materializes the first accepted prompt into a routed Pi session. */
 export function NewSessionSurface() {
@@ -201,49 +201,28 @@ export function NewSessionSurface() {
 
   if (phase === "no-project") {
     return (
-      <div className="session-surface-shell">
-        <header className="topbar">
-          <SidebarToggle location="topbar" />
-          <div className="topbar-title">
-            <strong>新会话</strong>
-          </div>
-        </header>
-        <div className="workspace-row">
-          <main className="chat-workspace">
-            <EmptyChatState
-              title="没有可用工作区"
-              detail={loadError ?? "通用工作区不可用，且没有可用的 Project。请添加一个 Project。"}
-            />
-          </main>
-        </div>
-      </div>
+      <NewSessionShell disabled={!projectId} error={null}>
+        <EmptyChatState
+          title="没有可用工作区"
+          detail={loadError ?? "通用工作区不可用，且没有可用的 Project。请添加一个 Project。"}
+        />
+      </NewSessionShell>
     );
   }
 
   return (
-    <div className="session-surface-shell">
-      <header className="topbar">
-        <SidebarToggle location="topbar" />
-        <div className="topbar-title">
-          <strong>新会话</strong>
-        </div>
-      </header>
-      <div className="workspace-row">
-        <main className="chat-workspace">
-          <DraftComposerThread
-            projects={projects}
-            project={project}
-            config={config}
-            configLoading={config === null}
-            phase={phase === "materializing" ? "materializing" : "editing"}
-            onProjectChange={selectProject}
-            onModelChange={selectModel}
-            onThinkingChange={selectThinking}
-            onSubmit={submit}
-          />
-        </main>
-      </div>
-      {loadError ? <div className="composer-error">{loadError}</div> : null}
-    </div>
+    <NewSessionShell disabled={!projectId} error={loadError}>
+      <DraftComposerThread
+        projects={projects}
+        project={project}
+        config={config}
+        configLoading={config === null}
+        phase={phase === "materializing" ? "materializing" : "editing"}
+        onProjectChange={selectProject}
+        onModelChange={selectModel}
+        onThinkingChange={selectThinking}
+        onSubmit={submit}
+      />
+    </NewSessionShell>
   );
 }

@@ -23,7 +23,7 @@ import { useSessionDraft } from "../../../state/session-draft-context.tsx";
 import { workbenchPanelTabKey } from "../../../state/workbench-tab-context.tsx";
 import { DraftComposerThread } from "../../chat/draft-composer-thread.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../../session-context.tsx";
-import { NEW_SESSION_PANEL_KIND } from "../builtin-panel-tabs.tsx";
+import { NEW_SESSION_PANEL_KIND } from "../builtin-panel-kinds.ts";
 
 /**
  * workbench-panel 中的新会话草稿：项目固定为当前主 session 所在项目，
