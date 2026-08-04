@@ -3,28 +3,32 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopRoot = join(repoRoot, "packages", "desktop");
-const outputRoot = join(desktopRoot, "out", "sidecar");
-const packagedRoot = join(desktopRoot, "output", "pi-sidecar");
+const defaultOutputRoot = join(desktopRoot, "out", "sidecar");
+const defaultPackagedRoot = join(desktopRoot, "output", "pi-sidecar");
 const codingAgentPackage = JSON.parse(readFileSync(join(repoRoot, "packages", "coding-agent", "package.json"), "utf8"));
 const electronPath = require("electron");
-const compatibility = runtimeCompatibility(electronPath);
 
-writeManifest(outputRoot, {
-  entries: sidecarEntries("sidecar"),
-  compatibility,
-  integrity: runtimeIntegrity(""),
-});
-
-writeManifest(packagedRoot, {
-  entries: sidecarEntries("../app.asar.unpacked/out/sidecar/sidecar"),
-  compatibility,
-  integrity: runtimeIntegrity("../app.asar.unpacked/out/sidecar"),
-});
+export function generateDesktopSidecarManifests(
+  outputRoot = defaultOutputRoot,
+  packagedRoot = defaultPackagedRoot,
+) {
+  const compatibility = runtimeCompatibility(electronPath);
+  writeManifest(outputRoot, {
+    entries: sidecarEntries("sidecar"),
+    compatibility,
+    integrity: runtimeIntegrity(outputRoot, ""),
+  });
+  writeManifest(packagedRoot, {
+    entries: sidecarEntries("../app.asar.unpacked/out/sidecar/sidecar"),
+    compatibility,
+    integrity: runtimeIntegrity(outputRoot, "../app.asar.unpacked/out/sidecar"),
+  });
+}
 
 function sidecarEntries(prefix) {
   return {
@@ -34,7 +38,7 @@ function sidecarEntries(prefix) {
   };
 }
 
-function runtimeIntegrity(packagedPrefix) {
+function runtimeIntegrity(outputRoot, packagedPrefix) {
   const files = {};
   for (const entry of readdirSync(outputRoot, { recursive: true, encoding: "utf8" })) {
     const path = join(outputRoot, entry);
@@ -79,4 +83,8 @@ function writeManifest(root, manifest) {
   const manifestPath = join(root, "runtime-manifest.json");
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`Generated ${relative(repoRoot, manifestPath)}`);
+}
+
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  generateDesktopSidecarManifests();
 }
