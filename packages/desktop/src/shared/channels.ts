@@ -56,6 +56,7 @@ export const CHANNELS = {
   terminalsWrite: "desktop:terminals:write",
   terminalsResize: "desktop:terminals:resize",
   terminalsRestart: "desktop:terminals:restart",
+  terminalsDispose: "desktop:terminals:dispose",
   terminalsEvent: "desktop:terminals:event",
   workbenchGet: "desktop:workbench:get",
   workbenchUpdate: "desktop:workbench:update",

@@ -271,6 +271,7 @@ export interface DesktopApi {
       cols: number,
       rows: number,
     ): Promise<TerminalSnapshot>;
+    dispose(projectId: string, threadId: string, terminalId: string): Promise<void>;
     onEvent(listener: (event: TerminalEvent) => void): () => void;
   };
   workbench: {

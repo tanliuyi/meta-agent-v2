@@ -3,6 +3,7 @@ import { getShellConfig, SettingsManager } from "@earendil-works/pi-coding-agent
 import * as pty from "node-pty";
 import type { TerminalEvent, TerminalSnapshot } from "../../shared/contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
+import { prepareShellInjection } from "./shell-integration.ts";
 import { TerminalOutputBuffer } from "./terminal-output-buffer.ts";
 
 const MAX_OUTPUT = 2 * 1024 * 1024;
@@ -14,6 +15,8 @@ const MIN_ROWS = 4;
 const MAX_ROWS = 200;
 const TERMINAL_SHUTDOWN_GRACE_MS = 2_000;
 const TERMINAL_SHUTDOWN_TIMEOUT_MS = 5_000;
+/** 注入 shell integration 的进程启动即退（<3s 且非 0 退出码）时，自动降级为无注入重启。 */
+const INJECTION_FALLBACK_GRACE_MS = 3_000;
 
 export interface TerminalShellCommand {
   file: string;
@@ -34,6 +37,12 @@ interface TerminalProcess {
   revision: number;
   running: boolean;
   disposed: boolean;
+  /** 释放 shell integration 注入用的临时目录（best-effort）。 */
+  cleanup?: () => void;
+  /** 是否带 shell integration 注入启动（用于启动即退时的自动回退）。 */
+  injected: boolean;
+  /** PTY 启动时间戳（启动即退判定）。 */
+  startedAt: number;
 }
 
 /** 按 Project、session 和终端槽位管理独立 PTY。 */
@@ -93,7 +102,12 @@ export class TerminalSupervisor {
     } else {
       this.flushData(key, projectId, threadId, terminalId, terminal);
       if (terminal.running) {
-        terminal.pty.resize(clamp(cols, MIN_COLS, MAX_COLS), clamp(rows, MIN_ROWS, MAX_ROWS));
+        try {
+          terminal.pty.resize(clamp(cols, MIN_COLS, MAX_COLS), clamp(rows, MIN_ROWS, MAX_ROWS));
+        } catch {
+          // 退出竞态窗口（agent 已标记退出但 onExit 未到）：resize 被拒绝，静默忽略，
+          // 退出状态随后由 onExit 事件流驱动。
+        }
       }
     }
     return snapshot(projectId, threadId, terminalId, terminal);
@@ -104,22 +118,31 @@ export class TerminalSupervisor {
     this.assertWorkspaceWritable(projectId);
     const terminal = this.require(projectId, threadId, terminalId);
     if (!terminal.running) throw new Error("终端进程已退出，请重新启动");
-    terminal.pty.write(data);
+    try {
+      terminal.pty.write(data);
+    } catch {
+      // 进程退出的 IPC 竞态窗口：agent 已标记退出但 onExit 尚未到达（running 仍为 true），
+      // 此时写入会抛错；退出状态随后由 onExit 事件流驱动，这里静默忽略。
+    }
   }
 
-  /** 同步指定 PTY 的字符尺寸。 */
+  /** 同步指定 PTY 的字符尺寸；进程已退出时静默忽略（渲染端 ResizeObserver 会继续发事件）。 */
   resize(projectId: string, threadId: string, terminalId: string, cols: number, rows: number): void {
-    this.require(projectId, threadId, terminalId).pty.resize(
-      clamp(cols, MIN_COLS, MAX_COLS),
-      clamp(rows, MIN_ROWS, MAX_ROWS),
-    );
+    const terminal = this.require(projectId, threadId, terminalId);
+    if (!terminal.running) return;
+    try {
+      terminal.pty.resize(clamp(cols, MIN_COLS, MAX_COLS), clamp(rows, MIN_ROWS, MAX_ROWS));
+    } catch {
+      // node-pty 的 agent 在进程退出瞬间即拒绝 resize（"Cannot resize a pty that has already exited"），
+      // 早于 onExit 派发到本进程；退出状态由 onExit 事件流驱动，这里静默忽略。
+    }
   }
 
   /** 结束旧 PTY 并在相同 session cwd 中重新启动。 */
   restart(projectId: string, threadId: string, terminalId: string, cols: number, rows: number): TerminalSnapshot {
     this.assertWorkspaceWritable(projectId);
     const key = terminalKey(projectId, threadId, terminalId);
-    this.disposeTerminal(key);
+    this.killTerminal(key);
     const terminal = this.create(projectId, threadId, terminalId, cols, rows);
     this.terminals.set(key, terminal);
     this.changed({ type: "reset", projectId, threadId, terminalId, revision: terminal.revision });
@@ -130,21 +153,26 @@ export class TerminalSupervisor {
   disposeSession(projectId: string, threadId: string): void {
     const prefix = `${projectId}:${threadId}:`;
     for (const key of this.terminals.keys()) {
-      if (key.startsWith(prefix)) this.disposeTerminal(key);
+      if (key.startsWith(prefix)) this.killTerminal(key);
     }
+  }
+
+  /** 关闭单个终端并释放其 PTY（多终端 tab 的关闭操作）。 */
+  disposeTerminal(projectId: string, threadId: string, terminalId: string): void {
+    this.killTerminal(terminalKey(projectId, threadId, terminalId));
   }
 
   /** 移除 Project 时释放其所有 PTY。 */
   disposeProject(projectId: string): void {
     const prefix = `${projectId}:`;
     for (const key of this.terminals.keys()) {
-      if (key.startsWith(prefix)) this.disposeTerminal(key);
+      if (key.startsWith(prefix)) this.killTerminal(key);
     }
   }
 
   /** 应用退出时释放全部 PTY。 */
   dispose(): void {
-    for (const key of [...this.terminals.keys()]) this.disposeTerminal(key);
+    for (const key of [...this.terminals.keys()]) this.killTerminal(key);
     this.restoreBlockedProjects.clear();
   }
 
@@ -152,14 +180,23 @@ export class TerminalSupervisor {
     if (this.restoreBlockedProjects.has(projectId)) throw new Error("终端在 checkpoint 恢复期间不可用");
   }
 
-  private create(projectId: string, threadId: string, terminalId: string, cols: number, rows: number): TerminalProcess {
+  private create(
+    projectId: string,
+    threadId: string,
+    terminalId: string,
+    cols: number,
+    rows: number,
+    allowInjection = true,
+  ): TerminalProcess {
     const key = terminalKey(projectId, threadId, terminalId);
     const cwd = this.projects.getCwd(projectId);
     const shell = this.resolveShell(cwd);
-    const terminalPty = pty.spawn(shell.file, shell.args, {
+    // 注入 shell integration（bash 追加 --rcfile，zsh 附加 ZDOTDIR）；失败时静默降级为普通 spawn
+    const injection = allowInjection ? prepareShellInjection(shell.file, shell.args, process.env) : undefined;
+    const terminalPty = pty.spawn(shell.file, injection?.args ?? shell.args, {
       name: "xterm-256color",
       cwd,
-      env: process.env,
+      env: injection?.env ?? process.env,
       cols: clamp(cols, MIN_COLS, MAX_COLS),
       rows: clamp(rows, MIN_ROWS, MAX_ROWS),
       useConpty: process.platform === "win32",
@@ -173,6 +210,9 @@ export class TerminalSupervisor {
       revision: this.nextRevision(key),
       running: true,
       disposed: false,
+      cleanup: injection?.cleanup,
+      injected: Boolean(injection),
+      startedAt: Date.now(),
     };
     terminal.data = terminalPty.onData((data) => {
       if (terminal.disposed) return;
@@ -181,9 +221,24 @@ export class TerminalSupervisor {
     });
     terminal.exit = terminalPty.onExit(({ exitCode }) => {
       if (terminal.disposed) return;
+      // 注入的 shell 启动即退（如注入脚本导致 shell 初始化失败）：自动降级为无注入重启，
+      // 保证终端始终可用；已回退的进程不再重复回退。
+      if (
+        allowInjection &&
+        terminal.injected &&
+        exitCode !== 0 &&
+        Date.now() - terminal.startedAt < INJECTION_FALLBACK_GRACE_MS
+      ) {
+        this.terminals.delete(key);
+        const fallback = this.create(projectId, threadId, terminalId, cols, rows, false);
+        this.terminals.set(key, fallback);
+        this.changed({ type: "reset", projectId, threadId, terminalId, revision: fallback.revision });
+        return;
+      }
       this.flushData(key, projectId, threadId, terminalId, terminal);
       terminal.running = false;
       terminal.revision = this.nextRevision(key);
+      terminal.cleanup?.();
       this.changed({ type: "exit", projectId, threadId, terminalId, revision: terminal.revision, exitCode });
     });
     return terminal;
@@ -292,13 +347,19 @@ export class TerminalSupervisor {
     terminal.pendingDataLength = 0;
     terminal.data?.dispose();
     terminal.exit?.dispose();
+    terminal.cleanup?.();
   }
 
-  private disposeTerminal(key: string): void {
+  private killTerminal(key: string): void {
     const terminal = this.terminals.get(key);
     if (!terminal) return;
     this.detachTerminal(key, terminal);
-    if (terminal.running) terminal.pty.kill();
+    if (!terminal.running) return;
+    try {
+      terminal.pty.kill();
+    } catch {
+      // 退出竞态窗口：kill 被拒绝时静默忽略（进程已退出，无需再杀）。
+    }
   }
 
   private nextRevision(key: string): number {

@@ -492,6 +492,11 @@ body.is-resizing-column .sidebar {
   margin-left: 8px;
 }
 
+/* 底部终端圆角跟随 win32 工作区收起态圆角，与右侧 Panel 的裁剪效果保持一致。 */
+.app-frame[data-platform="win32"] .sidebar[data-collapsed="true"] ~ .workspace > .bottom-terminal {
+  border-radius: 8px;
+}
+
 .workspace:has(> .workbench-panel) {
   grid-template-columns: minmax(0, 1fr) auto;
 }
@@ -508,13 +513,34 @@ body.is-resizing-column .sidebar {
   column-gap: 0;
 }
 
-.app-frame[data-platform="darwin"] .workspace > :is(.session-surface-shell, .workbench-panel) {
+.app-frame[data-platform="darwin"] .workspace > :is(.session-surface-shell, .workbench-panel, .bottom-terminal) {
   border-radius: 0;
 }
 
 .app-frame[data-platform="darwin"] .workspace > .workbench-panel {
   border: 1px solid hsl(var(--border));
   border-left: 0;
+}
+
+/* darwin 下终端贴边无圆角，边框改由元素自身提供（同 workbench-panel 的 darwin 方案），
+   伪元素边框禁用；与 Panel 展开时相邻的右缘分界线由终端侧提供（Panel 无左边框）。 */
+.app-frame[data-platform="darwin"] .workspace > .bottom-terminal {
+  border: 1px solid hsl(var(--border));
+}
+
+.app-frame[data-platform="darwin"] .workspace > .bottom-terminal::before {
+  content: none;
+}
+
+/* darwin 下元素自身有 1px 边框，padding box 下移；拖拽条补偿 1px 以对齐 8px gap 正中
+   （同 panel 的 resize-handle-panel darwin 调整模式）。 */
+.app-frame[data-platform="darwin"] .workspace > .bottom-terminal .resize-handle-terminal {
+  top: -9px;
+}
+
+/* 收起动画期间高度为 0，元素自身边框仍占 2px 渲染高度，需一并归零。 */
+.app-frame[data-platform="darwin"] .workspace > .bottom-terminal[data-collapsed] {
+  border: 0;
 }
 
 .app-frame[data-platform="darwin"] .workspace > .workbench-panel::before {
@@ -544,6 +570,12 @@ body.is-resizing-column .sidebar {
   border-radius: 16px;
   box-shadow: var(--workspace-edge-shadow);
   background: hsl(var(--background));
+}
+
+/* 终端收起（元素不存在或 data-collapsed）时第 3 行 auto 高度为 0，但其上方的 row-gap
+   仍残留 8px 空隙；让会话壳延伸到末行把 gap 吸收进自身盒内，底部占满工作区。 */
+.workspace:not(:has(> .bottom-terminal:not([data-collapsed]))) > .session-surface-shell {
+  grid-row: 1 / -1;
 }
 
 .workspace:has(> .workbench-panel) > .bottom-terminal {

@@ -4,11 +4,12 @@ import type {
   WorkbenchSessionTab,
   WorkbenchState,
   WorkbenchTab,
+  WorkbenchTerminalTab,
 } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useSessionCacheRecords } from "./session-cache-context.tsx";
 
-/** tab 的定位键：会话用 session key，面板使用 workbenchPanelTabKey(kind)。 */
+/** tab 的定位键：会话与终端用各自的 key，面板使用 workbenchPanelTabKey(kind)。 */
 export function workbenchTabKey(tab: WorkbenchTab): string {
   return tab.kind === "panel" ? workbenchPanelTabKey(tab.panel) : tab.key;
 }
@@ -34,6 +35,7 @@ export interface WorkbenchTabStates {
 export interface SessionWorkbenchTabs extends WorkbenchTabState {
   openSessionTab(tab: WorkbenchSessionTab): void;
   openPanelTab(panel: string): void;
+  openTerminalTab(tab: WorkbenchTerminalTab): void;
   activate(key: string | null): void;
   closeTab(key: string): void;
   openNewPanel(): void;
@@ -42,6 +44,7 @@ export interface SessionWorkbenchTabs extends WorkbenchTabState {
 export type WorkbenchTabAction =
   | { type: "open-session-tab"; tab: WorkbenchSessionTab }
   | { type: "open-panel-tab"; panel: string }
+  | { type: "open-terminal-tab"; tab: WorkbenchTerminalTab }
   | { type: "activate"; key: string | null }
   | { type: "close-tab"; key: string }
   | { type: "open-new-panel" }
@@ -77,6 +80,14 @@ export function reduceWorkbenchTabState(state: WorkbenchTabState, action: Workbe
         ? state.tabs
         : [...state.tabs, tab];
       return { tabs, activeKey: key };
+    }
+    case "open-terminal-tab": {
+      // 已选中该 tab 时保持原状态引用；每个终端 tab 独立（允许同 displayName 多开）。
+      if (state.activeKey === action.tab.key) return state;
+      const tabs = state.tabs.some((tab) => workbenchTabKey(tab) === action.tab.key)
+        ? state.tabs
+        : [...state.tabs, action.tab];
+      return { tabs, activeKey: action.tab.key };
     }
     case "activate":
       return state.activeKey === action.key ? state : { ...state, activeKey: action.key };
@@ -130,6 +141,8 @@ export interface WorkbenchTabContextValue {
   openSessionTab(sessionKey: string, tab: WorkbenchSessionTab): void;
   /** 在指定主 session 中注册面板 tab（kind 见 panel-tab-registry）并选中。 */
   openPanelTab(sessionKey: string, panel: string): void;
+  /** 在指定主 session 中注册终端 tab 并选中；重复注册只做选中。 */
+  openTerminalTab(sessionKey: string, tab: WorkbenchTerminalTab): void;
   /** 选中/取消选中指定主 session 的 tab；null 表示回到新建 Panel 缺省页。 */
   activate(sessionKey: string, key: string | null): void;
   closeTab(sessionKey: string, key: string): void;
@@ -223,6 +236,11 @@ export function WorkbenchTabProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "session", sessionKey, action: { type: "open-panel-tab", panel } }),
     [],
   );
+  const openTerminalTab = useCallback(
+    (sessionKey: string, tab: WorkbenchTerminalTab) =>
+      dispatch({ type: "session", sessionKey, action: { type: "open-terminal-tab", tab } }),
+    [],
+  );
   const activate = useCallback(
     (sessionKey: string, key: string | null) =>
       dispatch({ type: "session", sessionKey, action: { type: "activate", key } }),
@@ -239,8 +257,8 @@ export function WorkbenchTabProvider({ children }: { children: ReactNode }) {
   const getState = useCallback((sessionKey: string) => states[sessionKey] ?? WORKBENCH_TAB_INITIAL_STATE, [states]);
 
   const value = useMemo(
-    () => ({ getState, openSessionTab, openPanelTab, activate, closeTab, openNewPanel }),
-    [getState, openSessionTab, openPanelTab, activate, closeTab, openNewPanel],
+    () => ({ getState, openSessionTab, openPanelTab, openTerminalTab, activate, closeTab, openNewPanel }),
+    [getState, openSessionTab, openPanelTab, openTerminalTab, activate, closeTab, openNewPanel],
   );
   return <WorkbenchTabContext.Provider value={value}>{children}</WorkbenchTabContext.Provider>;
 }

@@ -1,13 +1,13 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { ModelsCompatEditor } from "../src/renderer/src/features/settings/models-compat-editor.tsx";
-import { ModelsProviderForm } from "../src/renderer/src/features/settings/models-provider-form.tsx";
-import { createProviderDraft } from "../src/renderer/src/features/settings/models-settings-model.ts";
-import { ProviderBuiltInModelDetail } from "../src/renderer/src/features/settings/provider-built-in-model-detail.tsx";
-import { ProviderCard } from "../src/renderer/src/features/settings/provider-card.tsx";
-import { ProviderCredentialsForm } from "../src/renderer/src/features/settings/provider-credentials-form.tsx";
-import { groupProviderEntries } from "../src/renderer/src/features/settings/providers-settings-page.tsx";
+import { ModelsCompatEditor } from "../src/renderer/src/features/settings/models/models-compat-editor.tsx";
+import { ModelsProviderForm } from "../src/renderer/src/features/settings/models/models-provider-form.tsx";
+import { createProviderDraft } from "../src/renderer/src/features/settings/models/models-settings-model.ts";
+import { ProviderBuiltInModelDetail } from "../src/renderer/src/features/settings/models/provider-built-in-model-detail.tsx";
+import { ProviderCard } from "../src/renderer/src/features/settings/models/provider-card.tsx";
+import { ProviderCredentialsForm } from "../src/renderer/src/features/settings/models/provider-credentials-form.tsx";
+import { groupProviderEntries } from "../src/renderer/src/features/settings/models/providers-settings-page.tsx";
 import type { ProviderEntry } from "../src/shared/providers-config-contracts.ts";
 
 const metadata = {
@@ -166,14 +166,14 @@ describe("models settings components", () => {
       />,
     );
     for (const field of [
-      "allowEmptySignature",
-      "supportsTemperature",
-      "supportsOpenAIGrammarTools",
-      "supportsStrictTools",
-      "supportsToolSearch",
-      "maxTokensField",
-      "thinkingFormat",
-      "sessionAffinityFormat",
+      "允许空思考签名",
+      "支持 temperature 参数",
+      "支持 OpenAI grammar 工具",
+      "支持严格工具定义",
+      "支持工具搜索",
+      "最大 token 字段名",
+      "思考参数格式",
+      "会话亲和头格式",
       "chatTemplateKwargs",
       "OpenRouter routing",
       "Vercel AI Gateway routing",

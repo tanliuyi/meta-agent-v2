@@ -23,7 +23,19 @@ export function WorkbenchPanel() {
       tabs={tabs.tabs}
       activeKey={tabs.activeKey}
       onActivate={tabs.activate}
-      onCloseTab={(tab) => tabs.closeTab(workbenchTabKey(tab))}
+      onCloseTab={(tab) => {
+        // 关闭终端 tab 时释放其 PTY（进程级终止）；兼容旧版持久化的 panel:terminal tab。
+        const terminalId =
+          tab.kind === "terminal"
+            ? tab.terminalId
+            : tab.kind === "panel" && tab.panel === "terminal"
+              ? "panel"
+              : undefined;
+        if (terminalId) {
+          void window.desktop.terminals.dispose(record.identity.projectId, record.identity.threadId, terminalId);
+        }
+        tabs.closeTab(workbenchTabKey(tab));
+      }}
       onOpenNewPanel={tabs.openNewPanel}
       onOpenPanelTab={tabs.openPanelTab}
     />

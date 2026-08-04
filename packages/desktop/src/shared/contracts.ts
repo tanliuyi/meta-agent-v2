@@ -567,8 +567,19 @@ export interface WorkbenchPanelTab {
   panel: string;
 }
 
-/** workbench-panel 中注册的 tab：会话或面板（含新会话草稿），均可关闭。 */
-export type WorkbenchTab = WorkbenchSessionTab | WorkbenchPanelTab;
+/** 在 workbench-panel 中注册的一个终端 tab（一个 tab 对应一个终端实例）。 */
+export interface WorkbenchTerminalTab {
+  kind: "terminal";
+  /** 定位键（`terminal:${序号}`），与主进程 PTY 槽位独立。 */
+  key: string;
+  /** 终端实例 id（主进程 PTY 槽位，projectId+threadId 内唯一）。 */
+  terminalId: string;
+  /** Tab 展示名（参考 VS Code 终端标签显示名，不含场景语义）。 */
+  displayName: string;
+}
+
+/** workbench-panel 中注册的 tab：会话/面板/终端，均可关闭。 */
+export type WorkbenchTab = WorkbenchSessionTab | WorkbenchPanelTab | WorkbenchTerminalTab;
 
 /** 每个 session 独立持有的 Workbench Panel 布局状态。 */
 export interface WorkbenchState {
@@ -581,6 +592,10 @@ export interface WorkbenchState {
   fileMarkdownPreview?: boolean;
   terminalOpen: boolean;
   terminalHeight: number;
+  /** 侧边栏面板终端的 tab 列表与激活项（跨收起/刷新持久化）。 */
+  panelTerminals?: TerminalTabsState;
+  /** 底部终端的 tab 列表与激活项。 */
+  bottomTerminals?: TerminalTabsState;
   openFiles: string[];
   activeFile?: string;
   /** 处于“预览”状态的 tab（单击打开，可被下一次单击替换）；固定后为 undefined。 */
@@ -590,6 +605,14 @@ export interface WorkbenchState {
   tabs?: WorkbenchTab[];
   /** 当前选中的 tab 键；null 表示展示新建 Panel 缺省页。 */
   activeTabKey?: string | null;
+  /** 终端 tab 序号计数器（单调递增，跨刷新/重启持久化，保证 terminalId 不重复）。 */
+  terminalTabCounter?: number;
+}
+
+/** 单个终端视图的 tab 状态（多终端 tab 持久化）。 */
+export interface TerminalTabsState {
+  tabs: string[];
+  activeId: string;
 }
 
 /** links.open 的解析结果：项目内文件返回 workbench 相对路径，其余由系统/外部打开。 */

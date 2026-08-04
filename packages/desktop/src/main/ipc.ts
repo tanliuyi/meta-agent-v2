@@ -609,6 +609,9 @@ export function registerIpc(
     (_event, projectId: string, threadId: string, terminalId: string, cols: number, rows: number) =>
       terminals.restart(projectId, threadId, terminalId, cols, rows),
   );
+  ipcMain.handle(CHANNELS.terminalsDispose, (_event, projectId: string, threadId: string, terminalId: string) =>
+    terminals.disposeTerminal(projectId, threadId, terminalId),
+  );
   ipcMain.handle(CHANNELS.workbenchGet, (_event, projectId: string, threadId: string) =>
     projects.getWorkbench(projectId, threadId),
   );

@@ -235,9 +235,9 @@ export function useProvidersSettingsController(): ProvidersSettingsController {
   // ---------------------------------------------------------------------------
   const mutate = useCallback((mutator: (drafts: ProviderDrafts) => void) => {
     if (saving.current) return;
-    const nextModels = cloneModelsProviders(modelsDraftRef.current);
-    const nextAuth = cloneAuthProviders(authDraftRef.current);
-    mutator({ modelsProviders: nextModels, authProviders: nextAuth });
+    const applied = applyDraftsMutator(mutator, modelsDraftRef.current, authDraftRef.current);
+    const nextModels = applied.modelsProviders;
+    const nextAuth = applied.authProviders;
     modelsDraftRef.current = nextModels;
     authDraftRef.current = nextAuth;
     draftGeneration.current += 1;
@@ -396,6 +396,27 @@ export function useProvidersSettingsController(): ProvidersSettingsController {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Apply a drafts mutator to fresh clones and return the resulting drafts.
+ *
+ * The mutator may either edit the arrays in place (push/splice/index
+ * assignment) or replace them wholesale (filter/map), because the wrapper
+ * object it receives is re-read after the call; callers must not rely on the
+ * pre-mutator clones being authoritative.
+ */
+export function applyDraftsMutator(
+  mutator: (drafts: ProviderDrafts) => void,
+  modelsProviders: ModelsProviderDraft[],
+  authProviders: AuthProviderDraft[],
+): ProviderDrafts {
+  const drafts: ProviderDrafts = {
+    modelsProviders: cloneModelsProviders(modelsProviders),
+    authProviders: cloneAuthProviders(authProviders),
+  };
+  mutator(drafts);
+  return drafts;
+}
 
 function isDocumentHidden(): boolean {
   return document.visibilityState === "hidden";

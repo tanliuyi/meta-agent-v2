@@ -70,7 +70,7 @@ export function ModelSelect({
             aria-label={showLoading ? "正在加载模型" : "选择模型"}
             aria-busy={loading || undefined}
             disabled={disabled || showLoading}
-            className="min-w-0 rounded-xl px-2.5 text-[length:var(--type-size-ui)] font-medium data-[state=open]:bg-muted data-[state=open]:text-foreground"
+            className="min-w-0 rounded-xl px-2.5 text-(length:--type-size-ui) font-medium data-[state=open]:bg-muted data-[state=open]:text-foreground"
           >
             {showLoading ? (
               <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground" role="status">

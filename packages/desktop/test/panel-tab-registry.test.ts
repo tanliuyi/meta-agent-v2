@@ -57,14 +57,11 @@ describe("panel-tab-registry", () => {
   it("registerBuiltinPanelTabs 注册全部内置面板且幂等", () => {
     registerBuiltinPanelTabs();
     registerBuiltinPanelTabs();
-    expect(listWorkbenchPanelTabs().map((definition) => definition.kind)).toEqual([
-      NEW_SESSION_PANEL_KIND,
-      "terminal",
-      "files",
-    ]);
+    expect(listWorkbenchPanelTabs().map((definition) => definition.kind)).toEqual([NEW_SESSION_PANEL_KIND, "files"]);
     expect(getWorkbenchPanelTabDefinition(NEW_SESSION_PANEL_KIND)?.label).toBe("新会话");
-    expect(getWorkbenchPanelTabDefinition("terminal")?.label).toBe("终端");
     expect(getWorkbenchPanelTabDefinition("files")?.label).toBe("资源管理");
+    // 终端是“一 tab 一终端”的多开 tab，不注册为面板（见 open-workbench-panel 的 terminalOption）。
+    expect(getWorkbenchPanelTabDefinition("terminal")).toBeUndefined();
     for (const definition of listWorkbenchPanelTabs()) {
       expect(definition.addable).not.toBe(false);
     }

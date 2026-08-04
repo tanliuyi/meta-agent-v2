@@ -11,7 +11,6 @@ import type {
   SubagentWatchdogConfigInput,
   SubagentWatchdogSettings,
 } from "../../../../../shared/subagent-contracts.ts";
-import { getThinkingLevelLabel } from "../../../shared/lib/thinking-level-label.ts";
 import { SubagentFormField } from "./subagent-form-field.tsx";
 import { SubagentModelSelectOptions } from "./subagent-model-select-options.tsx";
 
@@ -159,7 +158,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
                     <SelectItem value={INHERIT_VALUE}>继承（{mainThinkingLabel}）</SelectItem>
                     {THINKING_LEVELS.map((level) => (
                       <SelectItem key={level} value={level}>
-                        {getThinkingLevelLabel(level)}
+                        {level}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -212,7 +211,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
                     <SelectItem value={INHERIT_VALUE}>继承（{childrenThinkingLabel}）</SelectItem>
                     {THINKING_LEVELS.map((level) => (
                       <SelectItem key={level} value={level}>
-                        {getThinkingLevelLabel(level)}
+                        {level}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -253,5 +252,5 @@ function optionalStringOverride(value: string): string | null {
 }
 
 function effectiveThinkingLabel(value: ThinkingLevel | false | undefined): string {
-  return getThinkingLevelLabel(value === false ? "off" : (value ?? "off"));
+  return value === false ? "off" : (value ?? "off");
 }

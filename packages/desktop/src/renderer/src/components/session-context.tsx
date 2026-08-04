@@ -6,6 +6,7 @@ import type {
   ThinkingLevel,
   WorkbenchSessionTab,
   WorkbenchState,
+  WorkbenchTerminalTab,
 } from "../../../shared/contracts.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
@@ -97,6 +98,7 @@ export function useSessionWorkbenchTabs(): SessionWorkbenchTabs {
       ...windowTabs.getState(record.key),
       openSessionTab: (tab: WorkbenchSessionTab) => windowTabs.openSessionTab(record.key, tab),
       openPanelTab: (panel: string) => windowTabs.openPanelTab(record.key, panel),
+      openTerminalTab: (tab: WorkbenchTerminalTab) => windowTabs.openTerminalTab(record.key, tab),
       activate: (key: string | null) => windowTabs.activate(record.key, key),
       closeTab: (key: string) => windowTabs.closeTab(record.key, key),
       openNewPanel: () => windowTabs.openNewPanel(record.key),

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,7 @@ import type { TerminalEvent } from "../src/shared/contracts.ts";
 const ptyMock = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node-pty", () => ({ spawn: ptyMock.spawn }));
 
+import { BASH_INJECTION, isInjectedShell, ZSH_INJECTION } from "../src/main/terminal/shell-integration.ts";
 import { createTerminalShellResolver, TerminalSupervisor } from "../src/main/terminal/terminal-supervisor.ts";
 
 const roots: string[] = [];
@@ -36,6 +38,89 @@ describe("TerminalSupervisor", () => {
     expect(terminals.open(project.id, "second", "bottom", 90, 28).output).toBe("second output");
     expect(ptyMock.spawn).toHaveBeenCalledTimes(2);
     expect(events.filter(({ type }) => type === "data")).toHaveLength(2);
+  });
+
+  it("注入的 shell 启动即退（非 0 退出码）时自动降级为无注入重启", async () => {
+    const { project, store } = await createStore();
+    const injectedPty = new FakePty();
+    const fallbackPty = new FakePty();
+    ptyMock.spawn.mockReturnValueOnce(injectedPty).mockReturnValueOnce(fallbackPty);
+    const events: TerminalEvent[] = [];
+    const terminals = new TerminalSupervisor(store, (event) => events.push(event));
+    const start = Date.now();
+    vi.setSystemTime(start);
+
+    try {
+      terminals.open(project.id, "thread", "bottom", 80, 24);
+      // bash 注入：第一次 spawn 带 --rcfile
+      expect(ptyMock.spawn).toHaveBeenCalledTimes(1);
+      const firstArgs = ptyMock.spawn.mock.calls[0]![1] as string[];
+      expect(firstArgs).toContain("--rcfile");
+
+      // 启动 1 秒后以退出码 2 退出（模拟注入导致 shell 初始化失败）
+      vi.setSystemTime(start + 1_000);
+      injectedPty.emitExit(2);
+
+      // 自动回退：第二次 spawn 无注入参数，且发出 reset 事件
+      expect(ptyMock.spawn).toHaveBeenCalledTimes(2);
+      const secondArgs = ptyMock.spawn.mock.calls[1]![1] as string[];
+      expect(secondArgs).not.toContain("--rcfile");
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: "reset", projectId: project.id, threadId: "thread", terminalId: "bottom" }),
+      );
+      // 回退后的终端可继续写入
+      expect(() => terminals.write(project.id, "thread", "bottom", "echo hi\r")).not.toThrow();
+      expect(fallbackPty.write).toHaveBeenCalledWith("echo hi\r");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("注入的 shell 正常退出（0 退出码）不触发自动回退", async () => {
+    const { project, store } = await createStore();
+    const terminal = new FakePty();
+    ptyMock.spawn.mockReturnValue(terminal);
+    const events: TerminalEvent[] = [];
+    const terminals = new TerminalSupervisor(store, (event) => events.push(event));
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+    terminal.emitExit(0);
+
+    expect(ptyMock.spawn).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({ type: "exit", exitCode: 0 }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "reset" }));
+  });
+
+  it("PTY 退出后 resize 静默忽略（渲染端 ResizeObserver 会继续发事件）", async () => {
+    const { project, store } = await createStore();
+    const terminal = new FakePty();
+    ptyMock.spawn.mockReturnValue(terminal);
+    const terminals = new TerminalSupervisor(store, () => {});
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+    terminal.emitExit(0);
+    expect(() => terminals.resize(project.id, "thread", "bottom", 120, 40)).not.toThrow();
+    expect(terminal.cols).toBe(80);
+    expect(terminal.rows).toBe(24);
+  });
+
+  it("PTY 退出竞态窗口内 open 复用不抛错（agent 已退出但 onExit 未到）", async () => {
+    const { project, store } = await createStore();
+    const terminal = new FakePty();
+    ptyMock.spawn.mockReturnValue(terminal);
+    const terminals = new TerminalSupervisor(store, () => {});
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+    // 模拟 agent 已拒绝 resize 而 onExit 尚未派发的窗口：FakePty.resize 抛错。
+    const originalResize = terminal.resize.bind(terminal);
+    terminal.resize = () => {
+      throw new Error("Cannot resize a pty that has already exited");
+    };
+    try {
+      expect(() => terminals.open(project.id, "thread", "bottom", 100, 30)).not.toThrow();
+    } finally {
+      terminal.resize = originalResize;
+    }
   });
 
   it("合并短时间内的输出，并在退出前按 revision flush", async () => {
@@ -119,7 +204,11 @@ describe("TerminalSupervisor", () => {
 
     terminals.open(project.id, "thread", "bottom", 80, 24);
 
-    expect(ptyMock.spawn).toHaveBeenCalledWith(userShell, ["--login", "-i"], expect.any(Object));
+    expect(ptyMock.spawn).toHaveBeenCalledWith(
+      userShell,
+      expect.arrayContaining(["--rcfile", expect.any(String), "-i"]),
+      expect.any(Object),
+    );
   });
 
   it("uses the managed shell when the user has not configured shellPath", async () => {
@@ -137,7 +226,11 @@ describe("TerminalSupervisor", () => {
 
     terminals.open(project.id, "thread", "bottom", 80, 24);
 
-    expect(ptyMock.spawn).toHaveBeenCalledWith(managedShell, ["--login", "-i"], expect.any(Object));
+    expect(ptyMock.spawn).toHaveBeenCalledWith(
+      managedShell,
+      expect.arrayContaining(["--rcfile", expect.any(String), "-i"]),
+      expect.any(Object),
+    );
   });
 
   it("closes affected terminals and blocks new input during workspace restore", async () => {
@@ -229,6 +322,100 @@ describe("TerminalSupervisor", () => {
     expect(() => terminals.write(project.id, "first", "bottom", "dir\r")).toThrow("终端尚未打开");
     terminals.write(project.id, "second", "bottom", "dir\r");
     expect(second.write).toHaveBeenCalledWith("dir\r");
+  });
+});
+
+describe("shell integration 注入", () => {
+  it("bash：spawn args 追加 --rcfile，env 不含 ZDOTDIR，dispose 后清理临时文件", async () => {
+    const { project, store } = await createStore();
+    ptyMock.spawn.mockReturnValue(new FakePty());
+    const bash = process.platform === "win32" ? "bash.exe" : "bash";
+    const terminals = new TerminalSupervisor(
+      store,
+      () => undefined,
+      () => ({ file: bash, args: ["--login", "-i"] }),
+    );
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+
+    const [file, args, options] = ptyMock.spawn.mock.calls[0]!;
+    expect(file).toBe(bash);
+    const spawnArgs = args as string[];
+    // --rcfile 替换原 --login（login 模式不读 rcfile）；-i 必须位于 --rcfile 之后
+    expect(spawnArgs.slice(0, 2)).toEqual(["--rcfile", expect.any(String)]);
+    expect(spawnArgs[2]).toBe("-i");
+    const rcfile = spawnArgs[1]!;
+    expect(rcfile).toContain("meta-agent-shell");
+    expect((options as { env?: Record<string, string | undefined> }).env).not.toHaveProperty("ZDOTDIR");
+    expect(existsSync(rcfile)).toBe(true);
+
+    terminals.dispose();
+    expect(existsSync(rcfile)).toBe(false);
+  });
+
+  it("zsh：env.ZDOTDIR 指向临时目录，args 不含 --rcfile，dispose 后清理临时目录", async () => {
+    const { project, store } = await createStore();
+    ptyMock.spawn.mockReturnValue(new FakePty());
+    const zsh = process.platform === "win32" ? "zsh.exe" : "zsh";
+    const terminals = new TerminalSupervisor(
+      store,
+      () => undefined,
+      () => ({ file: zsh, args: ["--login", "-i"] }),
+    );
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+
+    const [file, args, options] = ptyMock.spawn.mock.calls[0]!;
+    expect(file).toBe(zsh);
+    expect(args).toEqual(["--login", "-i"]);
+    const env = (options as { env?: Record<string, string | undefined> }).env;
+    const zdotdir = env?.ZDOTDIR;
+    expect(zdotdir).toBeDefined();
+    expect(zdotdir).toContain("meta-agent-shell");
+    expect(existsSync(join(zdotdir!, ".zshrc"))).toBe(true);
+
+    terminals.dispose();
+    expect(existsSync(zdotdir!)).toBe(false);
+  });
+
+  it("非 bash/zsh（powershell）spawn 参数与注入前一致，env 无 ZDOTDIR", async () => {
+    const { project, store } = await createStore();
+    ptyMock.spawn.mockReturnValue(new FakePty());
+    const pwsh = process.platform === "win32" ? "powershell.exe" : "/usr/bin/pwsh";
+    const terminals = new TerminalSupervisor(
+      store,
+      () => undefined,
+      () => ({ file: pwsh, args: ["-NoLogo"] }),
+    );
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+
+    const [file, args, options] = ptyMock.spawn.mock.calls[0]!;
+    expect(file).toBe(pwsh);
+    expect(args).toEqual(["-NoLogo"]);
+    expect((options as { env?: Record<string, string | undefined> }).env).not.toHaveProperty("ZDOTDIR");
+    terminals.dispose();
+  });
+
+  it("注入模板包含 OSC 633 序列与用户配置保留逻辑", () => {
+    expect(BASH_INJECTION).toContain("\\033]633;A;");
+    expect(BASH_INJECTION).toContain("\\033]633;1");
+    expect(BASH_INJECTION).toContain("\\033]633;2");
+    expect(BASH_INJECTION).toContain("$" + "{HOME}/.bashrc");
+    expect(ZSH_INJECTION).toContain("\\033]633;A;");
+    expect(ZSH_INJECTION).toContain("\\033]633;1");
+    expect(ZSH_INJECTION).toContain("\\033]633;2");
+    expect(ZSH_INJECTION).toContain("precmd_functions");
+    expect(ZSH_INJECTION).toContain("$" + "{HOME}/.zshrc");
+  });
+
+  it("isInjectedShell 匹配 bash/zsh 及其 .exe，不匹配其他 shell", () => {
+    expect(isInjectedShell("bash")).toBe(true);
+    expect(isInjectedShell(join("usr", "bin", "zsh"))).toBe(true);
+    expect(isInjectedShell(join("Git", "bin", "bash.exe"))).toBe(true);
+    expect(isInjectedShell("zsh.exe")).toBe(true);
+    expect(isInjectedShell("powershell.exe")).toBe(false);
+    expect(isInjectedShell("fish")).toBe(false);
   });
 });
 

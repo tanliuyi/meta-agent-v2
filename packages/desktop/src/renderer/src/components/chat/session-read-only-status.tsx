@@ -2,7 +2,6 @@ import Cpu from "lucide-react/dist/esm/icons/cpu.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
 import type { PiThreadPhase, SessionControlState } from "../../../../shared/contracts.ts";
-import { getThinkingLevelLabel } from "../../shared/lib/thinking-level-label.ts";
 import { Button } from "../../shared/ui/button.tsx";
 
 const SUBAGENT_PHASE_LABELS: Record<Exclude<PiThreadPhase, "idle">, string> = {
@@ -47,7 +46,7 @@ export function ReadOnlySessionStatus({
             <span className="shrink-0 text-muted-foreground/70">({model.provider})</span>
           </span>
         ) : null}
-        {!syncing ? <span>思考：{getThinkingLevelLabel(thinkingLevel)}</span> : null}
+        {!syncing ? <span>思考：{thinkingLevel}</span> : null}
         <span>{syncing ? "请稍候" : "此会话暂时只读"}</span>
       </div>
       {!syncing && onStop ? (

@@ -67,8 +67,8 @@ export function ModelsThinkingMapEditor({ value, onChange }: ModelsThinkingMapEd
                 }}
                 options={[
                   { value: "inherit", label: "未设置" },
-                  { value: "null", label: "null" },
-                  { value: "value", label: "自定义值" },
+                  { value: "null", label: "禁用" },
+                  { value: "value", label: "启用并映射" },
                 ]}
               />
               <Input

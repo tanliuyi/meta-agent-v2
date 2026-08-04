@@ -370,6 +370,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.terminalsResize, projectId, threadId, terminalId, cols, rows),
     restart: (projectId, threadId, terminalId, cols, rows) =>
       ipcRenderer.invoke(CHANNELS.terminalsRestart, projectId, threadId, terminalId, cols, rows),
+    dispose: (projectId, threadId, terminalId) =>
+      ipcRenderer.invoke(CHANNELS.terminalsDispose, projectId, threadId, terminalId),
     onEvent(listener) {
       const handler = (_event: Electron.IpcRendererEvent, terminalEvent: TerminalEvent) => listener(terminalEvent);
       ipcRenderer.on(CHANNELS.terminalsEvent, handler);

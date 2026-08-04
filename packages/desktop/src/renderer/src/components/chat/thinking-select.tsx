@@ -1,5 +1,4 @@
 import type { SessionControlState } from "../../../../shared/contracts.ts";
-import { getThinkingLevelLabel } from "../../shared/lib/thinking-level-label.ts";
 import { Select } from "../assistant-ui/select/select.tsx";
 
 interface ThinkingSelectProps {
@@ -14,9 +13,9 @@ export function ThinkingSelect({ value, levels, disabled = false, onValueChange 
   return (
     <Select
       value={value}
-      className="max-w-24 text-sm ps-2 pe-2"
+      className="max-w-24 text-(length:--type-size-ui) ps-2 pe-2 font-medium"
       tooltip="选择思考等级"
-      options={levels.map((level) => ({ value: level, label: getThinkingLevelLabel(level) }))}
+      options={levels.map((level) => ({ value: level, label: level }))}
       disabled={disabled || levels.length === 0}
       onValueChange={(nextValue) => {
         const nextLevel = nextValue as SessionControlState["thinkingLevel"];

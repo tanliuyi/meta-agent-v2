@@ -26,7 +26,7 @@ export function ModelSelectorContent({
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "flex max-h-(--radix-popover-content-available-height) w-72 max-w-[calc(100vw-1rem)] min-w-(--radix-popover-trigger-width) flex-col overflow-hidden rounded-lg bg-popover p-0 shadow-(--elevation-popover) [&_[data-slot=command-input-wrapper]]:h-9 [&_[data-slot=command-input-wrapper]]:gap-2.5 [&_[data-slot=command-input-wrapper]]:border-border/70 [&_[data-slot=command-input-wrapper]]:px-3 [&_[data-slot=command-input-wrapper]_svg]:size-4",
+        "z-(--stack-menu) flex max-h-(--radix-popover-content-available-height) w-72 max-w-[calc(100vw-1rem)] min-w-(--radix-popover-trigger-width) flex-col overflow-hidden rounded-lg bg-popover p-0 shadow-(--elevation-popover) [&_[data-slot=command-input-wrapper]]:h-9 [&_[data-slot=command-input-wrapper]]:gap-2.5 [&_[data-slot=command-input-wrapper]]:border-border/70 [&_[data-slot=command-input-wrapper]]:px-3 [&_[data-slot=command-input-wrapper]_svg]:size-4",
         className,
       )}
       {...props}

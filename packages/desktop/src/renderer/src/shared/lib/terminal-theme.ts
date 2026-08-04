@@ -3,8 +3,26 @@ export const TERMINAL_COLOR_TOKENS = {
   foreground: "--terminal-foreground",
   cursor: "--terminal-cursor",
   selectionBackground: "--terminal-selection",
+  cursorAccent: "--terminal-cursor-accent",
+  selectionInactiveBackground: "--terminal-selection-inactive",
+  ansiBlack: "--terminal-ansi-black",
+  ansiRed: "--terminal-ansi-red",
+  ansiGreen: "--terminal-ansi-green",
+  ansiYellow: "--terminal-ansi-yellow",
+  ansiBlue: "--terminal-ansi-blue",
+  ansiMagenta: "--terminal-ansi-magenta",
+  ansiCyan: "--terminal-ansi-cyan",
+  ansiWhite: "--terminal-ansi-white",
+  ansiBrightBlack: "--terminal-ansi-bright-black",
+  ansiBrightRed: "--terminal-ansi-bright-red",
+  ansiBrightGreen: "--terminal-ansi-bright-green",
+  ansiBrightYellow: "--terminal-ansi-bright-yellow",
+  ansiBrightBlue: "--terminal-ansi-bright-blue",
+  ansiBrightMagenta: "--terminal-ansi-bright-magenta",
+  ansiBrightCyan: "--terminal-ansi-bright-cyan",
+  ansiBrightWhite: "--terminal-ansi-bright-white",
 } as const;
-export const TERMINAL_FONT_TOKEN = "--font-family-mono";
+export const TERMINAL_FONT_TOKEN = "--terminal-font-family";
 export const TERMINAL_FONT_SIZE_TOKEN = "--terminal-font-size";
 
 interface CssColorTokens {
@@ -21,6 +39,31 @@ export interface TerminalTheme {
   foreground: string;
   cursor: string;
   selectionBackground: string;
+  /** 块状光标下字符色，与 cursor 相反。 */
+  cursorAccent: string;
+  /** 选区文字色；未提供时由 xterm 自行决定。 */
+  selectionForeground?: string;
+  /** 终端失焦时的选区背景色。 */
+  selectionInactiveBackground?: string;
+  /** ANSI 0-15 色（0-7 常规，8-15 高亮）。 */
+  ansi: {
+    black: string;
+    red: string;
+    green: string;
+    yellow: string;
+    blue: string;
+    magenta: string;
+    cyan: string;
+    white: string;
+    brightBlack: string;
+    brightRed: string;
+    brightGreen: string;
+    brightYellow: string;
+    brightBlue: string;
+    brightMagenta: string;
+    brightCyan: string;
+    brightWhite: string;
+  };
 }
 
 /**
@@ -69,5 +112,37 @@ export function resolveTerminalTheme(style: CssColorTokens): TerminalTheme {
     foreground: readCssColorToken(style, TERMINAL_COLOR_TOKENS.foreground),
     cursor: readCssColorToken(style, TERMINAL_COLOR_TOKENS.cursor),
     selectionBackground: readCssColorToken(style, TERMINAL_COLOR_TOKENS.selectionBackground),
+    cursorAccent: readCssColorToken(style, TERMINAL_COLOR_TOKENS.cursorAccent),
+    selectionInactiveBackground: readCssColorToken(style, TERMINAL_COLOR_TOKENS.selectionInactiveBackground),
+    ansi: readAnsiColors(style),
   };
+}
+
+/** ANSI 0-15 色键，与 TerminalTheme.ansi 字段及 token 命名一一对应。 */
+const ANSI_COLOR_KEYS = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+
+function readAnsiColors(style: CssColorTokens): TerminalTheme["ansi"] {
+  const ansi = {} as TerminalTheme["ansi"];
+  for (const key of ANSI_COLOR_KEYS) {
+    const tokenKey = `ansi${key.charAt(0).toUpperCase()}${key.slice(1)}` as keyof typeof TERMINAL_COLOR_TOKENS;
+    ansi[key] = readCssColorToken(style, TERMINAL_COLOR_TOKENS[tokenKey]);
+  }
+  return ansi;
 }

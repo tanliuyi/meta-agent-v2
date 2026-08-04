@@ -1,6 +1,7 @@
 import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import LayoutPanelLeft from "lucide-react/dist/esm/icons/layout-panel-left.mjs";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
+import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useRef } from "react";
@@ -67,6 +68,8 @@ export function WorkbenchTabList({ tabs, activeKey, runningThreadIds, onActivate
         const icon: ReactNode =
           tab.kind === "panel" ? (
             (definition?.icon ?? <LayoutPanelLeft className="size-3.5 shrink-0" aria-hidden="true" />)
+          ) : tab.kind === "terminal" ? (
+            <TerminalSquare className="size-3.5 shrink-0" aria-hidden="true" />
           ) : tab.agentName ? (
             <span className="panel-tab-agent-icon" data-running={agentRunning || undefined} aria-hidden="true">
               <Bot className="size-3.5" />

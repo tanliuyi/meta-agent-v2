@@ -19,8 +19,8 @@ vi.mock("@renderer/shared/hooks/use-resizable-region", () => ({
 vi.mock("../src/renderer/src/components/panel/files/file-panel.tsx", () => ({
   FilePanel: () => <div data-slot="files" />,
 }));
-vi.mock("../src/renderer/src/components/panel/terminal/terminal-panel.tsx", () => ({
-  TerminalPanel: () => <div data-slot="terminal" />,
+vi.mock("../src/renderer/src/components/panel/terminal/terminal-view.tsx", () => ({
+  TerminalView: () => <div data-slot="terminal" />,
 }));
 vi.mock("../src/renderer/src/components/panel/session/session-content.tsx", () => ({
   SessionContent: () => <div data-slot="sidebar-session" />,
@@ -100,10 +100,10 @@ describe("OpenWorkbenchPanel presence", () => {
           width: 420,
           tabs: [
             { kind: "panel", panel: "files" },
-            { kind: "panel", panel: "terminal" },
+            { kind: "terminal", key: "terminal:1", terminalId: "terminal-1", displayName: "终端" },
             { kind: "session", key: "s1", projectId: "p", threadId: "t1", displayName: "执行者", agentName: "worker" },
           ],
-          activeKey: "panel:terminal",
+          activeKey: "terminal:1",
         }),
       ),
     );

@@ -1,6 +1,5 @@
 import { MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { cn } from "@renderer/shared/lib/cn";
-import { getThinkingLevelLabel } from "@renderer/shared/lib/thinking-level-label";
 import { useThinkingVisibility } from "@renderer/state/thinking-visibility";
 import { useCallback, useEffect, useState } from "react";
 import type { ThinkingLevel } from "../../../../../shared/contracts.ts";
@@ -65,9 +64,7 @@ export function AssistantMessage() {
           <div className="min-w-0 flex flex-col gap-1">
             <div className="message-avatar-name">{provenanceModel}</div>
             {provenanceThinking !== undefined ? (
-              <div className="message-avatar-thinking text-xs text-muted-foreground">
-                思考：{getThinkingLevelLabel(provenanceThinking)}
-              </div>
+              <div className="message-avatar-thinking text-xs text-muted-foreground">思考：{provenanceThinking}</div>
             ) : null}
           </div>
         </div>

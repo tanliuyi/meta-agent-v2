@@ -23,7 +23,7 @@ describe("terminal theme", () => {
   });
 
   it("xterm 字体直接读取 CSS 字体 token", () => {
-    const value = '"Cascadia Mono", Consolas, monospace';
+    const value = 'Consolas, "Cascadia Mono", monospace';
     expect(readCssToken(createStyle({ [TERMINAL_FONT_TOKEN]: ` ${value} ` }), TERMINAL_FONT_TOKEN)).toBe(value);
   });
 
@@ -57,6 +57,24 @@ describe("terminal theme", () => {
       [TERMINAL_COLOR_TOKENS.foreground]: "220 15% 86%",
       [TERMINAL_COLOR_TOKENS.cursor]: "220 17% 95%",
       [TERMINAL_COLOR_TOKENS.selectionBackground]: "215 15% 26%",
+      [TERMINAL_COLOR_TOKENS.cursorAccent]: "225 17% 7%",
+      [TERMINAL_COLOR_TOKENS.selectionInactiveBackground]: "215 15% 26% / 0.5",
+      [TERMINAL_COLOR_TOKENS.ansiBlack]: "0 0% 10%",
+      [TERMINAL_COLOR_TOKENS.ansiRed]: "0 60% 60%",
+      [TERMINAL_COLOR_TOKENS.ansiGreen]: "145 55% 55%",
+      [TERMINAL_COLOR_TOKENS.ansiYellow]: "43 90% 62%",
+      [TERMINAL_COLOR_TOKENS.ansiBlue]: "210 70% 65%",
+      [TERMINAL_COLOR_TOKENS.ansiMagenta]: "280 60% 65%",
+      [TERMINAL_COLOR_TOKENS.ansiCyan]: "185 65% 62%",
+      [TERMINAL_COLOR_TOKENS.ansiWhite]: "0 0% 85%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightBlack]: "0 0% 30%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightRed]: "0 65% 70%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightGreen]: "145 60% 65%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightYellow]: "43 90% 72%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightBlue]: "210 75% 75%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightMagenta]: "280 65% 75%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightCyan]: "185 70% 72%",
+      [TERMINAL_COLOR_TOKENS.ansiBrightWhite]: "0 0% 95%",
     });
 
     expect(resolveTerminalTheme(style)).toEqual({
@@ -64,6 +82,26 @@ describe("terminal theme", () => {
       foreground: "hsl(220 15% 86%)",
       cursor: "hsl(220 17% 95%)",
       selectionBackground: "hsl(215 15% 26%)",
+      cursorAccent: "hsl(225 17% 7%)",
+      selectionInactiveBackground: "hsl(215 15% 26% / 0.5)",
+      ansi: {
+        black: "hsl(0 0% 10%)",
+        red: "hsl(0 60% 60%)",
+        green: "hsl(145 55% 55%)",
+        yellow: "hsl(43 90% 62%)",
+        blue: "hsl(210 70% 65%)",
+        magenta: "hsl(280 60% 65%)",
+        cyan: "hsl(185 65% 62%)",
+        white: "hsl(0 0% 85%)",
+        brightBlack: "hsl(0 0% 30%)",
+        brightRed: "hsl(0 65% 70%)",
+        brightGreen: "hsl(145 60% 65%)",
+        brightYellow: "hsl(43 90% 72%)",
+        brightBlue: "hsl(210 75% 75%)",
+        brightMagenta: "hsl(280 65% 75%)",
+        brightCyan: "hsl(185 70% 72%)",
+        brightWhite: "hsl(0 0% 95%)",
+      },
     });
   });
 });

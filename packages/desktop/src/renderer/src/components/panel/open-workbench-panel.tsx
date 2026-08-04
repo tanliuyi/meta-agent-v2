@@ -1,6 +1,7 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import type { WorkbenchTab } from "../../../../shared/contracts.ts";
 import { parseSessionRecordKey } from "../../runtime/pi-session-store.ts";
 import { useDesktopSelector } from "../../state/desktop-context.tsx";
@@ -19,6 +20,7 @@ import { NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { registerBuiltinPanelTabs } from "./builtin-panel-tabs.tsx";
 import { WorkbenchTabList } from "./panel-tab.tsx";
 import { SessionContent } from "./session/session-content.tsx";
+import { TerminalView } from "./terminal/terminal-view.tsx";
 
 // 桌面内置面板在模块加载时注册；扩展面板可随时通过 registerWorkbenchPanelTab 追加。
 registerBuiltinPanelTabs();
@@ -46,6 +48,10 @@ const getPanelMaxSize = () => {
   const ratio = workspaceWidth < 720 ? 0.92 : 0.8;
   return Math.max(360, workspaceWidth * ratio);
 };
+
+// 终端是“一 tab 一终端”的多开 tab（不占用面板注册表），固定在缺省页首位。
+// 静态 JSX 提升到模块级，避免每次渲染重建（rendering-hoist-jsx）。
+const TERMINAL_OPTION = { kind: "terminal", label: "终端", icon: <TerminalSquare size={14} /> } as const;
 
 /**
  * 渲染已打开的可调整 Workbench；tab 全部为动态注册（会话或经注册表面板），均可关闭。
@@ -86,11 +92,27 @@ export function OpenWorkbenchPanel({
   });
   const activeTab = tabs.find((tab) => workbenchTabKey(tab) === activeKey) ?? null;
   const activeDefinition = activeTab?.kind === "panel" ? getWorkbenchPanelTabDefinition(activeTab.panel) : undefined;
+  const sessionWorkbenchTabs = useSessionWorkbenchTabs();
+
+  /** 新建终端 tab：编号取 workbench state 的单调计数器（跨刷新持久化），id 与主进程 PTY 槽位对齐。 */
+  const openNewTerminalTab = useCallback(() => {
+    const workbench = record.stores.workbench.getSnapshot();
+    const counter = (workbench?.terminalTabCounter ?? 0) + 1;
+    updateWorkbench({ terminalTabCounter: counter });
+    sessionWorkbenchTabs.openTerminalTab({
+      kind: "terminal",
+      key: `terminal:${counter}`,
+      terminalId: `terminal-${counter}`,
+      displayName: counter === 1 ? "终端" : `终端 ${counter}`,
+    });
+  }, [record, sessionWorkbenchTabs, updateWorkbench]);
   // 未选中任何 tab 时展示新建缺省页；选项来自注册表中 addable 的面板定义。
   // 新会话草稿尚未固定项目，不提供“新会话”草稿面板入口。
   const newPanelOptions = definitions.filter(
     (definition) => definition.addable !== false && !(isDraft && definition.kind === NEW_SESSION_PANEL_KIND),
   );
+  // 终端是“一 tab 一终端”的多开 tab（不占用面板注册表），固定在缺省页首位。
+  const newPanelOptionsWithTerminal = [TERMINAL_OPTION, ...newPanelOptions];
   // 草稿下即使已打开过“新会话”面板 tab 也隐藏（页面级 tab 表理论上不会出现）。
   const visibleTabs = isDraft
     ? tabs.filter((tab) => workbenchTabKey(tab) !== workbenchPanelTabKey(NEW_SESSION_PANEL_KIND))
@@ -98,7 +120,6 @@ export function OpenWorkbenchPanel({
 
   // 侧边栏已打开时承接会话拖拽：悬停高亮，drop 后将会话作为 tab 打开（不再显示右缘占位条）。
   const { dragged } = useThreadDrag();
-  const sessionWorkbenchTabs = useSessionWorkbenchTabs();
   const cache = useSessionCache();
   const store = useDesktopStore();
   const dropDepthRef = useRef(0);
@@ -214,21 +235,26 @@ export function OpenWorkbenchPanel({
             {activeKey === null ? (
               <div className="panel-content sidebar-new-panel-default">
                 <div className="sidebar-new-panel-options" aria-label="新建 Panel">
-                  {newPanelOptions.map((definition) => (
+                  {newPanelOptionsWithTerminal.map((option) => (
                     <button
-                      key={definition.kind}
+                      key={option.kind}
                       type="button"
                       className="sidebar-new-session-option"
-                      onClick={() => onOpenPanelTab(definition.kind)}
+                      onClick={() => (option.kind === "terminal" ? openNewTerminalTab() : onOpenPanelTab(option.kind))}
                     >
-                      {definition.icon}
-                      <span>{definition.label}</span>
+                      {option.icon}
+                      <span>{option.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
             ) : activeTab?.kind === "session" ? (
               <SessionContent tab={activeTab} onClose={onCloseTab} />
+            ) : activeTab?.kind === "terminal" || (activeTab?.kind === "panel" && activeTab.panel === "terminal") ? (
+              // 终端 tab：一 tab 一终端；兼容旧版本持久化的 panel:terminal tab（terminalId 回退 "panel"）。
+              <div className="panel-content">
+                <TerminalView terminalId={activeTab.kind === "terminal" ? activeTab.terminalId : "panel"} />
+              </div>
             ) : activeTab?.kind === "panel" && activeDefinition ? (
               <div className="panel-content">
                 <activeDefinition.component />

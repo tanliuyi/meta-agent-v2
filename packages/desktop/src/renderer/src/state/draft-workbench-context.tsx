@@ -126,6 +126,7 @@ export function DraftWorkbenchProvider({ children }: { children: ReactNode }) {
       ...tabState,
       openSessionTab: (tab) => dispatchTab({ type: "open-session-tab", tab }),
       openPanelTab: (panel) => dispatchTab({ type: "open-panel-tab", panel }),
+      openTerminalTab: (tab) => dispatchTab({ type: "open-terminal-tab", tab }),
       activate: (key) => dispatchTab({ type: "activate", key }),
       closeTab: (key) => dispatchTab({ type: "close-tab", key }),
       openNewPanel: () => dispatchTab({ type: "open-new-panel" }),

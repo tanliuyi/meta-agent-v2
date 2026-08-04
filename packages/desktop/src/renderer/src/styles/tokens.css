@@ -73,8 +73,11 @@
     --font-family-sans-default: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
     --font-family-sans: var(--ui-font-family, var(--font-family-sans-default));
     --font-family-mono: "Cascadia Mono", Consolas, monospace;
-    /* xterm 通过 readCssFontSizePx 解析此 token，rem 值随 UI 字号偏好缩放。 */
-    --terminal-font-size: var(--type-size-control);
+    /* 终端专用字体：Consolas 优先（ClearType 优化字体，canvas/WebGL 灰度渲染下笔画更实，
+       观感接近 VS Code Windows 默认）；xterm 通过 readCssFontSizePx 解析字号 token。 */
+    --terminal-font-family: Consolas, "Cascadia Mono", monospace;
+    /* 13px：比 UI 正文略小但大于 12px，避免小字号灰度抗锯齿下文字偏细。 */
+    --terminal-font-size: 0.8125rem;
 
     --type-size-caption: 0.625rem;
     --type-size-meta: 0.6875rem;
@@ -215,6 +218,25 @@
     --terminal-error-foreground: 0 62% 40%;
     --terminal-cursor: 220 15% 18%;
     --terminal-selection: 218 15% 87%;
+    /* xterm 扩展色：光标强调色与 cursor 相反，失焦选区带 alpha；ANSI 色参考 VS Code 默认主题经典色值手调，中性色取 220 hue 系。 */
+    --terminal-cursor-accent: 220 20% 98%;
+    --terminal-selection-inactive: 218 15% 87% / 0.5;
+    --terminal-ansi-black: 220 9% 14%;
+    --terminal-ansi-red: 0 62% 46%;
+    --terminal-ansi-green: 145 62% 34%;
+    --terminal-ansi-yellow: 60 76% 36%;
+    --terminal-ansi-blue: 210 72% 38%;
+    --terminal-ansi-magenta: 300 58% 42%;
+    --terminal-ansi-cyan: 190 68% 36%;
+    --terminal-ansi-white: 220 8% 45%;
+    --terminal-ansi-bright-black: 220 8% 55%;
+    --terminal-ansi-bright-red: 0 68% 56%;
+    --terminal-ansi-bright-green: 145 62% 44%;
+    --terminal-ansi-bright-yellow: 60 78% 46%;
+    --terminal-ansi-bright-blue: 210 74% 50%;
+    --terminal-ansi-bright-magenta: 300 60% 54%;
+    --terminal-ansi-bright-cyan: 190 70% 48%;
+    --terminal-ansi-bright-white: 220 10% 78%;
     --window-close-background: 4 75% 44%;
     --window-close-background-active: 4 78% 38%;
     --window-close-foreground: 0 0% 100%;
@@ -275,6 +297,25 @@
     --terminal-error-foreground: 0 69% 80%;
     --terminal-cursor: 220 17% 95%;
     --terminal-selection: 215 15% 26%;
+    /* xterm 扩展色：光标强调色与 cursor 相反，失焦选区带 alpha；ANSI 色参考 VS Code 默认主题经典色值手调，中性色取灰阶（hue 0）。 */
+    --terminal-cursor-accent: 225 17% 7%;
+    --terminal-selection-inactive: 215 15% 26% / 0.5;
+    --terminal-ansi-black: 0 0% 0%;
+    --terminal-ansi-red: 0 61% 50%;
+    --terminal-ansi-green: 145 87% 39%;
+    --terminal-ansi-yellow: 60 87% 48%;
+    --terminal-ansi-blue: 210 70% 46%;
+    --terminal-ansi-magenta: 300 50% 49%;
+    --terminal-ansi-cyan: 190 85% 44%;
+    --terminal-ansi-white: 0 0% 90%;
+    --terminal-ansi-bright-black: 0 0% 40%;
+    --terminal-ansi-bright-red: 0 85% 62%;
+    --terminal-ansi-bright-green: 145 72% 48%;
+    --terminal-ansi-bright-yellow: 60 90% 62%;
+    --terminal-ansi-bright-blue: 210 80% 58%;
+    --terminal-ansi-bright-magenta: 300 55% 64%;
+    --terminal-ansi-bright-cyan: 190 70% 52%;
+    --terminal-ansi-bright-white: 0 0% 100%;
     --window-close-background: 4 75% 44%;
     --window-close-background-active: 4 78% 38%;
     --window-close-foreground: 0 0% 100%;

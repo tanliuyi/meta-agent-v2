@@ -105,7 +105,7 @@ export function ModelsModelForm({ model, metadata, onChange }: ModelsModelFormPr
                 updateConfig(setOptionalBoolean(modelRef.current.config, "reasoning", nextValue), true)
               }
               options={[
-                { value: "unset", label: "继承 / 默认" },
+                { value: "unset", label: "未设置" },
                 { value: "true", label: "支持" },
                 { value: "false", label: "不支持" },
               ]}

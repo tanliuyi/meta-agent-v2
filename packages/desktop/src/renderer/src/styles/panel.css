@@ -103,7 +103,9 @@ body.is-resizing-column .workbench-panel {
   right: 0;
 }
 .resize-handle-terminal {
-  top: -4px;
+  /* 终端与上方会话区之间 row-gap 8px，8px 高的拖拽条 top: -8px 恰好覆盖整个 gap 并居中；
+     非 darwin 下终端元素自身无边框（边框经 ::before 绘制），无需边框补偿。 */
+  top: -8px;
   right: 0;
   left: 0;
   height: 8px;
@@ -1051,6 +1053,10 @@ html[data-theme="dark"] .file-preview-token {
   width: 100%;
   height: 100%;
 }
+/* xterm 6.0 滚动条滑块：背景色由 xterm 运行时按主题注入，这里只补圆角 */
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+  border-radius: var(--shape-radius-round);
+}
 .terminal-status {
   position: absolute;
   right: 12px;
@@ -1061,14 +1067,66 @@ html[data-theme="dark"] .file-preview-token {
   color: hsl(var(--terminal-error-foreground));
   font-size: var(--type-size-caption);
 }
+/* 状态徽标语义色：exited 用 warning，running 用 success，error 保持默认。 */
+.terminal-status[data-kind="exited"] {
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning));
+}
+.terminal-status[data-kind="running"] {
+  background: hsl(var(--success) / 0.14);
+  color: hsl(var(--success));
+}
+/* exited 徽标是可点击的重启入口（进程退出后唯一恢复途径）。 */
+.terminal-status[data-kind="exited"] {
+  border: none;
+  cursor: pointer;
+}
+.terminal-status[data-kind="exited"]:hover {
+  filter: brightness(1.15);
+}
 
 .bottom-terminal {
   position: relative;
   height: var(--resizable-region-size, var(--layout-terminal-default-height));
   min-height: var(--layout-terminal-min-height);
   max-height: var(--layout-terminal-max-height);
-  border-top: 1px solid hsl(var(--border));
+  border: 0;
   border-radius: 16px;
+  overflow: visible;
+  transition:
+    height var(--motion-duration-standard) var(--motion-ease-emphasized),
+    min-height var(--motion-duration-standard) var(--motion-ease-emphasized),
+    max-height var(--motion-duration-standard) var(--motion-ease-emphasized);
+}
+/* 收起态（同 workbench-panel 的 data-collapsed 方案）：高度归零并换用快收 easing，
+   高度过渡驱动 workspace 的 auto 行同步收缩，实现收起/展开动画。 */
+.bottom-terminal[data-collapsed] {
+  height: 0;
+  min-height: 0;
+  max-height: 0;
+  transition:
+    height var(--motion-duration-standard) cubic-bezier(0.7, 0, 1, 1),
+    min-height var(--motion-duration-standard) cubic-bezier(0.7, 0, 1, 1),
+    max-height var(--motion-duration-standard) cubic-bezier(0.7, 0, 1, 1);
+}
+/* 拖拽调高中禁用高度过渡，尺寸随指针即时跟随（同 panel 的 is-resizing-column）。 */
+body.is-resizing-row .bottom-terminal {
+  transition: none;
+}
+/* 边框经伪元素绘制（同 workbench-panel），避免元素 border 参与盒模型；
+   border-radius: inherit 使圆角随平台适配（darwin 0 / win32 收起态 8px）同步。 */
+.bottom-terminal::before {
+  position: absolute;
+  inset: 0;
+  z-index: 51;
+  border: 1px solid hsl(var(--border));
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.bottom-terminal[data-collapsed]::before {
+  opacity: 0;
 }
 .bottom-terminal > header {
   display: flex;
@@ -1077,20 +1135,6 @@ html[data-theme="dark"] .file-preview-token {
   height: 36px;
   padding: 0 8px;
   border-bottom: 1px solid hsl(var(--terminal-border));
-}
-.terminal-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 27px;
-  padding: 0 9px;
-  border-radius: var(--shape-radius-sm);
-  color: hsl(var(--terminal-muted));
-  font-size: var(--type-size-meta);
-}
-.terminal-tab[data-active] {
-  background: hsl(var(--terminal-active));
-  color: hsl(var(--terminal-foreground));
 }
 .terminal-close {
   margin-left: auto;
@@ -1275,4 +1319,108 @@ html[data-theme="dark"] .file-preview-token {
   flex-shrink: 0;
   color: hsl(var(--muted-foreground));
   font-size: var(--type-size-caption);
+}
+
+/* ===== 终端增强（terminal-view 改造配套）：状态徽标语义化、搜索条 ===== */
+
+/* 状态徽标语义变体：running 中性、exited 警告、error 错误 */
+.terminal-status[data-kind="running"] {
+  background: hsl(var(--terminal-active));
+  color: hsl(var(--terminal-muted));
+}
+.terminal-status[data-kind="exited"] {
+  background: hsl(var(--warning) / 0.16);
+  color: hsl(var(--warning));
+}
+.terminal-status[data-kind="error"] {
+  background: hsl(var(--terminal-error-background));
+  color: hsl(var(--terminal-error-foreground));
+}
+
+/* 终端搜索条：浮层于终端容器右上，复用 --terminal-* token */
+.terminal-search-bar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid hsl(var(--terminal-border));
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--terminal-background) / 0.96);
+  color: hsl(var(--terminal-foreground));
+  box-shadow: var(--elevation-popover);
+}
+.terminal-search-input {
+  width: 160px;
+  padding: 2px 6px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: hsl(var(--terminal-foreground));
+  font-family: inherit;
+  font-size: var(--type-size-caption);
+}
+.terminal-search-input::placeholder {
+  color: hsl(var(--terminal-muted));
+}
+.terminal-search-count {
+  min-width: 44px;
+  padding: 0 4px;
+  text-align: right;
+  color: hsl(var(--terminal-muted));
+  font-size: var(--type-size-caption);
+  font-variant-numeric: tabular-nums;
+}
+.terminal-search-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--shape-radius-xs);
+  background: transparent;
+  color: hsl(var(--terminal-muted));
+  cursor: pointer;
+}
+.terminal-search-button:hover:not(:disabled) {
+  background: hsl(var(--terminal-active));
+  color: hsl(var(--terminal-foreground));
+}
+.terminal-search-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ===== 终端多 tab（复用侧边栏 panel-tab-* 结构）：会话容器 ===== */
+
+/* 新建/关闭按钮复用 TooltipIconButton（与侧边栏"新建 Panel"按钮一致），无需自定义样式 */
+
+/* 会话容器：每个 tab 一个等高 item，非激活实例保持挂载（display:none 仅隐藏） */
+.terminal-session {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.terminal-session-item {
+  height: 100%;
+}
+
+/* 命令装饰：gutter 色条，标记 shell integration 检测到的命令执行结果（VS Code 同款）。 */
+.terminal-command-decoration {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  pointer-events: none;
+}
+.terminal-command-decoration[data-exit="success"] {
+  background: hsl(var(--success));
+}
+.terminal-command-decoration[data-exit="error"] {
+  background: hsl(var(--destructive));
 }
