@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IDisposable, IPty } from "node-pty";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +11,11 @@ const ptyMock = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node-pty", () => ({ spawn: ptyMock.spawn }));
 
 import { BASH_INJECTION, isInjectedShell, ZSH_INJECTION } from "../src/main/terminal/shell-integration.ts";
-import { createTerminalShellResolver, TerminalSupervisor } from "../src/main/terminal/terminal-supervisor.ts";
+import {
+  createTerminalShellResolver,
+  expandTilde,
+  TerminalSupervisor,
+} from "../src/main/terminal/terminal-supervisor.ts";
 
 const roots: string[] = [];
 
@@ -231,6 +235,43 @@ describe("TerminalSupervisor", () => {
       expect.arrayContaining(["--rcfile", expect.any(String), "-i"]),
       expect.any(Object),
     );
+  });
+
+  it("prefers the desktop shell path over the user and managed shells", async () => {
+    const { project, root, store } = await createStore();
+    const agentDir = join(root, "agent");
+    const desktopShell = join(root, "desktop-shell", process.platform === "win32" ? "bash.exe" : "bash");
+    const userShell = join(root, "user-shell", process.platform === "win32" ? "bash.exe" : "bash");
+    const managedShell = join(root, "managed-shell", process.platform === "win32" ? "bash.exe" : "bash");
+    await Promise.all([
+      mkdir(agentDir),
+      mkdir(join(root, "desktop-shell")),
+      mkdir(join(root, "user-shell")),
+      mkdir(join(root, "managed-shell")),
+    ]);
+    await Promise.all([writeFile(desktopShell, ""), writeFile(userShell, ""), writeFile(managedShell, "")]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ shellPath: userShell }));
+    ptyMock.spawn.mockReturnValue(new FakePty());
+    const terminals = new TerminalSupervisor(
+      store,
+      () => undefined,
+      createTerminalShellResolver(agentDir, managedShell, () => desktopShell),
+    );
+
+    terminals.open(project.id, "thread", "bottom", 80, 24);
+
+    expect(ptyMock.spawn).toHaveBeenCalledWith(
+      desktopShell,
+      expect.arrayContaining(["--rcfile", expect.any(String), "-i"]),
+      expect.any(Object),
+    );
+  });
+
+  it("expands a tilde prefix in the desktop shell path", async () => {
+    expect(expandTilde(undefined)).toBeUndefined();
+    expect(expandTilde("~")).toBe(homedir());
+    expect(expandTilde("~/bin/zsh")).toBe(join(homedir(), "bin/zsh"));
+    expect(expandTilde("/bin/zsh")).toBe("/bin/zsh");
   });
 
   it("closes affected terminals and blocks new input during workspace restore", async () => {

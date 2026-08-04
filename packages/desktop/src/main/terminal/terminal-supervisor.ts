@@ -1,4 +1,5 @@
-import { basename } from "node:path";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import { getShellConfig, SettingsManager } from "@earendil-works/pi-coding-agent";
 import * as pty from "node-pty";
 import type { TerminalEvent, TerminalSnapshot } from "../../shared/contracts.ts";
@@ -374,11 +375,24 @@ function terminalKey(projectId: string, threadId: string, terminalId: string): s
   return `${projectId}:${threadId}:${terminalId}`;
 }
 
-export function createTerminalShellResolver(agentDir: string, managedShellPath?: string): TerminalShellResolver {
+export function createTerminalShellResolver(
+  agentDir: string,
+  managedShellPath?: string,
+  desktopShellPath?: () => string | undefined,
+): TerminalShellResolver {
   return (cwd) => {
+    const desktopPath = expandTilde(desktopShellPath?.());
     const configuredShellPath = SettingsManager.create(cwd, agentDir).getShellPath();
-    return resolveTerminalShell(configuredShellPath, managedShellPath);
+    return resolveTerminalShell(desktopPath ?? configuredShellPath, managedShellPath);
   };
+}
+
+/** 展开 `~`/`~/` 前缀到用户主目录（desktop 设置允许写 `~`）。 */
+export function expandTilde(value: string | undefined): string | undefined {
+  if (!value) return value;
+  if (value === "~") return homedir();
+  if (value.startsWith("~/")) return join(homedir(), value.slice(2));
+  return value;
 }
 
 export function resolveTerminalShell(configuredShellPath?: string, managedShellPath?: string): TerminalShellCommand {

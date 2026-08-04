@@ -33,6 +33,7 @@ import type {
   ApproveDevelopmentExtensionInput,
   SaveDesktopExtensionSettingsInput,
 } from "../shared/desktop-extension-contracts.ts";
+import type { GitCommitInput, GitDiffInput, GitHunkActionInput, GitPathsInput } from "../shared/git-contracts.ts";
 import type {
   MutateMemoryEntryInput,
   RunMemoryMaintenanceInput,
@@ -66,6 +67,7 @@ import { OauthLoginCoordinator } from "./auth/oauth-login-coordinator.ts";
 import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ProjectFileWatcher } from "./files/file-watcher.ts";
+import type { GitService } from "./git/git-service.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
 import type { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
@@ -99,6 +101,7 @@ export function registerIpc(
   settings: SettingsConfigService,
   dirtyGuard: WindowDirtyGuard,
   runtimeDependencies: {
+    git?: GitService;
     refreshActiveModelRuntimes?(): Promise<void>;
     refreshMemoryConfiguration?(): Promise<void>;
     shell?: {
@@ -583,6 +586,19 @@ export function registerIpc(
   );
   ipcMain.handle(CHANNELS.filesWatch, (_event, projectId: string) => fileWatcher.watch(projectId));
   ipcMain.handle(CHANNELS.filesUnwatch, (_event, projectId: string) => fileWatcher.unwatch(projectId));
+  const git = runtimeDependencies.git;
+  if (git) {
+    ipcMain.handle(CHANNELS.gitStatus, (_event, projectId: string) => git.getStatus(projectId));
+    ipcMain.handle(CHANNELS.gitDiff, (_event, input: GitDiffInput) => git.diff(input));
+    ipcMain.handle(CHANNELS.gitDiffUntracked, (_event, input: GitDiffInput) => git.diffUntracked(input));
+    ipcMain.handle(CHANNELS.gitStage, (_event, input: GitPathsInput) => git.stage(input));
+    ipcMain.handle(CHANNELS.gitUnstage, (_event, input: GitPathsInput) => git.unstage(input));
+    ipcMain.handle(CHANNELS.gitDiscard, (_event, input: GitPathsInput) => git.discard(input));
+    ipcMain.handle(CHANNELS.gitApplyHunk, (_event, input: GitHunkActionInput) => git.applyHunk(input));
+    ipcMain.handle(CHANNELS.gitCommit, (_event, input: GitCommitInput) => git.commit(input));
+    ipcMain.handle(CHANNELS.gitWatch, (_event, projectId: string) => git.watch(projectId));
+    ipcMain.handle(CHANNELS.gitUnwatch, (_event, projectId: string) => git.unwatch(projectId));
+  }
   ipcMain.handle(CHANNELS.filesResolvePath, (_event, projectId: string, path: string) =>
     resolveFilePath(projectId, path, projects),
   );

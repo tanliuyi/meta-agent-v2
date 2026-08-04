@@ -1,7 +1,7 @@
 import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   MISSING_SETTINGS_CONFIG_REVISION,
   SettingsConfigService,
@@ -43,6 +43,7 @@ describe("SettingsConfigService", () => {
         messageWidth: MESSAGE_WIDTH_DEFAULT,
         userName: "用户",
         userAvatarPath: null,
+        terminalShellPath: null,
       },
     });
     await expect(lstat(configPath)).rejects.toMatchObject({ code: "ENOENT" });
@@ -60,6 +61,7 @@ describe("SettingsConfigService", () => {
         messageWidth: 960,
         userName: "Tan",
         userAvatarPath: "/Users/tan/avatar.png",
+        terminalShellPath: null,
       },
     });
 
@@ -74,6 +76,7 @@ describe("SettingsConfigService", () => {
           messageWidth: 960,
           userName: "Tan",
           userAvatarPath: "/Users/tan/avatar.png",
+          terminalShellPath: null,
         },
       },
     });
@@ -85,6 +88,7 @@ describe("SettingsConfigService", () => {
       messageWidth: 960,
       userName: "Tan",
       userAvatarPath: "/Users/tan/avatar.png",
+      terminalShellPath: null,
     });
   });
 
@@ -102,6 +106,7 @@ describe("SettingsConfigService", () => {
         messageWidth: 960,
         userName: "用户",
         userAvatarPath: null,
+        terminalShellPath: null,
       },
     });
 
@@ -115,6 +120,7 @@ describe("SettingsConfigService", () => {
       messageWidth: 960,
       userName: "用户",
       userAvatarPath: null,
+      terminalShellPath: null,
     });
     if (process.platform !== "win32") {
       expect((await lstat(configPath)).mode & 0o777).toBe(0o600);
@@ -136,6 +142,7 @@ describe("SettingsConfigService", () => {
         messageWidth: 810,
         userName: "用户",
         userAvatarPath: null,
+        terminalShellPath: null,
       },
     });
 
@@ -149,6 +156,7 @@ describe("SettingsConfigService", () => {
           messageWidth: MESSAGE_WIDTH_DEFAULT,
           userName: "用户",
           userAvatarPath: null,
+          terminalShellPath: null,
         },
       },
     });
@@ -166,6 +174,7 @@ describe("SettingsConfigService", () => {
           messageWidth: 810,
           userName: "用户",
           userAvatarPath: null,
+          terminalShellPath: null,
         },
       } as never),
     ).rejects.toThrow("Invalid settings save input");
@@ -179,6 +188,7 @@ describe("SettingsConfigService", () => {
           messageWidth: "960",
           userName: "用户",
           userAvatarPath: null,
+          terminalShellPath: null,
         },
       } as never),
     ).rejects.toThrow("Invalid settings save input");
@@ -192,6 +202,7 @@ describe("SettingsConfigService", () => {
           messageWidth: 810,
           userName: "用户",
           userAvatarPath: null,
+          terminalShellPath: null,
         },
       } as never),
     ).rejects.toThrow("Invalid settings save input");
@@ -243,6 +254,7 @@ describe("SettingsConfigService", () => {
         messageWidth: null,
         userName: "用户",
         userAvatarPath: null,
+        terminalShellPath: null,
       },
     });
 
@@ -255,6 +267,7 @@ describe("SettingsConfigService", () => {
       messageWidth: null,
       userName: "用户",
       userAvatarPath: null,
+      terminalShellPath: null,
     });
   });
 
@@ -296,6 +309,69 @@ describe("SettingsConfigService", () => {
         settings: { ...snapshot.settings, userName: "用户", userAvatarPath: "/tmp/avatar.svg" },
       }),
     ).rejects.toThrow("Invalid settings save input");
+  });
+
+  test("保存终端 Shell 路径并拒绝相对路径与空白", async () => {
+    const snapshot = await service.getConfig();
+    const shellPath = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "/opt/homebrew/bin/zsh";
+
+    const result = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      settings: { ...snapshot.settings, terminalShellPath: shellPath },
+    });
+
+    expect(result).toMatchObject({
+      status: "saved",
+      snapshot: { settings: { terminalShellPath: shellPath } },
+    });
+    expect(JSON.parse(await readFile(configPath, "utf8")).terminalShellPath).toBe(shellPath);
+
+    const saved = result.status === "saved" ? result.snapshot : snapshot;
+    await expect(
+      service.saveConfig({
+        expectedRevision: saved.revision,
+        settings: { ...saved.settings, terminalShellPath: "bin/zsh" },
+      }),
+    ).rejects.toThrow("Invalid settings save input");
+    await expect(
+      service.saveConfig({
+        expectedRevision: saved.revision,
+        settings: { ...saved.settings, terminalShellPath: " " },
+      }),
+    ).rejects.toThrow("Invalid settings save input");
+  });
+
+  test("终端 Shell 路径支持 ~ 前缀", async () => {
+    const snapshot = await service.getConfig();
+
+    const result = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      settings: { ...snapshot.settings, terminalShellPath: "~/bin/zsh" },
+    });
+
+    expect(result).toMatchObject({
+      status: "saved",
+      snapshot: { settings: { terminalShellPath: "~/bin/zsh" } },
+    });
+  });
+
+  test("保存成功后回调携带最新快照", async () => {
+    const onSaved = vi.fn();
+    const callbackService = new SettingsConfigService(directory, { onSaved });
+    const snapshot = await callbackService.getConfig();
+
+    const result = await callbackService.saveConfig({
+      expectedRevision: snapshot.revision,
+      settings: { ...snapshot.settings, terminalShellPath: "/bin/zsh" },
+    });
+
+    expect(result.status).toBe("saved");
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onSaved).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({ terminalShellPath: "/bin/zsh" }),
+      }),
+    );
   });
 
   test("拒绝符号链接和非普通文件", async () => {

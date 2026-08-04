@@ -24,6 +24,7 @@ interface SettingsFileData {
   messageWidth?: number | null;
   userName?: string;
   userAvatarPath?: string | null;
+  terminalShellPath?: string | null;
   [key: string]: unknown;
 }
 
@@ -35,6 +36,8 @@ interface CurrentSettingsSource {
 
 interface SettingsConfigServiceOptions {
   createId?(): string;
+  /** 保存成功后回调（用于主进程按新配置刷新运行时状态，如终端 Shell 路径）。 */
+  onSaved?(snapshot: SettingsConfigSnapshot): void;
 }
 
 /** Owns reads and atomic writes for Desktop's userData/settings.json. */
@@ -42,10 +45,12 @@ export class SettingsConfigService {
   readonly path: string;
   private saveTail: Promise<void> = Promise.resolve();
   private readonly createId: () => string;
+  private readonly onSaved: ((snapshot: SettingsConfigSnapshot) => void) | undefined;
 
   constructor(userDataDir: string, options: SettingsConfigServiceOptions = {}) {
     this.path = join(userDataDir, "settings.json");
     this.createId = options.createId ?? randomUUID;
+    this.onSaved = options.onSaved;
   }
 
   async getConfig(): Promise<SettingsConfigSnapshot> {
@@ -76,7 +81,9 @@ export class SettingsConfigService {
       }
       const source = `${JSON.stringify({ ...current.data, version: 1, ...normalizeSettingsForSave(input.settings) }, null, 2)}\n`;
       await this.atomicWrite(source);
-      return { status: "saved", snapshot: snapshotFromCurrent(this.path, await this.readCurrent()) };
+      const snapshot = snapshotFromCurrent(this.path, await this.readCurrent());
+      this.onSaved?.(snapshot);
+      return { status: "saved", snapshot };
     } finally {
       await release();
     }
@@ -125,6 +132,9 @@ export class SettingsConfigService {
     }
     if (value.userAvatarPath !== undefined && !isValidUserAvatarPath(value.userAvatarPath)) {
       throw new Error("settings.json userAvatarPath must be an absolute PNG, JPEG, or WebP path, or null");
+    }
+    if (value.terminalShellPath !== undefined && !isValidTerminalShellPath(value.terminalShellPath)) {
+      throw new Error("settings.json terminalShellPath must be an absolute path or null");
     }
     return { exists: true, revision: hashBytes(bytes), data: value as SettingsFileData };
   }
@@ -185,6 +195,7 @@ function snapshotFromCurrent(path: string, current: CurrentSettingsSource): Sett
       messageWidth: normalizeStoredMessageWidth(current.data.messageWidth),
       userName: current.data.userName ?? DEFAULT_USER_NAME,
       userAvatarPath: current.data.userAvatarPath ?? null,
+      terminalShellPath: current.data.terminalShellPath ?? null,
     },
   };
 }
@@ -201,7 +212,8 @@ function assertSaveInputShape(input: SaveSettingsConfigInput): void {
     (input.settings.messageWidth !== null &&
       (typeof input.settings.messageWidth !== "number" || !Number.isFinite(input.settings.messageWidth))) ||
     !isValidUserName(input.settings.userName) ||
-    !isValidUserAvatarPath(input.settings.userAvatarPath)
+    !isValidUserAvatarPath(input.settings.userAvatarPath) ||
+    !isValidTerminalShellPath(input.settings.terminalShellPath)
   ) {
     throw new TypeError("Invalid settings save input");
   }
@@ -217,6 +229,15 @@ export function isValidUserAvatarPath(value: unknown): value is string | null {
   if (value === null) return true;
   if (typeof value !== "string" || !isAbsolute(value)) return false;
   return [".png", ".jpg", ".jpeg", ".webp"].includes(extname(value).toLowerCase());
+}
+
+/** 终端 Shell 必须为绝对路径（允许带 ~ 前缀的用户目录展开）或 null。 */
+export function isValidTerminalShellPath(value: unknown): value is string | null {
+  if (value === null) return true;
+  if (typeof value !== "string" || value.trim() === "" || value.length > 1024) return false;
+  const normalized = value.startsWith("~") ? value.slice(1) : value;
+  if (normalized === "") return false;
+  return isAbsolute(normalized);
 }
 
 /** 缺失时用默认宽度，null（满屏）原样保留，数值夹取到支持范围。 */

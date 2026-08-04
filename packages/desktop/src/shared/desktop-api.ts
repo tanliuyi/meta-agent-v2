@@ -46,6 +46,16 @@ import type {
   SaveDesktopExtensionSettingsResult,
 } from "./desktop-extension-contracts.ts";
 import type {
+  GitCommitInput,
+  GitCommitResult,
+  GitDiffInput,
+  GitDiffResult,
+  GitHunkActionInput,
+  GitHunkActionResult,
+  GitPathsInput,
+  GitStatusResult,
+} from "./git-contracts.ts";
+import type {
   MemoryMaintenanceResult,
   MemoryMutationResult,
   MemorySettingsSnapshot,
@@ -253,6 +263,21 @@ export interface DesktopApi {
     unwatch(projectId: string): Promise<void>;
     /** 订阅 Project 文件变化；返回取消订阅函数。 */
     onChanged(projectId: string, listener: (change: FileChangeSet) => void): () => void;
+  };
+  /** 源代码管理（对应 VS Code 的 SCM Provider）：git 状态快照与变更操作。 */
+  git: {
+    getStatus(projectId: string): Promise<GitStatusResult>;
+    diff(input: GitDiffInput): Promise<GitDiffResult>;
+    diffUntracked(input: GitDiffInput): Promise<GitDiffResult>;
+    stage(input: GitPathsInput): Promise<void>;
+    unstage(input: GitPathsInput): Promise<void>;
+    discard(input: GitPathsInput): Promise<void>;
+    applyHunk(input: GitHunkActionInput): Promise<GitHunkActionResult>;
+    commit(input: GitCommitInput): Promise<GitCommitResult>;
+    watch(projectId: string): Promise<void>;
+    unwatch(projectId: string): Promise<void>;
+    /** 订阅仓库状态变化（.git 内部变更或 git 操作后）；返回取消订阅函数。 */
+    onStatusChanged(projectId: string, listener: () => void): () => void;
   };
   terminals: {
     open(

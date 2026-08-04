@@ -153,7 +153,7 @@ async function yieldToEventLoop(): Promise<void> {
   await new Promise<void>((resolveYield) => setImmediate(resolveYield));
 }
 
-function resolveInside(cwd: string, path: string): string {
+export function resolveInside(cwd: string, path: string): string {
   const target = resolve(cwd, path);
   const child = relative(cwd, target);
   if (child === ".." || child.startsWith(`..${sep}`) || resolve(target) === resolve(cwd, "..")) {

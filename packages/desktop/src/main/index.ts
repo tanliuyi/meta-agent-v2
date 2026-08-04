@@ -12,6 +12,7 @@ import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-
 import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
+import { GitService } from "./git/git-service.ts";
 import { broadcastTerminalEvent, broadcastThreadCatalogUpdate, registerIpc } from "./ipc.ts";
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
@@ -57,6 +58,7 @@ let metadata: MetadataWorkerClient | undefined;
 let sidecarLog: SidecarLog | undefined;
 let subagents: SubagentWorkerRegistry | undefined;
 let terminals: TerminalSupervisor | undefined;
+let gitService: GitService | undefined;
 let stopAutoUpdateChecks: (() => void) | undefined;
 let stopMarketplaceGarbageCollection: (() => void) | undefined;
 let quitGuardPending = false;
@@ -226,7 +228,15 @@ app.whenReady().then(async () => {
     modelsPath: join(agentDir, "models.json"),
     allowModelNetwork: false,
   });
-  const settings = new SettingsConfigService(userDataDir);
+  // desktop 设置页配置的终端 Shell 路径（null 时回退到项目设置或系统默认），
+  // 由 settings 服务初始化与保存回调共同维护，终端 resolver 每次创建时读取。
+  let desktopTerminalShellPath: string | undefined;
+  const settings = new SettingsConfigService(userDataDir, {
+    // 保存成功后刷新终端 Shell 解析器的 desktop 配置值。
+    onSaved: (snapshot) => {
+      desktopTerminalShellPath = snapshot.settings.terminalShellPath ?? undefined;
+    },
+  });
   const memorySettings = new MemorySettingsService(agentDir, {
     listProjects: () => projects.list(),
     getProjectCwd: (projectId) => projects.getCwd(projectId),
@@ -263,6 +273,9 @@ app.whenReady().then(async () => {
     projectsLoad,
     marketplaceReconciliation,
     reactDevToolsInstall,
+    settings.getConfig().then((snapshot) => {
+      desktopTerminalShellPath = snapshot.settings.terminalShellPath ?? undefined;
+    }),
   ]);
   const auth = new AuthConfigService(agentDir, {
     log: (text) => sidecarLog?.write("auth", text),
@@ -388,7 +401,7 @@ app.whenReady().then(async () => {
   terminals = new TerminalSupervisor(
     projects,
     broadcastTerminalEvent,
-    createTerminalShellResolver(agentDir, desktopBashPath),
+    createTerminalShellResolver(agentDir, desktopBashPath, () => desktopTerminalShellPath),
   );
   const providers = new ProvidersConfigService(models, auth, authModelRuntime);
   const desktopProviderEnvKeys = new Map(
@@ -414,6 +427,11 @@ app.whenReady().then(async () => {
     },
     getProjectCwd: (projectId) => projects.getCwd(projectId),
   });
+  gitService = new GitService(projects, (projectId) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send(CHANNELS.gitStatusChanged, projectId);
+    }
+  });
   registerIpc(
     projects,
     sessions,
@@ -430,6 +448,7 @@ app.whenReady().then(async () => {
     settings,
     dirtyGuard,
     {
+      git: gitService,
       refreshActiveModelRuntimes: async () => {
         modelConfigurationGeneration += 1;
         const revision = { generation: modelConfigurationGeneration };
@@ -543,6 +562,8 @@ app.on("before-quit", (event) => {
   stopAutoUpdateChecks = undefined;
   stopMarketplaceGarbageCollection?.();
   stopMarketplaceGarbageCollection = undefined;
+  gitService?.dispose();
+  gitService = undefined;
   if (!sessions && !metadata && !sidecarLog && !subagents && !terminals) return;
   sidecarLog?.write("main", "Desktop shutdown started");
   event.preventDefault();

@@ -15,12 +15,13 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import type { TerminalEvent } from "../../../../../shared/contracts.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
 import { useFont } from "../../../state/font.tsx";
+import { useTerminal } from "../../../state/terminal.tsx";
 import { useTheme } from "../../../state/theme.tsx";
 import { useSessionScope } from "../../session-context.tsx";
 import { createCommandDecorationManager } from "./terminal-command-decorations.ts";
 import { attachVisualCursorImeAnchor, constrainTerminalComposition } from "./terminal-composition.ts";
 import { registerTerminalLinkProviders } from "./terminal-links.ts";
-import { shouldUseWebglRenderer } from "./terminal-renderer.ts";
+import { canCompileWasm, shouldUseWebglRenderer } from "./terminal-renderer.ts";
 import { TerminalSearchBar } from "./terminal-search-bar.tsx";
 import { MouseWheelClassifier } from "./terminal-wheel-classifier.ts";
 
@@ -46,6 +47,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
   const { projectId, threadId } = record.identity;
   const { resolvedTheme } = useTheme();
   const { fontSize: uiFontSize } = useFont();
+  const { fontFamily: terminalFontFamily, fontSize: terminalFontSize } = useTerminal();
   const container = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const syncSizeRef = useRef<(() => void) | null>(null);
@@ -246,8 +248,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
         webglRenderFailed = true;
       }
     }
-    // 图片协议仅 WebGL 下可用（VS Code _refreshImageAddon 同策略）。
-    if (webgl) {
+    // 图片协议仅 WebGL 下可用（VS Code _refreshImageAddon 同策略）；
+    // CSP 未放行 wasm 时同步预检降级，避免解码器在 promise 中抛 unhandled rejection。
+    if (webgl && canCompileWasm()) {
       try {
         image = new ImageAddon();
         terminal.loadAddon(image);
@@ -399,7 +402,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     if (terminal.options.fontSize === next) return;
     terminal.options.fontSize = next;
     syncSizeRef.current?.();
-  }, [uiFontSize]);
+  }, [uiFontSize, terminalFontSize]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const next = readCssToken(rootStyle, TERMINAL_FONT_TOKEN);
+    if (terminal.options.fontFamily === next) return;
+    terminal.options.fontFamily = next;
+    syncSizeRef.current?.();
+  }, [terminalFontFamily]);
 
   return (
     <div className="terminal-view">

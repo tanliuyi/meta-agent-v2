@@ -13,6 +13,13 @@ import type {
   Thread,
 } from "../shared/contracts.ts";
 import type { DesktopApi, DesktopPlatform, ShellRuntimeProgress } from "../shared/desktop-api.ts";
+import type {
+  GitCommitInput,
+  GitDiffInput,
+  GitHunkActionInput,
+  GitPathsInput,
+  GitStatusResult,
+} from "../shared/git-contracts.ts";
 import type { SaveProvidersInput, SaveProvidersResult } from "../shared/providers-config-contracts.ts";
 import type { UpdaterState } from "../shared/updater-contracts.ts";
 
@@ -359,6 +366,25 @@ const desktopApi: DesktopApi = {
       };
       ipcRenderer.on(CHANNELS.filesChanged, handler);
       return () => ipcRenderer.removeListener(CHANNELS.filesChanged, handler);
+    },
+  },
+  git: {
+    getStatus: (projectId) => ipcRenderer.invoke(CHANNELS.gitStatus, projectId) as Promise<GitStatusResult>,
+    diff: (input: GitDiffInput) => ipcRenderer.invoke(CHANNELS.gitDiff, input),
+    diffUntracked: (input: GitDiffInput) => ipcRenderer.invoke(CHANNELS.gitDiffUntracked, input),
+    stage: (input: GitPathsInput) => ipcRenderer.invoke(CHANNELS.gitStage, input),
+    unstage: (input: GitPathsInput) => ipcRenderer.invoke(CHANNELS.gitUnstage, input),
+    discard: (input: GitPathsInput) => ipcRenderer.invoke(CHANNELS.gitDiscard, input),
+    applyHunk: (input: GitHunkActionInput) => ipcRenderer.invoke(CHANNELS.gitApplyHunk, input),
+    commit: (input: GitCommitInput) => ipcRenderer.invoke(CHANNELS.gitCommit, input),
+    watch: (projectId) => ipcRenderer.invoke(CHANNELS.gitWatch, projectId),
+    unwatch: (projectId) => ipcRenderer.invoke(CHANNELS.gitUnwatch, projectId),
+    onStatusChanged(projectId, listener) {
+      const handler = (_event: Electron.IpcRendererEvent, changedProjectId: string) => {
+        if (changedProjectId === projectId) listener();
+      };
+      ipcRenderer.on(CHANNELS.gitStatusChanged, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.gitStatusChanged, handler);
     },
   },
   terminals: {

@@ -23,6 +23,7 @@ import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
 import { Route as SettingsSubagentsRouteImport } from './routes/settings.subagents'
+import { Route as SettingsTerminalRouteImport } from './routes/settings.terminal'
 import { Route as ChatPluginsIndexRouteImport } from './routes/_chat.plugins.index'
 import { Route as ChatPluginsPluginIdRouteImport } from './routes/_chat.plugins.$pluginId'
 import { Route as ChatPluginsLocalPluginIdRouteImport } from './routes/_chat.plugins.local.$pluginId'
@@ -97,6 +98,11 @@ const SettingsSubagentsRoute = SettingsSubagentsRouteImport.update({
   path: '/subagents',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsTerminalRoute = SettingsTerminalRouteImport.update({
+  id: '/terminal',
+  path: '/terminal',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const ChatPluginsIndexRoute = ChatPluginsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -133,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/subagents': typeof SettingsSubagentsRoute
+  '/settings/terminal': typeof SettingsTerminalRoute
   '/settings/': typeof SettingsIndexRoute
   '/plugins/$pluginId': typeof ChatPluginsPluginIdRoute
   '/plugins/': typeof ChatPluginsIndexRoute
@@ -149,6 +156,7 @@ export interface FileRoutesByTo {
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/subagents': typeof SettingsSubagentsRoute
+  '/settings/terminal': typeof SettingsTerminalRoute
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/plugins/$pluginId': typeof ChatPluginsPluginIdRoute
@@ -170,6 +178,7 @@ export interface FileRoutesById {
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
   '/settings/subagents': typeof SettingsSubagentsRoute
+  '/settings/terminal': typeof SettingsTerminalRoute
   '/_chat/': typeof ChatIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/_chat/plugins/$pluginId': typeof ChatPluginsPluginIdRoute
@@ -192,6 +201,7 @@ export interface FileRouteTypes {
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/subagents'
+    | '/settings/terminal'
     | '/settings/'
     | '/plugins/$pluginId'
     | '/plugins/'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/subagents'
+    | '/settings/terminal'
     | '/'
     | '/settings'
     | '/plugins/$pluginId'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '/settings/models'
     | '/settings/personalization'
     | '/settings/subagents'
+    | '/settings/terminal'
     | '/_chat/'
     | '/settings/'
     | '/_chat/plugins/$pluginId'
@@ -341,6 +353,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsSubagentsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/terminal': {
+      id: '/settings/terminal'
+      path: '/terminal'
+      fullPath: '/settings/terminal'
+      preLoaderRoute: typeof SettingsTerminalRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/_chat/plugins/': {
       id: '/_chat/plugins/'
       path: '/'
@@ -414,6 +433,7 @@ interface SettingsRouteChildren {
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
   SettingsSubagentsRoute: typeof SettingsSubagentsRoute
+  SettingsTerminalRoute: typeof SettingsTerminalRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
 
@@ -426,6 +446,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,
   SettingsSubagentsRoute: SettingsSubagentsRoute,
+  SettingsTerminalRoute: SettingsTerminalRoute,
   SettingsIndexRoute: SettingsIndexRoute,
 }
 

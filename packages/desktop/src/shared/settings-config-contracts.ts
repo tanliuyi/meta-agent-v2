@@ -9,6 +9,8 @@ export interface DesktopSettings {
   userName: string;
   /** 用户头像的本地绝对路径，null 表示使用默认头像。 */
   userAvatarPath: string | null;
+  /** 终端 Shell 的本地绝对路径，null 表示回退到项目设置或系统默认。 */
+  terminalShellPath: string | null;
 }
 
 export const DEFAULT_USER_NAME = "用户";

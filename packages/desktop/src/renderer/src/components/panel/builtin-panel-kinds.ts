@@ -6,5 +6,5 @@
 /** 新会话草稿面板的注册 kind；提交成功后由草稿组件自行关闭该 tab。 */
 export const NEW_SESSION_PANEL_KIND = "draft";
 
-/** 资源管理（文件）面板的注册 kind。 */
+/** 资源管理（文件与源代码管理）面板的注册 kind。 */
 export const FILES_PANEL_KIND = "files";

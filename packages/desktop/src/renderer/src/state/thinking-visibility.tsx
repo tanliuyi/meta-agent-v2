@@ -41,6 +41,7 @@ const DEFAULT_SETTINGS: DesktopSettings = {
   messageWidth: MESSAGE_WIDTH_DEFAULT,
   userName: "用户",
   userAvatarPath: null,
+  terminalShellPath: null,
 };
 
 /** 消息宽度停止输入后延迟持久化（ms）。 */

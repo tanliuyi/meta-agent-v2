@@ -6,18 +6,21 @@ import type { HighlightResult } from "@streamdown/code";
 import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
+import GitCompare from "lucide-react/dist/esm/icons/git-compare.mjs";
 import Pin from "lucide-react/dist/esm/icons/pin.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import WrapText from "lucide-react/dist/esm/icons/wrap-text.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FileImage, FileNode, TextFile } from "../../../../../shared/contracts.ts";
+import type { GitDiffHunk, GitHunkAction, GitResourceGroup } from "../../../../../shared/git-contracts.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
 import { ContextMenuContent } from "../../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../../shared/ui/context-menu-item.tsx";
 import { SHIKI_THEMES } from "../../assistant-ui/streamdown/streamdown-config.ts";
 import { StreamdownMarkdown } from "../../assistant-ui/streamdown/streamdown-markdown.tsx";
 import { useSessionScope, useSessionWorkbench } from "../../session-context.tsx";
+import { ExplorerModeSwitch, type ExplorerPanelMode } from "../explorer-mode-switch.tsx";
 import {
   closeWorkbenchFile,
   isImagePath,
@@ -27,6 +30,9 @@ import {
   pinWorkbenchFile,
   replaceActiveWorkbenchFile,
 } from "../panel-model.ts";
+import { DiffView } from "../source-control/diff-view.tsx";
+import { scmTreeExpansionKey } from "../source-control/scm-tree.ts";
+import { SourceControlTree } from "../source-control/source-control-panel.tsx";
 import { highlightFileCode } from "./file-highlight-client.ts";
 import { FilePathBreadcrumb } from "./file-path-breadcrumb.tsx";
 import { FilePreview } from "./file-preview.tsx";
@@ -39,6 +45,26 @@ const FILE_TREE_DEFAULT_WIDTH = 240;
 const FILE_TREE_MIN_WIDTH = 180;
 const FILE_TREE_MAX_WIDTH = 360;
 const FILE_PREVIEW_MIN_WIDTH = 260;
+
+type DiffTabStatus = "loading" | "ready" | "error";
+
+interface DiffTab {
+  key: string;
+  path: string;
+  group: GitResourceGroup["kind"];
+  status: DiffTabStatus;
+  patch: string;
+  hunks: GitDiffHunk[];
+  errorMessage: string | null;
+}
+
+function fileTabKey(path: string): string {
+  return `file:${path}`;
+}
+
+function diffTabKey(path: string, group: GitResourceGroup["kind"]): string {
+  return `diff:${group}:${path}`;
+}
 
 /** session 独立的文件预览和 Project cwd 文件树。 */
 export function FilePanel() {
@@ -54,6 +80,9 @@ export function FilePanel() {
   const fileMarkdownPreview = workbench?.fileMarkdownPreview ?? false;
   const isMarkdown = /\.(md|markdown)$/iu.test(activeFile ?? "");
   const fileTreeContentId = useId();
+  const [panelMode, setPanelMode] = useState<ExplorerPanelMode>("files");
+  const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
+  const [activeContentKey, setActiveContentKey] = useState("");
   const [query, setQuery] = useState("");
   const [roots, setRoots] = useState<FileNode[]>([]);
   const [children, setChildren] = useState<Record<string, FileNode[]>>({});
@@ -68,6 +97,14 @@ export function FilePanel() {
   const [fileRevision, setFileRevision] = useState(0);
   const treeGeneration = useRef(0);
   const fileGeneration = useRef(0);
+  const diffRequestSequence = useRef(0);
+  const diffRequests = useRef(new Map<string, number>());
+  const diffTabsRef = useRef<DiffTab[]>([]);
+  const showDiffRef = useRef<(path: string, group: GitResourceGroup["kind"], activate?: boolean) => Promise<void>>(
+    async () => undefined,
+  );
+  const closeDiffTabRef = useRef<(key: string) => void>(() => undefined);
+  const observedActiveFile = useRef<string | null>(null);
   const highlightGeneration = useRef(0);
   const workspace = useRef<HTMLDivElement>(null);
   const tabsListRef = useRef<HTMLDivElement>(null);
@@ -91,6 +128,7 @@ export function FilePanel() {
     },
   });
   activeProjectId.current = projectId;
+  diffTabsRef.current = diffTabs;
 
   useEffect(() => {
     const tabs = tabsListRef.current;
@@ -115,8 +153,22 @@ export function FilePanel() {
     setFile(null);
     setTreeError(null);
     setFileError(null);
+    setDiffTabs([]);
+    diffRequests.current.clear();
+    setActiveContentKey(activeFile ? fileTabKey(activeFile) : "");
+    observedActiveFile.current = activeFile;
     directoryRequests.current.clear();
   }, [projectId]);
+
+  useEffect(() => {
+    const previous = observedActiveFile.current;
+    observedActiveFile.current = activeFile;
+    if (activeFile && activeFile !== previous) {
+      setActiveContentKey(fileTabKey(activeFile));
+    } else if (!activeFile && previous) {
+      setActiveContentKey((current) => (current === fileTabKey(previous) ? (diffTabs.at(-1)?.key ?? "") : current));
+    }
+  }, [activeFile, diffTabs]);
 
   useEffect(() => {
     const generation = ++treeGeneration.current;
@@ -322,6 +374,7 @@ export function FilePanel() {
       if (!workbench) return;
       // 预览打开 + 父目录链展开合并为一次写入。
       updateWorkbench(openWorkbenchFilePatch(workbench, node.path));
+      setActiveContentKey(fileTabKey(node.path));
     },
     [toggleDirectory, updateWorkbench, workbench],
   );
@@ -393,6 +446,137 @@ export function FilePanel() {
     [loadDirectory, projectId],
   );
 
+  const closeDiffTab = useCallback(
+    (key: string) => {
+      const nextActiveDiff = diffTabs.filter((tab) => tab.key !== key).at(-1)?.key ?? "";
+      diffRequests.current.delete(key);
+      setDiffTabs((current) => current.filter((tab) => tab.key !== key));
+      setActiveContentKey((current) => {
+        if (current !== key) return current;
+        return activeFile ? fileTabKey(activeFile) : nextActiveDiff;
+      });
+    },
+    [activeFile, diffTabs],
+  );
+
+  const showDiff = useCallback(
+    async (path: string, group: GitResourceGroup["kind"], activate = true) => {
+      const key = diffTabKey(path, group);
+      const requestId = ++diffRequestSequence.current;
+      diffRequests.current.set(key, requestId);
+      if (activate) setActiveContentKey(key);
+      setDiffTabs((current) => {
+        const loading: DiffTab = {
+          key,
+          path,
+          group,
+          status: "loading",
+          patch: "",
+          hunks: [],
+          errorMessage: null,
+        };
+        const index = current.findIndex((tab) => tab.key === key);
+        return index < 0 ? [...current, loading] : current.map((tab) => (tab.key === key ? loading : tab));
+      });
+
+      try {
+        const input = { projectId, path, staged: group === "staged" };
+        const result =
+          group === "untracked" ? await window.desktop.git.diffUntracked(input) : await window.desktop.git.diff(input);
+        if (diffRequests.current.get(key) !== requestId) return;
+        if (!result.ok) {
+          if (result.reason === "no-diff") {
+            closeDiffTab(key);
+            return;
+          }
+          setDiffTabs((current) =>
+            current.map((tab) => (tab.key === key ? { ...tab, status: "error", errorMessage: result.message } : tab)),
+          );
+          return;
+        }
+        setDiffTabs((current) =>
+          current.map((tab) =>
+            tab.key === key
+              ? {
+                  ...tab,
+                  status: "ready",
+                  patch: result.patch,
+                  hunks: result.hunks,
+                  errorMessage: null,
+                }
+              : tab,
+          ),
+        );
+      } catch (error) {
+        if (diffRequests.current.get(key) !== requestId) return;
+        setDiffTabs((current) =>
+          current.map((tab) =>
+            tab.key === key ? { ...tab, status: "error", errorMessage: errorMessage(error) } : tab,
+          ),
+        );
+      }
+    },
+    [closeDiffTab, projectId],
+  );
+
+  showDiffRef.current = showDiff;
+  closeDiffTabRef.current = closeDiffTab;
+
+  useEffect(() => {
+    let active = true;
+    void window.desktop.git.watch(projectId);
+    const unsubscribe = window.desktop.git.onStatusChanged(projectId, () => {
+      void window.desktop.git.getStatus(projectId).then((result) => {
+        if (!active || !result.ok) return;
+        const available = new Set(
+          result.state.groups.flatMap((group) => group.changes.map((change) => diffTabKey(change.path, group.kind))),
+        );
+        for (const tab of diffTabsRef.current) {
+          if (available.has(tab.key)) void showDiffRef.current(tab.path, tab.group, false);
+          else closeDiffTabRef.current(tab.key);
+        }
+      });
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+      void window.desktop.git.unwatch(projectId);
+    };
+  }, [projectId]);
+
+  const applyDiffHunk = useCallback(
+    async (tab: DiffTab, action: GitHunkAction, hunkId: string) => {
+      const result = await window.desktop.git.applyHunk({
+        projectId,
+        path: tab.path,
+        hunkId,
+        action,
+        untracked: tab.group === "untracked",
+      });
+      if (!result.ok) throw new Error(result.message);
+      if (tab.group === "untracked" && action === "stage") {
+        closeDiffTab(tab.key);
+        return;
+      }
+      await showDiff(tab.path, tab.group);
+    },
+    [closeDiffTab, projectId, showDiff],
+  );
+
+  const openScmFile = useCallback(
+    (path: string) => {
+      if (!workbench) return;
+      updateWorkbench(openWorkbenchFilePatch(workbench, path));
+      setActiveContentKey(fileTabKey(path));
+    },
+    [updateWorkbench, workbench],
+  );
+
+  const activeDiffTab = diffTabs.find((tab) => tab.key === activeContentKey) ?? null;
+  const selectedScmKey = activeDiffTab ? scmTreeExpansionKey(activeDiffTab.group, activeDiffTab.path) : null;
+  const activeContentIsFile = activeFile !== null && activeContentKey === fileTabKey(activeFile);
+  const hasPreviewTabs = openFiles.length > 0 || diffTabs.length > 0;
+
   if (!workbench) return null;
 
   return (
@@ -422,52 +606,68 @@ export function FilePanel() {
           onPointerDown={resize.onPointerDown}
           onKeyDown={resize.onKeyDown}
         />
-        <div id={fileTreeContentId} className="file-tree-surface">
-          <div className="file-tree-toolbar">
-            <label className="file-search">
-              <Search size={14} aria-hidden="true" />
-              <span className="sr-only">筛选文件</span>
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="筛选文件..."
-              />
-            </label>
-          </div>
-          {treeError ? (
-            <p className="panel-error" role="alert">
-              {treeError}
-            </p>
-          ) : null}
-          <div className="file-tree" aria-busy={treeLoading}>
-            {treeLoading && roots.length === 0 ? (
-              <p className="file-tree-status" role="status">
-                正在加载文件
+        {panelMode === "files" ? (
+          <div id={fileTreeContentId} className="file-tree-surface">
+            <div className="file-tree-toolbar">
+              <ExplorerModeSwitch value="files" onValueChange={setPanelMode} />
+              <label className="file-search">
+                <Search size={14} aria-hidden="true" />
+                <span className="sr-only">筛选文件</span>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="筛选文件..."
+                />
+              </label>
+            </div>
+            {treeError ? (
+              <p className="panel-error" role="alert">
+                {treeError}
               </p>
-            ) : (
-              <FileTree
-                nodes={roots}
-                children={children}
-                expanded={expanded}
-                active={activeFile ?? undefined}
-                onOpen={openNode}
-                onPinOpen={pinNode}
-                renderContextMenu={renderFileContextMenu}
-              />
-            )}
+            ) : null}
+            <div className="file-tree" aria-busy={treeLoading}>
+              {treeLoading && roots.length === 0 ? (
+                <p className="file-tree-status" role="status">
+                  正在加载文件
+                </p>
+              ) : (
+                <FileTree
+                  nodes={roots}
+                  children={children}
+                  expanded={expanded}
+                  active={activeFile ?? undefined}
+                  onOpen={openNode}
+                  onPinOpen={pinNode}
+                  renderContextMenu={renderFileContextMenu}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <SourceControlTree
+            contentId={fileTreeContentId}
+            projectId={projectId}
+            selectedKey={selectedScmKey}
+            onModeChange={setPanelMode}
+            onSelect={(path, group) => void showDiff(path, group)}
+            onOpenFile={openScmFile}
+          />
+        )}
       </aside>
       <Tabs.Root
         className="file-preview"
-        value={activeFile ?? ""}
+        value={activeContentKey}
         orientation="horizontal"
-        aria-label="打开的文件"
-        onValueChange={(path) => updateWorkbench({ activeFile: path })}
+        aria-label="文件与差异预览"
+        onValueChange={(key) => {
+          setActiveContentKey(key);
+          const path = openFiles.find((candidate) => fileTabKey(candidate) === key);
+          if (path) updateWorkbench({ activeFile: path });
+        }}
       >
-        {openFiles.length > 0 ? (
-          <Tabs.List ref={tabsListRef} className="file-tabs" aria-label="打开的文件">
+        {hasPreviewTabs ? (
+          <Tabs.List ref={tabsListRef} className="file-tabs" aria-label="文件与差异预览">
             {openFiles.map((path) => {
               const label = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
               const isPreview = path === previewFile;
@@ -475,12 +675,12 @@ export function FilePanel() {
                 <div
                   key={path}
                   className="file-tab-item"
-                  data-active={activeFile === path || undefined}
+                  data-active={activeContentKey === fileTabKey(path) || undefined}
                   data-preview={isPreview || undefined}
                 >
                   <Tabs.Trigger
                     className="file-tab-trigger"
-                    value={path}
+                    value={fileTabKey(path)}
                     title={path}
                     onDoubleClick={() => {
                       const patch = pinWorkbenchFile(previewFile, path);
@@ -512,8 +712,34 @@ export function FilePanel() {
                 </div>
               );
             })}
+            {diffTabs.map((tab) => {
+              const label = tab.path.split(/[\\/]/u).filter(Boolean).at(-1) ?? tab.path;
+              const scopeLabel = tab.group === "staged" ? "已暂存" : tab.group === "untracked" ? "未跟踪" : "工作区";
+              return (
+                <div
+                  key={tab.key}
+                  className="file-tab-item"
+                  data-active={activeContentKey === tab.key || undefined}
+                  data-diff="true"
+                >
+                  <Tabs.Trigger className="file-tab-trigger" value={tab.key} title={`${tab.path} · ${scopeLabel}`}>
+                    <GitCompare size={14} aria-hidden="true" />
+                    <span>{label}</span>
+                    <span className="file-tab-diff-scope">{scopeLabel}</span>
+                  </Tabs.Trigger>
+                  <button
+                    type="button"
+                    className="file-tab-close"
+                    aria-label={`关闭 ${label} 差异`}
+                    onClick={() => closeDiffTab(tab.key)}
+                  >
+                    <X size={13} aria-hidden="true" />
+                  </button>
+                </div>
+              );
+            })}
             <div className="file-tabs-actions">
-              {isMarkdown ? (
+              {activeContentIsFile && isMarkdown ? (
                 <TooltipIconButton
                   className="file-markdown-preview-toggle"
                   tooltip={fileMarkdownPreview ? "查看源码" : "预览 Markdown"}
@@ -529,7 +755,7 @@ export function FilePanel() {
                   <Eye size={14} aria-hidden="true" />
                 </TooltipIconButton>
               ) : null}
-              {isMarkdown && fileMarkdownPreview ? null : (
+              {activeContentIsFile && isMarkdown && fileMarkdownPreview ? null : activeContentIsFile ? (
                 <TooltipIconButton
                   className="file-wrap-toggle"
                   tooltip={fileWrap ? "关闭换行" : "开启换行"}
@@ -540,11 +766,11 @@ export function FilePanel() {
                 >
                   <WrapText size={14} aria-hidden="true" />
                 </TooltipIconButton>
-              )}
+              ) : null}
             </div>
           </Tabs.List>
         ) : null}
-        {activeFile ? (
+        {activeContentIsFile && activeFile ? (
           <FilePathBreadcrumb
             path={activeFile}
             children={children}
@@ -555,7 +781,7 @@ export function FilePanel() {
           />
         ) : null}
         {openFiles.map((path) => (
-          <Tabs.Content key={path} className="file-preview-content" value={path}>
+          <Tabs.Content key={path} className="file-preview-content" value={fileTabKey(path)}>
             {fileError ? (
               <p className="panel-error" role="alert">
                 {fileError}
@@ -569,11 +795,33 @@ export function FilePanel() {
             )}
           </Tabs.Content>
         ))}
-        {openFiles.length === 0 ? (
+        {diffTabs.map((tab) => (
+          <Tabs.Content key={tab.key} className="file-preview-content" value={tab.key}>
+            {tab.status === "loading" ? (
+              <div className="file-preview-loading" aria-busy="true">
+                正在读取差异
+              </div>
+            ) : tab.status === "error" ? (
+              <p className="panel-error" role="alert">
+                {tab.errorMessage ?? "无法读取差异"}
+              </p>
+            ) : (
+              <DiffView
+                path={tab.path}
+                group={tab.group}
+                patch={tab.patch}
+                hunks={tab.hunks}
+                onClose={() => closeDiffTab(tab.key)}
+                onHunkAction={(action, hunkId) => applyDiffHunk(tab, action, hunkId)}
+              />
+            )}
+          </Tabs.Content>
+        ))}
+        {!hasPreviewTabs ? (
           <div className="file-empty">
             <FolderOpen size={28} aria-hidden="true" />
             <strong>打开文件</strong>
-            <span>从工作区目录树中选择文件</span>
+            <span>从左侧文件或源代码管理树中选择内容</span>
           </div>
         ) : null}
       </Tabs.Root>
