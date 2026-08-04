@@ -18,7 +18,9 @@ import { useFont } from "../../../state/font.tsx";
 import { useTheme } from "../../../state/theme.tsx";
 import { useSessionScope } from "../../session-context.tsx";
 import { createCommandDecorationManager } from "./terminal-command-decorations.ts";
+import { attachVisualCursorImeAnchor, constrainTerminalComposition } from "./terminal-composition.ts";
 import { registerTerminalLinkProviders } from "./terminal-links.ts";
+import { shouldUseWebglRenderer } from "./terminal-renderer.ts";
 import { TerminalSearchBar } from "./terminal-search-bar.tsx";
 import { MouseWheelClassifier } from "./terminal-wheel-classifier.ts";
 
@@ -117,8 +119,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
       minimumContrastRatio: 4.5,
       // 命令装饰（OSC 633）与 registerDecoration 需要 proposed API。
       allowProposedApi: true,
-      // 图片协议（sixel/kitty/iTerm）需要透明 canvas；仅程序主动输出图片序列时生效。
-      allowTransparency: true,
+      // 终端表面始终由主题提供不透明背景；保持 false 让 WebGL glyph atlas 使用实色背景，
+      // 避免透明纹理的边缘覆盖率把小字号文字渲染得过细。ImageAddon 自己的图片层仍使用 alpha canvas。
+      allowTransparency: false,
       // 右侧滚动条内显示搜索匹配/命令装饰位置（VS Code overviewRuler）。
       overviewRuler: { width: 10 },
       // 平滑滚动初始关闭，wheel 事件经分类器识别为物理滚轮后再启用（VS Code 做法）：
@@ -231,7 +234,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     // WebGL 渲染优化：加载失败回退 DOM renderer（模块级标记避免每个终端重试）；
     // context 丢失时自动 dispose 回退 DOM renderer。两种切换后 cell 尺寸不同，
     // 必须重新 fit 并同步 PTY 尺寸。
-    if (!webglRenderFailed) {
+    // xterm WebGL 的 glyph atlas 在非整数 DPR 下需要对 canvas 做小数缩放，
+    // 小字号边缘会被纹理采样软化；这类屏幕改用默认 DOM renderer，整数 DPR 仍保留 WebGL 性能。
+    const useWebgl = shouldUseWebglRenderer(window.devicePixelRatio);
+    if (useWebgl && !webglRenderFailed) {
       try {
         webgl = new WebglAddon();
         terminal.loadAddon(webgl);
@@ -309,6 +315,27 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     };
     element?.addEventListener("wheel", classifyWheel, { passive: true });
 
+    // xterm 的 IME 浮层按光标位置向右自然扩展，靠近右边缘时会侵入相邻面板。
+    // 在 xterm 完成 compositionupdate 定位后，将浮层向左约束到当前终端表面内。
+    const compositionView = element?.querySelector<HTMLElement>(".composition-view");
+    let compositionFrame: number | undefined;
+    const constrainComposition = () => {
+      if (!element || !compositionView || compositionFrame !== undefined) return;
+      compositionFrame = requestAnimationFrame(() => {
+        compositionFrame = undefined;
+        constrainTerminalComposition(element, compositionView);
+      });
+    };
+    const clearCompositionConstraint = () => {
+      if (compositionFrame !== undefined) cancelAnimationFrame(compositionFrame);
+      compositionFrame = undefined;
+      if (compositionView) compositionView.style.transform = "";
+    };
+    terminal.textarea?.addEventListener("compositionstart", constrainComposition);
+    terminal.textarea?.addEventListener("compositionupdate", constrainComposition);
+    terminal.textarea?.addEventListener("compositionend", clearCompositionConstraint);
+    const visualCursorImeAnchor = attachVisualCursorImeAnchor(terminal);
+
     // 低配 shell integration：OSC 633 命令边界解析 + 成功/失败装饰。
     const commandDecorations = createCommandDecorationManager(terminal);
 
@@ -345,6 +372,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
       disposeLinks();
       element?.removeEventListener("contextmenu", handleContextMenu);
       element?.removeEventListener("wheel", classifyWheel);
+      terminal.textarea?.removeEventListener("compositionstart", constrainComposition);
+      terminal.textarea?.removeEventListener("compositionupdate", constrainComposition);
+      terminal.textarea?.removeEventListener("compositionend", clearCompositionConstraint);
+      visualCursorImeAnchor.dispose();
+      clearCompositionConstraint();
       image?.dispose();
       webgl?.dispose();
       unicode11.dispose();

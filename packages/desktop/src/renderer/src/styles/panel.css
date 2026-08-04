@@ -1046,7 +1046,8 @@ html[data-theme="dark"] .file-preview-token {
   min-width: 0;
   min-height: 0;
   height: 100%;
-  padding: 4px;
+  /* 终端内容与容器的间距：小间距，避免字符贴边（滚动条、搜索条浮层均在内部）。 */
+  padding: var(--space-3);
   overflow: hidden;
 }
 .terminal-xterm {
@@ -1056,6 +1057,14 @@ html[data-theme="dark"] .file-preview-token {
 /* xterm 6.0 滚动条滑块：背景色由 xterm 运行时按主题注入，这里只补圆角 */
 .xterm .xterm-scrollable-element > .scrollbar > .slider {
   border-radius: var(--shape-radius-round);
+}
+/*
+ * 中文/日文 IME 组合文本由 xterm 以绝对定位浮层渲染。限制其最大宽度，配合
+ * terminal-view 的边界校正，避免光标靠近右缘时覆盖相邻面板。
+ */
+.xterm .composition-view {
+  max-width: 100%;
+  overflow: hidden;
 }
 .terminal-status {
   position: absolute;
