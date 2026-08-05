@@ -196,7 +196,7 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("maps groq qwen3 reasoning levels to default reasoning_effort", async () => {
-		const model = getModel("groq", "qwen/qwen3.6-27b")!;
+		const model = getModel("groq", "qwen/qwen3-32b")!;
 		let payload: unknown;
 
 		await streamSimple(
@@ -212,7 +212,7 @@ describe("openai-completions tool_choice", () => {
 			},
 			{
 				apiKey: "test",
-				reasoning: "medium",
+				reasoning: "high",
 				onPayload: (params: unknown) => {
 					payload = params;
 				},
