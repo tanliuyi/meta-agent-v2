@@ -9,6 +9,8 @@ import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.
 import type { DesktopActions } from "../src/renderer/src/state/desktop-actions.ts";
 import { DesktopActionsContext } from "../src/renderer/src/state/desktop-context.tsx";
 import { DesktopStoreProvider } from "../src/renderer/src/state/desktop-store-context.tsx";
+import { preferencesStorage } from "../src/renderer/src/state/preferences-store.ts";
+import { PROJECT_EXPANSION_STORAGE_KEY } from "../src/renderer/src/state/project-expansion-preference.ts";
 import { GENERAL_WORKSPACE_ID } from "../src/shared/contracts.ts";
 
 describe("GeneralConversationSection", () => {
@@ -36,9 +38,23 @@ describe("GeneralConversationSection", () => {
   });
 
   it("首帧恢复持久化的收起状态", () => {
+    preferencesStorage.reset();
     vi.stubGlobal("window", {
-      localStorage: {
-        getItem: () => JSON.stringify({ version: 1, projects: [[GENERAL_WORKSPACE_ID, false]] }),
+      desktop: {
+        platform: "win32",
+        preferences: {
+          getInitial: () => ({
+            path: "preferences.json",
+            exists: true,
+            values: {
+              [PROJECT_EXPANSION_STORAGE_KEY]: JSON.stringify({
+                version: 1,
+                projects: [[GENERAL_WORKSPACE_ID, false]],
+              }),
+            },
+          }),
+          save: () => Promise.resolve({ status: "saved" }),
+        },
       },
     });
 

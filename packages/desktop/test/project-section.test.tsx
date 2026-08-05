@@ -6,15 +6,23 @@ import {
   shouldAutoExpandProjectsSection,
 } from "../src/renderer/src/components/layout/project-section.tsx";
 import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
+import { preferencesStorage } from "../src/renderer/src/state/preferences-store.ts";
+import { PROJECT_EXPANSION_STORAGE_KEY } from "../src/renderer/src/state/project-expansion-preference.ts";
 
 vi.mock("../src/renderer/src/components/layout/project-list.tsx", () => ({
   ProjectList: () => <ul data-slot="project-list" />,
 }));
 
 beforeEach(() => {
+  preferencesStorage.reset();
   vi.stubGlobal("window", {
-    desktop: { platform: "win32" },
-    localStorage: { getItem: () => null },
+    desktop: {
+      platform: "win32",
+      preferences: {
+        getInitial: () => ({ path: "preferences.json", exists: true, values: {} }),
+        save: () => Promise.resolve({ status: "saved" }),
+      },
+    },
   });
 });
 
@@ -63,14 +71,23 @@ describe("ProjectSection", () => {
   });
 
   it("restores a persisted collapsed state on first frame", () => {
+    preferencesStorage.reset();
     vi.stubGlobal("window", {
-      desktop: { platform: "win32" },
-      localStorage: {
-        getItem: () =>
-          JSON.stringify({
-            version: 1,
-            projects: [["__sidebar-projects__", false]],
+      desktop: {
+        platform: "win32",
+        preferences: {
+          getInitial: () => ({
+            path: "preferences.json",
+            exists: true,
+            values: {
+              [PROJECT_EXPANSION_STORAGE_KEY]: JSON.stringify({
+                version: 1,
+                projects: [["__sidebar-projects__", false]],
+              }),
+            },
           }),
+          save: () => Promise.resolve({ status: "saved" }),
+        },
       },
     });
 

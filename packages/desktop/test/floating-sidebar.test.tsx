@@ -5,6 +5,7 @@ import { FloatingSidebar } from "../src/renderer/src/components/layout/floating-
 import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
 import { LayoutProvider } from "../src/renderer/src/state/layout.tsx";
 import { SIDEBAR_OPEN_STORAGE_KEY, SIDEBAR_WIDTH_STORAGE_KEY } from "../src/renderer/src/state/layout-preference.ts";
+import { preferencesStorage } from "../src/renderer/src/state/preferences-store.ts";
 
 vi.mock("@renderer/shared/hooks/use-resizable-region", () => ({
   useResizableRegion: () => ({
@@ -77,13 +78,20 @@ describe("FloatingSidebar", () => {
 });
 
 function renderSidebar(open: "0" | "1"): string {
+  preferencesStorage.reset();
   vi.stubGlobal("window", {
-    desktop: { platform: "win32" },
-    localStorage: {
-      getItem: (key: string) => {
-        if (key === SIDEBAR_OPEN_STORAGE_KEY) return open;
-        if (key === SIDEBAR_WIDTH_STORAGE_KEY) return "280";
-        return null;
+    desktop: {
+      platform: "win32",
+      preferences: {
+        getInitial: () => ({
+          path: "preferences.json",
+          exists: true,
+          values: {
+            [SIDEBAR_OPEN_STORAGE_KEY]: open,
+            [SIDEBAR_WIDTH_STORAGE_KEY]: "280",
+          },
+        }),
+        save: () => Promise.resolve({ status: "saved" }),
       },
     },
   });

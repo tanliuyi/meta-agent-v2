@@ -9,7 +9,7 @@
     "email": "tanliuyi@chichuang.com"
   },
   "type": "module",
-  "main": "./out/main/index.js",
+  "main": "./out/main/index.cjs",
   "scripts": {
     "prepare:node-pty": "node ../../scripts/prepare-desktop-node-pty.mjs",
     "prepare:managed-shell": "node ../../scripts/prepare-desktop-managed-shell.mjs",
@@ -30,8 +30,8 @@
     "smoke:gui": "node ../../scripts/smoke-desktop-gui.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.82.1",
-    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@earendil-works/pi-ai": "0.83.0",
+    "@earendil-works/pi-coding-agent": "0.83.0",
     "@floating-ui/react": "0.27.20",
     "@rc-component/image": "1.10.0",
     "@tanstack/react-virtual": "3.14.9",

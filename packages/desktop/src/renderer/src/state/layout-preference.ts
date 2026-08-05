@@ -1,3 +1,5 @@
+import { preferencesStorage } from "./preferences-store.ts";
+
 export const SIDEBAR_OPEN_STORAGE_KEY = "pi-desktop:sidebar-open";
 export const SIDEBAR_WIDTH_STORAGE_KEY = "pi-desktop:sidebar-width";
 export const SIDEBAR_DEFAULT_OPEN = true;
@@ -13,7 +15,7 @@ export function parseSidebarOpen(value: string | null): boolean {
 }
 
 export function readStoredSidebarOpen(
-  readValue: () => string | null = () => window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY),
+  readValue: () => string | null = () => preferencesStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY),
 ): boolean {
   try {
     return parseSidebarOpen(readValue());
@@ -24,7 +26,7 @@ export function readStoredSidebarOpen(
 
 export function writeStoredSidebarOpen(
   open: boolean,
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, value),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, value),
 ): void {
   try {
     writeValue(open ? "1" : "0");
@@ -44,7 +46,7 @@ export function parseSidebarWidth(value: string | null): number {
 }
 
 export function readStoredSidebarWidth(
-  readValue: () => string | null = () => window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY),
+  readValue: () => string | null = () => preferencesStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY),
 ): number {
   try {
     return parseSidebarWidth(readValue());
@@ -55,7 +57,7 @@ export function readStoredSidebarWidth(
 
 export function writeStoredSidebarWidth(
   width: number,
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, value),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, value),
 ): void {
   try {
     writeValue(String(normalizeSidebarWidth(width)));

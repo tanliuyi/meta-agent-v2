@@ -7,7 +7,10 @@ import type { DesktopActions } from "../src/renderer/src/state/desktop-actions.t
 import { DesktopActionsContext } from "../src/renderer/src/state/desktop-context.tsx";
 import { INITIAL_STATE } from "../src/renderer/src/state/desktop-model.ts";
 import { DesktopStoreProvider } from "../src/renderer/src/state/desktop-store-context.tsx";
+import { preferencesStorage } from "../src/renderer/src/state/preferences-store.ts";
+import { PROJECT_EXPANSION_STORAGE_KEY } from "../src/renderer/src/state/project-expansion-preference.ts";
 import { ThreadPinningProvider } from "../src/renderer/src/state/thread-pinning-context.tsx";
+import { PINNED_THREADS_STORAGE_KEY } from "../src/renderer/src/state/thread-pinning-preference.ts";
 import type { Project, Thread } from "../src/shared/contracts.ts";
 
 const project: Project = {
@@ -19,9 +22,15 @@ const project: Project = {
 };
 
 beforeEach(() => {
+  preferencesStorage.reset();
   vi.stubGlobal("window", {
-    desktop: { platform: "win32" },
-    localStorage: { getItem: () => null },
+    desktop: {
+      platform: "win32",
+      preferences: {
+        getInitial: () => ({ path: "preferences.json", exists: true, values: {} }),
+        save: () => Promise.resolve({ status: "saved" }),
+      },
+    },
   });
 });
 
@@ -41,10 +50,23 @@ describe("ProjectItem", () => {
   });
 
   it("首帧优先恢复持久化的收起状态", () => {
+    preferencesStorage.reset();
     vi.stubGlobal("window", {
-      desktop: { platform: "win32" },
-      localStorage: {
-        getItem: () => JSON.stringify({ version: 1, projects: [[project.id, false]] }),
+      desktop: {
+        platform: "win32",
+        preferences: {
+          getInitial: () => ({
+            path: "preferences.json",
+            exists: true,
+            values: {
+              [PROJECT_EXPANSION_STORAGE_KEY]: JSON.stringify({
+                version: 1,
+                projects: [[project.id, false]],
+              }),
+            },
+          }),
+          save: () => Promise.resolve({ status: "saved" }),
+        },
       },
     });
 
@@ -55,10 +77,23 @@ describe("ProjectItem", () => {
 
   it("置顶会话不再显示在原项目列表中", () => {
     const pinned = { ...runningThread, id: "pinned", title: "Pinned thread" };
+    preferencesStorage.reset();
     vi.stubGlobal("window", {
-      desktop: { platform: "win32" },
-      localStorage: {
-        getItem: () => JSON.stringify({ version: 1, threads: [[project.id, pinned.id]] }),
+      desktop: {
+        platform: "win32",
+        preferences: {
+          getInitial: () => ({
+            path: "preferences.json",
+            exists: true,
+            values: {
+              [PINNED_THREADS_STORAGE_KEY]: JSON.stringify({
+                version: 1,
+                threads: [[project.id, pinned.id]],
+              }),
+            },
+          }),
+          save: () => Promise.resolve({ status: "saved" }),
+        },
       },
     });
 

@@ -1,3 +1,5 @@
+import { preferencesStorage } from "./preferences-store.ts";
+
 export interface UiFontPreferences {
   /** 自定义 UI 字体族，空字符串表示使用默认字体栈。 */
   fontFamily: string;
@@ -64,7 +66,7 @@ export function sanitizeUiFontFamily(value: string | null): string {
 }
 
 export function readStoredUiFontFamily(
-  readValue: () => string | null = () => window.localStorage.getItem(UI_FONT_FAMILY_STORAGE_KEY),
+  readValue: () => string | null = () => preferencesStorage.getItem(UI_FONT_FAMILY_STORAGE_KEY),
 ): string {
   try {
     return sanitizeUiFontFamily(readValue());
@@ -74,7 +76,7 @@ export function readStoredUiFontFamily(
 }
 
 export function readStoredUiFontSize(
-  readValue: () => string | null = () => window.localStorage.getItem(UI_FONT_SIZE_STORAGE_KEY),
+  readValue: () => string | null = () => preferencesStorage.getItem(UI_FONT_SIZE_STORAGE_KEY),
 ): number {
   try {
     return parseUiFontSize(readValue());
@@ -85,7 +87,7 @@ export function readStoredUiFontSize(
 
 export function writeStoredUiFontFamily(
   fontFamily: string,
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(UI_FONT_FAMILY_STORAGE_KEY, value),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(UI_FONT_FAMILY_STORAGE_KEY, value),
 ): void {
   try {
     writeValue(fontFamily);
@@ -96,7 +98,7 @@ export function writeStoredUiFontFamily(
 
 export function writeStoredUiFontSize(
   fontSize: number,
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(UI_FONT_SIZE_STORAGE_KEY, value),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(UI_FONT_SIZE_STORAGE_KEY, value),
 ): void {
   try {
     writeValue(String(fontSize));

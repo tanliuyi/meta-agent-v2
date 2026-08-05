@@ -1,5 +1,6 @@
 import type { DraftSessionConfig, ThinkingLevel } from "../../../shared/contracts.ts";
 import { selectDraftModel, selectDraftThinkingLevel } from "./draft-creation.ts";
+import { preferencesStorage } from "./preferences-store.ts";
 
 export const DRAFT_SELECTION_STORAGE_KEY = "pi-desktop:draft-selection";
 const DRAFT_SELECTION_STORAGE_VERSION = 1;
@@ -24,11 +25,11 @@ interface StoredDraftSelectionPreferences {
 type ReadValue = () => string | null;
 type WriteValue = (value: string) => void;
 
-const defaultReadValue: ReadValue = () => window.localStorage.getItem(DRAFT_SELECTION_STORAGE_KEY);
-const defaultWriteValue: WriteValue = (value) => window.localStorage.setItem(DRAFT_SELECTION_STORAGE_KEY, value);
+const defaultReadValue: ReadValue = () => preferencesStorage.getItem(DRAFT_SELECTION_STORAGE_KEY);
+const defaultWriteValue: WriteValue = (value) => preferencesStorage.setItem(DRAFT_SELECTION_STORAGE_KEY, value);
 
-const defaultProjectReadValue: ReadValue = () => window.localStorage.getItem(DRAFT_PROJECT_STORAGE_KEY);
-const defaultProjectWriteValue: WriteValue = (value) => window.localStorage.setItem(DRAFT_PROJECT_STORAGE_KEY, value);
+const defaultProjectReadValue: ReadValue = () => preferencesStorage.getItem(DRAFT_PROJECT_STORAGE_KEY);
+const defaultProjectWriteValue: WriteValue = (value) => preferencesStorage.setItem(DRAFT_PROJECT_STORAGE_KEY, value);
 
 export function readStoredDraftSelection(
   projectId: string,

@@ -14,10 +14,12 @@
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js"
+			"import": "./dist/index.js",
+			"require": "./dist/index.js"
 		},
 		"./rpc-entry": {
-			"import": "./dist/rpc-entry.js"
+			"import": "./dist/rpc-entry.js",
+			"require": "./dist/rpc-entry.js"
 		}
 	},
 	"files": [

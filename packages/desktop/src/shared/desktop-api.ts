@@ -85,6 +85,7 @@ import type {
   UpdateMarketplacePluginInput,
   UpdateMarketplacePluginResult,
 } from "./plugin-marketplace-contracts.ts";
+import type { PreferencesSnapshot, SavePreferencesInput, SavePreferencesResult } from "./preferences-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
 import type {
   SaveSettingsConfigInput,
@@ -164,6 +165,11 @@ export interface DesktopApi {
     getConfig(): Promise<SettingsConfigSnapshot>;
     saveConfig(input: SaveSettingsConfigInput): Promise<SaveSettingsConfigResult>;
     chooseUserAvatar(): Promise<string | null>;
+  };
+  preferences: {
+    /** 首帧初始化所需的同步快照（preload sendSync），任何失败都回退为空 values。 */
+    getInitial(): PreferencesSnapshot;
+    save(input: SavePreferencesInput): Promise<SavePreferencesResult>;
   };
   memorySettings: {
     getSnapshot(): Promise<MemorySettingsSnapshot>;

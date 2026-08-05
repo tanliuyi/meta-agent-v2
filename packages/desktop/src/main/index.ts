@@ -27,6 +27,7 @@ import { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-install
 import { MarketplacePluginReconciler } from "./plugins/marketplace-plugin-reconciler.ts";
 import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
 import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
+import { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
@@ -227,6 +228,7 @@ app.whenReady().then(async () => {
     allowModelNetwork: false,
   });
   const settings = new SettingsConfigService(userDataDir);
+  const preferences = new PreferencesConfigService(userDataDir);
   const memorySettings = new MemorySettingsService(agentDir, {
     listProjects: () => projects.list(),
     getProjectCwd: (projectId) => projects.getCwd(projectId),
@@ -511,6 +513,7 @@ app.whenReady().then(async () => {
     marketplacePluginInstaller,
     pluginConfigurations,
     memorySettings,
+    preferences,
   );
   createWindow();
   stopAutoUpdateChecks = scheduleAutoUpdateChecks(updater);

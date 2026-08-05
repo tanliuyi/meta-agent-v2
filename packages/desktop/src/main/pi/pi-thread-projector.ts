@@ -1264,6 +1264,9 @@ function assistantStatus(message: AssistantMessage): PiAssistantStatus {
       return { type: "incomplete", reason: "length" };
     case "aborted":
       return { type: "incomplete", reason: "cancelled" };
+    case "pending":
+      // Partial streaming message that has not reached a terminal state yet.
+      return { type: "incomplete", reason: "other" };
     case "error":
       return {
         type: "incomplete",

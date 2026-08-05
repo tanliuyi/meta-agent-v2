@@ -1,3 +1,5 @@
+import { preferencesStorage } from "./preferences-store.ts";
+
 export const PROJECT_EXPANSION_STORAGE_KEY = "pi-desktop:project-expansion";
 export const SIDEBAR_PROJECTS_SECTION_ID = "__sidebar-projects__";
 const PROJECT_EXPANSION_STORAGE_VERSION = 1;
@@ -33,7 +35,7 @@ export function parseProjectExpansionPreferences(value: string | null): Readonly
 export function readStoredProjectExpanded(
   projectId: string,
   fallback: boolean,
-  readValue: () => string | null = () => window.localStorage.getItem(PROJECT_EXPANSION_STORAGE_KEY),
+  readValue: () => string | null = () => preferencesStorage.getItem(PROJECT_EXPANSION_STORAGE_KEY),
 ): boolean {
   try {
     return parseProjectExpansionPreferences(readValue()).get(projectId) ?? fallback;
@@ -45,8 +47,8 @@ export function readStoredProjectExpanded(
 export function writeStoredProjectExpanded(
   projectId: string,
   expanded: boolean,
-  readValue: () => string | null = () => window.localStorage.getItem(PROJECT_EXPANSION_STORAGE_KEY),
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(PROJECT_EXPANSION_STORAGE_KEY, value),
+  readValue: () => string | null = () => preferencesStorage.getItem(PROJECT_EXPANSION_STORAGE_KEY),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(PROJECT_EXPANSION_STORAGE_KEY, value),
 ): void {
   try {
     const projects = new Map(parseProjectExpansionPreferences(readValue()));

@@ -1,3 +1,5 @@
+import { preferencesStorage } from "./preferences-store.ts";
+
 export const PINNED_THREADS_STORAGE_KEY = "pi-desktop:pinned-threads";
 const PINNED_THREADS_STORAGE_VERSION = 1;
 
@@ -10,8 +12,8 @@ interface StoredPinnedThreads {
   threads: PinnedThreadEntry[];
 }
 
-const defaultReadValue: ReadValue = () => window.localStorage.getItem(PINNED_THREADS_STORAGE_KEY);
-const defaultWriteValue: WriteValue = (value) => window.localStorage.setItem(PINNED_THREADS_STORAGE_KEY, value);
+const defaultReadValue: ReadValue = () => preferencesStorage.getItem(PINNED_THREADS_STORAGE_KEY);
+const defaultWriteValue: WriteValue = (value) => preferencesStorage.setItem(PINNED_THREADS_STORAGE_KEY, value);
 
 /** 使用稳定的结构化键区分不同项目中的同名 session。 */
 export function pinnedThreadKey(projectId: string, threadId: string): string {

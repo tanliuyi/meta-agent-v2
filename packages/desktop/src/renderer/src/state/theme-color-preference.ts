@@ -1,3 +1,4 @@
+import { preferencesStorage } from "./preferences-store.ts";
 import type { ResolvedTheme } from "./theme-preference.ts";
 
 export const THEME_COLOR_PREFERENCES = ["blue", "teal", "violet", "rose", "amber", "custom"] as const;
@@ -58,8 +59,8 @@ export function normalizeHexColor(value: string | null): string | null {
 }
 
 export function readStoredThemeColorPreferences(
-  readPreference: () => string | null = () => window.localStorage.getItem(THEME_COLOR_STORAGE_KEY),
-  readCustomColor: () => string | null = () => window.localStorage.getItem(CUSTOM_THEME_COLOR_STORAGE_KEY),
+  readPreference: () => string | null = () => preferencesStorage.getItem(THEME_COLOR_STORAGE_KEY),
+  readCustomColor: () => string | null = () => preferencesStorage.getItem(CUSTOM_THEME_COLOR_STORAGE_KEY),
 ): ThemeColorPreferences {
   try {
     return {
@@ -73,7 +74,7 @@ export function readStoredThemeColorPreferences(
 
 export function writeStoredThemeColorPreference(
   preference: ThemeColorPreference,
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(THEME_COLOR_STORAGE_KEY, value),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(THEME_COLOR_STORAGE_KEY, value),
 ): void {
   try {
     writeValue(preference);
@@ -84,7 +85,7 @@ export function writeStoredThemeColorPreference(
 
 export function writeStoredCustomThemeColor(
   color: string,
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(CUSTOM_THEME_COLOR_STORAGE_KEY, value),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(CUSTOM_THEME_COLOR_STORAGE_KEY, value),
 ): void {
   try {
     writeValue(normalizeHexColor(color) ?? DEFAULT_CUSTOM_THEME_COLOR);

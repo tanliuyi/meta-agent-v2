@@ -125,7 +125,7 @@ export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: 
                   variant="ghost"
                   disabled={draftMaterializing}
                   className={sidebarRowClass}
-                  onClick={(event) => runControlledThreadAction(event, () => startDraft())}
+                  onClick={(event) => runControlledThreadAction(event, () => startDraft(activeProjectId ?? undefined))}
                 >
                   <Plus size={16} />
                   <span className="whitespace-nowrap">新建任务</span>

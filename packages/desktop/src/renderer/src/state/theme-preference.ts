@@ -1,3 +1,5 @@
+import { preferencesStorage } from "./preferences-store.ts";
+
 export const THEME_PREFERENCES = ["system", "light", "dark"] as const;
 export type ThemePreference = (typeof THEME_PREFERENCES)[number];
 export type ResolvedTheme = Exclude<ThemePreference, "system">;
@@ -29,7 +31,7 @@ export function resolveTheme(preference: ThemePreference, systemPrefersDark: boo
 }
 
 export function readStoredThemePreference(
-  readValue: () => string | null = () => window.localStorage.getItem(THEME_STORAGE_KEY),
+  readValue: () => string | null = () => preferencesStorage.getItem(THEME_STORAGE_KEY),
 ): ThemePreference {
   try {
     return parseThemePreference(readValue());
@@ -40,7 +42,7 @@ export function readStoredThemePreference(
 
 export function writeStoredThemePreference(
   preference: ThemePreference,
-  writeValue: (value: string) => void = (value) => window.localStorage.setItem(THEME_STORAGE_KEY, value),
+  writeValue: (value: string) => void = (value) => preferencesStorage.setItem(THEME_STORAGE_KEY, value),
 ): void {
   try {
     writeValue(preference);

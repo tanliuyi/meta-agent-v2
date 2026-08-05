@@ -191,6 +191,10 @@ const desktopApi: DesktopApi = {
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.settingsSaveConfig, input),
     chooseUserAvatar: () => ipcRenderer.invoke(CHANNELS.settingsChooseUserAvatar),
   },
+  preferences: {
+    getInitial: () => ipcRenderer.sendSync(CHANNELS.preferencesGetInitial),
+    save: (input) => ipcRenderer.invoke(CHANNELS.preferencesSave, input),
+  },
   memorySettings: {
     getSnapshot: () => ipcRenderer.invoke(CHANNELS.memorySettingsGetSnapshot),
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsSaveConfig, input),

@@ -59,6 +59,7 @@ import type {
   UninstallMarketplacePluginInput,
   UpdateMarketplacePluginInput,
 } from "../shared/plugin-marketplace-contracts.ts";
+import type { SavePreferencesInput } from "../shared/preferences-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
@@ -73,6 +74,7 @@ import type { MarketplaceEndpointSettingsService } from "./plugins/marketplace-e
 import type { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
 import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
+import type { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import type { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
@@ -117,6 +119,7 @@ export function registerIpc(
   marketplaceInstaller?: MarketplacePluginInstaller,
   pluginConfigurations?: PluginConfigurationService,
   memorySettings?: MemorySettingsService,
+  preferences?: PreferencesConfigService,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -203,6 +206,12 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.providersOpenConfigExternally, async () => openPath(await providers.getExternalOpenTarget()));
   ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
   ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
+  if (preferences) {
+    ipcMain.on(CHANNELS.preferencesGetInitial, (event) => {
+      event.returnValue = preferences.getInitial();
+    });
+    ipcMain.handle(CHANNELS.preferencesSave, (_event, input: SavePreferencesInput) => preferences.save(input));
+  }
   ipcMain.handle(CHANNELS.settingsChooseUserAvatar, async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const options: OpenDialogOptions = {

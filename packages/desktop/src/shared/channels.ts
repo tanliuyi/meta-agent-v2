@@ -77,6 +77,8 @@ export const CHANNELS = {
   settingsGetConfig: "desktop:settings:get-config",
   settingsSaveConfig: "desktop:settings:save-config",
   settingsChooseUserAvatar: "desktop:settings:choose-user-avatar",
+  preferencesGetInitial: "desktop:preferences:get-initial",
+  preferencesSave: "desktop:preferences:save",
   memorySettingsGetSnapshot: "desktop:memory-settings:get-snapshot",
   memorySettingsSaveConfig: "desktop:memory-settings:save-config",
   memorySettingsMutateEntry: "desktop:memory-settings:mutate-entry",
