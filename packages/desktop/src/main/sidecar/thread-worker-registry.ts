@@ -12,6 +12,7 @@ import type {
   SessionControlState,
   SessionCreateInput,
   SessionEditInput,
+  SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
@@ -186,6 +187,37 @@ export class ThreadWorkerRegistry {
     for (const thread of this.options.listSubagentThreads?.(projectId) ?? []) {
       const indexed = catalog.get(thread.id);
       catalog.set(thread.id, { ...indexed, ...thread, archived: indexed?.archived ?? thread.archived });
+    }
+    await this.reconcileCreationReservations(projectId);
+    return [...catalog.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+  }
+
+  /** 同 list，但保留 session.jsonl 绝对路径（@ 提及会话引用用）。 */
+  async listWithPaths(projectId: string): Promise<SessionMentionCandidate[]> {
+    this.assertProjectAvailable(projectId);
+    const cwd = this.options.getCwd(projectId);
+    const catalog = new Map(
+      (await this.options.metadata.listWithPaths(projectId, cwd)).map((thread) => [thread.id, thread]),
+    );
+    for (const record of this.records.values()) {
+      if (record.projectId !== projectId || record.retired || !record.summary) continue;
+      const indexed = catalog.get(record.threadId);
+      if (indexed) {
+        catalog.set(record.threadId, {
+          ...record.summary,
+          path: indexed.path,
+          ...(indexed?.parentThreadId ? { parentThreadId: indexed.parentThreadId } : {}),
+          ...(indexed?.origin ? { origin: indexed.origin } : {}),
+          ...(indexed?.parentThreadId ? { title: indexed.title, preview: indexed.preview } : {}),
+        });
+      } else if (record.sessionFile) {
+        catalog.set(record.threadId, { ...record.summary, path: record.sessionFile });
+      }
+    }
+    for (const thread of this.options.listSubagentThreads?.(projectId) ?? []) {
+      const indexed = catalog.get(thread.id);
+      if (!indexed) continue;
+      catalog.set(thread.id, { ...indexed, ...thread, path: indexed.path });
     }
     await this.reconcileCreationReservations(projectId);
     return [...catalog.values()].sort((left, right) => right.updatedAt - left.updatedAt);

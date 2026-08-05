@@ -41,6 +41,19 @@ describe("SessionMetadataIndex", () => {
     expect(mocks.listSessions).toHaveBeenCalledWith(cwd, sessionDirectory);
   });
 
+  it("listWithPaths 保留 session.jsonl 绝对路径，list 不暴露", async () => {
+    const sessionFile = join(userDataDir, "agent", "sessions", "--general--", "a.jsonl");
+    mocks.listSessions.mockResolvedValue([sessionInfo("a", sessionFile, "Alpha", 2)]);
+    const index = new SessionMetadataIndex(userDataDir, join(userDataDir, "agent"));
+
+    await expect(index.listWithPaths(GENERAL_WORKSPACE_ID, cwd)).resolves.toEqual([
+      expect.objectContaining({ id: "a", title: "Alpha", path: sessionFile }),
+    ]);
+    await expect(index.list(GENERAL_WORKSPACE_ID, cwd)).resolves.toEqual([
+      expect.not.objectContaining({ path: sessionFile }),
+    ]);
+  });
+
   it("migrates legacy general sessions before indexing the short directory", async () => {
     const agentDir = join(userDataDir, "agent");
     const legacyName = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;

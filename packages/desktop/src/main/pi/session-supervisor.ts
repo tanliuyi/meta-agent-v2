@@ -12,6 +12,7 @@ import type {
   SessionControlState,
   SessionCreateInput,
   SessionEditInput,
+  SessionMentionCandidate,
   SessionPromptInput,
   SessionPush,
   SessionPushPayload,
@@ -81,6 +82,13 @@ export class SessionSupervisor {
     return (await this.workers.list(projectId))
       .map((thread) => ({ ...thread, archived: this.projects.isArchived(projectId, thread.id) }))
       .filter((thread) => includeArchived || !thread.archived);
+  }
+
+  /** 同 list，但保留 session.jsonl 绝对路径（@ 提及会话引用用）。 */
+  async listWithPaths(projectId: string): Promise<SessionMentionCandidate[]> {
+    return (await this.workers.listWithPaths(projectId))
+      .map((thread) => ({ ...thread, archived: this.projects.isArchived(projectId, thread.id) }))
+      .filter((thread) => !thread.archived);
   }
 
   getDraftConfig(projectId: string): Promise<DraftSessionConfig> {

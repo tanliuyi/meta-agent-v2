@@ -912,14 +912,18 @@
   color: hsl(var(--muted-foreground) / 0.72);
 }
 .composer-command-groups,
-.composer-command-group {
+.composer-command-group,
+.composer-file-groups,
+.composer-file-group {
   min-width: 0;
 }
-.composer-command-groups {
+.composer-command-groups,
+.composer-file-groups {
   display: grid;
   gap: 3px;
 }
-.composer-command-group-label {
+.composer-command-group-label,
+.composer-file-group-label {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -959,6 +963,9 @@
 }
 .composer-command-item[data-command-source="skill"] .composer-command-item-icon {
   color: hsl(var(--warning));
+}
+.composer-session-item-icon {
+  color: hsl(var(--info));
 }
 .composer-suggestions-empty,
 .composer-suggestions-loading {

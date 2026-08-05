@@ -57,6 +57,11 @@ export interface Thread {
   agentName?: string;
 }
 
+/** Thread 加 session.jsonl 绝对路径，用于 @ 提及会话引用。 */
+export interface SessionMentionCandidate extends Thread {
+  path: string;
+}
+
 export type SessionRemovePolicy = "subtree" | "reparent";
 
 export interface SessionRemoveResult {

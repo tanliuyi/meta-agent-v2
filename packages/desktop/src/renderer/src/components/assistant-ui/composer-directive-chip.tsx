@@ -3,7 +3,7 @@ import { DirectiveIcon } from "./directive-icon.tsx";
 import { directiveDisplayLabel } from "./directive-text.tsx";
 
 export function ComposerDirectiveChip({ directiveId, directiveType, label }: DirectiveChipProps) {
-  const displayLabel = directiveDisplayLabel(directiveType, label);
+  const displayLabel = directiveDisplayLabel(directiveType, label, directiveId);
 
   return (
     <span className="inline-flex items-baseline px-1">

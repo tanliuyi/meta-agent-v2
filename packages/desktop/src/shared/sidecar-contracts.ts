@@ -269,6 +269,7 @@ export interface ColdOperationLease {
 
 export type MetadataSidecarCommand =
   | { type: "listSessions"; projectId: string; cwd: string }
+  | { type: "listSessionsWithPaths"; projectId: string; cwd: string }
   | { type: "getDraftConfig"; projectId: string; cwd: string; extensionSet: ResolvedExtensionSet }
   | { type: "resolveSession"; projectId: string; cwd: string; threadId: string }
   | { type: "upsertSession"; projectId: string; cwd: string; sessionFile: string; thread: Thread }

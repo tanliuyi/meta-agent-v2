@@ -5,11 +5,14 @@ import {
   composerSuggestionOptionId,
   fileSuggestions,
   scrollSelectedSuggestion,
+  searchSessions,
   searchSlashCommands,
+  sessionMentionLabel,
+  sessionPreview,
   slashCommandDisplayDescription,
   slashCommandDisplayName,
 } from "../src/renderer/src/components/chat/composer/composer-suggestion-model.ts";
-import type { SlashCommand } from "../src/shared/contracts.ts";
+import type { SessionMentionCandidate, SlashCommand } from "../src/shared/contracts.ts";
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return { left, top, right: left + width, bottom: top + height, width, height } as DOMRect;
@@ -28,7 +31,7 @@ function suggestionContainer(
       if (selector === '[aria-selected="true"], [data-highlighted]') {
         return { getBoundingClientRect: () => itemRect, scrollIntoView };
       }
-      if (selector === ".composer-command-group-label") {
+      if (selector === ".composer-command-group-label, .composer-file-group-label") {
         return labelRect ? { getBoundingClientRect: () => labelRect } : null;
       }
       return null;
@@ -215,4 +218,43 @@ describe("ComposerSuggestions", () => {
       { id: "README.md", label: "README.md", detail: undefined, text: ":file[README.md] " },
     ]);
   });
+
+  it("会话按 title 检索：空查询保持 updatedAt 顺序，关键词匹配标题并优先生成 startsWith 结果", () => {
+    const candidates: SessionMentionCandidate[] = [
+      sessionCandidate("a", "修复登录模块的 bug", 300),
+      sessionCandidate("b", "重构 API 网关", 200),
+      sessionCandidate("c", "登录模块测试用例补充", 100),
+    ];
+    expect(searchSessions(candidates, "").map(({ id }) => id)).toEqual(["a", "b", "c"]);
+    expect(searchSessions(candidates, "登录").map(({ id }) => id)).toEqual(["c", "a"]);
+    expect(searchSessions(candidates, "重构").map(({ id }) => id)).toEqual(["b"]);
+    expect(searchSessions(candidates, "不存在")).toEqual([]);
+  });
+
+  it("会话描述取 preview 首行，与标题重复或为空时不展示", () => {
+    const candidate = sessionCandidate("a", "标题", 300);
+    expect(sessionPreview({ ...candidate, preview: "第一行\n第二行" })).toBe("第一行");
+    expect(sessionPreview({ ...candidate, preview: candidate.title })).toBeUndefined();
+    expect(sessionPreview({ ...candidate, preview: "  \n  " })).toBeUndefined();
+  });
+
+  it("会话标题清洗移除破坏 directive 语法的字符", () => {
+    expect(sessionMentionLabel("修复 [登录] 模块\n第二行")).toBe("修复 [登录  模块 第二行");
+    expect(sessionMentionLabel("普通标题")).toBe("普通标题");
+  });
 });
+
+function sessionCandidate(id: string, title: string, updatedAt: number): SessionMentionCandidate {
+  return {
+    id,
+    projectId: "project",
+    title,
+    createdAt: 0,
+    updatedAt,
+    messageCount: 1,
+    preview: title,
+    archived: false,
+    running: false,
+    path: `/sessions/${id}.jsonl`,
+  };
+}

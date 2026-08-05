@@ -29,6 +29,30 @@ describe("DirectiveText", () => {
     expect(markup).not.toContain(":file[packages/desktop");
   });
 
+  it("keeps session mention titles verbatim even when they contain path separators", () => {
+    const markup = renderToStaticMarkup(
+      createElement(RenderDirectiveText, {
+        text: "参考 :file[修复 A/B 模块的 bug]{name=/Users/tanliuyi/.pi/agent/sessions/--general--/a.jsonl} 继续。",
+      }),
+    );
+
+    expect(markup).toContain('data-directive-id="/Users/tanliuyi/.pi/agent/sessions/--general--/a.jsonl"');
+    expect(markup).toContain(">修复 A/B 模块的 bug</span>");
+  });
+
+  it("keeps session mention labels verbatim through the composer chip", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ComposerDirectiveChip, {
+        directiveId: "/Users/tanliuyi/.pi/agent/sessions/--general--/a.jsonl",
+        directiveType: "file",
+        label: "修复 A/B 模块的 bug",
+      }),
+    );
+
+    expect(markup).toContain('aria-label="修复 A/B 模块的 bug"');
+    expect(markup).toContain(">修复 A/B 模块的 bug</span>");
+  });
+
   it("keeps the composer directive identity while rendering the final path segment", () => {
     const markup = renderToStaticMarkup(
       createElement(ComposerDirectiveChip, {
@@ -65,6 +89,18 @@ describe("DirectiveText", () => {
     expect(directiveDisplayLabel("command", "packages/desktop/src/renderer/src/components/assistant-ui")).toBe(
       "packages/desktop/src/renderer/src/components/assistant-ui",
     );
+  });
+
+  it("takes the final path segment only for file path labels, not session titles", () => {
+    expect(
+      directiveDisplayLabel(
+        "file",
+        "packages/desktop/src/renderer/src/components/assistant-ui/directive-text.tsx",
+        "directive-text",
+      ),
+    ).toBe("directive-text.tsx");
+    expect(directiveDisplayLabel("file", "修复 A/B 模块的 bug", "/sessions/a.jsonl")).toBe("修复 A/B 模块的 bug");
+    expect(directiveDisplayLabel("file", "修复模块的 bug", "/sessions/a.jsonl")).toBe("修复模块的 bug");
   });
 
   it("does not render a file icon for other directive types", () => {

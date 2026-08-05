@@ -10,9 +10,12 @@ import { DirectiveIcon } from "./directive-icon.tsx";
 
 const LEGACY_PI_FILE_REFERENCE_RE = /(^|\s)@([^\s@]+)/gu;
 
-export function directiveDisplayLabel(type: string, label: string): string {
+export function directiveDisplayLabel(type: string, label: string, id?: string): string {
   if (type !== "file") return label;
-  return label.split(/[\\/]/u).filter(Boolean).at(-1) ?? label;
+  // 会话引用（id 为 session.jsonl 路径）：label 是标题，原样展示（标题可能含路径分隔符）。
+  if (id !== undefined && id.endsWith(".jsonl")) return label;
+  // 路径引用取 basename；不含分隔符的 label（如模型回复中的文件名）原样展示。
+  return label.includes("/") || label.includes("\\") ? (label.split(/[\\/]/u).filter(Boolean).at(-1) ?? label) : label;
 }
 
 function parseLegacyPiFileReferences(text: string): Unstable_DirectiveSegment[] {
@@ -56,7 +59,7 @@ export const DirectiveText: TextMessagePartComponent = memo(function DirectiveTe
           );
         }
 
-        const displayLabel = directiveDisplayLabel(segment.type, segment.label);
+        const displayLabel = directiveDisplayLabel(segment.type, segment.label, segment.id);
         return (
           <span
             key={index}

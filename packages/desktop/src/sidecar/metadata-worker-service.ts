@@ -44,6 +44,8 @@ export class MetadataWorkerService implements SidecarService {
     switch (command.type) {
       case "listSessions":
         return this.index.list(command.projectId, command.cwd);
+      case "listSessionsWithPaths":
+        return this.index.listWithPaths(command.projectId, command.cwd);
       case "getDraftConfig": {
         const extensionSet = await validateResolvedExtensionSet(command.projectId, command.extensionSet);
         return loadDraftSessionConfig(command.cwd, undefined, this.agentDir, extensionSet);

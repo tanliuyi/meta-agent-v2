@@ -1,5 +1,5 @@
 import { unstable_defaultDirectiveFormatter } from "@assistant-ui/react";
-import type { FileNode, SlashCommand } from "../../../../../shared/contracts.ts";
+import type { FileNode, SessionMentionCandidate, SlashCommand } from "../../../../../shared/contracts.ts";
 
 export interface ComposerSuggestion {
   id: string;
@@ -144,6 +144,43 @@ export function fileSuggestions(files: readonly FileNode[]): ComposerSuggestion[
   });
 }
 
+/** 会话提及建议按 title 检索；空查询返回全部（保持传入的 updatedAt 排序）。 */
+export function searchSessions(sessions: readonly SessionMentionCandidate[], query: string): SessionMentionCandidate[] {
+  const terms = normalizedSearchTerms(query);
+  if (terms.length === 0) return [...sessions];
+  return sessions
+    .map((session, index) => ({ session, index, score: sessionTitleSearchScore(session.title, terms) }))
+    .filter(
+      (entry): entry is { session: SessionMentionCandidate; index: number; score: number } => entry.score !== null,
+    )
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .map(({ session }) => session);
+}
+
+function sessionTitleSearchScore(title: string, terms: readonly string[]): number | null {
+  const normalizedTitle = normalizedSearchTerms(title).join(" ");
+  if (!terms.every((term) => normalizedTitle.includes(term))) return null;
+  const query = terms.join(" ");
+  if (normalizedTitle === query) return 0;
+  if (normalizedTitle.startsWith(query)) return 10;
+  return 20 + terms.reduce((score, term) => score + normalizedTitle.indexOf(term), 0);
+}
+
+/** 会话标题清洗：移除会破坏 directive 语法的字符，保证插入后 parse 往返一致。 */
+export function sessionMentionLabel(title: string): string {
+  return title.replace(/[\]\n]/gu, " ");
+}
+
+/** 会话描述：preview 首行（与标题重复或为空时不展示）。 */
+export function sessionPreview(session: SessionMentionCandidate): string | undefined {
+  const firstLine = session.preview
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine || firstLine === session.title) return undefined;
+  return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
+}
+
 /** 为 combobox 活动建议生成稳定 DOM id。 */
 export function composerSuggestionOptionId(listboxId: string, index: number): string {
   return `${listboxId}-option-${index}`;
@@ -156,11 +193,13 @@ export function scrollSelectedSuggestion(container: HTMLElement | null): void {
   if (!item) return;
   const containerRect = container.getBoundingClientRect();
   const itemRect = item.getBoundingClientRect();
-  // 吸顶的分组标签（.composer-command-group-label）会盖住滚到其下方的条目：
+  // 吸顶的分组标签（.composer-command-group-label / .composer-file-group-label）会盖住滚到其下方的条目：
   // 顶部处于标签覆盖区或上方的条目需对齐到标签之下，否则键盘移动时高亮项会被遮挡。
-  const labelHeight = container.querySelector(".composer-command-group-label")?.getBoundingClientRect().height ?? 0;
-  if (itemRect.top < containerRect.top + labelHeight) {
-    container.scrollTop -= containerRect.top + labelHeight - itemRect.top;
+  const label =
+    container.querySelector(".composer-command-group-label, .composer-file-group-label")?.getBoundingClientRect()
+      .height ?? 0;
+  if (itemRect.top < containerRect.top + label) {
+    container.scrollTop -= containerRect.top + label - itemRect.top;
     return;
   }
   if (itemRect.bottom > containerRect.bottom) {

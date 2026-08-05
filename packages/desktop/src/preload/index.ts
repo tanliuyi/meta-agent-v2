@@ -273,6 +273,7 @@ const desktopApi: DesktopApi = {
   },
   sessions: {
     list: (projectId, includeArchived) => ipcRenderer.invoke(CHANNELS.sessionsList, projectId, includeArchived),
+    listWithPaths: (projectId) => ipcRenderer.invoke(CHANNELS.sessionsListWithPaths, projectId),
     onCatalogChanged(listener) {
       const handler = (_event: Electron.IpcRendererEvent, thread: Thread) => listener(thread);
       ipcRenderer.on(CHANNELS.sessionsCatalogChanged, handler);

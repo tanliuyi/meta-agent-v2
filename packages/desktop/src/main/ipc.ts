@@ -485,6 +485,7 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsList, (_event, projectId: string, includeArchived?: boolean) =>
     sessions.list(projectId, includeArchived),
   );
+  ipcMain.handle(CHANNELS.sessionsListWithPaths, (_event, projectId: string) => sessions.listWithPaths(projectId));
   ipcMain.handle(CHANNELS.sessionsDraftConfig, (_event, projectId: string) => sessions.getDraftConfig(projectId));
   ipcMain.handle(
     CHANNELS.sessionsCreate,

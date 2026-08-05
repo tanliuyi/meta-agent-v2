@@ -18,6 +18,7 @@ export const CHANNELS = {
   projectsRemove: "desktop:projects:remove",
   projectsActive: "desktop:projects:active",
   sessionsList: "desktop:sessions:list",
+  sessionsListWithPaths: "desktop:sessions:list-with-paths",
   sessionsDraftConfig: "desktop:sessions:draft-config",
   sessionsCreate: "desktop:sessions:create",
   sessionsAttach: "desktop:sessions:attach",

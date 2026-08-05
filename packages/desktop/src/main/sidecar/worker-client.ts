@@ -463,6 +463,7 @@ function isMutationCommand(commandType: SidecarCommand["type"]): boolean {
     "getSummary",
     "getCheckpointDiff",
     "listSessions",
+    "listSessionsWithPaths",
     "resolveSession",
     "getDraftConfig",
     "prepareProjection",

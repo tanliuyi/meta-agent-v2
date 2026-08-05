@@ -13,7 +13,7 @@ import {
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
-import type { SessionRemovePolicy, SessionRemoveResult, Thread } from "../shared/contracts.ts";
+import type { SessionMentionCandidate, SessionRemovePolicy, SessionRemoveResult, Thread } from "../shared/contracts.ts";
 import { collectThreadDescendantIds } from "../shared/thread-tree.ts";
 import {
   migrateLegacyGeneralSessionDirectory,
@@ -73,6 +73,12 @@ export class SessionMetadataIndex {
   async list(projectId: string, cwd: string): Promise<Thread[]> {
     const project = await this.requireProject(projectId, cwd);
     return project.sessions.map(({ path: _path, ...thread }) => ({ ...thread, running: false }));
+  }
+
+  /** 同 list，但保留 session.jsonl 绝对路径（@ 提及会话引用用）。 */
+  async listWithPaths(projectId: string, cwd: string): Promise<SessionMentionCandidate[]> {
+    const project = await this.requireProject(projectId, cwd);
+    return project.sessions.map((session) => ({ ...session, running: false }));
   }
 
   async resolve(projectId: string, cwd: string, threadId: string): Promise<{ id: string; path: string }> {

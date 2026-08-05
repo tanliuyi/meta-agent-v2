@@ -25,6 +25,7 @@ import type {
   SessionCreateInput,
   SessionEditInput,
   SessionFlushResult,
+  SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
@@ -223,6 +224,8 @@ export interface DesktopApi {
   };
   sessions: {
     list(projectId: string, includeArchived?: boolean): Promise<Thread[]>;
+    /** 保留 session.jsonl 绝对路径的会话列表（@ 提及会话引用用）。 */
+    listWithPaths(projectId: string): Promise<SessionMentionCandidate[]>;
     onCatalogChanged(listener: (thread: Thread) => void): () => void;
     getDraftConfig(projectId: string): Promise<DraftSessionConfig>;
     create(input: SessionCreateInput): Promise<SessionBootstrap>;

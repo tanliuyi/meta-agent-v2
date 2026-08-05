@@ -5,12 +5,12 @@ import Sparkles from "lucide-react/dist/esm/icons/sparkles.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { useMemo, useRef } from "react";
 import type { SlashCommand } from "../../../../../shared/contracts.ts";
-import { ComposerCommandScrollSync } from "./composer-command-scroll-sync.tsx";
 import {
   searchSlashCommands,
   slashCommandDisplayDescription,
   slashCommandDisplayName,
 } from "./composer-suggestion-model.ts";
+import { ComposerSuggestionScrollSync } from "./composer-suggestion-scroll-sync.tsx";
 import { ComposerTriggerState } from "./composer-trigger-state.tsx";
 
 const COMMAND_GROUPS = [
@@ -73,7 +73,7 @@ export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: Com
         }}
       />
       <ComposerTriggerState onOpenChange={onOpenChange} />
-      <ComposerCommandScrollSync container={scrollContainer} />
+      <ComposerSuggestionScrollSync container={scrollContainer} />
       <ComposerPrimitive.Unstable_TriggerPopoverItems
         ref={scrollContainer}
         className="composer-suggestions-scroll composer-command-suggestions-scroll"

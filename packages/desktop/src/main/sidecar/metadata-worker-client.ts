@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { DraftSessionConfig, SessionRemovePolicy, SessionRemoveResult, Thread } from "../../shared/contracts.ts";
+import type {
+  DraftSessionConfig,
+  SessionMentionCandidate,
+  SessionRemovePolicy,
+  SessionRemoveResult,
+  Thread,
+} from "../../shared/contracts.ts";
 import type { ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
 import type {
   ColdOperationLease,
@@ -40,6 +46,13 @@ export class MetadataWorkerClient {
 
   list(projectId: string, cwd: string): Promise<Thread[]> {
     return this.enqueue(() => this.safeRequest<Thread[]>({ type: "listSessions", projectId, cwd }));
+  }
+
+  /** 保留 session.jsonl 绝对路径的会话列表（@ 提及会话引用用）。 */
+  listWithPaths(projectId: string, cwd: string): Promise<SessionMentionCandidate[]> {
+    return this.enqueue(() =>
+      this.safeRequest<SessionMentionCandidate[]>({ type: "listSessionsWithPaths", projectId, cwd }),
+    );
   }
 
   getDraftConfig(projectId: string, cwd: string, extensionSet: ResolvedExtensionSet): Promise<DraftSessionConfig> {
