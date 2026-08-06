@@ -1,0 +1,26 @@
+{
+  "name": "pi-officecli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "基于 OfficeCLI 的 Office 文档（.docx/.xlsx/.pptx）创建、读取与编辑插件",
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "tsx": "4.21.0",
+    "typescript": "6.0.2"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
