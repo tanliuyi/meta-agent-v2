@@ -1,11 +1,14 @@
+import { constants } from "node:fs";
 import { lookup } from "node:dns/promises";
-import { readFile, realpath, stat } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import { isIP } from "node:net";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { describeDownloadError, ImageGenError, throwDownloadHttpError } from './errors.ts';
 import type { ResolvedImageInput } from './types.ts';
 
 export const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+export const MAX_BASE64_IMAGE_CHARS = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
+export const MAX_GENERATED_IMAGES = 10;
 
 const MAGIC_BYTES: Array<{ mimeType: string; bytes: number[] }> = [
   { mimeType: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
@@ -84,25 +87,82 @@ async function resolveOne(
   }
 
   // Anything else — treat as a file path (absolute or relative to cwd).
-  const absolute = isAbsolute(trimmed) ? resolve(trimmed) : resolve(cwd, trimmed);
+  const lexicalRoot = resolve(cwd);
+  const absolute = isAbsolute(trimmed) ? resolve(trimmed) : resolve(lexicalRoot, trimmed);
+  const pathFromRoot = relative(lexicalRoot, absolute);
+  if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+    throw new ImageGenError(
+      `${inputLabel} must be inside the current workspace.`,
+      `${logLabel} outside workspace`,
+    );
+  }
+
   let bytes: Buffer;
   try {
-    const [projectRoot, canonicalPath] = await Promise.all([realpath(cwd), realpath(absolute)]);
-    const projectRelativePath = relative(projectRoot, canonicalPath);
-    if (projectRelativePath.startsWith("..") || isAbsolute(projectRelativePath)) {
+    const projectRoot = await realpath(cwd).catch(() => lexicalRoot);
+    const info = await lstat(absolute);
+    if (info.isSymbolicLink()) {
       throw new ImageGenError(
-        `${inputLabel} must be inside the current workspace.`,
-        `${logLabel} outside workspace`,
+        `${inputLabel} must not be a symbolic link.`,
+        `${logLabel} rejected (symlink)`,
       );
     }
-    const info = await stat(canonicalPath);
     if (!info.isFile() || info.size > MAX_IMAGE_BYTES) {
       throw new ImageGenError(
         `${inputLabel} must be a readable image file no larger than 25 MB.`,
         `${logLabel} too large or not a file`,
       );
     }
-    bytes = await readFile(canonicalPath);
+
+    const file = await open(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const openedInfo = await file.stat();
+      const canonicalPath = await realpath(absolute);
+      const canonicalInfo = await lstat(canonicalPath);
+      const projectRelativePath = relative(projectRoot, canonicalPath);
+      if (
+        projectRelativePath === ".." ||
+        projectRelativePath.startsWith(`..${sep}`) ||
+        isAbsolute(projectRelativePath) ||
+        !openedInfo.isFile() ||
+        canonicalInfo.dev !== openedInfo.dev ||
+        canonicalInfo.ino !== openedInfo.ino
+      ) {
+        throw new ImageGenError(
+          `${inputLabel} must be a regular image file inside the current workspace.`,
+          `${logLabel} rejected (outside workspace or changed file)`,
+        );
+      }
+      if (openedInfo.size > MAX_IMAGE_BYTES) {
+        throw new ImageGenError(
+          `${inputLabel} must be no larger than 25 MB.`,
+          `${logLabel} too large`,
+        );
+      }
+      const buffer = Buffer.allocUnsafe(openedInfo.size);
+      let offset = 0;
+      while (offset < buffer.byteLength) {
+        const { bytesRead } = await file.read(
+          buffer,
+          offset,
+          buffer.byteLength - offset,
+          null,
+        );
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      const probe = Buffer.allocUnsafe(1);
+      const { bytesRead: extraBytes } = await file.read(probe, 0, 1, null);
+      if (extraBytes > 0) {
+        throw new ImageGenError(
+          `${inputLabel} changed while it was being read. Try again after the file is stable.`,
+          `${logLabel} changed while reading`,
+        );
+      }
+      bytes = buffer.subarray(0, offset);
+    } finally {
+      await file.close();
+    }
     if (bytes.byteLength > MAX_IMAGE_BYTES) {
       throw new ImageGenError(
         `${inputLabel} must be no larger than 25 MB.`,
@@ -213,8 +273,8 @@ function isPrivateAddress(address: string, allowProxyBenchmarkRange = false): bo
     ) {
       return true;
     }
-    const mapped = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
-    return mapped ? isPrivateAddress(mapped, allowProxyBenchmarkRange) : false;
+    const embedded = embeddedIpv4Address(normalized);
+    return embedded ? isPrivateAddress(embedded, allowProxyBenchmarkRange) : false;
   }
   const octets = normalized.split(".").map(Number);
   if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
@@ -232,6 +292,16 @@ function isPrivateAddress(address: string, allowProxyBenchmarkRange = false): bo
     (!allowProxyBenchmarkRange && a === 198 && (b === 18 || b === 19)) ||
     a! >= 224
   );
+}
+
+function embeddedIpv4Address(address: string): string | undefined {
+  const dotted = address.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+  if (dotted) return dotted;
+  const hexadecimal = address.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!hexadecimal) return undefined;
+  const high = Number.parseInt(hexadecimal[1]!, 16);
+  const low = Number.parseInt(hexadecimal[2]!, 16);
+  return `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
 }
 
 export async function readImageResponse(
@@ -336,6 +406,7 @@ export function classifyImageOutput(
 
   const dataMatch = DATA_URI_RE.exec(trimmed);
   if (dataMatch) {
+    if (dataMatch[2]!.length > MAX_BASE64_IMAGE_CHARS) return null;
     return {
       kind: 'base64',
       bytes: dataMatch[2]!,
@@ -345,7 +416,13 @@ export function classifyImageOutput(
 
   // Maybe bare base64 — try to decode and sniff. Bail cheaply on anything that
   // can't possibly be an image (too short, contains non-base64 chars).
-  if (trimmed.length < 16 || /[^A-Za-z0-9+/=\s]/.test(trimmed)) return null;
+  if (
+    trimmed.length < 16 ||
+    trimmed.length > MAX_BASE64_IMAGE_CHARS ||
+    /[^A-Za-z0-9+/=\s]/.test(trimmed)
+  ) {
+    return null;
+  }
   let decoded: Buffer;
   try {
     decoded = Buffer.from(trimmed, 'base64');

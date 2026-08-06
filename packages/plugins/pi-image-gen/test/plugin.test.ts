@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -10,7 +10,11 @@ import {
   IMAGE_GEN_CONFIGURATION_SCHEMA_JSON,
 } from "../src/configuration.ts";
 import { generateImage } from "../src/generate.ts";
-import { readImageResponse, resolveImageInputs } from "../src/image-input.ts";
+import {
+  MAX_GENERATED_IMAGES,
+  readImageResponse,
+  resolveImageInputs,
+} from "../src/image-input.ts";
 import { BUILT_IN_MODELS } from "../src/models.ts";
 import type { BuiltInProviderId, ImageGenSettings } from "../src/types.ts";
 
@@ -224,6 +228,29 @@ describe("provider adapters", () => {
     expect(result.images).toHaveLength(1);
     expect(await readFile(result.images[0]!.path)).toEqual(PNG_BYTES);
   });
+
+  it("rejects a provider response with too many images", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "desktop-image-count-"));
+    tempDirectories.push(cwd);
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          data: Array.from({ length: MAX_GENERATED_IMAGES + 1 }, () => ({ b64_json: PNG_BASE64 })),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+
+    await expect(
+      generateImage(
+        { prompt: "too many images" },
+        {
+          cwd,
+          settings: { defaultModel: "gpt-image-2", providers: { openai: { apiKey: "test-key" } } },
+          fetchImpl,
+        },
+      ),
+    ).rejects.toThrow(/too many images/i);
+  });
 });
 
 describe("extension contract", () => {
@@ -275,6 +302,30 @@ describe("extension contract", () => {
     await expect(resolveImageInputs([outsideImage], workspace, fetch)).rejects.toThrow(
       /inside the current workspace/i,
     );
+  });
+
+  it("rejects symbolic-link reference files", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "desktop-image-symlink-"));
+    tempDirectories.push(workspace);
+    const target = join(workspace, "target.png");
+    const link = join(workspace, "link.png");
+    await writeFile(target, PNG_BYTES);
+    try {
+      await symlink(target, link, "file");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") return;
+      throw error;
+    }
+
+    await expect(resolveImageInputs([link], workspace, fetch)).rejects.toThrow(/symbolic link/i);
+  });
+
+  it("rejects IPv4-mapped loopback image URLs before making a request", async () => {
+    const fetchImpl = vi.fn(async () => new Response(PNG_BYTES)) as unknown as typeof fetch;
+    await expect(
+      resolveImageInputs(["http://[::ffff:127.0.0.1]/private.png"], process.cwd(), fetchImpl),
+    ).rejects.toThrow(/public host/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("rejects private image URLs before making a request", async () => {

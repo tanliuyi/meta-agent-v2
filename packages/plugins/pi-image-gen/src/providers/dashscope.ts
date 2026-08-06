@@ -6,7 +6,7 @@ import {
   readBodyText,
   throwHttpError,
 } from '../errors.ts';
-import { classifyImageOutput, toDataUri } from '../image-input.ts';
+import { classifyImageOutput, MAX_GENERATED_IMAGES, toDataUri } from '../image-input.ts';
 import type {
   GenerateImageParams,
   ImageProviderAdapter,
@@ -109,7 +109,15 @@ export const dashscopeAdapter: ImageProviderAdapter = {
         const candidate =
           typeof part.image_url === 'string' ? part.image_url : (part.image_url?.url ?? part.image);
         const classified = classifyImageOutput(candidate);
-        if (classified) out.push({ data: classified });
+        if (classified) {
+          if (out.length >= MAX_GENERATED_IMAGES) {
+            throw new ImageGenError(
+              `Provider returned too many images (maximum ${MAX_GENERATED_IMAGES}).`,
+              `${providerLogLabel(provider)} returned too many images`,
+            );
+          }
+          out.push({ data: classified });
+        }
       }
     }
     if (out.length === 0) {

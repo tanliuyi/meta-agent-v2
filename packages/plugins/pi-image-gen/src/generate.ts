@@ -1,5 +1,5 @@
 import { mkdir, open, realpath, unlink } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveModel } from './config.ts';
 import {
   cancelledError,
@@ -10,6 +10,8 @@ import {
 } from './errors.ts';
 import {
   fetchPublicImage,
+  MAX_BASE64_IMAGE_CHARS,
+  MAX_GENERATED_IMAGES,
   MAX_IMAGE_BYTES,
   readImageResponse,
   resolveImageInputs,
@@ -89,6 +91,12 @@ export async function generateImage(
     options.signal,
     inputs,
   );
+  if (raws.length > MAX_GENERATED_IMAGES) {
+    throw new ImageGenError(
+      `Provider returned too many images (maximum ${MAX_GENERATED_IMAGES}).`,
+      'provider returned too many images',
+    );
+  }
 
   if (options.signal?.aborted) throw cancelledError('image generation');
 
@@ -193,7 +201,11 @@ async function assertInsideWorkspace(path: string, cwd: string): Promise<void> {
 
 function isInsidePath(root: string, candidate: string): boolean {
   const projectRelativePath = relative(root, candidate);
-  return !projectRelativePath.startsWith('..') && !isAbsolute(projectRelativePath);
+  return (
+    projectRelativePath !== '..' &&
+    !projectRelativePath.startsWith(`..${sep}`) &&
+    !isAbsolute(projectRelativePath)
+  );
 }
 
 function formatStamp(date: Date): string {
@@ -273,6 +285,12 @@ async function materialize(
   signal?: AbortSignal,
 ): Promise<{ bytes: Uint8Array; mimeType: string }> {
   if (raw.data.kind === 'base64') {
+    if (raw.data.bytes.length > MAX_BASE64_IMAGE_CHARS) {
+      throw new ImageGenError(
+        'The generated image exceeds the 25 MB image safety limit.',
+        'generated image too large',
+      );
+    }
     const bytes = Buffer.from(raw.data.bytes, 'base64');
     if (bytes.byteLength > MAX_IMAGE_BYTES) {
       throw new ImageGenError(

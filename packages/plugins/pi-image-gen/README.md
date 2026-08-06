@@ -16,7 +16,8 @@ under the Apache-2.0 license.
 - Defaults to the exact model ID `gpt-image-2`. There is no `image2` alias.
 - Supports OpenAI, Gemini, DashScope, Volcengine Ark, and OpenRouter.
 - Reads local or HTTP(S) reference images and writes generated images without overwriting existing files.
-- Limits each input/output image to 25 MB and provider JSON responses to 50 MB.
+- Local reference images must be regular files inside the session workspace; symbolic links are rejected.
+- Limits each input/output image to 25 MB, provider JSON responses to 50 MB, and provider output to 10 images.
 
 ## Configuration
 
