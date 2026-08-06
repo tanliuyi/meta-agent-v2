@@ -110,7 +110,7 @@ export const ProjectItem = memo(function ProjectItem({
   const confirmDelete = () => runProjectAction(() => actions.removeProject(project.id));
 
   return (
-    <li className="project-group" data-project-id={project.id}>
+    <li className="project-group mb-1" data-project-id={project.id}>
       <Collapsible open={expanded} onOpenChange={handleOpenChange}>
         <ContextMenu.Root>
           <ContextMenu.Trigger asChild>

@@ -29,6 +29,7 @@ import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry
 import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
+import { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
 import { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { handleLocalImageRequests, registerLocalImageSchemes } from "./settings/user-avatar-protocol.ts";
@@ -396,6 +397,15 @@ app.whenReady().then(async () => {
   const desktopProviderEnvKeys = new Map(
     DesktopBuiltinProviderRegistry.getKnownProviderInfos().map((provider) => [provider.id, provider.envKeys]),
   );
+  const isDesktopProviderAvailable = async (providerId: string): Promise<boolean> => {
+    const credential = await credentialStore.read(providerId);
+    if (credential?.type === "oauth" || (credential?.type === "api_key" && Boolean(credential.key))) return true;
+    return desktopProviderEnvKeys.get(providerId)?.some((envKey) => Boolean(process.env[envKey])) ?? false;
+  };
+  const autoTitleSettings = new AutoTitleSettingsService(agentDir, {
+    modelRuntime: authModelRuntime,
+    isDesktopProviderAvailable,
+  });
   let modelConfigurationGeneration = 0;
   const subagentSettings = new SubagentSettingsConfigService({
     agentDir,
@@ -409,11 +419,7 @@ app.whenReady().then(async () => {
       "agents",
     ),
     modelRuntime: authModelRuntime,
-    isDesktopProviderAvailable: async (providerId) => {
-      const credential = await credentialStore.read(providerId);
-      if (credential?.type === "oauth" || (credential?.type === "api_key" && Boolean(credential.key))) return true;
-      return desktopProviderEnvKeys.get(providerId)?.some((envKey) => Boolean(process.env[envKey])) ?? false;
-    },
+    isDesktopProviderAvailable,
     getProjectCwd: (projectId) => projects.getCwd(projectId),
   });
   registerIpc(
@@ -513,6 +519,7 @@ app.whenReady().then(async () => {
     marketplacePluginInstaller,
     pluginConfigurations,
     memorySettings,
+    autoTitleSettings,
     preferences,
   );
   createWindow();

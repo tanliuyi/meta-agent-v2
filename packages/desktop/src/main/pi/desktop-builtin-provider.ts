@@ -23,6 +23,7 @@ import type {
 } from "../../shared/providers-config-contracts.ts";
 import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
 import type { ModelsModelDefinition } from "../models/models-config-schema.ts";
+import piAutoTitleExtension from "./extensions/pi-auto-title/index.ts";
 import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
 import piRewindExtension from "./extensions/pi-rewind/src/index.ts";
 import subagentsExtension from "./extensions/pi-subagents/index.ts";
@@ -89,6 +90,16 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       ],
     },
     factory: { name: "desktop:pi-subagents", factory: subagentsExtension },
+  },
+  {
+    definition: {
+      id: "pi-auto-title",
+      displayName: "自动标题",
+      source: "builtin",
+      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+      capabilities: ["events.subscribe", "session.read"],
+    },
+    factory: { name: "desktop:pi-auto-title", factory: piAutoTitleExtension },
   },
 ];
 const coreProviderIds = new Set(getModelsConfigMetadata().builtInProviders.map((provider) => provider.id));

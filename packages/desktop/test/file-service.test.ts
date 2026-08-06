@@ -70,6 +70,80 @@ describe("FileService", () => {
 
     await expect(files.readImage(project.id, "first-target.txt")).rejects.toThrow("不是支持的图片格式");
   });
+
+  it("目录列表与搜索排除 .gitignore 中的文件与目录", async () => {
+    const { files, project } = await createService();
+    await writeFile(
+      join(project.cwd, ".gitignore"),
+      ["ignored-directory/", "*.log", "!keep.log", "docs/generated.md", "/root-only.txt"].join("\n"),
+    );
+    await mkdir(join(project.cwd, "ignored-directory"));
+    await writeFile(join(project.cwd, "ignored-directory", "ignored-inner.txt"), "x");
+    await writeFile(join(project.cwd, "app.log"), "x");
+    await writeFile(join(project.cwd, "keep.log"), "x");
+    await mkdir(join(project.cwd, "docs"));
+    await writeFile(join(project.cwd, "docs", "generated.md"), "x");
+    await writeFile(join(project.cwd, "docs", "readme.md"), "x");
+    await writeFile(join(project.cwd, "root-only.txt"), "x");
+    await writeFile(join(project.cwd, "nested-root.txt"), "x");
+
+    const root = await files.list(project.id, "", "");
+    expect(root.map((node) => node.name)).toEqual([
+      "docs",
+      ".gitignore",
+      "first-target.txt",
+      "keep.log",
+      "nested-root.txt",
+      "second-target.txt",
+    ]);
+
+    // 子目录 .gitignore 生效，`!readme.md` 重新包含 readme.md
+    await writeFile(join(project.cwd, "docs", ".gitignore"), "*.md\n!readme.md\n");
+    const docs = await files.list(project.id, "docs", "");
+    expect(docs.map((node) => node.name)).toEqual([".gitignore", "readme.md"]);
+
+    // 被忽略目录内不可被 `!` 重新包含
+    await writeFile(join(project.cwd, "ignored-directory", ".gitignore"), "!*");
+    await expect(files.list(project.id, "", "ignored-inner")).resolves.toEqual([]);
+    await expect(files.list(project.id, "ignored-directory", "")).resolves.toEqual([]);
+
+    // 搜索同样排除被忽略条目，且保留 `!` 恢复的条目
+    await expect(files.list(project.id, "", "keep")).resolves.toMatchObject([{ name: "keep.log", type: "file" }]);
+    await expect(files.list(project.id, "", "app")).resolves.toEqual([]);
+    await expect(files.list(project.id, "", "readme")).resolves.toMatchObject([{ name: "readme.md", type: "file" }]);
+  });
+
+  it("gitignore 支持转义的注释和否定前缀", async () => {
+    const { files, project } = await createService();
+    await writeFile(join(project.cwd, ".gitignore"), "\\#secret.txt\n\\!important.txt\n");
+    await writeFile(join(project.cwd, "#secret.txt"), "x");
+    await writeFile(join(project.cwd, "!important.txt"), "x");
+
+    await expect(files.list(project.id, "", "#secret")).resolves.toEqual([]);
+    await expect(files.list(project.id, "", "!important")).resolves.toEqual([]);
+    await expect(files.list(project.id, "", "")).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "#secret.txt" }),
+        expect.objectContaining({ name: "!important.txt" }),
+      ]),
+    );
+  });
+
+  it("gitignore 支持 ** 与字符类模式", async () => {
+    const { files, project } = await createService();
+    await writeFile(join(project.cwd, ".gitignore"), "**/generated/\n*tmp[0-9].txt\n");
+    await mkdir(join(project.cwd, "a", "b", "generated"), { recursive: true });
+    await mkdir(join(project.cwd, "generated"));
+    await writeFile(join(project.cwd, "a", "b", "generated", "out.js"), "x");
+    await writeFile(join(project.cwd, "generated", "out.js"), "x");
+    await writeFile(join(project.cwd, "a", "tmp1.txt"), "x");
+    await writeFile(join(project.cwd, "a", "tmpX.txt"), "x");
+
+    await expect(files.list(project.id, "", "out")).resolves.toEqual([]);
+    await expect(files.list(project.id, "", "tmp1")).resolves.toEqual([]);
+    await expect(files.list(project.id, "", "tmpX")).resolves.toMatchObject([{ name: "tmpX.txt", type: "file" }]);
+    await expect(files.list(project.id, "", "generated")).resolves.toEqual([]);
+  });
 });
 
 async function createService() {

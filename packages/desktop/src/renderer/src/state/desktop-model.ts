@@ -1,4 +1,9 @@
 import type { Project, SessionBootstrap, Thread } from "../../../shared/contracts.ts";
+import {
+  previewFirstLines,
+  THREAD_ASSISTANT_PREVIEW_MAX_CHARS,
+  THREAD_USER_PREVIEW_MAX_CHARS,
+} from "../../../shared/contracts.ts";
 
 export interface DesktopState {
   projects: Project[];
@@ -193,13 +198,14 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
 export function threadFromBootstrap(bootstrap: SessionBootstrap): Thread {
   const visible = bootstrap.timeline.nodes.filter((node) => node.kind === "user" || node.kind === "assistant");
   const firstUser = visible.find((node) => node.kind === "user");
-  const preview =
-    firstUser?.kind === "user"
-      ? firstUser.content
-          .flatMap((part) => (part.type === "text" ? [part.text] : []))
-          .join("\n")
-          .slice(0, 120)
-      : "";
+  const lastNode = visible.at(-1);
+  const lastUser = lastNode ? [...visible].reverse().find((node) => node.kind === "user") : undefined;
+  const nodeText = (node: (typeof visible)[number]) =>
+    node.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  const preview = firstUser?.kind === "user" ? nodeText(firstUser).slice(0, 120) : "";
+  const lastUserPreview = lastUser ? previewFirstLines(nodeText(lastUser), THREAD_USER_PREVIEW_MAX_CHARS) : undefined;
+  const lastAssistantPreview =
+    lastNode?.kind === "assistant" ? previewFirstLines(nodeText(lastNode), THREAD_ASSISTANT_PREVIEW_MAX_CHARS) : "";
   return {
     id: bootstrap.threadId,
     projectId: bootstrap.projectId,
@@ -208,6 +214,8 @@ export function threadFromBootstrap(bootstrap: SessionBootstrap): Thread {
     updatedAt: bootstrap.control.updatedAt,
     messageCount: visible.length,
     preview,
+    ...(lastUserPreview !== undefined ? { lastUserPreview } : {}),
+    lastAssistantPreview,
     archived: false,
     running: bootstrap.timeline.phase !== "idle",
   };
@@ -254,6 +262,8 @@ function mergeCatalogThread(current: Thread, update: Thread): Thread {
     ...update,
     title: liveThreadTitle(current, update.title),
     preview: current.parentThreadId ? current.preview : update.preview,
+    lastUserPreview: update.lastUserPreview ?? current.lastUserPreview,
+    lastAssistantPreview: update.lastAssistantPreview ?? current.lastAssistantPreview,
     archived: current.archived,
     ...(completed ? { completed: true } : {}),
     ...(parentThreadId ? { parentThreadId } : {}),
@@ -276,6 +286,8 @@ function equalThread(left: Thread, right: Thread | undefined): boolean {
     left.updatedAt === right.updatedAt &&
     left.messageCount === right.messageCount &&
     left.preview === right.preview &&
+    left.lastUserPreview === right.lastUserPreview &&
+    left.lastAssistantPreview === right.lastAssistantPreview &&
     left.archived === right.archived &&
     left.running === right.running &&
     left.completed === right.completed &&

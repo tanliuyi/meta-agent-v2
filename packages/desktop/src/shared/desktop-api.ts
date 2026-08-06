@@ -7,6 +7,12 @@ import type {
   SaveAuthConfigResult,
 } from "./auth-config-contracts.ts";
 import type {
+  AutoTitleModelOption,
+  AutoTitleSettingsSnapshot,
+  SaveAutoTitleSettingsInput,
+  SaveAutoTitleSettingsResult,
+} from "./auto-title-contracts.ts";
+import type {
   ClearedQueue,
   DraftSessionConfig,
   FileChangeSet,
@@ -177,6 +183,12 @@ export interface DesktopApi {
     saveConfig(input: SaveMemorySettingsInput): Promise<SaveMemorySettingsResult>;
     mutateEntry(input: MutateMemoryEntryInput): Promise<MemoryMutationResult>;
     runMaintenance(input: RunMemoryMaintenanceInput): Promise<MemoryMaintenanceResult>;
+    setEditorDirty(dirty: boolean): boolean;
+  };
+  autoTitle: {
+    getSnapshot(): Promise<AutoTitleSettingsSnapshot>;
+    saveConfig(input: SaveAutoTitleSettingsInput): Promise<SaveAutoTitleSettingsResult>;
+    getModelOptions(): Promise<AutoTitleModelOption[]>;
     setEditorDirty(dirty: boolean): boolean;
   };
   extensions: {

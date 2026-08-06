@@ -3,6 +3,7 @@ import { extname, relative, resolve, sep } from "node:path";
 import type { FileImage, FileNode, TextFile } from "../../shared/contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 import { fuzzyMatch } from "./fuzzy.ts";
+import { collectGitignoreLayers, type GitignoreLayer, isPathIgnored, readGitignoreLayer } from "./gitignore.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -48,6 +49,10 @@ export class FileService {
         return searchResults;
       }
       const target = resolveInside(cwd, path);
+      const layers = await collectGitignoreLayers(cwd, target);
+      if (relative(cwd, target) !== "" && isPathIgnored(normalizeRelative(relative(cwd, target)), true, layers)) {
+        return [];
+      }
       const entries = await readdir(target, { withFileTypes: true });
       const nodes = await Promise.all(
         entries
@@ -55,8 +60,10 @@ export class FileService {
             (left, right) =>
               Number(right.isDirectory()) - Number(left.isDirectory()) || left.name.localeCompare(right.name),
           )
-          .map(async (entry) => {
+          .map(async (entry): Promise<FileNode | null> => {
+            if (entry.name === ".git" || entry.name === "node_modules") return null;
             const child = resolve(target, entry.name);
+            if (isPathIgnored(normalizeRelative(relative(cwd, child)), entry.isDirectory(), layers)) return null;
             return {
               name: entry.name,
               path: normalizeRelative(relative(cwd, child)),
@@ -65,7 +72,7 @@ export class FileService {
             } satisfies FileNode;
           }),
       );
-      return nodes;
+      return nodes.filter((node): node is FileNode => node !== null);
     } finally {
       if (requestKey !== undefined && this.activeRequests.get(requestKey) === requestToken) {
         this.activeRequests.delete(requestKey);
@@ -106,18 +113,24 @@ export class FileService {
 
   private async search(cwd: string, query: string, isCancelled: () => boolean): Promise<FileNode[]> {
     const results: Array<{ node: FileNode; score: number }> = [];
-    const pending = [cwd];
+    const pending: Array<{ dir: string; depth: number; layers: readonly GitignoreLayer[] }> = [
+      { dir: cwd, depth: 0, layers: [] },
+    ];
     let nextYieldAt = performance.now() + SEARCH_YIELD_INTERVAL_MS;
     while (pending.length > 0 && results.length < MAX_SEARCH_CANDIDATES) {
       if (isCancelled()) return [];
-      const folder = pending.pop();
-      if (!folder) break;
-      const entries = await readdir(folder, { withFileTypes: true });
+      const current = pending.pop();
+      if (!current) break;
+      const { dir, depth, layers } = current;
+      const entries = await readdir(dir, { withFileTypes: true });
       if (isCancelled()) return [];
+      const ownLayer = await readGitignoreLayer(dir, depth);
+      const nextLayers = ownLayer ? [...layers, ownLayer] : layers;
       for (const entry of entries) {
         if (entry.name === ".git" || entry.name === "node_modules") continue;
-        const target = resolve(folder, entry.name);
-        if (entry.isDirectory()) pending.push(target);
+        const target = resolve(dir, entry.name);
+        if (isPathIgnored(normalizeRelative(relative(cwd, target)), entry.isDirectory(), nextLayers)) continue;
+        if (entry.isDirectory()) pending.push({ dir: target, depth: depth + 1, layers: nextLayers });
         const score = fuzzyMatch(query, entry.name);
         if (score !== null) {
           results.push({

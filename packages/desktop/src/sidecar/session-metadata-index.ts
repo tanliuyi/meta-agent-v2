@@ -14,6 +14,11 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { SessionMentionCandidate, SessionRemovePolicy, SessionRemoveResult, Thread } from "../shared/contracts.ts";
+import {
+  previewFirstLines,
+  THREAD_ASSISTANT_PREVIEW_MAX_CHARS,
+  THREAD_USER_PREVIEW_MAX_CHARS,
+} from "../shared/contracts.ts";
 import { collectThreadDescendantIds } from "../shared/thread-tree.ts";
 import {
   migrateLegacyGeneralSessionDirectory,
@@ -23,6 +28,11 @@ import {
 
 const INDEX_VERSION = 5;
 const INDEX_FILE_NAME = "session-metadata-index.json";
+/** 会话文件尾部读取块大小与上限（避免全量读取只为最后一条消息）。 */
+const LAST_MESSAGE_PREVIEW_TAIL_BYTES = 256 * 1024;
+const LAST_MESSAGE_PREVIEW_MAX_TAIL_BYTES = 4 * 1024 * 1024;
+/** 重建索引时并行读取会话文件的上限。 */
+const MAX_CONCURRENT_SESSION_FILE_READS = 10;
 
 interface IndexedSession extends Thread {
   path: string;
@@ -352,12 +362,24 @@ export class SessionMetadataIndex {
     const threadIdByPath = new Map(validExplicitSessions.map(({ session }) => [resolve(session.path), session.id]));
     for (const { session } of candidates) threadIdByPath.set(resolve(session.path), session.id);
     const knownSessionsById = new Map(currentProject?.sessions.map((session) => [session.id, session]));
-    const rebuiltSessions = await Promise.all(
-      candidates.map(async ({ session, originHint }): Promise<IndexedSession> => {
+    const rebuiltCandidates = await mapWithConcurrency(
+      candidates,
+      MAX_CONCURRENT_SESSION_FILE_READS,
+      async ({ session, originHint }): Promise<IndexedSession | undefined> => {
         const parentThreadId = session.parentSessionPath
           ? threadIdByPath.get(resolve(session.parentSessionPath))
           : undefined;
-        const fork = parentThreadId || originHint ? await readForkDescriptor(session, originHint) : undefined;
+        let fork: ForkDescriptor | undefined;
+        let lastMessagePreview: Awaited<ReturnType<typeof readLastMessagePreview>>;
+        try {
+          [fork, lastMessagePreview] = await Promise.all([
+            parentThreadId || originHint ? readForkDescriptor(session, originHint) : Promise.resolve(undefined),
+            readLastMessagePreview(session.path),
+          ]);
+        } catch (error) {
+          if (isSessionFileUnavailable(error)) return undefined;
+          throw error;
+        }
         return {
           id: session.id,
           projectId,
@@ -366,28 +388,33 @@ export class SessionMetadataIndex {
           updatedAt: knownSessionsById.get(session.id)?.updatedAt ?? session.modified.getTime(),
           messageCount: session.messageCount,
           preview: fork?.title || session.firstMessage,
+          ...lastMessagePreview,
           archived: false,
           running: false,
           ...(parentThreadId ? { parentThreadId } : {}),
           ...(fork?.origin ? { origin: fork.origin } : {}),
           path: session.path,
         };
-      }),
+      },
     );
-    const rootIds = new Set(rootSessions.map(({ id }) => id));
+    const rebuiltRootSessions = rebuiltCandidates
+      .slice(0, rootSessions.length)
+      .filter((session): session is IndexedSession => session !== undefined);
+    const rebuiltNestedSessions = rebuiltCandidates
+      .slice(rootSessions.length)
+      .filter((session): session is IndexedSession => session !== undefined);
+    const rootIds = new Set(rebuiltRootSessions.map(({ id }) => id));
     const explicitById = new Map(
       validExplicitSessions
         .filter(({ session }) => !rootIds.has(session.id))
         .map((explicit): [string, ExplicitIndexedSession] => [explicit.session.id, explicit]),
     );
-    for (const session of rebuiltSessions.slice(rootSessions.length)) {
+    for (const session of rebuiltNestedSessions) {
       if (rootIds.has(session.id) || explicitById.has(session.id)) continue;
       explicitById.set(session.id, { session });
     }
     const explicitSessions = [...explicitById.values()];
-    const sessionsById = new Map(
-      rebuiltSessions.slice(0, rootSessions.length).map((session): [string, IndexedSession] => [session.id, session]),
-    );
+    const sessionsById = new Map(rebuiltRootSessions.map((session): [string, IndexedSession] => [session.id, session]));
     for (const { session } of explicitSessions) sessionsById.set(session.id, session);
     const sessions = [...sessionsById.values()].sort((left, right) => right.updatedAt - left.updatedAt);
     const project = {
@@ -415,10 +442,13 @@ export class SessionMetadataIndex {
     cwd: string,
   ): project is IndexedProject {
     const configuredDirectory = this.agentDir ? resolveDesktopSessionDirectory(projectId, this.agentDir) : undefined;
+    const previewsUpgraded =
+      project?.sessions.every((session) => session.origin === "subagent" || "lastAssistantPreview" in session) ?? false;
     return (
       project?.cwd === cwd &&
       (configuredDirectory === undefined || project.sessionDirectory === configuredDirectory) &&
       project.backfillComplete &&
+      previewsUpgraded &&
       project.directoryFingerprint !== null &&
       fingerprintSessionDirectory(project.sessionDirectory) === project.directoryFingerprint &&
       project.explicitSessions.every(({ session }) => existsSync(session.path))
@@ -475,6 +505,8 @@ function isIndexedSession(value: unknown): value is IndexedSession {
     typeof value.updatedAt === "number" &&
     typeof value.messageCount === "number" &&
     typeof value.preview === "string" &&
+    (value.lastUserPreview === undefined || typeof value.lastUserPreview === "string") &&
+    (value.lastAssistantPreview === undefined || typeof value.lastAssistantPreview === "string") &&
     typeof value.archived === "boolean" &&
     typeof value.running === "boolean" &&
     (value.parentThreadId === undefined || typeof value.parentThreadId === "string") &&
@@ -559,6 +591,76 @@ async function readForkDescriptor(
     title: activity.name || (activity.prompt ? forkTitle(activity.prompt, origin) : "分支会话"),
     ...(activity.prompt ? { prompt: activity.prompt } : {}),
   };
+}
+
+/** 以固定并发上限映射异步任务，避免同时打开大量会话文件。 */
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** 读取会话文件最后一条可见消息（user/assistant）的前两行，用于侧边栏 hover 预览。 */
+async function readLastMessagePreview(
+  sessionFile: string,
+): Promise<{ lastUserPreview?: string; lastAssistantPreview?: string }> {
+  const fileSize = statSync(sessionFile).size;
+  let lastUserPreview: string | undefined;
+  let lastRole: string | undefined;
+  let lastText: string | undefined;
+  // 只读文件尾部：最后一条消息几乎总在末尾；块首行可能被 UTF-8 边界截断，JSON.parse 失败自然跳过。
+  let tailStart = Math.max(0, fileSize - LAST_MESSAGE_PREVIEW_TAIL_BYTES);
+  for (;;) {
+    const lines = createInterface({
+      input: createReadStream(sessionFile, { encoding: "utf8", start: tailStart }),
+      crlfDelay: Infinity,
+    });
+    for await (const line of lines) {
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!isRecord(value) || value.type !== "message" || !isRecord(value.message)) continue;
+      const role = value.message.role;
+      const text = messageText(value.message.content).trim();
+      if (role !== "user" && role !== "assistant") continue;
+      if (!text) continue;
+      lastRole = role;
+      lastText = text;
+      if (role === "user") lastUserPreview = previewFirstLines(text, THREAD_USER_PREVIEW_MAX_CHARS);
+    }
+    // 未解析到可见消息，或仅缺少 assistant 前的 user 时，继续向前扩展重读。
+    if (
+      (lastRole === undefined || (lastRole === "assistant" && lastUserPreview === undefined)) &&
+      tailStart > 0 &&
+      fileSize - tailStart < LAST_MESSAGE_PREVIEW_MAX_TAIL_BYTES
+    ) {
+      tailStart = Math.max(0, tailStart - LAST_MESSAGE_PREVIEW_TAIL_BYTES);
+      continue;
+    }
+    break;
+  }
+  const lastAssistantPreview =
+    lastRole === "assistant" && lastText ? previewFirstLines(lastText, THREAD_ASSISTANT_PREVIEW_MAX_CHARS) : "";
+  return { ...(lastUserPreview !== undefined ? { lastUserPreview } : {}), lastAssistantPreview };
+}
+
+function isSessionFileUnavailable(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "EACCES" || error.code === "EPERM")
+  );
 }
 
 async function readForkActivity(

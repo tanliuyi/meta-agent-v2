@@ -17,6 +17,7 @@ import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
+import { Route as SettingsAutoTitleRouteImport } from './routes/settings.auto-title'
 import { Route as SettingsDependenciesRouteImport } from './routes/settings.dependencies'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
@@ -65,6 +66,11 @@ const SettingsAboutRoute = SettingsAboutRouteImport.update({
 const SettingsAuthRoute = SettingsAuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsAutoTitleRoute = SettingsAutoTitleRouteImport.update({
+  id: '/auto-title',
+  path: '/auto-title',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsDependenciesRoute = SettingsDependenciesRouteImport.update({
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/plugins': typeof ChatPluginsRouteWithChildren
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/auto-title': typeof SettingsAutoTitleRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -143,6 +150,7 @@ export interface FileRoutesByTo {
   '/new': typeof ChatNewRoute
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/auto-title': typeof SettingsAutoTitleRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -164,6 +172,7 @@ export interface FileRoutesById {
   '/_chat/plugins': typeof ChatPluginsRouteWithChildren
   '/settings/about': typeof SettingsAboutRoute
   '/settings/auth': typeof SettingsAuthRoute
+  '/settings/auto-title': typeof SettingsAutoTitleRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -186,6 +195,7 @@ export interface FileRouteTypes {
     | '/plugins'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/auto-title'
     | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/memory'
@@ -202,6 +212,7 @@ export interface FileRouteTypes {
     | '/new'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/auto-title'
     | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/memory'
@@ -222,6 +233,7 @@ export interface FileRouteTypes {
     | '/_chat/plugins'
     | '/settings/about'
     | '/settings/auth'
+    | '/settings/auto-title'
     | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/memory'
@@ -297,6 +309,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/settings/auth'
       preLoaderRoute: typeof SettingsAuthRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/auto-title': {
+      id: '/settings/auto-title'
+      path: '/auto-title'
+      fullPath: '/settings/auto-title'
+      preLoaderRoute: typeof SettingsAutoTitleRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/dependencies': {
@@ -408,6 +427,7 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 interface SettingsRouteChildren {
   SettingsAboutRoute: typeof SettingsAboutRoute
   SettingsAuthRoute: typeof SettingsAuthRoute
+  SettingsAutoTitleRoute: typeof SettingsAutoTitleRoute
   SettingsDependenciesRoute: typeof SettingsDependenciesRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsMemoryRoute: typeof SettingsMemoryRoute
@@ -420,6 +440,7 @@ interface SettingsRouteChildren {
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAboutRoute: SettingsAboutRoute,
   SettingsAuthRoute: SettingsAuthRoute,
+  SettingsAutoTitleRoute: SettingsAutoTitleRoute,
   SettingsDependenciesRoute: SettingsDependenciesRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsMemoryRoute: SettingsMemoryRoute,

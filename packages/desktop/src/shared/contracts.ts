@@ -47,6 +47,10 @@ export interface Thread {
   updatedAt: number;
   messageCount: number;
   preview: string;
+  /** 最后一对消息中用户消息的文本（前两行），用于侧边栏 hover 预览。 */
+  lastUserPreview?: string;
+  /** 最后一条 AI 回复的文本（前两行）；空或缺失表示最后一条消息无 AI 回复，不展示预览。 */
+  lastAssistantPreview?: string;
   archived: boolean;
   running: boolean;
   /** 渲染器本地标记：运行完成（成功或失败）后尚未被用户查看。主进程从不发送该字段。 */
@@ -60,6 +64,18 @@ export interface Thread {
 /** Thread 加 session.jsonl 绝对路径，用于 @ 提及会话引用。 */
 export interface SessionMentionCandidate extends Thread {
   path: string;
+}
+
+/** 侧边栏 hover 预览中用户消息预览的最大字符数。 */
+export const THREAD_USER_PREVIEW_MAX_CHARS = 240;
+/** 侧边栏 hover 预览中 AI 回复预览的最大字符数。 */
+export const THREAD_ASSISTANT_PREVIEW_MAX_CHARS = 480;
+
+/** 取文本前两行并限制总长，用于侧边栏 hover 预览。 */
+export function previewFirstLines(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  const joined = trimmed.split("\n").slice(0, 2).join("\n");
+  return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
 }
 
 export type SessionRemovePolicy = "subtree" | "reparent";

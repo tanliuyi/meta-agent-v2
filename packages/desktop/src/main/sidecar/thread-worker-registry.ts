@@ -21,6 +21,11 @@ import type {
   SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
+import {
+  previewFirstLines,
+  THREAD_ASSISTANT_PREVIEW_MAX_CHARS,
+  THREAD_USER_PREVIEW_MAX_CHARS,
+} from "../../shared/contracts.ts";
 import type {
   ApplyDesktopExtensionSetResult,
   DesktopExtensionDiagnostic,
@@ -1671,13 +1676,14 @@ function cloneExtensionSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
 function summaryFromBootstrap(bootstrap: SessionBootstrap): Thread {
   const nodes = bootstrap.timeline.nodes.filter((node) => node.kind === "user" || node.kind === "assistant");
   const firstUser = nodes.find((node) => node.kind === "user");
-  const preview =
-    firstUser?.kind === "user"
-      ? firstUser.content
-          .flatMap((part) => (part.type === "text" ? [part.text] : []))
-          .join("\n")
-          .slice(0, 120)
-      : "";
+  const lastNode = nodes.at(-1);
+  const lastUser = lastNode ? [...nodes].reverse().find((node) => node.kind === "user") : undefined;
+  const nodeText = (node: (typeof nodes)[number]) =>
+    node.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  const preview = firstUser?.kind === "user" ? nodeText(firstUser).slice(0, 120) : "";
+  const lastUserPreview = lastUser ? previewFirstLines(nodeText(lastUser), THREAD_USER_PREVIEW_MAX_CHARS) : undefined;
+  const lastAssistantPreview =
+    lastNode?.kind === "assistant" ? previewFirstLines(nodeText(lastNode), THREAD_ASSISTANT_PREVIEW_MAX_CHARS) : "";
   return {
     id: bootstrap.threadId,
     projectId: bootstrap.projectId,
@@ -1686,6 +1692,8 @@ function summaryFromBootstrap(bootstrap: SessionBootstrap): Thread {
     updatedAt: bootstrap.control.updatedAt,
     messageCount: nodes.length,
     preview,
+    ...(lastUserPreview !== undefined ? { lastUserPreview } : {}),
+    lastAssistantPreview,
     archived: false,
     running: bootstrap.timeline.phase !== "idle",
   };

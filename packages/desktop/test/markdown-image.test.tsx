@@ -53,4 +53,15 @@ describe("Markdown images", () => {
     expect(markup).toContain("下载图片");
     expect(markup).toContain("引用图片");
   });
+
+  it("在无 SessionScope 的悬浮预览中禁用链接安全，链接直接渲染为锚点", () => {
+    const markup = renderToStaticMarkup(
+      <StreamdownMarkdown linkSafety={{ enabled: false }}>
+        {"点此查看 [项目文档](https://example.com/docs)"}
+      </StreamdownMarkdown>,
+    );
+
+    expect(markup).toContain('href="https://example.com/docs"');
+    expect(markup).not.toContain("打开外部链接？");
+  });
 });

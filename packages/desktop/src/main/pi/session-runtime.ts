@@ -14,6 +14,7 @@ import {
 import {
   type ClearedQueue,
   PROTOCOL_VERSION,
+  previewFirstLines,
   type SessionBootstrap,
   type SessionBranchInput,
   type SessionBranchResult,
@@ -24,6 +25,8 @@ import {
   type SessionPromptInput,
   type SessionPushPayload,
   type SessionReloadInput,
+  THREAD_ASSISTANT_PREVIEW_MAX_CHARS,
+  THREAD_USER_PREVIEW_MAX_CHARS,
   type Thread,
 } from "../../shared/contracts.ts";
 import type { DesktopExtensionDiagnostic, ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
@@ -158,6 +161,7 @@ export class SessionRuntime {
       throw new DesktopExtensionStartupError(extensionSet.generation, extensionDiagnostics);
     }
     const sessionManager = options.sessionManager ?? SessionManager.create(services.cwd);
+    const isNewSession = options.createInput !== undefined || options.sessionManager === undefined;
     const selection = options.createInput
       ? resolveSessionCreateSelection(options.createInput, services.modelRuntime)
       : options.sessionManager
@@ -167,7 +171,7 @@ export class SessionRuntime {
       services,
       sessionManager,
       ...(selection ? { model: selection.model, thinkingLevel: selection.thinkingLevel } : {}),
-      sessionStartEvent: { type: "session_start", reason: options.sessionManager ? "resume" : "new" },
+      sessionStartEvent: { type: "session_start", reason: isNewSession ? "new" : "resume" },
     });
     let runtime: SessionRuntime;
     try {
@@ -664,6 +668,18 @@ export class SessionRuntime {
       ...this.summaryState,
       title,
       preview,
+      ...(message.role === "user" || message.role === "assistant"
+        ? {
+            lastUserPreview:
+              message.role === "user"
+                ? previewFirstLines(contentText(message.content), THREAD_USER_PREVIEW_MAX_CHARS)
+                : this.summaryState.lastUserPreview,
+            lastAssistantPreview:
+              message.role === "assistant"
+                ? previewFirstLines(contentText(message.content), THREAD_ASSISTANT_PREVIEW_MAX_CHARS)
+                : "",
+          }
+        : {}),
       updatedAt:
         message.role === "user"
           ? Math.max(this.summaryState.updatedAt, message.timestamp)
@@ -714,9 +730,16 @@ function createSummary(
 ): Omit<Thread, "projectId" | "archived" | "running"> {
   const visible = session.messages.filter((message) => message.role === "user" || message.role === "assistant");
   const first = visible.find((message) => message.role === "user");
+  const last = visible.at(-1);
+  const lastUser = last ? [...visible].reverse().find((message) => message.role === "user") : undefined;
   const preview = first?.role === "user" ? contentText(first.content).slice(0, 120) : "";
+  const lastUserPreview = lastUser
+    ? previewFirstLines(contentText(lastUser.content), THREAD_USER_PREVIEW_MAX_CHARS)
+    : undefined;
+  const lastAssistantPreview =
+    last?.role === "assistant" ? previewFirstLines(contentText(last.content), THREAD_ASSISTANT_PREVIEW_MAX_CHARS) : "";
   const headerTimestamp = Date.parse(session.sessionManager.getHeader()?.timestamp ?? "");
-  const lastMessageTimestamp = visible.at(-1)?.timestamp ?? 0;
+  const lastMessageTimestamp = last?.timestamp ?? 0;
   const updatedAt =
     initialUpdatedAt ??
     (Math.max(lastMessageTimestamp, Number.isFinite(headerTimestamp) ? headerTimestamp : 0) || Date.now());
@@ -727,6 +750,8 @@ function createSummary(
     updatedAt,
     messageCount: visible.length,
     preview,
+    ...(lastUserPreview !== undefined ? { lastUserPreview } : {}),
+    lastAssistantPreview,
   };
 }
 

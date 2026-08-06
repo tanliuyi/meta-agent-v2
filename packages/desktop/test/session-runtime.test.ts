@@ -190,12 +190,14 @@ describe("SessionRuntime Pi-native commands", () => {
   it("创建新 session 时加载 Pi 默认 services 并传递显式 model 和 thinking", async () => {
     const session = createSession();
     const model = { provider: "openai", id: "gpt" };
+    const sessionManager = {} as SessionManager;
     mocks.resolveSelection.mockReturnValue({ model, thinkingLevel: "high" });
     mocks.createAgentSessionFromServices.mockResolvedValue({ session });
 
     await SessionRuntime.create({
       projectId: "project",
       cwd: "/workspace",
+      sessionManager,
       createInput: {
         projectId: "project",
         createRequestId: "create",
@@ -211,8 +213,10 @@ describe("SessionRuntime Pi-native commands", () => {
     expect(mocks.createAgentSessionFromServices).toHaveBeenCalledWith(
       expect.objectContaining({
         services: expect.objectContaining({ resourceLoader: expect.any(Object) }),
+        sessionManager,
         model,
         thinkingLevel: "high",
+        sessionStartEvent: { type: "session_start", reason: "new" },
       }),
     );
   });

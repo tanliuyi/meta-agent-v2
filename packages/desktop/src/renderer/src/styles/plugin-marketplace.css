@@ -1014,7 +1014,7 @@ button.plugin-local-row-main:hover strong {
   width: 100%;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-7);
   text-align: left;
 }

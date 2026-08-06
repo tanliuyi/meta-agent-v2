@@ -54,6 +54,13 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
       "ui.status",
     ],
   },
+  {
+    id: "pi-auto-title",
+    displayName: "自动标题",
+    source: "builtin",
+    hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+    capabilities: ["events.subscribe", "session.read"],
+  },
 ];
 const curatedExtensions: DesktopExtensionDefinition[] = [];
 

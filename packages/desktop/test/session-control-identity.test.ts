@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeSessionControl } from "../src/renderer/src/state/session-control-identity.ts";
+import { mergeSessionControl } from "../src/renderer/src/shared/session-control-identity.ts";
 import { PROTOCOL_VERSION, type SessionControlState } from "../src/shared/contracts.ts";
 
 describe("mergeSessionControl", () => {

@@ -1,3 +1,4 @@
+import { autoUpdate, FloatingPortal, flip, offset, shift, useFloating } from "@floating-ui/react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import ArrowUpToLine from "lucide-react/dist/esm/icons/arrow-up-to-line.mjs";
@@ -11,17 +12,22 @@ import Pin from "lucide-react/dist/esm/icons/pin.mjs";
 import PinOff from "lucide-react/dist/esm/icons/pin-off.mjs";
 import Square from "lucide-react/dist/esm/icons/square.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { memo, useRef } from "react";
+import { memo, useMemo, useRef, useState } from "react";
+import type { LinkSafetyConfig } from "streamdown";
 import type { Thread } from "../../../../shared/contracts.ts";
 import { builtinSubagentDisplayName } from "../../shared/lib/builtin-subagent-name.ts";
 import { ContextMenuContent } from "../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../shared/ui/context-menu-item.tsx";
 import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context.tsx";
 import { Badge } from "../assistant-ui/badge.tsx";
+import { StreamdownMarkdown } from "../assistant-ui/streamdown/streamdown-markdown.tsx";
 
 const TREE_GUIDE_START = 16;
 const TREE_LEVEL_INDENT = 16;
 const TREE_TOGGLE_SIZE = 16;
+
+// 侧边栏悬浮预览无会话上下文，链接确认 modal 依赖 SessionScope，故禁用链接安全。
+const PREVIEW_LINK_SAFETY: LinkSafetyConfig = { enabled: false };
 
 interface DesktopThreadListItemProps {
   thread: Thread;
@@ -71,6 +77,17 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
     props.isPromotePending;
   const contentIndent =
     props.compactRoot && props.depth === 0 && props.childCount === 0 ? 8 : 32 + props.depth * TREE_LEVEL_INDENT;
+  const [previewHovered, setPreviewHovered] = useState(false);
+  const userPreview = thread.lastUserPreview?.trim() ?? "";
+  const assistantPreview = thread.lastAssistantPreview?.trim() ?? "";
+  const previewVisible = userPreview.length > 0 && assistantPreview.length > 0;
+  const previewMiddleware = useMemo(() => [offset(14), flip({}), shift({ padding: 12 })], []);
+  const { refs, floatingStyles } = useFloating({
+    open: previewHovered && previewVisible,
+    placement: "right",
+    middleware: previewMiddleware,
+    whileElementsMounted: autoUpdate,
+  });
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
@@ -151,6 +168,7 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           ) : null}
           <button
             type="button"
+            ref={refs.setReference}
             className="thread-main focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1 rounded-xl pe-2 text-start outline-none focus-visible:ring-[3px]"
             style={{ paddingInlineStart: contentIndent }}
             role="treeitem"
@@ -158,6 +176,8 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             aria-expanded={props.childCount > 0 ? props.expanded : undefined}
             aria-selected={props.active}
             disabled={props.isSwitching}
+            onPointerEnter={() => setPreviewHovered(true)}
+            onPointerLeave={() => setPreviewHovered(false)}
             onClick={() => {
               if (!props.active) props.onOpen(thread);
             }}
@@ -201,6 +221,16 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
             <span className="thread-drag-image-title">{thread.title || "新会话"}</span>
             <span className="thread-drag-image-hint">在侧边栏打开</span>
           </div>
+          {previewHovered && previewVisible ? (
+            <FloatingPortal preserveTabOrder={false}>
+              <div ref={refs.setFloating} className="message-navigation-summary" style={floatingStyles} role="tooltip">
+                <span>{userPreview}</span>
+                <div className="message-navigation-summary-markdown">
+                  <StreamdownMarkdown linkSafety={PREVIEW_LINK_SAFETY}>{assistantPreview}</StreamdownMarkdown>
+                </div>
+              </div>
+            </FloatingPortal>
+          ) : null}
         </div>
       </ContextMenu.Trigger>
       <ContextMenuContent>

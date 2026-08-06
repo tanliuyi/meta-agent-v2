@@ -43,6 +43,8 @@ describe("SessionMetadataIndex", () => {
 
   it("listWithPaths 保留 session.jsonl 绝对路径，list 不暴露", async () => {
     const sessionFile = join(userDataDir, "agent", "sessions", "--general--", "a.jsonl");
+    mkdirSync(join(userDataDir, "agent", "sessions", "--general--"), { recursive: true });
+    writeFileSync(sessionFile, '{"type":"session","id":"a"}\n');
     mocks.listSessions.mockResolvedValue([sessionInfo("a", sessionFile, "Alpha", 2)]);
     const index = new SessionMetadataIndex(userDataDir, join(userDataDir, "agent"));
 
@@ -52,6 +54,13 @@ describe("SessionMetadataIndex", () => {
     await expect(index.list(GENERAL_WORKSPACE_ID, cwd)).resolves.toEqual([
       expect.not.objectContaining({ path: sessionFile }),
     ]);
+  });
+
+  it("skips a session file removed after directory scanning", async () => {
+    const removedFile = join(userDataDir, "removed.jsonl");
+    mocks.listSessions.mockResolvedValue([sessionInfo("removed", removedFile, "Removed", 2)]);
+
+    await expect(new SessionMetadataIndex(userDataDir).list("project", cwd)).resolves.toEqual([]);
   });
 
   it("migrates legacy general sessions before indexing the short directory", async () => {
@@ -164,6 +173,26 @@ describe("SessionMetadataIndex", () => {
     expect(mocks.listSessions).not.toHaveBeenCalled();
   });
 
+  it("rejects persisted preview fields with invalid types and rebuilds them", async () => {
+    const sessionFile = join(userDataDir, "thread.jsonl");
+    writeFileSync(sessionFile, '{"type":"session","id":"thread"}\n');
+    mocks.listSessions.mockResolvedValue([sessionInfo("thread", sessionFile, "Initial", 2)]);
+    await new SessionMetadataIndex(userDataDir).list("project", cwd);
+
+    const indexPath = join(userDataDir, "session-metadata-index.json");
+    const stored = JSON.parse(readFileSync(indexPath, "utf8")) as {
+      projects: Record<string, { sessions: Array<Record<string, unknown>> }>;
+    };
+    stored.projects.project!.sessions[0]!.lastAssistantPreview = 42;
+    writeFileSync(indexPath, `${JSON.stringify(stored, null, 2)}\n`);
+    mocks.listSessions.mockClear();
+
+    await expect(new SessionMetadataIndex(userDataDir).list("project", cwd)).resolves.toEqual([
+      expect.objectContaining({ id: "thread", lastAssistantPreview: "" }),
+    ]);
+    expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+  });
+
   it("validates a newly discovered session directory before reusing its persisted index", async () => {
     const sessionFile = join(userDataDir, "recovered.jsonl");
     writeFileSync(sessionFile, "recovered\n");
@@ -266,6 +295,7 @@ describe("SessionMetadataIndex", () => {
     const initialFile = join(userDataDir, "initial.jsonl");
     const recoveredFile = join(userDataDir, "recovered.jsonl");
     writeFileSync(initialFile, "initial\n");
+    writeFileSync(recoveredFile, "recovered\n");
     const index = new SessionMetadataIndex(userDataDir);
     index.upsert("project", cwd, initialFile, thread("initial", "Initial"));
     mocks.listSessions.mockResolvedValue([sessionInfo("initial", initialFile, "Initial", 2)]);
@@ -281,6 +311,26 @@ describe("SessionMetadataIndex", () => {
       path: recoveredFile,
     });
     expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a visible message whose JSONL line is larger than the initial tail block", async () => {
+    const sessionFile = join(userDataDir, "large-message.jsonl");
+    const text = `large assistant preview ${"x".repeat(300 * 1024)}`;
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({ type: "session", id: "large" })}\n${JSON.stringify({
+        type: "message",
+        message: { role: "assistant", content: [{ type: "text", text }], timestamp: 2 },
+      })}\n`,
+    );
+    mocks.listSessions.mockResolvedValue([sessionInfo("large", sessionFile, "Large", 2, { messageCount: 1 })]);
+
+    await expect(new SessionMetadataIndex(userDataDir).list("project", cwd)).resolves.toEqual([
+      expect.objectContaining({
+        id: "large",
+        lastAssistantPreview: text.slice(0, 480),
+      }),
+    ]);
   });
 
   it("does not rebuild twice when resolve still misses after refreshing an invalidated project", async () => {
@@ -514,6 +564,7 @@ describe("SessionMetadataIndex", () => {
         createdAt: 100,
         updatedAt: 120,
         preview: "Implement the Desktop session tree without widen",
+        lastUserPreview: "You are a delegated subagent running from a fork of the parent session.\n",
         parentThreadId: "parent",
         origin: "subagent",
       },
@@ -586,6 +637,7 @@ function thread(id: string, title: string): Thread {
     updatedAt: 2,
     messageCount: 0,
     preview: "",
+    lastAssistantPreview: "",
     archived: false,
     running: false,
   };

@@ -7,6 +7,7 @@ import type {
   AuthOauthLoginResponse,
   SaveAuthConfigInput,
 } from "../shared/auth-config-contracts.ts";
+import type { SaveAutoTitleSettingsInput } from "../shared/auto-title-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   HostResponse,
@@ -76,6 +77,7 @@ import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-reg
 import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import type { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
+import type { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
 import type { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
 import type { ProjectStore } from "./store/project-store.ts";
@@ -88,6 +90,7 @@ import type { WindowDirtyGuard } from "./window-dirty-guard.ts";
 const authEditorWebContents = new Set<number>();
 const providerEditorWebContents = new Set<number>();
 const memoryEditorWebContents = new Set<number>();
+const autoTitleEditorWebContents = new Set<number>();
 
 export function registerIpc(
   projects: ProjectStore,
@@ -119,6 +122,7 @@ export function registerIpc(
   marketplaceInstaller?: MarketplacePluginInstaller,
   pluginConfigurations?: PluginConfigurationService,
   memorySettings?: MemorySettingsService,
+  autoTitle?: AutoTitleSettingsService,
   preferences?: PreferencesConfigService,
 ): void {
   const subscribedWebContents = new Set<number>();
@@ -245,6 +249,13 @@ export function registerIpc(
     ipcMain.handle(CHANNELS.memorySettingsRunMaintenance, (_event, input: RunMemoryMaintenanceInput) =>
       memorySettings.runMaintenance(input),
     );
+  }
+  if (autoTitle) {
+    ipcMain.handle(CHANNELS.autoTitleGetSnapshot, () => autoTitle.getSnapshot());
+    ipcMain.handle(CHANNELS.autoTitleSaveConfig, (_event, input: SaveAutoTitleSettingsInput) =>
+      autoTitle.saveConfig(input),
+    );
+    ipcMain.handle(CHANNELS.autoTitleGetModelOptions, () => autoTitle.getModelOptions());
   }
   if (subagents) {
     ipcMain.handle(CHANNELS.subagentsGetSnapshot, (_event, input?: GetSubagentSettingsInput) =>
@@ -401,6 +412,23 @@ export function registerIpc(
       memoryEditorWebContents.add(ownerId);
       event.sender.once("destroyed", () => {
         memoryEditorWebContents.delete(ownerId);
+        dirtyGuard.remove(ownerId);
+      });
+    }
+    event.returnValue = true;
+  });
+
+  ipcMain.on(CHANNELS.autoTitleSetEditorDirty, (event, dirty: unknown) => {
+    if (typeof dirty !== "boolean") {
+      event.returnValue = false;
+      return;
+    }
+    const ownerId = event.sender.id;
+    dirtyGuard.setDirty(ownerId, dirty);
+    if (!autoTitleEditorWebContents.has(ownerId)) {
+      autoTitleEditorWebContents.add(ownerId);
+      event.sender.once("destroyed", () => {
+        autoTitleEditorWebContents.delete(ownerId);
         dirtyGuard.remove(ownerId);
       });
     }

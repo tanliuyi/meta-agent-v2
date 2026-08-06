@@ -16,6 +16,7 @@
 @import "./plugin-marketplace.css" layer(components);
 @import "./subagent-settings.css" layer(components);
 @import "./memory-settings.css" layer(components);
+@import "./auto-title-settings.css" layer(components);
 @import "./providers-settings.css" layer(components);
 @import "./chat.css" layer(components);
 @import "./image-preview.css";

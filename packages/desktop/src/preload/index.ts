@@ -202,6 +202,12 @@ const desktopApi: DesktopApi = {
     runMaintenance: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsRunMaintenance, input),
     setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.memorySettingsSetEditorDirty, dirty) === true,
   },
+  autoTitle: {
+    getSnapshot: () => ipcRenderer.invoke(CHANNELS.autoTitleGetSnapshot),
+    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.autoTitleSaveConfig, input),
+    getModelOptions: () => ipcRenderer.invoke(CHANNELS.autoTitleGetModelOptions),
+    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.autoTitleSetEditorDirty, dirty) === true,
+  },
   extensions: {
     getConfig: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.extensionsGetConfig, projectId, threadId),
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.extensionsSaveConfig, input),

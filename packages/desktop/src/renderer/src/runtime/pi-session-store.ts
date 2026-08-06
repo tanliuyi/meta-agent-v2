@@ -1,5 +1,6 @@
 import type { Attachment } from "@assistant-ui/react";
 import type { PiThreadSnapshot, SessionControlState, WorkbenchState } from "../../../shared/contracts.ts";
+import { mergeSessionControl } from "../shared/session-control-identity.ts";
 import { PiThreadStore } from "./pi-thread-store.ts";
 
 /**
@@ -152,12 +153,12 @@ function createControlStore(): SessionControlStore {
       return control;
     },
     replace(value: SessionControlState) {
-      control = value;
+      control = mergeSessionControl(control ?? undefined, value);
       for (const listener of listeners) listener();
     },
     apply(value: SessionControlState) {
       if (control && control.revision >= value.revision) return;
-      control = value;
+      control = mergeSessionControl(control ?? undefined, value);
       for (const listener of listeners) listener();
     },
     subscribe(listener: () => void) {
