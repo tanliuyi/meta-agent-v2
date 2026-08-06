@@ -37,6 +37,30 @@ Never place passwords, session tokens, admin tokens, signing private keys, or SS
 8. Publish the version, then verify the public plugin detail, version detail, artifact metadata, downloadable bytes, SHA-256, signed manifest, entry path, target, and capabilities.
 9. Report plugin ID, version, status, target, size, SHA-256, compatibility, and residual platform or credential requirements. Do not report secrets.
 
+## Scripts
+
+Reusable Node scripts live in `scripts/` next to this file (Node 18+, `fetch`, zero npm dependencies). They keep credential handling uniform: secrets are read from files, never from argv, and the session token is written with mode 0600. Prefer these scripts over regenerating ad-hoc equivalents; use them as building blocks when the workflow needs extra steps (e.g. admin-token operations).
+
+- `scripts/discover.mjs <publicBaseUrl>` — fetch `/.well-known/meta-agent-marketplace.json` and print `{ apiRoot, marketplaceId, protocolVersion, fingerprint, signingKey }`. Compare the fingerprint against previously trusted values; require explicit trust on first sight and on change.
+- `scripts/build-payload.mjs <pluginDir> <out.zip> [entry...]` — assemble the payload ZIP with validated POSIX-relative paths. Default entries are `index.ts src`; excludes tests, `node_modules`, `dist`, `.git`, source maps, env/log/lock files, and `market-manifest.json`. Runs from any directory with Node only (no jszip needed).
+- `scripts/login.mjs <apiRoot> <username> <passwordFile> <tokenOut> <publisherId>` — authenticate, confirm publisher membership via `/auth/me`, write the session token to a 0600 file. The password is read from a file; delete both files after publishing.
+- `scripts/login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--timeout <seconds>]` — preferred interactive login: starts a loopback HTTP server, opens the browser, and the user enters credentials on a page (login or register mode). The page submits to the local server, which forwards to the marketplace auth API, checks publisher membership, and writes the token to a 0600 file. Passwords never reach argv, shell history, or the agent. The server exits after a successful auth or the timeout (default 300 s).
+- `scripts/publish.mjs <apiRoot> <tokenFile> <spec.json> <payload.zip>... [--yes]` — declare plugin metadata, create the draft version, upload every declared artifact, then publish. The spec mirrors the API request bodies; see `scripts/spec.example.json`. Pauses 3 seconds before publishing unless `--yes` is passed, so an unintended run can be Ctrl-C'd.
+- `scripts/verify.mjs <apiRoot> <pluginId> <version> [--out <dir>] [--key <publicKeyFile>]` — check the public catalog reports `available`, follow the download endpoint's `url` field to fetch real artifact bytes, compare SHA-256 and size, unpack the `.meta-plugin`, cross-check `market-manifest.json` against the payload file set, and optionally verify the Ed25519 signature.
+
+Typical sequence:
+
+```bash
+node scripts/discover.mjs https://marketplace.example.com
+node scripts/build-payload.mjs ./plugin-dir ./payload.zip
+node scripts/login-web.mjs "$API_ROOT" ./token.tmp admin
+node scripts/publish.mjs "$API_ROOT" ./token.tmp ./spec.json ./payload.zip --yes
+node scripts/verify.mjs "$API_ROOT" pi.example 1.0.0 --out ./verify-out
+rm -f ./token.tmp ./payload.zip
+```
+
+Use `login-web.mjs` whenever a browser is available (credentials stay out of the session entirely); fall back to `login.mjs` for headless runs. `password.tmp` and `token.tmp` must be created with owner-only permissions and removed in a `finally`/trap path. Never commit them or the spec's credentials (the spec itself is secret-free).
+
 ## Artifact Rules
 
 - The entry must be a regular `.ts`, `.js`, `.mjs`, or `.cjs` file with a default Pi Extension factory export.
