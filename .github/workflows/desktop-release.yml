@@ -115,6 +115,12 @@ jobs:
           chmod 600 "$KEY_PATH"
           echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
 
+      - name: Generate AI model data
+        # packages/ai derives model types from src/providers/data/*.json, which is
+        # gitignored and generated from models.dev. The desktop build type-checks
+        # packages/ai sources, so generate the data before building.
+        run: npm --prefix packages/ai run generate-models
+
       - name: Build Desktop
         run: npm --prefix packages/desktop run build
 
