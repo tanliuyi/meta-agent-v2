@@ -35,7 +35,7 @@ describe("shell runtime settings", () => {
     const globalShellPath = join(root, "global", "bash.exe");
     const projectShellPath = join(root, "project", "bash.exe");
     const replacementShellPath = join(root, "replacement", "bash.exe");
-    const projectSettingsDir = join(cwd, ".pi-desk");
+    const projectSettingsDir = join(cwd, ".pi");
     mkdirSync(projectSettingsDir, { recursive: true });
     writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: globalShellPath }));
     writeFileSync(join(projectSettingsDir, "settings.json"), JSON.stringify({ shellPath: projectShellPath }));

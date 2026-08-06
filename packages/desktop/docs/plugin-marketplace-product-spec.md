@@ -480,7 +480,7 @@ interface MarketplaceRuntimeTarget {
 <agentDir>/extensions/<plugin-id>/
 ```
 
-必须完整支持 `PI_CODING_AGENT_DIR`，不得在 renderer、preload 或市场 DTO 中拼接 `~/.pi-desk/agent`。
+必须完整支持 `PI_CODING_AGENT_DIR`，不得在 renderer、preload 或市场 DTO 中拼接 `~/.pi/agent`。
 
 ### 10.2 Project
 

@@ -18,7 +18,7 @@
 - 创建、编辑、删除 chain（步骤式工作流）；
 - 编辑 subagent 扩展全局配置（默认异步、嵌套深度、并行上限等）。
 
-本规范不依赖 Pi session runtime，页面通过窄化的 IPC API 直接读写 `~/.pi-desk/agent` 下的文件。
+本规范不依赖 Pi session runtime，页面通过窄化的 IPC API 直接读写 `~/.pi/agent` 下的文件。
 
 ## 2. 非目标
 
@@ -40,13 +40,13 @@
 
 | 来源 | 路径 | 用途 |
 |---|---|---|
-| Subagent 扩展配置 | `~/.pi-desk/agent/extensions/subagent/config.json` | `ExtensionConfig`（异步默认、深度上限等） |
-| Agent settings | `~/.pi-desk/agent/settings.json` 的 `subagents.agentOverrides` 部分 | 内置 agent override（用户级） |
-| Agent settings（项目） | `<project>/.pi-desk/settings.json` 的 `subagents.agentOverrides` 部分 | 内置 agent override（项目级） |
-| 自定义 agent 目录（用户） | `~/.pi-desk/agent/agents/*.md` | 自定义 agent 定义 |
-| 自定义 agent 目录（项目） | `<project>/.pi-desk/agents/*.md` | 自定义 agent 定义 |
-| Chain 目录（用户） | `~/.pi-desk/agent/chains/*.chain.md` | Chain 定义 |
-| Chain 目录（项目） | `<project>/.pi-desk/chains/*.chain.md` | Chain 定义 |
+| Subagent 扩展配置 | `~/.pi/agent/extensions/subagent/config.json` | `ExtensionConfig`（异步默认、深度上限等） |
+| Agent settings | `~/.pi/agent/settings.json` 的 `subagents.agentOverrides` 部分 | 内置 agent override（用户级） |
+| Agent settings（项目） | `<project>/.pi/settings.json` 的 `subagents.agentOverrides` 部分 | 内置 agent override（项目级） |
+| 自定义 agent 目录（用户） | `~/.pi/agent/agents/*.md` | 自定义 agent 定义 |
+| 自定义 agent 目录（项目） | `<project>/.pi/agents/*.md` | 自定义 agent 定义 |
+| Chain 目录（用户） | `~/.pi/agent/chains/*.chain.md` | Chain 定义 |
+| Chain 目录（项目） | `<project>/.pi/chains/*.chain.md` | Chain 定义 |
 
 Agent discovery 通过 `@earendil-works/pi-coding-agent` 内建扩展 `pi-subagents` 的 `discoverAgentsAll()` 函数完成，该函数合并内置、包、用户和项目作用域的 agent。
 
@@ -124,7 +124,7 @@ Agent discovery 通过 `@earendil-works/pi-coding-agent` 内建扩展 `pi-subage
 保存操作对应不同的底层写入：
 
 - 覆盖内置 agent → 写入 `settings.json` 的 `subagents.agentOverrides.<name>`
-- 创建/更新自定义 agent → 写入 `~/.pi-desk/agent/agents/<name>.md`
+- 创建/更新自定义 agent → 写入 `~/.pi/agent/agents/<name>.md`
 - eject → 先读取内置 agent 定义，序列化为 Markdown 写入用户 agents 目录
 
 ### 4.4 Chain 编辑面板
@@ -332,7 +332,7 @@ Renderer
     → IPC handler
       → SubagentSettingsConfigService.mutate()
         → pi-subagents saveBuiltinAgentOverride(cwd, "reviewer", "user", { model: "claude-opus-4" })
-          → 写 ~/.pi-desk/agent/settings.json 的 subagents.agentOverrides.reviewer
+          → 写 ~/.pi/agent/settings.json 的 subagents.agentOverrides.reviewer
       → 重新 getSnapshot()
       → return { status: "saved", snapshot }
   → Renderer 更新列表

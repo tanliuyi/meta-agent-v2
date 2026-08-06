@@ -19,7 +19,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "desktop-subagent-settings-"));
   agentDir = join(root, "agent");
   projectDir = join(root, "project");
-  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(projectDir, ".pi-desk"), { recursive: true })]);
+  await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(join(projectDir, ".pi"), { recursive: true })]);
   previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   previousHome = process.env.HOME;
   previousUserProfile = process.env.USERPROFILE;
@@ -109,7 +109,7 @@ describe("SubagentSettingsConfigService", () => {
     const modernUserDir = join(root, ".agents");
     await Promise.all([
       mkdir(join(modernUserDir, "projects", "example", "memory"), { recursive: true }),
-      mkdir(join(projectDir, ".pi-desk", "agents"), { recursive: true }),
+      mkdir(join(projectDir, ".pi", "agents"), { recursive: true }),
     ]);
     await Promise.all([
       writeFile(
@@ -123,7 +123,7 @@ describe("SubagentSettingsConfigService", () => {
         "utf8",
       ),
       writeFile(
-        join(projectDir, ".pi-desk", "agents", "project-helper.md"),
+        join(projectDir, ".pi", "agents", "project-helper.md"),
         "---\nname: project-helper\ndescription: Real project agent\n---\n\nHelp with project tasks.\n",
         "utf8",
       ),
@@ -420,7 +420,7 @@ describe("SubagentSettingsConfigService", () => {
     });
 
     const userSettings = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
-    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi-desk", "settings.json"), "utf8"));
+    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi", "settings.json"), "utf8"));
     expect(userSettings.subagents.watchdog).toMatchObject({
       enabled: true,
       main: { enabled: false, model: "openai/reviewer", thinking: "high" },
@@ -548,7 +548,7 @@ describe("SubagentSettingsConfigService", () => {
       overrideScope: "project",
       disabled: true,
     });
-    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi-desk", "settings.json"), "utf8"));
+    const projectSettings = JSON.parse(await readFile(join(projectDir, ".pi", "settings.json"), "utf8"));
     expect(projectSettings.subagents.agentOverrides.reviewer).toMatchObject({
       model: "openai/project-reviewer",
       disabled: true,

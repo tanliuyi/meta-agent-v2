@@ -82,7 +82,7 @@ Desktop Extension Host Profile
 
 - Pi runtime 继续是 session、queue、agent loop 和 extension event 的唯一语义源。
 - Desktop 不模拟 TUI component、theme 或 terminal behavior。
-- 未批准的 `~/.pi-desk/agent/extensions` 和项目 `.pi-desk/extensions` 不会意外进入 Desktop。
+- 未批准的 `~/.pi/agent/extensions` 和项目 `.pi/extensions` 不会意外进入 Desktop。
 - draft 中显示的 extension commands 与 live worker 实际加载集合一致。
 - extension source、版本和 worker generation 可诊断。
 - extension 失败不会在 Electron main 或 renderer 执行任意代码。

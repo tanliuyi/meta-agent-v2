@@ -6,8 +6,8 @@
  * and can be activated via CLI flag, /preset command, or Ctrl+Shift+U to cycle.
  *
  * Config files (merged, project takes precedence):
- * - ~/.pi-desk/agent/presets.json (global)
- * - <cwd>/.pi-desk/presets.json (project-local)
+ * - ~/.pi/agent/presets.json (global)
+ * - <cwd>/.pi/presets.json (project-local)
  *
  * Example presets.json:
  * ```json

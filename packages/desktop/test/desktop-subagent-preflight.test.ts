@@ -15,7 +15,7 @@ describe("Desktop subagent preflight", () => {
   it("resolves a builtin without CLI lifecycle dependencies and reports host-owned tools", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "desktop-subagent-preflight-"));
     cleanups.push(() => rmSync(cwd, { recursive: true, force: true }));
-    const settingsPath = join(cwd, ".pi-desk", "settings.json");
+    const settingsPath = join(cwd, ".pi", "settings.json");
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(
       settingsPath,

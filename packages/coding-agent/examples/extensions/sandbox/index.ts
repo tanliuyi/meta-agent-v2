@@ -10,10 +10,10 @@
  * via `tool_call` input mutation without replacing the tool.
  *
  * Config files (merged, project takes precedence):
- * - ~/.pi-desk/agent/extensions/sandbox.json (global)
- * - <cwd>/.pi-desk/sandbox.json (project-local)
+ * - ~/.pi/agent/extensions/sandbox.json (global)
+ * - <cwd>/.pi/sandbox.json (project-local)
  *
- * Example .pi-desk/sandbox.json:
+ * Example .pi/sandbox.json:
  * ```json
  * {
  *   "enabled": true,
@@ -35,8 +35,8 @@
  * - `/sandbox` - show current sandbox configuration
  *
  * Setup:
- * 1. Copy sandbox/ directory to ~/.pi-desk/agent/extensions/
- * 2. Run `npm install` in ~/.pi-desk/agent/extensions/sandbox/
+ * 1. Copy sandbox/ directory to ~/.pi/agent/extensions/
+ * 2. Run `npm install` in ~/.pi/agent/extensions/sandbox/
  *
  * Linux also requires: bubblewrap, socat, ripgrep
  */

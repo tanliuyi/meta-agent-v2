@@ -187,7 +187,7 @@ app.whenReady().then(async () => {
   handleLocalImageRequests();
   Menu.setApplicationMenu(null);
   const userDataDir = app.getPath("userData");
-  const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi-desk", "agent");
+  const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
   if (runtimeSetupSelection) {
     try {
       await runRuntimeSetup(userDataDir, agentDir, runtimeSetupSelection);

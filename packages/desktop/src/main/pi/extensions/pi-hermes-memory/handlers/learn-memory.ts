@@ -178,7 +178,7 @@ export function registerLearnMemoryCommand(pi: ExtensionAPI): void {
         lines.push('    → Check Settings > Memory > Memory Content, then tell agent "remember X"');
         lines.push("");
         lines.push('  "Want to edit manually"');
-        lines.push("    → Files at ~/.pi-desk/agent/pi-hermes-memory/ (plain markdown)");
+        lines.push("    → Files at ~/.pi/agent/pi-hermes-memory/ (plain markdown)");
       }
 
       if (lines.length > 0) {

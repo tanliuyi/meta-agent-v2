@@ -9,7 +9,7 @@
 
 Desktop 将 Pi runtime 放在 Electron embedded Node sidecar 中运行，每个 live thread 一个 worker，metadata 和 programmatic subagent 使用独立 worker。Electron main 负责 IPC、窗口、项目状态和 worker 生命周期。
 
-Desktop 与 Pi CLI 继续共享 `agentDir`、Project `.pi-desk` 配置以及 model、auth、settings、prompt、skill 和 session JSONL 语义。
+Desktop 与 Pi CLI 继续共享 `agentDir`、Project `.pi` 配置以及 model、auth、settings、prompt、skill 和 session JSONL 语义。
 
 Extension 来源由 [`desktop-controlled-extensions-spec.md`](./desktop-controlled-extensions-spec.md) 负责：Desktop 禁止 Pi 默认 global/project extension discovery，只加载内建 inline、同仓精选、Marketplace 和 Developer Mode 显式批准的 entry。
 

@@ -3,14 +3,14 @@
  *
  * Demonstrates the project_trust event. Install globally or pass via -e:
  *
- *   mkdir -p ~/.pi-desk/agent/extensions
- *   cp packages/coding-agent/examples/extensions/project-trust.ts ~/.pi-desk/agent/extensions/
+ *   mkdir -p ~/.pi/agent/extensions
+ *   cp packages/coding-agent/examples/extensions/project-trust.ts ~/.pi/agent/extensions/
  *
  * Or:
  *
  *   pi -e packages/coding-agent/examples/extensions/project-trust.ts
  *
- * Try it in a project containing .pi-desk, AGENTS.md/CLAUDE.md, or .agents/skills.
+ * Try it in a project containing .pi, AGENTS.md/CLAUDE.md, or .agents/skills.
  */
 
 import type { ExtensionAPI, ProjectTrustEventResult } from "@earendil-works/pi-coding-agent";

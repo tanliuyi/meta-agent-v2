@@ -7,7 +7,7 @@
 
 在 Desktop 设置中新增"凭据"菜单和 `#/settings/auth` 子路由，用结构化界面编辑 Pi CLI 与 Desktop 共同使用的 `auth.json`。
 
-本规范中的文件名统一指 `auth.json`。默认路径是 `~/.pi-desk/agent/auth.json`，但实现必须使用 Desktop main 已解析的 `agentDir`，完整支持 `PI_CODING_AGENT_DIR`，不得在 renderer 中拼接 home 路径。
+本规范中的文件名统一指 `auth.json`。默认路径是 `~/.pi/agent/auth.json`，但实现必须使用 Desktop main 已解析的 `agentDir`，完整支持 `PI_CODING_AGENT_DIR`，不得在 renderer 中拼接 home 路径。
 
 最终能力包括：
 
@@ -32,7 +32,7 @@
 - 凭据有效性校验（不做真实 API 调用或 endpoint 探测）；
 - 保存后自动通知 active session worker 重载凭据；
 - 在 renderer 中提供完整 raw source 编辑器；
-- 项目级 `.pi-desk/auth.json`，因为 Pi 当前不存在该配置层；
+- 项目级 `.pi/auth.json`，因为 Pi 当前不存在该配置层；
 - CLI `--api-key` 运行时覆盖的 GUI 管理；
 - 凭据导入/导出模板。
 
@@ -93,7 +93,7 @@ Desktop 凭据设置页和 Pi CLI 操作的是**同一个物理文件**：
 
 ```text
 <agentDir>/auth.json
-默认: ~/.pi-desk/agent/auth.json
+默认: ~/.pi/agent/auth.json
 可通过: PI_CODING_AGENT_DIR 环境变量覆盖
 ```
 
