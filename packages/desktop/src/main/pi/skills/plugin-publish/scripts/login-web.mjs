@@ -37,15 +37,36 @@ if (!apiRoot || !tokenOut) {
 
 function run() {
   const server = createServer(handler);
+  let timeoutTimer = null;
+  let done = false;
+  // Terminal path: cancel the pending timeout, stop accepting connections,
+  // and end the process so the caller gets a return promptly. Without this
+  // the process would linger until the timeout fires (or forever on failure).
+  function finish(code, msg) {
+    if (done) return;
+    done = true;
+    if (msg) console.error(msg);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    try {
+      server.closeAllConnections?.();
+    } catch {
+      // older Node without closeAllConnections
+    }
+    server.close(() => {
+      process.exitCode = code;
+      // Idle undici keep-alive sockets can hold the event loop open for a
+      // few seconds; force-exit as a backstop so the caller never hangs.
+      const t = setTimeout(() => process.exit(code), 3000);
+      t.unref?.();
+    });
+  }
   server.listen(0, "127.0.0.1", () => {
     const { port } = server.address();
     const url = `http://127.0.0.1:${port}/`;
     console.log(`Open ${url} in your browser (closing this process in ${timeoutSec}s without a login)`);
     openBrowser(url);
-    setTimeout(() => {
-      console.error("TIMEOUT: no successful login within", timeoutSec, "seconds");
-      server.close();
-      process.exitCode = 1;
+    timeoutTimer = setTimeout(() => {
+      finish(1, `TIMEOUT: no successful login within ${timeoutSec} seconds`);
     }, timeoutSec * 1000);
   });
 
@@ -232,6 +253,7 @@ function run() {
             res.end(
               JSON.stringify({ ok: false, error: `账号不是发布者 ${publisherId} 的成员，请先联系市场管理员` }),
             );
+            setTimeout(() => finish(1, `AUTH_FAILED: user ${username} is not a member of publisher ${publisherId}`), 1200);
             return;
           }
         }
@@ -240,9 +262,9 @@ function run() {
         console.log(`AUTH_OK token written to ${tokenOut} (user: ${username})`);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
-        // One successful auth is enough; shut the server down shortly after
-        // the page has rendered the result.
-        setTimeout(() => server.close(), 1500);
+        // One successful auth is enough; give the page a moment to render the
+        // result, then end the process so the caller gets a return.
+        setTimeout(() => finish(0), 1200);
       } catch (err) {
         res.writeHead(502, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: `本地转发失败：${err.message}` }));

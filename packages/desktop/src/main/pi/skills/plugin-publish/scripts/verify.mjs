@@ -111,7 +111,12 @@ async function main() {
     if (mPluginId !== pluginId) throw new Error(`manifest pluginId ${mPluginId} != ${pluginId}`);
     if (mVersion !== version) throw new Error(`manifest version ${mVersion} != ${version}`);
     const expected = new Set(payloadNames);
-    for (const f of m.files ?? []) {
+    // Server manifests list files either as an array ("path" or string entries)
+    // or as an object keyed by payload-relative path ("path": { "mode": ... }).
+    const listed = Array.isArray(m.files)
+      ? m.files
+      : Object.keys(m.files ?? {}).map((p) => ({ path: p }));
+    for (const f of listed) {
       const p = f.path ?? f;
       if (!expected.has(p)) throw new Error(`manifest lists ${p} but archive does not contain it`);
     }
