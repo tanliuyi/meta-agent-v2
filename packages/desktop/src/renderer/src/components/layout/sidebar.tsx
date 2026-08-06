@@ -7,6 +7,7 @@ import Settings from "lucide-react/dist/esm/icons/settings.mjs";
 import { type CSSProperties, memo, useCallback } from "react";
 import { GENERAL_WORKSPACE_ID } from "../../../../shared/contracts.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
+import { useDraftSession } from "../../state/draft-session-context.tsx";
 import { useLayout } from "../../state/layout.tsx";
 import { getSidebarMaxWidth, SIDEBAR_MIN_WIDTH } from "../../state/layout-preference.ts";
 import { useSessionDraftMaterializing } from "../../state/session-cache-context.tsx";
@@ -29,6 +30,7 @@ const sidebarRowClass =
 export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: boolean }) {
   const actions = useDesktopActions();
   const draftMaterializing = useSessionDraftMaterializing();
+  const draft = useDraftSession();
   const { sidebarOpen, sidebarWidth, setSidebarWidth } = useLayout();
   const matchRoute = useMatchRoute();
   const navigate = useNavigate();
@@ -49,7 +51,11 @@ export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: 
           returnProjectId: returnSession.projectId,
           returnThreadId: returnSession.threadId,
         }
-      : {};
+      : {
+          // 新会话时缓存当前草稿项目，设置页“返回聊天”恢复到 /new 的选择。
+          draftProjectId:
+            draft.projectId ?? (typeof routeSearch.projectId === "string" ? routeSearch.projectId : undefined),
+        };
   const resize = useResizableRegion<HTMLElement>({
     value: sidebarWidth,
     min: SIDEBAR_MIN_WIDTH,
