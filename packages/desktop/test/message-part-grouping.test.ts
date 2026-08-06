@@ -1,10 +1,11 @@
-import type { GroupByContext, PartState } from "@assistant-ui/react";
+import type { GroupByContext, MessageState, PartState } from "@assistant-ui/react";
 import { describe, expect, it } from "vitest";
 import {
   createRunGroupPart,
   groupMessagePart,
   hasFinalResponseText,
   hasTextAfterGroup,
+  hasUserMessageAfter,
   summarizeChainOfThought,
 } from "../src/renderer/src/components/chat/message-part-grouping.ts";
 
@@ -155,6 +156,22 @@ describe("message part grouping", () => {
     } satisfies GroupByContext;
 
     expect(runGroupPaths(parts, context)).toEqual([["group-runActivity", "group-chainOfThought"], []]);
+  });
+
+  it("hasUserMessageAfter 判断消息之后是否已出现新的用户 prompt", () => {
+    const messages = [
+      { id: "u1", role: "user", content: [] },
+      { id: "a1", role: "assistant", content: [] },
+      { id: "a2", role: "assistant", content: [] },
+      { id: "u2", role: "user", content: [] },
+      { id: "a3", role: "assistant", content: [] },
+    ] as unknown as MessageState[];
+
+    expect(hasUserMessageAfter(messages, "a1")).toBe(true);
+    expect(hasUserMessageAfter(messages, "a2")).toBe(true);
+    expect(hasUserMessageAfter(messages, "a3")).toBe(false);
+    expect(hasUserMessageAfter(messages, "u2")).toBe(false);
+    expect(hasUserMessageAfter(messages, "missing")).toBe(false);
   });
 
   it("仅在组后出现 text 时结束自动展开", () => {

@@ -66,6 +66,16 @@ export function hasFinalResponseInRun(messages: readonly MessageState[], message
     .some((message) => message.role === "assistant" && hasFinalResponseText(message.content));
 }
 
+/** 判断消息之后（含后续所有消息）是否已出现新的用户 prompt。 */
+export function hasUserMessageAfter(messages: readonly MessageState[], messageId: string): boolean {
+  const messageIndex = messages.findIndex((message) => message.id === messageId);
+  if (messageIndex < 0) return false;
+  for (let index = messageIndex + 1; index < messages.length; index += 1) {
+    if (messages[index]?.role === "user") return true;
+  }
+  return false;
+}
+
 function findFinalResponseTextIndex(parts: readonly FinalResponsePart[]): number {
   const lastStepIndex = parts.findLastIndex((part) => part.type === "reasoning" || part.type === "tool-call");
   const lastTextIndex = parts.findLastIndex((part) => part.type === "text" && (part.text?.trim().length ?? 0) > 0);
