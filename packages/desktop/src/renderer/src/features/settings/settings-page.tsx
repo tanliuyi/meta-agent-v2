@@ -1,7 +1,9 @@
 import { DesktopSectionShell } from "@renderer/components/layout/desktop-section-shell";
 import { settingsMenuItemVariants } from "@renderer/shared/ui/settings-menu-item-variants";
-import { settingsReturnSession } from "@renderer/state/settings-navigation";
+import { draftSearch } from "@renderer/state/session-navigation";
+import { settingsReturnDraftProject, settingsReturnSession } from "@renderer/state/settings-navigation";
 import { Link, Outlet, useSearch } from "@tanstack/react-router";
+import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
 import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
@@ -17,6 +19,7 @@ const SETTINGS_LINKS = [
   { to: "/settings/auto-title", label: "自动标题", icon: Sparkles },
   { to: "/settings/memory", label: "记忆", icon: Brain },
   { to: "/settings/subagents", label: "子智能体", icon: Bot },
+  { to: "/settings/archives", label: "归档", icon: Archive },
   { to: "/settings/dependencies", label: "依赖项", icon: Boxes },
   { to: "/settings/about", label: "关于", icon: Info },
 ] as const;
@@ -25,6 +28,7 @@ const SETTINGS_LINKS = [
 export function SettingsPage() {
   const search = useSearch({ from: "/settings" });
   const returnSession = settingsReturnSession(search);
+  const returnDraftProjectId = settingsReturnDraftProject(search);
 
   const menu = (
     <>
@@ -35,6 +39,15 @@ export function SettingsPage() {
             projectId: returnSession.projectId,
             threadId: returnSession.threadId,
           }}
+          className={settingsMenuItemVariants({ variant: "back" })}
+        >
+          <ArrowLeft />
+          <span>返回聊天</span>
+        </Link>
+      ) : returnDraftProjectId ? (
+        <Link
+          to="/new"
+          search={draftSearch(returnDraftProjectId)}
           className={settingsMenuItemVariants({ variant: "back" })}
         >
           <ArrowLeft />

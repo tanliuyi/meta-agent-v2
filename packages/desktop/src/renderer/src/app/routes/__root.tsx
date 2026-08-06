@@ -1,4 +1,7 @@
 import { createRootRoute, Navigate, Outlet } from "@tanstack/react-router";
+import { ToastProvider } from "../../shared/ui/toast-provider.tsx";
+import { DesktopCatalogProvider } from "../../state/desktop-catalog-provider.tsx";
+import { DesktopErrorToast } from "../desktop-error-toast.tsx";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -9,7 +12,12 @@ export const Route = createRootRoute({
 function RootLayout() {
   return (
     <div className="app-frame" data-platform={window.desktop.platform}>
-      <Outlet />
+      <ToastProvider label="通知" swipeDirection="right">
+        <DesktopCatalogProvider>
+          <DesktopErrorToast />
+          <Outlet />
+        </DesktopCatalogProvider>
+      </ToastProvider>
     </div>
   );
 }
