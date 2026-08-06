@@ -1,6 +1,6 @@
 {
   "name": "pi-web-access-desktop",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "为桌面端提供联网能力的插件：网页搜索、网页内容抓取、GitHub 克隆、PDF 提取与视频理解",
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "pi-web-access": "0.14.0"
+    "pi-web-access": "0.18.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

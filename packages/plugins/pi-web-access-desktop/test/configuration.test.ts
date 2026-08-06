@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";import test from "node:test";
+import { dirname, join } from "node:path";
+import test from "node:test";
 import {
   applyDesktopConfig,
   getWebSearchConfigPath,
@@ -14,6 +15,8 @@ function withTempHome(): string {
   const root = mkdtempSync(join(tmpdir(), "web-access-config-"));
   tempRoots.push(root);
   const home = join(root, "home");
+  delete process.env.PI_CODING_AGENT_DIR;
+  delete process.env.XDG_CONFIG_HOME;
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   return root;
@@ -26,11 +29,65 @@ test.after(() => {
 test("schema is valid and flat-keyed", () => {
   assert.equal(WEB_ACCESS_CONFIGURATION_SCHEMA.version, 1);
   const keys = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.map((field) => field.key);
-  assert.ok(keys.length <= 64);
+  assert.equal(keys.length, 64);
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys.includes("searchProvider"));
+  assert.ok(keys.includes("searchRouting.providers"));
+  assert.ok(keys.includes("curatorRemote.enabled"));
+  assert.ok(keys.includes("searxngHeaders"));
+  assert.ok(keys.includes("pdf.maxSizeMB"));
+  assert.ok(keys.includes("toolNames.webSearch"));
   assert.ok(keys.includes("githubClone.enabled"));
   assert.ok(keys.includes("ssrf.allowRanges"));
+  const searchProvider = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find((field) => field.key === "searchProvider");
+  assert.equal(searchProvider?.type, "select");
+  if (searchProvider?.type !== "select") throw new Error("searchProvider field is missing");
+  assert.deepEqual(
+    searchProvider.options.map((option) => option.value),
+    [
+      "auto",
+      "all",
+      "openai",
+      "brave",
+      "parallel",
+      "tinyfish",
+      "search1api",
+      "searchinfinity",
+      "querit",
+      "tavily",
+      "searxng",
+      "perplexity",
+      "gemini",
+      "exa",
+      "serpdive",
+      "kagi",
+      "ollama",
+      "anysearch",
+      "xai",
+      "brightdata",
+      "serpbase",
+    ],
+  );
+  const serpdiveModel = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find(
+    (field) => field.key === "serpdiveModel",
+  );
+  assert.equal(serpdiveModel?.type, "select");
+  if (serpdiveModel?.type !== "select") throw new Error("serpdiveModel field is missing");
+  assert.deepEqual(
+    serpdiveModel.options.map((option) => option.value),
+    ["krill", "mako", "moby"],
+  );
+  const curatorTimeout = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find(
+    (field) => field.key === "curatorTimeoutSeconds",
+  );
+  assert.equal(curatorTimeout?.type, "number");
+  if (curatorTimeout?.type !== "number") throw new Error("curatorTimeoutSeconds field is missing");
+  assert.equal(curatorTimeout.maximum, 600);
+  for (const key of ["firecrawlApiVersion", "firecrawlFreshScrape", "pdf.maxSizeMB"]) {
+    const field = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find((candidate) => candidate.key === key);
+    assert.ok(field);
+    assert.equal("defaultValue" in field, false);
+  }
   for (const field of WEB_ACCESS_CONFIGURATION_SCHEMA.fields) {
     assert.ok(field.key.length > 0);
     assert.ok(field.label.length > 0);
@@ -58,12 +115,80 @@ test("applyDesktopConfig merges nested fields and preserves existing config", ()
   applyDesktopConfig({
     "githubClone.enabled": true,
     "githubClone.maxRepoSizeMB": 500,
-    "video.preferredModel": "gemini-2.5-flash",
+    "video.preferredModel": "gemini-3.6-flash",
+    "pdf.maxSizeMB": 30,
+    "searchRouting.providers": "brave\nexa",
+    "searchRouting.fallbackOn": "transient\nnetwork",
+    "toolNames.fetchContent": "desktop_fetch",
   });
   const config = JSON.parse(readFileSync(getWebSearchConfigPath(), "utf8"));
-  assert.deepEqual(config.toolNames, { fetch: "x" });
+  assert.deepEqual(config.toolNames, { fetch: "x", fetchContent: "desktop_fetch" });
   assert.deepEqual(config.githubClone, { enabled: true, maxRepoSizeMB: 500 });
-  assert.equal(config.video.preferredModel, "gemini-2.5-flash");
+  assert.equal(config.video.preferredModel, "gemini-3.6-flash");
+  assert.equal(config.pdf.maxSizeMB, 30);
+  assert.deepEqual(config.searchRouting, {
+    providers: ["brave", "exa"],
+    fallbackOn: ["transient", "network"],
+  });
+  assert.equal(config.toolNames.fetchContent, "desktop_fetch");
+});
+
+test("applyDesktopConfig serializes structured upstream settings", () => {
+  withTempHome();
+  applyDesktopConfig({
+    "curatorRemote.enabled": true,
+    "curatorRemote.host": "desktop.example.test",
+    "curatorRemote.bind": "0.0.0.0",
+    searxngHeaders:
+      "Authorization: Bearer test\nX-Tenant: desktop\nX-Invalid: value\u0000\ninvalid-line",
+  });
+  const config = JSON.parse(readFileSync(getWebSearchConfigPath(), "utf8"));
+  assert.deepEqual(config.curatorRemote, { host: "desktop.example.test", bind: "0.0.0.0" });
+  assert.deepEqual(config.searxngHeaders, {
+    Authorization: "Bearer test",
+    "X-Tenant": "desktop",
+  });
+});
+
+test("applyDesktopConfig preserves structured settings when form fields are empty", () => {
+  withTempHome();
+  prewriteConfig({
+    curatorRemote: { host: "old.example.test", bind: "127.0.0.1" },
+    searchRouting: { providers: ["brave"], fallbackOn: ["network"] },
+  });
+  applyDesktopConfig({
+    "curatorRemote.enabled": true,
+    "curatorRemote.host": "new.example.test",
+    "curatorRemote.bind": "",
+    "searchRouting.providers": "",
+    "searchRouting.fallbackOn": "",
+  });
+  const config = JSON.parse(readFileSync(getWebSearchConfigPath(), "utf8"));
+  assert.deepEqual(config.curatorRemote, {
+    host: "new.example.test",
+    bind: "127.0.0.1",
+  });
+  assert.deepEqual(config.searchRouting, {
+    providers: ["brave"],
+    fallbackOn: ["network"],
+  });
+});
+
+test("applyDesktopConfig does not create incomplete search routing", () => {
+  withTempHome();
+  applyDesktopConfig({
+    "searchRouting.providers": "brave\nexa",
+    "searchRouting.fallbackOn": "",
+  });
+  assert.throws(() => readFileSync(getWebSearchConfigPath(), "utf8"), { code: "ENOENT" });
+});
+
+test("getWebSearchConfigPath follows upstream environment priority", () => {
+  const root = withTempHome();
+  process.env.XDG_CONFIG_HOME = join(root, "xdg");
+  assert.equal(getWebSearchConfigPath(), join(root, "xdg", "pi", "web-search.json"));
+  process.env.PI_CODING_AGENT_DIR = join(root, "agent");
+  assert.equal(getWebSearchConfigPath(), join(root, "agent", "web-search.json"));
 });
 
 test("applyDesktopConfig splits textarea fields into arrays", () => {
@@ -86,8 +211,10 @@ test("applyDesktopConfig ignores empty strings and undefined", () => {
   assert.equal(config.openaiApiKey, undefined);
 });
 
-test("applyDesktopConfig does nothing without config", () => {
+test("applyDesktopConfig does nothing without values", () => {
   withTempHome();
   applyDesktopConfig(undefined);
+  assert.throws(() => readFileSync(getWebSearchConfigPath(), "utf8"), { code: "ENOENT" });
+  applyDesktopConfig({});
   assert.throws(() => readFileSync(getWebSearchConfigPath(), "utf8"), { code: "ENOENT" });
 });
