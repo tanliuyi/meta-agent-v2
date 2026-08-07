@@ -622,10 +622,6 @@
 .message-navigation-summary-markdown {
   color: hsl(var(--foreground));
 }
-.message-navigation-summary-markdown .aui-md {
-  font-size: inherit;
-  line-height: inherit;
-}
 .message-navigation-summary-markdown .aui-md > :first-child {
   margin-top: 0;
 }

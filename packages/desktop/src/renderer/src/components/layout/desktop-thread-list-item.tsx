@@ -20,6 +20,7 @@ import { ContextMenuContent } from "../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../shared/ui/context-menu-item.tsx";
 import { THREAD_DRAG_MIME, useThreadDrag } from "../../state/thread-drag-context.tsx";
 import { Badge } from "../assistant-ui/badge.tsx";
+import { DirectiveTextContent } from "../assistant-ui/directive-text-content.tsx";
 import { StreamdownMarkdown } from "../assistant-ui/streamdown/streamdown-markdown.tsx";
 
 const TREE_GUIDE_START = 16;
@@ -224,7 +225,9 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
           {previewHovered && previewVisible ? (
             <FloatingPortal preserveTabOrder={false}>
               <div ref={refs.setFloating} className="message-navigation-summary" style={floatingStyles} role="tooltip">
-                <span>{userPreview}</span>
+                <span>
+                  <DirectiveTextContent text={userPreview} />
+                </span>
                 <div className="message-navigation-summary-markdown">
                   <StreamdownMarkdown linkSafety={PREVIEW_LINK_SAFETY}>{assistantPreview}</StreamdownMarkdown>
                 </div>

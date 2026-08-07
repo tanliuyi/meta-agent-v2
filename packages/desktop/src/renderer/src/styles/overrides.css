@@ -1,1 +1,16 @@
 /* Component-specific compatibility overrides belong in this layer. */
+
+/* 悬浮预览浮层(thread-main hover)中的 markdown 所有标签文字大小统一为 --type-size-ui。
+   .aui-md 上的 text-sm/6 在 utilities 层,此处 overrides 层最后声明才能压过它。 */
+.message-navigation-summary-markdown .aui-md {
+  font-size: var(--type-size-ui);
+  line-height: inherit;
+}
+
+.message-navigation-summary-markdown .markdown-inline-code,
+.message-navigation-summary-markdown .markdown-code-content,
+.message-navigation-summary-markdown .markdown-code-language,
+.message-navigation-summary-markdown .markdown-table,
+.message-navigation-summary-markdown .katex {
+  font-size: var(--type-size-ui);
+}

@@ -1,6 +1,6 @@
 import type { DirectiveChipProps } from "@assistant-ui/react-lexical";
 import { DirectiveIcon } from "./directive-icon.tsx";
-import { directiveDisplayLabel } from "./directive-text.tsx";
+import { directiveDisplayLabel } from "./directive-text-content.tsx";
 
 export function ComposerDirectiveChip({ directiveId, directiveType, label }: DirectiveChipProps) {
   const displayLabel = directiveDisplayLabel(directiveType, label, directiveId);
