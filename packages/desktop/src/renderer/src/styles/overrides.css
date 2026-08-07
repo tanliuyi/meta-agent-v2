@@ -7,10 +7,7 @@
   line-height: inherit;
 }
 
-.message-navigation-summary-markdown .markdown-inline-code,
-.message-navigation-summary-markdown .markdown-code-content,
-.message-navigation-summary-markdown .markdown-code-language,
-.message-navigation-summary-markdown .markdown-table,
-.message-navigation-summary-markdown .katex {
+.message-navigation-summary-markdown .aui-md,
+.message-navigation-summary-markdown .aui-md :where(*) {
   font-size: var(--type-size-ui);
 }
