@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AuthOauthLoginEvent } from "../shared/auth-config-contracts.ts";
+import type { BrowserAction, BrowserCreateTabRequest, BrowserStateEvent } from "../shared/browser-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   FileChangeSet,
@@ -392,6 +393,36 @@ const desktopApi: DesktopApi = {
   workbench: {
     get: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.workbenchGet, projectId, threadId),
     update: (state) => ipcRenderer.invoke(CHANNELS.workbenchUpdate, state),
+  },
+  browser: {
+    attach: (webContentsId, requestId) => ipcRenderer.invoke(CHANNELS.browserAttach, webContentsId, requestId),
+    detach: (webContentsId) => ipcRenderer.invoke(CHANNELS.browserDetach, webContentsId),
+    selectTab: (tabId) => ipcRenderer.invoke(CHANNELS.browserTabSelect, tabId),
+    navigate: (tabId, url) => ipcRenderer.invoke(CHANNELS.browserNavigate, tabId, url),
+    screenshot: (tabId) => ipcRenderer.invoke(CHANNELS.browserScreenshot, tabId),
+    snapshot: (tabId, opts) => ipcRenderer.invoke(CHANNELS.browserSnapshot, tabId, opts),
+    action: (tabId, action: BrowserAction) => ipcRenderer.invoke(CHANNELS.browserAction, tabId, action),
+    tabsList: () => ipcRenderer.invoke(CHANNELS.browserTabsList),
+    getSettings: () => ipcRenderer.invoke(CHANNELS.browserSettingsGet),
+    saveSettings: (input) => ipcRenderer.invoke(CHANNELS.browserSettingsSave, input),
+    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.browserSetEditorDirty, dirty) === true,
+    clearData: () => ipcRenderer.invoke(CHANNELS.browserClearData),
+    browserHistory: () => ipcRenderer.invoke(CHANNELS.browserHistory),
+    annotationPick: (tabId, x, y) => ipcRenderer.invoke(CHANNELS.browserAnnotationPick, tabId, x, y),
+    annotationAdd: (tabId, input) => ipcRenderer.invoke(CHANNELS.browserAnnotationAdd, tabId, input),
+    annotationList: (tabId) => ipcRenderer.invoke(CHANNELS.browserAnnotationList, tabId),
+    annotationRemove: (tabId, id) => ipcRenderer.invoke(CHANNELS.browserAnnotationRemove, tabId, id),
+    annotationResolve: (tabId, id) => ipcRenderer.invoke(CHANNELS.browserAnnotationResolve, tabId, id),
+    onStateChanged(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, stateEvent: BrowserStateEvent) => listener(stateEvent);
+      ipcRenderer.on(CHANNELS.browserStateChanged, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.browserStateChanged, handler);
+    },
+    onCreateTabRequest(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, request: BrowserCreateTabRequest) => listener(request);
+      ipcRenderer.on(CHANNELS.browserCreateTabRequest, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.browserCreateTabRequest, handler);
+    },
   },
 };
 

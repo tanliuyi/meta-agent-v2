@@ -61,6 +61,13 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
     hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
     capabilities: ["events.subscribe", "session.read"],
   },
+  {
+    id: "pi-browser",
+    displayName: "内置浏览器",
+    source: "builtin",
+    hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+    capabilities: ["tools.register", "events.subscribe", "session.read", "ui.notify"],
+  },
 ];
 const curatedExtensions: DesktopExtensionDefinition[] = [];
 

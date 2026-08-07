@@ -182,7 +182,34 @@ function toolHeader(name: string, args: Readonly<Record<string, unknown>>, proje
       context: SKILL_ACTION_LABELS[readToolStringArgument(args, "action")] ?? "",
     };
   }
+  if (name === "browser" || name.startsWith("browser_")) {
+    return browserToolHeader(name, args);
+  }
   return { label: name, target: textTarget(toolFallbackTarget(args)) };
+}
+
+const BROWSER_ACTION_LABELS: Readonly<Record<string, string>> = {
+  open: "打开",
+  navigate: "导航",
+  snapshot: "快照",
+  screenshot: "截图",
+  click: "点击",
+  type: "输入",
+  scroll: "滚动",
+  back: "后退",
+  forward: "前进",
+  reload: "刷新",
+  tabs: "标签页",
+};
+
+function browserToolHeader(name: string, args: Readonly<Record<string, unknown>>): ToolHeader {
+  const action = name === "browser" ? "" : name.slice("browser_".length);
+  const url = readToolStringArgument(args, "url");
+  const tabId = typeof args.tabId === "number" ? String(args.tabId) : "";
+  const elementIndex = typeof args.elementIndex === "number" ? `[${args.elementIndex}]` : "";
+  const target = url || (tabId ? `tab ${tabId}` : elementIndex) || "…";
+  const context = BROWSER_ACTION_LABELS[action] ?? "";
+  return { label: "browser", target: textTarget(target), context: context || undefined };
 }
 
 const MEMORY_ACTION_LABELS: Readonly<Record<string, string>> = {

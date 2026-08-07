@@ -8,6 +8,8 @@ import type {
   SaveAuthConfigInput,
 } from "../shared/auth-config-contracts.ts";
 import type { SaveAutoTitleSettingsInput } from "../shared/auto-title-contracts.ts";
+import type { BrowserCreateTabRequest, BrowserStateEvent } from "../shared/browser-contracts.ts";
+import type { SaveBrowserSettingsInput } from "../shared/browser-settings-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   HostResponse,
@@ -65,6 +67,7 @@ import type { SaveSettingsConfigInput } from "../shared/settings-config-contract
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
 import { OauthLoginCoordinator } from "./auth/oauth-login-coordinator.ts";
+import type { BrowserManager } from "./browser/browser-manager.ts";
 import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ProjectFileWatcher } from "./files/file-watcher.ts";
@@ -91,6 +94,7 @@ const authEditorWebContents = new Set<number>();
 const providerEditorWebContents = new Set<number>();
 const memoryEditorWebContents = new Set<number>();
 const autoTitleEditorWebContents = new Set<number>();
+const browserEditorWebContents = new Set<number>();
 
 export function registerIpc(
   projects: ProjectStore,
@@ -124,6 +128,7 @@ export function registerIpc(
   memorySettings?: MemorySettingsService,
   autoTitle?: AutoTitleSettingsService,
   preferences?: PreferencesConfigService,
+  browser?: BrowserManager,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -215,6 +220,39 @@ export function registerIpc(
       event.returnValue = preferences.getInitial();
     });
     ipcMain.handle(CHANNELS.preferencesSave, (_event, input: SavePreferencesInput) => preferences.save(input));
+  }
+  if (browser) {
+    ipcMain.handle(CHANNELS.browserAttach, (_event, webContentsId: number, requestId?: number) =>
+      browser.attach(webContentsId, requestId),
+    );
+    ipcMain.handle(CHANNELS.browserDetach, (_event, webContentsId: number) => browser.detach(webContentsId));
+    ipcMain.handle(CHANNELS.browserTabSelect, (_event, tabId: number) => browser.selectTab(tabId));
+    ipcMain.handle(CHANNELS.browserNavigate, (_event, tabId: number, url: string) => browser.navigate(tabId, url));
+    ipcMain.handle(CHANNELS.browserScreenshot, (_event, tabId: number) => browser.screenshot(tabId));
+    ipcMain.handle(CHANNELS.browserSnapshot, (_event, tabId: number, opts?: { withScreenshot?: boolean }) =>
+      browser.snapshot(tabId, opts),
+    );
+    ipcMain.handle(CHANNELS.browserAction, (_event, tabId: number, action) => browser.action(tabId, action));
+    ipcMain.handle(CHANNELS.browserTabsList, () => browser.tabsList());
+    ipcMain.handle(CHANNELS.browserSettingsGet, () => browser.getSettingsSnapshot());
+    ipcMain.handle(CHANNELS.browserSettingsSave, (_event, input: SaveBrowserSettingsInput) =>
+      browser.saveSettings(input),
+    );
+    ipcMain.handle(CHANNELS.browserClearData, () => browser.clearData());
+    ipcMain.handle(CHANNELS.browserHistory, () => browser.browserHistory());
+    ipcMain.handle(CHANNELS.browserAnnotationPick, (_event, tabId: number, x: number, y: number) =>
+      browser.pickAnnotationTarget(tabId, x, y),
+    );
+    ipcMain.handle(CHANNELS.browserAnnotationAdd, (_event, tabId: number, input) =>
+      browser.addAnnotation(tabId, input),
+    );
+    ipcMain.handle(CHANNELS.browserAnnotationList, (_event, tabId: number) => browser.listAnnotations(tabId));
+    ipcMain.handle(CHANNELS.browserAnnotationRemove, (_event, tabId: number, id: string) =>
+      browser.removeAnnotation(tabId, id),
+    );
+    ipcMain.handle(CHANNELS.browserAnnotationResolve, (_event, tabId: number, id: string) =>
+      browser.resolveAnnotationBounds(tabId, id),
+    );
   }
   ipcMain.handle(CHANNELS.settingsChooseUserAvatar, async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
@@ -412,6 +450,23 @@ export function registerIpc(
       memoryEditorWebContents.add(ownerId);
       event.sender.once("destroyed", () => {
         memoryEditorWebContents.delete(ownerId);
+        dirtyGuard.remove(ownerId);
+      });
+    }
+    event.returnValue = true;
+  });
+
+  ipcMain.on(CHANNELS.browserSetEditorDirty, (event, dirty: unknown) => {
+    if (typeof dirty !== "boolean") {
+      event.returnValue = false;
+      return;
+    }
+    const ownerId = event.sender.id;
+    dirtyGuard.setDirty(ownerId, dirty);
+    if (!browserEditorWebContents.has(ownerId)) {
+      browserEditorWebContents.add(ownerId);
+      event.sender.once("destroyed", () => {
+        browserEditorWebContents.delete(ownerId);
         dirtyGuard.remove(ownerId);
       });
     }
@@ -818,5 +873,19 @@ export function broadcastThreadCatalogUpdate(thread: Thread): void {
 export function broadcastTerminalEvent(event: TerminalEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.terminalsEvent, event);
+  }
+}
+
+/** 向所有 renderer 广播内置浏览器状态（tabs/活跃 tab）。 */
+export function broadcastBrowserEvent(event: BrowserStateEvent): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserStateChanged, event);
+  }
+}
+
+/** 向所有 renderer 广播建 tab 请求（工具 browser.open 等触发）。 */
+export function broadcastBrowserCreateTabRequest(request: BrowserCreateTabRequest): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCreateTabRequest, request);
   }
 }

@@ -1,3 +1,4 @@
+import { BrowserContent } from "./browser-content.tsx";
 import { CommandContent } from "./command-content.tsx";
 import { EditContent } from "./edit-content.tsx";
 import { MemoryContent } from "./memory-content.tsx";
@@ -37,6 +38,9 @@ export function ToolContent({ name, args, result, error, expanded, argsComplete 
         argsComplete={argsComplete}
       />
     );
+  }
+  if (name === "browser" || name.startsWith("browser_")) {
+    return <BrowserContent result={result} error={error} expanded={expanded} />;
   }
   if (name === "memory") {
     return <MemoryContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />;

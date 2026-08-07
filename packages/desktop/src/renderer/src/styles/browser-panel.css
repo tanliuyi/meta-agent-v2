@@ -1,0 +1,565 @@
+/* 内置浏览器（IAB）面板样式。
+ * 状态一律用 data-* 属性暴露；颜色只用 tokens（hsl(var(--...))），
+ * 遵守 renderer 边界校验（禁止裸色值、CSS state modifier、is-* 类、强制优先级声明）。
+ */
+
+.browser-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: hsl(var(--background));
+}
+
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.browser-address-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.browser-address {
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-xl);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  outline: 0;
+}
+.browser-address::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+.browser-address:focus {
+  border-color: hsl(var(--ring));
+}
+.browser-address-error {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: hsl(var(--destructive));
+}
+
+.browser-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.browser-tab-list {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+}
+.browser-tab-list::-webkit-scrollbar {
+  height: 6px;
+}
+
+.browser-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--shape-radius-sm) var(--shape-radius-sm) 0 0;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  font-size: 12px;
+}
+.browser-tab[data-active] {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.browser-tab[data-crashed] {
+  color: hsl(var(--warning));
+}
+
+.browser-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-viewport {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browser-view-host {
+  position: absolute;
+  inset: 0;
+}
+
+.browser-webview {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.browser-loading-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--stack-sticky-control);
+  height: 2px;
+  overflow: hidden;
+  background: hsl(var(--primary) / 0.18);
+  pointer-events: none;
+}
+.browser-loading-indicator::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  background: hsl(var(--primary));
+  animation: browser-loading-sweep 1.1s var(--motion-ease-emphasized) infinite;
+}
+
+.browser-tool-loading-icon {
+  animation: browser-loading-spin var(--motion-duration-spinner) var(--motion-ease-linear) infinite;
+}
+
+@keyframes browser-loading-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  55% {
+    transform: translateX(250%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+
+@keyframes browser-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-loading-indicator::before {
+    animation-duration: 2.2s;
+  }
+  .browser-tool-loading-icon {
+    animation-duration: 1.6s;
+  }
+}
+
+.browser-blank-state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  pointer-events: none;
+}
+.browser-blank-state strong {
+  font-size: 18px;
+  font-weight: 600;
+}
+.browser-blank-state span {
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+}
+
+.browser-crash-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 13px;
+}
+.browser-crash-overlay strong {
+  font-weight: 600;
+}
+
+.browser-address-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.browser-address {
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-xl);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  outline: 0;
+}
+.browser-address::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+.browser-address:focus {
+  border-color: hsl(var(--ring));
+}
+
+.browser-history-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--popover));
+  box-shadow: 0 8px 24px hsl(var(--shadow) / 0.25);
+}
+
+.browser-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+}
+.browser-history-item:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.browser-history-item svg {
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground));
+}
+
+.browser-history-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.browser-history-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-history-item-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+}
+
+.browser-annotation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+}
+
+.browser-annotation-hitarea {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+}
+
+.browser-annotation-hover-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid hsl(var(--ring));
+  background: hsl(var(--ring) / 0.08);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.browser-annotation-tooltip {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
+  box-shadow: 0 4px 12px hsl(var(--shadow) / 0.25);
+  font-size: 11px;
+  pointer-events: none;
+}
+.browser-annotation-tooltip-tag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: var(--shape-radius-xs);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+}
+.browser-annotation-tooltip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-annotation-marker {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed hsl(var(--ring));
+  pointer-events: auto;
+}
+
+.browser-annotation-badge {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.browser-annotation-text {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  display: none;
+  max-width: 240px;
+  padding: 4px 8px;
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
+  box-shadow: 0 4px 12px hsl(var(--shadow) / 0.25);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.browser-annotation-marker:hover .browser-annotation-text {
+  display: block;
+}
+
+.browser-annotation-remove-slot {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  display: none;
+}
+.browser-annotation-marker:hover .browser-annotation-remove-slot {
+  display: inline-flex;
+}
+
+.browser-annotation-editor {
+  position: absolute;
+  z-index: 40;
+  width: 260px;
+  padding: 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--popover));
+  box-shadow: 0 8px 24px hsl(var(--shadow) / 0.3);
+}
+
+.browser-annotation-editor-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+.browser-annotation-editor-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--shape-radius-xs);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+.browser-annotation-editor-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.browser-annotation-input {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  outline: 0;
+}
+.browser-annotation-input:focus {
+  border-color: hsl(var(--ring));
+}
+
+.browser-annotation-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.browser-annotation-cancel,
+.browser-annotation-save {
+  padding: 4px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: transparent;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  font-size: 12px;
+}
+.browser-annotation-save {
+  border-color: transparent;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.browser-annotation-save[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.browser-annotation-error {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+  font-size: 12px;
+}
+
+.browser-annotation-bar {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--popover));
+  box-shadow: 0 4px 12px hsl(var(--shadow) / 0.25);
+  font-size: 12px;
+  color: hsl(var(--foreground));
+}
+.browser-annotation-bar-count {
+  color: hsl(var(--muted-foreground));
+}
+
+.browser-annotation-commit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  cursor: pointer;
+  font-size: 12px;
+}
+.browser-annotation-commit[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.browser-panel-error {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 16px);
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+  box-shadow: 0 4px 12px hsl(var(--shadow) / 0.25);
+  font-size: 12px;
+}
+.browser-panel-error-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-panel-error-retry {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: var(--shape-radius-sm);
+  background: hsl(var(--destructive-foreground));
+  color: hsl(var(--destructive));
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.browser-rebuild-button {
+  margin-top: 4px;
+  padding: 4px 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  cursor: pointer;
+  font-size: 12px;
+}
+.browser-rebuild-button:hover {
+  background: hsl(var(--accent-foreground));
+  color: hsl(var(--accent));
+}

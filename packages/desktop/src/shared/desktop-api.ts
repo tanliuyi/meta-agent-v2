@@ -13,6 +13,27 @@ import type {
   SaveAutoTitleSettingsResult,
 } from "./auto-title-contracts.ts";
 import type {
+  BrowserAction,
+  BrowserActionResult,
+  BrowserAnnotation,
+  BrowserAnnotationBounds,
+  BrowserAnnotationInput,
+  BrowserAnnotationPickResult,
+  BrowserAttachResult,
+  BrowserCreateTabRequest,
+  BrowserHistoryEntry,
+  BrowserNavigateResult,
+  BrowserScreenshotResult,
+  BrowserSnapshotResult,
+  BrowserStateEvent,
+  BrowserTab,
+} from "./browser-contracts.ts";
+import type {
+  BrowserSettingsSnapshot,
+  SaveBrowserSettingsInput,
+  SaveBrowserSettingsResult,
+} from "./browser-settings-contracts.ts";
+import type {
   ClearedQueue,
   DraftSessionConfig,
   FileChangeSet,
@@ -298,5 +319,45 @@ export interface DesktopApi {
   workbench: {
     get(projectId: string, threadId: string): Promise<WorkbenchState>;
     update(state: WorkbenchState): Promise<void>;
+  };
+  browser: {
+    /** renderer 在 webview attach 后报告 guest webContentsId；返回分配的 tab。requestId 用于响应 main 的建 tab 请求。 */
+    attach(webContentsId: number, requestId?: number): Promise<BrowserAttachResult>;
+    /** renderer 移除 webview 时注销；幂等。 */
+    detach(webContentsId: number): Promise<void>;
+    /** 切换活跃 tab（CDP attach 只跟随活跃 tab）。 */
+    selectTab(tabId: number): Promise<BrowserTab | null>;
+    /** 导航到 URL（http/https；file:// 拒绝）。 */
+    navigate(tabId: number, url: string): Promise<BrowserNavigateResult>;
+    /** 截取当前页面 PNG。 */
+    screenshot(tabId: number): Promise<BrowserScreenshotResult>;
+    /** 结构化页面快照（AX 树简化 + 可交互元素编号 + 可选截图）。 */
+    snapshot(tabId: number, opts?: { withScreenshot?: boolean }): Promise<BrowserSnapshotResult>;
+    /** 元素级交互（click/type/scroll，编号来自 snapshot）。 */
+    action(tabId: number, action: BrowserAction): Promise<BrowserActionResult>;
+    /** 当前全部 tab（含活跃标识由调用方按状态事件维护）。 */
+    tabsList(): Promise<BrowserTab[]>;
+    getSettings(): Promise<BrowserSettingsSnapshot>;
+    saveSettings(input: SaveBrowserSettingsInput): Promise<SaveBrowserSettingsResult>;
+    /** 设置页未保存修改标记（窗口关闭守卫）。 */
+    setEditorDirty(dirty: boolean): boolean;
+    /** 清除浏览器分区数据（cookie/缓存/登录态）。 */
+    clearData(): Promise<void>;
+    /** 访问历史（最近在前，仅用户 UI；Agent 不可见）。 */
+    browserHistory(): Promise<BrowserHistoryEntry[]>;
+    /** 取视口坐标处元素（标注模式）：生成选择器与 bounds。 */
+    annotationPick(tabId: number, x: number, y: number): Promise<BrowserAnnotationPickResult>;
+    /** 添加标注；返回完整标注对象（null = tab 不存在）。 */
+    annotationAdd(tabId: number, input: BrowserAnnotationInput): Promise<BrowserAnnotation | null>;
+    /** 指定 tab 的标注列表（最近在前）。 */
+    annotationList(tabId: number): Promise<BrowserAnnotation[]>;
+    /** 删除标注。 */
+    annotationRemove(tabId: number, id: string): Promise<void>;
+    /** 按选择器重新解析标注 bounds；元素消失返回 null。 */
+    annotationResolve(tabId: number, id: string): Promise<BrowserAnnotationBounds | null>;
+    /** 订阅浏览器全局状态（tabs/活跃 tab）；返回取消订阅函数。 */
+    onStateChanged(listener: (event: BrowserStateEvent) => void): () => void;
+    /** main 请求创建新 tab（工具 browser.open 等）；返回取消订阅函数。 */
+    onCreateTabRequest(listener: (request: BrowserCreateTabRequest) => void): () => void;
   };
 }

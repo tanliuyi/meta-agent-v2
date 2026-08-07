@@ -19,6 +19,7 @@ import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as SettingsArchivesRouteImport } from './routes/settings.archives'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
 import { Route as SettingsAutoTitleRouteImport } from './routes/settings.auto-title'
+import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsDependenciesRouteImport } from './routes/settings.dependencies'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
@@ -77,6 +78,11 @@ const SettingsAuthRoute = SettingsAuthRouteImport.update({
 const SettingsAutoTitleRoute = SettingsAutoTitleRouteImport.update({
   id: '/auto-title',
   path: '/auto-title',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsBrowserRoute = SettingsBrowserRouteImport.update({
+  id: '/browser',
+  path: '/browser',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsDependenciesRoute = SettingsDependenciesRouteImport.update({
@@ -141,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/settings/archives': typeof SettingsArchivesRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/auto-title': typeof SettingsAutoTitleRoute
+  '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -159,6 +166,7 @@ export interface FileRoutesByTo {
   '/settings/archives': typeof SettingsArchivesRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/auto-title': typeof SettingsAutoTitleRoute
+  '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -182,6 +190,7 @@ export interface FileRoutesById {
   '/settings/archives': typeof SettingsArchivesRoute
   '/settings/auth': typeof SettingsAuthRoute
   '/settings/auto-title': typeof SettingsAutoTitleRoute
+  '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/memory': typeof SettingsMemoryRoute
@@ -206,6 +215,7 @@ export interface FileRouteTypes {
     | '/settings/archives'
     | '/settings/auth'
     | '/settings/auto-title'
+    | '/settings/browser'
     | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/memory'
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
     | '/settings/archives'
     | '/settings/auth'
     | '/settings/auto-title'
+    | '/settings/browser'
     | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/memory'
@@ -246,6 +257,7 @@ export interface FileRouteTypes {
     | '/settings/archives'
     | '/settings/auth'
     | '/settings/auto-title'
+    | '/settings/browser'
     | '/settings/dependencies'
     | '/settings/extensions'
     | '/settings/memory'
@@ -335,6 +347,13 @@ declare module '@tanstack/react-router' {
       path: '/auto-title'
       fullPath: '/settings/auto-title'
       preLoaderRoute: typeof SettingsAutoTitleRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/browser': {
+      id: '/settings/browser'
+      path: '/browser'
+      fullPath: '/settings/browser'
+      preLoaderRoute: typeof SettingsBrowserRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/dependencies': {
@@ -448,6 +467,7 @@ interface SettingsRouteChildren {
   SettingsArchivesRoute: typeof SettingsArchivesRoute
   SettingsAuthRoute: typeof SettingsAuthRoute
   SettingsAutoTitleRoute: typeof SettingsAutoTitleRoute
+  SettingsBrowserRoute: typeof SettingsBrowserRoute
   SettingsDependenciesRoute: typeof SettingsDependenciesRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsMemoryRoute: typeof SettingsMemoryRoute
@@ -462,6 +482,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsArchivesRoute: SettingsArchivesRoute,
   SettingsAuthRoute: SettingsAuthRoute,
   SettingsAutoTitleRoute: SettingsAutoTitleRoute,
+  SettingsBrowserRoute: SettingsBrowserRoute,
   SettingsDependenciesRoute: SettingsDependenciesRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsMemoryRoute: SettingsMemoryRoute,
