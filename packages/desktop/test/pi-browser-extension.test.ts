@@ -137,26 +137,46 @@ describe("BrowserClient", () => {
   beforeEach(() => {
     envBackup.PORT = process.env.PI_BROWSER_HOST_PORT;
     envBackup.TOKEN = process.env.PI_BROWSER_TOKEN;
+    envBackup.SESSION_TOKEN = process.env.PI_BROWSER_SESSION_TOKEN;
+    envBackup.PROJECT = process.env.PI_BROWSER_SESSION_PROJECT_ID;
+    process.env.PI_BROWSER_SESSION_TOKEN = "session-tok";
+    envBackup.THREAD = process.env.PI_BROWSER_SESSION_THREAD_ID;
   });
 
   afterEach(() => {
-    if (envBackup.PORT === undefined) delete process.env.PI_BROWSER_HOST_PORT;
-    else process.env.PI_BROWSER_HOST_PORT = envBackup.PORT;
-    if (envBackup.TOKEN === undefined) delete process.env.PI_BROWSER_TOKEN;
-    else process.env.PI_BROWSER_TOKEN = envBackup.TOKEN;
+    for (const [name, value] of Object.entries(envBackup)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   });
 
   test("env 缺失时构造抛 BrowserUnavailableError", () => {
     delete process.env.PI_BROWSER_HOST_PORT;
     delete process.env.PI_BROWSER_TOKEN;
+    delete process.env.PI_BROWSER_SESSION_PROJECT_ID;
+    delete process.env.PI_BROWSER_SESSION_THREAD_ID;
     expect(() => new BrowserClient()).toThrow(BrowserUnavailableError);
   });
 
-  test("成功信封解析并返回 data", async () => {
+  test("会话身份 env 缺失时构造抛 BrowserUnavailableError（fail-closed）", () => {
+    process.env.PI_BROWSER_HOST_PORT = "8123";
+    process.env.PI_BROWSER_TOKEN = "tok";
+    delete process.env.PI_BROWSER_SESSION_PROJECT_ID;
+    delete process.env.PI_BROWSER_SESSION_THREAD_ID;
+    expect(() => new BrowserClient()).toThrow("PI_BROWSER_SESSION");
+  });
+
+  test("成功信封解析并返回 data；每个请求携带会话身份头", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({ ok: true, data: [{ tabId: 1 }] }), { status: 200 }));
-    const client = new BrowserClient({ port: 8123, token: "tok", fetchImpl: fetchImpl as unknown as typeof fetch });
+    const client = new BrowserClient({
+      port: 8123,
+      token: "tok",
+      sessionProjectId: "proj-a",
+      sessionThreadId: "thread-a",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
 
     const result = await client.tabsList();
     expect(result).toEqual([{ tabId: 1 }]);
@@ -164,14 +184,41 @@ describe("BrowserClient", () => {
     expect(request[0]).toBe("http://127.0.0.1:8123/rpc");
     const init = request[1] as { headers: Record<string, string>; body: string };
     expect(init.headers["x-desktop-browser-token"]).toBe("tok");
+    expect(init.headers["x-desktop-browser-session-token"]).toBe("session-tok");
+    expect(init.headers["x-desktop-browser-session-project-id"]).toBe("proj-a");
+    expect(init.headers["x-desktop-browser-session-thread-id"]).toBe("thread-a");
     expect(JSON.parse(init.body)).toEqual({ method: "tabsList", params: undefined });
+  });
+
+  test("env 注入的会话身份随请求发送", async () => {
+    process.env.PI_BROWSER_SESSION_PROJECT_ID = "env-proj";
+    process.env.PI_BROWSER_SESSION_THREAD_ID = "env-thread";
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true, data: null }), { status: 200 }));
+    const client = new BrowserClient({
+      port: 8123,
+      token: "tok",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await client.activeTab();
+    const init = (fetchImpl.mock.calls[0] as unknown[])[1] as { headers: Record<string, string> };
+    expect(init.headers["x-desktop-browser-session-project-id"]).toBe("env-proj");
+    expect(init.headers["x-desktop-browser-session-thread-id"]).toBe("env-thread");
   });
 
   test("信封失败抛普通错误（保留 server 错误文案）", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({ ok: false, error: "tab 1 不存在" }), { status: 200 }));
-    const client = new BrowserClient({ port: 8123, token: "tok", fetchImpl: fetchImpl as unknown as typeof fetch });
+    const client = new BrowserClient({
+      port: 8123,
+      token: "tok",
+      sessionProjectId: "proj-a",
+      sessionThreadId: "thread-a",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
     await expect(client.navigate(1, "https://example.com/")).rejects.toThrow("tab 1 不存在");
   });
 
@@ -179,6 +226,8 @@ describe("BrowserClient", () => {
     const httpError = new BrowserClient({
       port: 8123,
       token: "tok",
+      sessionProjectId: "proj-a",
+      sessionThreadId: "thread-a",
       fetchImpl: (async () => new Response("nope", { status: 401 })) as unknown as typeof fetch,
     });
     await expect(httpError.activeTab()).rejects.toThrow(BrowserUnavailableError);
@@ -186,6 +235,8 @@ describe("BrowserClient", () => {
     const networkError = new BrowserClient({
       port: 8123,
       token: "tok",
+      sessionProjectId: "proj-a",
+      sessionThreadId: "thread-a",
       fetchImpl: (async () => {
         throw new Error("connect ECONNREFUSED");
       }) as unknown as typeof fetch,
@@ -199,7 +250,13 @@ describe("BrowserClient", () => {
       .mockResolvedValue(
         new Response(JSON.stringify({ ok: false, error: "创建浏览器标签页超时（15000ms）" }), { status: 500 }),
       );
-    const client = new BrowserClient({ port: 8123, token: "tok", fetchImpl: fetchImpl as unknown as typeof fetch });
+    const client = new BrowserClient({
+      port: 8123,
+      token: "tok",
+      sessionProjectId: "proj-a",
+      sessionThreadId: "thread-a",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
 
     await expect(client.openTab("https://example.com/")).rejects.toThrow("创建浏览器标签页超时（15000ms）");
   });
@@ -596,6 +653,54 @@ describe("pi-browser 工具注册", () => {
     );
 
     expect(confirm).toHaveBeenCalledTimes(2);
+    expect(result.details.browser.ok).toBe(true);
+  });
+
+  test("站点/敏感确认透传工具 AbortSignal：abort 后确认取消且不执行动作", async () => {
+    calls.tabsList.mockResolvedValue([{ ...TAB, url: "https://other.example.net/form" }]);
+    calls.inspectElement.mockResolvedValue({
+      ok: true,
+      node: { index: 7, role: "button", name: "购买并支付", tag: "button" },
+    });
+    const receivedSignals: AbortSignal[] = [];
+    const confirm = vi
+      .fn()
+      .mockImplementationOnce((_title: string, _message: string, opts?: { signal?: AbortSignal }) => {
+        if (opts?.signal) receivedSignals.push(opts.signal);
+        return Promise.resolve(true);
+      })
+      .mockImplementationOnce((_title: string, _message: string, opts?: { signal?: AbortSignal }) => {
+        if (opts?.signal) receivedSignals.push(opts.signal);
+        return Promise.reject(new DOMException("aborted", "AbortError"));
+      });
+    const controller = new AbortController();
+    const tool = tools.find((candidate) => candidate.name === "browser_click")!;
+
+    const result = await tool.execute("c1", { tabId: 5, elementIndex: 7 }, controller.signal, undefined, {
+      ui: { confirm },
+    } as unknown as ExtensionContext);
+
+    expect(receivedSignals).toHaveLength(2); // 站点确认 + 敏感点击确认
+    expect(receivedSignals.every((signal) => signal === controller.signal)).toBe(true);
+    expect(result.details.browser.ok).toBe(false);
+    expect(calls.action).not.toHaveBeenCalled();
+  });
+
+  test("browser.history 确认透传工具 AbortSignal", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const confirm = vi.fn((_title: string, _message: string, opts?: { signal?: AbortSignal }) => {
+      receivedSignal = opts?.signal;
+      return Promise.resolve(true);
+    });
+    calls.browserHistory.mockResolvedValue([]);
+    const controller = new AbortController();
+    const tool = tools.find((candidate) => candidate.name === "browser_history")!;
+
+    const result = await tool.execute("c1", {}, controller.signal, undefined, {
+      ui: { confirm },
+    } as unknown as ExtensionContext);
+
+    expect(receivedSignal).toBe(controller.signal);
     expect(result.details.browser.ok).toBe(true);
   });
 

@@ -2,14 +2,16 @@ import { EventEmitter } from "node:events";
 import type { WebContents } from "electron";
 import { describe, expect, test, vi } from "vitest";
 import { installBrowserWebviewSecurity, isBrowserWebviewUrl } from "../src/main/browser/browser-webview-policy.ts";
-import { BROWSER_PARTITION } from "../src/shared/browser-contracts.ts";
+import { browserPartitionFor, isBrowserSessionPartition } from "../src/shared/browser-contracts.ts";
+
+const SESSION_PARTITION = browserPartitionFor({ projectId: "proj-a", threadId: "thread-a" });
 
 function attachEvent(): Electron.Event {
   return { preventDefault: vi.fn() } as unknown as Electron.Event;
 }
 
 describe("browser webview security policy", () => {
-  test("allows only the browser partition and safe initial URLs", () => {
+  test("allows only per-session browser partitions and safe initial URLs", () => {
     const webContents = new EventEmitter() as unknown as WebContents;
     const remove = installBrowserWebviewSecurity(webContents);
     const event = attachEvent();
@@ -24,7 +26,7 @@ describe("browser webview security policy", () => {
       webviewTag: true,
     };
     const params: Record<string, string> = {
-      partition: BROWSER_PARTITION,
+      partition: SESSION_PARTITION,
       src: "about:blank",
       preload: "/tmp/attacker-preload.js",
       webpreferences: "nodeIntegration=yes",
@@ -43,7 +45,8 @@ describe("browser webview security policy", () => {
     expect(preferences.webSecurity).toBe(true);
     expect(preferences.allowRunningInsecureContent).toBe(false);
     expect(preferences.webviewTag).toBe(false);
-    expect(preferences.partition).toBe(BROWSER_PARTITION);
+    // 保留 renderer 按会话身份设置的分区。
+    expect(preferences.partition).toBe(SESSION_PARTITION);
 
     remove();
   });
@@ -59,10 +62,22 @@ describe("browser webview security policy", () => {
     });
     expect(partitionEvent.preventDefault).toHaveBeenCalledOnce();
 
+    const globalPartitionEvent = attachEvent();
+    webContents.emit(
+      "will-attach-webview",
+      globalPartitionEvent,
+      {},
+      {
+        partition: "persist:browser",
+        src: "about:blank",
+      },
+    );
+    expect(globalPartitionEvent.preventDefault).toHaveBeenCalledOnce();
+
     const urlEvent = attachEvent();
     const urlPreferences: Electron.WebPreferences = {};
     webContents.emit("will-attach-webview", urlEvent, urlPreferences, {
-      partition: BROWSER_PARTITION,
+      partition: SESSION_PARTITION,
       src: "file:///etc/passwd",
     });
     expect(urlEvent.preventDefault).toHaveBeenCalledOnce();
@@ -77,5 +92,17 @@ describe("browser webview security policy", () => {
     expect(isBrowserWebviewUrl("file:///tmp/index.html")).toBe(false);
     expect(isBrowserWebviewUrl("javascript:alert(1)")).toBe(false);
     expect(isBrowserWebviewUrl(undefined)).toBe(false);
+  });
+
+  test("isBrowserSessionPartition 只接受会话分区格式", () => {
+    expect(isBrowserSessionPartition(SESSION_PARTITION)).toBe(true);
+    expect(isBrowserSessionPartition("persist:browser")).toBe(false);
+    expect(isBrowserSessionPartition("persist:other")).toBe(false);
+    expect(isBrowserSessionPartition("persist:browser-zzzzzzzzzzzzzzzz")).toBe(false);
+    expect(isBrowserSessionPartition("")).toBe(false);
+    // 不同会话分区互不相同。
+    expect(browserPartitionFor({ projectId: "proj-a", threadId: "thread-a" })).not.toBe(
+      browserPartitionFor({ projectId: "proj-a", threadId: "thread-b" }),
+    );
   });
 });

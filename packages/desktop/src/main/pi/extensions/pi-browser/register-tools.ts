@@ -97,7 +97,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const client = resolveOrUnavailable();
       if (client instanceof Error) return unavailableResult(client, "open");
-      const blocked = await checkToolSiteAccess(client, params.url, ctx);
+      const blocked = await checkToolSiteAccess(client, params.url, ctx, _signal);
       if (blocked !== null) return toolResult("open", { ok: false, error: blocked });
       const active = await client.activeTab(...signalArgs(_signal));
       if (active && active.url !== "about:blank") {
@@ -134,7 +134,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const client = resolveOrUnavailable();
       if (client instanceof Error) return unavailableResult(client, "navigate");
-      const blocked = await checkToolSiteAccess(client, params.url, ctx);
+      const blocked = await checkToolSiteAccess(client, params.url, ctx, _signal);
       if (blocked !== null) return toolResult("navigate", { ok: false, error: blocked });
       const tabId = await resolveTabId(client, params.tabId);
       if (tabId === null) return noTabResult("navigate");
@@ -220,13 +220,13 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
       let navigationApprovalUrl: string | undefined;
       if (targetUrl !== null && targetUrl !== access.url) {
         const targetAccess = await siteAccess.check(access.settings, targetUrl, (url, host) =>
-          confirmSiteAccess(ctx, url, host),
+          confirmSiteAccess(ctx, url, host, _signal),
         );
         if (!targetAccess.allowed) return toolResult("click", { ok: false, error: targetAccess.error.message });
         navigationApprovalUrl = targetUrl;
       }
       if (isSensitiveClickTarget(target.node)) {
-        const allowed = await confirmSensitiveAction(ctx, access.settings, access.url, "点击敏感控件");
+        const allowed = await confirmSensitiveAction(ctx, access.settings, access.url, "点击敏感控件", _signal);
         if (!allowed) return toolResult("click", { ok: false, error: "用户拒绝敏感操作" });
       }
       const actionTarget = makeActionTarget(target.node, access.url);
@@ -268,7 +268,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
         return toolResult("type", { ok: false, error: "目标元素不是可输入控件，请重新 browser_snapshot 后选择输入框" });
       }
       if (params.submit === true) {
-        const allowed = await confirmSensitiveAction(ctx, access.settings, access.url, "提交表单");
+        const allowed = await confirmSensitiveAction(ctx, access.settings, access.url, "提交表单", _signal);
         if (!allowed) return toolResult("type", { ok: false, error: "用户拒绝提交表单" });
       }
       const result = await client.action(
@@ -330,12 +330,14 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
       if (tabs.length === 0) {
         return toolResult("tabs", { ok: false, error: "内置浏览器没有打开的标签页，请先使用 browser_open" });
       }
-      const settings = await fetchSiteSettings(client);
+      const settings = await fetchSiteSettings(client, _signal);
       if (settings === undefined) {
         return toolResult("tabs", { ok: false, error: "无法读取浏览器访问策略，请确认浏览器服务正常后重试" });
       }
       for (const tab of tabs) {
-        const access = await siteAccess.check(settings, tab.url, (url, host) => confirmSiteAccess(ctx, url, host));
+        const access = await siteAccess.check(settings, tab.url, (url, host) =>
+          confirmSiteAccess(ctx, url, host, _signal),
+        );
         if (!access.allowed) return toolResult("tabs", { ok: false, error: access.error.message });
       }
       const lines = tabs.map((tab) => `[${tab.tabId}] ${tab.title || tab.url}${tab.loading ? " (加载中)" : ""}`);
@@ -360,6 +362,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
         approved = await ctx.ui.confirm(
           "读取浏览历史",
           "Agent 请求读取内置浏览器的访问历史，其中可能包含敏感 URL。是否允许？",
+          _signal === undefined ? undefined : { signal: _signal },
         );
       } catch {
         approved = false;
@@ -424,7 +427,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
           const historyTarget = await client.historyTarget(tabId, entry.kind, _signal);
           if (!historyTarget.ok) return toolResult(entry.kind, { ok: false, error: historyTarget.error });
           const targetAccess = await siteAccess.check(access.settings, historyTarget.target.url, (url, host) =>
-            confirmSiteAccess(ctx, url, host),
+            confirmSiteAccess(ctx, url, host, _signal),
           );
           if (!targetAccess.allowed) return toolResult(entry.kind, { ok: false, error: targetAccess.error.message });
           navigationApprovalUrl = historyTarget.target.url;
@@ -456,9 +459,12 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
     client: BrowserClient,
     url: string,
     ctx: ExtensionContext,
+    signal?: AbortSignal,
   ): Promise<string | null> {
-    const settings = await fetchSiteSettings(client);
-    const outcome = await siteAccess.check(settings, url, (target, host) => confirmSiteAccess(ctx, target, host));
+    const settings = await fetchSiteSettings(client, signal);
+    const outcome = await siteAccess.check(settings, url, (target, host) =>
+      confirmSiteAccess(ctx, target, host, signal),
+    );
     return outcome.allowed ? null : outcome.error.message;
   }
 }
@@ -605,7 +611,7 @@ async function checkCurrentTabSiteAccess(
   }
   const tab = tabs.find((candidate) => candidate.tabId === tabId);
   if (!tab) return { settings, url: "", error: `tab ${tabId} 不存在` };
-  const outcome = await siteAccess.check(settings, tab.url, (url, host) => confirmSiteAccess(ctx, url, host));
+  const outcome = await siteAccess.check(settings, tab.url, (url, host) => confirmSiteAccess(ctx, url, host, signal));
   return outcome.allowed
     ? { settings, url: tab.url, error: null }
     : { settings, url: tab.url, error: outcome.error.message };
@@ -668,27 +674,39 @@ function isSensitiveClickTarget(node: BrowserSnapshotNode): boolean {
   );
 }
 
-/** 敏感动作确认；允许列表站点在 unlisted-sites 模式下免二次确认。 */
+/** 敏感动作确认；允许列表站点在 unlisted-sites 模式下免二次确认。
+ *  传入工具 AbortSignal：abort/timeout/dispose 清理确认状态且不执行动作。 */
 async function confirmSensitiveAction(
   ctx: ExtensionContext,
   settings: BrowserPolicySettings,
   targetUrl: string,
   actionName: string,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   if (settings.confirmSensitiveActions === "unlisted-sites" && checkSiteAccess(settings, targetUrl) === "allowed") {
     return true;
   }
   try {
-    return await ctx.ui.confirm(actionName, `Agent 要在 ${targetUrl} 执行${actionName}，是否允许？`);
+    return await ctx.ui.confirm(
+      actionName,
+      `Agent 要在 ${targetUrl} 执行${actionName}，是否允许？`,
+      signal === undefined ? undefined : { signal },
+    );
   } catch {
     return false;
   }
 }
 
-/** 未允许站点的用户确认（fail-closed 由 SiteAccessController 保证）。 */
-async function confirmSiteAccess(ctx: ExtensionContext, url: string, host: string): Promise<boolean> {
+/** 未允许站点的用户确认（fail-closed 由 SiteAccessController 保证）；abort 时确认取消且不执行。 */
+async function confirmSiteAccess(
+  ctx: ExtensionContext,
+  url: string,
+  host: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
   return ctx.ui.confirm(
     "访问站点",
     `Agent 要在内置浏览器中访问 ${url}。该站点未列入允许列表，是否允许（本次会话内不再询问 ${host}）？`,
+    signal === undefined ? undefined : { signal },
   );
 }

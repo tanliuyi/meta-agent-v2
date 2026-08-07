@@ -9,32 +9,67 @@ import type {
 } from "../src/main/browser/browser-host-controller.ts";
 import { StaleReferenceError } from "../src/main/browser/browser-host-controller.ts";
 import { BrowserManager, type BrowserManagerOptions } from "../src/main/browser/browser-manager.ts";
-import type {
-  BrowserAction,
-  BrowserAnnotationBounds,
-  BrowserCreateTabRequest,
-  BrowserSnapshot,
-  BrowserStateEvent,
+import {
+  BROWSER_INTERNAL_PAGES,
+  type BrowserAction,
+  type BrowserAnnotationBounds,
+  type BrowserCreateTabRequest,
+  type BrowserSessionIdentity,
+  type BrowserSnapshot,
+  type BrowserStateEvent,
+  browserPartitionFor,
+  browserSessionKey,
 } from "../src/shared/browser-contracts.ts";
 
 const electron = vi.hoisted(() => {
-  const clearStorageData = vi.fn().mockResolvedValue(undefined);
-  const clearCache = vi.fn().mockResolvedValue(undefined);
+  const sessions = new Map<string, unknown>();
   const browserSession = {
     setPermissionRequestHandler: vi.fn(),
-    clearStorageData,
-    clearCache,
+    clearStorageData: vi.fn().mockResolvedValue(undefined),
+    clearCache: vi.fn().mockResolvedValue(undefined),
     on: vi.fn(),
     off: vi.fn(),
   };
-  return { browserSession, clearStorageData, clearCache };
+  const popup = vi.fn();
+  const buildFromTemplate = vi.fn(() => ({ popup }));
+  const fromWebContents = vi.fn(() => undefined);
+  const writeText = vi.fn();
+  const writeImage = vi.fn();
+  const createFromDataURL = vi.fn(() => ({ isEmpty: () => false }));
+  return {
+    sessions,
+    browserSession,
+    popup,
+    buildFromTemplate,
+    fromWebContents,
+    writeText,
+    writeImage,
+    createFromDataURL,
+  };
 });
 
 vi.mock("electron", () => ({
   webContents: { fromId: () => null },
   session: {
-    fromPartition: () => electron.browserSession,
+    fromPartition: (partition: string) => {
+      let existing = electron.sessions.get(partition);
+      if (!existing) {
+        existing = {
+          setPermissionRequestHandler: vi.fn(),
+          clearStorageData: vi.fn().mockResolvedValue(undefined),
+          clearCache: vi.fn().mockResolvedValue(undefined),
+          on: vi.fn(),
+          off: vi.fn(),
+        };
+        electron.sessions.set(partition, existing);
+      }
+      return existing;
+    },
   },
+  BrowserWindow: { fromWebContents: electron.fromWebContents },
+  Menu: { buildFromTemplate: electron.buildFromTemplate },
+  clipboard: { writeText: electron.writeText, writeImage: electron.writeImage },
+  nativeImage: { createFromDataURL: electron.createFromDataURL },
 }));
 
 /** 内存假宿主：记录调用、可手动触发事件。 */
@@ -159,12 +194,16 @@ class FakeHost implements BrowserHostController {
 interface Setup {
   manager: BrowserManager;
   hosts: Map<number, FakeHost>;
-  hostOptions: Map<number, { cdpTimeoutMs?: number; maxSnapshotNodes?: number }>;
+  hostOptions: Map<number, WebContentsHostControllerOptions>;
   states: BrowserStateEvent[];
 }
 
+const SESSION_A: BrowserSessionIdentity = { projectId: "proj-a", threadId: "thread-a" };
+const SESSION_B: BrowserSessionIdentity = { projectId: "proj-a", threadId: "thread-b" };
+const SESSION_C: BrowserSessionIdentity = { projectId: "proj-b", threadId: "thread-c" };
+
 function fakeWebContents(
-  contentsSession = electron.browserSession,
+  contentsSession: Electron.Session,
   hostWebContents: WebContents | null = {} as WebContents,
   url = "about:blank",
 ): WebContents {
@@ -178,9 +217,13 @@ function fakeWebContents(
   } as unknown as WebContents;
 }
 
+function sessionFor(identity: BrowserSessionIdentity): Electron.Session {
+  return (electron.sessions.get(browserPartitionFor(identity)) ?? electron.browserSession) as Electron.Session;
+}
+
 function setup(options: Partial<BrowserManagerOptions> = {}): Setup {
   const hosts = new Map<number, FakeHost>();
-  const hostOptions = new Map<number, { cdpTimeoutMs?: number; maxSnapshotNodes?: number }>();
+  const hostOptions = new Map<number, WebContentsHostControllerOptions>();
   const states: BrowserStateEvent[] = [];
   const manager = new BrowserManager(join(tmpdir(), `desktop-browser-manager-${Date.now()}`), {
     ...options,
@@ -191,189 +234,449 @@ function setup(options: Partial<BrowserManagerOptions> = {}): Setup {
       hostOptions.set(webContentsId, options ?? {});
       return host;
     },
-    fromWebContentsId: options.fromWebContentsId ?? (() => fakeWebContents()),
+    fromWebContentsId:
+      options.fromWebContentsId ??
+      ((webContentsId: number) => {
+        // 按 webContentsId 前缀区分 guest 属于哪个会话（101-199 → A，201-299 → B，301-399 → C）。
+        if (webContentsId >= 300) return fakeWebContents(sessionFor(SESSION_C));
+        if (webContentsId >= 200) return fakeWebContents(sessionFor(SESSION_B));
+        return fakeWebContents(sessionFor(SESSION_A));
+      }),
   });
+  manager.registerSession(SESSION_A);
+  manager.registerSession(SESSION_B);
+  manager.registerSession(SESSION_C);
   return { manager, hosts, hostOptions, states };
 }
 
-describe("BrowserManager", () => {
-  test("attach 注册 tab 并广播状态", async () => {
+describe("BrowserManager 会话隔离", () => {
+  test("attach 注册 tab 并广播携带 sessionKey 的状态", async () => {
     const { manager, hosts, states } = setup();
 
-    const result = await manager.attach(101);
+    const result = await manager.attach(SESSION_A, 101);
 
     expect(result).toMatchObject({ ok: true, tab: { tabId: 1, url: "about:blank" } });
     expect(hosts.has(101)).toBe(true);
-    expect(manager.tabsList()).toHaveLength(1);
-    expect(states.at(-1)).toMatchObject({ activeTabId: 1, tabs: [{ tabId: 1 }] });
+    expect(manager.tabsList(SESSION_A)).toHaveLength(1);
+    expect(states.at(-1)).toMatchObject({
+      sessionKey: browserSessionKey(SESSION_A),
+      activeTabId: 1,
+      tabs: [{ tabId: 1 }],
+    });
+  });
+
+  test("双会话 profile/tab 状态完全隔离", async () => {
+    const hosts = new Map<number, FakeHost>();
+    const states: BrowserStateEvent[] = [];
+    const sessionA = sessionFor(SESSION_A);
+    const sessionB = sessionFor(SESSION_B);
+    const managerWithPerSession = new BrowserManager(join(tmpdir(), `desktop-browser-manager-${Date.now()}`), {
+      onStateChanged: (event) => states.push(event),
+      createHost: (webContentsId, _options) => {
+        const host = new FakeHost();
+        hosts.set(webContentsId, host);
+        return host;
+      },
+      fromWebContentsId: (webContentsId) => {
+        // 按 webContentsId 前缀区分属于哪个会话的 guest（101-199 → A，201-299 → B）。
+        if (webContentsId < 200) return fakeWebContents(sessionA);
+        return fakeWebContents(sessionB);
+      },
+    });
+    managerWithPerSession.registerSession(SESSION_A);
+    managerWithPerSession.registerSession(SESSION_B);
+
+    await managerWithPerSession.attach(SESSION_A, 101);
+    await managerWithPerSession.attach(SESSION_A, 102);
+    await managerWithPerSession.attach(SESSION_B, 201);
+
+    // 各自独立的 tab 列表与 tabId 编号。
+    expect(managerWithPerSession.tabsList(SESSION_A).map((tab) => tab.tabId)).toEqual([1, 2]);
+    expect(managerWithPerSession.tabsList(SESSION_B).map((tab) => tab.tabId)).toEqual([1]);
+    expect(managerWithPerSession.tabsList(SESSION_C)).toEqual([]);
+
+    // 各自独立的 active tab；A 的 agent 操作不能改变 B 的 active tab。
+    managerWithPerSession.selectTab(SESSION_A, 2);
+    managerWithPerSession.selectTab(SESSION_B, 1);
+    managerWithPerSession.snapshot(SESSION_A, 2, {}, "agent"); // activateAgentTab(A, 2)
+    expect(managerWithPerSession.activeTab(SESSION_A)?.tabId).toBe(2);
+    expect(managerWithPerSession.activeTab(SESSION_B)?.tabId).toBe(1);
+
+    // 广播带各自 sessionKey。
+    const sessionKeys = new Set(states.map((state) => state.sessionKey));
+    expect(sessionKeys).toEqual(new Set([browserSessionKey(SESSION_A), browserSessionKey(SESSION_B)]));
+  });
+
+  test("双会话使用不同 Electron partition（cookie/cache 隔离）", () => {
+    expect(browserPartitionFor(SESSION_A)).not.toBe(browserPartitionFor(SESSION_B));
+    expect(browserPartitionFor(SESSION_A)).toMatch(/^persist:browser-[0-9a-f]{16}$/);
+    expect(browserPartitionFor(SESSION_B)).toMatch(/^persist:browser-[0-9a-f]{16}$/);
+    // 同一身份幂等。
+    expect(browserPartitionFor(SESSION_A)).toBe(browserPartitionFor({ projectId: "proj-a", threadId: "thread-a" }));
+  });
+
+  test("跨会话 tab 访问被拒绝且不产生副作用", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+
+    // 用 B 的身份访问 A 的 tab：一律拒绝。
+    await expect(manager.navigate(SESSION_B, 1, "https://example.com/")).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("不存在"),
+    });
+    await expect(manager.snapshot(SESSION_B, 1)).resolves.toMatchObject({ ok: false });
+    await expect(manager.screenshot(SESSION_B, 1)).resolves.toMatchObject({ ok: false });
+    await expect(manager.action(SESSION_B, 1, { type: "click", elementIndex: 1 })).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(manager.goBack(SESSION_B, 1)).resolves.toMatchObject({ ok: false });
+    expect(manager.navigationTarget(SESSION_B, 1, "back")).toMatchObject({ ok: false });
+    expect(manager.inspectElement(SESSION_B, 1, 1)).toMatchObject({ ok: false });
+    await expect(manager.pickAnnotationTarget(SESSION_B, 1, 10, 10)).resolves.toMatchObject({ ok: false });
+
+    // A 的宿主没有被任何 B 操作触碰。
+    expect(hosts.get(101)?.navigatedUrls).toEqual([]);
+    expect(hosts.get(101)?.performedActions).toEqual([]);
+    expect(hosts.get(101)?.backCount).toBe(0);
+  });
+
+  test("错误 partition 的 guest attach 被拒绝且不留孤儿", async () => {
+    const { hosts } = setup();
+    // guest 属于 B 的分区，但以 A 的身份 attach。
+    const managerWithForeign = new BrowserManager(join(tmpdir(), `desktop-browser-manager-${Date.now()}`), {
+      createHost: (webContentsId, options) => {
+        const host = new FakeHost();
+        hosts.set(webContentsId, host);
+        hostOptions.set(webContentsId, options ?? {});
+        return host;
+      },
+      fromWebContentsId: () => fakeWebContents(sessionFor(SESSION_B)),
+    });
+    managerWithForeign.registerSession(SESSION_A);
+
+    const result = await managerWithForeign.attach(SESSION_A, 101);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("分区") });
+    expect(managerWithForeign.tabsList(SESSION_A)).toHaveLength(0);
+    expect(hosts.has(101)).toBe(false);
+  });
+
+  test("openTab 广播带 sessionKey 的建 tab 请求，attach 后按会话 resolve", async () => {
+    const requests: BrowserCreateTabRequest[] = [];
+    const { manager, hosts } = setup({ onCreateTabRequest: (request) => requests.push(request) });
+
+    const openPromise = manager.openTab(SESSION_A, "https://example.com");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: "https://example.com/",
+      sessionKey: browserSessionKey(SESSION_A),
+    });
+    const requestId = requests[0]!.requestId;
+
+    const attachResult = await manager.attach(SESSION_A, 101, requestId);
+    expect(attachResult.ok).toBe(true);
+
+    const result = await openPromise;
+    expect(result.ok).toBe(true);
+    expect(hosts.get(101)?.navigatedUrls).toEqual(["https://example.com/"]);
+  });
+
+  test("双会话 pending create 请求互相隔离；未知 requestId attach 拒绝", async () => {
+    const requests: BrowserCreateTabRequest[] = [];
+    const { manager, hosts } = setup({ onCreateTabRequest: (request) => requests.push(request) });
+
+    const openA = manager.openTab(SESSION_A, "https://a.example/");
+    const openB = manager.openTab(SESSION_B, "https://b.example/");
+    const requestA = requests.find((request) => request.sessionKey === browserSessionKey(SESSION_A))!;
+    const requestB = requests.find((request) => request.sessionKey === browserSessionKey(SESSION_B))!;
+    expect(requestA).toBeDefined();
+    expect(requestB).toBeDefined();
+    expect(requestA.requestId).not.toBe(requestB.requestId);
+
+    // 未知 requestId 的 attach 被拒绝且不留孤儿。
+    await expect(manager.attach(SESSION_A, 101, 999)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("未知的建 tab 请求"),
+    });
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
+
+    // A 的 attach 只 resolve A 的 pending；B 的 openTab 仍挂起。
+    await manager.attach(SESSION_A, 101, requestA.requestId);
+    await expect(openA).resolves.toMatchObject({ ok: true });
+    let settledB = false;
+    void openB.then(() => {
+      settledB = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settledB).toBe(false);
+
+    // B 正确 attach 后 resolve 自己的请求。
+    await manager.attach(SESSION_B, 201, requestB.requestId);
+    await expect(openB).resolves.toMatchObject({ ok: true });
+    expect(hosts.get(101)?.navigatedUrls).toEqual(["https://a.example/"]);
+    expect(hosts.get(201)?.navigatedUrls).toEqual(["https://b.example/"]);
+  });
+
+  test("openTab 可被 AbortSignal 取消：pending 清理且不留孤儿", async () => {
+    const requests: BrowserCreateTabRequest[] = [];
+    const { manager } = setup({ onCreateTabRequest: (request) => requests.push(request) });
+    const controller = new AbortController();
+
+    const openPromise = manager.openTab(SESSION_A, "https://example.com", "agent", controller.signal);
+    controller.abort();
+    await expect(openPromise).resolves.toMatchObject({ ok: false, error: "已取消" });
+
+    // 迟到的 attach（带已取消的 requestId）被拒绝。
+    const late = await manager.attach(SESSION_A, 101, requests[0]!.requestId);
+    expect(late).toMatchObject({ ok: false, error: expect.stringContaining("未知的建 tab 请求") });
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
+  });
+
+  test("openTab 在 attach 前已 abort 时直接取消", async () => {
+    const requests: BrowserCreateTabRequest[] = [];
+    const { manager } = setup({ onCreateTabRequest: (request) => requests.push(request) });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(manager.openTab(SESSION_A, "https://example.com", "agent", controller.signal)).resolves.toMatchObject({
+      ok: false,
+      error: "已取消",
+    });
+    expect(requests).toHaveLength(0);
   });
 
   test("同一 webContentsId 重复 attach 幂等返回同一 tab", async () => {
     const { manager, hosts } = setup();
 
-    const first = await manager.attach(101);
-    const second = await manager.attach(101);
+    const first = await manager.attach(SESSION_A, 101);
+    const second = await manager.attach(SESSION_A, 101);
 
     expect(second).toMatchObject({ ok: true, tab: { tabId: first.ok === true ? first.tab.tabId : -1 } });
     expect(hosts.size).toBe(1);
-    expect(manager.tabsList()).toHaveLength(1);
+    expect(manager.tabsList(SESSION_A)).toHaveLength(1);
   });
 
   test("webContents 不存在时 attach 返回错误", async () => {
     const manager = new BrowserManager(join(tmpdir(), `desktop-browser-manager-${Date.now()}`), {
       fromWebContentsId: () => null,
     });
+    manager.registerSession(SESSION_A);
 
-    const result = await manager.attach(999);
+    const result = await manager.attach(SESSION_A, 999);
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining("不存在") });
   });
 
-  test("webContents 不属于浏览器分区或不是 guest 时 attach 被拒绝", async () => {
-    const foreignSession = {} as Electron.Session;
-    const foreignManager = new BrowserManager(join(tmpdir(), `desktop-browser-manager-${Date.now()}`), {
-      fromWebContentsId: () => fakeWebContents(foreignSession),
-    });
-    await expect(foreignManager.attach(999)).resolves.toMatchObject({
-      ok: false,
-      error: expect.stringContaining("分区"),
-    });
+  test("未注册会话的 RPC 操作 fail-closed", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const unknown: BrowserSessionIdentity = { projectId: "proj-x", threadId: "thread-x" };
 
-    const nonGuestManager = new BrowserManager(join(tmpdir(), `desktop-browser-manager-${Date.now()}`), {
-      fromWebContentsId: () => fakeWebContents(electron.browserSession, null),
-    });
-    await expect(nonGuestManager.attach(998)).resolves.toMatchObject({
+    expect(manager.isKnownSession(unknown)).toBe(false);
+    await expect(manager.navigate(unknown, 1, "https://example.com/")).resolves.toMatchObject({
       ok: false,
-      error: expect.stringContaining("guest"),
+      error: "未知的浏览器会话",
     });
+    await expect(manager.openTab(unknown, "https://example.com/")).resolves.toMatchObject({
+      ok: false,
+      error: "未知的浏览器会话",
+    });
+    expect(hosts.get(101)?.navigatedUrls).toEqual([]);
+  });
+
+  test("retireSession 清理会话状态并撤销身份，重新注册后可重建", async () => {
+    const { manager, hosts, states } = setup();
+    await manager.attach(SESSION_A, 101);
+    await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#a",
+      tag: "button",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "t",
+    });
+    const host = hosts.get(101)!;
+    states.length = 0;
+
+    manager.retireSession(SESSION_A);
+
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
+    expect(manager.browserHistory(SESSION_A)).toEqual([]);
+    expect(manager.listAnnotations(SESSION_A, 1)).toEqual([]);
+    expect(host.disposed).toBe(true);
+    expect(states.at(-1)).toMatchObject({ sessionKey: browserSessionKey(SESSION_A), tabs: [], activeTabId: null });
+    expect(manager.isKnownSession(SESSION_A)).toBe(false);
+
+    // 重建：重新注册 identity 后再次 attach 正常。
+    manager.registerSession(SESSION_A);
+    const rebuilt = await manager.attach(SESSION_A, 102);
+    expect(rebuilt.ok).toBe(true);
+    expect(manager.tabsList(SESSION_A)).toHaveLength(1);
   });
 
   test("navigate 拒绝非法协议与非法 URL", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
 
-    await expect(manager.navigate(1, "file:///etc/passwd")).resolves.toMatchObject({ ok: false });
-    await expect(manager.navigate(1, "ftp://example.com")).resolves.toMatchObject({ ok: false });
-    await expect(manager.navigate(1, "not a url")).resolves.toMatchObject({ ok: false });
+    await expect(manager.navigate(SESSION_A, 1, "file:///etc/passwd")).resolves.toMatchObject({ ok: false });
+    await expect(manager.navigate(SESSION_A, 1, "ftp://example.com")).resolves.toMatchObject({ ok: false });
+    await expect(manager.navigate(SESSION_A, 1, "not a url")).resolves.toMatchObject({ ok: false });
     expect(hosts.get(101)?.navigatedUrls).toEqual([]);
   });
 
   test("navigate 成功转发到宿主并规范化 URL", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
 
-    const result = await manager.navigate(1, "https://example.com");
+    const result = await manager.navigate(SESSION_A, 1, "https://example.com");
 
     expect(result.ok).toBe(true);
     expect(hosts.get(101)?.navigatedUrls).toEqual(["https://example.com/"]);
   });
 
+  test("用户可打开 Chromium 内置页，Agent 仍不能导航到 chrome 协议", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+
+    await expect(manager.navigate(SESSION_A, 1, BROWSER_INTERNAL_PAGES.passwordManager)).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(manager.navigate(SESSION_A, 1, BROWSER_INTERNAL_PAGES.downloads, "agent")).resolves.toMatchObject({
+      ok: false,
+    });
+    expect(hosts.get(101)?.navigatedUrls).toEqual([BROWSER_INTERNAL_PAGES.passwordManager]);
+  });
+
+  test("copyScreenshot 将 PNG 写入系统剪贴板", async () => {
+    const { manager } = setup();
+    await manager.attach(SESSION_A, 101);
+
+    await expect(manager.copyScreenshot(SESSION_A, 1)).resolves.toEqual({ ok: true });
+    expect(electron.createFromDataURL).toHaveBeenCalledWith("data:image/png;base64,AAAA");
+    expect(electron.writeImage).toHaveBeenCalledWith(expect.objectContaining({ isEmpty: expect.any(Function) }));
+  });
+
   test("navigate 不存在的 tab 返回错误", async () => {
     const { manager } = setup();
 
-    await expect(manager.navigate(42, "https://example.com")).resolves.toMatchObject({ ok: false });
+    await expect(manager.navigate(SESSION_A, 42, "https://example.com")).resolves.toMatchObject({ ok: false });
   });
 
   test("宿主事件更新 tab 状态并广播", async () => {
     const { manager, hosts, states } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
     const host = hosts.get(101)!;
 
     host.emit({ type: "navigated", url: "https://example.com/page", canGoBack: true, canGoForward: false });
-    expect(manager.tabsList()[0]).toMatchObject({ url: "https://example.com/page", canGoBack: true });
+    expect(manager.tabsList(SESSION_A)[0]).toMatchObject({ url: "https://example.com/page", canGoBack: true });
 
     host.emit({ type: "title-updated", title: "Example" });
-    expect(manager.tabsList()[0]?.title).toBe("Example");
+    expect(manager.tabsList(SESSION_A)[0]?.title).toBe("Example");
 
     host.emit({ type: "loading-changed", loading: true });
-    expect(manager.tabsList()[0]?.loading).toBe(true);
+    expect(manager.tabsList(SESSION_A)[0]?.loading).toBe(true);
 
     host.emit({ type: "navigated-in-page", url: "https://example.com/page#top" });
-    expect(manager.tabsList()[0]?.url).toBe("https://example.com/page#top");
+    expect(manager.tabsList(SESSION_A)[0]?.url).toBe("https://example.com/page#top");
 
     host.emit({ type: "crashed", reason: "crashed" });
-    expect(manager.tabsList()[0]).toMatchObject({ crashed: true, loading: false });
+    expect(manager.tabsList(SESSION_A)[0]).toMatchObject({ crashed: true, loading: false });
 
     expect(states).toHaveLength(1 + 5);
   });
 
   test("screenshot 成功返回 dataUrl", async () => {
     const { manager } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
 
-    const result = await manager.screenshot(1);
+    const result = await manager.screenshot(SESSION_A, 1);
 
     expect(result).toMatchObject({ ok: true, dataUrl: "data:image/png;base64,AAAA", width: 100, height: 80 });
   });
 
   test("screenshot 对崩溃或未知 tab 返回错误", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
     hosts.get(101)!.emit({ type: "crashed", reason: "crashed" });
 
-    await expect(manager.screenshot(1)).resolves.toMatchObject({ ok: false, error: expect.stringContaining("崩溃") });
-    await expect(manager.screenshot(42)).resolves.toMatchObject({ ok: false });
+    await expect(manager.screenshot(SESSION_A, 1)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("崩溃"),
+    });
+    await expect(manager.screenshot(SESSION_A, 42)).resolves.toMatchObject({ ok: false });
   });
 
   test("detach 移除 tab、释放宿主并广播；幂等", async () => {
     const { manager, hosts, states } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
     const host = hosts.get(101)!;
 
-    await manager.detach(101);
-    await manager.detach(101);
+    await manager.detach(SESSION_A, 101);
+    await manager.detach(SESSION_A, 101);
 
-    expect(manager.tabsList()).toHaveLength(0);
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
     expect(host.disposed).toBe(true);
     expect(states.at(-1)).toMatchObject({ activeTabId: null, tabs: [] });
   });
 
   test("selectTab 切换活跃 tab；未知 tab 返回 null", async () => {
     const { manager, states } = setup();
-    await manager.attach(101);
-    await manager.attach(102);
+    await manager.attach(SESSION_A, 101);
+    await manager.attach(SESSION_A, 102);
 
-    const selected = manager.selectTab(1);
+    const selected = manager.selectTab(SESSION_A, 1);
     expect(selected?.tabId).toBe(1);
     expect(states.at(-1)?.activeTabId).toBe(1);
-    expect(manager.selectTab(42)).toBeNull();
+    expect(manager.selectTab(SESSION_A, 42)).toBeNull();
   });
 
   test("关闭活跃 tab 后活跃回退到剩余第一个 tab", async () => {
     const { manager, states } = setup();
-    await manager.attach(101); // tab 1（active）
-    await manager.attach(102); // tab 2（active）
+    await manager.attach(SESSION_A, 101); // tab 1（active）
+    await manager.attach(SESSION_A, 102); // tab 2（active）
 
-    await manager.detach(102);
+    await manager.detach(SESSION_A, 102);
 
     expect(states.at(-1)?.activeTabId).toBe(1);
-    expect(manager.tabsList().map((tab) => tab.tabId)).toEqual([1]);
+    expect(manager.tabsList(SESSION_A).map((tab) => tab.tabId)).toEqual([1]);
   });
 
-  test("clearData 直接清除持久浏览器分区，即使没有已注册宿主", async () => {
-    const { manager, hosts } = setup();
+  test("clearSessionData 只清除本会话分区", async () => {
+    const { manager } = setup();
+    const aSession = sessionFor(SESSION_A);
+    const bSession = sessionFor(SESSION_B);
 
-    await manager.clearData();
+    await manager.clearSessionData(SESSION_A);
 
-    expect(electron.clearStorageData).toHaveBeenCalled();
-    expect(electron.clearCache).toHaveBeenCalled();
-    expect(hosts.size).toBe(0);
+    expect(aSession.clearStorageData).toHaveBeenCalled();
+    expect(aSession.clearCache).toHaveBeenCalled();
+    expect(bSession.clearStorageData).not.toHaveBeenCalled();
+  });
+
+  test("clearAllData 清除全部会话分区（设置页入口）", async () => {
+    const { manager } = setup();
+
+    await manager.clearAllData();
+
+    expect(sessionFor(SESSION_A).clearStorageData).toHaveBeenCalled();
+    expect(sessionFor(SESSION_B).clearStorageData).toHaveBeenCalled();
   });
 
   test("dispose 释放全部宿主且不再广播", async () => {
     const { manager, hosts, states } = setup();
-    await manager.attach(101);
-    const host = hosts.get(101)!;
+    await manager.attach(SESSION_A, 101);
+    await manager.attach(SESSION_B, 201);
+    const hostA = hosts.get(101)!;
+    const hostB = hosts.get(201)!;
     states.length = 0;
 
     manager.dispose();
 
-    expect(host.disposed).toBe(true);
-    expect(manager.tabsList()).toHaveLength(0);
+    expect(hostA.disposed).toBe(true);
+    expect(hostB.disposed).toBe(true);
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
+    expect(manager.tabsList(SESSION_B)).toHaveLength(0);
     expect(states).toHaveLength(0);
   });
 
-  test("设置快照与保存透传到设置服务", async () => {
+  test("设置快照与保存透传到设置服务（全局）", async () => {
     const { manager } = setup();
 
     const snapshot = await manager.getSettingsSnapshot();
@@ -387,7 +690,7 @@ describe("BrowserManager", () => {
     expect(saved.status).toBe("saved");
   });
 
-  test("attach 使用运行时 CDP 设置，保存后更新既有宿主", async () => {
+  test("attach 使用运行时 CDP 设置，保存后更新全部会话既有宿主", async () => {
     const { manager, hosts, hostOptions } = setup();
     const initial = await manager.getSettingsSnapshot();
     const saved = await manager.saveSettings({
@@ -396,7 +699,7 @@ describe("BrowserManager", () => {
     });
     expect(saved.status).toBe("saved");
 
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
     expect(hostOptions.get(101)).toMatchObject({ maxSnapshotNodes: 321, cdpTimeoutMs: 2_000 });
 
     if (saved.status !== "saved") throw new Error("settings save failed");
@@ -407,52 +710,36 @@ describe("BrowserManager", () => {
     expect(updated.status).toBe("saved");
     expect(hosts.get(101)?.updatedSettings.at(-1)).toEqual({ maxSnapshotNodes: 444, cdpTimeoutMs: 3_000 });
   });
+
   test("destroyed 事件移除 tab 并释放宿主，活跃回退", async () => {
     const { manager, hosts, states } = setup();
-    await manager.attach(101);
-    await manager.attach(102);
-    manager.selectTab(1);
+    await manager.attach(SESSION_A, 101);
+    await manager.attach(SESSION_A, 102);
+    manager.selectTab(SESSION_A, 1);
     const host1 = hosts.get(101)!;
     const host2 = hosts.get(102)!;
 
     host2.emit({ type: "destroyed" });
 
-    expect(manager.tabsList().map((tab) => tab.tabId)).toEqual([1]);
+    expect(manager.tabsList(SESSION_A).map((tab) => tab.tabId)).toEqual([1]);
     expect(host2.disposed).toBe(true);
     expect(states.at(-1)?.activeTabId).toBe(1);
 
     host1.emit({ type: "destroyed" });
-    expect(manager.tabsList()).toHaveLength(0);
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
     expect(states.at(-1)?.activeTabId).toBeNull();
     expect(host1.disposed).toBe(true);
   });
 
   test("activeTab 返回当前活跃 tab；无 tab 返回 null", async () => {
     const { manager } = setup();
-    expect(manager.activeTab()).toBeNull();
+    expect(manager.activeTab(SESSION_A)).toBeNull();
 
-    await manager.attach(101);
-    expect(manager.activeTab()).toMatchObject({ tabId: 1 });
+    await manager.attach(SESSION_A, 101);
+    expect(manager.activeTab(SESSION_A)).toMatchObject({ tabId: 1 });
 
-    manager.selectTab(1);
-    expect(manager.activeTab()?.tabId).toBe(1);
-  });
-
-  test("openTab 广播建 tab 请求并在 renderer attach 后完成并导航", async () => {
-    const requests: BrowserCreateTabRequest[] = [];
-    const { manager, hosts } = setup({ onCreateTabRequest: (request) => requests.push(request) });
-
-    const openPromise = manager.openTab("https://example.com");
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ url: "https://example.com/" });
-    const requestId = requests[0]!.requestId;
-
-    const attachResult = await manager.attach(101, requestId);
-    expect(attachResult.ok).toBe(true);
-
-    const result = await openPromise;
-    expect(result.ok).toBe(true);
-    expect(hosts.get(101)?.navigatedUrls).toEqual(["https://example.com/"]);
+    manager.selectTab(SESSION_A, 1);
+    expect(manager.activeTab(SESSION_A)?.tabId).toBe(1);
   });
 
   test("openTab attach 后导航失败时返回失败且清理 tab", async () => {
@@ -462,22 +749,24 @@ describe("BrowserManager", () => {
     const manager = new BrowserManager(join(tmpdir(), `desktop-browser-manager-${Date.now()}`), {
       onCreateTabRequest: (request) => requests.push(request),
       createHost: () => host,
-      fromWebContentsId: () => fakeWebContents(),
+      fromWebContentsId: () => fakeWebContents(sessionFor(SESSION_A)),
     });
+    manager.registerSession(SESSION_A);
 
-    const pending = manager.openTab("https://example.com");
+    const pending = manager.openTab(SESSION_A, "https://example.com");
     const requestId = requests[0]!.requestId;
-    const attach = await manager.attach(101, requestId);
+    const attach = await manager.attach(SESSION_A, 101, requestId);
 
     expect(attach).toMatchObject({ ok: false, error: "导航失败" });
     await expect(pending).resolves.toMatchObject({ ok: false, error: "导航失败" });
-    expect(manager.tabsList()).toHaveLength(0);
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
   });
+
   test("openTab 拒绝非法 URL", async () => {
     const requests: BrowserCreateTabRequest[] = [];
     const { manager } = setup({ onCreateTabRequest: (request) => requests.push(request) });
 
-    await expect(manager.openTab("file:///etc/passwd")).resolves.toMatchObject({ ok: false });
+    await expect(manager.openTab(SESSION_A, "file:///etc/passwd")).resolves.toMatchObject({ ok: false });
     expect(requests).toHaveLength(0);
   });
 
@@ -485,45 +774,23 @@ describe("BrowserManager", () => {
     const requests: BrowserCreateTabRequest[] = [];
     const { manager } = setup({ onCreateTabRequest: (request) => requests.push(request) });
 
-    const pending = manager.openTab("example.com/foo");
+    const pending = manager.openTab(SESSION_A, "example.com/foo");
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ url: "https://example.com/foo" });
-    // 模拟 renderer attach 完成请求。
-    requests[0]?.requestId;
     const requestId = requests[0]!.requestId;
-    await manager.attach(101, requestId);
+    await manager.attach(SESSION_A, 101, requestId);
     await expect(pending).resolves.toMatchObject({ ok: true });
-  });
-
-  test("openTab 超时返回错误", async () => {
-    const { manager } = setup({ openTabTimeoutMs: 30 });
-
-    await expect(manager.openTab("https://example.com")).resolves.toMatchObject({
-      ok: false,
-      error: "创建浏览器标签页超时（30ms）",
-    });
-  });
-
-  test("openTab 超时后迟到 attach 被拒绝且不会留下孤儿 tab", async () => {
-    const requests: BrowserCreateTabRequest[] = [];
-    const { manager } = setup({ openTabTimeoutMs: 10, onCreateTabRequest: (request) => requests.push(request) });
-
-    await expect(manager.openTab("https://example.com")).resolves.toMatchObject({ ok: false });
-    const lateAttach = await manager.attach(101, requests[0]!.requestId);
-
-    expect(lateAttach).toMatchObject({ ok: false, error: expect.stringContaining("已超时") });
-    expect(manager.tabsList()).toHaveLength(0);
   });
 
   test("navigationTarget 返回准确的 back/forward 目标", async () => {
     const { manager } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
 
-    expect(manager.navigationTarget(1, "back")).toMatchObject({
+    expect(manager.navigationTarget(SESSION_A, 1, "back")).toMatchObject({
       ok: true,
       target: { url: "https://example.com/previous" },
     });
-    expect(manager.navigationTarget(1, "forward")).toMatchObject({
+    expect(manager.navigationTarget(SESSION_A, 1, "forward")).toMatchObject({
       ok: true,
       target: { url: "https://example.com/next" },
     });
@@ -531,30 +798,29 @@ describe("BrowserManager", () => {
 
   test("snapshot 透传到宿主", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
 
-    const result = await manager.snapshot(1, { withScreenshot: true });
+    const result = await manager.snapshot(SESSION_A, 1, { withScreenshot: true });
 
     expect(result.ok).toBe(true);
     expect(hosts.get(101)?.snapshotCalls).toEqual([{ withScreenshot: true }]);
-    expect(hosts.get(101)?.snapshotCalls[0]).toEqual({ withScreenshot: true });
   });
 
   test("snapshot 对未知 tab 或崩溃 tab 返回错误", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
     hosts.get(101)!.emit({ type: "crashed", reason: "crashed" });
 
-    await expect(manager.snapshot(1)).resolves.toMatchObject({ ok: false });
-    await expect(manager.snapshot(42)).resolves.toMatchObject({ ok: false });
+    await expect(manager.snapshot(SESSION_A, 1)).resolves.toMatchObject({ ok: false });
+    await expect(manager.snapshot(SESSION_A, 42)).resolves.toMatchObject({ ok: false });
   });
 
   test("action 透传到宿主", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
     const action: BrowserAction = { type: "type", elementIndex: 2, text: "hello", submit: true };
 
-    const result = await manager.action(1, action);
+    const result = await manager.action(SESSION_A, 1, action);
 
     expect(result.ok).toBe(true);
     expect(hosts.get(101)?.performedActions).toEqual([action]);
@@ -562,114 +828,120 @@ describe("BrowserManager", () => {
 
   test("goBack/goForward/reload 透传到宿主", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
 
-    await expect(manager.goBack(1)).resolves.toMatchObject({ ok: true });
-    await expect(manager.goForward(1)).resolves.toMatchObject({ ok: true });
-    await expect(manager.reload(1)).resolves.toMatchObject({ ok: true });
+    await expect(manager.goBack(SESSION_A, 1)).resolves.toMatchObject({ ok: true });
+    await expect(manager.goForward(SESSION_A, 1)).resolves.toMatchObject({ ok: true });
+    await expect(manager.reload(SESSION_A, 1)).resolves.toMatchObject({ ok: true });
     const host = hosts.get(101)!;
     expect(host.backCount).toBe(1);
     expect(host.forwardCount).toBe(1);
     expect(host.reloadCount).toBe(1);
 
-    await expect(manager.goBack(42)).resolves.toMatchObject({ ok: false });
+    await expect(manager.goBack(SESSION_A, 42)).resolves.toMatchObject({ ok: false });
   });
 
   test("action 的 stale ref 错误映射为 staleRef 标记", async () => {
     const { manager } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
 
-    const result = await manager.action(1, { type: "click", elementIndex: 999 });
+    const result = await manager.action(SESSION_A, 1, { type: "click", elementIndex: 999 });
 
     expect(result).toMatchObject({ ok: false, staleRef: true });
   });
 
-  test("访问历史：导航记录、同 URL 合并、tab 关闭清理", async () => {
+  test("访问历史按会话隔离：导航记录、同 URL 合并、tab 关闭清理", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
-    const host = hosts.get(101)!;
+    await manager.attach(SESSION_A, 101);
+    await manager.attach(SESSION_B, 201);
+    const hostA = hosts.get(101)!;
+    const hostB = hosts.get(201)!;
 
-    host.emit({ type: "navigated", url: "https://example.com/a", canGoBack: false, canGoForward: false });
-    host.emit({ type: "title-updated", title: "A 页面" });
-    host.emit({ type: "navigated", url: "https://example.com/b", canGoBack: true, canGoForward: false });
+    hostA.emit({ type: "navigated", url: "https://example.com/a", canGoBack: false, canGoForward: false });
+    hostA.emit({ type: "title-updated", title: "A 页面" });
+    hostA.emit({ type: "navigated", url: "https://example.com/b", canGoBack: true, canGoForward: false });
     // 同一 tab 重复导航同 URL：不重复记录。
-    host.emit({ type: "navigated", url: "https://example.com/b", canGoBack: true, canGoForward: false });
+    hostA.emit({ type: "navigated", url: "https://example.com/b", canGoBack: true, canGoForward: false });
 
-    expect(manager.browserHistory()).toHaveLength(2);
-    expect(manager.browserHistory()[0]).toMatchObject({ url: "https://example.com/b" });
-    expect(manager.browserHistory()[1]).toMatchObject({ url: "https://example.com/a", title: "A 页面" });
+    expect(manager.browserHistory(SESSION_A)).toHaveLength(2);
+    expect(manager.browserHistory(SESSION_A)[0]).toMatchObject({ url: "https://example.com/b" });
+    expect(manager.browserHistory(SESSION_A)[1]).toMatchObject({ url: "https://example.com/a", title: "A 页面" });
+    expect(manager.browserHistory(SESSION_B)).toEqual([]);
 
-    // 第二个 tab 导航到同一 URL：合并并提前。
-    await manager.attach(102);
-    const host2 = hosts.get(102)!;
-    host2.emit({ type: "navigated", url: "https://example.com/a", canGoBack: false, canGoForward: false });
-    expect(manager.browserHistory()).toHaveLength(2);
-    expect(manager.browserHistory()[0]).toMatchObject({ url: "https://example.com/a" });
-
-    // 关闭 tab 不影响全局历史。
-    await manager.detach(101);
-    expect(manager.browserHistory()).toHaveLength(2);
+    // B 导航到相同 URL：不合并到 A 的历史（会话隔离）。
+    hostB.emit({ type: "navigated", url: "https://example.com/a", canGoBack: false, canGoForward: false });
+    expect(manager.browserHistory(SESSION_B)).toHaveLength(1);
+    expect(manager.browserHistory(SESSION_A)).toHaveLength(2);
   });
 
-  test("标注：pick/add/list/remove/resolve 全链路", async () => {
+  test("标注按会话隔离：pick/add/list/remove/resolve 全链路", async () => {
     const { manager } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
+    await manager.attach(SESSION_B, 201);
 
-    const pick = await manager.pickAnnotationTarget(1, 30, 40);
+    const pick = await manager.pickAnnotationTarget(SESSION_A, 1, 30, 40);
     expect(pick).toMatchObject({ ok: true, selector: "#fake-30-40", bounds: { x: 30, y: 40 } });
 
-    const added = await manager.addAnnotation(1, {
+    const added = await manager.addAnnotation(SESSION_A, 1, {
       selector: "#fake-30-40",
       tag: "button",
       bounds: { x: 30, y: 40, width: 10, height: 10 },
       text: "按钮文案要改",
     });
     expect(added).toMatchObject({ selector: "#fake-30-40", tag: "button", text: "按钮文案要改" });
-    expect(typeof added?.id).toBe("string");
 
-    expect(manager.listAnnotations(1)).toHaveLength(1);
-    await expect(manager.resolveAnnotationBounds(1, added!.id)).resolves.toEqual({ x: 1, y: 2, width: 10, height: 10 });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(1);
+    expect(manager.listAnnotations(SESSION_B, 1)).toHaveLength(0);
+    await expect(manager.resolveAnnotationBounds(SESSION_A, 1, added!.id)).resolves.toEqual({
+      x: 1,
+      y: 2,
+      width: 10,
+      height: 10,
+    });
 
-    await manager.removeAnnotation(1, added!.id);
-    expect(manager.listAnnotations(1)).toHaveLength(0);
+    await manager.removeAnnotation(SESSION_A, 1, added!.id);
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
 
     // tab 不存在时 pick 报错、add 返回 null。
-    await expect(manager.pickAnnotationTarget(42, 1, 1)).resolves.toMatchObject({ ok: false });
+    await expect(manager.pickAnnotationTarget(SESSION_A, 42, 1, 1)).resolves.toMatchObject({ ok: false });
     await expect(
-      manager.addAnnotation(42, { selector: "#x", tag: "div", bounds: { x: 0, y: 0, width: 1, height: 1 }, text: "x" }),
+      manager.addAnnotation(SESSION_A, 42, {
+        selector: "#x",
+        tag: "div",
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+        text: "x",
+      }),
     ).resolves.toBeNull();
   });
 
   test("标注随 tab 关闭清理", async () => {
     const { manager, hosts } = setup();
-    await manager.attach(101);
-    await manager.addAnnotation(1, {
+    await manager.attach(SESSION_A, 101);
+    await manager.addAnnotation(SESSION_A, 1, {
       selector: "#a",
       tag: "button",
       bounds: { x: 0, y: 0, width: 1, height: 1 },
       text: "t",
     });
-    expect(manager.listAnnotations(1)).toHaveLength(1);
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(1);
 
-    await manager.detach(101);
-    expect(manager.listAnnotations(1)).toHaveLength(0);
+    await manager.detach(SESSION_A, 101);
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
     expect(hosts.get(101)?.disposed).toBe(true);
   });
 
   test("加载失败广播 loadError，导航成功与开始加载时清除", async () => {
     const { manager, hosts, states } = setup();
-    await manager.attach(101);
+    await manager.attach(SESSION_A, 101);
     const host = hosts.get(101)!;
 
     host.emit({ type: "load-failed", url: "https://www.baidu.com/", code: -105, description: "ERR_NAME_NOT_RESOLVED" });
     expect(states.at(-1)?.tabs[0]?.loadError).toContain("域名解析失败（DNS）");
-    expect(hosts.get(101) && states.at(-1)?.tabs[0]?.loading).toBe(false);
+    expect(states.at(-1)?.tabs[0]?.loading).toBe(false);
 
-    // 开始新加载：错误清除。
     host.emit({ type: "loading-changed", loading: true });
     expect(states.at(-1)?.tabs[0]?.loadError).toBeUndefined();
 
-    // 加载失败后导航成功：错误清除。
     host.emit({ type: "load-failed", url: "https://example.com/", code: -106, description: "ERR_CONNECTION_REFUSED" });
     expect(states.at(-1)?.tabs[0]?.loadError).toContain("无法连接服务器");
     host.emit({ type: "navigated", url: "https://example.com/", canGoBack: false, canGoForward: false });

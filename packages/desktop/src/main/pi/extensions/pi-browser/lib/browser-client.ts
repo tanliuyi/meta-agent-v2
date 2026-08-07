@@ -4,7 +4,9 @@
  * pi extension 运行在 Electron-as-Node sidecar 进程，无法直接引用 main 进程的
  * BrowserManager；main 在 127.0.0.1 随机端口起本地 HTTP RPC（browser-host-server），
  * endpoint 与 token 经 worker 环境变量 PI_BROWSER_HOST_PORT / PI_BROWSER_TOKEN
- * 注入。本客户端封装 fetch 调用与 Result 解析。
+ * 注入，会话身份经 PI_BROWSER_SESSION_PROJECT_ID / PI_BROWSER_SESSION_THREAD_ID
+ * 注入（由 ThreadWorkerBinding 派生）。本客户端封装 fetch 调用与 Result 解析；
+ * 身份缺失时构造即失败（fail-closed），每个请求都携带身份头。
  */
 
 import type {
@@ -23,7 +25,6 @@ import type { BrowserSettingsSnapshot } from "../../../../../shared/browser-sett
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 130_000;
 const REQUEST_TIMEOUTS_MS: Record<string, number> = {
-  openTab: 20_000,
   navigate: 35_000,
   tabsList: 15_000,
   activeTab: 15_000,
@@ -41,24 +42,47 @@ export interface BrowserClientOptions {
   port?: number;
   /** 覆盖 PI_BROWSER_TOKEN（测试注入）。 */
   token?: string;
+  /** 覆盖 PI_BROWSER_SESSION_TOKEN（每个 worker 独有的 capability）。 */
+  sessionToken?: string;
+  /** 覆盖 PI_BROWSER_SESSION_PROJECT_ID（测试注入）。 */
+  sessionProjectId?: string;
+  /** 覆盖 PI_BROWSER_SESSION_THREAD_ID（测试注入）。 */
+  sessionThreadId?: string;
   /** 覆盖全局 fetch（测试注入）。 */
   fetchImpl?: typeof fetch;
 }
 
-/** 与 main 进程 BrowserManager 的 RPC 客户端。 */
+/** 与 main 进程 BrowserManager 的 RPC 客户端（会话身份随每个请求发送）。 */
 export class BrowserClient {
   private readonly baseUrl: string;
   private readonly token: string;
+  private readonly sessionToken: string;
+  private readonly sessionProjectId: string;
+  private readonly sessionThreadId: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: BrowserClientOptions = {}) {
     const port = options.port ?? envPort();
     const token = options.token ?? envToken();
+    const sessionToken = options.sessionToken ?? envSessionToken();
+    const sessionProjectId = options.sessionProjectId ?? envSessionProjectId();
+    const sessionThreadId = options.sessionThreadId ?? envSessionThreadId();
     if (port === undefined || token === undefined) {
       throw new BrowserUnavailableError("浏览器宿主服务未就绪（缺少 PI_BROWSER_HOST_PORT/PI_BROWSER_TOKEN）");
     }
+    if (sessionToken === undefined) {
+      throw new BrowserUnavailableError("浏览器宿主服务未就绪（缺少 PI_BROWSER_SESSION_TOKEN）");
+    }
+    if (!sessionProjectId || !sessionThreadId) {
+      throw new BrowserUnavailableError(
+        "浏览器宿主服务未就绪（缺少 PI_BROWSER_SESSION_PROJECT_ID/PI_BROWSER_SESSION_THREAD_ID）",
+      );
+    }
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.token = token;
+    this.sessionToken = sessionToken;
+    this.sessionProjectId = sessionProjectId;
+    this.sessionThreadId = sessionThreadId;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -146,6 +170,9 @@ export class BrowserClient {
         headers: {
           "content-type": "application/json",
           "x-desktop-browser-token": this.token,
+          "x-desktop-browser-session-token": this.sessionToken,
+          "x-desktop-browser-session-project-id": this.sessionProjectId,
+          "x-desktop-browser-session-thread-id": this.sessionThreadId,
         },
         body: JSON.stringify({ method, params }),
         signal: combineSignals(signal, REQUEST_TIMEOUTS_MS[method] ?? DEFAULT_REQUEST_TIMEOUT_MS),
@@ -190,6 +217,21 @@ function envPort(): number | undefined {
 
 function envToken(): string | undefined {
   const raw = process.env.PI_BROWSER_TOKEN;
+  return raw !== undefined && raw.length > 0 ? raw : undefined;
+}
+
+function envSessionToken(): string | undefined {
+  const raw = process.env.PI_BROWSER_SESSION_TOKEN;
+  return raw !== undefined && raw.length > 0 ? raw : undefined;
+}
+
+function envSessionProjectId(): string | undefined {
+  const raw = process.env.PI_BROWSER_SESSION_PROJECT_ID;
+  return raw !== undefined && raw.length > 0 ? raw : undefined;
+}
+
+function envSessionThreadId(): string | undefined {
+  const raw = process.env.PI_BROWSER_SESSION_THREAD_ID;
   return raw !== undefined && raw.length > 0 ? raw : undefined;
 }
 

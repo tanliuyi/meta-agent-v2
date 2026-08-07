@@ -8,7 +8,11 @@ import type {
   SaveAuthConfigInput,
 } from "../shared/auth-config-contracts.ts";
 import type { SaveAutoTitleSettingsInput } from "../shared/auto-title-contracts.ts";
-import type { BrowserCreateTabRequest, BrowserStateEvent } from "../shared/browser-contracts.ts";
+import type {
+  BrowserCreateTabRequest,
+  BrowserSessionIdentity,
+  BrowserStateEvent,
+} from "../shared/browser-contracts.ts";
 import type { SaveBrowserSettingsInput } from "../shared/browser-settings-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
@@ -222,36 +226,69 @@ export function registerIpc(
     ipcMain.handle(CHANNELS.preferencesSave, (_event, input: SavePreferencesInput) => preferences.save(input));
   }
   if (browser) {
-    ipcMain.handle(CHANNELS.browserAttach, (_event, webContentsId: number, requestId?: number) =>
-      browser.attach(webContentsId, requestId),
+    ipcMain.handle(
+      CHANNELS.browserAttach,
+      (_event, identity: BrowserSessionIdentity, webContentsId: number, requestId?: number) =>
+        browser.attach(identity, webContentsId, requestId),
     );
-    ipcMain.handle(CHANNELS.browserDetach, (_event, webContentsId: number) => browser.detach(webContentsId));
-    ipcMain.handle(CHANNELS.browserTabSelect, (_event, tabId: number) => browser.selectTab(tabId));
-    ipcMain.handle(CHANNELS.browserNavigate, (_event, tabId: number, url: string) => browser.navigate(tabId, url));
-    ipcMain.handle(CHANNELS.browserScreenshot, (_event, tabId: number) => browser.screenshot(tabId));
-    ipcMain.handle(CHANNELS.browserSnapshot, (_event, tabId: number, opts?: { withScreenshot?: boolean }) =>
-      browser.snapshot(tabId, opts),
+    ipcMain.handle(CHANNELS.browserDetach, (_event, identity: BrowserSessionIdentity, webContentsId: number) =>
+      browser.detach(identity, webContentsId),
     );
-    ipcMain.handle(CHANNELS.browserAction, (_event, tabId: number, action) => browser.action(tabId, action));
-    ipcMain.handle(CHANNELS.browserTabsList, () => browser.tabsList());
+    ipcMain.handle(CHANNELS.browserTabSelect, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.selectTab(identity, tabId),
+    );
+    ipcMain.handle(CHANNELS.browserNavigate, (_event, identity: BrowserSessionIdentity, tabId: number, url: string) =>
+      browser.navigate(identity, tabId, url),
+    );
+    ipcMain.handle(CHANNELS.browserScreenshot, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.screenshot(identity, tabId),
+    );
+    ipcMain.handle(CHANNELS.browserCopyScreenshot, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.copyScreenshot(identity, tabId),
+    );
+    ipcMain.handle(
+      CHANNELS.browserSnapshot,
+      (_event, identity: BrowserSessionIdentity, tabId: number, opts?: { withScreenshot?: boolean }) =>
+        browser.snapshot(identity, tabId, opts),
+    );
+    ipcMain.handle(CHANNELS.browserAction, (_event, identity: BrowserSessionIdentity, tabId: number, action) =>
+      browser.action(identity, tabId, action),
+    );
+    ipcMain.handle(CHANNELS.browserTabsList, (_event, identity: BrowserSessionIdentity) => browser.tabsList(identity));
     ipcMain.handle(CHANNELS.browserSettingsGet, () => browser.getSettingsSnapshot());
     ipcMain.handle(CHANNELS.browserSettingsSave, (_event, input: SaveBrowserSettingsInput) =>
       browser.saveSettings(input),
     );
-    ipcMain.handle(CHANNELS.browserClearData, () => browser.clearData());
-    ipcMain.handle(CHANNELS.browserHistory, () => browser.browserHistory());
-    ipcMain.handle(CHANNELS.browserAnnotationPick, (_event, tabId: number, x: number, y: number) =>
-      browser.pickAnnotationTarget(tabId, x, y),
+    ipcMain.handle(CHANNELS.browserSessionRetire, (_event, identity: BrowserSessionIdentity) =>
+      browser.retireSession(identity),
     );
-    ipcMain.handle(CHANNELS.browserAnnotationAdd, (_event, tabId: number, input) =>
-      browser.addAnnotation(tabId, input),
+    ipcMain.handle(CHANNELS.browserClearData, (_event, identity: BrowserSessionIdentity) =>
+      browser.clearSessionData(identity),
     );
-    ipcMain.handle(CHANNELS.browserAnnotationList, (_event, tabId: number) => browser.listAnnotations(tabId));
-    ipcMain.handle(CHANNELS.browserAnnotationRemove, (_event, tabId: number, id: string) =>
-      browser.removeAnnotation(tabId, id),
+    ipcMain.handle(CHANNELS.browserClearAllData, () => browser.clearAllData());
+    ipcMain.handle(CHANNELS.browserHistory, (_event, identity: BrowserSessionIdentity) =>
+      browser.browserHistory(identity),
     );
-    ipcMain.handle(CHANNELS.browserAnnotationResolve, (_event, tabId: number, id: string) =>
-      browser.resolveAnnotationBounds(tabId, id),
+    ipcMain.handle(
+      CHANNELS.browserAnnotationPick,
+      (_event, identity: BrowserSessionIdentity, tabId: number, x: number, y: number) =>
+        browser.pickAnnotationTarget(identity, tabId, x, y),
+    );
+    ipcMain.handle(CHANNELS.browserAnnotationAdd, (_event, identity: BrowserSessionIdentity, tabId: number, input) =>
+      browser.addAnnotation(identity, tabId, input),
+    );
+    ipcMain.handle(CHANNELS.browserAnnotationList, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.listAnnotations(identity, tabId),
+    );
+    ipcMain.handle(
+      CHANNELS.browserAnnotationRemove,
+      (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
+        browser.removeAnnotation(identity, tabId, id),
+    );
+    ipcMain.handle(
+      CHANNELS.browserAnnotationResolve,
+      (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
+        browser.resolveAnnotationBounds(identity, tabId, id),
     );
   }
   ipcMain.handle(CHANNELS.settingsChooseUserAvatar, async (event) => {
@@ -876,14 +913,14 @@ export function broadcastTerminalEvent(event: TerminalEvent): void {
   }
 }
 
-/** 向所有 renderer 广播内置浏览器状态（tabs/活跃 tab）。 */
+/** 向所有 renderer 广播内置浏览器状态（会话 + tabs/活跃 tab）。 */
 export function broadcastBrowserEvent(event: BrowserStateEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserStateChanged, event);
   }
 }
 
-/** 向所有 renderer 广播建 tab 请求（工具 browser.open 等触发）。 */
+/** 向所有 renderer 广播建 tab 请求（工具 browser.open 等触发；携带会话身份）。 */
 export function broadcastBrowserCreateTabRequest(request: BrowserCreateTabRequest): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCreateTabRequest, request);

@@ -9,7 +9,6 @@ import Eraser from "lucide-react/dist/esm/icons/eraser.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
 import { useState } from "react";
-import { BROWSER_PARTITION } from "../../../../../shared/browser-contracts.ts";
 import { type BrowserSettingsStatus, useBrowserSettingsController } from "./use-browser-settings-controller.ts";
 
 function statusText(status: BrowserSettingsStatus, dirty: boolean): string {
@@ -209,7 +208,7 @@ export function BrowserSettingsPage() {
                 <div className="settings-row-text">
                   <span>清除浏览数据</span>
                   <p className="settings-row-description">
-                    清除 {BROWSER_PARTITION} 分区中的 Cookie、缓存与登录态；不影响应用主会话与浏览器本身
+                    清除全部会话浏览器分区的 Cookie、缓存与登录态；不影响应用主会话与浏览器本身
                   </p>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => setClearConfirmOpen(true)}>
@@ -224,7 +223,7 @@ export function BrowserSettingsPage() {
       <ConfirmDialog
         open={clearConfirmOpen}
         title="清除浏览数据？"
-        description="将清除内置浏览器分区中的 Cookie、缓存与所有站点的登录状态，正在打开的标签页会保持。"
+        description="将清除全部会话浏览器分区中的 Cookie、缓存与所有站点的登录状态，正在打开的标签页会保持。"
         confirmLabel="清除"
         onCancel={() => setClearConfirmOpen(false)}
         onConfirm={() => controller.clearData()}

@@ -347,6 +347,8 @@ app.whenReady().then(async () => {
   });
   const activeSubagents = subagentRegistry;
   subagents = activeSubagents;
+  // 浏览器管理器在 registry 之后创建（回调容忍赋值前触发）。
+  let browserManagerInstance: BrowserManager | undefined;
   const workers = new ThreadWorkerRegistry({
     manifest: runtimeManifest,
     metadata: metadataClient,
@@ -397,6 +399,8 @@ app.whenReady().then(async () => {
       activeSubagents.beginThreadMutation(projectId, parentThreadId),
     endSubagentTreeMutation: (projectId, parentThreadId) =>
       activeSubagents.endThreadMutation(projectId, parentThreadId),
+    registerBrowserSession: (identity) => browserManagerInstance?.registerSession(identity),
+    revokeBrowserSession: (_identity, token) => browserManagerInstance?.revokeSessionCapability(token),
   });
   const startedSupervisor = new SessionSupervisor(projects, workers, {
     log: (scope, text) => sidecarLog?.write(scope, text),
@@ -421,7 +425,7 @@ app.whenReady().then(async () => {
     modelRuntime: authModelRuntime,
     isDesktopProviderAvailable,
   });
-  const browserManagerInstance = new BrowserManager(userDataDir, {
+  browserManagerInstance = new BrowserManager(userDataDir, {
     onStateChanged: broadcastBrowserEvent,
     onCreateTabRequest: broadcastBrowserCreateTabRequest,
     log: (text) => sidecarLog?.write("browser", text),

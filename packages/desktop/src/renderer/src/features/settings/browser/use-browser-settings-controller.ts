@@ -154,7 +154,7 @@ export function useBrowserSettingsController(): BrowserSettingsController {
 
   const clearData = useCallback(async () => {
     try {
-      await window.desktop.browser.clearData();
+      await window.desktop.browser.clearAllData();
       if (mounted.current) setNotice("已清除浏览器数据（Cookie、缓存与登录态）。");
     } catch (value) {
       if (mounted.current) setError(errorMessage(value));

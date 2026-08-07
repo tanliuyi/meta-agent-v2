@@ -65,4 +65,19 @@ describe("Host request components", () => {
     expect(markup).toContain('data-close-button-class-name="hidden"');
     expect(markup).toContain('data-class-name="gap-3 sm:max-w-lg"');
   });
+
+  it("长工具调用 ID 在标题行内截断并保留完整值供悬停查看", () => {
+    const toolCallId = "CALL_808PXWHYBYCYWIO2S2MMS7X7IFC_079BFC02BEF2F8FA016A758E4CFA0C819B84EA";
+    const markup = renderToStaticMarkup(
+      <HostRequestDialog
+        request={{ ...selectRequest, type: "confirm", title: "访问站点", toolCallId }}
+        projectId="project"
+        threadId="thread"
+      />,
+    );
+
+    expect(markup).toContain('class="flex min-w-0 items-baseline gap-1 text-xs font-medium text-muted-foreground"');
+    expect(markup).toContain('class="min-w-0 truncate font-mono"');
+    expect(markup).toContain(`title="${toolCallId}"`);
+  });
 });

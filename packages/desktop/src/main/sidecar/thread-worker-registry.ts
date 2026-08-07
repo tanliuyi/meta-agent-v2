@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { BrowserSessionIdentity } from "../../shared/browser-contracts.ts";
 import type {
   ClearedQueue,
   DraftSessionConfig,
@@ -84,6 +85,8 @@ interface WorkerRecord {
   desiredExtensionDiagnostics: DesktopExtensionDiagnostic[];
   extensionDiagnostics: DesktopExtensionDiagnostic[];
   retired: boolean;
+  browserSessionIdentity: BrowserSessionIdentity;
+  browserSessionToken?: string;
   shutdownPromise?: Promise<void>;
   failureReported?: boolean;
 }
@@ -118,6 +121,10 @@ export interface ThreadWorkerRegistryOptions {
   endSubagentProjectMutation?(projectId: string): void;
   beginSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
   endSubagentTreeMutation?(projectId: string, parentThreadId: string): void;
+  /** 从 ThreadWorkerBinding 受控注册浏览器会话身份并返回本 worker capability。 */
+  registerBrowserSession?(identity: BrowserSessionIdentity): string | undefined;
+  /** 撤销已退出 thread worker 的浏览器 capability。 */
+  revokeBrowserSession?(identity: BrowserSessionIdentity, token: string): void;
   createWorkerClient?(options: WorkerClientOptions): ThreadWorkerClient;
   idleTtlMs?: number;
   maxLiveWorkers?: number;
@@ -1126,8 +1133,10 @@ export class ThreadWorkerRegistry {
       const delays = binding.mode === "create" ? [0] : [0, 100, 500];
       for (const delayMs of delays) {
         if (delayMs > 0) await delay(delayMs);
+        let browserSessionToken: string | undefined;
         try {
-          const record = await this.spawnAttempt(binding);
+          browserSessionToken = this.options.registerBrowserSession?.(browserSessionIdentityOf(binding));
+          const record = await this.spawnAttempt(binding, browserSessionToken);
           if (record.retired || record.client.available === false) {
             await this.awaitRecordShutdown(record);
             throw new Error(`Thread worker generation exited before registration: ${binding.projectId}`);
@@ -1153,6 +1162,9 @@ export class ThreadWorkerRegistry {
           this.blockedDevelopmentSets.delete(binding.extensionSet.generation);
           return record;
         } catch (error) {
+          if (browserSessionToken !== undefined) {
+            this.options.revokeBrowserSession?.(browserSessionIdentityOf(binding), browserSessionToken);
+          }
           if (isNonRetryableStartupError(error)) throw error;
           lastError = error;
         }
@@ -1169,7 +1181,7 @@ export class ThreadWorkerRegistry {
     }
   }
 
-  private async spawnAttempt(binding: ThreadWorkerBinding): Promise<WorkerRecord> {
+  private async spawnAttempt(binding: ThreadWorkerBinding, browserSessionToken?: string): Promise<WorkerRecord> {
     const workspaceKey = await this.options.getWorkspaceKey(binding.projectId);
     let record: WorkerRecord;
     let client: ThreadWorkerClient;
@@ -1206,6 +1218,7 @@ export class ThreadWorkerRegistry {
           this.options.failed(record.projectId, record.threadId, error);
         }
       },
+      browserSessionToken,
     };
     client = this.options.createWorkerClient?.(clientOptions) ?? new SidecarWorkerClient(clientOptions);
     this.liveClients.set(client.instanceId, client);
@@ -1213,6 +1226,9 @@ export class ThreadWorkerRegistry {
       this.options.generationReferences?.retain(`thread:${client.instanceId}`, binding.extensionSet);
     } catch (error) {
       this.liveClients.delete(client.instanceId);
+      if (browserSessionToken !== undefined) {
+        this.options.revokeBrowserSession?.(browserSessionIdentityOf(binding), browserSessionToken);
+      }
       await client.shutdown().catch(() => undefined);
       throw error;
     }
@@ -1230,6 +1246,8 @@ export class ThreadWorkerRegistry {
       desiredExtensionGeneration: binding.extensionSet.generation,
       desiredExtensionDiagnostics: binding.extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
       extensionDiagnostics: binding.extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+      browserSessionIdentity: browserSessionIdentityOf(binding),
+      ...(browserSessionToken !== undefined ? { browserSessionToken } : {}),
       retired: false,
     };
     try {
@@ -1277,6 +1295,11 @@ export class ThreadWorkerRegistry {
 
   private beginRecordShutdown(record: WorkerRecord): Promise<void> {
     record.shutdownPromise ??= Promise.resolve()
+      .then(() => {
+        const token = record.browserSessionToken;
+        record.browserSessionToken = undefined;
+        if (token !== undefined) this.options.revokeBrowserSession?.(record.browserSessionIdentity, token);
+      })
       .then(() => this.options.hostWorkerFailed?.(record.projectId, record.threadId))
       .then(() => record.client.shutdown())
       .finally(() => this.unregisterClient(record.client));
@@ -1625,6 +1648,14 @@ export function assertHostRequestIdentity(request: SubagentHostRequest, binding:
   if (identity.projectId !== binding.projectId || identity.parentThreadId !== parentThreadId) {
     throw new Error("Subagent host request identity does not match the thread worker binding");
   }
+}
+
+/** 从 ThreadWorkerBinding 派生浏览器会话身份（与 sidecar 注入的 PI_BROWSER_SESSION_* 一致）。 */
+export function browserSessionIdentityOf(binding: ThreadWorkerBinding): BrowserSessionIdentity {
+  return {
+    projectId: binding.projectId,
+    threadId: binding.mode === "create" ? binding.sessionId : binding.threadId,
+  };
 }
 
 function workerKey(projectId: string, threadId: string): string {

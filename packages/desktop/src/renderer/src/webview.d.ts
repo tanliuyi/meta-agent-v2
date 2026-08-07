@@ -23,6 +23,12 @@ export interface BrowserWebviewElement extends HTMLElement {
   goForward(): void;
   reload(): void;
   stop(): void;
+  findInPage(text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }): number;
+  getZoomFactor(): number;
+  getZoomLevel(): number;
+  print(options?: { silent?: boolean; printBackground?: boolean }): Promise<void>;
+  stopFindInPage(action: "clearSelection" | "keepSelection" | "activateSelection"): void;
+  setZoomFactor(factor: number): void;
 }
 
 /** page-title-updated 事件 payload。 */
@@ -49,6 +55,15 @@ export interface BrowserWebviewFailLoadEvent extends Event {
   errorDescription: string;
   validatedURL: string;
   isMainFrame: boolean;
+}
+
+/** found-in-page 事件 payload。 */
+export interface BrowserWebviewFoundInPageEvent extends Event {
+  result: {
+    activeMatchOrdinal: number;
+    matches: number;
+  };
+  requestId: number;
 }
 
 declare global {

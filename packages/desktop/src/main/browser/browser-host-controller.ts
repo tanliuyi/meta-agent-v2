@@ -38,6 +38,7 @@ export interface WebContentsHostControllerOptions {
   maxSnapshotNodes?: number;
   onAgentNavigation?: AgentNavigationGuard;
   onPopup?: (url: string) => void;
+  onContextMenu?: (event: Electron.Event, params: Electron.ContextMenuParams) => void;
 }
 
 /** 宿主无关的浏览器控制接口（一个实例对应一个 tab 的 guest webContents）。 */
@@ -129,6 +130,7 @@ export class WebContentsHostController implements BrowserHostController {
   private maxSnapshotNodes: number;
   private readonly onAgentNavigation?: AgentNavigationGuard;
   private readonly onPopup?: (url: string) => void;
+  private readonly onContextMenu?: (event: Electron.Event, params: Electron.ContextMenuParams) => void;
   /** 命令串行队列：同一 tab 内 CDP 命令逐个执行。 */
   private cdpQueue: Promise<void> = Promise.resolve();
   private debuggerAttached = false;
@@ -144,6 +146,7 @@ export class WebContentsHostController implements BrowserHostController {
     this.maxSnapshotNodes = options.maxSnapshotNodes ?? DEFAULT_MAX_SNAPSHOT_NODES;
     this.onAgentNavigation = options.onAgentNavigation;
     this.onPopup = options.onPopup;
+    this.onContextMenu = options.onContextMenu;
     this.bindEvents();
     this.bindWindowOpenHandler();
   }
@@ -783,6 +786,16 @@ export class WebContentsHostController implements BrowserHostController {
       wc.off("will-navigate", onWillNavigate);
       wc.off("will-redirect", onWillRedirect);
     });
+
+    if (this.onContextMenu) {
+      const onContextMenu = (event: Electron.Event, params: Electron.ContextMenuParams): void => {
+        this.onContextMenu?.(event, params);
+      };
+      wc.on("context-menu", onContextMenu);
+      this.listeners.push(() => {
+        wc.off("context-menu", onContextMenu);
+      });
+    }
 
     const onNavigated = (_event: Electron.Event, url: string): void => {
       const history = wc.navigationHistory;

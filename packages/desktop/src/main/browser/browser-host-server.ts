@@ -7,13 +7,19 @@
  * 经 worker 环境变量（PI_BROWSER_HOST_PORT / PI_BROWSER_TOKEN）注入
  * sidecar，extension 用 fetch 调用。
  *
+ * 会话隔离：每个请求必须携带会话身份头（PI_BROWSER_SESSION_PROJECT_ID /
+ * PI_BROWSER_SESSION_THREAD_ID 注入，BrowserClient 逐请求发送）。RPC 只接受
+ * BrowserManager 中真实注册过的会话（由 ThreadWorkerBinding 受控注册），
+ * 未知身份一律 403 fail-closed。
+ *
  * 安全：仅监听 loopback；请求必须带 x-desktop-browser-token（随机 32 字节
  * hex）；方法白名单固定；body 上限 1MB；所有错误转 { ok:false, error }。
  */
 
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { BrowserAction, BrowserActionTarget } from "../../shared/browser-contracts.ts";
+import type { BrowserAction, BrowserActionTarget, BrowserSessionIdentity } from "../../shared/browser-contracts.ts";
+import { browserSessionKey } from "../../shared/browser-contracts.ts";
 import type { BrowserManager } from "./browser-manager.ts";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -80,6 +86,21 @@ async function handleRequest(
       writeJson(response, 401, { ok: false, error: "unauthorized" });
       return;
     }
+    const identity = readSessionIdentity(request);
+    const capability = readSessionCapability(request);
+    if (identity === null || capability === null) {
+      writeJson(response, 403, { ok: false, error: "缺少浏览器会话身份或 capability" });
+      return;
+    }
+    const capabilityIdentity = manager.resolveSessionCapability(capability);
+    if (capabilityIdentity === null || browserSessionKey(capabilityIdentity) !== browserSessionKey(identity)) {
+      writeJson(response, 403, { ok: false, error: "浏览器会话 capability 无效" });
+      return;
+    }
+    if (!manager.isKnownSession(identity)) {
+      writeJson(response, 403, { ok: false, error: "未知的浏览器会话身份" });
+      return;
+    }
     const body = await readBody(request);
     if (body === null) {
       // 暂停继续接收（避免内存膨胀），先回 413 再结束连接。
@@ -92,26 +113,49 @@ async function handleRequest(
       writeJson(response, 400, { ok: false, error: "JSON 解析失败" });
       return;
     }
-    const result = await dispatch(rpc, manager);
-    writeJson(response, 200, result);
+    // 客户端断开（工具 abort）时取消 openTab 等待：不执行动作、不留 pending 孤儿。
+    const controller = new AbortController();
+    const onClose = (): void => {
+      if (!response.writableEnded) controller.abort();
+    };
+    // request.close 可能在请求体读取完成后已经触发；aborted 和 response.close
+    // 覆盖客户端在服务端进入长时间 dispatch 后关闭连接的情况。
+    request.once("aborted", onClose);
+    response.once("close", onClose);
+    let result: unknown;
+    try {
+      result = await dispatch(rpc, manager, identity, controller.signal);
+    } finally {
+      request.off("aborted", onClose);
+      response.off("close", onClose);
+    }
+    if (!response.writableEnded) writeJson(response, 200, result);
   } catch (error) {
     log?.(`browser host rpc error: ${messageOf(error)}`);
     writeJson(response, 500, { ok: false, error: messageOf(error) });
   }
 }
 
-async function dispatch(rpc: RpcRequest, manager: BrowserManager): Promise<unknown> {
+async function dispatch(
+  rpc: RpcRequest,
+  manager: BrowserManager,
+  identity: BrowserSessionIdentity,
+  signal: AbortSignal,
+): Promise<unknown> {
   const method = rpc.method;
   const params = rpc.params as Record<string, unknown> | undefined;
   switch (method) {
     case "tabsList":
-      return { ok: true, data: manager.tabsList() };
+      return { ok: true, data: manager.tabsList(identity) };
     case "activeTab":
-      return { ok: true, data: manager.activeTab() };
+      return { ok: true, data: manager.activeTab(identity) };
     case "navigate": {
       requireParams(params, ["tabId", "url"]);
       const safe = params as Record<string, unknown>;
-      return { ok: true, data: await manager.navigate(Number(safe.tabId), String(safe.url), "agent") };
+      return {
+        ok: true,
+        data: await manager.navigate(identity, Number(safe.tabId), String(safe.url), "agent", signal),
+      };
     }
     case "historyTarget": {
       requireParams(params, ["tabId", "direction"]);
@@ -121,7 +165,7 @@ async function dispatch(rpc: RpcRequest, manager: BrowserManager): Promise<unkno
       }
       return {
         ok: true,
-        data: manager.navigationTarget(Number(safe.tabId), safe.direction),
+        data: manager.navigationTarget(identity, Number(safe.tabId), safe.direction),
       };
     }
     case "goBack": {
@@ -130,9 +174,11 @@ async function dispatch(rpc: RpcRequest, manager: BrowserManager): Promise<unkno
       return {
         ok: true,
         data: await manager.goBack(
+          identity,
           Number(safe.tabId),
           "agent",
           typeof safe.navigationApprovalUrl === "string" ? safe.navigationApprovalUrl : undefined,
+          signal,
         ),
       };
     }
@@ -142,15 +188,20 @@ async function dispatch(rpc: RpcRequest, manager: BrowserManager): Promise<unkno
       return {
         ok: true,
         data: await manager.goForward(
+          identity,
           Number(safe.tabId),
           "agent",
           typeof safe.navigationApprovalUrl === "string" ? safe.navigationApprovalUrl : undefined,
+          signal,
         ),
       };
     }
     case "reload": {
       requireParams(params, ["tabId"]);
-      return { ok: true, data: await manager.reload(Number((params as Record<string, unknown>).tabId), "agent") };
+      return {
+        ok: true,
+        data: await manager.reload(identity, Number((params as Record<string, unknown>).tabId), "agent", signal),
+      };
     }
     case "snapshot": {
       requireParams(params, ["tabId"]);
@@ -158,11 +209,13 @@ async function dispatch(rpc: RpcRequest, manager: BrowserManager): Promise<unkno
       return {
         ok: true,
         data: await manager.snapshot(
+          identity,
           Number(safe.tabId),
           {
             withScreenshot: safe.withScreenshot === true,
           },
           "agent",
+          signal,
         ),
       };
     }
@@ -172,7 +225,7 @@ async function dispatch(rpc: RpcRequest, manager: BrowserManager): Promise<unkno
       if (typeof safe.elementIndex !== "number" || !Number.isInteger(safe.elementIndex)) {
         return { ok: false, error: "elementIndex 参数非法" };
       }
-      return { ok: true, data: manager.inspectElement(Number(safe.tabId), safe.elementIndex) };
+      return { ok: true, data: manager.inspectElement(identity, Number(safe.tabId), safe.elementIndex) };
     }
     case "action": {
       requireParams(params, ["tabId", "action"]);
@@ -181,27 +234,40 @@ async function dispatch(rpc: RpcRequest, manager: BrowserManager): Promise<unkno
       if (action === null) {
         return { ok: false, error: "action 参数非法：需为 { type: click|type|scroll, ... } 形状" };
       }
-      return { ok: true, data: await manager.action(Number(safe.tabId), action, "agent") };
+      return { ok: true, data: await manager.action(identity, Number(safe.tabId), action, "agent", signal) };
     }
     case "openTab": {
       requireParams(params, ["url"]);
       const safe = params as Record<string, unknown>;
-      return { ok: true, data: await manager.openTab(String(safe.url)) };
+      return { ok: true, data: await manager.openTab(identity, String(safe.url), "agent", signal) };
     }
     case "screenshot": {
       requireParams(params, ["tabId"]);
       const safe = params as Record<string, unknown>;
-      return { ok: true, data: await manager.screenshot(Number(safe.tabId), "agent") };
+      return { ok: true, data: await manager.screenshot(identity, Number(safe.tabId), "agent", signal) };
     }
     case "clearData":
-      return { ok: true, data: await manager.clearData() };
+      return { ok: true, data: await manager.clearSessionData(identity, signal) };
     case "history":
-      return { ok: true, data: manager.browserHistory() };
+      return { ok: true, data: manager.browserHistory(identity) };
     case "getSettings":
       return { ok: true, data: await manager.getSettingsSnapshot() };
     default:
       throw new Error(`不支持的方法: ${method}`);
   }
+}
+
+function readSessionCapability(request: IncomingMessage): string | null {
+  const capability = request.headers["x-desktop-browser-session-token"];
+  return typeof capability === "string" && capability.length > 0 ? capability : null;
+}
+
+function readSessionIdentity(request: IncomingMessage): BrowserSessionIdentity | null {
+  const projectId = request.headers["x-desktop-browser-session-project-id"];
+  const threadId = request.headers["x-desktop-browser-session-thread-id"];
+  if (typeof projectId !== "string" || projectId.length === 0) return null;
+  if (typeof threadId !== "string" || threadId.length === 0) return null;
+  return { projectId, threadId };
 }
 
 function requireParams(params: Record<string, unknown> | undefined, keys: string[]): void {

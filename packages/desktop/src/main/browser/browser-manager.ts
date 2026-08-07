@@ -1,23 +1,26 @@
 /**
- * 内置浏览器（IAB）主进程服务：管理浏览器 tab 生命周期、导航、截图与状态广播。
+ * 内置浏览器（IAB）主进程服务：按会话隔离的浏览器状态/profile 管理。
  *
- * - tab 注册：renderer 创建 `<webview>` 后上报 guest webContentsId，main 注册为
- *   tab 并订阅宿主事件（导航/标题/加载/崩溃/销毁）。
- * - 状态广播：任何 tab 状态变化后立即调用 `onStateChanged`（P0 不做节流，
- *   P1 若事件过于频繁再合并）。
+ * 每个会话（ThreadWorkerBinding 的 projectId + threadId）拥有独立的
+ * Electron partition（`persist:browser-<hash>`）与独立的 tab 注册表、
+ * active tab、pending 建 tab 请求、访问历史与标注。所有操作先校验 identity
+ * 再访问 tab；Agent 操作不能改变其他会话的 active tab。
+ *
+ * - tab 注册：renderer 创建 `<webview>` 后上报 guest webContentsId + 会话身份，
+ *   main 校验 webContents 属于该会话的 partition 后注册为 tab 并订阅宿主事件。
+ * - 状态广播：携带 sessionKey；任何 tab 状态变化后立即调用 `onStateChanged`。
  * - 导航只允许 http/https（file:// 等拒绝）；URL 补全是 renderer 职责。
- * - 设置读写委托 BrowserSettingsService。
+ * - 设置（allow/block/confirm/download/cdp）全局共享，委托 BrowserSettingsService。
  *
- * 宿主无关：CDP（元素级交互）在 P1 通过 BrowserHostController 新实现扩展，
- * 不改变本类公开接口。
+ * 宿主无关：CDP（元素级交互）经 BrowserHostController 扩展实现。
  */
 
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import type { WebContents } from "electron";
-import { webContents as electronWebContents, session } from "electron";
+import { BrowserWindow, clipboard, webContents as electronWebContents, Menu, nativeImage, session } from "electron";
 import {
-  BROWSER_PARTITION,
+  BROWSER_INTERNAL_PAGES,
   type BrowserAction,
   type BrowserActionResult,
   type BrowserAnnotation,
@@ -25,15 +28,19 @@ import {
   type BrowserAnnotationInput,
   type BrowserAnnotationPickResult,
   type BrowserAttachResult,
+  type BrowserClipboardResult,
   type BrowserCreateTabRequest,
   type BrowserInspectElementResult,
   type BrowserNavigateResult,
   type BrowserNavigationTargetResult,
   type BrowserOpenTabResult,
   type BrowserScreenshotResult,
+  type BrowserSessionIdentity,
   type BrowserSnapshotResult,
   type BrowserStateEvent,
   type BrowserTab,
+  browserPartitionFor,
+  browserSessionKey,
 } from "../../shared/browser-contracts.ts";
 import type {
   BrowserSettings,
@@ -43,6 +50,7 @@ import type {
 } from "../../shared/browser-settings-contracts.ts";
 import { defaultBrowserSettings } from "../../shared/browser-settings-contracts.ts";
 import { checkSiteAccess } from "../../shared/browser-site-policy.ts";
+import { type BrowserContextMenuActions, buildBrowserContextMenuTemplate } from "./browser-context-menu.ts";
 import {
   type BrowserHostController,
   type BrowserHostEvent,
@@ -54,9 +62,9 @@ import { BrowserSettingsService } from "./browser-settings-service.ts";
 import { isBrowserWebviewUrl } from "./browser-webview-policy.ts";
 
 export interface BrowserManagerOptions {
-  /** tab 状态变化时广播；由 index.ts 注入跨窗口推送实现。 */
+  /** tab 状态变化时广播（携带 sessionKey）；由 index.ts 注入跨窗口推送实现。 */
   onStateChanged?: (event: BrowserStateEvent) => void;
-  /** 工具侧建 tab 请求广播；由 index.ts 注入。 */
+  /** 工具侧建 tab 请求广播（携带 sessionKey）；由 index.ts 注入。 */
   onCreateTabRequest?: (request: BrowserCreateTabRequest) => void;
   /** 服务日志（可选）。 */
   log?: (text: string) => void;
@@ -66,8 +74,6 @@ export interface BrowserManagerOptions {
   fromWebContentsId?: (webContentsId: number) => WebContents | null;
   /** 测试注入：覆盖设置文件路径。 */
   settingsPath?: string;
-  /** 测试注入：openTab 等待 renderer attach 的超时（默认 15s）。 */
-  openTabTimeoutMs?: number;
 }
 
 export type BrowserOperationSource = "user" | "agent" | "popup";
@@ -84,73 +90,134 @@ interface PendingCreateTab {
   source: BrowserOperationSource;
   resolve: (result: BrowserOpenTabResult) => void;
   reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  abort?: AbortSignal;
+  onAbort?: () => void;
 }
 
-const DEFAULT_OPEN_TAB_TIMEOUT_MS = 15_000;
-const CREATE_REQUEST_TOMBSTONE_TTL_MS = 60_000;
+/** 单个会话的浏览器状态：profile（partition）、tabs、历史与标注全部按会话隔离。 */
+interface SessionState {
+  identity: BrowserSessionIdentity;
+  sessionKey: string;
+  partition: string;
+  browserSession: Electron.Session;
+  entries: Map<number, TabEntry>; // tabId -> entry
+  byWebContentsId: Map<number, number>; // webContentsId -> tabId
+  activeTabId: number | null;
+  nextTabId: number;
+  pendingCreates: Map<number, PendingCreateTab>;
+  /** 访问历史（最近在前，上限 MAX_HISTORY_ENTRIES；仅内存态，供地址栏搜索与 UI）。 */
+  history: BrowserHistoryEntry[];
+  /** tabId -> 最近记录过的 URL（连续重复导航不重复记录）。 */
+  lastHistoryUrlByTab: Map<number, string>;
+  /** tabId -> 标注列表（标注模式；仅内存态）。 */
+  annotationsByTab: Map<number, BrowserAnnotation[]>;
+  onWillDownload: (event: Electron.Event, item: Electron.DownloadItem) => void;
+}
 
-/** 内置浏览器主进程服务。 */
+/** 内置浏览器主进程服务（main service 入口；内部按 sessionKey 隔离）。 */
 export class BrowserManager {
   private readonly options: BrowserManagerOptions;
   private readonly settingsService: BrowserSettingsService;
-  private readonly browserSession: Electron.Session;
-  private readonly onWillDownload = (_event: Electron.Event, item: Electron.DownloadItem): void => {
-    const directory = this.runtimeSettings.downloadDirectory;
-    if (!directory) return;
-    const filename = basename(item.getFilename());
-    if (filename.length === 0) return;
-    item.setSavePath(join(directory, filename));
-  };
+  private readonly sessions = new Map<string, SessionState>();
+  /** 曾经受控注册过的会话身份（retire 后仍保持已知；状态按需重建）。 */
+  private readonly knownSessions = new Set<string>();
+  /** 当前仍可调用 RPC 的 worker capability -> session identity。 */
+  private readonly sessionCapabilities = new Map<string, BrowserSessionIdentity>();
+  /** 已经注册过的 identity，用于 clearAllData 覆盖已 retire 的持久分区。 */
+  private readonly sessionIdentities = new Map<string, BrowserSessionIdentity>();
   private runtimeSettings: BrowserSettings = defaultBrowserSettings();
   private runtimeSettingsLoaded = false;
   private runtimeSettingsLoadFailed = false;
   private readonly settingsReady: Promise<void>;
-  private readonly entries = new Map<number, TabEntry>(); // tabId -> entry
-  private readonly byWebContentsId = new Map<number, number>(); // webContentsId -> tabId
-  private activeTabId: number | null = null;
-  private nextTabId = 1;
   private nextCreateRequestId = 1;
-  private readonly pendingCreates = new Map<number, PendingCreateTab>();
-  private readonly expiredCreateRequests = new Map<number, ReturnType<typeof setTimeout>>();
   private disposed = false;
-  /** 访问历史（最近在前，上限 MAX_HISTORY_ENTRIES；仅内存态，供地址栏搜索与 UI）。 */
-  private readonly history: BrowserHistoryEntry[] = [];
-  /** tabId -> 最近记录过的 URL（连续重复导航不重复记录）。 */
-  private readonly lastHistoryUrlByTab = new Map<number, string>();
-  /** tabId -> 标注列表（标注模式，§11；仅内存态）。 */
-  private readonly annotationsByTab = new Map<number, BrowserAnnotation[]>();
 
   constructor(userDataDir: string, options: BrowserManagerOptions = {}) {
     this.options = options;
     this.settingsService = new BrowserSettingsService(userDataDir, {
       path: options.settingsPath,
     });
-    this.browserSession = session.fromPartition(BROWSER_PARTITION);
     this.settingsReady = this.refreshRuntimeSettings();
-    // 分区权限默认全部拒绝（spec §10）：未设置 handler 时 Electron 默认放行
-    // 权限请求，恶意页面可静默取得摄像头/麦克风/地理位置等；P1 再按
-    // media 类弹窗询问等策略细化。
-    this.browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
-    this.browserSession.on("will-download", this.onWillDownload);
   }
 
-  /** renderer 在 webview attach 后上报 guest webContentsId；重复上报幂等返回已有 tab。
-   *  requestId 用于匹配 BrowserManager.openTab 发出的建 tab 请求。 */
-  async attach(webContentsId: number, requestId?: number): Promise<BrowserAttachResult> {
+  /** 会话注册：由 thread worker 派生；每次新 worker 注册都会轮换 capability。 */
+  registerSession(identity: BrowserSessionIdentity): string {
+    const sessionKey = browserSessionKey(identity);
+    this.knownSessions.add(sessionKey);
+    this.sessionIdentities.set(sessionKey, { ...identity });
+    for (const [token, capabilityIdentity] of this.sessionCapabilities) {
+      if (browserSessionKey(capabilityIdentity) === sessionKey) this.sessionCapabilities.delete(token);
+    }
+    const capability = randomBytes(32).toString("hex");
+    this.sessionCapabilities.set(capability, { ...identity });
+    this.ensureSession(identity);
+    return capability;
+  }
+
+  /** 解析 worker capability；header 中的 identity 只能作为一致性校验。 */
+  resolveSessionCapability(token: string): BrowserSessionIdentity | null {
+    const identity = this.sessionCapabilities.get(token);
+    if (!identity || !this.knownSessions.has(browserSessionKey(identity))) return null;
+    return { ...identity };
+  }
+
+  revokeSessionCapability(token: string): void {
+    this.sessionCapabilities.delete(token);
+  }
+
+  /** RPC 等不可信入口的身份校验：仅接受当前已注册且未退役的会话。 */
+  isKnownSession(identity: BrowserSessionIdentity): boolean {
+    return this.knownSessions.has(browserSessionKey(identity));
+  }
+
+  /** 会话退役：清理该会话的 tabs/pending/历史/标注，并撤销其 RPC 身份。 */
+  retireSession(identity: BrowserSessionIdentity): void {
+    const sessionKey = browserSessionKey(identity);
+    this.knownSessions.delete(sessionKey);
+    for (const [token, capabilityIdentity] of this.sessionCapabilities) {
+      if (browserSessionKey(capabilityIdentity) === sessionKey) this.sessionCapabilities.delete(token);
+    }
+    const state = this.sessions.get(sessionKey);
+    if (!state) return;
+    for (const pending of state.pendingCreates.values()) {
+      if (pending.onAbort) pending.abort?.removeEventListener("abort", pending.onAbort);
+      pending.reject(new Error("浏览器会话已关闭"));
+    }
+    state.pendingCreates.clear();
+    for (const entry of state.entries.values()) entry.host.dispose();
+    state.entries.clear();
+    state.byWebContentsId.clear();
+    state.activeTabId = null;
+    state.history.length = 0;
+    state.lastHistoryUrlByTab.clear();
+    state.annotationsByTab.clear();
+    state.browserSession.off("will-download", state.onWillDownload);
+    this.sessions.delete(state.sessionKey);
+    this.broadcast(state);
+  }
+
+  /** renderer 在 webview attach 后上报 guest webContentsId + 会话身份；重复上报幂等返回已有 tab。
+   *  requestId 用于匹配 openTab 发出的建 tab 请求。 */
+  async attach(
+    identity: BrowserSessionIdentity,
+    webContentsId: number,
+    requestId?: number,
+  ): Promise<BrowserAttachResult> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
     if (this.disposed) return { ok: false, error: "浏览器服务已关闭" };
 
-    const existingTabId = this.byWebContentsId.get(webContentsId);
+    const existingTabId = state.byWebContentsId.get(webContentsId);
     if (existingTabId !== undefined) {
-      const entry = this.entries.get(existingTabId);
+      const entry = state.entries.get(existingTabId);
       if (entry) return { ok: true, tab: { ...entry.tab } };
     }
 
     const resolved =
       this.options.fromWebContentsId?.(webContentsId) ?? electronWebContents.fromId(webContentsId) ?? null;
     if (!resolved) return { ok: false, error: `webContents ${webContentsId} 不存在` };
-    if (resolved.session !== this.browserSession) {
-      return { ok: false, error: `webContents ${webContentsId} 不属于浏览器分区` };
+    if (resolved.session !== state.browserSession) {
+      return { ok: false, error: `webContents ${webContentsId} 不属于会话浏览器分区` };
     }
     if (!resolved.hostWebContents) {
       return { ok: false, error: `webContents ${webContentsId} 不是浏览器 guest` };
@@ -160,15 +227,18 @@ export class BrowserManager {
       return { ok: false, error: `webContents ${webContentsId} 的 URL 不符合浏览器页面要求` };
     }
 
-    if (requestId !== undefined && !this.pendingCreates.has(requestId)) {
-      if (this.expiredCreateRequests.has(requestId)) {
-        return { ok: false, error: `建 tab 请求 ${requestId} 已超时，请重新打开` };
-      }
+    if (requestId !== undefined && !state.pendingCreates.has(requestId)) {
       return { ok: false, error: `未知的建 tab 请求 ${requestId}` };
     }
 
     await this.settingsReady;
-    const tabId = this.nextTabId++;
+    if (this.sessions.get(state.sessionKey) !== state || !this.knownSessions.has(state.sessionKey)) {
+      return { ok: false, error: "浏览器会话已关闭" };
+    }
+    if (requestId !== undefined && !state.pendingCreates.has(requestId)) {
+      return { ok: false, error: `未知的建 tab 请求 ${requestId}` };
+    }
+    const tabId = state.nextTabId++;
     const history = resolved.navigationHistory;
     const tab: BrowserTab = {
       tabId,
@@ -184,35 +254,46 @@ export class BrowserManager {
       cdpTimeoutMs: this.runtimeSettings.cdpTimeoutMs,
       maxSnapshotNodes: this.runtimeSettings.maxSnapshotNodes,
       onAgentNavigation: (url, currentUrl, approvedUrl) =>
-        this.allowAgentNavigation(tabId, url, currentUrl, approvedUrl),
+        this.allowAgentNavigation(state, tabId, url, currentUrl, approvedUrl),
       onPopup: (url) => {
-        void this.openTab(url, "popup").catch((error: unknown) => {
+        void this.openTab(state.identity, url, "popup").catch((error: unknown) => {
           this.options.log?.(`browser popup rejected: ${messageOf(error)}`);
         });
       },
+      onContextMenu: (event, params) => this.handleContextMenu(state, tabId, resolved, event, params),
     };
     const host =
       this.options.createHost?.(webContentsId, hostOptions) ?? new WebContentsHostController(resolved, hostOptions);
-    this.entries.set(tabId, { tabId, webContentsId, host, tab });
-    this.byWebContentsId.set(webContentsId, tabId);
-    host.onEvent((event) => this.handleHostEvent(tabId, event));
-    this.activeTabId = tabId;
-    this.broadcast();
+    state.entries.set(tabId, { tabId, webContentsId, host, tab });
+    state.byWebContentsId.set(webContentsId, tabId);
+    host.onEvent((event) => this.handleHostEvent(state, tabId, event));
+    state.activeTabId = tabId;
+    this.broadcast(state);
 
     // 若该 webContents 是对 openTab 建 tab 请求的响应：完成请求并导航目标 URL。
     if (requestId !== undefined) {
-      const pending = this.pendingCreates.get(requestId);
+      const pending = state.pendingCreates.get(requestId);
       if (pending) {
-        this.pendingCreates.delete(requestId);
-        clearTimeout(pending.timer);
-        const navigation = await this.navigate(tabId, pending.url, pending.source);
+        state.pendingCreates.delete(requestId);
+        if (pending.onAbort) pending.abort?.removeEventListener("abort", pending.onAbort);
+        if (pending.abort?.aborted) {
+          this.removeEntry(state, tabId);
+          pending.resolve({ ok: false, error: "已取消" });
+          return { ok: false, error: "已取消" };
+        }
+        const navigation = await this.navigate(state.identity, tabId, pending.url, pending.source, pending.abort);
         if (!navigation.ok) {
-          this.removeEntry(tabId);
+          this.removeEntry(state, tabId);
           pending.resolve({ ok: false, error: navigation.error });
           return { ok: false, error: navigation.error };
         }
         // 导航后回读 entry.tab（navigate 的 did-navigate 事件可能已更新 URL/标题）。
-        const current = this.entries.get(tabId);
+        if (pending.abort?.aborted) {
+          this.removeEntry(state, tabId);
+          pending.resolve({ ok: false, error: "已取消" });
+          return { ok: false, error: "已取消" };
+        }
+        const current = state.entries.get(tabId);
         pending.resolve({ ok: true, tab: current ? { ...current.tab } : { ...tab } });
       }
     }
@@ -220,33 +301,48 @@ export class BrowserManager {
   }
 
   /** renderer 移除 webview 时注销；幂等。 */
-  async detach(webContentsId: number): Promise<void> {
-    const tabId = this.byWebContentsId.get(webContentsId);
-    if (tabId !== undefined) this.removeEntry(tabId);
+  async detach(identity: BrowserSessionIdentity, webContentsId: number): Promise<void> {
+    const state = this.requireSession(identity);
+    if (!state) return;
+    const tabId = state.byWebContentsId.get(webContentsId);
+    if (tabId !== undefined) this.removeEntry(state, tabId);
   }
 
   /** 切换活跃 tab；不存在时返回 null。 */
-  selectTab(tabId: number): BrowserTab | null {
-    const entry = this.entries.get(tabId);
+  selectTab(identity: BrowserSessionIdentity, tabId: number): BrowserTab | null {
+    const state = this.requireSession(identity);
+    if (!state) return null;
+    const entry = state.entries.get(tabId);
     if (!entry) return null;
-    this.activeTabId = tabId;
-    this.broadcast();
+    state.activeTabId = tabId;
+    this.broadcast(state);
     return { ...entry.tab };
   }
 
-  tabsList(): BrowserTab[] {
-    return [...this.entries.values()].map((entry) => ({ ...entry.tab }));
+  tabsList(identity: BrowserSessionIdentity): BrowserTab[] {
+    const state = this.requireSession(identity);
+    if (!state) return [];
+    return [...state.entries.values()].map((entry) => ({ ...entry.tab }));
   }
 
   /** 当前活跃 tab；无 tab 或服务已关闭时返回 null。 */
-  activeTab(): BrowserTab | null {
-    if (this.activeTabId === null) return null;
-    const entry = this.entries.get(this.activeTabId);
+  activeTab(identity: BrowserSessionIdentity): BrowserTab | null {
+    const state = this.requireSession(identity);
+    if (!state || state.activeTabId === null) return null;
+    const entry = state.entries.get(state.activeTabId);
     return entry ? { ...entry.tab } : null;
   }
 
-  /** 由工具侧发起建 tab：广播建 tab 请求并等待 renderer 创建 webview 后 attach。 */
-  async openTab(url: string, source: BrowserOperationSource = "agent"): Promise<BrowserOpenTabResult> {
+  /** 由工具侧发起建 tab：广播建 tab 请求并等待 renderer 创建 webview 后 attach。
+   *  不设固定超时（用户确认/渲染器就绪可能较慢）；abort 信号取消时清理 pending 且不留孤儿。 */
+  async openTab(
+    identity: BrowserSessionIdentity,
+    url: string,
+    source: BrowserOperationSource = "agent",
+    signal?: AbortSignal,
+  ): Promise<BrowserOpenTabResult> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
     if (this.disposed) return { ok: false, error: "浏览器服务已关闭" };
     const normalized = normalizeNavigateUrl(url);
     if (!normalized) return { ok: false, error: "仅支持 http/https 链接" };
@@ -259,36 +355,47 @@ export class BrowserManager {
     }
 
     const requestId = this.nextCreateRequestId++;
-    const request: BrowserCreateTabRequest = { requestId, url: normalized };
-    const result = await new Promise<BrowserOpenTabResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingCreates.delete(requestId);
-        const expiry = setTimeout(() => this.expiredCreateRequests.delete(requestId), CREATE_REQUEST_TOMBSTONE_TTL_MS);
-        this.expiredCreateRequests.set(requestId, expiry);
-        resolve({ ok: false, error: `创建浏览器标签页超时（${openTabTimeoutOf(this.options)}ms）` });
-      }, openTabTimeoutOf(this.options));
-      this.pendingCreates.set(requestId, { url: normalized, source, resolve, reject, timer });
+    const request: BrowserCreateTabRequest = { requestId, url: normalized, sessionKey: state.sessionKey };
+    if (signal?.aborted) return { ok: false, error: "已取消" };
+    return await new Promise<BrowserOpenTabResult>((resolve, reject) => {
+      const pending: PendingCreateTab = { url: normalized, source, resolve, reject, abort: signal };
+      const onAbort = (): void => {
+        state.pendingCreates.delete(requestId);
+        if (pending.onAbort) pending.abort?.removeEventListener("abort", pending.onAbort);
+        resolve({ ok: false, error: "已取消" });
+      };
+      pending.onAbort = onAbort;
+      signal?.addEventListener("abort", onAbort, { once: true });
+      state.pendingCreates.set(requestId, pending);
       this.options.onCreateTabRequest?.(request);
     });
-    return result;
   }
 
   /** 结构化页面快照（AX 树简化 + 可交互元素编号 + 可选截图）。 */
   async snapshot(
+    identity: BrowserSessionIdentity,
     tabId: number,
     opts: { withScreenshot?: boolean } = {},
     source: BrowserOperationSource = "user",
+    signal?: AbortSignal,
   ): Promise<BrowserSnapshotResult> {
-    const entry = this.entries.get(tabId);
+    if (signal?.aborted) return { ok: false, error: "已取消" };
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (source === "agent") this.activateAgentTab(tabId);
+    if (source === "agent") this.activateAgentTab(state, tabId);
     if (source === "agent") {
       const policyError = this.blockedAgentSiteError(entry.tab.url);
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
-      const snapshot = await entry.host.snapshot({ withScreenshot: opts.withScreenshot === true });
+      const snapshot = await withAbort(
+        () => entry.host.snapshot({ withScreenshot: opts.withScreenshot === true }),
+        signal,
+        () => entry.host.cancelPendingOperations(),
+      );
       return { ok: true, snapshot };
     } catch (error) {
       this.options.log?.(`browser snapshot failed: ${messageOf(error)}`);
@@ -298,17 +405,22 @@ export class BrowserManager {
 
   /** 元素级交互（click/type/scroll），编号来自最近一次 snapshot。 */
   async action(
+    identity: BrowserSessionIdentity,
     tabId: number,
     action: BrowserAction,
     source: BrowserOperationSource = "user",
+    signal?: AbortSignal,
   ): Promise<BrowserActionResult> {
-    const entry = this.entries.get(tabId);
+    if (signal?.aborted) return { ok: false, error: "已取消" };
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
     if (source === "agent" && (action.type === "click" || action.type === "type") && action.target === undefined) {
       return { ok: false, error: "元素引用缺少快照指纹，请重新 browser_snapshot 后再操作", staleRef: true };
     }
-    if (source === "agent") this.activateAgentTab(tabId);
+    if (source === "agent") this.activateAgentTab(state, tabId);
     if (source === "agent") {
       const expectedUrl = action.type === "scroll" ? action.expectedUrl : action.target?.pageUrl;
       if (expectedUrl !== undefined && !sameBrowserUrl(expectedUrl, entry.tab.url)) {
@@ -318,7 +430,11 @@ export class BrowserManager {
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
-      const outcome = await entry.host.performAction(action, { agent: source === "agent" });
+      const outcome = await withAbort(
+        () => entry.host.performAction(action, { agent: source === "agent" }),
+        signal,
+        () => entry.host.cancelPendingOperations(),
+      );
       return { ok: true, url: outcome.url, title: outcome.title };
     } catch (error) {
       if (error instanceof StaleReferenceError) {
@@ -330,29 +446,40 @@ export class BrowserManager {
   }
 
   /** 读取最近一次 snapshot 中的元素元数据，不刷新编号索引。 */
-  inspectElement(tabId: number, elementIndex: number): BrowserInspectElementResult {
-    const entry = this.entries.get(tabId);
+  inspectElement(identity: BrowserSessionIdentity, tabId: number, elementIndex: number): BrowserInspectElementResult {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    this.activateAgentTab(tabId);
+    this.activateAgentTab(state, tabId);
     const policyError = this.blockedAgentSiteError(entry.tab.url);
     if (policyError !== null) return { ok: false, error: policyError };
     const node = entry.host.inspectElement(elementIndex);
     return node ? { ok: true, node } : { ok: false, error: "元素编号已失效，请重新获取页面快照", staleRef: true };
   }
 
-  /** 导航到 URL；仅 http/https，其余协议拒绝；URL 补全是 renderer 职责。
+  /** 导航到 URL；用户操作支持 http/https 和受限的 Chromium 内置页，Agent 仍只允许 http/https。
    *  loadURL 挂起（连接无响应）时按 NAVIGATE_TIMEOUT_MS 超时返回错误。 */
-  async navigate(tabId: number, url: string, source: BrowserOperationSource = "user"): Promise<BrowserNavigateResult> {
-    const normalized = normalizeNavigateUrl(url);
-    if (!normalized) return { ok: false, error: "仅支持 http/https 链接" };
-    const entry = this.entries.get(tabId);
+  async navigate(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    url: string,
+    source: BrowserOperationSource = "user",
+    signal?: AbortSignal,
+  ): Promise<BrowserNavigateResult> {
+    if (signal?.aborted) return { ok: false, error: "已取消" };
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const normalized = normalizeNavigateUrl(url) ?? (source === "user" ? normalizeInternalBrowserPage(url) : null);
+    if (!normalized) return { ok: false, error: "仅支持 http/https 链接或受支持的 Chromium 内置页面" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
     if (source === "popup" && checkSiteAccess(this.runtimeSettings, normalized) !== "allowed") {
       return { ok: false, error: `站点 ${new URL(normalized).host} 未列入允许列表，页面弹窗已阻止` };
     }
-    if (source === "agent") this.activateAgentTab(tabId);
+    if (source === "agent") this.activateAgentTab(state, tabId);
     if (source === "agent") {
       const currentPolicyError = this.blockedAgentSiteError(entry.tab.url);
       if (currentPolicyError !== null) return { ok: false, error: currentPolicyError };
@@ -362,11 +489,16 @@ export class BrowserManager {
       }
     }
     try {
-      await withTimeout(
-        entry.host.navigate(normalized, { agent: source === "agent", navigationApprovalUrl: normalized }),
-        NAVIGATE_TIMEOUT_MS,
+      await withAbort(
+        () =>
+          withTimeout(
+            entry.host.navigate(normalized, { agent: source === "agent", navigationApprovalUrl: normalized }),
+            NAVIGATE_TIMEOUT_MS,
+            () => entry.host.cancelPendingOperations(),
+            `导航超时（${NAVIGATE_TIMEOUT_MS}ms）`,
+          ),
+        signal,
         () => entry.host.cancelPendingOperations(),
-        `导航超时（${NAVIGATE_TIMEOUT_MS}ms）`,
       );
     } catch (error) {
       this.options.log?.(`browser navigate failed: ${messageOf(error)}`);
@@ -377,16 +509,22 @@ export class BrowserManager {
   }
 
   /** 返回历史动作的目标 URL，Agent 在真正调用 back/forward 前据此完成站点审批。 */
-  navigationTarget(tabId: number, direction: "back" | "forward"): BrowserNavigationTargetResult {
-    const entry = this.entries.get(tabId);
+  navigationTarget(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    direction: "back" | "forward",
+  ): BrowserNavigationTargetResult {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    this.activateAgentTab(tabId);
+    this.activateAgentTab(state, tabId);
     try {
-      const state = entry.host.getNavigationState();
-      const targetIndex = state.activeIndex + (direction === "back" ? -1 : 1);
-      const target = state.entries[targetIndex];
-      const current = state.entries[state.activeIndex] ?? { url: entry.tab.url, title: entry.tab.title };
+      const history = entry.host.getNavigationState();
+      const targetIndex = history.activeIndex + (direction === "back" ? -1 : 1);
+      const target = history.entries[targetIndex];
+      const current = history.entries[history.activeIndex] ?? { url: entry.tab.url, title: entry.tab.title };
       if (!target) return { ok: false, error: `没有可${direction === "back" ? "后退" : "前进"}的历史记录` };
       return { ok: true, current, target };
     } catch (error) {
@@ -396,53 +534,79 @@ export class BrowserManager {
 
   /** 后退；无历史时返回错误。 */
   async goBack(
+    identity: BrowserSessionIdentity,
     tabId: number,
     source: BrowserOperationSource = "user",
     navigationApprovalUrl?: string,
+    signal?: AbortSignal,
   ): Promise<BrowserNavigateResult> {
-    const target = this.navigationTarget(tabId, "back");
+    const target = this.navigationTarget(identity, tabId, "back");
     if (!target.ok) return target;
     return this.runHistoryAction(
+      identity,
       tabId,
       (host) => host.goBack({ agent: source === "agent", navigationApprovalUrl }),
       source,
       target.target.url,
       navigationApprovalUrl,
+      signal,
     );
   }
 
   /** 前进；无历史时返回错误。 */
   async goForward(
+    identity: BrowserSessionIdentity,
     tabId: number,
     source: BrowserOperationSource = "user",
     navigationApprovalUrl?: string,
+    signal?: AbortSignal,
   ): Promise<BrowserNavigateResult> {
-    const target = this.navigationTarget(tabId, "forward");
+    const target = this.navigationTarget(identity, tabId, "forward");
     if (!target.ok) return target;
     return this.runHistoryAction(
+      identity,
       tabId,
       (host) => host.goForward({ agent: source === "agent", navigationApprovalUrl }),
       source,
       target.target.url,
       navigationApprovalUrl,
+      signal,
     );
   }
 
-  async reload(tabId: number, source: BrowserOperationSource = "user"): Promise<BrowserNavigateResult> {
-    return this.runHistoryAction(tabId, (host) => host.reload({ agent: source === "agent" }), source);
+  async reload(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    source: BrowserOperationSource = "user",
+    signal?: AbortSignal,
+  ): Promise<BrowserNavigateResult> {
+    return this.runHistoryAction(
+      identity,
+      tabId,
+      (host) => host.reload({ agent: source === "agent" }),
+      source,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   private async runHistoryAction(
+    identity: BrowserSessionIdentity,
     tabId: number,
     run: (host: BrowserHostController) => Promise<void>,
     _source: BrowserOperationSource,
     targetUrl?: string,
     navigationApprovalUrl?: string,
+    signal?: AbortSignal,
   ): Promise<BrowserNavigateResult> {
-    const entry = this.entries.get(tabId);
+    if (signal?.aborted) return { ok: false, error: "已取消" };
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (_source === "agent") this.activateAgentTab(tabId);
+    if (_source === "agent") this.activateAgentTab(state, tabId);
     if (_source === "agent") {
       const policyError = this.blockedAgentSiteError(entry.tab.url);
       if (policyError !== null) return { ok: false, error: policyError };
@@ -459,7 +623,11 @@ export class BrowserManager {
       }
     }
     try {
-      await run(entry.host);
+      await withAbort(
+        () => run(entry.host),
+        signal,
+        () => entry.host.cancelPendingOperations(),
+      );
     } catch (error) {
       return { ok: false, error: messageOf(error) };
     }
@@ -467,36 +635,177 @@ export class BrowserManager {
   }
 
   /** 截取指定 tab 当前页面 PNG。 */
-  async screenshot(tabId: number, source: BrowserOperationSource = "user"): Promise<BrowserScreenshotResult> {
-    const entry = this.entries.get(tabId);
+  async screenshot(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    source: BrowserOperationSource = "user",
+    signal?: AbortSignal,
+  ): Promise<BrowserScreenshotResult> {
+    if (signal?.aborted) return { ok: false, error: "已取消" };
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (source === "agent") this.activateAgentTab(tabId);
+    if (source === "agent") this.activateAgentTab(state, tabId);
     if (source === "agent") {
       const policyError = this.blockedAgentSiteError(entry.tab.url);
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
-      const shot = await entry.host.captureScreenshot();
+      const shot = await withAbort(
+        () => entry.host.captureScreenshot(),
+        signal,
+        () => entry.host.cancelPendingOperations(),
+      );
       return { ok: true, ...shot };
     } catch (error) {
       return { ok: false, error: messageOf(error) };
     }
   }
 
-  /** 清除整个持久分区的数据，即使当前没有已注册 tab。 */
-  async clearData(): Promise<void> {
-    await Promise.all([this.browserSession.clearStorageData(), this.browserSession.clearCache()]);
+  /** 截取指定 tab 当前页面 PNG 并写入系统剪贴板。 */
+  async copyScreenshot(identity: BrowserSessionIdentity, tabId: number): Promise<BrowserClipboardResult> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    try {
+      const shot = await entry.host.captureScreenshot();
+      const image = nativeImage.createFromDataURL(shot.dataUrl);
+      if (image.isEmpty()) return { ok: false, error: "页面截图为空" };
+      clipboard.writeImage(image);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 显示 guest 页面原生 Chromium 右键菜单。 */
+  private handleContextMenu(
+    state: SessionState,
+    tabId: number,
+    webContents: WebContents,
+    event: Electron.Event,
+    params: Electron.ContextMenuParams,
+  ): void {
+    const entry = state.entries.get(tabId);
+    if (!entry || this.disposed) return;
+
+    event.preventDefault();
+    const actions: BrowserContextMenuActions = {
+      openUrlInNewTab: (url) => {
+        void this.openTab(state.identity, url, "user").catch((error: unknown) => {
+          this.options.log?.(`browser context menu open failed: ${messageOf(error)}`);
+        });
+      },
+      downloadUrl: (url) => {
+        const normalized = normalizeNavigateUrl(url);
+        if (!normalized) return;
+        try {
+          webContents.downloadURL(normalized);
+        } catch (error) {
+          this.options.log?.(`browser context menu download failed: ${messageOf(error)}`);
+        }
+      },
+      copyText: (text) => clipboard.writeText(text),
+      copyImage: (x, y) => webContents.copyImageAt(x, y),
+      copyVideoFrame: (x, y) => webContents.copyVideoFrameAt(x, y),
+      replaceMisspelling: (word) => webContents.replaceMisspelling(word),
+      addWordToDictionary: (word) => webContents.session.addWordToSpellCheckerDictionary(word),
+      undo: () => webContents.undo(),
+      redo: () => webContents.redo(),
+      cut: () => webContents.cut(),
+      copy: () => webContents.copy(),
+      paste: () => webContents.paste(),
+      pasteAndMatchStyle: () => webContents.pasteAndMatchStyle(),
+      delete: () => webContents.delete(),
+      selectAll: () => webContents.selectAll(),
+      goBack: () => {
+        void this.goBack(state.identity, tabId, "user").catch((error: unknown) => {
+          this.options.log?.(`browser context menu back failed: ${messageOf(error)}`);
+        });
+      },
+      goForward: () => {
+        void this.goForward(state.identity, tabId, "user").catch((error: unknown) => {
+          this.options.log?.(`browser context menu forward failed: ${messageOf(error)}`);
+        });
+      },
+      reload: () => {
+        void this.reload(state.identity, tabId, "user").catch((error: unknown) => {
+          this.options.log?.(`browser context menu reload failed: ${messageOf(error)}`);
+        });
+      },
+      print: () => {
+        try {
+          webContents.print({ printBackground: true }, (success, failureReason) => {
+            if (!success) this.options.log?.(`browser context menu print failed: ${failureReason}`);
+          });
+        } catch (error) {
+          this.options.log?.(`browser context menu print failed: ${messageOf(error)}`);
+        }
+      },
+      inspect: (x, y) => {
+        try {
+          webContents.inspectElement(x, y);
+        } catch (error) {
+          this.options.log?.(`browser context menu inspect failed: ${messageOf(error)}`);
+        }
+      },
+      canGoBack: entry.tab.canGoBack,
+      canGoForward: entry.tab.canGoForward,
+    };
+
+    try {
+      const menu = Menu.buildFromTemplate(buildBrowserContextMenuTemplate(params, actions));
+      const owner = webContents.hostWebContents ?? webContents;
+      menu.popup({
+        window: BrowserWindow.fromWebContents(owner) ?? undefined,
+        frame: params.frame ?? undefined,
+        sourceType: params.menuSourceType,
+      });
+    } catch (error) {
+      this.options.log?.(`browser context menu failed: ${messageOf(error)}`);
+    }
+  }
+
+  /** 清除指定会话分区数据（cookie/缓存/登录态），即使当前没有已注册 tab。 */
+  async clearSessionData(identity: BrowserSessionIdentity, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
+    const state = this.requireSession(identity);
+    if (!state) return;
+    await Promise.all([state.browserSession.clearStorageData(), state.browserSession.clearCache()]);
+  }
+
+  /** 清除全部已注册过的会话分区数据（设置页入口）。 */
+  async clearAllData(): Promise<void> {
+    await Promise.all(
+      [...this.sessionIdentities.values()].map(async (identity) => {
+        const state = this.sessions.get(browserSessionKey(identity));
+        const browserSession = state?.browserSession ?? session.fromPartition(browserPartitionFor(identity));
+        await Promise.all([browserSession.clearStorageData(), browserSession.clearCache()]);
+      }),
+    );
   }
 
   /** 访问历史（最近在前）；仅用户 UI 用，Agent 侧不可见（规范 §10.5）。 */
-  browserHistory(): BrowserHistoryEntry[] {
-    return this.history.map((entry) => ({ ...entry }));
+  browserHistory(identity: BrowserSessionIdentity): BrowserHistoryEntry[] {
+    const state = this.requireSession(identity);
+    if (!state) return [];
+    return state.history.map((entry) => ({ ...entry }));
   }
 
   /** 取视口坐标处元素（标注模式）：生成选择器与 bounds。 */
-  async pickAnnotationTarget(tabId: number, x: number, y: number): Promise<BrowserAnnotationPickResult> {
-    const entry = this.entries.get(tabId);
+  async pickAnnotationTarget(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    x: number,
+    y: number,
+  ): Promise<BrowserAnnotationPickResult> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
     try {
@@ -507,8 +816,14 @@ export class BrowserManager {
   }
 
   /** 添加标注；返回完整标注对象。 */
-  async addAnnotation(tabId: number, input: BrowserAnnotationInput): Promise<BrowserAnnotation | null> {
-    const entry = this.entries.get(tabId);
+  async addAnnotation(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    input: BrowserAnnotationInput,
+  ): Promise<BrowserAnnotation | null> {
+    const state = this.requireSession(identity);
+    if (!state) return null;
+    const entry = state.entries.get(tabId);
     if (!entry) return null;
     const annotation: BrowserAnnotation = {
       id: randomUUID(),
@@ -519,34 +834,44 @@ export class BrowserManager {
       text: input.text,
       createdAt: Date.now(),
     };
-    const list = this.annotationsByTab.get(tabId) ?? [];
+    const list = state.annotationsByTab.get(tabId) ?? [];
     list.push(annotation);
-    this.annotationsByTab.set(tabId, list);
+    state.annotationsByTab.set(tabId, list);
     return { ...annotation };
   }
 
   /** 指定 tab 的标注列表（最近创建在前）。 */
-  listAnnotations(tabId: number): BrowserAnnotation[] {
-    return (this.annotationsByTab.get(tabId) ?? [])
+  listAnnotations(identity: BrowserSessionIdentity, tabId: number): BrowserAnnotation[] {
+    const state = this.requireSession(identity);
+    if (!state) return [];
+    return (state.annotationsByTab.get(tabId) ?? [])
       .slice()
       .reverse()
       .map((annotation) => ({ ...annotation, bounds: { ...annotation.bounds } }));
   }
 
   /** 删除标注；不存在时静默。 */
-  async removeAnnotation(tabId: number, id: string): Promise<void> {
-    const list = this.annotationsByTab.get(tabId);
+  async removeAnnotation(identity: BrowserSessionIdentity, tabId: number, id: string): Promise<void> {
+    const state = this.requireSession(identity);
+    if (!state) return;
+    const list = state.annotationsByTab.get(tabId);
     if (!list) return;
     const next = list.filter((annotation) => annotation.id !== id);
-    if (next.length === 0) this.annotationsByTab.delete(tabId);
-    else this.annotationsByTab.set(tabId, next);
+    if (next.length === 0) state.annotationsByTab.delete(tabId);
+    else state.annotationsByTab.set(tabId, next);
   }
 
   /** 按选择器重新解析标注 bounds（导航/重绘后 overlay 重定位）；元素消失返回 null。 */
-  async resolveAnnotationBounds(tabId: number, id: string): Promise<BrowserAnnotationBounds | null> {
-    const annotation = (this.annotationsByTab.get(tabId) ?? []).find((item) => item.id === id);
+  async resolveAnnotationBounds(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    id: string,
+  ): Promise<BrowserAnnotationBounds | null> {
+    const state = this.requireSession(identity);
+    if (!state) return null;
+    const annotation = (state.annotationsByTab.get(tabId) ?? []).find((item) => item.id === id);
     if (!annotation) return null;
-    const entry = this.entries.get(tabId);
+    const entry = state.entries.get(tabId);
     if (!entry || entry.tab.crashed) return null;
     try {
       return await entry.host.resolveSelectorBounds(annotation.selector);
@@ -573,7 +898,9 @@ export class BrowserManager {
         cdpTimeoutMs: this.runtimeSettings.cdpTimeoutMs,
         maxSnapshotNodes: this.runtimeSettings.maxSnapshotNodes,
       };
-      for (const entry of this.entries.values()) entry.host.updateSettings(options);
+      for (const state of this.sessions.values()) {
+        for (const entry of state.entries.values()) entry.host.updateSettings(options);
+      }
     }
     return result;
   }
@@ -581,28 +908,74 @@ export class BrowserManager {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.browserSession.off("will-download", this.onWillDownload);
-    for (const pending of this.pendingCreates.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error("浏览器服务已关闭"));
+    for (const state of this.sessions.values()) {
+      state.browserSession.off("will-download", state.onWillDownload);
+      for (const pending of state.pendingCreates.values()) {
+        if (pending.onAbort) pending.abort?.removeEventListener("abort", pending.onAbort);
+        pending.reject(new Error("浏览器服务已关闭"));
+      }
+      state.pendingCreates.clear();
+      for (const entry of state.entries.values()) entry.host.dispose();
+      state.entries.clear();
+      state.byWebContentsId.clear();
+      state.activeTabId = null;
     }
-    this.pendingCreates.clear();
-    for (const expiry of this.expiredCreateRequests.values()) clearTimeout(expiry);
-    this.expiredCreateRequests.clear();
-    for (const entry of this.entries.values()) entry.host.dispose();
-    this.entries.clear();
-    this.byWebContentsId.clear();
-    this.activeTabId = null;
+    this.sessions.clear();
+    this.sessionCapabilities.clear();
   }
 
-  private activateAgentTab(tabId: number): void {
-    if (this.activeTabId === tabId) return;
-    this.activeTabId = tabId;
-    this.broadcast();
+  /** 会话状态（不存在则创建）。IPC（renderer）路径使用：renderer 是受信应用代码。 */
+  private ensureSession(identity: BrowserSessionIdentity): SessionState {
+    const sessionKey = browserSessionKey(identity);
+    this.knownSessions.add(sessionKey);
+    const existing = this.sessions.get(sessionKey);
+    if (existing) return existing;
+    const partition = browserPartitionFor(identity);
+    const browserSession = session.fromPartition(partition);
+    // 分区权限默认全部拒绝（spec §10）：未设置 handler 时 Electron 默认放行
+    // 权限请求，恶意页面可静默取得摄像头/麦克风/地理位置等。
+    browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    const onWillDownload = (_event: Electron.Event, item: Electron.DownloadItem): void => {
+      const directory = this.runtimeSettings.downloadDirectory;
+      if (!directory) return;
+      const filename = basename(item.getFilename());
+      if (filename.length === 0) return;
+      item.setSavePath(join(directory, filename));
+    };
+    browserSession.on("will-download", onWillDownload);
+    const state: SessionState = {
+      identity: { ...identity },
+      sessionKey,
+      partition,
+      browserSession,
+      entries: new Map(),
+      byWebContentsId: new Map(),
+      activeTabId: null,
+      nextTabId: 1,
+      pendingCreates: new Map(),
+      history: [],
+      lastHistoryUrlByTab: new Map(),
+      annotationsByTab: new Map(),
+      onWillDownload,
+    };
+    this.sessions.set(sessionKey, state);
+    return state;
   }
 
-  private handleHostEvent(tabId: number, event: BrowserHostEvent): void {
-    const entry = this.entries.get(tabId);
+  /** 会话状态（仅已注册会话；RPC/sidecar 路径使用，缺失即拒绝）。 */
+  private requireSession(identity: BrowserSessionIdentity): SessionState | null {
+    if (this.disposed) return null;
+    return this.sessions.get(browserSessionKey(identity)) ?? null;
+  }
+
+  private activateAgentTab(state: SessionState, tabId: number): void {
+    if (state.activeTabId === tabId) return;
+    state.activeTabId = tabId;
+    this.broadcast(state);
+  }
+
+  private handleHostEvent(state: SessionState, tabId: number, event: BrowserHostEvent): void {
+    const entry = state.entries.get(tabId);
     if (!entry || this.disposed) return;
     switch (event.type) {
       case "navigated":
@@ -611,7 +984,7 @@ export class BrowserManager {
         entry.tab.canGoForward = event.canGoForward;
         entry.tab.crashed = false;
         entry.tab.loadError = undefined;
-        this.recordHistory(tabId, event.url, entry.tab.title);
+        this.recordHistory(state, tabId, event.url, entry.tab.title);
         break;
       case "navigated-in-page":
         entry.tab.url = event.url;
@@ -627,10 +1000,10 @@ export class BrowserManager {
       case "title-updated":
         entry.tab.title = event.title;
         // 同步历史中该 tab 最后一条同 URL 记录的标题（导航后标题异步到达）。
-        if (this.lastHistoryUrlByTab.get(tabId) === entry.tab.url) {
-          const historyIndex = this.history.findIndex((item) => item.url === entry.tab.url);
+        if (state.lastHistoryUrlByTab.get(tabId) === entry.tab.url) {
+          const historyIndex = state.history.findIndex((item) => item.url === entry.tab.url);
           if (historyIndex !== -1) {
-            this.history[historyIndex] = { ...this.history[historyIndex]!, title: event.title };
+            state.history[historyIndex] = { ...state.history[historyIndex]!, title: event.title };
           }
         }
         break;
@@ -648,38 +1021,38 @@ export class BrowserManager {
         break;
       case "destroyed":
         // guest webContents 已销毁：从注册表移除（webview 需由 renderer 重建后重新 attach）。
-        this.removeEntry(tabId);
+        this.removeEntry(state, tabId);
         return;
     }
-    this.broadcast();
+    this.broadcast(state);
   }
 
-  private removeEntry(tabId: number): void {
-    const entry = this.entries.get(tabId);
+  private removeEntry(state: SessionState, tabId: number): void {
+    const entry = state.entries.get(tabId);
     if (!entry) return;
-    this.entries.delete(tabId);
-    this.byWebContentsId.delete(entry.webContentsId);
-    this.lastHistoryUrlByTab.delete(tabId);
-    this.annotationsByTab.delete(tabId);
-    if (this.activeTabId === tabId) {
-      this.activeTabId = [...this.entries.keys()][0] ?? null;
+    state.entries.delete(tabId);
+    state.byWebContentsId.delete(entry.webContentsId);
+    state.lastHistoryUrlByTab.delete(tabId);
+    state.annotationsByTab.delete(tabId);
+    if (state.activeTabId === tabId) {
+      state.activeTabId = [...state.entries.keys()][0] ?? null;
     }
     entry.host.dispose();
-    this.broadcast();
+    this.broadcast(state);
   }
 
-  /** 记录访问历史：同一 tab 重复导航同 URL 不重复；全局同 URL 合并并提前。 */
-  private recordHistory(tabId: number, url: string, title: string): void {
-    if (this.lastHistoryUrlByTab.get(tabId) === url) return;
-    this.lastHistoryUrlByTab.set(tabId, url);
-    const existing = this.history.findIndex((entry) => entry.url === url);
+  /** 记录访问历史：同一 tab 重复导航同 URL 不重复；会话内同 URL 合并并提前。 */
+  private recordHistory(state: SessionState, tabId: number, url: string, title: string): void {
+    if (state.lastHistoryUrlByTab.get(tabId) === url) return;
+    state.lastHistoryUrlByTab.set(tabId, url);
+    const existing = state.history.findIndex((entry) => entry.url === url);
     if (existing !== -1) {
-      const current = this.history.splice(existing, 1)[0]!;
-      this.history.unshift({ url, title: title || current.title, timestamp: Date.now() });
+      const current = state.history.splice(existing, 1)[0]!;
+      state.history.unshift({ url, title: title || current.title, timestamp: Date.now() });
       return;
     }
-    this.history.unshift({ url, title, timestamp: Date.now() });
-    if (this.history.length > MAX_HISTORY_ENTRIES) this.history.length = MAX_HISTORY_ENTRIES;
+    state.history.unshift({ url, title, timestamp: Date.now() });
+    if (state.history.length > MAX_HISTORY_ENTRIES) state.history.length = MAX_HISTORY_ENTRIES;
   }
 
   private async refreshRuntimeSettings(): Promise<void> {
@@ -707,7 +1080,13 @@ export class BrowserManager {
   }
 
   /** Agent 动作触发页面导航时的同步守卫；用户地址栏导航不经过此回调。 */
-  private allowAgentNavigation(tabId: number, url: string, currentUrl: string, approvedUrl?: string): boolean {
+  private allowAgentNavigation(
+    _state: SessionState,
+    tabId: number,
+    url: string,
+    currentUrl: string,
+    approvedUrl?: string,
+  ): boolean {
     const target = parseHttpUrl(url);
     const current = parseHttpUrl(currentUrl);
     if (!target) return false;
@@ -720,11 +1099,12 @@ export class BrowserManager {
     return false;
   }
 
-  private broadcast(): void {
+  private broadcast(state: SessionState): void {
     if (this.disposed) return;
     this.options.onStateChanged?.({
-      tabs: this.tabsList(),
-      activeTabId: this.activeTabId,
+      sessionKey: state.sessionKey,
+      tabs: [...state.entries.values()].map((entry) => ({ ...entry.tab })),
+      activeTabId: state.activeTabId,
     });
   }
 }
@@ -774,6 +1154,43 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () =>
   });
 }
 
+function withAbort<T>(operation: () => Promise<T>, signal: AbortSignal | undefined, onAbort: () => void): Promise<T> {
+  if (signal === undefined) return operation();
+  if (signal.aborted) {
+    onAbort();
+    return Promise.reject(new Error("已取消"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => signal.removeEventListener("abort", abort);
+    const abort = (): void => {
+      if (settled) return;
+      settled = true;
+      onAbort();
+      cleanup();
+      reject(new Error("已取消"));
+    };
+    const settle = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    let promise: Promise<T>;
+    try {
+      promise = operation();
+    } catch (error) {
+      settle(() => reject(error));
+      return;
+    }
+    promise.then(
+      (value) => settle(() => resolve(value)),
+      (error: unknown) => settle(() => reject(error)),
+    );
+  });
+}
+
 /** 一条访问历史记录（用户 UI 用，Agent 不可见）。 */
 export interface BrowserHistoryEntry {
   url: string;
@@ -807,8 +1224,8 @@ function normalizeNavigateUrl(raw: string): string | null {
   return parsed.href;
 }
 
-function openTabTimeoutOf(options: BrowserManagerOptions): number {
-  return options.openTabTimeoutMs ?? DEFAULT_OPEN_TAB_TIMEOUT_MS;
+function normalizeInternalBrowserPage(raw: string): string | null {
+  return Object.values(BROWSER_INTERNAL_PAGES).find((page) => page === raw) ?? null;
 }
 
 function parseHttpUrl(raw: string): URL | null {

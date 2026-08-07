@@ -1,17 +1,52 @@
 /**
  * Desktop 内置浏览器（IAB）IPC 契约。
  *
- * 浏览器面板在 renderer 持有 `<webview partition="persist:browser">` 标签；
- * guest webContents 实例归属 main 进程。renderer 在 webview attach 后把
- * `webContentsId` 交给 main 注册（BrowserManager），此后导航/截图/状态
- * 全部由 main 驱动并经 `browserStateChanged` 事件广播回 renderer。
- *
- * P0 范围：tab 注册、导航、截图、状态同步。元素级交互（click/type/snapshot）
- * 与 CDP 控制在 P1 通过同一 BrowserManager 扩展，不改变本文件外的 IPC 形状。
+ * 浏览器按会话（ThreadWorkerBinding 的 projectId + sessionId/threadId）隔离：
+ * 每个会话使用独立的 `persist:browser-<hash>` Electron partition（profile/
+ * cookie/cache 互不共享），BrowserManager 内部按 sessionKey 维护各自的
+ * tab/active/history/annotations/pending 状态。所有 IPC、RPC、状态广播与建 tab
+ * 请求都携带 `BrowserSessionIdentity`，renderer 与 sidecar 按身份路由。
  */
 
-/** 内置浏览器 webview 使用的独立 session 分区（renderer 面板与设置页共用）。 */
-export const BROWSER_PARTITION = "persist:browser";
+/** 浏览器会话身份：与 thread sidecar 的 ThreadWorkerBinding 对齐（create 用 sessionId）。 */
+export interface BrowserSessionIdentity {
+  projectId: string;
+  threadId: string;
+}
+
+/** 会话键：main/renderer 两侧一致的稳定键（与 renderer sessionRecordKey 同格式）。 */
+export function browserSessionKey(identity: BrowserSessionIdentity): string {
+  return `${identity.projectId}\u0000${identity.threadId}`;
+}
+
+/** 会话专用 Electron partition：确定性 64 位 FNV-1a 十六进制，仅 [a-f0-9]。 */
+export function browserPartitionFor(identity: BrowserSessionIdentity): string {
+  return `persist:browser-${fnv1a64Hex(`${identity.projectId}\u0000${identity.threadId}`)}`;
+}
+
+/** partition 是否属于会话浏览器（webview will-attach 白名单格式校验）。 */
+export function isBrowserSessionPartition(partition: string): boolean {
+  return /^persist:browser-[0-9a-f]{16}$/.test(partition);
+}
+
+/** 64 位 FNV-1a（非加密；仅用于分区命名，不用于安全边界）。 */
+function fnv1a64Hex(input: string): string {
+  const big = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  let hash = big;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= BigInt(input.charCodeAt(index));
+    hash = (hash * prime) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+/** Chromium 内置页仅供用户在浏览器面板中打开，Agent 导航仍限制为 http/https。 */
+export const BROWSER_INTERNAL_PAGES = {
+  passwordManager: "chrome://password-manager/passwords",
+  autofill: "chrome://settings/addresses",
+  downloads: "chrome://downloads/",
+} as const;
 
 /** 内置浏览器中的一个 tab（对应一个已 attach 的 webview）。 */
 export interface BrowserTab {
@@ -42,6 +77,9 @@ export type BrowserNavigateResult = { ok: true; tab: BrowserTab } | { ok: false;
 export type BrowserScreenshotResult =
   | { ok: true; dataUrl: string; width: number; height: number }
   | { ok: false; error: string };
+
+/** 将当前页面 PNG 写入系统剪贴板的结果。 */
+export type BrowserClipboardResult = { ok: true } | { ok: false; error: string };
 
 /** 访问历史（最近在前，上限 200 条；仅用户 UI，Agent 侧不可见）。 */
 export interface BrowserHistoryEntry {
@@ -85,8 +123,9 @@ export type BrowserAnnotationPickResult =
   | { ok: true; selector: string; bounds: BrowserAnnotationBounds; tag: string; name: string }
   | { ok: false; error: string };
 
-/** 浏览器全局状态广播（tabs 列表 + 活跃 tab），合并节流后推送。 */
+/** 浏览器会话状态广播（tabs 列表 + 活跃 tab）；renderer 按 sessionKey 路由。 */
 export interface BrowserStateEvent {
+  sessionKey: string;
   tabs: BrowserTab[];
   activeTabId: number | null;
 }
@@ -184,10 +223,11 @@ export type BrowserActionResult =
   | { ok: true; url?: string; title?: string }
   | { ok: false; error: string; staleRef?: boolean };
 
-/** main 请求 renderer 创建新 tab（工具 browser.open 等触发）。 */
+/** main 请求 renderer 创建新 tab（工具 browser.open 等触发）；按 sessionKey 路由。 */
 export interface BrowserCreateTabRequest {
   requestId: number;
   url: string;
+  sessionKey: string;
 }
 
 export type BrowserOpenTabResult = { ok: true; tab: BrowserTab } | { ok: false; error: string };

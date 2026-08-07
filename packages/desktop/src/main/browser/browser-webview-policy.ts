@@ -1,7 +1,14 @@
 import type { WebContents } from "electron";
-import { BROWSER_PARTITION } from "../../shared/browser-contracts.ts";
+import { isBrowserSessionPartition } from "../../shared/browser-contracts.ts";
 
-/** Install the main-process policy for every webview attached to the app window. */
+/**
+ * Install the main-process policy for every webview attached to the app window.
+ *
+ * 每个会话使用独立分区（`persist:browser-<hash>`，见 browserPartitionFor）。
+ * 分区由 renderer 按会话身份设置，这里只做格式白名单校验 + 安全加固；
+ * 身份与分区的绑定由 BrowserManager.attach 在 main 侧校验（webContents 的
+ * session 必须与会话身份对应的 partition session 一致）。
+ */
 export function installBrowserWebviewSecurity(webContents: WebContents): () => void {
   const onWillAttach = (
     event: Electron.Event,
@@ -20,9 +27,14 @@ export function installBrowserWebviewSecurity(webContents: WebContents): () => v
     webPreferences.webSecurity = true;
     webPreferences.allowRunningInsecureContent = false;
     webPreferences.webviewTag = false;
-    webPreferences.partition = BROWSER_PARTITION;
 
-    if (params.partition !== BROWSER_PARTITION || !isBrowserWebviewUrl(params.src)) {
+    const partition = params.partition ?? "";
+    if (!isBrowserSessionPartition(partition)) {
+      event.preventDefault();
+      return;
+    }
+    webPreferences.partition = partition;
+    if (!isBrowserWebviewUrl(params.src)) {
       event.preventDefault();
     }
   };

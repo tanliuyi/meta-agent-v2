@@ -286,4 +286,20 @@ describe("WebContentsHostController CDP integration", () => {
     expect(response).toEqual({ action: "deny" });
     expect(onPopup).toHaveBeenCalledWith("https://popup.example/");
   });
+
+  test("forwards guest context-menu events and removes the listener on dispose", () => {
+    const webContents = new FakeWebContents();
+    const onContextMenu = vi.fn();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { onContextMenu });
+    hosts.push(host);
+    const event = { preventDefault: vi.fn() };
+    const params = { pageURL: "https://example.com/", x: 10, y: 20 } as unknown as Electron.ContextMenuParams;
+
+    webContents.emit("context-menu", event, params);
+    expect(onContextMenu).toHaveBeenCalledWith(event, params);
+
+    host.dispose();
+    webContents.emit("context-menu", event, params);
+    expect(onContextMenu).toHaveBeenCalledOnce();
+  });
 });
