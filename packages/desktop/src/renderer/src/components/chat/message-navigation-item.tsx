@@ -1,5 +1,6 @@
 import { autoUpdate, FloatingPortal, flip, offset, shift, useFloating } from "@floating-ui/react";
 import { memo, useMemo } from "react";
+import { DirectiveTextContent } from "../assistant-ui/directive-text-content.tsx";
 import { StreamdownMarkdown } from "../assistant-ui/streamdown/streamdown-markdown.tsx";
 import type { MessageNavigationSummary } from "./message-navigation.tsx";
 
@@ -63,7 +64,9 @@ export const MessageNavigationItem = memo(function MessageNavigationItem({
                   <StreamdownMarkdown>{item.text}</StreamdownMarkdown>
                 </div>
               ) : (
-                <span key={summaryIndex}>{item.text}</span>
+                <span key={summaryIndex}>
+                  <DirectiveTextContent text={item.text} />
+                </span>
               ),
             )}
           </div>

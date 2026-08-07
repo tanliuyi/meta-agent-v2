@@ -3,7 +3,12 @@ import AlertCircle from "lucide-react/dist/esm/icons/circle-alert.mjs";
 import { useMemo } from "react";
 import { useThinkingVisibility } from "../../../state/thinking-visibility.tsx";
 import { StreamdownText } from "../../assistant-ui/streamdown/streamdown-text.tsx";
-import { createRunGroupPart, hasFinalResponseInRun, hasTextAfterGroup } from "../message-part-grouping.ts";
+import {
+  createRunGroupPart,
+  hasFinalResponseInRun,
+  hasTextAfterGroup,
+  hasUserMessageAfter,
+} from "../message-part-grouping.ts";
 import { PiNoticeView } from "../pi-notice-view.tsx";
 import { ToolView } from "../tool-view.tsx";
 import { ChainOfThoughtGroup } from "./chain-of-thought-group.tsx";
@@ -23,8 +28,9 @@ export function AssistantMessageContent({
   const runStartedAt = useAuiState((state) => state.message.createdAt.getTime());
   const runCompletedAt = useAuiState((state) => piCompletedAt(state.message.metadata.custom));
   const runHasFinalResponse = useAuiState((state) => hasFinalResponseInRun(state.thread.messages, state.message.id));
+  const hasNewUserPrompt = useAuiState((state) => hasUserMessageAfter(state.thread.messages, state.message.id));
   const groupMessagePart = useMemo(() => createRunGroupPart(messageParts), [messageParts]);
-  const defaultOpenCompletedActivity = showAvatars && !runHasFinalResponse;
+  const defaultOpenCompletedActivity = !runHasFinalResponse && (showAvatars || !hasNewUserPrompt);
   const hasGroupedRunActivity = useMemo(
     () => messageParts.some((part) => groupMessagePart(part, { toolUIs })[0] === "group-runActivity"),
     [groupMessagePart, messageParts, toolUIs],

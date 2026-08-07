@@ -51,16 +51,6 @@ nsis:
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
-linux:
-  icon: build/icon.png
-  executableName: meta-agent-desktop
-  artifactName: meta-agent-desktop-${version}-${arch}.${ext}
-  category: Development
-  target:
-    - AppImage
-    - deb
-appImage:
-  artifactName: meta-agent-desktop-${version}.${ext}
 npmRebuild: false
 buildDependenciesFromSource: false
 publish:

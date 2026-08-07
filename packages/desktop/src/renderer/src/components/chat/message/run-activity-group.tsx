@@ -27,10 +27,13 @@ export function RunActivityGroup({
     running ? elapsedDuration(startedAt, Date.now()) : completedDuration(startedAt, completedAt),
   );
   const previousRunning = useRef(running);
+  const previousDefaultOpen = useRef(defaultOpenWhenComplete);
 
   useEffect(() => {
     if (!running) {
-      if (previousRunning.current) setOpen(defaultOpenWhenComplete);
+      if (previousRunning.current || defaultOpenWhenComplete !== previousDefaultOpen.current) {
+        setOpen(defaultOpenWhenComplete);
+      }
       setElapsedSeconds(
         completedAt === undefined && previousRunning.current
           ? elapsedDuration(startedAt, Date.now())
@@ -38,6 +41,7 @@ export function RunActivityGroup({
       );
     }
     previousRunning.current = running;
+    previousDefaultOpen.current = defaultOpenWhenComplete;
   }, [completedAt, defaultOpenWhenComplete, running, setOpen, startedAt]);
 
   useEffect(() => {

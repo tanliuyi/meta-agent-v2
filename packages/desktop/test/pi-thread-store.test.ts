@@ -449,7 +449,7 @@ describe("PiMessageRepositoryConverter", () => {
     ]);
   });
 
-  it("压缩 notice 单独成条，并打断前后 assistant group", () => {
+  it("压缩 notice 也并入 assistant group，不打断前后 assistant 流", () => {
     const first = assistantNode("a-1", null);
     const compaction = noticeNode("compaction", "a-1", "compaction");
     const second = assistantNode("a-2", "compaction");
@@ -457,16 +457,16 @@ describe("PiMessageRepositoryConverter", () => {
 
     const repository = converter.build(snapshot([first, compaction, second], "a-2"));
 
-    expect(repository.messages.map(({ message, parentId }) => [message.id, parentId])).toEqual([
-      ["a-1", null],
-      ["compaction", "a-1"],
-      ["a-2", "compaction"],
-    ]);
-    expect(repository.headId).toBe("a-2");
-    expect(repository.messages[1]?.message).toMatchObject({
-      id: "compaction",
+    expect(repository.messages.map(({ message, parentId }) => [message.id, parentId])).toEqual([["a-1", null]]);
+    expect(repository.headId).toBe("a-1");
+    expect(repository.messages[0]?.message).toMatchObject({
+      id: "a-1",
       role: "assistant",
-      content: [{ type: "data", name: "pi-notice", data: compaction }],
+      content: [
+        expect.objectContaining({ type: "text", text: "hello" }),
+        { type: "data", name: "pi-notice", data: compaction },
+        expect.objectContaining({ type: "text", text: "hello" }),
+      ],
     });
   });
 

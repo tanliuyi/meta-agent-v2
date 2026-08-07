@@ -42,11 +42,6 @@ jobs:
             os: macos-latest
             builder_args: --mac --arm64
             update_channel: latest-arm64
-          - platform: linux
-            arch: x64
-            os: ubuntu-latest
-            builder_args: --linux --x64
-            update_channel: latest
     env:
       MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
       MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
@@ -140,8 +135,8 @@ jobs:
         run: |
           mkdir release-assets
           find packages/desktop/output/installers -maxdepth 1 -type f \
-            \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' \
-            -o -name '*.deb' -o -name '*.blockmap' -o -name 'latest*.yml' \) \
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \
+            -o -name '*.blockmap' -o -name 'latest*.yml' \) \
             -exec cp {} release-assets/ \;
           test -n "$(find release-assets -type f -print -quit)"
 

@@ -28,18 +28,11 @@ export function createRunGroupPart(parts: readonly PartState[]) {
 }
 
 function isRunActivityPart(part: PartState): boolean {
-  return part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isNonCompactionNotice(part);
+  return part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isPiNoticePart(part);
 }
 
-function isNonCompactionNotice(part: PartState): boolean {
-  return (
-    part.type === "data" &&
-    part.name === "pi-notice" &&
-    typeof part.data === "object" &&
-    part.data !== null &&
-    "noticeType" in part.data &&
-    part.data.noticeType !== "compaction"
-  );
+function isPiNoticePart(part: PartState): boolean {
+  return part.type === "data" && part.name === "pi-notice";
 }
 
 type FinalResponsePart = {
@@ -64,6 +57,16 @@ export function hasFinalResponseInRun(messages: readonly MessageState[], message
   return messages
     .slice(startIndex, endIndex)
     .some((message) => message.role === "assistant" && hasFinalResponseText(message.content));
+}
+
+/** 判断消息之后（含后续所有消息）是否已出现新的用户 prompt。 */
+export function hasUserMessageAfter(messages: readonly MessageState[], messageId: string): boolean {
+  const messageIndex = messages.findIndex((message) => message.id === messageId);
+  if (messageIndex < 0) return false;
+  for (let index = messageIndex + 1; index < messages.length; index += 1) {
+    if (messages[index]?.role === "user") return true;
+  }
+  return false;
 }
 
 function findFinalResponseTextIndex(parts: readonly FinalResponsePart[]): number {

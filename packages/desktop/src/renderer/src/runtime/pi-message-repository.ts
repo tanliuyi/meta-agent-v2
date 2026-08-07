@@ -256,14 +256,14 @@ function projectionRebuildStart(
     if (affected) start = Math.min(start, affected.startIndex);
   }
   const current = nodes[start];
-  if (current?.kind === "assistant" || (current?.kind === "notice" && current.noticeType !== "compaction")) {
+  if (current && current.kind !== "user") {
     while (start > 0 && !isAssistantGroupBoundary(nodes[start - 1])) start -= 1;
   }
   return start;
 }
 
 function isAssistantGroupBoundary(node: PiTimelineNode | undefined): boolean {
-  return !node || node.kind === "user" || (node.kind === "notice" && node.noticeType === "compaction");
+  return !node || node.kind === "user";
 }
 
 function entryContaining(entries: readonly ProjectionEntry[], nodeIndex: number): ProjectionEntry | undefined {
