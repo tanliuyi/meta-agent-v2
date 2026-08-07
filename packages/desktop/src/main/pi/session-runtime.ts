@@ -580,7 +580,8 @@ export class SessionRuntime {
       publish = true;
     }
     if (event.type === "session_info_changed") {
-      this.summaryState = { ...this.summaryState, title: event.name?.trim() || this.summaryState.title };
+      const title = event.name?.trim() || this.summaryState.preview.slice(0, 48) || "新会话";
+      this.summaryState = { ...this.summaryState, title };
       this.onSummaryChanged(this);
       publish = true;
     }

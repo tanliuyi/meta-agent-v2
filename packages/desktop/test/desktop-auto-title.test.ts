@@ -2,10 +2,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ModelRuntime, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import piAutoTitle, {
   type AutoTitleGenerateInput,
+  buildConversationText,
+  cleanTitleText,
+  derivePlaceholderTitle,
   normalizeTitle,
   resolveTitleModel,
 } from "../src/main/pi/extensions/pi-auto-title/index.ts";
@@ -33,11 +36,19 @@ interface ExtensionHarness {
   getSessionName: ReturnType<typeof vi.fn>;
   triggerSessionStart(reason: string): Promise<void>;
   triggerPrompt(prompt: string): Promise<void>;
+  triggerInfoChanged(name?: string): Promise<void>;
+  appendBranch(...entries: SessionEntry[]): void;
   triggerShutdown(): Promise<void>;
 }
 
 async function createHarness(
-  options: { configPath?: string; getSessionName?: () => string | undefined } = {},
+  options: {
+    configPath?: string;
+    getSessionName?: () => string | undefined;
+    branch?: SessionEntry[];
+    modelAvailable?: boolean;
+    authAvailable?: boolean;
+  } = {},
 ): Promise<ExtensionHarness> {
   // Always run against an isolated config file so the real user configuration
   // at ~/.pi/agent/auto-title-config.json can never leak into the test.
@@ -59,12 +70,23 @@ async function createHarness(
     getSessionName,
   } as unknown as ExtensionAPI;
 
+  const branch = options.branch ?? [];
   const context = {
-    sessionManager: { getSessionId: () => "session-1" },
-    model: { provider: "test", id: "fake-model" } as unknown as Model<Api>,
+    sessionManager: {
+      getSessionId: () => "session-1",
+      getSessionName,
+      getBranch: () => branch,
+      buildContextEntries: () => branch,
+    },
+    model:
+      options.modelAvailable === false ? undefined : ({ provider: "test", id: "fake-model" } as unknown as Model<Api>),
     modelRegistry: {
       find: () => undefined,
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key", headers: {} }),
+      getApiKeyAndHeaders: async () => ({
+        ok: options.authAvailable !== false,
+        apiKey: options.authAvailable === false ? "" : "test-key",
+        headers: {},
+      }),
     },
   } as unknown as ExtensionContext;
 
@@ -81,10 +103,46 @@ async function createHarness(
     async triggerPrompt(prompt: string) {
       await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt }, context);
     },
+    async triggerInfoChanged(name?: string) {
+      await handlers.get("session_info_changed")?.({ type: "session_info_changed", name }, context);
+    },
+    appendBranch(...entries: SessionEntry[]) {
+      branch.push(...entries);
+    },
     async triggerShutdown() {
       await handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" }, context);
     },
   };
+}
+
+function messageEntry(role: "user" | "assistant", text: string, index: number): SessionEntry {
+  const message =
+    role === "user"
+      ? { role, content: text, timestamp: index }
+      : {
+          role,
+          content: [{ type: "text", text }],
+          api: "test",
+          provider: "test",
+          model: "fake-model",
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop",
+          timestamp: index,
+        };
+  return {
+    type: "message",
+    id: `entry-${index}`,
+    parentId: index > 1 ? `entry-${index - 1}` : null,
+    timestamp: new Date(index).toISOString(),
+    message,
+  } as unknown as SessionEntry;
 }
 
 describe("pi-auto-title extension", () => {
@@ -97,6 +155,7 @@ describe("pi-auto-title extension", () => {
     expect(harness.generate).toHaveBeenCalledTimes(1);
     const input = harness.generate.mock.calls[0]![0] as AutoTitleGenerateInput;
     expect(input.prompt).toBe("帮我重构登录模块的鉴权逻辑");
+    expect(input.conversationText).toContain("User: 帮我重构登录模块的鉴权逻辑");
     expect(input.systemPrompt).toContain("长度限制");
     expect(input.maxLength).toBe(60);
   });
@@ -109,6 +168,26 @@ describe("pi-auto-title extension", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(harness.generate).not.toHaveBeenCalled();
     }
+  });
+
+  it("does not persist a provisional title when the title model is unavailable", async () => {
+    const harness = await createHarness({ modelAvailable: false });
+    await harness.triggerSessionStart("new");
+    await harness.triggerPrompt("修复 src/app.ts 的登录问题");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(harness.generate).not.toHaveBeenCalled();
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+  });
+
+  it("does not persist a provisional title when the title model has no credentials", async () => {
+    const harness = await createHarness({ authAvailable: false });
+    await harness.triggerSessionStart("new");
+    await harness.triggerPrompt("Investigate example.com timeout");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(harness.generate).not.toHaveBeenCalled();
+    expect(harness.setSessionName).not.toHaveBeenCalled();
   });
 
   it("skips generation when the session already has a name", async () => {
@@ -136,8 +215,30 @@ describe("pi-auto-title extension", () => {
     harness.getSessionName.mockReturnValue("手动命名");
     resolveGeneration?.("自动标题");
 
-    await vi.waitFor(() => expect(harness.getSessionName).toHaveBeenCalledTimes(2));
-    expect(harness.setSessionName).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(harness.setSessionName).toHaveBeenCalledWith("第一个问题");
+    expect(harness.setSessionName).not.toHaveBeenCalledWith("自动标题");
+  });
+
+  it("does not restore a title after the user clears it", async () => {
+    const harness = await createHarness();
+    let resolveGeneration: ((title: string | undefined) => void) | undefined;
+    harness.generate.mockImplementation(
+      async () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveGeneration = resolve;
+        }),
+    );
+
+    await harness.triggerSessionStart("new");
+    await harness.triggerPrompt("第一个问题");
+    await vi.waitFor(() => expect(harness.generate).toHaveBeenCalledTimes(1));
+    await harness.triggerInfoChanged();
+    resolveGeneration?.("自动标题");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(harness.setSessionName).toHaveBeenCalledWith("第一个问题");
+    expect(harness.setSessionName).not.toHaveBeenCalledWith("自动标题");
   });
 
   it("aborts in-flight generation when the session shuts down", async () => {
@@ -157,17 +258,59 @@ describe("pi-auto-title extension", () => {
     await harness.triggerShutdown();
 
     expect(signal?.aborted).toBe(true);
-    expect(harness.setSessionName).not.toHaveBeenCalled();
+    expect(harness.setSessionName).toHaveBeenCalledWith("第一个问题");
+    expect(harness.setSessionName).not.toHaveBeenCalledWith("自动标题");
   });
 
-  it("generates only once per session", async () => {
+  it("refines the placeholder once from the third meaningful prompt", async () => {
     const harness = await createHarness();
     await harness.triggerSessionStart("new");
-    await harness.triggerPrompt("第一个问题");
+
+    await harness.triggerPrompt("实现登录超时重试");
+    harness.appendBranch(messageEntry("user", "实现登录超时重试", 1), messageEntry("assistant", "我会检查认证流程", 2));
+    await harness.triggerPrompt("同时补充测试");
+    harness.appendBranch(messageEntry("user", "同时补充测试", 3), messageEntry("assistant", "已补充测试方案", 4));
+    await harness.triggerPrompt("最后修复 CI 配置");
+
+    await vi.waitFor(() => expect(harness.generate).toHaveBeenCalledTimes(2));
+    const refinement = harness.generate.mock.calls[1]![0] as AutoTitleGenerateInput;
+    expect(refinement.conversationText).toContain("User: 实现登录超时重试");
+    expect(refinement.conversationText).toContain("Assistant: 我会检查认证流程");
+    expect(refinement.conversationText).toContain("User: 最后修复 CI 配置");
+
+    await harness.triggerPrompt("第四条消息不再触发");
+    expect(harness.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let the first generation overwrite a later refinement", async () => {
+    const harness = await createHarness();
+    let resolveFirst: ((title: string | undefined) => void) | undefined;
+    let resolveThird: ((title: string | undefined) => void) | undefined;
+    let callCount = 0;
+    harness.generate.mockImplementation(
+      async () =>
+        new Promise<string | undefined>((resolve) => {
+          callCount += 1;
+          if (callCount === 1) resolveFirst = resolve;
+          else resolveThird = resolve;
+        }),
+    );
+
+    await harness.triggerSessionStart("new");
+    await harness.triggerPrompt("首个任务");
     await vi.waitFor(() => expect(harness.generate).toHaveBeenCalledTimes(1));
-    await harness.triggerPrompt("第二个问题");
+    harness.appendBranch(messageEntry("user", "首个任务", 1), messageEntry("assistant", "开始处理", 2));
+    await harness.triggerPrompt("补充需求");
+    harness.appendBranch(messageEntry("user", "补充需求", 3), messageEntry("assistant", "已完成分析", 4));
+    await harness.triggerPrompt("最终目标");
+    await vi.waitFor(() => expect(harness.generate).toHaveBeenCalledTimes(2));
+
+    resolveThird?.("第三条标题");
+    await vi.waitFor(() => expect(harness.setSessionName).toHaveBeenCalledWith("第三条标题"));
+    resolveFirst?.("第一条标题");
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(harness.generate).toHaveBeenCalledTimes(1);
+
+    expect(harness.setSessionName).not.toHaveBeenCalledWith("第一条标题");
   });
 
   it("does not set a name when generation returns no title", async () => {
@@ -177,7 +320,9 @@ describe("pi-auto-title extension", () => {
     await harness.triggerPrompt("第一个问题");
     await vi.waitFor(() => expect(harness.generate).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(harness.setSessionName).not.toHaveBeenCalled();
+    expect(harness.setSessionName).toHaveBeenCalledWith("第一个问题");
+    expect(harness.setSessionName).toHaveBeenCalledWith("");
+    expect(harness.setSessionName).not.toHaveBeenCalledWith("自动标题");
   });
 
   it("swallows generation errors without blocking the session", async () => {
@@ -187,7 +332,9 @@ describe("pi-auto-title extension", () => {
     await harness.triggerPrompt("第一个问题");
     await vi.waitFor(() => expect(harness.generate).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(harness.setSessionName).not.toHaveBeenCalled();
+    expect(harness.setSessionName).toHaveBeenCalledWith("第一个问题");
+    expect(harness.setSessionName).toHaveBeenCalledWith("");
+    expect(harness.setSessionName).not.toHaveBeenCalledWith("自动标题");
   });
 
   it("does not generate when the feature is disabled in the config file", async () => {
@@ -238,8 +385,31 @@ describe("normalizeTitle", () => {
     expect(normalizeTitle("第一行\n第二行", 60)).toBe("第一行");
   });
 
+  it("parses structured title responses and removes model wrappers", () => {
+    expect(normalizeTitle('{"title":"修复登录问题。"}', 60)).toBe("修复登录问题");
+    expect(normalizeTitle('```json\n{"title":"Fix auth flow"}\n```', 60)).toBe("Fix auth flow");
+    expect(normalizeTitle("标题：修复鉴权。", 60)).toBe("修复鉴权");
+  });
+
   it("clamps to maxLength", () => {
-    expect(normalizeTitle("123456", 3)).toBe("123");
+    expect(normalizeTitle("123456", 3)).toBe("12…");
+  });
+
+  it("removes synthetic prompt wrappers before deriving a title", () => {
+    expect(cleanTitleText("<command-name>/help</command-name>")).toBeUndefined();
+    expect(cleanTitleText("<ide_opened_file>src/app.ts</ide_opened_file>修复登录问题")).toBe("修复登录问题");
+    expect(derivePlaceholderTitle("修复登录问题。请补充测试", 60)).toBe("修复登录问题。");
+    expect(derivePlaceholderTitle("修复 src/app.ts 的登录问题", 60)).toBe("修复 src/app.ts 的登录问题");
+    expect(derivePlaceholderTitle("Investigate example.com timeout", 60)).toBe("Investigate example.com timeout");
+    expect(derivePlaceholderTitle("修复登录问题. 请补充测试", 60)).toBe("修复登录问题.");
+  });
+
+  it("builds a labeled conversation from user and assistant text", () => {
+    const conversation = buildConversationText(
+      [messageEntry("user", "实现 OAuth 登录", 1), messageEntry("assistant", "我会先检查回调路由", 2)],
+      "再补充登录失败测试",
+    );
+    expect(conversation).toBe("User: 实现 OAuth 登录\nAssistant: 我会先检查回调路由\nUser: 再补充登录失败测试");
   });
 
   it("returns undefined for empty output", () => {

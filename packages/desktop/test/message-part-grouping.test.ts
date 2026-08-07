@@ -104,7 +104,7 @@ describe("message part grouping", () => {
     ]);
   });
 
-  it("普通通知和其他 pi-notice 保持在 run group 内，只有压缩 notice 打断折叠", () => {
+  it("所有 pi-notice 都属于 assistant run activity，压缩事件不会打断折叠", () => {
     const parts = [
       { type: "reasoning", text: "分析", status: COMPLETE },
       { type: "data", name: "pi-notice", data: { noticeType: "custom" }, status: COMPLETE },
@@ -118,7 +118,7 @@ describe("message part grouping", () => {
       ["group-runActivity", "group-chainOfThought"],
       ["group-runActivity"],
       ["group-runActivity"],
-      [],
+      ["group-runActivity"],
       [],
       [],
     ]);

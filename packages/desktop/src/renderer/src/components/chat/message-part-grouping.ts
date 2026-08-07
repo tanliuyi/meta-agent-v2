@@ -28,18 +28,11 @@ export function createRunGroupPart(parts: readonly PartState[]) {
 }
 
 function isRunActivityPart(part: PartState): boolean {
-  return part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isNonCompactionNotice(part);
+  return part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isPiNoticePart(part);
 }
 
-function isNonCompactionNotice(part: PartState): boolean {
-  return (
-    part.type === "data" &&
-    part.name === "pi-notice" &&
-    typeof part.data === "object" &&
-    part.data !== null &&
-    "noticeType" in part.data &&
-    part.data.noticeType !== "compaction"
-  );
+function isPiNoticePart(part: PartState): boolean {
+  return part.type === "data" && part.name === "pi-notice";
 }
 
 type FinalResponsePart = {

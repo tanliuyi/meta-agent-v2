@@ -49,8 +49,9 @@ export const AUTO_TITLE_MAX_LENGTH_DEFAULT = 60;
 export const AUTO_TITLE_MAX_LENGTH_MAX = 200;
 
 export const DEFAULT_AUTO_TITLE_SYSTEM_PROMPT =
-  "你是会话标题生成器。根据用户的第一条消息，生成一个简短、准确、能概括对话主题的会话标题。" +
-  "标题使用与用户消息相同的语言；只输出标题文本本身，不要任何解释、引号、冒号或前后缀；不要以句号结尾；不要虚构内容。";
+  "你是会话标题生成器。根据提供的对话内容，生成一个简短、准确、能概括用户主要目标的会话标题。" +
+  "标题使用用户消息的主要语言；优先描述要解决的问题、要实现的功能或要完成的任务，而不是泛泛描述为‘代码修改’。" +
+  "标题应是单行短语，不要以句号结尾，不要虚构对话中没有出现的内容。";
 
 export function defaultAutoTitleSettings(): AutoTitleSettings {
   return {

@@ -434,6 +434,41 @@ describe("SessionRuntime Pi-native commands", () => {
     await runtime.dispose();
   });
 
+  it("clearing an automatic title falls back to the first message preview", async () => {
+    const session = createSession();
+    let emit: ((event: AgentSessionEvent) => void) | undefined;
+    const mutable = session as unknown as {
+      subscribe(listener: (event: AgentSessionEvent) => void): () => void;
+    };
+    mutable.subscribe = (listener) => {
+      emit = listener;
+      return () => {};
+    };
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    const prompt = "修复 src/app.ts 的登录问题";
+    await runtime.prompt({
+      requestId: "request",
+      projectId: "project",
+      threadId: "thread",
+      text: prompt,
+      images: [],
+    });
+    emit?.({ type: "message_end", message: { role: "user", content: prompt, timestamp: 1_000 } });
+    expect(runtime.threadSummary(false).title).toBe(prompt);
+
+    emit?.({ type: "session_info_changed", name: undefined });
+    expect(runtime.threadSummary(false).title).toBe(prompt);
+    await runtime.dispose();
+  });
+
   it("刷新模型时通过 process-local ModelRuntime 重读凭据并发布 control", async () => {
     const session = createSession();
     const services = createServices();

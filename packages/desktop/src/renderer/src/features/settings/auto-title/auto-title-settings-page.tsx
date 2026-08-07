@@ -90,7 +90,7 @@ export function AutoTitleSettingsPage() {
                 <div className="settings-row-text">
                   <span>启用自动标题</span>
                   <p className="settings-row-description">
-                    新会话收到第一条消息后，异步用大模型生成会话标题，不阻塞对话
+                    首条有效消息先生成临时标题，第三条有效消息后再结合当前对话异步优化，不阻塞对话
                   </p>
                 </div>
                 <Switch
