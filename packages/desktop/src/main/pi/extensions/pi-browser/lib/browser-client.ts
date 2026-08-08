@@ -12,11 +12,14 @@
 import type {
   BrowserAction,
   BrowserActionResult,
+  BrowserConsoleEntry,
+  BrowserEvaluateResult,
   BrowserHistoryEntry,
   BrowserInspectElementResult,
   BrowserNavigateResult,
   BrowserNavigationTargetResult,
   BrowserOpenTabResult,
+  BrowserPendingDialog,
   BrowserScreenshotResult,
   BrowserSnapshotResult,
   BrowserTab,
@@ -151,6 +154,294 @@ export class BrowserClient {
 
   async screenshot(tabId: number, signal?: AbortSignal): Promise<BrowserScreenshotResult> {
     return (await this.request("screenshot", { tabId }, signal)) as BrowserScreenshotResult;
+  }
+
+  /** 全页截图（完整滚动区域）。 */
+  async fullPageScreenshot(tabId: number, signal?: AbortSignal): Promise<BrowserScreenshotResult> {
+    return (await this.request("screenshot", { tabId, fullPage: true }, signal)) as BrowserScreenshotResult;
+  }
+
+  /** 读取页面 console 日志（拉取即清空）。 */
+  async consoleLogs(
+    tabId: number,
+    options: { filter?: string; levels?: BrowserConsoleEntry["level"][]; limit?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; logs: BrowserConsoleEntry[] } | { ok: false; error: string }> {
+    return (await this.request("consoleLogs", { tabId, ...options }, signal)) as
+      | {
+          ok: true;
+          logs: BrowserConsoleEntry[];
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 当前挂起的 JS 对话框。 */
+  async getDialog(
+    tabId: number,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; dialog: BrowserPendingDialog | null } | { ok: false; error: string }> {
+    return (await this.request("getDialog", { tabId }, signal)) as
+      | {
+          ok: true;
+          dialog: BrowserPendingDialog | null;
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 响应挂起的 JS 对话框。 */
+  async handleDialog(
+    tabId: number,
+    action: "accept" | "dismiss",
+    promptText?: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request(
+      "handleDialog",
+      { tabId, action, ...(promptText !== undefined ? { promptText } : {}) },
+      signal,
+    )) as { ok: true } | { ok: false; error: string };
+  }
+
+  /** 在页面上下文执行 JS。 */
+  async evaluate(
+    tabId: number,
+    expression: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; result: BrowserEvaluateResult } | { ok: false; error: string }> {
+    return (await this.request("evaluate", { tabId, expression }, signal)) as
+      | {
+          ok: true;
+          result: BrowserEvaluateResult;
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 关闭指定标签页（renderer 删除视图并 detach）。 */
+  async closeTab(tabId: number, signal?: AbortSignal): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("closeTab", { tabId }, signal)) as { ok: true } | { ok: false; error: string };
+  }
+
+  /** 按键（组合键如 "Control+Enter"）。 */
+  async pressKey(
+    tabId: number,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("pressKey", { tabId, key }, signal)) as { ok: true } | { ok: false; error: string };
+  }
+
+  /** 等待页面条件（load/timeout/url）。 */
+  async waitFor(
+    tabId: number,
+    options: { state?: "load" | "domcontentloaded" | "networkidle"; timeoutMs?: number; url?: string } = {},
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("waitFor", { tabId, ...options }, signal)) as
+      | { ok: true }
+      | { ok: false; error: string };
+  }
+
+  /** 读取缓冲的 CDP 事件（拉取即清空）。 */
+  async cdpEvents(
+    tabId: number,
+    options: { methods?: string[]; limit?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<
+    { ok: true; events: Array<{ method: string; params?: Record<string, unknown> }> } | { ok: false; error: string }
+  > {
+    return (await this.request("cdpEvents", { tabId, ...options }, signal)) as
+      | {
+          ok: true;
+          events: Array<{ method: string; params?: Record<string, unknown> }>;
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 读剪贴板文本。 */
+  async clipboardRead(
+    tabId: number,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+    return (await this.request("clipboardRead", { tabId }, signal)) as
+      | { ok: true; text: string }
+      | { ok: false; error: string };
+  }
+
+  /** 写剪贴板文本。 */
+  async clipboardWrite(
+    tabId: number,
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("clipboardWrite", { tabId, text }, signal)) as
+      | { ok: true }
+      | { ok: false; error: string };
+  }
+
+  /** 按选择器执行元素操作（对齐 Codex PlaywrightLocator）。 */
+  async locatorAction(
+    tabId: number,
+    selector: string,
+    action: string,
+    params: {
+      value?: string;
+      attribute?: string;
+      name?: string;
+      by?: "css" | "role" | "text" | "label" | "placeholder" | "testid";
+      byValue?: string;
+      frame?: string;
+      nth?: number;
+    } = {},
+    signal?: AbortSignal,
+  ): Promise<
+    | {
+        ok: true;
+        value?: string;
+        count?: number;
+        visible?: boolean;
+        enabled?: boolean;
+        info?: Record<string, unknown>;
+        screenshot?: { dataUrl: string; width: number; height: number };
+      }
+    | { ok: false; error: string }
+  > {
+    return (await this.request("locatorAction", { tabId, selector, action, ...params }, signal)) as
+      | {
+          ok: true;
+          value?: string;
+          count?: number;
+          visible?: boolean;
+          enabled?: boolean;
+          info?: Record<string, unknown>;
+          screenshot?: { dataUrl: string; width: number; height: number };
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 原始 CDP 命令（对齐 Codex cdp.send）。 */
+  async cdpSend(
+    tabId: number,
+    method: string,
+    params?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
+    return (await this.request("cdpSend", { tabId, method, ...(params ? { params } : {}) }, signal)) as
+      | {
+          ok: true;
+          result: unknown;
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 等待下一次导航完成（对齐 Codex expectNavigation）。 */
+  async expectNavigation(
+    tabId: number,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request(
+      "expectNavigation",
+      { tabId, ...(timeoutMs !== undefined ? { timeoutMs } : {}) },
+      signal,
+    )) as { ok: true } | { ok: false; error: string };
+  }
+
+  /** 拖拽：沿坐标路径移动鼠标（对齐 Codex CUA drag）。 */
+  async dragPath(
+    tabId: number,
+    points: Array<{ x: number; y: number }>,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("dragPath", { tabId, points }, signal)) as { ok: true } | { ok: false; error: string };
+  }
+
+  /** 移动鼠标到坐标（对齐 Codex CUA move）。 */
+  async moveMouse(
+    tabId: number,
+    x: number,
+    y: number,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("moveMouse", { tabId, x, y }, signal)) as { ok: true } | { ok: false; error: string };
+  }
+
+  /** 坐标双击（对齐 Codex CUA double_click）。 */
+  async dblclickPoint(
+    tabId: number,
+    x: number,
+    y: number,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("dblclickPoint", { tabId, x, y }, signal)) as
+      | { ok: true }
+      | { ok: false; error: string };
+  }
+
+  /** 导出页面主文本（对齐 Codex ContentAPI.export）。 */
+  async contentExport(
+    tabId: number,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+    return (await this.request("contentExport", { tabId }, signal)) as
+      | { ok: true; text: string }
+      | { ok: false; error: string };
+  }
+
+  /** 最近下载记录。 */
+  async downloads(
+    tabId: number,
+    signal?: AbortSignal,
+  ): Promise<
+    | { ok: true; downloads: Array<{ url: string; filename: string; path: string | null }> }
+    | { ok: false; error: string }
+  > {
+    return (await this.request("downloads", { tabId }, signal)) as
+      | {
+          ok: true;
+          downloads: Array<{ url: string; filename: string; path: string | null }>;
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 文件上传。 */
+  async uploadFile(
+    tabId: number,
+    selector: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("uploadFile", { tabId, selector, path }, signal)) as
+      | { ok: true }
+      | { ok: false; error: string };
+  }
+
+  /** 触发下载并保存到指定路径。 */
+  async downloadMedia(
+    tabId: number,
+    url: string,
+    savePath: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("downloadMedia", { tabId, url, savePath }, signal)) as
+      | {
+          ok: true;
+        }
+      | { ok: false; error: string };
+  }
+
+  /** 坐标点击（对齐 Codex CUA clickPoint）。 */
+  async clickPoint(
+    tabId: number,
+    x: number,
+    y: number,
+    keys?: string[],
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    return (await this.request("clickPoint", { tabId, x, y, ...(keys ? { keys } : {}) }, signal)) as
+      | {
+          ok: true;
+        }
+      | { ok: false; error: string };
   }
 
   async browserHistory(signal?: AbortSignal): Promise<BrowserHistoryEntry[]> {

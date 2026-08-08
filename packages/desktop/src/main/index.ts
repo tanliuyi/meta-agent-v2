@@ -16,6 +16,7 @@ import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-sou
 import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
 import {
+  broadcastBrowserCloseTabRequest,
   broadcastBrowserCreateTabRequest,
   broadcastBrowserEvent,
   broadcastTerminalEvent,
@@ -428,6 +429,7 @@ app.whenReady().then(async () => {
   browserManagerInstance = new BrowserManager(userDataDir, {
     onStateChanged: broadcastBrowserEvent,
     onCreateTabRequest: broadcastBrowserCreateTabRequest,
+    onCloseTabRequest: broadcastBrowserCloseTabRequest,
     log: (text) => sidecarLog?.write("browser", text),
   });
   browserManager = browserManagerInstance;

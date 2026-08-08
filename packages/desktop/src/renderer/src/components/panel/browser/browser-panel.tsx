@@ -36,9 +36,11 @@ import { DropdownMenuSubTrigger } from "../../../shared/ui/dropdown-menu-sub-tri
 import { DropdownMenuTrigger } from "../../../shared/ui/dropdown-menu-trigger.tsx";
 import { useToast } from "../../../shared/ui/use-toast.ts";
 import { emitBrowserAnnotationToComposer } from "../../../state/browser-composer-bridge.ts";
+import { workbenchPanelTabKey, workbenchTabKey } from "../../../state/workbench-tab-context.tsx";
 import type { BrowserWebviewElement, BrowserWebviewFoundInPageEvent } from "../../../webview.d.ts";
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
-import { useSessionScope } from "../../session-context.tsx";
+import { useSessionScope, useSessionWorkbenchTabs } from "../../session-context.tsx";
+import { BROWSER_PANEL_KIND } from "../builtin-panel-kinds.ts";
 import type { SessionBrowserRuntime } from "./browser-runtime-host.ts";
 import {
   activeViewIdOf,
@@ -47,7 +49,6 @@ import {
   closeView,
   createBlankView,
   createView,
-  displayWebview,
   ensureBrowserRuntime,
   rebuildView,
   remountView,
@@ -112,7 +113,8 @@ function normalizeAddress(input: string): string | null {
 export function BrowserPanel() {
   const aui = useAui();
   const navigate = useNavigate();
-  const { record } = useSessionScope();
+  const { record, updateWorkbench } = useSessionScope();
+  const workbenchTabs = useSessionWorkbenchTabs();
   const { notify } = useToast();
   const { projectId: sessionProjectId, threadId: sessionThreadId } = record.identity;
   const sessionKey = browserSessionKey(record.identity);
@@ -221,21 +223,74 @@ export function BrowserPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey]);
 
-  // 活跃 webview 显示：把活跃视图的 webview 元素移入面板视口；卸载/切换时移回
-  // parking host（guest 不销毁）。必须用 useLayoutEffect：清理在 React 删除视口
-  // DOM 之前执行。
-  useLayoutEffect(() => {
+  // 把会话 runtime 容器 CSS 定位到面板视口矩形（webview 元素不移动，guest 不销毁）。
+  function positionContainerToViewport(container: HTMLElement, viewport: HTMLElement): void {
+    container.removeAttribute("data-offscreen");
+    const rect = viewport.getBoundingClientRect();
+    container.style.position = "fixed";
+    container.style.left = `${rect.left}px`;
+    container.style.top = `${rect.top}px`;
+    container.style.width = `${rect.width}px`;
+    container.style.height = `${rect.height}px`;
+    // parking host 默认 pointer-events: none；显示时必须恢复交互（隐藏的
+    // data-hidden webview 由 display:none 天然不接收事件）。
+    container.style.pointerEvents = "auto";
+  }
+  // 活跃 webview 显示（根因方案）：webview 元素与容器永不移动。
+  // Electron 中 webview 元素（或含它的容器）一旦从 DOM 移除，guest 即销毁并重建，
+  // 这是面板闪烁、tab 重建、活跃 tab 回退切换的全部根源。因此：
+  //   1. 显示面板 = 把会话 runtime 容器 CSS 定位（fixed）到视口矩形，不改 DOM；
+  //   2. 关闭面板 = 容器移出屏幕（保留渲染，guest 存活、截图正常）；
+  //   3. 切换 tab = 仅切换 data-hidden（display:none 不销毁 guest）。
+  // 全程零 DOM 移动 → guest 永不销毁 → 无重建、无闪烁、无活跃回退。
+  // 视口位置随窗口尺寸/面板宽度变化由下方 ResizeObserver 同步，开销为单元素
+  // 布局读写（应用整体不滚动，无需 scroll 同步）。
+  useEffect(() => {
     const viewport = viewportEl.current;
     if (!viewport) return;
     if (activeViewId === undefined) return;
     const element = webviewOf(runtime, activeViewId);
     if (!element) return;
-    displayWebview(runtime, activeViewId, viewport);
+    positionContainerToViewport(runtime.container, viewport);
+    // 外部原因（崩溃等）导致 guest 销毁重建期间跳过可见性切换，避免活跃回退闪烁。
+    const activeRecord = runtime.views.find((view) => view.viewId === activeViewId);
+    if (activeRecord?.rebuilding) return;
+    for (const view of runtime.views) {
+      const viewElement = webviewOf(runtime, view.viewId);
+      if (!viewElement) continue;
+      if (view.viewId === activeViewId) {
+        if (viewElement.hasAttribute("data-hidden")) viewElement.removeAttribute("data-hidden");
+      } else if (!viewElement.hasAttribute("data-hidden")) {
+        viewElement.setAttribute("data-hidden", "");
+      }
+    }
+  }, [runtime, activeViewId]);
+
+  // 视口尺寸/位置变化（窗口 resize、面板宽度拖拽）：同步容器定位。
+  useEffect(() => {
+    const viewport = viewportEl.current;
+    if (!viewport) return;
+    if (activeViewId === undefined) return;
+    const update = (): void => positionContainerToViewport(runtime.container, viewport);
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    window.addEventListener("resize", update);
     return () => {
-      // 面板卸载或活跃视图变化：元素先回 parking host，再让 React 处理视口 DOM。
-      displayWebview(runtime, activeViewId, null);
+      observer.disconnect();
+      window.removeEventListener("resize", update);
     };
-  }, [runtime, activeViewId, runtimeVersion]);
+  }, [runtime, activeViewId]);
+
+  // 面板卸载：容器标记为屏幕外（content-visibility:hidden——保留布局尺寸且语义清晰，
+  // 等价于 Chromium 后台化；guest 存活，读 DOM/执行 JS 不受影响，截图经 CDP
+  // fromSurface:false 仍可用）。重新打开面板时由显示 effect 恢复定位。
+  useEffect(() => {
+    return () => {
+      runtime.container.setAttribute("data-offscreen", "");
+      runtime.container.style.pointerEvents = "none";
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 设备工具栏/device 尺寸：直接作用于 webview 元素（webview 是视口直接子元素）。
   useEffect(() => {
@@ -812,9 +867,15 @@ export function BrowserPanel() {
   const handleCloseView = useCallback(
     (viewId: number) => {
       closeView(runtime, viewId);
-      if (runtime.views.length === 0) createBlankView(runtime);
+      if (runtime.views.length > 0) return;
+      // 最后一个标签页关闭：同时关闭浏览器面板。若无其他面板 tab（如终端）
+      // 则收起面板容器；有则只关闭浏览器 tab。
+      const browserTabKey = workbenchPanelTabKey(BROWSER_PANEL_KIND);
+      const hasOtherTabs = workbenchTabs.tabs.some((tab) => workbenchTabKey(tab) !== browserTabKey);
+      workbenchTabs.closeTab(browserTabKey);
+      if (!hasOtherTabs) updateWorkbench({ panelOpen: false });
     },
-    [runtime],
+    [runtime, updateWorkbench, workbenchTabs],
   );
 
   const handleAddView = useCallback(() => {

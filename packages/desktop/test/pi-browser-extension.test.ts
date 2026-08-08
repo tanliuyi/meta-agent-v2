@@ -14,7 +14,7 @@ import {
 import { SiteAccessController } from "../src/main/pi/extensions/pi-browser/lib/site-access.ts";
 import { registerBrowserTools } from "../src/main/pi/extensions/pi-browser/register-tools.ts";
 import type { BrowserSnapshot, BrowserSnapshotResult, BrowserTab } from "../src/shared/browser-contracts.ts";
-import type { BrowserSettingsSnapshot } from "../src/shared/browser-settings-contracts.ts";
+import { type BrowserSettingsSnapshot, defaultBrowserSettings } from "../src/shared/browser-settings-contracts.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = Record<string, any>;
@@ -108,13 +108,8 @@ const DEFAULT_SETTINGS: BrowserSettingsSnapshot = {
   exists: true,
   revision: "rev-1",
   settings: {
+    ...defaultBrowserSettings(),
     allowSites: ["example.com"],
-    blockSites: [],
-    downloadDirectory: null,
-    maxSnapshotNodes: 200,
-    cdpTimeoutMs: 10_000,
-    restoreTabsOnLaunch: true,
-    confirmSensitiveActions: "all",
   },
 };
 
@@ -375,7 +370,7 @@ describe("pi-browser 工具注册", () => {
     createSiteAccess: () => siteAccess,
   });
 
-  test("注册 11 个 browser_* 工具，并符合 OpenAI 工具名约束", () => {
+  test("注册 browser_* 工具，并符合 OpenAI 工具名约束", () => {
     const names = tools.map((tool) => tool.name);
     expect(names).toEqual([
       "browser_open",
@@ -387,6 +382,22 @@ describe("pi-browser 工具注册", () => {
       "browser_scroll",
       "browser_tabs",
       "browser_history",
+      "browser_evaluate",
+      "browser_console",
+      "browser_dialog",
+      "browser_close",
+      "browser_press",
+      "browser_wait",
+      "browser_cdp",
+      "browser_clipboard",
+      "browser_locator",
+      "browser_upload",
+      "browser_click_at",
+      "browser_move",
+      "browser_drag",
+      "browser_content",
+      "browser_download",
+      "browser_downloads",
       "browser_back",
       "browser_forward",
       "browser_reload",
@@ -522,6 +533,42 @@ describe("pi-browser 工具注册", () => {
     expect(calls.browserHistory).toHaveBeenCalledOnce();
     expect(result.details.browser).toMatchObject({ kind: "history", ok: true });
     expect(result.details.history).toEqual(entries);
+  });
+
+  test("browser.history 在始终允许策略下不再弹窗", async () => {
+    calls.getSettings.mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      settings: { ...DEFAULT_SETTINGS.settings, historyAccess: "always-allow" },
+    });
+    const confirm = vi.fn();
+    const entries = [{ url: "https://example.com/", title: "Example", timestamp: 1 }];
+    calls.browserHistory.mockResolvedValue(entries);
+    const tool = tools.find((candidate) => candidate.name === "browser_history")!;
+
+    const result = await tool.execute("c1", {}, undefined, undefined, {
+      ui: { confirm },
+    } as unknown as ExtensionContext);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(calls.browserHistory).toHaveBeenCalledOnce();
+    expect(result.details.browser).toMatchObject({ kind: "history", ok: true });
+  });
+
+  test("browser.history 在始终拒绝策略下不读取历史", async () => {
+    calls.getSettings.mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      settings: { ...DEFAULT_SETTINGS.settings, historyAccess: "always-deny" },
+    });
+    const confirm = vi.fn();
+    const tool = tools.find((candidate) => candidate.name === "browser_history")!;
+
+    const result = await tool.execute("c1", {}, undefined, undefined, {
+      ui: { confirm },
+    } as unknown as ExtensionContext);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(calls.browserHistory).not.toHaveBeenCalled();
+    expect(result.details.browser).toMatchObject({ kind: "history", ok: false });
   });
 
   test("browser.history does not read entries when user rejects", async () => {

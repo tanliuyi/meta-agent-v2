@@ -16,7 +16,7 @@ import type { WorkbenchTabState } from "../../state/workbench-tab-context.tsx";
 import { workbenchPanelTabKey, workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../session-context.tsx";
-import { NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
+import { BROWSER_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { registerBuiltinPanelTabs } from "./builtin-panel-tabs.tsx";
 import { WorkbenchTabList } from "./panel-tab.tsx";
 import { SessionContent } from "./session/session-content.tsx";
@@ -257,7 +257,15 @@ export function OpenWorkbenchPanel({
               </div>
             ) : activeTab?.kind === "panel" && activeDefinition ? (
               <div className="panel-content">
-                <activeDefinition.component />
+                {isDraft && activeTab.panel === BROWSER_PANEL_KIND ? (
+                  // 草稿阶段无真实会话（threadId 固定为 draft，多个草稿会共享同一浏览器
+                  // runtime）：禁用浏览器面板，提交会话后再使用。
+                  <div className="panel-content sidebar-session-loading">
+                    浏览器在新建会话草稿阶段不可用，提交会话后即可使用
+                  </div>
+                ) : (
+                  <activeDefinition.component />
+                )}
               </div>
             ) : activeTab?.kind === "panel" ? (
               <div className="panel-content sidebar-session-loading">面板未注册：{activeTab.panel}</div>

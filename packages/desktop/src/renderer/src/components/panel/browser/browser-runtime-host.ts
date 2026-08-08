@@ -15,6 +15,7 @@
 
 import { useEffect } from "react";
 import type {
+  BrowserCloseTabRequest,
   BrowserCreateTabRequest,
   BrowserSessionIdentity,
   BrowserStateEvent,
@@ -36,6 +37,8 @@ export interface BrowserViewRecord {
   pendingRequestId?: number;
   /** 强制重建 webview 元素的递增号（attach 失败/卡住时用）。 */
   remountEpoch: number;
+  /** guest 已销毁、Electron 正在自动重建新 guest 中：不参与面板显示切换，避免闪烁。 */
+  rebuilding?: boolean;
 }
 
 /** 一个会话的常驻浏览器运行时（视图/tab 状态；面板与后台共用）。 */
@@ -116,8 +119,10 @@ export function configureBrowserRuntimeHost(options: BrowserRuntimeHostOptions):
 export function resetBrowserRuntimeHostForTest(): void {
   nativeStateUnsubscribe?.();
   nativeCreateUnsubscribe?.();
+  nativeCloseUnsubscribe?.();
   nativeStateUnsubscribe = undefined;
   nativeCreateUnsubscribe = undefined;
+  nativeCloseUnsubscribe = undefined;
   runtimes.clear();
   internalsByKey.clear();
   runtimeListeners.clear();
@@ -142,6 +147,7 @@ let parkingHost: HTMLElement | null = null;
 let nextViewId = 1;
 let nativeStateUnsubscribe: (() => void) | undefined;
 let nativeCreateUnsubscribe: (() => void) | undefined;
+let nativeCloseUnsubscribe: (() => void) | undefined;
 
 function createRequestKey(sessionKey: string, requestId: number): string {
   return `${sessionKey}\u0000${requestId}`;
@@ -156,8 +162,10 @@ export function BrowserRuntimeHost(): null {
       unregisterBrowserRuntime();
       nativeStateUnsubscribe?.();
       nativeCreateUnsubscribe?.();
+      nativeCloseUnsubscribe?.();
       nativeStateUnsubscribe = undefined;
       nativeCreateUnsubscribe = undefined;
+      nativeCloseUnsubscribe = undefined;
     };
   }, []);
   return null;
@@ -185,6 +193,20 @@ function ensureNativeSubscriptions(): void {
   nativeCreateUnsubscribe = window.desktop.browser.onCreateTabRequest((request) => {
     handleNativeCreateTabRequest(request);
   });
+  nativeCloseUnsubscribe = window.desktop.browser.onCloseTabRequest((request) => {
+    handleNativeCloseTabRequest(request);
+  });
+}
+
+/** 工具 browser.close：按 tabId 找到视图并关闭（删除视图 + detach，不重建）。 */
+function handleNativeCloseTabRequest(request: BrowserCloseTabRequest): void {
+  const internals = internalsByKey.get(request.sessionKey);
+  if (!internals) return;
+  const viewId = internals.viewIdByTabId.get(request.tabId);
+  if (viewId === undefined) return;
+  // 与面板 closeView 同一路径：移除元素 + detach（main 侧随之移除 entry）。
+  removeViewInternal(internals, viewId);
+  markChanged(internals);
 }
 
 function handleNativeCreateTabRequest(request: BrowserCreateTabRequest): void {
@@ -539,9 +561,11 @@ function bindElementEvents(internals: RuntimeInternals, viewId: number, element:
   const onAttach = (): void => attachView(internals, viewId, element, false);
   const onAttachQuiet = (): void => attachView(internals, viewId, element, true);
   const onGone = (): void => handleCrash(internals, viewId, element);
+  const onDestroyed = (): void => handleGuestDestroyed(internals, viewId, element);
   element.addEventListener("did-attach", onAttach);
   element.addEventListener("dom-ready", onAttach);
   element.addEventListener("render-process-gone", onGone);
+  element.addEventListener("destroyed", onDestroyed);
   let attempts = 0;
   const timer = setInterval(() => {
     attempts += 1;
@@ -566,8 +590,31 @@ function bindElementEvents(internals: RuntimeInternals, viewId: number, element:
     element.removeEventListener("did-attach", onAttach);
     element.removeEventListener("dom-ready", onAttach);
     element.removeEventListener("render-process-gone", onGone);
+    element.removeEventListener("destroyed", onDestroyed);
     internals.pollTimers.delete(viewId);
   });
+}
+
+/**
+ * guest webContents 销毁（webview 元素仍在 DOM，Electron 会自动创建新 guest）。
+ * 清除本视图的登记：main 已随 destroyed 移除对应 tab，新 guest 的 did-attach 会
+ * 走 attachView 重新 attach（重建 tab），否则旧登记会挡住重新 attach 导致视图
+ * 与 guest 失联（例如元素在面板视口与 parking host 间移动后 guest 必然重建）。
+ */
+function handleGuestDestroyed(internals: RuntimeInternals, viewId: number, sourceElement: BrowserWebviewElement): void {
+  if (internals.elementByView.get(viewId) !== sourceElement) return;
+  const runtime = internals.runtime;
+  const tabId = internals.tabIdByView.get(viewId);
+  if (tabId !== undefined) {
+    internals.viewIdByTabId.delete(tabId);
+    internals.tabIdByView.delete(viewId);
+  }
+  internals.webContentsIdByView.delete(viewId);
+  // 标记重建中：Electron 会为仍在 DOM 中的元素自动创建新 guest 并重新 did-attach；
+  // 期间 main 侧已移除旧 tab，活跃 tab 回退会触发显示 effect 反复切换可见性，
+  // 跳过该视图可避免面板闪烁（见 BrowserPanel 显示 effect）。
+  runtime.views = runtime.views.map((view) => (view.viewId === viewId ? { ...view, rebuilding: true } : view));
+  markChanged(internals);
 }
 
 /** attach：webview did-attach / dom-ready 后把 guest webContentsId + 会话身份交给 main。 */
@@ -625,7 +672,7 @@ function attachView(internals: RuntimeInternals, viewId: number, element: Browse
       internals.viewIdByTabId.set(result.tab.tabId, viewId);
       // 请求已由 main 接管，清除 requestId 标记，避免重建时重复走请求路径。
       runtime.views = runtime.views.map((view) =>
-        view.viewId === viewId ? { ...view, pendingRequestId: undefined } : view,
+        view.viewId === viewId ? { ...view, pendingRequestId: undefined, rebuilding: false } : view,
       );
       const latest = runtime.views.find((view) => view.viewId === viewId);
       if (latest?.pendingUrl && requestId === undefined) {

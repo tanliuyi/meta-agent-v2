@@ -101,8 +101,10 @@ interface DesktopStub {
   sessionRetire: ReturnType<typeof vi.fn>;
   onStateChanged: ReturnType<typeof vi.fn>;
   onCreateTabRequest: ReturnType<typeof vi.fn>;
+  onCloseTabRequest: ReturnType<typeof vi.fn>;
   stateHandler?: (event: { sessionKey: string; tabs: BrowserTab[]; activeTabId: number | null }) => void;
   createHandler?: (request: { requestId: number; url: string; sessionKey: string }) => void;
+  closeHandler?: (request: { sessionKey: string; tabId: number }) => void;
 }
 
 const SESSION_A: BrowserSessionIdentity = { projectId: "proj-a", threadId: "thread-a" };
@@ -147,6 +149,12 @@ beforeEach(() => {
       desktop.createHandler = handler;
       return () => {
         desktop.createHandler = undefined;
+      };
+    }),
+    onCloseTabRequest: vi.fn((handler) => {
+      desktop.closeHandler = handler;
+      return () => {
+        desktop.closeHandler = undefined;
       };
     }),
   };
@@ -264,6 +272,25 @@ describe("browser runtime host 会话路由", () => {
     expect(desktop.attach).toHaveBeenCalledWith(SESSION_B, 7, 31);
   });
 
+  test("关闭 tab 请求：按 tabId 删除视图并 detach（不重建）", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    desktop.createHandler?.({
+      requestId: 41,
+      url: "https://example.com/",
+      sessionKey: runtime.sessionKey,
+    });
+    await flushAttach();
+    expect(runtime.views).toHaveLength(1);
+
+    desktop.closeHandler?.({ sessionKey: runtime.sessionKey, tabId: 41 });
+    expect(runtime.views).toHaveLength(0);
+    expect(desktop.detach).toHaveBeenCalledWith(SESSION_A, 7);
+
+    // 幂等：重复关闭不报错、无副作用。
+    desktop.closeHandler?.({ sessionKey: runtime.sessionKey, tabId: 41 });
+    expect(desktop.detach).toHaveBeenCalledTimes(1);
+  });
+
   test("subscribeBrowserCreateRequest 首次订阅即安装原生监听并按会话过滤", async () => {
     const sessionKey = browserSessionKey(SESSION_A);
     const opened: string[] = [];
@@ -331,5 +358,31 @@ describe("browser runtime host 会话路由", () => {
     closeView(runtime, runtime.views[0]!.viewId);
     expect(desktop.detach).toHaveBeenCalledWith(SESSION_A, 7);
     expect(runtime.views).toHaveLength(0);
+  });
+
+  test("guest destroyed 后清除登记，新 guest 的 did-attach 重新 attach", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    createBlankView(runtime);
+    await flushAttach();
+    expect(desktop.attach).toHaveBeenCalledTimes(1);
+
+    // 模拟 main 广播 tab 状态（attach 成功后）。
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(1, "about:blank")],
+      activeTabId: 1,
+    });
+    expect(runtime.tabs).toHaveLength(1);
+
+    // guest 销毁（元素仍在 DOM，例如视口与 parking host 间移动）：视图保留，登记清除。
+    const element = elements.at(-1)!;
+    element.emit("destroyed");
+    expect(runtime.views).toHaveLength(1);
+    expect(runtime.tabs).toHaveLength(1);
+
+    // 新 guest 的 did-attach：旧登记已清除，重新 attach（不因残留登记被跳过）。
+    element.emit("did-attach");
+    await flushAttach();
+    expect(desktop.attach).toHaveBeenCalledTimes(2);
   });
 });

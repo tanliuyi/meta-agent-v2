@@ -9,6 +9,7 @@ import type {
 } from "../shared/auth-config-contracts.ts";
 import type { SaveAutoTitleSettingsInput } from "../shared/auto-title-contracts.ts";
 import type {
+  BrowserCloseTabRequest,
   BrowserCreateTabRequest,
   BrowserSessionIdentity,
   BrowserStateEvent,
@@ -924,5 +925,12 @@ export function broadcastBrowserEvent(event: BrowserStateEvent): void {
 export function broadcastBrowserCreateTabRequest(request: BrowserCreateTabRequest): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCreateTabRequest, request);
+  }
+}
+
+/** 向所有 renderer 广播关闭 tab 请求（工具 browser.close 触发；renderer 负责删除视图）。 */
+export function broadcastBrowserCloseTabRequest(request: BrowserCloseTabRequest): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCloseTabRequest, request);
   }
 }

@@ -123,6 +123,24 @@ export type BrowserAnnotationPickResult =
   | { ok: true; selector: string; bounds: BrowserAnnotationBounds; tag: string; name: string }
   | { ok: false; error: string };
 
+/** 页面 console 日志条目（对齐 Codex browser_use 的 tab_dev_logs）。 */
+export interface BrowserConsoleEntry {
+  level: "log" | "info" | "warning" | "error" | "debug";
+  message: string;
+  timestamp: number;
+  url?: string;
+}
+
+/** 挂起的 JS 对话框（alert/confirm/prompt/beforeunload；对齐 Codex tab_get_js_dialog）。 */
+export interface BrowserPendingDialog {
+  type: "alert" | "confirm" | "prompt" | "beforeunload";
+  message: string;
+  defaultText?: string;
+}
+
+/** JS 执行结果（对齐 Codex PlaywrightEvaluate / Runtime.evaluate）。 */
+export type BrowserEvaluateResult = { ok: true; value: string; type: string } | { ok: false; error: string };
+
 /** 浏览器会话状态广播（tabs 列表 + 活跃 tab）；renderer 按 sessionKey 路由。 */
 export interface BrowserStateEvent {
   sessionKey: string;
@@ -210,6 +228,8 @@ export type BrowserAction =
       elementIndex: number;
       text: string;
       submit?: boolean;
+      /** 先全选清空输入框再输入（替换语义）；缺省为插入（追加）。 */
+      replace?: boolean;
       target?: BrowserActionTarget;
     }
   | {
@@ -220,7 +240,7 @@ export type BrowserAction =
     };
 
 export type BrowserActionResult =
-  | { ok: true; url?: string; title?: string }
+  | { ok: true; url?: string; title?: string; navigationBlocked?: string }
   | { ok: false; error: string; staleRef?: boolean };
 
 /** main 请求 renderer 创建新 tab（工具 browser.open 等触发）；按 sessionKey 路由。 */
@@ -228,6 +248,12 @@ export interface BrowserCreateTabRequest {
   requestId: number;
   url: string;
   sessionKey: string;
+}
+
+/** main 请求 renderer 关闭指定 tab（工具 browser.close 触发）；renderer 删除视图并 detach。 */
+export interface BrowserCloseTabRequest {
+  sessionKey: string;
+  tabId: number;
 }
 
 export type BrowserOpenTabResult = { ok: true; tab: BrowserTab } | { ok: false; error: string };

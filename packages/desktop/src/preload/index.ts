@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AuthOauthLoginEvent } from "../shared/auth-config-contracts.ts";
-import type { BrowserAction, BrowserCreateTabRequest, BrowserStateEvent } from "../shared/browser-contracts.ts";
+import type {
+  BrowserAction,
+  BrowserCloseTabRequest,
+  BrowserCreateTabRequest,
+  BrowserStateEvent,
+} from "../shared/browser-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   FileChangeSet,
@@ -452,6 +457,12 @@ const desktopApi: DesktopApi = {
       const handler = (_event: Electron.IpcRendererEvent, request: BrowserCreateTabRequest) => listener(request);
       ipcRenderer.on(CHANNELS.browserCreateTabRequest, handler);
       return () => ipcRenderer.removeListener(CHANNELS.browserCreateTabRequest, handler);
+    },
+    /** main 请求关闭指定 tab（工具 browser.close 触发；携带 sessionKey + tabId）。 */
+    onCloseTabRequest(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, request: BrowserCloseTabRequest) => listener(request);
+      ipcRenderer.on(CHANNELS.browserCloseTabRequest, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.browserCloseTabRequest, handler);
     },
   },
 };

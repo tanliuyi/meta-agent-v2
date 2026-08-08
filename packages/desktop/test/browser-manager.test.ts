@@ -13,7 +13,10 @@ import {
   BROWSER_INTERNAL_PAGES,
   type BrowserAction,
   type BrowserAnnotationBounds,
+  type BrowserConsoleEntry,
   type BrowserCreateTabRequest,
+  type BrowserEvaluateResult,
+  type BrowserPendingDialog,
   type BrowserSessionIdentity,
   type BrowserSnapshot,
   type BrowserStateEvent,
@@ -25,6 +28,7 @@ const electron = vi.hoisted(() => {
   const sessions = new Map<string, unknown>();
   const browserSession = {
     setPermissionRequestHandler: vi.fn(),
+    setPermissionCheckHandler: vi.fn(),
     clearStorageData: vi.fn().mockResolvedValue(undefined),
     clearCache: vi.fn().mockResolvedValue(undefined),
     on: vi.fn(),
@@ -56,6 +60,7 @@ vi.mock("electron", () => ({
       if (!existing) {
         existing = {
           setPermissionRequestHandler: vi.fn(),
+          setPermissionCheckHandler: vi.fn(),
           clearStorageData: vi.fn().mockResolvedValue(undefined),
           clearCache: vi.fn().mockResolvedValue(undefined),
           on: vi.fn(),
@@ -186,6 +191,95 @@ class FakeHost implements BrowserHostController {
 
   cancelPendingOperations(): void {}
 
+  async readConsoleLogs(_options?: {
+    filter?: string;
+    levels?: BrowserConsoleEntry["level"][];
+    limit?: number;
+  }): Promise<BrowserConsoleEntry[]> {
+    return [];
+  }
+
+  getPendingDialog(): BrowserPendingDialog | null {
+    return null;
+  }
+
+  async handleDialog(_action: "accept" | "dismiss", _promptText?: string): Promise<void> {}
+
+  async evaluate(_expression: string): Promise<BrowserEvaluateResult> {
+    return { ok: true, value: "undefined", type: "undefined" };
+  }
+
+  async pressKey(_keySequence: string): Promise<void> {}
+
+  async waitFor(_options: {
+    state?: "load" | "domcontentloaded" | "networkidle";
+    timeoutMs?: number;
+    url?: string;
+  }): Promise<void> {}
+
+  async readCdpEvents(_options?: {
+    methods?: string[];
+    limit?: number;
+  }): Promise<Array<{ method: string; params?: Record<string, unknown> }>> {
+    return [];
+  }
+
+  async clipboardReadText(): Promise<string> {
+    return "";
+  }
+
+  async clipboardWriteText(_text: string): Promise<void> {}
+
+  async locatorAction(
+    _selector: string,
+    _action: string,
+    _params?: {
+      value?: string;
+      attribute?: string;
+      by?: "css" | "role" | "text" | "label" | "placeholder" | "testid";
+      byValue?: string;
+      frame?: string;
+      nth?: number;
+    },
+  ): Promise<
+    | {
+        ok: true;
+        value?: string;
+        count?: number;
+        visible?: boolean;
+        enabled?: boolean;
+        info?: Record<string, unknown>;
+        screenshot?: { dataUrl: string; width: number; height: number };
+      }
+    | { ok: false; error: string }
+  > {
+    return { ok: true };
+  }
+
+  async uploadFile(_selector: string, _filePath: string): Promise<void> {}
+
+  async clickPoint(_x: number, _y: number, _keys?: string[]): Promise<void> {}
+
+  async cdpSend(_method: string, _params?: Record<string, unknown>): Promise<unknown> {
+    return {};
+  }
+
+  async expectNavigation(_timeoutMs?: number): Promise<void> {}
+
+  async dragPath(_points: Array<{ x: number; y: number }>): Promise<void> {}
+
+  async moveMouse(_x: number, _y: number): Promise<void> {}
+
+  async dblclickPoint(_x: number, _y: number): Promise<void> {}
+
+  async contentExport(): Promise<string> {
+    return "";
+  }
+
+  async downloadEvents(): Promise<Array<{ url: string; filename: string; path: string | null }>> {
+    return [];
+  }
+
   dispose(): void {
     this.disposed = true;
   }
@@ -247,6 +341,14 @@ function setup(options: Partial<BrowserManagerOptions> = {}): Setup {
   manager.registerSession(SESSION_B);
   manager.registerSession(SESSION_C);
   return { manager, hosts, hostOptions, states };
+}
+
+/** openTab 会在广播建 tab 请求前 await 设置加载（真实文件 IO），轮询等待请求到达。 */
+async function waitForRequests(requests: BrowserCreateTabRequest[], count: number): Promise<void> {
+  for (let index = 0; index < 100; index += 1) {
+    if (requests.length >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 describe("BrowserManager 会话隔离", () => {
@@ -365,6 +467,7 @@ describe("BrowserManager 会话隔离", () => {
     const { manager, hosts } = setup({ onCreateTabRequest: (request) => requests.push(request) });
 
     const openPromise = manager.openTab(SESSION_A, "https://example.com");
+    await waitForRequests(requests, 1);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       url: "https://example.com/",
@@ -386,6 +489,7 @@ describe("BrowserManager 会话隔离", () => {
 
     const openA = manager.openTab(SESSION_A, "https://a.example/");
     const openB = manager.openTab(SESSION_B, "https://b.example/");
+    await waitForRequests(requests, 2);
     const requestA = requests.find((request) => request.sessionKey === browserSessionKey(SESSION_A))!;
     const requestB = requests.find((request) => request.sessionKey === browserSessionKey(SESSION_B))!;
     expect(requestA).toBeDefined();
@@ -422,6 +526,7 @@ describe("BrowserManager 会话隔离", () => {
     const controller = new AbortController();
 
     const openPromise = manager.openTab(SESSION_A, "https://example.com", "agent", controller.signal);
+    await waitForRequests(requests, 1);
     controller.abort();
     await expect(openPromise).resolves.toMatchObject({ ok: false, error: "已取消" });
 
@@ -464,6 +569,26 @@ describe("BrowserManager 会话隔离", () => {
     const result = await manager.attach(SESSION_A, 999);
 
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining("不存在") });
+  });
+
+  test("attach 时 guest 初始 URL 尚未就绪（getURL 空串）视为 about:blank 放行", async () => {
+    // did-attach 触发时 guest 的 URL 可能尚未提交（getURL() 返回空串）；
+    // 此时必须放行，否则 attach 失败导致 renderer 移除 webview、openTab 挂起。
+    const { manager } = setup({
+      fromWebContentsId: () => fakeWebContents(sessionFor(SESSION_A), {} as WebContents, ""),
+    });
+    const result = await manager.attach(SESSION_A, 101);
+    expect(result).toMatchObject({ ok: true, tab: { url: "about:blank" } });
+    expect(manager.tabsList(SESSION_A)).toHaveLength(1);
+  });
+
+  test("attach 仍拒绝非空且非 http/https 的初始 URL", async () => {
+    const { manager } = setup({
+      fromWebContentsId: () => fakeWebContents(sessionFor(SESSION_A), {} as WebContents, "chrome://settings"),
+    });
+    const result = await manager.attach(SESSION_A, 101);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("URL 不符合") });
+    expect(manager.tabsList(SESSION_A)).toHaveLength(0);
   });
 
   test("未注册会话的 RPC 操作 fail-closed", async () => {
@@ -676,6 +801,21 @@ describe("BrowserManager 会话隔离", () => {
     expect(states).toHaveLength(0);
   });
 
+  test("始终允许策略放行点击后的跨站重定向", async () => {
+    const { manager, hostOptions } = setup();
+    const initial = await manager.getSettingsSnapshot();
+    const saved = await manager.saveSettings({
+      expectedRevision: initial.revision,
+      settings: { ...initial.settings, siteApproval: "always-allow" },
+    });
+    expect(saved.status).toBe("saved");
+
+    await manager.attach(SESSION_A, 101);
+    const guard = hostOptions.get(101)?.onAgentNavigation;
+    expect(guard).toBeDefined();
+    expect(guard?.("https://redirect.example/", "https://source.example/", "https://approved.example/")).toBe(true);
+  });
+
   test("设置快照与保存透传到设置服务（全局）", async () => {
     const { manager } = setup();
 
@@ -709,6 +849,64 @@ describe("BrowserManager 会话隔离", () => {
     });
     expect(updated.status).toBe("saved");
     expect(hosts.get(101)?.updatedSettings.at(-1)).toEqual({ maxSnapshotNodes: 444, cdpTimeoutMs: 3_000 });
+  });
+
+  test("媒体权限按默认值和站点覆盖同时约束 check/request", async () => {
+    const { manager } = setup();
+    const browserSession = sessionFor(SESSION_A) as unknown as {
+      setPermissionRequestHandler: { mock: { calls: unknown[][] } };
+      setPermissionCheckHandler: { mock: { calls: unknown[][] } };
+    };
+    const requestHandler = browserSession.setPermissionRequestHandler.mock.calls.at(-1)?.[0] as (
+      webContents: WebContents,
+      permission: string,
+      callback: (granted: boolean) => void,
+      details: { requestingUrl: string; securityOrigin?: string; mediaTypes?: Array<"video" | "audio"> },
+    ) => void;
+    const checkHandler = browserSession.setPermissionCheckHandler.mock.calls.at(-1)?.[0] as (
+      webContents: WebContents | null,
+      permission: string,
+      requestingOrigin: string,
+      details: { mediaType?: "video" | "audio" | "unknown" },
+    ) => boolean;
+
+    const initial = await manager.getSettingsSnapshot();
+    const denied: boolean[] = [];
+    requestHandler({} as WebContents, "media", (granted) => denied.push(granted), {
+      requestingUrl: "https://example.com/",
+      securityOrigin: "https://example.com",
+      mediaTypes: ["video"],
+    });
+    expect(denied).toEqual([false]);
+    expect(checkHandler(null, "media", "https://example.com", { mediaType: "video" })).toBe(false);
+
+    const saved = await manager.saveSettings({
+      expectedRevision: initial.revision,
+      settings: {
+        ...initial.settings,
+        mediaDefault: "allow",
+        mediaPermissions: [{ site: "blocked.example.com", camera: "deny", microphone: "deny" }],
+      },
+    });
+    expect(saved.status).toBe("saved");
+
+    const allowed: boolean[] = [];
+    requestHandler({} as WebContents, "media", (granted) => allowed.push(granted), {
+      requestingUrl: "https://example.com/",
+      securityOrigin: "https://example.com",
+      mediaTypes: ["video", "audio"],
+    });
+    expect(allowed).toEqual([true]);
+    expect(checkHandler(null, "media", "https://example.com", { mediaType: "audio" })).toBe(true);
+
+    const blocked: boolean[] = [];
+    requestHandler({} as WebContents, "media", (granted) => blocked.push(granted), {
+      requestingUrl: "https://blocked.example.com/",
+      securityOrigin: "https://blocked.example.com",
+      mediaTypes: ["video"],
+    });
+    expect(blocked).toEqual([false]);
+    expect(checkHandler(null, "media", "https://blocked.example.com", { mediaType: "video" })).toBe(false);
   });
 
   test("destroyed 事件移除 tab 并释放宿主，活跃回退", async () => {
@@ -754,6 +952,7 @@ describe("BrowserManager 会话隔离", () => {
     manager.registerSession(SESSION_A);
 
     const pending = manager.openTab(SESSION_A, "https://example.com");
+    await waitForRequests(requests, 1);
     const requestId = requests[0]!.requestId;
     const attach = await manager.attach(SESSION_A, 101, requestId);
 
@@ -775,6 +974,7 @@ describe("BrowserManager 会话隔离", () => {
     const { manager } = setup({ onCreateTabRequest: (request) => requests.push(request) });
 
     const pending = manager.openTab(SESSION_A, "example.com/foo");
+    await waitForRequests(requests, 1);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ url: "https://example.com/foo" });
     const requestId = requests[0]!.requestId;
@@ -946,5 +1146,76 @@ describe("BrowserManager 会话隔离", () => {
     expect(states.at(-1)?.tabs[0]?.loadError).toContain("无法连接服务器");
     host.emit({ type: "navigated", url: "https://example.com/", canGoBack: false, canGoForward: false });
     expect(states.at(-1)?.tabs[0]?.loadError).toBeUndefined();
+  });
+});
+
+describe("BrowserManager 新能力透传（对齐 Codex browser_use）", () => {
+  test("evaluate 透传到宿主并返回结果", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+    host.evaluate = vi.fn(async () => ({ ok: true, value: "2", type: "number" }));
+
+    const result = await manager.evaluate(SESSION_A, 1, "1 + 1");
+    expect(result).toMatchObject({ ok: true, result: { ok: true, value: "2" } });
+    expect(host.evaluate).toHaveBeenCalledWith("1 + 1");
+  });
+
+  test("pressKey 透传并激活 tab", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+    host.pressKey = vi.fn(async () => undefined);
+
+    const result = await manager.pressKey(SESSION_A, 1, "Control+Enter");
+    expect(result).toEqual({ ok: true });
+    expect(host.pressKey).toHaveBeenCalledWith("Control+Enter");
+    expect(manager.activeTab(SESSION_A)?.tabId).toBe(1);
+  });
+
+  test("readConsoleLogs 透传 filter/levels/limit", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+    host.readConsoleLogs = vi.fn(async () => [{ level: "log", message: "hello", timestamp: 1 }]);
+
+    const result = await manager.readConsoleLogs(SESSION_A, 1, { filter: "hello", limit: 5 });
+    expect(result.ok).toBe(true);
+    expect(host.readConsoleLogs).toHaveBeenCalledWith({ filter: "hello", limit: 5 });
+  });
+
+  test("locatorAction 透传选择器/操作/参数", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+    host.locatorAction = vi.fn(async () => ({ ok: true, count: 2 }));
+
+    const result = await manager.locatorAction(SESSION_A, 1, "#btn", "count");
+    expect(result).toMatchObject({ ok: true, count: 2 });
+    expect(host.locatorAction).toHaveBeenCalledWith("#btn", "count", {});
+  });
+
+  test("downloadMedia 透传 url/savePath", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+    host.downloadMedia = vi.fn(async () => undefined);
+
+    const result = await manager.downloadMedia(SESSION_A, 1, "https://example.com/f.zip", "/tmp/f.zip");
+    expect(result).toEqual({ ok: true });
+    expect(host.downloadMedia).toHaveBeenCalledWith("https://example.com/f.zip", "/tmp/f.zip");
+  });
+
+  test("closeTab 广播 close 请求；未知 tab 报错", async () => {
+    const requests: Array<{ sessionKey: string; tabId: number }> = [];
+    const { manager } = setup({ onCloseTabRequest: (request) => requests.push(request) });
+    await manager.attach(SESSION_A, 101);
+
+    const result = await manager.closeTab(SESSION_A, 1);
+    expect(result).toEqual({ ok: true });
+    expect(requests).toEqual([{ sessionKey: browserSessionKey(SESSION_A), tabId: 1 }]);
+
+    const missing = await manager.closeTab(SESSION_A, 999);
+    expect(missing).toMatchObject({ ok: false, error: expect.stringContaining("不存在") });
   });
 });

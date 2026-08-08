@@ -1,7 +1,12 @@
 import { EventEmitter } from "node:events";
 import type { WebContents } from "electron";
+import { clipboard as electronClipboard } from "electron";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { WebContentsHostController } from "../src/main/browser/browser-host-controller.ts";
+
+vi.mock("electron", () => ({
+  clipboard: { writeText: vi.fn(), readText: vi.fn(() => "mocked") },
+}));
 
 const AX_TREE = {
   nodes: [
@@ -48,6 +53,8 @@ class FakeWebContents extends EventEmitter {
     goBack: vi.fn(),
     goForward: vi.fn(),
   };
+  session = new EventEmitter();
+  downloadURL = vi.fn();
   debugger = Object.assign(new EventEmitter(), {
     attach: vi.fn(() => {
       this.debuggerDetached = false;
@@ -301,5 +308,114 @@ describe("WebContentsHostController CDP integration", () => {
     host.dispose();
     webContents.emit("context-menu", event, params);
     expect(onContextMenu).toHaveBeenCalledOnce();
+  });
+});
+
+describe("WebContentsHostController 新能力（对齐 Codex browser_use）", () => {
+  test("pressKey 组合键：修饰键按下→主键 down/up→修饰键松开（ControlOrMeta 平台解析）", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+    webContents.debugger.sendCommand.mockClear();
+
+    await host.pressKey("ControlOrMeta+Enter");
+
+    const calls = webContents.debugger.sendCommand.mock.calls.filter(
+      (call: unknown[]) => call[0] === "Input.dispatchKeyEvent",
+    );
+    // 4 次：修饰键 down、主键 down、主键 up、修饰键 up
+    expect(calls.length).toBe(4);
+    const [modDown, keyDown, keyUp, modUp] = calls.map((call: unknown[]) => call[1]);
+    const modifier = process.platform === "darwin" ? { key: "Meta", modifiers: 4 } : { key: "Control", modifiers: 2 };
+    expect(modDown).toMatchObject({ type: "rawKeyDown", ...modifier });
+    expect(keyDown).toMatchObject({ type: "keyDown", key: "Enter", modifiers: modifier.modifiers });
+    expect(keyUp).toMatchObject({ type: "keyUp", key: "Enter", modifiers: modifier.modifiers });
+    expect(modUp).toMatchObject({ type: "keyUp", ...modifier });
+  });
+
+  test("pressKey 普通按键与未知按键错误", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+
+    await host.pressKey("Escape");
+    const calls = webContents.debugger.sendCommand.mock.calls.filter(
+      (call: unknown[]) => call[0] === "Input.dispatchKeyEvent",
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0]![1]).toMatchObject({ type: "rawKeyDown", key: "Escape", code: "Escape" });
+
+    await expect(host.pressKey("NoSuchKey")).rejects.toThrow("未知按键");
+  });
+
+  test("evaluate 返回序列化结果与异常描述", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+
+    webContents.debugger.sendCommand.mockImplementation(async (method: string) => {
+      if (method === "Runtime.evaluate") return { result: { type: "number", value: 2 } };
+      return { result: { value: { width: 800, height: 600, dpr: 1 } } };
+    });
+    const ok = await host.evaluate("1 + 1");
+    expect(ok).toMatchObject({ ok: true, value: "2", type: "number" });
+  });
+
+  test("clipboard 读写经 Electron 系统剪贴板", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+
+    await host.clipboardWriteText("hello");
+    expect(electronClipboard.writeText).toHaveBeenCalledWith("hello");
+    await expect(host.clipboardReadText()).resolves.toBe("mocked");
+  });
+
+  test("downloadEvents 记录 will-download（含 setSavePath 与 done 后最终路径）", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+
+    const session = webContents.session as unknown as EventEmitter;
+    const item = new EventEmitter() as unknown as {
+      getURL: () => string;
+      getFilename: () => string;
+      getSavePath: () => string;
+      setSavePath: ReturnType<typeof vi.fn>;
+      once: (event: string, cb: () => void) => void;
+    };
+    Object.assign(item, {
+      getURL: () => "https://example.com/file.zip",
+      getFilename: () => "file.zip",
+      getSavePath: () => "/tmp/file.zip",
+      setSavePath: vi.fn(),
+    });
+
+    session.emit("will-download", {}, item);
+    (item as EventEmitter).emit("done");
+
+    const downloads = await host.downloadEvents();
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0]).toMatchObject({ url: "https://example.com/file.zip", filename: "file.zip" });
+  });
+
+  test("downloadMedia 设置保存路径并触发 downloadURL", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+    webContents.downloadURL = vi.fn();
+
+    await host.downloadMedia("https://example.com/file.zip", "/tmp/saved.zip");
+    expect(webContents.downloadURL).toHaveBeenCalledWith("https://example.com/file.zip");
+
+    await expect(host.downloadMedia("file:///etc/passwd", "/tmp/x")).rejects.toThrow("仅支持 http/https");
+  });
+
+  test("waitFor timeout 分支抛错", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+
+    await expect(host.waitFor({ timeoutMs: 10 })).resolves.toBeUndefined();
   });
 });

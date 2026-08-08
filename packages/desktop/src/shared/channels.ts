@@ -129,6 +129,7 @@ export const CHANNELS = {
   browserAction: "desktop:browser:action",
   browserTabsList: "desktop:browser:tabs-list",
   browserCreateTabRequest: "desktop:browser:create-tab-request",
+  browserCloseTabRequest: "desktop:browser:close-tab-request",
   browserStateChanged: "desktop:browser:state-changed",
   browserHistory: "desktop:browser:history",
   browserAnnotationPick: "desktop:browser:annotation-pick",

@@ -18,7 +18,12 @@
 
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { BrowserAction, BrowserActionTarget, BrowserSessionIdentity } from "../../shared/browser-contracts.ts";
+import type {
+  BrowserAction,
+  BrowserActionTarget,
+  BrowserConsoleEntry,
+  BrowserSessionIdentity,
+} from "../../shared/browser-contracts.ts";
 import { browserSessionKey } from "../../shared/browser-contracts.ts";
 import type { BrowserManager } from "./browser-manager.ts";
 
@@ -244,7 +249,203 @@ async function dispatch(
     case "screenshot": {
       requireParams(params, ["tabId"]);
       const safe = params as Record<string, unknown>;
-      return { ok: true, data: await manager.screenshot(identity, Number(safe.tabId), "agent", signal) };
+      return {
+        ok: true,
+        data: await manager.screenshot(identity, Number(safe.tabId), "agent", signal, safe.fullPage === true),
+      };
+    }
+    case "consoleLogs": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.readConsoleLogs(identity, Number(safe.tabId), {
+          ...(typeof safe.filter === "string" ? { filter: safe.filter } : {}),
+          ...(Array.isArray(safe.levels) ? { levels: safe.levels as BrowserConsoleEntry["level"][] } : {}),
+          ...(typeof safe.limit === "number" ? { limit: safe.limit } : {}),
+        }),
+      };
+    }
+    case "getDialog": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.getPendingDialog(identity, Number(safe.tabId)) };
+    }
+    case "handleDialog": {
+      requireParams(params, ["tabId", "action"]);
+      const safe = params as Record<string, unknown>;
+      if (safe.action !== "accept" && safe.action !== "dismiss") {
+        return { ok: false, error: "action 参数非法：需为 accept|dismiss" };
+      }
+      return {
+        ok: true,
+        data: await manager.handleDialog(
+          identity,
+          Number(safe.tabId),
+          safe.action,
+          typeof safe.promptText === "string" ? safe.promptText : undefined,
+        ),
+      };
+    }
+    case "evaluate": {
+      requireParams(params, ["tabId", "expression"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.evaluate(identity, Number(safe.tabId), String(safe.expression)) };
+    }
+    case "pressKey": {
+      requireParams(params, ["tabId", "key"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.pressKey(identity, Number(safe.tabId), String(safe.key)) };
+    }
+    case "waitFor": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.waitFor(identity, Number(safe.tabId), {
+          ...(typeof safe.state === "string"
+            ? { state: safe.state as "load" | "domcontentloaded" | "networkidle" }
+            : {}),
+          ...(typeof safe.timeoutMs === "number" ? { timeoutMs: safe.timeoutMs } : {}),
+          ...(typeof safe.url === "string" ? { url: safe.url } : {}),
+        }),
+      };
+    }
+    case "cdpEvents": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.readCdpEvents(identity, Number(safe.tabId), {
+          ...(Array.isArray(safe.methods) ? { methods: safe.methods as string[] } : {}),
+          ...(typeof safe.limit === "number" ? { limit: safe.limit } : {}),
+        }),
+      };
+    }
+    case "clipboardRead": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.clipboardRead(identity, Number(safe.tabId)) };
+    }
+    case "clipboardWrite": {
+      requireParams(params, ["tabId", "text"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.clipboardWrite(identity, Number(safe.tabId), String(safe.text)) };
+    }
+    case "locatorAction": {
+      requireParams(params, ["tabId", "selector", "action"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.locatorAction(identity, Number(safe.tabId), String(safe.selector), safe.action as never, {
+          ...(typeof safe.value === "string" ? { value: safe.value } : {}),
+          ...(typeof safe.attribute === "string" ? { attribute: safe.attribute } : {}),
+          ...(typeof safe.by === "string"
+            ? { by: safe.by as "css" | "role" | "text" | "label" | "placeholder" | "testid" }
+            : {}),
+          ...(typeof safe.name === "string" ? { name: safe.name } : {}),
+          ...(typeof safe.byValue === "string" ? { byValue: safe.byValue } : {}),
+          ...(typeof safe.frame === "string" ? { frame: safe.frame } : {}),
+          ...(typeof safe.nth === "number" ? { nth: safe.nth } : {}),
+        }),
+      };
+    }
+    case "cdpSend": {
+      requireParams(params, ["tabId", "method"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.cdpSend(
+          identity,
+          Number(safe.tabId),
+          String(safe.method),
+          typeof safe.params === "object" && safe.params !== null
+            ? (safe.params as Record<string, unknown>)
+            : undefined,
+        ),
+      };
+    }
+    case "expectNavigation": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.expectNavigation(
+          identity,
+          Number(safe.tabId),
+          typeof safe.timeoutMs === "number" ? safe.timeoutMs : undefined,
+        ),
+      };
+    }
+    case "dragPath": {
+      requireParams(params, ["tabId", "points"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.dragPath(
+          identity,
+          Number(safe.tabId),
+          Array.isArray(safe.points) ? (safe.points as Array<{ x: number; y: number }>) : [],
+        ),
+      };
+    }
+    case "moveMouse": {
+      requireParams(params, ["tabId", "x", "y"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.moveMouse(identity, Number(safe.tabId), Number(safe.x), Number(safe.y)) };
+    }
+    case "dblclickPoint": {
+      requireParams(params, ["tabId", "x", "y"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.dblclickPoint(identity, Number(safe.tabId), Number(safe.x), Number(safe.y)),
+      };
+    }
+    case "contentExport": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.contentExport(identity, Number(safe.tabId)) };
+    }
+    case "downloads": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.downloadEvents(identity, Number(safe.tabId)) };
+    }
+    case "uploadFile": {
+      requireParams(params, ["tabId", "selector", "path"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.uploadFile(identity, Number(safe.tabId), String(safe.selector), String(safe.path)),
+      };
+    }
+    case "downloadMedia": {
+      requireParams(params, ["tabId", "url", "savePath"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.downloadMedia(identity, Number(safe.tabId), String(safe.url), String(safe.savePath)),
+      };
+    }
+    case "clickPoint": {
+      requireParams(params, ["tabId", "x", "y"]);
+      const safe = params as Record<string, unknown>;
+      return {
+        ok: true,
+        data: await manager.clickPoint(
+          identity,
+          Number(safe.tabId),
+          Number(safe.x),
+          Number(safe.y),
+          Array.isArray(safe.keys) ? (safe.keys as string[]) : undefined,
+        ),
+      };
+    }
+    case "closeTab": {
+      requireParams(params, ["tabId"]);
+      const safe = params as Record<string, unknown>;
+      return { ok: true, data: await manager.closeTab(identity, Number(safe.tabId)) };
     }
     case "clearData":
       return { ok: true, data: await manager.clearSessionData(identity, signal) };
@@ -360,6 +561,7 @@ function parseBrowserAction(value: unknown): BrowserAction | null {
       elementIndex: action.elementIndex,
       text: action.text,
       submit: action.submit === true,
+      replace: action.replace === true,
       ...(target ? { target } : {}),
     };
   }

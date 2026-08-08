@@ -29,11 +29,15 @@ import {
   type BrowserAnnotationPickResult,
   type BrowserAttachResult,
   type BrowserClipboardResult,
+  type BrowserCloseTabRequest,
+  type BrowserConsoleEntry,
   type BrowserCreateTabRequest,
+  type BrowserEvaluateResult,
   type BrowserInspectElementResult,
   type BrowserNavigateResult,
   type BrowserNavigationTargetResult,
   type BrowserOpenTabResult,
+  type BrowserPendingDialog,
   type BrowserScreenshotResult,
   type BrowserSessionIdentity,
   type BrowserSnapshotResult,
@@ -49,7 +53,7 @@ import type {
   SaveBrowserSettingsResult,
 } from "../../shared/browser-settings-contracts.ts";
 import { defaultBrowserSettings } from "../../shared/browser-settings-contracts.ts";
-import { checkSiteAccess } from "../../shared/browser-site-policy.ts";
+import { checkSiteAccess, defaultSiteApproval, siteMatches } from "../../shared/browser-site-policy.ts";
 import { type BrowserContextMenuActions, buildBrowserContextMenuTemplate } from "./browser-context-menu.ts";
 import {
   type BrowserHostController,
@@ -66,6 +70,8 @@ export interface BrowserManagerOptions {
   onStateChanged?: (event: BrowserStateEvent) => void;
   /** 工具侧建 tab 请求广播（携带 sessionKey）；由 index.ts 注入。 */
   onCreateTabRequest?: (request: BrowserCreateTabRequest) => void;
+  /** 工具 browser.close 触发：请求 renderer 删除对应视图（随后 renderer detach 完成移除）。 */
+  onCloseTabRequest?: (request: BrowserCloseTabRequest) => void;
   /** 服务日志（可选）。 */
   log?: (text: string) => void;
   /** 测试注入：替换宿主创建逻辑。 */
@@ -222,8 +228,12 @@ export class BrowserManager {
     if (!resolved.hostWebContents) {
       return { ok: false, error: `webContents ${webContentsId} 不是浏览器 guest` };
     }
+    // did-attach 触发时 guest 的初始 URL 可能尚未提交（getURL() 返回空串）；
+    // webview 元素始终以 about:blank 起步，此时视为 about:blank 放行，否则
+    // attach 必然失败导致 renderer 移除 webview、openTab 请求永远挂起。
     const initialUrl = resolved.getURL();
-    if (!isBrowserWebviewUrl(initialUrl)) {
+    const effectiveInitialUrl = initialUrl.length === 0 ? "about:blank" : initialUrl;
+    if (!isBrowserWebviewUrl(effectiveInitialUrl)) {
       return { ok: false, error: `webContents ${webContentsId} 的 URL 不符合浏览器页面要求` };
     }
 
@@ -308,6 +318,19 @@ export class BrowserManager {
     if (tabId !== undefined) this.removeEntry(state, tabId);
   }
 
+  /** 工具关闭标签页：广播 close 请求由 renderer 删除视图（视图 detach 时本侧移除 entry）。 */
+  async closeTab(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    this.options.onCloseTabRequest?.({ sessionKey: state.sessionKey, tabId });
+    return { ok: true };
+  }
+
   /** 切换活跃 tab；不存在时返回 null。 */
   selectTab(identity: BrowserSessionIdentity, tabId: number): BrowserTab | null {
     const state = this.requireSession(identity);
@@ -344,6 +367,11 @@ export class BrowserManager {
     const state = this.requireSession(identity);
     if (!state) return { ok: false, error: "未知的浏览器会话" };
     if (this.disposed) return { ok: false, error: "浏览器服务已关闭" };
+    if (source === "agent") {
+      await this.settingsReady;
+      const settingsError = this.agentSettingsError();
+      if (settingsError !== null) return { ok: false, error: settingsError };
+    }
     const normalized = normalizeNavigateUrl(url);
     if (!normalized) return { ok: false, error: "仅支持 http/https 链接" };
     if (source === "popup") await this.settingsReady;
@@ -385,14 +413,22 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (source === "agent") this.activateAgentTab(state, tabId);
+    if (source === "agent") {
+      await this.settingsReady;
+      const settingsError = this.agentSettingsError();
+      if (settingsError !== null) return { ok: false, error: settingsError };
+      this.activateAgentTab(state, tabId);
+    }
     if (source === "agent") {
       const policyError = this.blockedAgentSiteError(entry.tab.url);
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
       const snapshot = await withAbort(
-        () => entry.host.snapshot({ withScreenshot: opts.withScreenshot === true }),
+        () =>
+          entry.host.snapshot({
+            withScreenshot: opts.withScreenshot === true && this.runtimeSettings.includeScreenshots,
+          }),
         signal,
         () => entry.host.cancelPendingOperations(),
       );
@@ -420,7 +456,12 @@ export class BrowserManager {
     if (source === "agent" && (action.type === "click" || action.type === "type") && action.target === undefined) {
       return { ok: false, error: "元素引用缺少快照指纹，请重新 browser_snapshot 后再操作", staleRef: true };
     }
-    if (source === "agent") this.activateAgentTab(state, tabId);
+    if (source === "agent") {
+      await this.settingsReady;
+      const settingsError = this.agentSettingsError();
+      if (settingsError !== null) return { ok: false, error: settingsError };
+      this.activateAgentTab(state, tabId);
+    }
     if (source === "agent") {
       const expectedUrl = action.type === "scroll" ? action.expectedUrl : action.target?.pageUrl;
       if (expectedUrl !== undefined && !sameBrowserUrl(expectedUrl, entry.tab.url)) {
@@ -471,6 +512,11 @@ export class BrowserManager {
     if (signal?.aborted) return { ok: false, error: "已取消" };
     const state = this.requireSession(identity);
     if (!state) return { ok: false, error: "未知的浏览器会话" };
+    if (source === "agent") {
+      await this.settingsReady;
+      const settingsError = this.agentSettingsError();
+      if (settingsError !== null) return { ok: false, error: settingsError };
+    }
     const normalized = normalizeNavigateUrl(url) ?? (source === "user" ? normalizeInternalBrowserPage(url) : null);
     if (!normalized) return { ok: false, error: "仅支持 http/https 链接或受支持的 Chromium 内置页面" };
     const entry = state.entries.get(tabId);
@@ -479,7 +525,9 @@ export class BrowserManager {
     if (source === "popup" && checkSiteAccess(this.runtimeSettings, normalized) !== "allowed") {
       return { ok: false, error: `站点 ${new URL(normalized).host} 未列入允许列表，页面弹窗已阻止` };
     }
-    if (source === "agent") this.activateAgentTab(state, tabId);
+    if (source === "agent") {
+      this.activateAgentTab(state, tabId);
+    }
     if (source === "agent") {
       const currentPolicyError = this.blockedAgentSiteError(entry.tab.url);
       if (currentPolicyError !== null) return { ok: false, error: currentPolicyError };
@@ -606,7 +654,12 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (_source === "agent") this.activateAgentTab(state, tabId);
+    if (_source === "agent") {
+      await this.settingsReady;
+      const settingsError = this.agentSettingsError();
+      if (settingsError !== null) return { ok: false, error: settingsError };
+      this.activateAgentTab(state, tabId);
+    }
     if (_source === "agent") {
       const policyError = this.blockedAgentSiteError(entry.tab.url);
       if (policyError !== null) return { ok: false, error: policyError };
@@ -640,6 +693,7 @@ export class BrowserManager {
     tabId: number,
     source: BrowserOperationSource = "user",
     signal?: AbortSignal,
+    fullPage = false,
   ): Promise<BrowserScreenshotResult> {
     if (signal?.aborted) return { ok: false, error: "已取消" };
     const state = this.requireSession(identity);
@@ -647,18 +701,465 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (source === "agent") this.activateAgentTab(state, tabId);
+    if (source === "agent") {
+      await this.settingsReady;
+      const settingsError = this.agentSettingsError();
+      if (settingsError !== null) return { ok: false, error: settingsError };
+      this.activateAgentTab(state, tabId);
+    }
     if (source === "agent") {
       const policyError = this.blockedAgentSiteError(entry.tab.url);
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
       const shot = await withAbort(
-        () => entry.host.captureScreenshot(),
+        () => entry.host.captureScreenshot({ fullPage }),
         signal,
         () => entry.host.cancelPendingOperations(),
       );
       return { ok: true, ...shot };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 读取页面 console 日志（对齐 Codex tab_dev_logs；拉取即清空）。 */
+  async readConsoleLogs(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    options: { filter?: string; levels?: BrowserConsoleEntry["level"][]; limit?: number } = {},
+  ): Promise<{ ok: true; logs: BrowserConsoleEntry[] } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      const logs = await entry.host.readConsoleLogs(options);
+      return { ok: true, logs };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 当前挂起的 JS 对话框（对齐 Codex tab_get_js_dialog）。 */
+  async getPendingDialog(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+  ): Promise<{ ok: true; dialog: BrowserPendingDialog | null } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    this.activateAgentTab(state, tabId);
+    try {
+      return { ok: true, dialog: entry.host.getPendingDialog() };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 响应挂起的 JS 对话框（对齐 Codex tab_handle_js_dialog）。 */
+  async handleDialog(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    action: "accept" | "dismiss",
+    promptText?: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    try {
+      await entry.host.handleDialog(action, promptText);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 在页面上下文执行 JS（对齐 Codex PlaywrightEvaluate）。 */
+  async evaluate(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    expression: string,
+  ): Promise<{ ok: true; result: BrowserEvaluateResult } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      const result = await entry.host.evaluate(expression);
+      return { ok: true, result };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 按键（对齐 Codex CuaKeypress）。 */
+  async pressKey(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    keySequence: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.pressKey(keySequence);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 等待页面条件（对齐 Codex waitFor*）。 */
+  async waitFor(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    options: { state?: "load" | "domcontentloaded" | "networkidle"; timeoutMs?: number; url?: string } = {},
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.waitFor(options);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 读取缓冲的 CDP 事件（对齐 Codex cdp.readEvents）。 */
+  async readCdpEvents(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    options: { methods?: string[]; limit?: number } = {},
+  ): Promise<
+    { ok: true; events: Array<{ method: string; params?: Record<string, unknown> }> } | { ok: false; error: string }
+  > {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    try {
+      const events = await entry.host.readCdpEvents(options);
+      return { ok: true, events };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 读剪贴板文本。 */
+  async clipboardRead(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+  ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    this.activateAgentTab(state, tabId);
+    try {
+      const text = await entry.host.clipboardReadText();
+      return { ok: true, text };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 写剪贴板文本。 */
+  async clipboardWrite(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    text: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.clipboardWriteText(text);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 按选择器执行元素操作（对齐 Codex PlaywrightLocator）。 */
+  async locatorAction(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    selector: string,
+    action: Parameters<BrowserHostController["locatorAction"]>[1],
+    params: {
+      value?: string;
+      attribute?: string;
+      by?: "css" | "role" | "text" | "label" | "placeholder" | "testid";
+      byValue?: string;
+      frame?: string;
+      nth?: number;
+    } = {},
+  ): Promise<
+    | {
+        ok: true;
+        value?: string;
+        count?: number;
+        visible?: boolean;
+        enabled?: boolean;
+        info?: Record<string, unknown>;
+        screenshot?: { dataUrl: string; width: number; height: number };
+      }
+    | { ok: false; error: string }
+  > {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      return await entry.host.locatorAction(selector, action, params);
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 原始 CDP 命令（对齐 Codex cdp.send）。 */
+  async cdpSend(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    method: string,
+    params?: Record<string, unknown>,
+  ): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      const result = await entry.host.cdpSend(method, params);
+      return { ok: true, result };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 等待下一次导航完成（对齐 Codex expectNavigation）。 */
+  async expectNavigation(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    timeoutMs?: number,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.expectNavigation(timeoutMs);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 拖拽：沿坐标路径移动鼠标（对齐 Codex CUA drag）。 */
+  async dragPath(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    points: Array<{ x: number; y: number }>,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.dragPath(points);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 移动鼠标到坐标（对齐 Codex CUA move）。 */
+  async moveMouse(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    x: number,
+    y: number,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.moveMouse(x, y);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 坐标双击（对齐 Codex CUA double_click）。 */
+  async dblclickPoint(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    x: number,
+    y: number,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.dblclickPoint(x, y);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 导出页面主文本（对齐 Codex ContentAPI.export）。 */
+  async contentExport(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+  ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      const text = await entry.host.contentExport();
+      return { ok: true, text };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 最近下载记录（对齐 Codex downloadMedia 的追踪能力）。 */
+  async downloadEvents(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+  ): Promise<
+    | { ok: true; downloads: Array<{ url: string; filename: string; path: string | null }> }
+    | { ok: false; error: string }
+  > {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    try {
+      const downloads = await entry.host.downloadEvents();
+      return { ok: true, downloads };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 文件上传（对齐 Codex PlaywrightFileChooser.setFiles）。 */
+  async uploadFile(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    selector: string,
+    filePath: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.uploadFile(selector, filePath);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 触发下载并保存（对齐 Codex downloadMedia）。 */
+  async downloadMedia(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    url: string,
+    savePath: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.downloadMedia(url, savePath);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: messageOf(error) };
+    }
+  }
+
+  /** 坐标点击（对齐 Codex CUA clickPoint）。 */
+  async clickPoint(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    x: number,
+    y: number,
+    keys?: string[],
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const state = this.requireSession(identity);
+    if (!state) return { ok: false, error: "未知的浏览器会话" };
+    const entry = state.entries.get(tabId);
+    if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    if (policyError !== null) return { ok: false, error: policyError };
+    this.activateAgentTab(state, tabId);
+    try {
+      await entry.host.clickPoint(x, y, keys);
+      return { ok: true };
     } catch (error) {
       return { ok: false, error: messageOf(error) };
     }
@@ -932,9 +1433,28 @@ export class BrowserManager {
     if (existing) return existing;
     const partition = browserPartitionFor(identity);
     const browserSession = session.fromPartition(partition);
-    // 分区权限默认全部拒绝（spec §10）：未设置 handler 时 Electron 默认放行
-    // 权限请求，恶意页面可静默取得摄像头/麦克风/地理位置等。
-    browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    // 分区权限默认 fail-closed：媒体权限按浏览器设置中的默认值和站点覆盖处理，
+    // 其他 Chromium 权限（地理位置、通知、剪贴板等）统一拒绝。
+    browserSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+      if (permission !== "media") return false;
+      const mediaType = (details as Electron.PermissionCheckHandlerHandlerDetails).mediaType;
+      return mediaType !== undefined && mediaType !== "unknown"
+        ? mediaPermissionAllowed(this.runtimeSettings, requestingOrigin, mediaType)
+        : false;
+    });
+    browserSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+      if (permission !== "media") {
+        callback(false);
+        return;
+      }
+      const request = details as Electron.MediaAccessPermissionRequest;
+      const origin = request.securityOrigin ?? request.requestingUrl;
+      const mediaTypes = request.mediaTypes ?? [];
+      callback(
+        mediaTypes.length > 0 &&
+          mediaTypes.every((mediaType) => mediaPermissionAllowed(this.runtimeSettings, origin, mediaType)),
+      );
+    });
     const onWillDownload = (_event: Electron.Event, item: Electron.DownloadItem): void => {
       const directory = this.runtimeSettings.downloadDirectory;
       if (!directory) return;
@@ -1066,6 +1586,11 @@ export class BrowserManager {
     }
   }
 
+  private agentSettingsError(): string | null {
+    if (this.runtimeSettingsLoadFailed) return "无法读取浏览器设置，请确认浏览器服务正常后重试";
+    return this.runtimeSettings.enabled ? null : "内置浏览器已在设置中关闭";
+  }
+
   private blockedAgentSiteError(url: string): string | null {
     if (!this.runtimeSettingsLoaded) return null;
     if (this.runtimeSettingsLoadFailed) return "无法读取浏览器访问策略，请确认浏览器服务正常后重试";
@@ -1091,6 +1616,7 @@ export class BrowserManager {
     const current = parseHttpUrl(currentUrl);
     if (!target) return false;
     if (checkSiteAccess(this.runtimeSettings, target.href) === "blocked") return false;
+    if (defaultSiteApproval(this.runtimeSettings) === "always-allow") return true;
     if (checkSiteAccess(this.runtimeSettings, target.href) === "allowed") return true;
     const approved = approvedUrl ? parseHttpUrl(approvedUrl) : null;
     if (approved && approved.href === target.href) return true;
@@ -1235,6 +1761,16 @@ function parseHttpUrl(raw: string): URL | null {
   } catch {
     return null;
   }
+}
+
+function mediaPermissionAllowed(settings: BrowserSettings, origin: string, mediaType: "video" | "audio"): boolean {
+  if (!origin || checkSiteAccess(settings, origin) === "blocked") return false;
+  const sitePermission = settings.mediaPermissions.find((entry) => siteMatches(entry.site, origin));
+  const decision =
+    mediaType === "video"
+      ? (sitePermission?.camera ?? settings.mediaDefault)
+      : (sitePermission?.microphone ?? settings.mediaDefault);
+  return decision === "allow";
 }
 
 function messageOf(error: unknown): string {

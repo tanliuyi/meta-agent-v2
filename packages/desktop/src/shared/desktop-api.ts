@@ -21,6 +21,7 @@ import type {
   BrowserAnnotationPickResult,
   BrowserAttachResult,
   BrowserClipboardResult,
+  BrowserCloseTabRequest,
   BrowserCreateTabRequest,
   BrowserHistoryEntry,
   BrowserNavigateResult,
@@ -384,5 +385,7 @@ export interface DesktopApi {
     onStateChanged(listener: (event: BrowserStateEvent) => void): () => void;
     /** main 请求创建新 tab（携带 sessionKey）；返回取消订阅函数。 */
     onCreateTabRequest(listener: (request: BrowserCreateTabRequest) => void): () => void;
+    /** main 请求关闭指定 tab（携带 sessionKey + tabId）；返回取消订阅函数。 */
+    onCloseTabRequest(listener: (request: BrowserCloseTabRequest) => void): () => void;
   };
 }
