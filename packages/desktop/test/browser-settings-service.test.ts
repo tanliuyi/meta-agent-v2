@@ -56,6 +56,37 @@ describe("BrowserSettingsService", () => {
     });
   });
 
+  test("保存站点审批和媒体权限设置并规范化网站", async () => {
+    const snapshot = await service.getSnapshot();
+    const saved = await service.saveConfig({
+      expectedRevision: snapshot.revision,
+      settings: {
+        ...snapshot.settings,
+        siteApproval: "always-allow",
+        historyAccess: "always-allow",
+        mediaDefault: "deny",
+        mediaPermissions: [{ site: "https://Example.com/path", camera: "allow", microphone: "deny" }],
+      },
+    });
+
+    expect(saved.status).toBe("saved");
+    expect(saved.status === "saved" ? saved.snapshot.settings : null).toMatchObject({
+      siteApproval: "always-allow",
+      historyAccess: "always-allow",
+      mediaPermissions: [{ site: "example.com", camera: "allow", microphone: "deny" }],
+    });
+  });
+
+  test("拒绝缺少新权限字段的恶意保存输入", async () => {
+    const snapshot = await service.getSnapshot();
+    await expect(
+      service.saveConfig({
+        expectedRevision: snapshot.revision,
+        settings: { allowSites: [], blockSites: [] } as never,
+      }),
+    ).rejects.toThrow("Invalid browser settings save input");
+  });
+
   test("保存配置时保留高级未知字段并检测外部冲突", async () => {
     await mkdir(userDataDir, { recursive: true });
     await writeFile(

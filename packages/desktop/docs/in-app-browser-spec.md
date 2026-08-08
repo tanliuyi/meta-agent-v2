@@ -273,12 +273,19 @@ P1 增加（spec §5 原草案形状）：`browserTabsList`、`browserTabOpen/Cl
 
 ```ts
 interface BrowserSettings {
-  allowSites: string[];      // 允许 Agent 直接操作的站点（默认空 = 每次询问）
-  blockSites: string[];      // 禁止站点
+  enabled: boolean;             // 是否允许 Agent 使用内置浏览器
+  allowSites: string[];         // 允许 Agent 直接操作的站点
+  blockSites: string[];         // 禁止站点
+  siteApproval: "always-allow" | "always-ask" | "always-deny";
+  historyAccess: "always-allow" | "always-ask" | "always-deny";
+  mediaDefault: "allow" | "deny";
+  mediaPermissions: Array<{ site: string; camera: "allow" | "deny"; microphone: "allow" | "deny" }>;
+  includeScreenshots: boolean;
   downloadDirectory: string | null; // null = 系统下载目录
-  maxSnapshotNodes: number;  // 默认 200
-  cdpTimeoutMs: number;      // 默认 10_000
-  restoreTabsOnLaunch: boolean; // 默认 true；P1 才消费（P0 面板为内存态 URL 快照恢复）
+  maxSnapshotNodes: number;          // 默认 200
+  cdpTimeoutMs: number;              // 默认 10_000
+  restoreTabsOnLaunch: boolean;      // 默认 true
+  confirmSensitiveActions: "all" | "unlisted-sites";
 }
 ```
 
@@ -287,7 +294,7 @@ interface BrowserSettings {
 ## 10. 安全与权限
 
 - **分区隔离**：`persist:browser` 独立 partition；浏览器内登录态与主应用 session 无关；清除数据只影响该分区。
-- **权限请求**：partition session `setPermissionRequestHandler`：默认拒绝；`media` 类权限弹窗询问（后续可加 UI）；`geolocation`/`notifications`/`clipboard-read` 默认拒绝。**P0 已实现默认全拒绝**（BrowserManager 构造时对 `persist:browser` 分区设置）；media 询问与细粒度放行 P1。
+- **权限请求**：partition session 同时安装 `setPermissionCheckHandler` 与 `setPermissionRequestHandler`。地理位置、通知、剪贴板等非媒体权限默认拒绝；摄像头/麦克风按 `mediaDefault` 和 `mediaPermissions` 的 host 覆盖决定，默认拒绝。
 - **弹窗**：`setWindowOpenHandler` → 全部转为新 tab（webview 内打开）；拒绝 `window.open` 直接创建新窗口。
 - **下载**：`will-download` → 存 `downloadDirectory` 或系统下载目录；不在 webview 内触发另存为 UI（P2 可加下载通知）。
 - **导航策略**：允许 `http`/`https`；`file://` 默认禁止（本地 Preview 场景 P2 显式白名单再开放）；`will-navigate` 记录并广播（用于 UI 展示与审计）。
@@ -296,11 +303,12 @@ interface BrowserSettings {
 
 ### 10.5 人机交互与审批（映射 Codex approval 模型到 pi 原生能力）
 
-- **站点级权限**：`allowSites` 为空时，Agent 对未允许站点首次操作前必须经用户确认；`blockSites` 命中直接拒绝（工具返回错误）。
+- **站点级权限**：`blockSites` 命中直接拒绝；`allowSites` 命中直接放行；未列入网站按 `siteApproval` 处理（始终允许、始终询问或始终拒绝）。设置页支持添加/删除网站覆盖。
+- **媒体权限**：设置页“网站设置”维护默认摄像头/麦克风决定和按 host 的覆盖；主进程在 Electron permission check/request 两条链路上使用同一策略。
 - **敏感操作确认**：通过 pi 扩展事件 `tool_call` 拦截实现（`pi.on("tool_call", ...)` 返回 `{ block: true, reason }`，`ctx.ui.confirm` 弹确认）——对应 Codex 的 approval policy on-request；确认粒度默认「敏感动作全确认」、可配置为「仅未允许站点确认」。
 - **等待用户登录**：共享视图下用户可在 webview 内直接登录（独立 partition 登录态），Agent 侧工具 `snapshot` 轮询检测登录完成（超时可配置），无需额外机制。
 - **操作可见性**：Agent 每次浏览器操作都在共享视图可见；BrowserManager 广播 `browserStateChanged`（含 loading/URL），渲染侧工具条同步当前状态（对应 Codex Browser Use PiP 的可视化意图）。
-- **历史访问**：`browser_tabs` / 地址栏历史记录仅用于用户 UI；Agent 需要历史时经 `browser_history` 工具读取，工具每次调用都须 `ctx.ui.confirm` 用户批准。历史 URL 与标题作为不可信上下文处理。
+- **历史访问**：`browser_tabs` / 地址栏历史记录仅用于用户 UI；Agent 读取历史时遵循 `historyAccess`，始终允许/拒绝时不弹窗，始终询问时经 `ctx.ui.confirm` 批准。历史 URL 与标题作为不可信上下文处理。
 
 ## 11. 标注（Annotation，P2）
 
@@ -385,18 +393,18 @@ P2 预留（尚未创建）：`browser-session-policy.ts`（权限策略细化�
 |---|---|---|
 | P0 原型（webview 面板 + BrowserManager + IPC） | 已完成 | 29 测试通过、`npm run check` 全绿 |
 | P1 工具化（pi-browser + CDP 元素交互 + snapshot 编号） | 已完成 | 72 个 browser 测试通过、tsc 三配置 0 错误 |
-| P2 打磨（标注、设置页、多窗口语义等） | 未开始 | 见 16.6 |
+| P2 打磨（标注、设置页、多窗口语义等） | 部分完成 | 设置页、站点/媒体权限、历史策略与真实 Electron 验证已完成；剩余见 16.6 |
 
 **未提交**：截至本节写入时，全部实现仍在工作区（未 commit）。工作区内另有并行会话的改动（`message-part-grouping.ts`/`assistant-message-content.tsx`/`run-activity-group.tsx` 及其测试、`AGENTS.md` 顶部通用准则），与本功能无关，提交时不得包含。`test/renderer-boundaries.test.ts` 中 `auto-title-settings.css` fixture 行也来自并行会话，与本功能混在同一文件（提交前需与并行会话确认归属或接受一并提交）。
 
 ### 16.2 已实现内容（与规范章节对照）
 
-- **P0**（§4/5/6/9）：renderer `<webview partition="persist:browser">` 多 tab 面板（地址栏、back/forward/reload/stop、崩溃重建、面板切换时 URL 快照恢复）；main `BrowserManager`（TabRegistry、attach/detach/selectTab/navigate/screenshot、`browserStateChanged` 广播）；`BrowserSettingsService`（§9.3 全字段，仿 auto-title 模式）；权限默认全拒绝（§10，BrowserManager 构造时对分区设置）。
-- **P1**（§6/7/8）：CDP 元素交互（`WebContentsHostController`：debugger 按需 attach、命令串行队列 + 10s 超时、`Accessibility.getFullAXTree` 简化 + 可交互编号 + boundingBox center、`Input.dispatchMouseEvent/insertText`、scroll、导航后编号缓存失效）；`openTab`（main → renderer `browserCreateTabRequest` 广播 → renderer 创建 webview → attach 带 requestId resolve，15s 超时）；本地 HTTP RPC server（§16.3）；pi-browser extension 12 个工具（含需批准的 `browser_history`）；工具卡片渲染（§7.3，toolHeader + browser-content.tsx）。
+- **P0**（§4/5/6/9）：renderer `<webview partition="persist:browser">` 多 tab 面板（地址栏、back/forward/reload/stop、崩溃重建、面板切换时 URL 快照恢复）；main `BrowserManager`（TabRegistry、attach/detach/selectTab/navigate/screenshot、`browserStateChanged` 广播）；`BrowserSettingsService`（§9.3 全字段，仿 auto-title 模式）；权限默认 fail-closed，非媒体权限统一拒绝，摄像头/麦克风按设置默认值与网站覆盖决定。
+- **P1**（§6/7/8）：CDP 元素交互（`WebContentsHostController`：debugger 按需 attach、命令串行队列 + 10s 超时、`Accessibility.getFullAXTree` 简化 + 可交互编号 + boundingBox center、`Input.dispatchMouseEvent/insertText`、scroll、导航后编号缓存失效）；`browser_*` 工具集（含需批准的 `browser_history`、页面 JS/console/dialog 与关闭 tab）；工具卡片渲染（§7.3，toolHeader + browser-content.tsx）。
 
 ### 16.3 关键架构决策（实现期确定，规范正文未写明的部分）
 
-1. **sidecar → main 通道 = 本地 HTTP RPC**：pi extension 运行在 sidecar 进程（Electron-as-Node），无法直接调用 main 的 BrowserManager，也不能访问 sidecar host 的 `requestHost`（subagents 专用）。实现为 main 起 `http://127.0.0.1:<随机端口>` server（`browser-host-server.ts`），32 字节随机 token 经请求头 `x-desktop-browser-token` 校验；端口与 token 通过 worker env 注入 sidecar：`PI_BROWSER_HOST_PORT` / `PI_BROWSER_TOKEN`。RPC 方法白名单：tabsList/activeTab/navigate/historyTarget/goBack/goForward/reload/snapshot/inspectElement/action/openTab/screenshot/history/clearData/getSettings；1MB body 上限；未知方法 500。
+1. **sidecar → main 通道 = 本地 HTTP RPC**：pi extension 运行在 sidecar 进程（Electron-as-Node），无法直接调用 main 的 BrowserManager，也不能访问 sidecar host 的 `requestHost`（subagents 专用）。实现为 main 起 `http://127.0.0.1:<随机端口>` server（`browser-host-server.ts`），32 字节随机 token 经请求头 `x-desktop-browser-token` 校验；端口与 token 通过 worker env 注入 sidecar：`PI_BROWSER_HOST_PORT` / `PI_BROWSER_TOKEN`。RPC 方法白名单：tabsList/activeTab/navigate/historyTarget/goBack/goForward/reload/snapshot/inspectElement/action/openTab/screenshot/consoleLogs/getDialog/handleDialog/evaluate/closeTab/history/clearData/getSettings；1MB body 上限；未知方法 500。
 2. **P0 不引入 CDP**：导航/截图/状态全部用 webContents 原生 API（`loadURL`/`capturePage`/生命周期事件），CDP 仅 P1 元素交互、标注拾取与重定位按需 attach（每 host 独立 debugger，无多 tab 冲突）。
 3. **renderer 建 tab 请求缓冲**：`browser-pending-requests.ts` 模块级缓冲 + 订阅者通知；面板已挂载时请求直通消费（不入缓冲，避免面板卸载重放），未挂载时入缓冲待挂载消费；requestId 经 `attach(webContentsId, requestId)` 回传 main resolve。
 4. **`onOpenPanel` 广播已删除**（死代码）：main 只发 `browserCreateTabRequest`，renderer 收到即开面板（`browser-request-listener.tsx`）。
@@ -415,9 +423,10 @@ P2 预留（尚未创建）：`browser-session-policy.ts`（权限策略细化�
 - spill 文件名加随机后缀防同毫秒覆盖。
 - 新增测试：`browser-ax-snapshot.test.ts`（AX 纯函数）、`browser-pending-requests.test.ts`（缓冲语义）。
 
-### 16.5 已知残留与降级（接手者注意）
+### 16.5 安全接入状态与残留（接手者注意）
 
-- **allowSites/blockSites 未接入**（spec §10.5）：设置字段已持久化但无消费者；站点级确认降级为仅 type submit 确认。接入方式：RPC 白名单加 `getSettings`（或 server 启动时读取设置注入），extension 在 openTab/navigate 前检查 host。
+- **allow/block 站点接入**：设置页通过 `BrowserSettings` 持久化站点覆盖；RPC `getSettings` 供 extension 读取；extension 侧 `SiteAccessController` 支持 `siteApproval` 默认策略，确认通道异常 fail-closed 拒绝。
+- **媒体权限**：`BrowserManager` 为每个独立 partition 安装权限 check/request handler，站点覆盖由 `mediaPermissions` 驱动，非媒体权限仍默认拒绝。
 - **`ctx.ui.confirm` 在 desktop 的表现未实测**：submit 确认路径依赖 pi UI 层在桌面端的渲染，需真实环境验证。
 - **真实 webview 行为未实测**：attach 时序、CDP 在真实页面上的 AX 树质量、崩溃重建需 `npm run dev` 人工验证（单测用 FakeHost/合成数据）。
 - **多窗口/多会话共享全局 BrowserManager 的语义串扰**：`attach` 抢占 activeTabId、广播全窗口；已按"全局单例"语义实现（spec §4.1 注明），多窗口同时使用需产品确认。
@@ -427,13 +436,9 @@ P2 预留（尚未创建）：`browser-session-policy.ts`（权限策略细化�
 
 ### 16.6 下一步（P2 候选清单）
 
-1. 设置页 UI（`/settings/browser`，控制器仿 auto-title 三件套）+ `SETTINGS_LINKS` 注册。
-2. allow/block 站点接入与站点级确认（16.5）。
-3. 标注（Annotation，§11）：`browser-comment-preload.ts` + overlay。
-4. 历史/地址栏搜索、清除数据 UI。
-5. 多窗口语义确认、keep-alive 面板（§4.1）。
-6. 真实环境验证清单：`npm --prefix packages/desktop run dev` 人工验证 webview 面板、`browser_open` 工具端到端（含 type submit 确认）、崩溃重建、CDP 快照质量。
-7. 视口内元素过滤、spill 清理、openTab 超时文案。
+1. 多窗口 BrowserManager 隔离/keep-alive 方案。
+2. 编号高亮 overlay。
+3. 真实 webview 稳定性与各平台摄像头/麦克风系统权限验证。
 
 ### 16.7 验证命令速查
 
@@ -456,7 +461,7 @@ cd ../.. && npm run check
 
 ### 17.1 本轮完成
 
-- **设置页 UI**（§16.6 #1）：`/settings/browser` 路由 + 三件套（`features/settings/browser/browser-settings-page.tsx` + `use-browser-settings-controller.ts`，仿 auto-title：revision 冲突、dirty 路由守卫、`browserSetEditorDirty` 通道）；`SETTINGS_LINKS` 注册「浏览器」项。页面含：站点访问策略（allow/block 列表，textarea 每行一个 host，经 `parseSiteListInput` 解析）、快照节点数、CDP 超时、下载目录、启动恢复开关、清除浏览数据（ConfirmDialog + `clearData`）。
+- **设置页 UI**（§16.6 #1）：`/settings/browser` 路由 + 三件套（`features/settings/browser/browser-settings-page.tsx` + `use-browser-settings-controller.ts`，仿 auto-title：revision 冲突、dirty 路由守卫、`browserSetEditorDirty` 通道）；`SETTINGS_LINKS` 注册「浏览器」项。页面含：浏览器启用、批注截图、标签页恢复、快照节点数、CDP 超时、下载目录、清除浏览数据、网站审批/历史访问/敏感操作策略，以及摄像头/麦克风默认权限和按网站覆盖管理。
 - **allow/block 站点接入**（§16.5 残留 + §10.5）：`src/shared/browser-site-policy.ts` 纯函数（`siteMatches` host/子域/端口语义、`checkSiteAccess` blocked 优先、`parseSiteListInput` 归一化去重）；RPC 白名单新增 `getSettings`；extension 侧 `SiteAccessController`（`lib/site-access.ts`）：open/navigate 前检查——blockSites 命中直接拒绝、allowSites 命中放行、未列入经 `ctx.ui.confirm` 确认且**会话内按 host 记忆**（同 host 不再询问）；确认通道异常 fail-closed 拒绝；设置读取失败同样 fail-closed。
 - **视口内元素过滤**（§16.6 #7）：`buildSnapshotTree` 先评估视口（`Runtime.evaluate`），`collectInteractive`/`buildNode` 增加 viewport 参数，可交互元素要求中心点在视口内（离屏元素不再编号，避免点击坐标不可达）。
 - **spill 清理**（§16.6 #7）：`render-snapshot.ts` 新增 `cleanupOldSpills`——写 spill 后异步清理：超过 24h 或超过 100 个时删除最旧文件（best-effort）。

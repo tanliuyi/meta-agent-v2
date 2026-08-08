@@ -10,6 +10,7 @@
 
 import {
   checkSiteAccess,
+  defaultSiteApproval,
   normalizeSitePattern,
   type SitePolicySettings,
 } from "../../../../../shared/browser-site-policy.ts";
@@ -36,6 +37,12 @@ export class SiteAccessController {
         error: { kind: "unavailable", message: "无法读取浏览器访问策略，请确认浏览器服务正常后重试" },
       };
     }
+    if (settings.enabled === false) {
+      return {
+        allowed: false,
+        error: { kind: "unavailable", message: "内置浏览器已在设置中关闭" },
+      };
+    }
     const access = checkSiteAccess(settings, url);
     if (access === "blocked") {
       return {
@@ -46,6 +53,14 @@ export class SiteAccessController {
     if (access === "allowed") return { allowed: true };
 
     const host = displayHost(url);
+    const approval = defaultSiteApproval(settings);
+    if (approval === "always-allow") return { allowed: true };
+    if (approval === "always-deny") {
+      return {
+        allowed: false,
+        error: { kind: "denied", message: `站点 ${host} 未列入允许列表，默认策略已拒绝访问` },
+      };
+    }
     if (this.confirmedHosts.has(host)) return { allowed: true };
     let allowed: boolean;
     try {

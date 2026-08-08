@@ -27,8 +27,14 @@ export interface BrowserSettingsController {
 
 function settingsEqual(left: BrowserSettings, right: BrowserSettings): boolean {
   return (
+    left.enabled === right.enabled &&
     JSON.stringify(left.allowSites) === JSON.stringify(right.allowSites) &&
     JSON.stringify(left.blockSites) === JSON.stringify(right.blockSites) &&
+    left.siteApproval === right.siteApproval &&
+    left.historyAccess === right.historyAccess &&
+    left.mediaDefault === right.mediaDefault &&
+    JSON.stringify(left.mediaPermissions) === JSON.stringify(right.mediaPermissions) &&
+    left.includeScreenshots === right.includeScreenshots &&
     left.downloadDirectory === right.downloadDirectory &&
     left.maxSnapshotNodes === right.maxSnapshotNodes &&
     left.cdpTimeoutMs === right.cdpTimeoutMs &&

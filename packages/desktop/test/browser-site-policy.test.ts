@@ -138,6 +138,42 @@ describe("SiteAccessController", () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  test("always-allow 策略不触发确认", async () => {
+    const controller = new SiteAccessController();
+    const confirm = vi.fn();
+    const outcome = await controller.check(
+      { allowSites: [], blockSites: [], siteApproval: "always-allow" },
+      "https://example.com/",
+      confirm,
+    );
+    expect(outcome).toEqual({ allowed: true });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  test("always-deny 策略不触发确认", async () => {
+    const controller = new SiteAccessController();
+    const confirm = vi.fn();
+    const outcome = await controller.check(
+      { allowSites: [], blockSites: [], siteApproval: "always-deny" },
+      "https://example.com/",
+      confirm,
+    );
+    expect(outcome).toMatchObject({ allowed: false, error: { kind: "denied" } });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  test("浏览器关闭时拒绝站点访问", async () => {
+    const controller = new SiteAccessController();
+    const confirm = vi.fn();
+    const outcome = await controller.check(
+      { allowSites: ["example.com"], blockSites: [], enabled: false },
+      "https://example.com/",
+      confirm,
+    );
+    expect(outcome).toMatchObject({ allowed: false, error: { kind: "unavailable" } });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
   test("reset 清空已确认 host", async () => {
     const controller = new SiteAccessController();
     const confirm = vi.fn().mockResolvedValue(true);

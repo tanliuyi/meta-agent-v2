@@ -10,10 +10,13 @@
  */
 
 export type SiteAccess = "allowed" | "blocked" | "unlisted";
+export type SiteApprovalMode = "always-allow" | "always-ask" | "always-deny";
 
 export interface SitePolicySettings {
   allowSites: string[];
   blockSites: string[];
+  siteApproval?: SiteApprovalMode;
+  enabled?: boolean;
 }
 
 /** pattern 是否为合法站点条目（非空、无协议、无路径/查询/哈希、host 可解析）。 */
@@ -57,6 +60,11 @@ export function checkSiteAccess(settings: SitePolicySettings, url: string): Site
     if (siteMatches(pattern, url)) return "allowed";
   }
   return "unlisted";
+}
+
+/** 应用未列入站点的默认策略；旧快照缺少该字段时保持原来的询问行为。 */
+export function defaultSiteApproval(settings: SitePolicySettings): SiteApprovalMode {
+  return settings.siteApproval ?? "always-ask";
 }
 
 /** 规范化站点条目：去协议/空白/尾部斜杠，小写；非法输入返回 null。 */
