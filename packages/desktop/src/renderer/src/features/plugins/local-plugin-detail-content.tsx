@@ -87,6 +87,12 @@ export function LocalPluginDetailContent({
           </div>
         </div>
         <span className="plugin-marketplace-detail-muted">{plugin.displayPath ?? "本地扩展入口"}</span>
+        {plugin.pluginId ? (
+          <div className="plugin-marketplace-notice" data-tone="info" role="status">
+            此插件声明了与市场插件 <strong>{plugin.pluginId}</strong> 相同的 ID，市场版本将被禁用，本地版本优先加载。
+            移除或停用本插件后市场版本恢复可用。
+          </div>
+        ) : null}
       </div>
       <Tabs defaultValue="overview" className="plugin-marketplace-detail-tabs">
         <TabsList className="plugin-marketplace-detail-tab-list" aria-label="插件详情">
@@ -102,6 +108,12 @@ export function LocalPluginDetailContent({
                   <dt>插件 ID</dt>
                   <dd>{plugin.id}</dd>
                 </div>
+                {plugin.pluginId ? (
+                  <div>
+                    <dt>市场插件身份</dt>
+                    <dd>{plugin.pluginId}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>入口路径</dt>
                   <dd>{plugin.displayPath ?? "本地扩展入口"}</dd>

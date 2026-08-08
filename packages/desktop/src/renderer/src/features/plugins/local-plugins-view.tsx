@@ -89,6 +89,14 @@ export function LocalPluginsView({ controller, onOpen }: LocalPluginsViewProps) 
                     <span>Development</span>
                   </div>
                   <span>{plugin.displayPath ?? "本地扩展入口"}</span>
+                  {plugin.pluginId ? (
+                    <span
+                      className="plugin-marketplace-scope-badge"
+                      title="本地插件已声明相同插件 ID，市场同名插件将被禁用"
+                    >
+                      覆盖市场同名插件
+                    </span>
+                  ) : null}
                 </button>
                 <div className="plugin-local-row-actions">
                   <Switch

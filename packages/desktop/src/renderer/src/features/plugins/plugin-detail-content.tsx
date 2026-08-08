@@ -21,6 +21,8 @@ interface PluginDetailContentProps {
   marketplaceId?: string;
   projects: readonly Project[];
   mutationPending: boolean;
+  /** 覆盖该市场插件的本地插件显示名；存在时市场版本被禁用。 */
+  supersededByLocalPlugin?: string;
   onSetScope(id: string, scope: MarketplacePluginScope, projectIds?: string[]): void;
 }
 
@@ -31,6 +33,7 @@ export function PluginDetailContent({
   marketplaceId,
   projects,
   mutationPending,
+  supersededByLocalPlugin,
   onSetScope,
 }: PluginDetailContentProps) {
   if (!plugin && !installed) return null;
@@ -125,6 +128,12 @@ export function PluginDetailContent({
             {installed ? (
               <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-detail-local-state">
                 <h3 id="plugin-detail-local-state">本地状态</h3>
+                {supersededByLocalPlugin ? (
+                  <div className="plugin-marketplace-notice" data-tone="info" role="status">
+                    本地插件 <strong>{supersededByLocalPlugin}</strong> 声明了相同的插件 ID，此市场版本已禁用。
+                    移除或停用本地插件后此市场版本恢复可用。
+                  </div>
+                ) : null}
                 <dl className="plugin-marketplace-detail-metadata">
                   <div>
                     <dt>安装状态</dt>

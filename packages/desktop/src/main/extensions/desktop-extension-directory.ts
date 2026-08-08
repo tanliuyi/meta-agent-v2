@@ -12,6 +12,8 @@ export interface ResolvedDevelopmentEntry {
   displayPath: string;
   capabilities: DesktopExtensionCapability[];
   configurationSchema?: PluginConfigurationSchema;
+  /** 插件声明的身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
+  pluginId?: string;
 }
 
 const ALLOWED_ENTRY_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts"]);
@@ -19,7 +21,7 @@ const CONVENTIONAL_ENTRY_NAMES = ["index.ts", "index.js", "index.mjs", "index.cj
 const MANIFEST_FILE_NAME = "market-manifest.json";
 
 interface DesktopDevelopmentManifest {
-  plugin: { name: string };
+  plugin: { id?: string; name: string };
   pi: { entry: string };
   capabilities: DesktopExtensionCapability[];
   configuration?: PluginConfigurationSchema;
@@ -55,6 +57,7 @@ async function resolveDevelopmentDirectory(directory: string): Promise<ResolvedD
       displayName: manifest.plugin.name,
       displayPath: basename(directory),
       capabilities: [...manifest.capabilities],
+      ...(manifest.plugin.id ? { pluginId: manifest.plugin.id } : {}),
       ...(manifest.configuration ? { configurationSchema: manifest.configuration } : {}),
     };
   }
@@ -113,6 +116,9 @@ function parseDesktopManifest(value: unknown): DesktopDevelopmentManifest {
   if (!isPlainObject(plugin) || typeof plugin.name !== "string" || !plugin.name.trim()) {
     throw new Error("market-manifest.json plugin.name is missing");
   }
+  if (plugin.id !== undefined && (typeof plugin.id !== "string" || !plugin.id.trim() || plugin.id.length > 200)) {
+    throw new Error("market-manifest.json plugin.id is invalid");
+  }
   const pi = value.pi;
   if (!isPlainObject(pi) || typeof pi.entry !== "string" || !pi.entry.trim()) {
     throw new Error("market-manifest.json pi.entry is missing");
@@ -123,7 +129,7 @@ function parseDesktopManifest(value: unknown): DesktopDevelopmentManifest {
     throw new Error("market-manifest.json configuration requires the configuration.read capability");
   }
   return {
-    plugin: { name: plugin.name.trim() },
+    plugin: { ...(plugin.id ? { id: plugin.id.trim() } : {}), name: plugin.name.trim() },
     pi: { entry: pi.entry },
     capabilities,
     ...(configuration ? { configuration } : {}),

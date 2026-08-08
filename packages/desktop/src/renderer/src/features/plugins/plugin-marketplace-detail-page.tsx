@@ -15,6 +15,8 @@ import { PluginDetailBackLink } from "./plugin-detail-back-link.tsx";
 import { PluginDetailContent } from "./plugin-detail-content.tsx";
 import { PluginDetailStatusBadges } from "./plugin-detail-status.tsx";
 import { PluginMarketplaceBreadcrumb } from "./plugin-marketplace-breadcrumb.tsx";
+import { localPluginIdOverrides } from "./plugin-marketplace-utils.ts";
+import { useLocalPlugins } from "./use-local-plugins.ts";
 import {
   loadMarketplacePluginDetail,
   type MarketplacePluginDetailLookup,
@@ -32,6 +34,10 @@ export function PluginMarketplaceDetailPage({
   const navigate = useNavigate();
   const controller = usePluginMarketplace(true, initialQuery);
   const projects = useDesktopSelector(selectProjects);
+  const localController = useLocalPlugins();
+  const localOverrides = localPluginIdOverrides(
+    (localController.snapshot?.entries ?? []).filter((entry) => entry.source === "development"),
+  );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [removingOrphaned, setRemovingOrphaned] = useState(false);
   const [detailLookup, setDetailLookup] = useState<MarketplacePluginDetailLookup>();
@@ -194,6 +200,7 @@ export function PluginMarketplaceDetailPage({
                 marketplaceId={controller.page?.marketplaceId}
                 projects={projects}
                 mutationPending={mutationPending}
+                supersededByLocalPlugin={installed ? localOverrides.get(installed.id) : undefined}
                 onSetScope={(id, scope, projectIds) => void controller.setScope(id, scope, projectIds)}
               />
             </div>
