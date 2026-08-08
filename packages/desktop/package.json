@@ -26,6 +26,7 @@
     "build": "npm run build:pi && npm run typecheck && electron-vite build",
     "package": "npm run build && electron-builder --config electron-builder.yml",
     "build:win": "npm run build && electron-builder --config electron-builder.yml --win",
+    "build:mac": "npm run build && electron-builder --config electron-builder.yml --mac",
     "smoke:sidecar": "node ../../scripts/smoke-desktop-sidecar.mjs",
     "smoke:gui": "node ../../scripts/smoke-desktop-gui.mjs"
   },
