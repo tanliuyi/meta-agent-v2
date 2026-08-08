@@ -1025,7 +1025,13 @@ export class WebContentsHostController implements BrowserHostController {
 
   dispose(): void {
     this.cancelPendingOperations();
-    for (const remove of this.listeners.splice(0)) remove();
+    for (const remove of this.listeners.splice(0)) {
+      try {
+        remove();
+      } catch {
+        // guest webContents 已销毁时，事件解绑（off）可能抛 "Object has been destroyed"。
+      }
+    }
     this.eventListeners.clear();
     this.interactiveByIndex.clear();
     this.downloadEventsBuffer.length = 0;

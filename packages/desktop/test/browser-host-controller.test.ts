@@ -21,6 +21,7 @@ const AX_TREE = {
 };
 
 class FakeWebContents extends EventEmitter {
+  destroyed = false;
   url = "https://example.com/";
   title = "Example";
   box = [10, 20, 50, 20, 50, 40, 10, 40];
@@ -53,7 +54,12 @@ class FakeWebContents extends EventEmitter {
     goBack: vi.fn(),
     goForward: vi.fn(),
   };
-  session = new EventEmitter();
+  private readonly sessionEmitter = new EventEmitter();
+  get session(): EventEmitter {
+    // 对齐 Electron：guest 销毁后访问 session 抛 "Object has been destroyed"。
+    if (this.destroyed) throw new Error("Object has been destroyed");
+    return this.sessionEmitter;
+  }
   downloadURL = vi.fn();
   debugger = Object.assign(new EventEmitter(), {
     attach: vi.fn(() => {
@@ -72,6 +78,11 @@ class FakeWebContents extends EventEmitter {
 
   getTitle(): string {
     return this.title;
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.emit("destroyed");
   }
 
   isLoading(): boolean {
@@ -308,6 +319,18 @@ describe("WebContentsHostController CDP integration", () => {
     host.dispose();
     webContents.emit("context-menu", event, params);
     expect(onContextMenu).toHaveBeenCalledOnce();
+  });
+
+  test("guest destroyed 后 dispose 不抛（清理回调访问已销毁 webContents）", () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents);
+    hosts.push(host);
+
+    // 模拟 guest 销毁：destroyed 事件派发时 webContents 已标记销毁，
+    // session getter 访问抛 "Object has been destroyed"（真实崩溃路径）。
+    webContents.destroy();
+    expect(() => host.dispose()).not.toThrow();
+    expect(() => host.dispose()).not.toThrow();
   });
 });
 
