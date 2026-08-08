@@ -2,7 +2,7 @@ import Files from "lucide-react/dist/esm/icons/files.mjs";
 import Globe from "lucide-react/dist/esm/icons/globe.mjs";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
 import { registerWorkbenchPanelTab } from "../../state/panel-tab-registry.ts";
-import { LazyBrowserPanel } from "./browser/lazy-browser-panel.tsx";
+import { BrowserPanelTab } from "./browser/browser-panel-tab.tsx";
 import { BROWSER_PANEL_KIND, FILES_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { FilePanel } from "./files/file-panel.tsx";
 import { NewSessionDraft } from "./session/new-session-draft.tsx";
@@ -32,7 +32,7 @@ export function registerBuiltinPanelTabs(): void {
     kind: BROWSER_PANEL_KIND,
     label: "浏览器",
     icon: <Globe size={14} />,
-    component: LazyBrowserPanel,
+    component: BrowserPanelTab,
     order: 3,
   });
 }
