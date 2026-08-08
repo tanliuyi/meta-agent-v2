@@ -1,4 +1,6 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
+import Maximize from "lucide-react/dist/esm/icons/maximize.mjs";
+import Minimize from "lucide-react/dist/esm/icons/minimize.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
@@ -28,6 +30,8 @@ registerBuiltinPanelTabs();
 interface OpenWorkbenchPanelProps extends WorkbenchTabState {
   open: boolean;
   width: number;
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
   onActivate(key: string | null): void;
   onCloseTab(tab: WorkbenchTab): void;
   onOpenNewPanel(): void;
@@ -60,6 +64,8 @@ const TERMINAL_OPTION = { kind: "terminal", label: "终端", icon: <TerminalSqua
 export function OpenWorkbenchPanel({
   open,
   width,
+  fullscreen = false,
+  onToggleFullscreen,
   tabs,
   activeKey,
   onActivate,
@@ -153,6 +159,7 @@ export function OpenWorkbenchPanel({
         } as CSSProperties
       }
       data-collapsed={!open || undefined}
+      data-fullscreen={fullscreen || undefined}
       data-drop-active={dropOver || undefined}
       aria-hidden={!open}
       role="complementary"
@@ -225,6 +232,17 @@ export function OpenWorkbenchPanel({
             >
               <Plus className="size-4.5!" />
             </TooltipIconButton>
+            {onToggleFullscreen ? (
+              <TooltipIconButton
+                tooltip={fullscreen ? "退出全屏" : "全屏"}
+                aria-label={fullscreen ? "退出全屏" : "进入全屏"}
+                className="text-muted-foreground"
+                aria-pressed={fullscreen}
+                onClick={onToggleFullscreen}
+              >
+                {fullscreen ? <Minimize className="size-4!" /> : <Maximize className="size-4!" />}
+              </TooltipIconButton>
+            ) : null}
           </header>
           <div
             id="workbench-panel-content"

@@ -10,7 +10,13 @@ import { BrowserRequestListener } from "./browser/browser-request-listener.tsx";
 import { OpenWorkbenchPanel } from "./open-workbench-panel.tsx";
 
 /** Workbench state is stored with the cached session record. */
-export function WorkbenchPanel() {
+export function WorkbenchPanel({
+  fullscreen = false,
+  onToggleFullscreen,
+}: {
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+}) {
   const { record } = useSessionScope();
   const accessible = useWorkbenchAccessible();
   const panelOpen = useSessionWorkbenchSelector((workbench) => workbench?.panelOpen === true);
@@ -23,6 +29,8 @@ export function WorkbenchPanel() {
       <OpenWorkbenchPanel
         open={panelOpen}
         width={panelWidth}
+        fullscreen={fullscreen}
+        onToggleFullscreen={onToggleFullscreen}
         tabs={tabs.tabs}
         activeKey={tabs.activeKey}
         onActivate={tabs.activate}
