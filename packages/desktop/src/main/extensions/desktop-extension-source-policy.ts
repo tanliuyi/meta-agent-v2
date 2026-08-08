@@ -11,7 +11,10 @@ import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-ext
 import { validateInstalledMarketplacePlugin } from "../plugins/marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
-import type { DesktopExtensionSettingsService } from "./desktop-extension-settings-service.ts";
+import type {
+  DesktopExtensionSettingsService,
+  StoredDevelopmentExtension,
+} from "./desktop-extension-settings-service.ts";
 
 interface DesktopExtensionSourcePolicyOptions {
   settings: DesktopExtensionSettingsService;
@@ -59,10 +62,23 @@ export class DesktopExtensionSourcePolicy {
     if (this.options.getMarketplaceExtensions) {
       const marketplace = await this.options.getMarketplaceExtensions();
       fingerprintParts.push(marketplace.revision);
+      const localPluginIds = collectLocalPluginIds(settings.developmentEntries, projectId);
       for (const plugin of marketplace.plugins) {
         if (!plugin.enabled || plugin.state !== "installed") continue;
         if (plugin.scope === "project" && !(plugin.projectIds ?? []).includes(projectId)) {
           fingerprintParts.push(`${plugin.id}:out-of-scope:${(plugin.projectIds ?? []).join(",")}`);
+          continue;
+        }
+        const localPlugin = localPluginIds.get(plugin.id);
+        if (localPlugin) {
+          fingerprintParts.push(`${plugin.id}:superseded-by-local`);
+          diagnostics.push({
+            extensionId: plugin.id,
+            source: "marketplace",
+            phase: "resolve",
+            code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
+            message: `Marketplace plugin is disabled because a local plugin with the same ID is present: ${plugin.displayName}（本地插件 ${localPlugin} 优先，移除本地插件后市场版本恢复）`,
+          });
           continue;
         }
         try {
@@ -115,7 +131,7 @@ export class DesktopExtensionSourcePolicy {
                 )
               : undefined;
           fingerprintParts.push(
-            `${entry.id}:${entry.scope ?? "global"}:${(entry.projectIds ?? []).join(",")}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
+            `${entry.id}:${entry.scope ?? "global"}:${(entry.projectIds ?? []).join(",")}:${entry.pluginId ?? ""}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
           );
           pathEntries.push({
             id: entry.id,
@@ -124,6 +140,7 @@ export class DesktopExtensionSourcePolicy {
             entryPath,
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [...entry.capabilities],
+            ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
           });
         } catch {
@@ -171,6 +188,19 @@ export class DesktopExtensionSourcePolicy {
     if (projectId) this.cache.delete(projectId);
     else this.cache.clear();
   }
+}
+
+function collectLocalPluginIds(
+  developmentEntries: StoredDevelopmentExtension[],
+  projectId: string,
+): Map<string, string> {
+  const pluginIds = new Map<string, string>();
+  for (const entry of developmentEntries) {
+    if (!entry.pluginId) continue;
+    if (entry.scope === "project" && !(entry.projectIds ?? []).includes(projectId)) continue;
+    pluginIds.set(entry.pluginId, entry.displayName);
+  }
+  return pluginIds;
 }
 
 function assertDefinition(definition: DesktopExtensionDefinition, expectedSource: "builtin" | "curated"): void {

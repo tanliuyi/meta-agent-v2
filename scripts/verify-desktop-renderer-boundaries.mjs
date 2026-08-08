@@ -29,6 +29,8 @@ const LOCAL_STYLE_IMPORTS = new Map([
 	["image-preview.css", '@import "./image-preview.css";'],
 	["markdown.css", '@import "./markdown.css" layer(components);'],
 	["panel.css", '@import "./panel.css" layer(components);'],
+	["browser-panel.css", '@import "./browser-panel.css" layer(components);'],
+	["browser-settings.css", '@import "./browser-settings.css" layer(components);'],
 	["utilities.css", '@import "./utilities.css";'],
 	["overrides.css", '@import "./overrides.css" layer(overrides);'],
 ]);

@@ -8,6 +8,13 @@ import type {
   SaveAuthConfigInput,
 } from "../shared/auth-config-contracts.ts";
 import type { SaveAutoTitleSettingsInput } from "../shared/auto-title-contracts.ts";
+import type {
+  BrowserCloseTabRequest,
+  BrowserCreateTabRequest,
+  BrowserSessionIdentity,
+  BrowserStateEvent,
+} from "../shared/browser-contracts.ts";
+import type { SaveBrowserSettingsInput } from "../shared/browser-settings-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   HostResponse,
@@ -65,6 +72,7 @@ import type { SaveSettingsConfigInput } from "../shared/settings-config-contract
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
 import { OauthLoginCoordinator } from "./auth/oauth-login-coordinator.ts";
+import type { BrowserManager } from "./browser/browser-manager.ts";
 import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ProjectFileWatcher } from "./files/file-watcher.ts";
@@ -91,6 +99,7 @@ const authEditorWebContents = new Set<number>();
 const providerEditorWebContents = new Set<number>();
 const memoryEditorWebContents = new Set<number>();
 const autoTitleEditorWebContents = new Set<number>();
+const browserEditorWebContents = new Set<number>();
 
 export function registerIpc(
   projects: ProjectStore,
@@ -124,6 +133,7 @@ export function registerIpc(
   memorySettings?: MemorySettingsService,
   autoTitle?: AutoTitleSettingsService,
   preferences?: PreferencesConfigService,
+  browser?: BrowserManager,
 ): void {
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
@@ -215,6 +225,72 @@ export function registerIpc(
       event.returnValue = preferences.getInitial();
     });
     ipcMain.handle(CHANNELS.preferencesSave, (_event, input: SavePreferencesInput) => preferences.save(input));
+  }
+  if (browser) {
+    ipcMain.handle(
+      CHANNELS.browserAttach,
+      (_event, identity: BrowserSessionIdentity, webContentsId: number, requestId?: number) =>
+        browser.attach(identity, webContentsId, requestId),
+    );
+    ipcMain.handle(CHANNELS.browserDetach, (_event, identity: BrowserSessionIdentity, webContentsId: number) =>
+      browser.detach(identity, webContentsId),
+    );
+    ipcMain.handle(CHANNELS.browserTabSelect, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.selectTab(identity, tabId),
+    );
+    ipcMain.handle(CHANNELS.browserNavigate, (_event, identity: BrowserSessionIdentity, tabId: number, url: string) =>
+      browser.navigate(identity, tabId, url),
+    );
+    ipcMain.handle(CHANNELS.browserScreenshot, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.screenshot(identity, tabId),
+    );
+    ipcMain.handle(CHANNELS.browserCopyScreenshot, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.copyScreenshot(identity, tabId),
+    );
+    ipcMain.handle(
+      CHANNELS.browserSnapshot,
+      (_event, identity: BrowserSessionIdentity, tabId: number, opts?: { withScreenshot?: boolean }) =>
+        browser.snapshot(identity, tabId, opts),
+    );
+    ipcMain.handle(CHANNELS.browserAction, (_event, identity: BrowserSessionIdentity, tabId: number, action) =>
+      browser.action(identity, tabId, action),
+    );
+    ipcMain.handle(CHANNELS.browserTabsList, (_event, identity: BrowserSessionIdentity) => browser.tabsList(identity));
+    ipcMain.handle(CHANNELS.browserSettingsGet, () => browser.getSettingsSnapshot());
+    ipcMain.handle(CHANNELS.browserSettingsSave, (_event, input: SaveBrowserSettingsInput) =>
+      browser.saveSettings(input),
+    );
+    ipcMain.handle(CHANNELS.browserSessionRetire, (_event, identity: BrowserSessionIdentity) =>
+      browser.retireSession(identity),
+    );
+    ipcMain.handle(CHANNELS.browserClearData, (_event, identity: BrowserSessionIdentity) =>
+      browser.clearSessionData(identity),
+    );
+    ipcMain.handle(CHANNELS.browserClearAllData, () => browser.clearAllData());
+    ipcMain.handle(CHANNELS.browserHistory, (_event, identity: BrowserSessionIdentity) =>
+      browser.browserHistory(identity),
+    );
+    ipcMain.handle(
+      CHANNELS.browserAnnotationPick,
+      (_event, identity: BrowserSessionIdentity, tabId: number, x: number, y: number) =>
+        browser.pickAnnotationTarget(identity, tabId, x, y),
+    );
+    ipcMain.handle(CHANNELS.browserAnnotationAdd, (_event, identity: BrowserSessionIdentity, tabId: number, input) =>
+      browser.addAnnotation(identity, tabId, input),
+    );
+    ipcMain.handle(CHANNELS.browserAnnotationList, (_event, identity: BrowserSessionIdentity, tabId: number) =>
+      browser.listAnnotations(identity, tabId),
+    );
+    ipcMain.handle(
+      CHANNELS.browserAnnotationRemove,
+      (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
+        browser.removeAnnotation(identity, tabId, id),
+    );
+    ipcMain.handle(
+      CHANNELS.browserAnnotationResolve,
+      (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
+        browser.resolveAnnotationBounds(identity, tabId, id),
+    );
   }
   ipcMain.handle(CHANNELS.settingsChooseUserAvatar, async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
@@ -412,6 +488,23 @@ export function registerIpc(
       memoryEditorWebContents.add(ownerId);
       event.sender.once("destroyed", () => {
         memoryEditorWebContents.delete(ownerId);
+        dirtyGuard.remove(ownerId);
+      });
+    }
+    event.returnValue = true;
+  });
+
+  ipcMain.on(CHANNELS.browserSetEditorDirty, (event, dirty: unknown) => {
+    if (typeof dirty !== "boolean") {
+      event.returnValue = false;
+      return;
+    }
+    const ownerId = event.sender.id;
+    dirtyGuard.setDirty(ownerId, dirty);
+    if (!browserEditorWebContents.has(ownerId)) {
+      browserEditorWebContents.add(ownerId);
+      event.sender.once("destroyed", () => {
+        browserEditorWebContents.delete(ownerId);
         dirtyGuard.remove(ownerId);
       });
     }
@@ -818,5 +911,26 @@ export function broadcastThreadCatalogUpdate(thread: Thread): void {
 export function broadcastTerminalEvent(event: TerminalEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.terminalsEvent, event);
+  }
+}
+
+/** 向所有 renderer 广播内置浏览器状态（会话 + tabs/活跃 tab）。 */
+export function broadcastBrowserEvent(event: BrowserStateEvent): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserStateChanged, event);
+  }
+}
+
+/** 向所有 renderer 广播建 tab 请求（工具 browser.open 等触发；携带会话身份）。 */
+export function broadcastBrowserCreateTabRequest(request: BrowserCreateTabRequest): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCreateTabRequest, request);
+  }
+}
+
+/** 向所有 renderer 广播关闭 tab 请求（工具 browser.close 触发；renderer 负责删除视图）。 */
+export function broadcastBrowserCloseTabRequest(request: BrowserCloseTabRequest): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCloseTabRequest, request);
   }
 }

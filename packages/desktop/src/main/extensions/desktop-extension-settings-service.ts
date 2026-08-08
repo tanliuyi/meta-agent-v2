@@ -31,6 +31,8 @@ export interface StoredDevelopmentExtension {
   configurationSchema?: PluginConfigurationSchema;
   scope?: ExtensionScope;
   projectIds?: string[];
+  /** 插件声明的身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
+  pluginId?: string;
 }
 
 export interface InternalDesktopExtensionSettings {
@@ -188,6 +190,7 @@ export class DesktopExtensionSettingsService {
                   displayPath: resolved.displayPath,
                   enabled: true,
                   capabilities: [...resolved.capabilities],
+                  ...(resolved.pluginId ? { pluginId: resolved.pluginId } : { pluginId: undefined }),
                   ...(resolved.configurationSchema
                     ? { configurationSchema: resolved.configurationSchema }
                     : { configurationSchema: undefined }),
@@ -203,6 +206,7 @@ export class DesktopExtensionSettingsService {
               enabled: true,
               capabilities: [...resolved.capabilities],
               ...(resolved.displayPath ? { displayPath: resolved.displayPath } : {}),
+              ...(resolved.pluginId ? { pluginId: resolved.pluginId } : {}),
               ...(resolved.configurationSchema ? { configurationSchema: resolved.configurationSchema } : {}),
             },
           ];
@@ -317,6 +321,7 @@ export class DesktopExtensionSettingsService {
         displayPath: entry.displayPath ?? basename(entry.entryPath),
         scope,
         ...(scope === "project" ? { projectIds: dedupeProjectIds(entry.projectIds ?? []) } : {}),
+        ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
         ...(entry.configurationSchema
           ? { configurationSchema: clonePluginConfigurationSchema(entry.configurationSchema) }
           : {}),
@@ -365,6 +370,7 @@ function developmentApprovalMatches(existing: StoredDevelopmentExtension, resolv
     existing.enabled &&
     existing.displayName === resolved.displayName &&
     existing.displayPath === resolved.displayPath &&
+    existing.pluginId === resolved.pluginId &&
     existing.capabilities.length === resolved.capabilities.length &&
     existing.capabilities.every((capability, index) => capability === resolved.capabilities[index]) &&
     JSON.stringify(existing.configurationSchema) === JSON.stringify(resolved.configurationSchema)
@@ -505,6 +511,8 @@ function assertSettingsFile(value: unknown): asserts value is ExtensionSettingsF
           (!Array.isArray(entry.capabilities) ||
             !entry.capabilities.every((capability) => typeof capability === "string"))) ||
         (entry.scope !== undefined && entry.scope !== "global" && entry.scope !== "project") ||
+        (entry.pluginId !== undefined &&
+          (typeof entry.pluginId !== "string" || !entry.pluginId.trim() || entry.pluginId.length > 200)) ||
         (entry.scope === "project" &&
           (!Array.isArray(entry.projectIds) ||
             entry.projectIds.length === 0 ||

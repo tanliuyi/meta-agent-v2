@@ -1,7 +1,9 @@
 import Files from "lucide-react/dist/esm/icons/files.mjs";
+import Globe from "lucide-react/dist/esm/icons/globe.mjs";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
 import { registerWorkbenchPanelTab } from "../../state/panel-tab-registry.ts";
-import { FILES_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
+import { BrowserPanelTab } from "./browser/browser-panel-tab.tsx";
+import { BROWSER_PANEL_KIND, FILES_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { FilePanel } from "./files/file-panel.tsx";
 import { NewSessionDraft } from "./session/new-session-draft.tsx";
 
@@ -25,5 +27,12 @@ export function registerBuiltinPanelTabs(): void {
     icon: <Files size={14} />,
     component: FilePanel,
     order: 2,
+  });
+  registerWorkbenchPanelTab({
+    kind: BROWSER_PANEL_KIND,
+    label: "浏览器",
+    icon: <Globe size={14} />,
+    component: BrowserPanelTab,
+    order: 3,
   });
 }

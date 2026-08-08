@@ -534,7 +534,17 @@ plugin ID 到目录名使用单一可逆或 registry-backed 映射。不得直�
 - UI 同时显示两个 installation，并把 global 标记为“在当前项目中被覆盖”；
 - 离开该 project 后 global entry 恢复生效；
 - project entry disabled 时仍视为显式 project override，不自动回退 global，避免禁用操作意外启用另一份代码；
-- duplicate ID 与 builtin/curated/development 冲突仍按 source policy 拒绝并显示诊断，不静默覆盖产品内建来源。
+- duplicate ID 与 builtin/curated 冲突仍按 source policy 拒绝并显示诊断，不静默覆盖产品内建来源；
+- development（本地）优先于 marketplace：本地插件在 `market-manifest.json` 声明 `plugin.id` 且 scope 匹配时，同 ID marketplace installation 不进入 `ResolvedExtensionSet`（市场版本禁用）并写入诊断；本地插件存在即视为本地 override，disabled 也不自动回退市场版本，避免禁用操作意外启用另一份代码；移除本地插件或改为不匹配的 scope 后市场版本恢复；本地插件不声明 `plugin.id` 时无法与市场插件建立覆盖关系。
+
+### 10.5 本地优先的插件身份
+
+本地 development 插件通过 `market-manifest.json` 的可选 `plugin.id` 字段声明插件身份（市场制品目录天然携带该字段；纯入口文件或未声明 id 的本地插件不参与覆盖判定）：
+
+- approval 时解析并持久化 `pluginId`，`extensions.json` 与 renderer snapshot 均携带；
+- 加载解析对每个 project 收集 scope 匹配的本地插件 ID，市场插件 ID 命中时跳过该 market entry 并给出 `DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT` 诊断；
+- 插件中心市场卡片/详情显示“本地已覆盖”，本地列表/详情显示覆盖关系与恢复条件；
+- 市场 registry 与安装目录不受影响，更新/卸载/启用操作仍可用，仅加载层排除。
 
 ## 11. 本地状态模型
 
@@ -1152,6 +1162,7 @@ operation-error
 ### 21.4 Source policy 与 worker
 
 - marketplace source merge/order/duplicate ID；
+- development 声明 `plugin.id` 覆盖同 ID marketplace entry：scope 匹配时市场 entry 不加载并产生 `DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT` 诊断；ID 不同、scope 不匹配或本地移除后市场 entry 恢复；disabled 本地 entry 仍保持覆盖。
 - disabled/broken/blocked exclusion；
 - scope root validation；
 - ownership/identity mismatch；
@@ -1248,6 +1259,7 @@ git diff --check
 16. Worker generation 引用 immutable version；旧 generation 的 lazy import/assets 在更新后仍可用，垃圾回收等待全部引用释放。
 17. 新版本 apply 失败后恢复目标 session 旧 set；registry 已提交的 mutation 不回滚，由启动 reconcile 补齐文件状态。
 18. Global/project 同 ID 使用 project-over-global，disabled project override 不回退 global。
+19. 本地 development 插件声明相同 `plugin.id` 时优先加载，市场同 ID 版本禁用并给出诊断，移除本地插件后恢复。
 19. Marketplace extension 支持并测试 `providers.register`，同时不扩展未实现的 TUI Host API。
 20. 安装前准确展示 full-trust 和 native code 风险，不使用 sandbox 误导文案。
 21. Capability disclosure 不被描述为 Node/OS 权限限制。

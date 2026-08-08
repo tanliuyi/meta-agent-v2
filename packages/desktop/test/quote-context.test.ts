@@ -13,6 +13,12 @@ describe("quote-context", () => {
     expect(quoteToBlockquote({ text: "第一行\r\n第二行" })).toBe("> 第一行\n> 第二行");
   });
 
+  it("将标签放在引用正文之前并统一换行", () => {
+    expect(quoteToBlockquote({ text: "用户标注", tags: ["浏览器标注", "元素 div", "链接 https://example.com"] })).toBe(
+      "> [浏览器标注] [元素 div] [链接 https://example.com]\n> 用户标注",
+    );
+  });
+
   it("withQuoteContext 构造的文本能被 buildQuotePrefix 精确剥离（round-trip）", () => {
     const quotes = [
       { text: "第一行\n第二行", messageId: "assistant-1" },
@@ -46,6 +52,18 @@ describe("quote-context", () => {
         quotes: [{ text: "引用", messageId: "assistant" }],
       }),
     ).toEqual({ userEntryId: "user-1", requestId: "request", quotes: [{ text: "引用", messageId: "assistant" }] });
+
+    expect(
+      parseQuoteAttachmentData({
+        userEntryId: "user-1",
+        requestId: "request",
+        quotes: [{ text: "引用", messageId: "assistant", tags: ["浏览器标注", "元素 div"] }],
+      }),
+    ).toEqual({
+      userEntryId: "user-1",
+      requestId: "request",
+      quotes: [{ text: "引用", messageId: "assistant", tags: ["浏览器标注", "元素 div"] }],
+    });
 
     expect(parseQuoteAttachmentData(undefined)).toBeUndefined();
     expect(parseQuoteAttachmentData(null)).toBeUndefined();

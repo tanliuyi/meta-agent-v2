@@ -7,8 +7,16 @@ const fixture = vi.hoisted(() => ({
     text: "第一段引用",
     messageId: "assistant-1",
     quotes: [
-      { text: "第一段引用", messageId: "assistant-1" },
-      { text: "第二段引用", messageId: "assistant-2" },
+      {
+        text: "第一段引用",
+        messageId: "assistant-1",
+        tags: ["浏览器标注", "div #main", "https://example.com"],
+      },
+      {
+        text: "第二段引用",
+        messageId: "assistant-2",
+        tags: ["浏览器标注", "元素 textarea", "选择器 #chat-textarea"],
+      },
     ],
   },
 }));
@@ -52,9 +60,18 @@ describe("ComposerQuotes UI", () => {
     expect(markup).toContain("composer-quotes-preview");
     expect(markup).toContain("1.");
     expect(markup).toContain("第一段引用");
+    expect(markup).toContain("浏览器标注");
+    expect(markup).toContain("composer-quotes-preview-tag-icon");
+    expect(markup).toContain("div #main");
+    expect(markup).toContain("https://example.com");
     expect(markup).toContain("2.");
     expect(markup).toContain("第二段引用");
-    expect(markup).toContain("所选文本：");
+    expect(markup).toContain("textarea #chat-textarea");
+    expect(markup).not.toContain("元素 div");
+    expect(markup).not.toContain("元素 textarea");
+    expect(markup).not.toContain("选择器 #chat-textarea");
+    expect(markup).not.toContain("链接 https://example.com");
+    expect(markup).not.toContain("所选文本：");
     expect(markup).toContain("移除全部引用");
     expect(markup).toContain("移除第 1 条引用");
     expect(markup).toContain("移除第 2 条引用");

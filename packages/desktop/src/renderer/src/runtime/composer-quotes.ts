@@ -66,7 +66,18 @@ function normalizeQuote(value: unknown): PiQuote | undefined {
   if (!record || typeof record.text !== "string" || typeof record.messageId !== "string") return undefined;
   const text = record.text.trim();
   const messageId = record.messageId.trim();
-  return text && messageId ? { text, messageId } : undefined;
+  if (!text || !messageId) return undefined;
+  const tags = normalizeQuoteTags(record.tags);
+  return { text, messageId, ...(tags ? { tags } : {}) };
+}
+
+function normalizeQuoteTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tags = value
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.replace(/[\r\n]+/gu, " ").trim())
+    .filter((tag) => tag.length > 0);
+  return tags.length > 0 ? tags : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

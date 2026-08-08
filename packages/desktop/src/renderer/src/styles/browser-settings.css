@@ -1,0 +1,308 @@
+.browser-settings-content {
+  max-width: 960px;
+}
+
+.browser-settings-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 104px;
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--card));
+  box-shadow: var(--settings-group-shadow);
+}
+
+.browser-settings-hero-copy {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 16px;
+}
+
+.browser-settings-hero-icon {
+  display: flex;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+
+.browser-settings-hero-icon svg {
+  width: 25px;
+  height: 25px;
+}
+
+.browser-settings-hero h3 {
+  margin: 0;
+  font-size: var(--type-size-body);
+  font-weight: 650;
+}
+
+.browser-settings-hero p {
+  margin: 4px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-control);
+}
+
+.browser-settings-select {
+  width: 152px;
+  min-width: 152px;
+  justify-content: space-between;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+
+.browser-settings-number {
+  width: 128px;
+  flex: 0 0 128px;
+}
+
+.browser-settings-directory {
+  width: min(300px, 44%);
+  flex: 0 0 min(300px, 44%);
+}
+
+.browser-settings-section-heading-with-action {
+  align-items: flex-start;
+  min-height: 68px;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.browser-settings-section-heading-with-action > div {
+  min-width: 0;
+}
+
+.browser-settings-section-heading-with-action .settings-row-description {
+  margin-top: 4px;
+}
+
+.browser-settings-site-list {
+  border-top: 1px solid hsl(var(--border) / 0.8);
+}
+
+.browser-settings-empty {
+  margin: 0;
+  padding: 18px 16px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-control);
+}
+
+.browser-settings-site-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 8px 16px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
+}
+
+.browser-settings-site-row:last-child {
+  border-bottom: 0;
+}
+
+.browser-settings-site-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--type-size-control);
+}
+
+.browser-settings-site-select {
+  width: 220px;
+  min-width: 0;
+  justify-content: space-between;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+
+.browser-site-dialog {
+  max-width: 440px;
+}
+
+.browser-site-dialog-form {
+  display: grid;
+  gap: 8px;
+}
+
+.browser-site-dialog-form label {
+  color: hsl(var(--foreground));
+  font-size: var(--type-size-control);
+  font-weight: 600;
+}
+
+.browser-site-dialog-select {
+  width: 100%;
+  justify-content: space-between;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+
+.browser-media-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-width: 680px;
+}
+
+.browser-media-dialog-body {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.browser-media-default-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
+}
+
+.browser-media-site-heading,
+.browser-media-site-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px 112px 32px;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-media-site-heading {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-caption);
+}
+
+.browser-media-site-heading > span:nth-child(n + 2) {
+  text-align: center;
+}
+
+.browser-media-site-list {
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-sm);
+}
+
+.browser-media-site-row {
+  min-height: 50px;
+  padding: 7px 10px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
+}
+
+.browser-media-site-row:last-child {
+  border-bottom: 0;
+}
+
+.browser-media-site-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--type-size-control);
+}
+
+.browser-media-site-row .browser-settings-select {
+  width: 112px;
+  min-width: 0;
+  justify-content: space-between;
+  padding-inline: 6px;
+}
+
+.browser-media-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.browser-media-dialog-error {
+  margin: 0;
+  color: hsl(var(--destructive));
+  font-size: var(--type-size-caption);
+}
+
+@media (max-width: 51.25rem) {
+  .browser-settings-hero {
+    padding-inline: 16px;
+  }
+
+  .browser-settings-directory {
+    width: min(100%, 300px);
+    flex: 0 0 auto;
+  }
+
+  .browser-settings-number {
+    flex: 0 0 auto;
+  }
+
+  .browser-settings-site-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .browser-settings-site-row .browser-settings-site-select {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .browser-media-site-heading,
+  .browser-media-site-row {
+    grid-template-columns: minmax(0, 1fr) 96px 96px 32px;
+  }
+
+  .browser-media-site-row .browser-settings-select {
+    width: 96px;
+  }
+}
+
+@media (max-width: 34rem) {
+  .browser-settings-hero {
+    align-items: flex-start;
+  }
+
+  .browser-settings-hero-copy {
+    align-items: flex-start;
+  }
+
+  .browser-settings-select,
+  .browser-settings-number,
+  .browser-settings-directory {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  .browser-settings-section-heading-with-action {
+    align-items: center;
+  }
+
+  .browser-media-default-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .browser-media-default-row .browser-settings-select {
+    width: 100%;
+  }
+
+  .browser-media-site-heading,
+  .browser-media-site-row {
+    grid-template-columns: minmax(0, 1fr) 88px 88px 32px;
+    gap: 5px;
+  }
+
+  .browser-media-site-row .browser-settings-select {
+    width: 88px;
+    padding-inline: 3px;
+  }
+}

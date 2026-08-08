@@ -1,3 +1,4 @@
+import { BrowserRuntimeHost } from "@renderer/components/panel/browser/browser-runtime-host";
 import { TooltipProvider } from "@renderer/shared/ui/tooltip-provider";
 import { DesktopCacheProviders } from "@renderer/state/desktop-cache-providers";
 import { DesktopStoreProvider } from "@renderer/state/desktop-store-context";
@@ -21,7 +22,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
           <ThinkingVisibilityProvider>
             <LayoutProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={100}>
-                <DesktopCacheProviders>{children}</DesktopCacheProviders>
+                <DesktopCacheProviders>
+                  <BrowserRuntimeHost />
+                  {children}
+                </DesktopCacheProviders>
               </TooltipProvider>
             </LayoutProvider>
           </ThinkingVisibilityProvider>

@@ -189,6 +189,8 @@ export type PiUserContentPart = { type: "text"; text: string } | { type: "image"
 export interface PiQuote {
   text: string;
   messageId: string;
+  /** Optional metadata labels rendered above the quote text (for example browser annotation context). */
+  tags?: string[];
 }
 
 export interface PiUserMessage extends PiTimelineNodeBase {

@@ -742,7 +742,7 @@
   height: 20px;
 }
 .composer-quotes-trigger:hover .composer-quotes-dismiss,
-.composer-quotes-anchor:focus-within .composer-quotes-dismiss,
+.composer-quotes-anchor:focus-visible .composer-quotes-dismiss,
 .composer-quotes-anchor[data-state="open"] .composer-quotes-dismiss {
   opacity: 1;
   pointer-events: auto;
@@ -790,11 +790,37 @@
   font-size: var(--type-size-ui);
   line-height: var(--type-line-normal);
 }
-.composer-quotes-preview-label {
+.composer-quotes-preview-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.composer-quotes-preview-tag {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  padding: 2px var(--space-2);
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-xs);
+  background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-meta);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-quotes-preview-tag[data-tag-kind="browser-annotation"] {
+  padding-inline: var(--space-2);
+}
+.composer-quotes-preview-tag-icon {
+  width: 13px;
+  height: 13px;
 }
 .composer-quotes-preview-copy p {
-  margin: var(--space-2) 0 0;
+  margin: 0;
   overflow-wrap: anywhere;
   font-weight: 600;
 }
@@ -1822,4 +1848,43 @@
   .session-bootstrap-controls span {
     animation: none;
   }
+}
+
+/* 内置浏览器工具卡片（browser.*）：快照摘要 + 截图缩略图 */
+.browser-tool-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.browser-snapshot-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--type-size-caption);
+}
+.browser-snapshot-title {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-snapshot-url {
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-snapshot-meta {
+  color: hsl(var(--muted-foreground));
+}
+.browser-screenshot {
+  display: block;
+  max-width: 100%;
+  max-height: 280px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--shape-radius-md);
+  object-fit: contain;
 }

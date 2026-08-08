@@ -461,6 +461,175 @@ describe("DesktopExtensionSourcePolicy", () => {
     const other = await harness.policy.resolve("other-project");
     expect(other.entries.some(({ id }) => id === "publisher.scoped")).toBe(true);
   });
+
+  it("disables the marketplace plugin when a local plugin declares the same plugin ID", async () => {
+    const harness = await createHarness();
+    const developmentRoot = join(harness.root, "local-dev");
+    await mkdir(developmentRoot, { recursive: true });
+    await writeFile(join(developmentRoot, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(developmentRoot, "market-manifest.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "publisher.plugin", name: "Local Dev" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: [],
+      })}\n`,
+      "utf8",
+    );
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve-local", expectedRevision: initial.revision },
+      developmentRoot,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    await harness.settings.saveConfig({
+      requestId: "enable-mode",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+    const marketplacePlugins = await createMarketplacePlugins(harness.root, [
+      { id: "publisher.plugin", displayName: "Marketplace Plugin" },
+    ]);
+    harness.policy = new DesktopExtensionSourcePolicy({
+      settings: harness.settings,
+      getBuiltinDefinitions: () => harness.builtin,
+      getCuratedDefinitions: () => harness.curated,
+      getMarketplaceExtensions: async () => ({ revision: "market-1", plugins: marketplacePlugins }),
+      marketplaceRoot: join(harness.root, "marketplace"),
+      curatedRoot: harness.curatedRoot,
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    expect(resolved.entries.map(({ source }) => source)).toEqual(["curated", "development", "builtin"]);
+    expect(resolved.entries.find((entry) => entry.source === "development")).toEqual(
+      expect.objectContaining({ id: "development:development", pluginId: "publisher.plugin" }),
+    );
+    expect(resolved.diagnostics).toEqual([
+      expect.objectContaining({
+        extensionId: "publisher.plugin",
+        source: "marketplace",
+        code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
+      }),
+    ]);
+  });
+
+  it("keeps the marketplace plugin when local plugin IDs differ or are out of scope", async () => {
+    const harness = await createHarness();
+    const developmentRoot = join(harness.root, "local-dev");
+    await mkdir(developmentRoot, { recursive: true });
+    await writeFile(join(developmentRoot, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(developmentRoot, "market-manifest.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "local.other", name: "Local Dev" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: [],
+      })}\n`,
+      "utf8",
+    );
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve-local", expectedRevision: initial.revision },
+      developmentRoot,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    const enabled = await harness.settings.saveConfig({
+      requestId: "enable-mode",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+    if (enabled.status !== "saved") throw new Error("enable failed");
+    const scoped = await harness.settings.saveConfig({
+      requestId: "scope",
+      expectedRevision: enabled.snapshot.revision,
+      mutation: {
+        type: "set-development-scope",
+        extensionId: "development:development",
+        scope: "project",
+        projectIds: ["other-project"],
+      },
+    });
+    if (scoped.status !== "saved") throw new Error("scope failed");
+    const marketplacePlugins = await createMarketplacePlugins(harness.root, [
+      { id: "publisher.plugin", displayName: "Marketplace Plugin" },
+    ]);
+    harness.policy = new DesktopExtensionSourcePolicy({
+      settings: harness.settings,
+      getBuiltinDefinitions: () => harness.builtin,
+      getCuratedDefinitions: () => harness.curated,
+      getMarketplaceExtensions: async () => ({ revision: "market-2", plugins: marketplacePlugins }),
+      marketplaceRoot: join(harness.root, "marketplace"),
+      curatedRoot: harness.curatedRoot,
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    // 本地插件 ID 不同且 scope 不匹配 project：市场插件保持加载
+    expect(resolved.entries.some(({ id }) => id === "publisher.plugin")).toBe(true);
+    expect(resolved.diagnostics).toEqual([]);
+  });
+
+  it("restores the marketplace plugin after the overriding local plugin is removed", async () => {
+    const harness = await createHarness();
+    const developmentRoot = join(harness.root, "local-dev");
+    await mkdir(developmentRoot, { recursive: true });
+    await writeFile(join(developmentRoot, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(developmentRoot, "market-manifest.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "publisher.plugin", name: "Local Dev" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: [],
+      })}\n`,
+      "utf8",
+    );
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve-local", expectedRevision: initial.revision },
+      developmentRoot,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    await harness.settings.saveConfig({
+      requestId: "enable-mode",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+    const marketplacePlugins = await createMarketplacePlugins(harness.root, [
+      { id: "publisher.plugin", displayName: "Marketplace Plugin" },
+    ]);
+    harness.policy = new DesktopExtensionSourcePolicy({
+      settings: harness.settings,
+      getBuiltinDefinitions: () => harness.builtin,
+      getCuratedDefinitions: () => harness.curated,
+      getMarketplaceExtensions: async () => ({ revision: "market-3", plugins: marketplacePlugins }),
+      marketplaceRoot: join(harness.root, "marketplace"),
+      curatedRoot: harness.curatedRoot,
+    });
+
+    const suppressed = await harness.policy.resolve("project");
+    expect(suppressed.entries.some(({ id }) => id === "publisher.plugin")).toBe(false);
+
+    const settings = await harness.settings.getConfig();
+    const removed = await harness.settings.saveConfig({
+      requestId: "remove-local",
+      expectedRevision: settings.revision,
+      mutation: { type: "remove-development-entry", extensionId: "development:development" },
+    });
+    if (removed.status !== "saved") throw new Error("remove failed");
+
+    const restored = await harness.policy.resolve("project");
+
+    expect(restored.entries.some(({ id }) => id === "publisher.plugin")).toBe(true);
+    expect(restored.entries.some(({ source }) => source === "development")).toBe(false);
+    expect(restored.diagnostics).toEqual([]);
+  });
 });
 
 interface MarketplacePluginFixtureSpec {

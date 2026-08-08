@@ -7,12 +7,22 @@ import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-insta
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
 import { AuthConfigService } from "./auth/auth-config-service.ts";
+import { type BrowserHostServer, createBrowserHostServer } from "./browser/browser-host-server.ts";
+import { BrowserManager } from "./browser/browser-manager.ts";
+import { installBrowserWebviewSecurity } from "./browser/browser-webview-policy.ts";
 import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extension-registry.ts";
 import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
-import { broadcastTerminalEvent, broadcastThreadCatalogUpdate, registerIpc } from "./ipc.ts";
+import {
+  broadcastBrowserCloseTabRequest,
+  broadcastBrowserCreateTabRequest,
+  broadcastBrowserEvent,
+  broadcastTerminalEvent,
+  broadcastThreadCatalogUpdate,
+  registerIpc,
+} from "./ipc.ts";
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
 import { DesktopBuiltinProviderRegistry } from "./pi/desktop-builtin-provider.ts";
@@ -59,6 +69,8 @@ let metadata: MetadataWorkerClient | undefined;
 let sidecarLog: SidecarLog | undefined;
 let subagents: SubagentWorkerRegistry | undefined;
 let terminals: TerminalSupervisor | undefined;
+let browserManager: BrowserManager | undefined;
+let browserHostServer: BrowserHostServer | undefined;
 let stopAutoUpdateChecks: (() => void) | undefined;
 let stopMarketplaceGarbageCollection: (() => void) | undefined;
 let quitGuardPending = false;
@@ -125,6 +137,8 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // IAB 内置浏览器面板依赖 renderer 侧 <webview> 标签；保持其余隔离默认不变。
+      webviewTag: true,
     },
   });
   windowState.manage(window);
@@ -133,6 +147,8 @@ function createWindow(): void {
   window.once("ready-to-show", () => window.show());
   window.on("maximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, true));
   window.on("unmaximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, false));
+  const removeBrowserWebviewSecurity = installBrowserWebviewSecurity(window.webContents);
+  window.once("closed", removeBrowserWebviewSecurity);
   window.webContents.on("preload-error", (_event, path, error) => {
     console.error(`Preload 加载失败: ${path}`, error);
   });
@@ -332,6 +348,8 @@ app.whenReady().then(async () => {
   });
   const activeSubagents = subagentRegistry;
   subagents = activeSubagents;
+  // 浏览器管理器在 registry 之后创建（回调容忍赋值前触发）。
+  let browserManagerInstance: BrowserManager | undefined;
   const workers = new ThreadWorkerRegistry({
     manifest: runtimeManifest,
     metadata: metadataClient,
@@ -382,6 +400,8 @@ app.whenReady().then(async () => {
       activeSubagents.beginThreadMutation(projectId, parentThreadId),
     endSubagentTreeMutation: (projectId, parentThreadId) =>
       activeSubagents.endThreadMutation(projectId, parentThreadId),
+    registerBrowserSession: (identity) => browserManagerInstance?.registerSession(identity),
+    revokeBrowserSession: (_identity, token) => browserManagerInstance?.revokeSessionCapability(token),
   });
   const startedSupervisor = new SessionSupervisor(projects, workers, {
     log: (scope, text) => sidecarLog?.write(scope, text),
@@ -406,6 +426,23 @@ app.whenReady().then(async () => {
     modelRuntime: authModelRuntime,
     isDesktopProviderAvailable,
   });
+  browserManagerInstance = new BrowserManager(userDataDir, {
+    onStateChanged: broadcastBrowserEvent,
+    onCreateTabRequest: broadcastBrowserCreateTabRequest,
+    onCloseTabRequest: broadcastBrowserCloseTabRequest,
+    log: (text) => sidecarLog?.write("browser", text),
+  });
+  browserManager = browserManagerInstance;
+  const browserHostServerInstance = await createBrowserHostServer(browserManagerInstance, {
+    log: (text) => sidecarLog?.write("browser-host", text),
+  });
+  browserHostServer = browserHostServerInstance;
+  const browserEndpoint = browserHostServerInstance.getEndpoint();
+  if (browserEndpoint) {
+    // sidecar 的 env 白名单放行 PI_* 前缀（保留 PI_DESKTOP_*），以此中转注入。
+    process.env.PI_BROWSER_HOST_PORT = String(browserEndpoint.port);
+    process.env.PI_BROWSER_TOKEN = browserEndpoint.token;
+  }
   let modelConfigurationGeneration = 0;
   const subagentSettings = new SubagentSettingsConfigService({
     agentDir,
@@ -521,6 +558,7 @@ app.whenReady().then(async () => {
     memorySettings,
     autoTitleSettings,
     preferences,
+    browserManagerInstance,
   );
   createWindow();
   stopAutoUpdateChecks = scheduleAutoUpdateChecks(updater);
@@ -566,6 +604,10 @@ app.on("before-quit", (event) => {
   sidecarLog = undefined;
   subagents = undefined;
   terminals = undefined;
+  browserManager?.dispose();
+  browserManager = undefined;
+  void browserHostServer?.dispose();
+  browserHostServer = undefined;
   currentTerminals?.dispose();
   void (async () => {
     await currentSessions

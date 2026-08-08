@@ -1,4 +1,5 @@
 import File from "lucide-react/dist/esm/icons/file.mjs";
+import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import Sparkles from "lucide-react/dist/esm/icons/sparkles.mjs";
 
 interface DirectiveIconProps {
@@ -6,6 +7,8 @@ interface DirectiveIconProps {
 }
 
 export function DirectiveIcon({ type }: DirectiveIconProps) {
+  if (type === "directory")
+    return <Folder className="aui-directive-chip-icon size-3 shrink-0 self-center" aria-hidden="true" />;
   if (type === "file")
     return <File className="aui-directive-chip-icon size-3 shrink-0 self-center" aria-hidden="true" />;
   if (type === "skill")

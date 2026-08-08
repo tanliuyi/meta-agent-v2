@@ -7,11 +7,14 @@ import {
 } from "@assistant-ui/react";
 import Command from "lucide-react/dist/esm/icons/command.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
-import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionControlState } from "../../../../../shared/contracts.ts";
+import { appendComposerQuote, type ComposerQuoteTarget } from "../../../runtime/composer-quotes.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
+import { subscribeBrowserAnnotationToComposer } from "../../../state/browser-composer-bridge.ts";
 import { ComposerAddAttachment } from "../../assistant-ui/attachment/composer-add-attachment.tsx";
 import { ComposerAttachments } from "../../assistant-ui/attachment/composer-attachments.tsx";
+import { useSessionScope } from "../../session-context.tsx";
 import { ModelSelect } from "../model-select.tsx";
 import { ProjectSelect } from "../project-select.tsx";
 import { ThinkingSelect } from "../thinking-select.tsx";
@@ -33,6 +36,7 @@ const EMPTY_WIDGETS: SessionControlState["extensionHost"]["widgets"] = [];
 /** assistant-ui Composer 与 Desktop draft/session 控制面的低频编排入口。 */
 export function Composer(props: ComposerProps) {
   const aui = useAui();
+  const { record } = useSessionScope();
   const [mode, setMode] = useState<"steer" | "followUp">("steer");
   const [sending, setSending] = useState(false);
   const [escapeCancelPending, setEscapeCancelPending] = useState(false);
@@ -94,6 +98,15 @@ export function Composer(props: ComposerProps) {
   useAuiEvent("composer.attachmentAddError", ({ message }) => {
     setError(message);
   });
+
+  // 浏览器面板保存标注后：作为用户引用（quote）追加到 composer。
+  useEffect(() => {
+    return subscribeBrowserAnnotationToComposer(record.key, (payload) => {
+      const composer = aui.composer() as ComposerQuoteTarget;
+      if (!composer || typeof composer.setQuote !== "function") return;
+      appendComposerQuote(composer, payload);
+    });
+  }, [aui, record.key]);
 
   const submitRunning = useCallback(() => {
     if (props.mode !== "session" || sending) return;

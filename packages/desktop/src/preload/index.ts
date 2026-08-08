@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AuthOauthLoginEvent } from "../shared/auth-config-contracts.ts";
+import type {
+  BrowserAction,
+  BrowserCloseTabRequest,
+  BrowserCreateTabRequest,
+  BrowserStateEvent,
+} from "../shared/browser-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   FileChangeSet,
@@ -392,6 +398,72 @@ const desktopApi: DesktopApi = {
   workbench: {
     get: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.workbenchGet, projectId, threadId),
     update: (state) => ipcRenderer.invoke(CHANNELS.workbenchUpdate, state),
+  },
+  browser: {
+    /** renderer 在 webview attach 后报告 guest webContentsId + 会话身份；返回分配的 tab。requestId 用于响应 main 的建 tab 请求。 */
+    attach: (identity, webContentsId, requestId) =>
+      ipcRenderer.invoke(CHANNELS.browserAttach, identity, webContentsId, requestId),
+    /** renderer 移除 webview 时注销；幂等。 */
+    detach: (identity, webContentsId) => ipcRenderer.invoke(CHANNELS.browserDetach, identity, webContentsId),
+    /** 切换会话内活跃 tab（CDP attach 只跟随该会话活跃 tab）。 */
+    selectTab: (identity, tabId) => ipcRenderer.invoke(CHANNELS.browserTabSelect, identity, tabId),
+    /** 导航到 URL（http/https；file:// 拒绝）。 */
+    navigate: (identity, tabId, url) => ipcRenderer.invoke(CHANNELS.browserNavigate, identity, tabId, url),
+    /** 截取当前页面 PNG。 */
+    screenshot: (identity, tabId) => ipcRenderer.invoke(CHANNELS.browserScreenshot, identity, tabId),
+    /** 截取当前页面 PNG 并写入系统剪贴板。 */
+    copyScreenshot: (identity, tabId) => ipcRenderer.invoke(CHANNELS.browserCopyScreenshot, identity, tabId),
+    /** 结构化页面快照（AX 树简化 + 可交互元素编号 + 可选截图）。 */
+    snapshot: (identity, tabId, opts) => ipcRenderer.invoke(CHANNELS.browserSnapshot, identity, tabId, opts),
+    /** 元素级交互（click/type/scroll，编号来自 snapshot）。 */
+    action: (identity, tabId, action: BrowserAction) =>
+      ipcRenderer.invoke(CHANNELS.browserAction, identity, tabId, action),
+    /** 会话内全部 tab（含活跃标识由调用方按状态事件维护）。 */
+    tabsList: (identity) => ipcRenderer.invoke(CHANNELS.browserTabsList, identity),
+    getSettings: () => ipcRenderer.invoke(CHANNELS.browserSettingsGet),
+    saveSettings: (input) => ipcRenderer.invoke(CHANNELS.browserSettingsSave, input),
+    /** 设置页未保存修改标记（窗口关闭守卫）。 */
+    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.browserSetEditorDirty, dirty) === true,
+    /** 会话退役：清理该会话的 webview/guest/映射（renderer 会话记录移除时调用）。 */
+    sessionRetire: (identity) => ipcRenderer.invoke(CHANNELS.browserSessionRetire, identity),
+    /** 清除指定会话分区数据（cookie/缓存/登录态）。 */
+    clearData: (identity) => ipcRenderer.invoke(CHANNELS.browserClearData, identity),
+    /** 清除全部会话分区数据（设置页入口）。 */
+    clearAllData: () => ipcRenderer.invoke(CHANNELS.browserClearAllData),
+    /** 会话内访问历史（最近在前，仅用户 UI；Agent 不可见）。 */
+    browserHistory: (identity) => ipcRenderer.invoke(CHANNELS.browserHistory, identity),
+    /** 取视口坐标处元素（标注模式）：生成选择器与 bounds。 */
+    annotationPick: (identity, tabId, x, y) =>
+      ipcRenderer.invoke(CHANNELS.browserAnnotationPick, identity, tabId, x, y),
+    /** 添加标注；返回完整标注对象（null = tab 不存在）。 */
+    annotationAdd: (identity, tabId, input) =>
+      ipcRenderer.invoke(CHANNELS.browserAnnotationAdd, identity, tabId, input),
+    /** 指定 tab 的标注列表（最近在前）。 */
+    annotationList: (identity, tabId) => ipcRenderer.invoke(CHANNELS.browserAnnotationList, identity, tabId),
+    /** 删除标注。 */
+    annotationRemove: (identity, tabId, id) =>
+      ipcRenderer.invoke(CHANNELS.browserAnnotationRemove, identity, tabId, id),
+    /** 按选择器重新解析标注 bounds；元素消失返回 null。 */
+    annotationResolve: (identity, tabId, id) =>
+      ipcRenderer.invoke(CHANNELS.browserAnnotationResolve, identity, tabId, id),
+    /** 订阅浏览器会话状态（携带 sessionKey，按身份路由）；返回取消订阅函数。 */
+    onStateChanged(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, stateEvent: BrowserStateEvent) => listener(stateEvent);
+      ipcRenderer.on(CHANNELS.browserStateChanged, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.browserStateChanged, handler);
+    },
+    /** main 请求创建新 tab（携带 sessionKey）；返回取消订阅函数。 */
+    onCreateTabRequest(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, request: BrowserCreateTabRequest) => listener(request);
+      ipcRenderer.on(CHANNELS.browserCreateTabRequest, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.browserCreateTabRequest, handler);
+    },
+    /** main 请求关闭指定 tab（工具 browser.close 触发；携带 sessionKey + tabId）。 */
+    onCloseTabRequest(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, request: BrowserCloseTabRequest) => listener(request);
+      ipcRenderer.on(CHANNELS.browserCloseTabRequest, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.browserCloseTabRequest, handler);
+    },
   },
 };
 

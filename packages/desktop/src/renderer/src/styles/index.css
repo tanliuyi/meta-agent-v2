@@ -22,6 +22,8 @@
 @import "./image-preview.css";
 @import "./markdown.css" layer(components);
 @import "./panel.css" layer(components);
+@import "./browser-panel.css" layer(components);
+@import "./browser-settings.css" layer(components);
 @import "./utilities.css";
 @import "./overrides.css" layer(overrides);
 

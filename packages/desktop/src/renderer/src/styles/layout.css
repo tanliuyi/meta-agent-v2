@@ -616,6 +616,41 @@ body.is-resizing-column .sidebar {
   }
 }
 
+/* 侧边栏全屏：右侧 Panel 占满整个工作区，会话与底部终端让位。
+   Panel 全屏时仍保留 tab 栏，可再次点击退出全屏。
+   拖拽 hook 注入的行内宽度变量仅被 var() 引用，此处直接声明 width/max-width 覆盖；
+   置于所有 workspace 布局规则之后，确保覆盖 panel/终端展开时的轨道定义。 */
+.workspace:has(> .workbench-panel[data-fullscreen]) {
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 0;
+}
+
+.workspace:has(> .workbench-panel[data-fullscreen]) > .workbench-panel {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  grid-column: 1 / -1;
+  /* 进入全屏瞬间禁用宽度过渡；退出方向由 JS 错帧禁用（见 session-surface）。 */
+  transition: none;
+}
+
+.workspace:has(> .workbench-panel[data-fullscreen]) > .workbench-panel .resize-handle-panel {
+  display: none;
+}
+
+/* 全屏时 topbar-actions 随会话壳隐藏，右侧留白与 drag 挖洞区不再需要。 */
+.workspace:has(> .workbench-panel[data-fullscreen]) > .workbench-panel .panel-tabs {
+  padding-right: 8px;
+}
+
+.workspace:has(> .workbench-panel[data-fullscreen]) > .workbench-panel .panel-tabs-safe-area {
+  display: none;
+}
+
+.workspace:has(> .workbench-panel[data-fullscreen]) > :is(.session-surface-shell, .bottom-terminal) {
+  display: none;
+}
+
 .topbar {
   position: relative;
   display: flex;

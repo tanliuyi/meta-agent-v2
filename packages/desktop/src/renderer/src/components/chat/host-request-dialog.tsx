@@ -26,9 +26,18 @@ export function HostRequestDialog({ request, projectId, threadId }: HostRequestD
         closeButtonClassName="hidden"
         onEscapeKeyDown={(event) => event.preventDefault()}
       >
-        <p className="text-xs font-medium text-muted-foreground uppercase">
-          {request.toolCallId ? `工具 ${request.toolCallId}` : "扩展请求"}
-        </p>
+        <div className="flex min-w-0 items-baseline gap-1 text-xs font-medium text-muted-foreground">
+          {request.toolCallId ? (
+            <>
+              <span className="shrink-0">工具</span>
+              <span className="min-w-0 truncate font-mono" title={request.toolCallId}>
+                {request.toolCallId}
+              </span>
+            </>
+          ) : (
+            "扩展请求"
+          )}
+        </div>
         <DialogTitle>{request.title}</DialogTitle>
         {request.message ? <DialogDescription>{request.message}</DialogDescription> : null}
         <HostRequestField request={request} value={value} onChange={setValue} />

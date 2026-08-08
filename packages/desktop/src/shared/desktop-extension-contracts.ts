@@ -62,6 +62,8 @@ export interface ResolvedExtensionEntry {
   hostProfileVersion: typeof DESKTOP_EXTENSION_HOST_PROFILE_VERSION;
   capabilities: DesktopExtensionCapability[];
   configuration?: Record<string, PluginConfigurationValue>;
+  /** development 插件声明的插件身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
+  pluginId?: string;
 }
 
 export interface ResolvedExtensionSet {
@@ -106,6 +108,8 @@ export interface DesktopExtensionListEntry {
   /** 生效范围：global 对所有项目生效；project 仅对 projectIds 指定的项目生效。 */
   scope: ExtensionScope;
   projectIds?: string[];
+  /** development 插件声明的插件身份（market-manifest.json plugin.id），用于识别与市场插件的覆盖关系。 */
+  pluginId?: string;
 }
 
 export interface DesktopExtensionSettingsSnapshot {

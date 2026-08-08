@@ -8,3 +8,6 @@ export const NEW_SESSION_PANEL_KIND = "draft";
 
 /** 资源管理（文件）面板的注册 kind。 */
 export const FILES_PANEL_KIND = "files";
+
+/** 内置浏览器（IAB）面板的注册 kind。 */
+export const BROWSER_PANEL_KIND = "browser";

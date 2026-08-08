@@ -13,6 +13,30 @@ import type {
   SaveAutoTitleSettingsResult,
 } from "./auto-title-contracts.ts";
 import type {
+  BrowserAction,
+  BrowserActionResult,
+  BrowserAnnotation,
+  BrowserAnnotationBounds,
+  BrowserAnnotationInput,
+  BrowserAnnotationPickResult,
+  BrowserAttachResult,
+  BrowserClipboardResult,
+  BrowserCloseTabRequest,
+  BrowserCreateTabRequest,
+  BrowserHistoryEntry,
+  BrowserNavigateResult,
+  BrowserScreenshotResult,
+  BrowserSessionIdentity,
+  BrowserSnapshotResult,
+  BrowserStateEvent,
+  BrowserTab,
+} from "./browser-contracts.ts";
+import type {
+  BrowserSettingsSnapshot,
+  SaveBrowserSettingsInput,
+  SaveBrowserSettingsResult,
+} from "./browser-settings-contracts.ts";
+import type {
   ClearedQueue,
   DraftSessionConfig,
   FileChangeSet,
@@ -298,5 +322,70 @@ export interface DesktopApi {
   workbench: {
     get(projectId: string, threadId: string): Promise<WorkbenchState>;
     update(state: WorkbenchState): Promise<void>;
+  };
+  browser: {
+    /** renderer 在 webview attach 后报告 guest webContentsId + 会话身份；返回分配的 tab。requestId 用于响应 main 的建 tab 请求。 */
+    attach(identity: BrowserSessionIdentity, webContentsId: number, requestId?: number): Promise<BrowserAttachResult>;
+    /** renderer 移除 webview 时注销；幂等。 */
+    detach(identity: BrowserSessionIdentity, webContentsId: number): Promise<void>;
+    /** 切换会话内活跃 tab（CDP attach 只跟随该会话活跃 tab）。 */
+    selectTab(identity: BrowserSessionIdentity, tabId: number): Promise<BrowserTab | null>;
+    /** 导航到 URL（http/https；file:// 拒绝）。 */
+    navigate(identity: BrowserSessionIdentity, tabId: number, url: string): Promise<BrowserNavigateResult>;
+    /** 截取当前页面 PNG。 */
+    screenshot(identity: BrowserSessionIdentity, tabId: number): Promise<BrowserScreenshotResult>;
+    /** 截取当前页面 PNG 并写入系统剪贴板。 */
+    copyScreenshot(identity: BrowserSessionIdentity, tabId: number): Promise<BrowserClipboardResult>;
+    /** 结构化页面快照（AX 树简化 + 可交互元素编号 + 可选截图）。 */
+    snapshot(
+      identity: BrowserSessionIdentity,
+      tabId: number,
+      opts?: { withScreenshot?: boolean },
+    ): Promise<BrowserSnapshotResult>;
+    /** 元素级交互（click/type/scroll，编号来自 snapshot）。 */
+    action(identity: BrowserSessionIdentity, tabId: number, action: BrowserAction): Promise<BrowserActionResult>;
+    /** 会话内全部 tab（含活跃标识由调用方按状态事件维护）。 */
+    tabsList(identity: BrowserSessionIdentity): Promise<BrowserTab[]>;
+    getSettings(): Promise<BrowserSettingsSnapshot>;
+    saveSettings(input: SaveBrowserSettingsInput): Promise<SaveBrowserSettingsResult>;
+    /** 设置页未保存修改标记（窗口关闭守卫）。 */
+    setEditorDirty(dirty: boolean): boolean;
+    /** 会话退役：清理该会话的 webview/guest/映射（renderer 会话记录移除时调用）。 */
+    sessionRetire(identity: BrowserSessionIdentity): Promise<void>;
+    /** 清除指定会话分区数据（cookie/缓存/登录态）。 */
+    clearData(identity: BrowserSessionIdentity): Promise<void>;
+    /** 清除全部会话分区数据（设置页入口）。 */
+    clearAllData(): Promise<void>;
+    /** 会话内访问历史（最近在前，仅用户 UI；Agent 不可见）。 */
+    browserHistory(identity: BrowserSessionIdentity): Promise<BrowserHistoryEntry[]>;
+    /** 取视口坐标处元素（标注模式）：生成选择器与 bounds。 */
+    annotationPick(
+      identity: BrowserSessionIdentity,
+      tabId: number,
+      x: number,
+      y: number,
+    ): Promise<BrowserAnnotationPickResult>;
+    /** 添加标注；返回完整标注对象（null = tab 不存在）。 */
+    annotationAdd(
+      identity: BrowserSessionIdentity,
+      tabId: number,
+      input: BrowserAnnotationInput,
+    ): Promise<BrowserAnnotation | null>;
+    /** 指定 tab 的标注列表（最近在前）。 */
+    annotationList(identity: BrowserSessionIdentity, tabId: number): Promise<BrowserAnnotation[]>;
+    /** 删除标注。 */
+    annotationRemove(identity: BrowserSessionIdentity, tabId: number, id: string): Promise<void>;
+    /** 按选择器重新解析标注 bounds；元素消失返回 null。 */
+    annotationResolve(
+      identity: BrowserSessionIdentity,
+      tabId: number,
+      id: string,
+    ): Promise<BrowserAnnotationBounds | null>;
+    /** 订阅浏览器会话状态（携带 sessionKey，按身份路由）；返回取消订阅函数。 */
+    onStateChanged(listener: (event: BrowserStateEvent) => void): () => void;
+    /** main 请求创建新 tab（携带 sessionKey）；返回取消订阅函数。 */
+    onCreateTabRequest(listener: (request: BrowserCreateTabRequest) => void): () => void;
+    /** main 请求关闭指定 tab（携带 sessionKey + tabId）；返回取消订阅函数。 */
+    onCloseTabRequest(listener: (request: BrowserCloseTabRequest) => void): () => void;
   };
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { NEW_SESSION_PANEL_KIND } from "../src/renderer/src/components/panel/builtin-panel-kinds.ts";
+import {
+  BROWSER_PANEL_KIND,
+  NEW_SESSION_PANEL_KIND,
+} from "../src/renderer/src/components/panel/builtin-panel-kinds.ts";
 import { registerBuiltinPanelTabs } from "../src/renderer/src/components/panel/builtin-panel-tabs.tsx";
 import {
   getWorkbenchPanelTabDefinition,
@@ -57,9 +60,14 @@ describe("panel-tab-registry", () => {
   it("registerBuiltinPanelTabs 注册全部内置面板且幂等", () => {
     registerBuiltinPanelTabs();
     registerBuiltinPanelTabs();
-    expect(listWorkbenchPanelTabs().map((definition) => definition.kind)).toEqual([NEW_SESSION_PANEL_KIND, "files"]);
+    expect(listWorkbenchPanelTabs().map((definition) => definition.kind)).toEqual([
+      NEW_SESSION_PANEL_KIND,
+      "files",
+      BROWSER_PANEL_KIND,
+    ]);
     expect(getWorkbenchPanelTabDefinition(NEW_SESSION_PANEL_KIND)?.label).toBe("新会话");
     expect(getWorkbenchPanelTabDefinition("files")?.label).toBe("资源管理");
+    expect(getWorkbenchPanelTabDefinition(BROWSER_PANEL_KIND)?.label).toBe("浏览器");
     // 终端是“一 tab 一终端”的多开 tab，不注册为面板（见 open-workbench-panel 的 terminalOption）。
     expect(getWorkbenchPanelTabDefinition("terminal")).toBeUndefined();
     for (const definition of listWorkbenchPanelTabs()) {

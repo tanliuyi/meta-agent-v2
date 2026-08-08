@@ -14,6 +14,7 @@ import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
 import { LocalPluginsView } from "./local-plugins-view.tsx";
 import { MarketplaceSettingsDialog } from "./marketplace-settings-dialog.tsx";
 import { MarketplacePluginCard } from "./plugin-marketplace-card.tsx";
+import { localPluginIdOverrides } from "./plugin-marketplace-utils.ts";
 import { useLocalPlugins } from "./use-local-plugins.ts";
 import { usePluginMarketplace } from "./use-plugin-marketplace.ts";
 
@@ -34,6 +35,9 @@ export function PluginMarketplacePage({
   }, [initialView]);
   const controller = usePluginMarketplace(activeView === "marketplace", initialQuery);
   const localController = useLocalPlugins(returnSession?.projectId, returnSession?.threadId);
+  const localOverrides = localPluginIdOverrides(
+    (localController.snapshot?.entries ?? []).filter((entry) => entry.source === "development"),
+  );
   const orphanedInstalled = controller.installed?.plugins.filter(
     (installed) => !controller.page?.plugins.some((plugin) => plugin.id === installed.id),
   );
@@ -163,6 +167,7 @@ export function PluginMarketplacePage({
                       <MarketplacePluginCard
                         key={installed.id}
                         installed={installed}
+                        supersededByLocalPlugin={localOverrides.get(installed.id)}
                         onOpen={() =>
                           void navigate({
                             to: "/plugins/$pluginId",
@@ -196,6 +201,7 @@ export function PluginMarketplacePage({
                         key={plugin.id}
                         plugin={plugin}
                         installed={controller.installed?.plugins.find((installed) => installed.id === plugin.id)}
+                        supersededByLocalPlugin={localOverrides.get(plugin.id)}
                         onOpen={() =>
                           void navigate({
                             to: "/plugins/$pluginId",

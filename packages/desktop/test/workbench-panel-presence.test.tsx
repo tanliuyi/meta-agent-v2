@@ -224,4 +224,42 @@ describe("OpenWorkbenchPanel presence", () => {
     expect(markup).toContain("面板未注册：gone-extension");
     expect(markup).toContain("关闭 gone-extension");
   });
+
+  it("renders the fullscreen toggle after the new-panel button when wired", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(OpenWorkbenchPanel, {
+          ...baseProps,
+          open: true,
+          width: 420,
+          fullscreen: false,
+          onToggleFullscreen: () => {},
+        }),
+      ),
+    );
+
+    expect(markup.indexOf("新建 Panel")).toBeGreaterThan(-1);
+    expect(markup.indexOf("进入全屏")).toBeGreaterThan(markup.indexOf("新建 Panel"));
+  });
+
+  it("reflects the fullscreen state on the panel tab bar button", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(OpenWorkbenchPanel, {
+          ...baseProps,
+          open: true,
+          width: 420,
+          fullscreen: true,
+          onToggleFullscreen: () => {},
+        }),
+      ),
+    );
+
+    expect(markup).toContain("退出全屏");
+    expect(markup).toContain('aria-pressed="true"');
+  });
 });

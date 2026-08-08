@@ -136,15 +136,43 @@ describe("DesktopExtensionSettingsService", () => {
             enabled: false,
             configuredEnabled: true,
             displayPath: "my-plugin",
+            pluginId: "dev.my-plugin",
           },
         ],
       },
     });
     expect(JSON.parse(await readFile(join(directory, "extensions.json"), "utf8"))).toMatchObject({
       developmentEntries: [
-        { displayName: "My Plugin", entryPath: await realpath(join(pluginDirectory, "payload", "index.ts")) },
+        {
+          displayName: "My Plugin",
+          entryPath: await realpath(join(pluginDirectory, "payload", "index.ts")),
+          pluginId: "dev.my-plugin",
+        },
       ],
     });
+  });
+
+  it("rejects a manifest plugin.id that is not a non-empty bounded string", async () => {
+    const pluginDirectory = join(directory, "bad-id-plugin");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "index.ts"), "export default function () {}\n", "utf8");
+    await writeFile(
+      join(pluginDirectory, "market-manifest.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "   ", name: "Bad ID" },
+        pi: { entry: "index.ts" },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+      }),
+      "utf8",
+    );
+
+    await expect(
+      service.approveDevelopmentEntry(
+        { requestId: "approve-bad-id", expectedRevision: (await service.getConfig()).revision },
+        pluginDirectory,
+      ),
+    ).rejects.toThrow(/plugin\.id is invalid/);
   });
 
   it("carries manifest capabilities and configuration schema into the snapshot", async () => {

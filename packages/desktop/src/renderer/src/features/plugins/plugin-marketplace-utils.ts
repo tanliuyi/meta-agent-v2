@@ -6,8 +6,12 @@ import type {
 export function cardState(
   plugin: MarketplacePluginSummary | undefined,
   installed: InstalledMarketplacePluginSummary | undefined,
+  supersededByLocalPlugin?: string,
 ): { label: string; tone: "neutral" | "success" | "info" | "warning" | "danger" } {
   if (installed?.state === "broken") return { label: "已损坏", tone: "danger" };
+  if (installed && supersededByLocalPlugin) {
+    return { label: "本地已覆盖", tone: "info" };
+  }
   if (plugin && updateAvailable(plugin, installed ? [installed] : undefined)) {
     return { label: "可更新", tone: "info" };
   }
@@ -31,6 +35,16 @@ export function statusLabel(status: MarketplacePluginSummary["status"]): string 
     case "blocked":
       return "已封禁";
   }
+}
+
+export function localPluginIdOverrides(
+  localPlugins: Array<{ pluginId?: string; displayName: string }>,
+): Map<string, string> {
+  const overrides = new Map<string, string>();
+  for (const plugin of localPlugins) {
+    if (plugin.pluginId && !overrides.has(plugin.pluginId)) overrides.set(plugin.pluginId, plugin.displayName);
+  }
+  return overrides;
 }
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", {

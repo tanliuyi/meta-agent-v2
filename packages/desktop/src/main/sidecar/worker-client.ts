@@ -55,6 +55,8 @@ export interface WorkerClientOptions {
   onFailure?(error: Error): void;
   onStderr?(text: string): void;
   onHostRequest?(request: SubagentHostRequest, emit: (event: SubagentRunEvent) => void): Promise<unknown>;
+  /** 当前 thread worker 的浏览器 capability；不与其他 worker 共享。 */
+  browserSessionToken?: string;
   startupTimeoutMs?: number;
 }
 
@@ -103,6 +105,8 @@ export class SidecarWorkerClient {
       env: createSidecarEnvironment(
         options.manifest.compatibility.runtimeCompatibilityId,
         options.binding.value.agentDir,
+        undefined,
+        threadBrowserSessionEnvironment(options.binding, options.browserSessionToken),
       ),
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       serialization: "json",
@@ -522,6 +526,7 @@ export function createSidecarEnvironment(
   runtimeCompatibilityId: string,
   agentDir: string,
   sourceEnvironment: NodeJS.ProcessEnv = process.env,
+  extraEnvironment?: Record<string, string>,
 ): NodeJS.ProcessEnv {
   const allowed = Object.fromEntries(
     Object.entries(sourceEnvironment).filter(
@@ -530,9 +535,29 @@ export function createSidecarEnvironment(
   );
   return {
     ...allowed,
+    ...extraEnvironment,
     ELECTRON_RUN_AS_NODE: "1",
     PI_CODING_AGENT_DIR: agentDir,
     PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: runtimeCompatibilityId,
+  };
+}
+
+/**
+ * 从 ThreadWorkerBinding 派生浏览器会话身份，注入 thread sidecar 的
+ * PI_BROWSER_SESSION_* 环境变量（create 模式用新会话 sessionId，open 模式用 threadId）。
+ * 非 thread worker（metadata/subagent）不注入：subagent 不直接使用浏览器工具。
+ */
+export function threadBrowserSessionEnvironment(
+  binding: SidecarBinding,
+  browserSessionToken?: string,
+): Record<string, string> | undefined {
+  if (binding.role !== "thread") return undefined;
+  const value = binding.value;
+  const threadId = value.mode === "create" ? value.sessionId : value.threadId;
+  return {
+    PI_BROWSER_SESSION_PROJECT_ID: value.projectId,
+    PI_BROWSER_SESSION_THREAD_ID: threadId,
+    ...(browserSessionToken !== undefined ? { PI_BROWSER_SESSION_TOKEN: browserSessionToken } : {}),
   };
 }
 

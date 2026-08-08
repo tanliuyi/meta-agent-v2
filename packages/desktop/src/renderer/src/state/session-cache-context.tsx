@@ -39,6 +39,20 @@ const SessionDraftMaterializingContext = createContext<boolean | null>(null);
 const MAX_HIBERNATED_SESSION_COUNT = 12;
 const MAX_HIBERNATED_SESSION_BYTES = 32 * 1024 * 1024;
 
+type BrowserRuntimeRetirer = (sessionKey: string) => Promise<void>;
+let browserRuntimeRetirer: BrowserRuntimeRetirer | undefined;
+
+export function registerBrowserRuntimeRetirer(retirer: BrowserRuntimeRetirer): () => void {
+  browserRuntimeRetirer = retirer;
+  return () => {
+    if (browserRuntimeRetirer === retirer) browserRuntimeRetirer = undefined;
+  };
+}
+
+export function retireBrowserRuntime(sessionKey: string): Promise<void> {
+  return browserRuntimeRetirer?.(sessionKey) ?? Promise.resolve();
+}
+
 /**
  * 持有所有 cached session records，并提供缓存生命周期管理。
  * 位于 Router 外部，不随路由变化卸载。
@@ -141,6 +155,9 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
         holdersRef.current.remove(key);
         const record = recordsRef.current.get(key);
         if (!record) return;
+        // 先完成 browser runtime 的 detach/sessionRetire，再释放 transport 和 record，
+        // 避免旧 generation 的异步清理删除同 key 的新 runtime。
+        await retireBrowserRuntime(key).catch(() => undefined);
         await transportManager.retire(key);
         if (recordsRef.current.get(key) !== record) return;
         recordsRef.current.delete(key);
@@ -151,7 +168,10 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
 
       async retireProject(projectId: string) {
         const records = [...recordsRef.current.values()].filter((record) => record.identity.projectId === projectId);
-        for (const record of records) holdersRef.current.remove(record.key);
+        for (const record of records) {
+          holdersRef.current.remove(record.key);
+          await retireBrowserRuntime(record.key).catch(() => undefined);
+        }
         await Promise.all(records.map((record) => transportManager.retire(record.key)));
         let recordsChanged = false;
         for (const record of records) {

@@ -24,6 +24,7 @@ import type {
 import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
 import type { ModelsModelDefinition } from "../models/models-config-schema.ts";
 import piAutoTitleExtension from "./extensions/pi-auto-title/index.ts";
+import piBrowserExtension from "./extensions/pi-browser/index.ts";
 import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
 import piRewindExtension from "./extensions/pi-rewind/src/index.ts";
 import subagentsExtension from "./extensions/pi-subagents/index.ts";
@@ -100,6 +101,16 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       capabilities: ["events.subscribe", "session.read"],
     },
     factory: { name: "desktop:pi-auto-title", factory: piAutoTitleExtension },
+  },
+  {
+    definition: {
+      id: "pi-browser",
+      displayName: "内置浏览器",
+      source: "builtin",
+      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+      capabilities: ["tools.register", "events.subscribe", "session.read", "ui.notify"],
+    },
+    factory: { name: "desktop:pi-browser", factory: piBrowserExtension },
   },
 ];
 const coreProviderIds = new Set(getModelsConfigMetadata().builtInProviders.map((provider) => provider.id));

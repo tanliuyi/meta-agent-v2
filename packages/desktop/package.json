@@ -26,6 +26,7 @@
     "build": "npm run build:pi && npm run typecheck && electron-vite build",
     "package": "npm run build && electron-builder --config electron-builder.yml",
     "build:win": "npm run build && electron-builder --config electron-builder.yml --win",
+    "build:mac": "npm run build && electron-builder --config electron-builder.yml --mac",
     "smoke:sidecar": "node ../../scripts/smoke-desktop-sidecar.mjs",
     "smoke:gui": "node ../../scripts/smoke-desktop-gui.mjs"
   },
@@ -60,6 +61,7 @@
     "@radix-ui/react-collapsible": "1.1.16",
     "@radix-ui/react-context-menu": "2.3.3",
     "@radix-ui/react-dialog": "1.1.19",
+    "@radix-ui/react-dropdown-menu": "2.1.24",
     "@radix-ui/react-popover": "1.1.19",
     "@radix-ui/react-radio-group": "1.4.3",
     "@radix-ui/react-select": "2.3.3",

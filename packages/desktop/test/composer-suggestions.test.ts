@@ -211,11 +211,13 @@ describe("ComposerSuggestions", () => {
     expect(
       fileSuggestions([
         { name: "main.ts", path: "src/main.ts", type: "file" },
+        { name: "renderer", path: "src/renderer", type: "directory" },
         { name: "README.md", path: "README.md", type: "file" },
       ]),
     ).toMatchObject([
-      { id: "src/main.ts", label: "main.ts", detail: "src", text: ":file[src/main.ts] " },
-      { id: "README.md", label: "README.md", detail: undefined, text: ":file[README.md] " },
+      { id: "src/main.ts", label: "main.ts", detail: "src", type: "file", text: ":file[src/main.ts] " },
+      { id: "src/renderer", label: "renderer", detail: "src", type: "directory", text: ":directory[src/renderer] " },
+      { id: "README.md", label: "README.md", detail: undefined, type: "file", text: ":file[README.md] " },
     ]);
   });
 

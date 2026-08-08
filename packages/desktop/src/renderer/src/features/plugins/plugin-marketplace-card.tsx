@@ -9,16 +9,23 @@ import { cardState } from "./plugin-marketplace-utils.ts";
 interface MarketplacePluginCardProps {
   plugin?: MarketplacePluginSummary;
   installed?: InstalledMarketplacePluginSummary;
+  /** 覆盖该市场插件的本地插件显示名；存在时市场版本被禁用。 */
+  supersededByLocalPlugin?: string;
   onOpen(): void;
 }
 
-export function MarketplacePluginCard({ plugin, installed, onOpen }: MarketplacePluginCardProps) {
+export function MarketplacePluginCard({
+  plugin,
+  installed,
+  supersededByLocalPlugin,
+  onOpen,
+}: MarketplacePluginCardProps) {
   if (!plugin && !installed) return null;
   const name = plugin?.name ?? installed!.displayName;
   const publisher = plugin?.publisher.displayName ?? installed!.marketplaceId;
   const description = plugin?.description ?? "该插件已安装，但当前市场目录中没有对应条目。";
   const version = installed?.version ?? plugin?.compatibleVersion ?? plugin?.latestVersion;
-  const state = cardState(plugin, installed);
+  const state = cardState(plugin, installed, supersededByLocalPlugin);
 
   return (
     <button
@@ -26,6 +33,7 @@ export function MarketplacePluginCard({ plugin, installed, onOpen }: Marketplace
       className="plugin-marketplace-card"
       data-status={plugin?.status}
       aria-label={`查看 ${name} 详情`}
+      title={supersededByLocalPlugin ? `已由本地插件 ${supersededByLocalPlugin} 覆盖，市场版本禁用` : undefined}
       onClick={onOpen}
     >
       <span className="plugin-marketplace-card-header">
@@ -61,6 +69,11 @@ export function MarketplacePluginCard({ plugin, installed, onOpen }: Marketplace
         {plugin?.categories[0] ? <span>{plugin.categories[0]}</span> : null}
         {plugin?.containsNativeCode || installed?.containsNativeCode ? (
           <span className="plugin-marketplace-native-badge">Native</span>
+        ) : null}
+        {supersededByLocalPlugin ? (
+          <span className="plugin-marketplace-scope-badge" title="本地插件已声明相同插件 ID，市场版本不会加载">
+            本地覆盖
+          </span>
         ) : null}
       </span>
     </button>

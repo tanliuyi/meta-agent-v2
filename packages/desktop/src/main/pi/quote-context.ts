@@ -16,9 +16,12 @@ export interface PiQuoteAttachmentData {
   quotes: PiQuote[];
 }
 
-/** 单条引用转 Markdown 块引用：换行统一为 \n 并以 "> " 续行。 */
-export function quoteToBlockquote(quote: Pick<PiQuote, "text">): string {
-  return `> ${quote.text.replace(/\r\n?/gu, "\n").replace(/\n/gu, "\n> ")}`;
+/** 单条引用转 Markdown 块引用：标签与文本分层，换行统一为 \n 并以 "> " 续行。 */
+export function quoteToBlockquote(quote: Pick<PiQuote, "text" | "tags">): string {
+  const tags = normalizeQuoteTags(quote.tags) ?? [];
+  const tagLine = tags.length > 0 ? `> ${tags.map((tag) => `[${tag}]`).join(" ")}\n` : "";
+  const text = quote.text.replace(/\r\n?/gu, "\n").replace(/\n/gu, "\n> ");
+  return `${tagLine}> ${text}`;
 }
 
 /** 引用上下文前缀（各块引用间空行分隔，尾部带空行），与 withQuoteContext 构造的文本严格一致。 */
@@ -56,8 +59,18 @@ export function parseQuoteAttachmentData(data: unknown): PiQuoteAttachmentData |
     const text = quote.text.trim();
     const messageId = quote.messageId.trim();
     if (!text || !messageId) return undefined;
-    quotes.push({ text, messageId });
+    const tags = normalizeQuoteTags(quote.tags);
+    quotes.push({ text, messageId, ...(tags ? { tags } : {}) });
   }
   if (quotes.length === 0) return undefined;
   return { userEntryId: record.userEntryId, requestId: record.requestId, quotes };
+}
+
+function normalizeQuoteTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tags = value
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.replace(/[\r\n]+/gu, " ").trim())
+    .filter((tag) => tag.length > 0);
+  return tags.length > 0 ? tags : undefined;
 }

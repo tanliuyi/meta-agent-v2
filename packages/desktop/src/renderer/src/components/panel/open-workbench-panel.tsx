@@ -1,4 +1,6 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
+import Maximize from "lucide-react/dist/esm/icons/maximize.mjs";
+import Minimize from "lucide-react/dist/esm/icons/minimize.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
@@ -16,7 +18,7 @@ import type { WorkbenchTabState } from "../../state/workbench-tab-context.tsx";
 import { workbenchPanelTabKey, workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../session-context.tsx";
-import { NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
+import { BROWSER_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { registerBuiltinPanelTabs } from "./builtin-panel-tabs.tsx";
 import { WorkbenchTabList } from "./panel-tab.tsx";
 import { SessionContent } from "./session/session-content.tsx";
@@ -28,6 +30,8 @@ registerBuiltinPanelTabs();
 interface OpenWorkbenchPanelProps extends WorkbenchTabState {
   open: boolean;
   width: number;
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
   onActivate(key: string | null): void;
   onCloseTab(tab: WorkbenchTab): void;
   onOpenNewPanel(): void;
@@ -60,6 +64,8 @@ const TERMINAL_OPTION = { kind: "terminal", label: "终端", icon: <TerminalSqua
 export function OpenWorkbenchPanel({
   open,
   width,
+  fullscreen = false,
+  onToggleFullscreen,
   tabs,
   activeKey,
   onActivate,
@@ -153,6 +159,7 @@ export function OpenWorkbenchPanel({
         } as CSSProperties
       }
       data-collapsed={!open || undefined}
+      data-fullscreen={fullscreen || undefined}
       data-drop-active={dropOver || undefined}
       aria-hidden={!open}
       role="complementary"
@@ -225,6 +232,17 @@ export function OpenWorkbenchPanel({
             >
               <Plus className="size-4.5!" />
             </TooltipIconButton>
+            {onToggleFullscreen ? (
+              <TooltipIconButton
+                tooltip={fullscreen ? "退出全屏" : "全屏"}
+                aria-label={fullscreen ? "退出全屏" : "进入全屏"}
+                className="text-muted-foreground"
+                aria-pressed={fullscreen}
+                onClick={onToggleFullscreen}
+              >
+                {fullscreen ? <Minimize className="size-4!" /> : <Maximize className="size-4!" />}
+              </TooltipIconButton>
+            ) : null}
           </header>
           <div
             id="workbench-panel-content"
@@ -257,7 +275,15 @@ export function OpenWorkbenchPanel({
               </div>
             ) : activeTab?.kind === "panel" && activeDefinition ? (
               <div className="panel-content">
-                <activeDefinition.component />
+                {isDraft && activeTab.panel === BROWSER_PANEL_KIND ? (
+                  // 草稿阶段无真实会话（threadId 固定为 draft，多个草稿会共享同一浏览器
+                  // runtime）：禁用浏览器面板，提交会话后再使用。
+                  <div className="panel-content sidebar-session-loading">
+                    浏览器在新建会话草稿阶段不可用，提交会话后即可使用
+                  </div>
+                ) : (
+                  <activeDefinition.component />
+                )}
               </div>
             ) : activeTab?.kind === "panel" ? (
               <div className="panel-content sidebar-session-loading">面板未注册：{activeTab.panel}</div>

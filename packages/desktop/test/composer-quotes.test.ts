@@ -11,6 +11,11 @@ import type { PiQuote } from "../src/shared/contracts.ts";
 
 const first: PiQuote = { text: "第一段", messageId: "assistant-1" };
 const second: PiQuote = { text: "第二段", messageId: "assistant-2" };
+const annotated: PiQuote = {
+  text: "用户标注",
+  messageId: "browser-annotation-1",
+  tags: ["浏览器标注", "元素 div", "链接 https://example.com"],
+};
 
 describe("composer quotes", () => {
   it("keeps a single quote compatible with assistant-ui's existing carrier", () => {
@@ -18,6 +23,13 @@ describe("composer quotes", () => {
 
     expect(value).toEqual(first);
     expect(getComposerQuotes(value)).toEqual([first]);
+  });
+
+  it("保留浏览器标注的标签元数据", () => {
+    const value = toComposerQuote([annotated]);
+
+    expect(value).toEqual(annotated);
+    expect(getComposerQuotes(value)).toEqual([annotated]);
   });
 
   it("carries and removes multiple quotes independently", () => {
