@@ -483,6 +483,28 @@ describe("BrowserManager 会话隔离", () => {
     expect(hosts.get(101)?.navigatedUrls).toEqual(["https://example.com/"]);
   });
 
+  test("onPopup 转应用内新 tab：默认站点策略下也能打开（用户操作不受 Agent 审批限制）", async () => {
+    const requests: BrowserCreateTabRequest[] = [];
+    const { manager, hosts, hostOptions } = setup({ onCreateTabRequest: (request) => requests.push(request) });
+
+    const attached = await manager.attach(SESSION_A, 101);
+    expect(attached.ok).toBe(true);
+    const onPopup = hostOptions.get(101)?.onPopup;
+    expect(onPopup).toBeDefined();
+
+    onPopup!("https://popup.example/");
+    await waitForRequests(requests, 1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: "https://popup.example/",
+      sessionKey: browserSessionKey(SESSION_A),
+    });
+
+    const attachResult = await manager.attach(SESSION_A, 102, requests[0]!.requestId);
+    expect(attachResult.ok).toBe(true);
+    expect(hosts.get(102)?.navigatedUrls).toEqual(["https://popup.example/"]);
+  });
+
   test("双会话 pending create 请求互相隔离；未知 requestId attach 拒绝", async () => {
     const requests: BrowserCreateTabRequest[] = [];
     const { manager, hosts } = setup({ onCreateTabRequest: (request) => requests.push(request) });

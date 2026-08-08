@@ -85,12 +85,12 @@ Agent 侧
   src="about:blank"
   partition="persist:browser"
   data-browser-view
-  allowpopups="false"
+  allowpopups="true"
   webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=yes"
 />
 ```
 
-- `allowpopups="false"`：`window.open`/`target=_blank` 由 main 的 `setWindowOpenHandler` 统一转新 tab（D3）。
+- `allowpopups="true"`：guest 页面的 `window.open`/`target=_blank` 请求进入 main 的 `setWindowOpenHandler`（D3），统一 deny 并转应用内新 tab；`allowpopups="false"` 时 Chromium 会直接吞掉弹窗请求、handler 不会触发，因此必须为 true 才能接管弹窗（guest 不会真正创建新窗口）。
 - 不设置 webview preload（注释功能 P2 可选时再引入，参考 Codex comment-preload.js）。
 - 禁止在 `did-attach-webview` 回调中同步导航（第 12 节 S1）。
 

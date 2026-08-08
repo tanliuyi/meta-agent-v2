@@ -374,10 +374,6 @@ export class BrowserManager {
     }
     const normalized = normalizeNavigateUrl(url);
     if (!normalized) return { ok: false, error: "仅支持 http/https 链接" };
-    if (source === "popup") await this.settingsReady;
-    if (source === "popup" && checkSiteAccess(this.runtimeSettings, normalized) !== "allowed") {
-      return { ok: false, error: `站点 ${new URL(normalized).host} 未列入允许列表，页面弹窗已阻止` };
-    }
     if (source === "agent" && this.blockedAgentSiteError(normalized) !== null) {
       return { ok: false, error: this.blockedAgentSiteError(normalized)! };
     }
@@ -522,9 +518,6 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (source === "popup" && checkSiteAccess(this.runtimeSettings, normalized) !== "allowed") {
-      return { ok: false, error: `站点 ${new URL(normalized).host} 未列入允许列表，页面弹窗已阻止` };
-    }
     if (source === "agent") {
       this.activateAgentTab(state, tabId);
     }

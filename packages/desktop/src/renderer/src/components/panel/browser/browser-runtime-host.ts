@@ -551,7 +551,10 @@ function createWebviewElement(runtime: SessionBrowserRuntime): BrowserWebviewEle
     runtimeOptions.createWebviewElement?.() ?? (document.createElement("webview") as unknown as BrowserWebviewElement);
   element.setAttribute("partition", runtime.partition);
   element.setAttribute("src", "about:blank");
-  element.setAttribute("allowpopups", "false");
+  // 必须为 true：allowpopups=false 时 guest 的 window.open/target=_blank 会被
+  // Chromium 直接吞掉，main 侧 setWindowOpenHandler 不会触发；置 true 后请求
+  // 进入 handler，由 main 统一 deny 并转应用内新 tab（guest 不会真正弹窗）。
+  element.setAttribute("allowpopups", "true");
   element.setAttribute("webpreferences", "contextIsolation=yes, nodeIntegration=no, sandbox=yes");
   element.className = "browser-webview";
   return element;
