@@ -2,7 +2,8 @@ import { createElement, type FC } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ComposerDirectiveChip } from "../src/renderer/src/components/assistant-ui/composer-directive-chip.tsx";
-import { DirectiveText, directiveDisplayLabel } from "../src/renderer/src/components/assistant-ui/directive-text.tsx";
+import { DirectiveText } from "../src/renderer/src/components/assistant-ui/directive-text.tsx";
+import { directiveDisplayLabel } from "../src/renderer/src/components/assistant-ui/directive-text-content.tsx";
 
 const RenderDirectiveText = DirectiveText as unknown as FC<{ text: string }>;
 
@@ -71,6 +72,37 @@ describe("DirectiveText", () => {
     expect(markup).toContain(">directive-text.tsx</span>");
   });
 
+  it("renders directory file directive chips with the folder icon", () => {
+    const markup = renderToStaticMarkup(
+      createElement(ComposerDirectiveChip, {
+        directiveId: "packages/desktop/src",
+        directiveType: "directory",
+        label: "src",
+      }),
+    );
+
+    expect(markup).toContain('data-directive-type="directory"');
+    expect(markup).toContain('data-directive-id="packages/desktop/src"');
+    expect(markup).toContain('class="lucide lucide-folder');
+    expect(markup).not.toContain('class="lucide lucide-file');
+    expect(markup).toContain(">src</span>");
+  });
+
+  it("renders serialized directory directives with the folder icon", () => {
+    const markup = renderToStaticMarkup(
+      createElement(RenderDirectiveText, {
+        text: "Inspect :directory[packages/desktop/src/renderer]{name=packages/desktop/src/renderer} before editing.",
+      }),
+    );
+
+    expect(markup).toContain('data-directive-type="directory"');
+    expect(markup).toContain('data-directive-id="packages/desktop/src/renderer"');
+    expect(markup).toContain('class="lucide lucide-folder');
+    expect(markup).not.toContain('class="lucide lucide-file');
+    expect(markup).toContain(">renderer</span>");
+    expect(markup).not.toContain(">packages/desktop/src/renderer</span>");
+  });
+
   it("renders skill directive chips with the skill icon", () => {
     const markup = renderToStaticMarkup(
       createElement(ComposerDirectiveChip, {
@@ -100,7 +132,7 @@ describe("DirectiveText", () => {
       ),
     ).toBe("directive-text.tsx");
     expect(directiveDisplayLabel("file", "修复 A/B 模块的 bug", "/sessions/a.jsonl")).toBe("修复 A/B 模块的 bug");
-    expect(directiveDisplayLabel("file", "修复模块的 bug", "/sessions/a.jsonl")).toBe("修复模块的 bug");
+    expect(directiveDisplayLabel("directory", "packages/desktop/src/renderer")).toBe("renderer");
   });
 
   it("does not render a file icon for other directive types", () => {

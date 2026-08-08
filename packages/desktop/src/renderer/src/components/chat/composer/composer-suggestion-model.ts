@@ -137,7 +137,7 @@ export function fileSuggestions(files: readonly FileNode[]): ComposerSuggestion[
       type: file.type,
       text: `${unstable_defaultDirectiveFormatter.serialize({
         id: file.path,
-        type: "file",
+        type: file.type,
         label: file.path,
       })} `,
     };
