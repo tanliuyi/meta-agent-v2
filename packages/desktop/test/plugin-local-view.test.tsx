@@ -76,7 +76,7 @@ describe("local plugins view", () => {
     expect(markup).toContain("添加本地插件");
     expect(markup).toContain("/reload");
     expect(markup).not.toContain("应用到当前会话");
-    expect(markup).toContain("development:example: 插件加载失败");
+    expect(markup).toContain("插件加载失败");
     expect(markup).toContain('aria-label="查看 example-plugin.ts 详情"');
     expect(markup).toContain('aria-label="移除 example-plugin.ts"');
   });

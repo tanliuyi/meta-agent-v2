@@ -77,7 +77,7 @@ export class DesktopExtensionSourcePolicy {
             source: "marketplace",
             phase: "resolve",
             code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
-            message: `Marketplace plugin is disabled because a local plugin with the same ID is present: ${plugin.displayName}（本地插件 ${localPlugin} 优先，移除本地插件后市场版本恢复）`,
+            message: `本地插件 ${localPlugin} 声明了与市场插件 ${plugin.displayName} 相同的 ID，市场版本已停用（本地优先）。移除或停用本地插件后市场版本恢复可用。`,
           });
           continue;
         }
@@ -107,7 +107,7 @@ export class DesktopExtensionSourcePolicy {
             source: "marketplace",
             phase: "resolve",
             code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-            message: `Marketplace extension entry is unavailable: ${plugin.displayName}`,
+            message: `市场插件入口不可用：${plugin.displayName}`,
           });
         }
       }
@@ -150,7 +150,7 @@ export class DesktopExtensionSourcePolicy {
             source: "development",
             phase: "resolve",
             code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-            message: `Development extension entry is unavailable: ${entry.displayName}`,
+            message: `本地插件入口不可用：${entry.displayName}`,
           });
         }
       }

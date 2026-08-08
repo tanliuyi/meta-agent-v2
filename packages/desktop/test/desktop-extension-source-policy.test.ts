@@ -125,7 +125,7 @@ describe("DesktopExtensionSourcePolicy", () => {
       expect.objectContaining({
         source: "development",
         code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-        message: "Development extension entry is unavailable: development.ts",
+        message: "本地插件入口不可用：development.ts",
       }),
     ]);
     expect(JSON.stringify(resolved.diagnostics)).not.toContain(developmentPath);
