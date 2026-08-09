@@ -6,7 +6,7 @@ compatibility: Meta Agent Desktop Host Profile v1 and the standard Pi Extension 
 
 # Create a Desktop Plugin
 
-Treat a Desktop plugin as a standard Pi Extension. Do not invent a Desktop-only plugin runtime or import Electron main, preload, renderer, or private Desktop modules.
+Treat a Desktop plugin as a standard Pi Extension. Do not invent a Desktop-only plugin runtime or import Electron main, preload, renderer, or private Desktop modules. For the manifest, configuration schema, Host Profile, loading, and packaging contract, read `desktop-plugin-development` and its focused `references/` documents before making design decisions.
 
 ## Workflow
 

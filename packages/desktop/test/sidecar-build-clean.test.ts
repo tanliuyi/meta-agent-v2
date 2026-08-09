@@ -47,6 +47,18 @@ describe("Desktop sidecar build cleanup", () => {
     const skillsRoot = join(outputRoot, "main", "pi", "skills");
     expect(readFileSync(join(skillsRoot, "plugin-create", "SKILL.md"), "utf8")).toContain("name: plugin-create");
     expect(readFileSync(join(skillsRoot, "plugin-publish", "SKILL.md"), "utf8")).toContain("name: plugin-publish");
+    expect(readFileSync(join(skillsRoot, "desktop-plugin-development", "SKILL.md"), "utf8")).toContain(
+      "name: desktop-plugin-development",
+    );
+    expect(
+      readFileSync(join(skillsRoot, "desktop-plugin-development", "references", "configuration-schema.md"), "utf8"),
+    ).toContain("Desktop Configuration Schema v1");
+    expect(
+      readFileSync(join(skillsRoot, "desktop-plugin-development", "references", "host-profile.md"), "utf8"),
+    ).toContain("Desktop Host Profile v1");
+    expect(
+      readFileSync(join(skillsRoot, "desktop-plugin-development", "references", "loading-and-packaging.md"), "utf8"),
+    ).toContain("Loading and Packaging");
     expect(readFileSync(join(skillsRoot, "plugin-publish", "references", "API.md"), "utf8")).toContain(
       "Marketplace Publish API v1",
     );
