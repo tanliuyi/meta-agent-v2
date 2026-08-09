@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "marketplaceId": "meta-agent-development",
+  "artifactId": "billion-context-pi-local",
+  "plugin": {
+    "id": "pi.billion-context",
+    "name": "Billion Context",
+    "version": "0.1.26-local",
+    "publisherId": "meta-agent"
+  },
+  "pi": {
+    "entry": "index.ts",
+    "extensionApi": "v1"
+  },
+  "desktop": {
+    "hostProfileVersion": 1
+  },
+  "target": {
+    "platform": "universal",
+    "arch": "universal"
+  },
+  "configuration": {
+    "version": 1,
+    "fields": [
+      {
+        "key": "modelContextLimit",
+        "label": "上下文上限（tokens）",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000,
+        "step": 1,
+        "description": "Billion Context 的上下文预算。设为 0 或留空时跟随当前模型的 context window。",
+        "group": "上下文",
+        "order": 1
+      },
+      {
+        "key": "preserveRecentMessages",
+        "label": "保留最近消息数",
+        "type": "number",
+        "defaultValue": 5,
+        "minimum": 0,
+        "maximum": 1000,
+        "step": 1,
+        "description": "压缩时始终保留在活动上下文中的最近消息数量。",
+        "group": "上下文",
+        "order": 2
+      },
+      {
+        "key": "toolBashDefaultTimeout",
+        "label": "Bash 默认超时（秒）",
+        "type": "number",
+        "defaultValue": 60,
+        "minimum": 0,
+        "maximum": 86400,
+        "step": 1,
+        "description": "模型未指定 timeout 时注入到 Bash 工具的默认超时；设为 0 可恢复不限制。",
+        "group": "工具输出",
+        "order": 3
+      },
+      {
+        "key": "toolOutputMaxBytes",
+        "label": "工具输出上限（bytes）",
+        "type": "number",
+        "defaultValue": 200000,
+        "minimum": 0,
+        "maximum": 10000000,
+        "step": 1,
+        "description": "单次工具结果允许进入上下文的最大字节数；设为 0 可关闭上限。",
+        "group": "工具输出",
+        "order": 4
+      },
+      {
+        "key": "debug",
+        "label": "调试日志",
+        "type": "boolean",
+        "defaultValue": false,
+        "description": "写入 ACP 调试日志并显示压缩提示。",
+        "group": "调试",
+        "order": 5
+      }
+    ]
+  },
+  "capabilities": [
+    "configuration.read",
+    "events.subscribe",
+    "tools.register",
+    "commands.register",
+    "session.read",
+    "session.compact",
+    "ui.notify"
+  ],
+  "nativeModules": [],
+  "executables": [],
+  "files": {
+    "index.ts": {
+      "mode": "0644"
+    }
+  }
+}
