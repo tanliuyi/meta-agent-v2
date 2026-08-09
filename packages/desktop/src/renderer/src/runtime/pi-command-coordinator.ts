@@ -67,11 +67,19 @@ export class PiCommandCoordinator {
     this.report = options.report;
   }
 
-  enqueue = (message: AppendMessage, options: { steer: boolean }): void => {
+  enqueue = (message: AppendMessage): void => {
+    this.submitPending(message, "followUp");
+  };
+
+  steer = (message: AppendMessage): void => {
+    this.submitPending(message, "steer");
+  };
+
+  private submitPending(message: AppendMessage, desiredMode: "steer" | "followUp"): void {
     const target = this.requireTarget();
     const requestId = crypto.randomUUID();
     this.rememberInput(requestId, message);
-    void this.submit(message, target, options.steer ? "steer" : "followUp", requestId).then(
+    void this.submit(message, target, desiredMode, requestId).then(
       (result) => {
         const pending = this.pendingInputs.get(requestId);
         if (!pending) return;
@@ -84,7 +92,7 @@ export class PiCommandCoordinator {
         this.report(error);
       },
     );
-  };
+  }
 
   edit = async (
     message: AppendMessage,
@@ -134,8 +142,6 @@ export class PiCommandCoordinator {
     throw new Error("assistant-ui queue routing 已改变：配置 queue 后不应调用 onNew");
   };
 
-  observeFrameworkClear = (): void => {};
-
   observeQueue(items: readonly PiQueueItem[]): void {
     const queuedRequestIds = new Set(items.flatMap((item) => (item.requestId ? [item.requestId] : [])));
     for (const [requestId, pending] of this.pendingInputs) {
@@ -145,7 +151,7 @@ export class PiCommandCoordinator {
   }
 
   unsupportedQueueOperation = (): never => {
-    throw new Error("Pi public queue API 不支持单项 remove/promote");
+    throw new Error("Pi public queue API 不支持单项 move/edit/remove");
   };
 
   private async submit(
