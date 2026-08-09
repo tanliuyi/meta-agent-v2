@@ -71,6 +71,28 @@ describe("plugin configuration schema", () => {
     ).toThrow("default is invalid");
   });
 
+  it("parses model-selector widget metadata", () => {
+    const schema = parsePluginConfigurationSchema({
+      version: 1,
+      fields: [
+        {
+          key: "searchModel",
+          label: "Search model",
+          type: "text",
+          widget: "model-selector",
+          modelFormat: "model-id",
+        },
+      ],
+    });
+    expect(schema?.fields[0]).toEqual(expect.objectContaining({ widget: "model-selector", modelFormat: "model-id" }));
+    expect(() =>
+      parsePluginConfigurationSchema({
+        version: 1,
+        fields: [{ key: "name", label: "Name", type: "text", modelFormat: "model-id" }],
+      }),
+    ).toThrow("metadata is invalid");
+  });
+
   it("returns stable field-level value validation", () => {
     const field = {
       key: "count",
