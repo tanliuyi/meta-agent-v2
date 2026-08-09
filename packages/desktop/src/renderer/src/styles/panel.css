@@ -122,7 +122,8 @@ body.is-resizing-column .workbench-panel {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 68px 0 8px;
+  /* 2 个 24px 顶部控制按钮 + 4px 组内间距 + 18px 右侧留白 + 4px 组间距。 */
+  padding: 0 74px 0 8px;
 }
 /* topbar-actions 悬浮于右侧留白上方，需从 drag 矩形中挖洞保持可交互。 */
 .panel-tabs-safe-area {
@@ -130,18 +131,19 @@ body.is-resizing-column .workbench-panel {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 68px;
+  width: 74px;
 }
 .app-frame[data-platform="darwin"] .panel-tabs {
   -webkit-app-region: drag;
   app-region: drag;
   user-select: none;
-  padding: 0 78px 0 8px;
+  /* macOS Panel 右侧有 1px 边框，安全区相应减少 1px。 */
+  padding: 0 73px 0 8px;
 }
 .app-frame[data-platform="darwin"] .panel-tabs-safe-area {
   -webkit-app-region: no-drag;
   app-region: no-drag;
-  width: 78px;
+  width: 73px;
 }
 .app-frame[data-platform="darwin"] .panel-tabs :is(button, input, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
@@ -333,8 +335,8 @@ body.is-resizing-column .workbench-panel {
   min-height: 0;
   flex-direction: column;
 }
-.sidebar-new-session-draft .composer-error {
-  margin: 8px;
+.sidebar-new-session-draft .composer-feedback {
+  margin-inline: 0;
 }
 
 /* subagent 会话内容：chat 行占满 panel 内容区。 */

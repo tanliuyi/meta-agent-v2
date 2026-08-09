@@ -223,20 +223,24 @@ export function OpenWorkbenchPanel({
               onCloseTab={onCloseTab}
             />
             <TooltipIconButton
+              variant="ghost"
+              size="icon"
               tooltip="新建 Panel"
               aria-label="新建 Panel"
-              className="text-muted-foreground"
+              className="size-6 text-muted-foreground"
               data-active={activeKey === null || undefined}
               aria-pressed={activeKey === null}
               onClick={onOpenNewPanel}
             >
-              <Plus className="size-4.5!" />
+              <Plus className="size-4!" />
             </TooltipIconButton>
             {onToggleFullscreen ? (
               <TooltipIconButton
+                variant="ghost"
+                size="icon"
                 tooltip={fullscreen ? "退出全屏" : "全屏"}
                 aria-label={fullscreen ? "退出全屏" : "进入全屏"}
-                className="text-muted-foreground"
+                className="size-6 text-muted-foreground"
                 aria-pressed={fullscreen}
                 onClick={onToggleFullscreen}
               >

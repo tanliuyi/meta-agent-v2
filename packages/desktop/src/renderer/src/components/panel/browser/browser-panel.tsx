@@ -1126,12 +1126,13 @@ export function BrowserPanel() {
                   tooltip={`关闭 ${label}`}
                   aria-label={`关闭 ${label}`}
                   variant="ghost-destructive"
+                  className="browser-tab-close size-4.5"
                   onClick={(event) => {
                     event.stopPropagation();
                     handleCloseView(view.viewId);
                   }}
                 >
-                  <X size={12} aria-hidden="true" />
+                  <X size={10} aria-hidden="true" />
                 </TooltipIconButton>
               </div>
             );

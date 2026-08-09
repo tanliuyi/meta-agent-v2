@@ -59,15 +59,15 @@
   display: flex;
   flex: 0 0 auto;
   align-items: stretch;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
-  padding: 4px 8px 0;
+  padding: 4px 8px;
   border-bottom: 1px solid hsl(var(--border));
 }
 .browser-tab-list {
   display: flex;
   align-items: stretch;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
   flex: 1 1 auto;
   overflow-x: auto;
@@ -77,22 +77,52 @@
 }
 
 .browser-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   max-width: 200px;
   min-width: 0;
-  padding: 5px 8px;
+  padding: 4px 8px;
   border: 0;
-  border-radius: var(--shape-radius-sm) var(--shape-radius-sm) 0 0;
+  border-radius: var(--shape-radius-xl);
   background: transparent;
   color: hsl(var(--muted-foreground));
   cursor: pointer;
   font-size: 12px;
 }
+.browser-tab-close {
+  opacity: 0;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+.browser-tab:hover .browser-tab-close,
+.browser-tab[data-active] .browser-tab-close,
+.browser-tab-close:focus-visible {
+  opacity: 0.72;
+}
+.browser-tab-close:hover {
+  opacity: 1;
+}
+
+.browser-tab:not([data-active]):hover {
+  border-radius: var(--shape-radius-xl);
+  background: hsl(var(--muted) / 0.65);
+  color: hsl(var(--foreground));
+}
+.browser-tab + .browser-tab::before {
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  left: -2px;
+  width: 1px;
+  background: hsl(var(--border) / 0.7);
+  content: "";
+  pointer-events: none;
+}
 .browser-tab[data-active] {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
+  /* border-radius: var(--shape-radius-xl) var(--shape-radius-xl) 0 0; */
 }
 .browser-tab[data-crashed] {
   color: hsl(var(--warning));
@@ -335,7 +365,8 @@
 
 .browser-history-item-text {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 .browser-history-item-title {
