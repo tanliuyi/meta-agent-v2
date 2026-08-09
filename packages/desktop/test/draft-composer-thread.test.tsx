@@ -7,6 +7,10 @@ import { ModelSelect } from "../src/renderer/src/components/chat/model-select.ts
 import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
 import type { DraftSessionConfig, Project } from "../src/shared/contracts.ts";
 
+vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
+  useSessionScope: () => ({ record: { key: "test-session" } }),
+}));
+
 const project: Project = {
   id: "project",
   name: "Project",
@@ -31,6 +35,7 @@ const config: DraftSessionConfig = {
   thinkingLevel: "off",
   thinkingLevels: ["off", "high"],
   readiness: { state: "ready" },
+  extensions: { extensionSetGeneration: "test-generation", diagnostics: [] },
 };
 
 describe("DraftComposerThread", () => {
@@ -65,6 +70,55 @@ describe("DraftComposerThread", () => {
     expect(markup).toContain('data-draft-composer="true"');
     expect(markup).toContain("max-w-(--layout-draft-composer-max-width)");
     expect(markup).not.toContain("max-w-(--layout-thread-max-width)");
+  });
+
+  it("将本地插件覆盖提示收敛为具体的信息反馈", () => {
+    function TestSurface() {
+      const runtime = useExternalStoreRuntime<ThreadMessage>({
+        messages: [],
+        isSendDisabled: true,
+        onNew: async () => {},
+      });
+      return (
+        <TooltipProvider>
+          <AssistantRuntimeProvider runtime={runtime}>
+            <DraftComposerThread
+              projects={[project]}
+              project={project}
+              config={config}
+              configLoading={false}
+              phase="editing"
+              diagnostics={[
+                {
+                  extensionId: "pi.web-access",
+                  source: "marketplace",
+                  phase: "resolve",
+                  code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
+                  message: "本地插件“Web Access”已覆盖市场插件“Web Access”，当前使用本地版本。",
+                },
+              ]}
+              onProjectChange={vi.fn()}
+              onModelChange={vi.fn()}
+              onThinkingChange={vi.fn()}
+              onSubmit={vi.fn()}
+            />
+          </AssistantRuntimeProvider>
+        </TooltipProvider>
+      );
+    }
+
+    const markup = renderToStaticMarkup(createElement(TestSurface));
+
+    expect(markup).toContain('class="composer-feedback" data-tone="info"');
+    expect(markup).not.toContain("本地插件优先");
+    expect(markup).toContain("本地插件“Web Access”已覆盖市场插件“Web Access”");
+    expect(markup).toContain("当前使用本地版本");
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).not.toContain("composer-feedback-title");
+    expect(markup).toContain("composer-feedback-icon");
+    expect(markup).toContain("<svg");
+    expect(markup).not.toContain("composer-error");
   });
 
   it("compact 模式隐藏标题并靠下对齐（侧边栏草稿）", () => {
