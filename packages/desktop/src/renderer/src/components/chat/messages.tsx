@@ -140,7 +140,7 @@ export function Messages() {
       element.removeEventListener("wheel", onWheel);
       element.removeEventListener("touchmove", disarm);
     };
-  }, []);
+  }, [sessionKey]);
 
   useLayoutEffect(() => {
     const element = scrollerRef.current;
@@ -156,7 +156,7 @@ export function Messages() {
       observer.disconnect();
       threadRoot.style.removeProperty("--thread-scrollbar-width");
     };
-  }, []);
+  }, [sessionKey]);
 
   useEffect(() => {
     const element = scrollerRef.current;
@@ -167,7 +167,7 @@ export function Messages() {
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, []);
+  }, [sessionKey]);
 
   useEffect(() => {
     const updateSelectionRange = () => {
@@ -200,17 +200,29 @@ export function Messages() {
   }, []);
 
   const previousIsRunningRef = useRef(false);
+  const didInitialJumpRef = useRef(false);
+
+  // 会话切换时 Messages 可能复用同一个组件实例；滚动元素和 refs 不能沿用旧会话状态。
+  // 先重置追底状态，再让下面的 layout effect 执行本次会话的首次跳底。
+  useLayoutEffect(() => {
+    stickyRef.current = true;
+    previousIsRunningRef.current = false;
+    didInitialJumpRef.current = false;
+    setIsAtBottom(true);
+    const element = scrollerRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [sessionKey]);
+
   useLayoutEffect(() => {
     if (isRunning && !previousIsRunningRef.current && stickyRef.current) jumpToBottom();
     previousIsRunningRef.current = isRunning;
   }, [isRunning, jumpToBottom]);
 
-  const didInitialJumpRef = useRef(false);
   useLayoutEffect(() => {
     if (didInitialJumpRef.current || turns.length === 0) return;
     didInitialJumpRef.current = true;
     jumpToBottom();
-  }, [jumpToBottom, turns.length]);
+  }, [jumpToBottom, sessionKey, turns.length]);
 
   const items = virtualizer.getVirtualItems();
   const paddingTop = items[0]?.start ?? 0;
