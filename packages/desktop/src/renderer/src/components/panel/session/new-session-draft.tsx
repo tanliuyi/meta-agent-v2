@@ -57,13 +57,7 @@ export function NewSessionDraft() {
       .then((next) => {
         if (!active) return;
         draft.setConfig(applyStoredDraftSelection(next, projectId));
-        draft.setLoadError(
-          next.extensions.diagnostics.length > 0
-            ? next.extensions.diagnostics
-                .map((diagnostic) => `${diagnostic.extensionId}: ${diagnostic.message}`)
-                .join("\n")
-            : null,
-        );
+        draft.setLoadError(null);
       })
       .catch((reason: unknown) => {
         if (active) draft.setLoadError(reason instanceof Error ? reason.message : String(reason));
@@ -154,6 +148,8 @@ export function NewSessionDraft() {
           config={draft.config}
           configLoading={draft.config === null}
           phase={draft.phase === "materializing" ? "materializing" : "editing"}
+          error={draft.loadError}
+          diagnostics={draft.config?.extensions.diagnostics}
           fixedProject
           compact
           onProjectChange={async () => undefined}
@@ -161,7 +157,6 @@ export function NewSessionDraft() {
           onThinkingChange={selectThinking}
           onSubmit={submit}
         />
-        {draft.loadError ? <div className="composer-error">{draft.loadError}</div> : null}
       </div>
     </AssistantRuntimeProvider>
   );

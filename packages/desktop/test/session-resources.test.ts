@@ -96,7 +96,10 @@ describe("desktop controlled Pi resources", () => {
 
     const skills = services.resourceLoader.getSkills();
     expect(skills.diagnostics.filter(({ type }) => type === "error")).toEqual([]);
-    expect(skills.skills.map(({ name }) => name)).toEqual(["plugin-create", "plugin-publish"]);
+    expect(skills.skills.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(["desktop-plugin-development", "plugin-create", "plugin-publish"]),
+    );
+    expect(skills.skills).toHaveLength(3);
     expect(skills.skills.find(({ name }) => name === "plugin-create")?.description).toContain(
       "standard Pi Extension plugins for Meta Agent Desktop",
     );

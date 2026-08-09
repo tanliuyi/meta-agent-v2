@@ -125,7 +125,7 @@ describe("DesktopExtensionSourcePolicy", () => {
       expect.objectContaining({
         source: "development",
         code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-        message: "本地插件入口不可用：development.ts",
+        message: "本地插件“development.ts”暂不可用，本次会话不会加载该插件。",
       }),
     ]);
     expect(JSON.stringify(resolved.diagnostics)).not.toContain(developmentPath);

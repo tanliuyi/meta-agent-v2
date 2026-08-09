@@ -134,6 +134,39 @@ describe("SessionRuntime Pi-native commands", () => {
     expect(mocks.createAgentSessionFromServices).not.toHaveBeenCalled();
   });
 
+  it("does not fail startup when a marketplace plugin is superseded by local development", async () => {
+    const session = createSession();
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const runtime = await SessionRuntime.create({
+      projectId: "project",
+      cwd: "/workspace",
+      extensionSet: {
+        generation: "local-priority",
+        projectId: "project",
+        entries: [],
+        diagnostics: [
+          {
+            extensionId: "pi.web-access",
+            source: "marketplace",
+            phase: "resolve",
+            code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
+            message: "本地插件优先",
+          },
+        ],
+        resolvedAt: 0,
+      },
+      push: () => {},
+      onSummaryChanged: () => {},
+    });
+
+    expect(runtime.bootstrap().control.lastError).toBeUndefined();
+    expect(runtime.bootstrap().control.extensionSet.diagnostics).toEqual([
+      expect.objectContaining({ code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT" }),
+    ]);
+    await runtime.dispose();
+  });
+
   it("fails worker startup when controlled provider registration fails", async () => {
     const services = createServices();
     services.diagnostics.push({

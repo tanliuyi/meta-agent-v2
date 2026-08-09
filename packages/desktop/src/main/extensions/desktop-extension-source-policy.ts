@@ -77,7 +77,7 @@ export class DesktopExtensionSourcePolicy {
             source: "marketplace",
             phase: "resolve",
             code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
-            message: `本地插件 ${localPlugin} 声明了与市场插件 ${plugin.displayName} 相同的 ID，市场版本已停用（本地优先）。移除或停用本地插件后市场版本恢复可用。`,
+            message: `本地插件“${localPlugin}”已覆盖市场插件“${plugin.displayName}”，当前使用本地版本。停用或移除本地插件后，市场版本将自动恢复。`,
           });
           continue;
         }
@@ -107,7 +107,7 @@ export class DesktopExtensionSourcePolicy {
             source: "marketplace",
             phase: "resolve",
             code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-            message: `市场插件入口不可用：${plugin.displayName}`,
+            message: `市场插件“${plugin.displayName}”暂不可用，本次会话不会加载该插件。`,
           });
         }
       }
@@ -150,7 +150,7 @@ export class DesktopExtensionSourcePolicy {
             source: "development",
             phase: "resolve",
             code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-            message: `本地插件入口不可用：${entry.displayName}`,
+            message: `本地插件“${entry.displayName}”暂不可用，本次会话不会加载该插件。`,
           });
         }
       }
