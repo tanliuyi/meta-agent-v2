@@ -65,10 +65,16 @@ import { cleanupWorktrees, createWorktrees, diffWorktrees, formatWorktreeDiffSum
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup } from "../shared/parallel-handoff.ts";
 import type { SessionLeaseRequest } from "../shared/session-lease.ts";
 import { appendJsonl } from "../../shared/artifacts.ts";
-import type { SubagentRuntime, SubagentRuntimeRunRequest } from "../../runtime/subagent-runtime.ts";
+import {
+  childExtensionTools,
+  resolveChildExtensions,
+  type SubagentRuntime,
+  type SubagentRuntimeRunRequest,
+} from "../../runtime/subagent-runtime.ts";
 import {
 	SUBAGENT_TIMEOUT_CODE,
 	subagentTextDelta,
+	type SubagentChildExtension,
 	type SubagentExtensionProfile,
 	type SubagentRunEvent,
 } from "../../../../../../../shared/subagent-contracts.ts";
@@ -203,6 +209,7 @@ export interface AsyncRunnerStepBuildParams {
 	resultMode?: SubagentRunMode;
 	agents: AgentConfig[];
 	ctx: AsyncExecutionContext;
+	subagentRuntime?: SubagentRuntime;
 	availableModels?: AvailableModelInfo[];
 	cwd?: string;
 	chainSkills?: string[];
@@ -227,18 +234,24 @@ function resolveProgrammaticToolPlan(
 	requestedTools: string[] | undefined,
 	capabilityCeiling: ResolvedSubagentCapabilityCeiling | undefined,
 	structuredOutput: boolean,
+	additionalTools: readonly string[] = [],
 ): { tools?: string[]; audit?: SubagentCapabilityAudit } {
 	const allowed = capabilityCeiling?.allowedTools ? new Set(capabilityCeiling.allowedTools) : undefined;
-	const effectiveTools = requestedTools?.filter((tool) => !allowed || allowed.has(tool));
+	const effectiveAdditionalTools = additionalTools.filter((tool) => !allowed || allowed.has(tool));
+	const effectiveRequestedTools = requestedTools?.filter((tool) => !allowed || allowed.has(tool));
+	const effectiveTools = requestedTools === undefined
+		? (allowed ? [...new Set([...allowed, ...effectiveAdditionalTools])] : undefined)
+		: [...new Set([...(effectiveRequestedTools ?? []), ...effectiveAdditionalTools])];
 	const internalTools = structuredOutput ? ["structured_output"] : [];
+	const auditedTools = [...new Set([...(effectiveTools ?? []), ...effectiveAdditionalTools, ...internalTools])];
 	return {
 		...(effectiveTools ? { tools: effectiveTools } : {}),
 		...(capabilityCeiling ? {
 			audit: {
 				ceiling: capabilityCeiling,
 				...(requestedTools ? { requestedTools } : {}),
-				effectiveTools: [...new Set([...(effectiveTools ?? []), ...internalTools])],
-				removedTools: requestedTools?.filter((tool) => !effectiveTools?.includes(tool)) ?? [],
+				effectiveTools: auditedTools,
+				removedTools: requestedTools?.filter((tool) => !effectiveRequestedTools?.includes(tool)) ?? [],
 				internalTools,
 				extensionsDenied: capabilityCeiling.denyExtensions,
 				removedExtensionCount: 0,
@@ -434,7 +447,17 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		const modelCandidates = buildModelCandidates(primaryModel, a.fallbackModels, availableModels, ctx.currentModelProvider, { scope: ctx.modelScope }).map((candidate) =>
 			applyThinkingSuffix(candidate, effectiveThinking, thinkingOverride !== undefined) ?? candidate,
 		);
-		const toolPlan = resolveProgrammaticToolPlan(a.tools, params.capabilityCeiling, Boolean(s.outputSchema));
+		const childExtensions = resolveChildExtensions(params.subagentRuntime, {
+			denyExtensions: params.capabilityCeiling?.denyExtensions,
+			allowedTools: params.capabilityCeiling?.allowedTools,
+		});
+		const childTools = childExtensionTools(childExtensions);
+		const toolPlan = resolveProgrammaticToolPlan(
+			a.tools,
+			params.capabilityCeiling,
+			Boolean(s.outputSchema),
+			childTools,
+		);
 		const launchContractDigest = launchBindingDigest({
 			definitionDigest: agentDefinitionDigest(a),
 			task: s.task ?? originalTask,
@@ -448,7 +471,14 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			skills: resolvedSkills.map((skill) => skill.name),
 			tools: toolPlan.tools,
 			extensions: params.capabilityCeiling?.denyExtensions ? [] : a.extensions,
-			subagentOnlyExtensions: params.capabilityCeiling?.denyExtensions ? [] : a.subagentOnlyExtensions,
+			...(childExtensions.length || a.subagentOnlyExtensions?.length
+				? {
+					subagentOnlyExtensions: [
+						...(params.capabilityCeiling?.denyExtensions ? [] : a.subagentOnlyExtensions ?? []),
+						...childExtensions.map((extension) => extension.path),
+					],
+				}
+				: {}),
 			mcpDirectTools: params.capabilityCeiling?.denyExtensions ? [] : a.mcpDirectTools,
 			...(outputPath ? { outputPath } : {}),
 			outputMode: behavior.outputMode,
@@ -476,7 +506,15 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			launchBindingTask: s.task ?? originalTask,
 			launchContractDigest,
 			extensions: params.capabilityCeiling?.denyExtensions ? [] : a.extensions,
-			subagentOnlyExtensions: params.capabilityCeiling?.denyExtensions ? [] : a.subagentOnlyExtensions,
+			childExtensions: [...childExtensions],
+			...(childExtensions.length || a.subagentOnlyExtensions?.length
+				? {
+					subagentOnlyExtensions: [
+						...(params.capabilityCeiling?.denyExtensions ? [] : a.subagentOnlyExtensions ?? []),
+						...childExtensions.map((extension) => extension.path),
+					],
+				}
+				: {}),
 			mcpDirectTools: params.capabilityCeiling?.denyExtensions ? [] : a.mcpDirectTools,
 			completionGuard: a.completionGuard,
 			systemPrompt,
@@ -681,6 +719,7 @@ export function executeAsyncChain(
 		resultMode,
 		agents,
 		ctx,
+		subagentRuntime: params.subagentRuntime,
 		availableModels: params.availableModels,
 		cwd,
 		chainSkills: params.chainSkills,
@@ -995,7 +1034,17 @@ export function executeAsyncSingle(
 	const modelCandidates = buildModelCandidates(primaryModel, agentConfig.fallbackModels, availableModels, ctx.currentModelProvider, { scope: ctx.modelScope }).map((candidate) =>
 		applyThinkingSuffix(candidate, effectiveThinking, params.thinkingOverride !== undefined) ?? candidate,
 	);
-	const toolPlan = resolveProgrammaticToolPlan(agentConfig.tools, capabilityCeiling, Boolean(params.structuredOutputSchema));
+	const childExtensions = resolveChildExtensions(params.subagentRuntime, {
+		denyExtensions: capabilityCeiling?.denyExtensions,
+		allowedTools: capabilityCeiling?.allowedTools,
+	});
+	const childTools = childExtensionTools(childExtensions);
+	const toolPlan = resolveProgrammaticToolPlan(
+		agentConfig.tools,
+		capabilityCeiling,
+		Boolean(params.structuredOutputSchema),
+		childTools,
+	);
 	const launchContractDigest = launchBindingDigest({
 		definitionDigest: agentDefinitionDigest(agentConfig),
 		task,
@@ -1009,7 +1058,14 @@ export function executeAsyncSingle(
 		skills: resolvedSkills.map((skill) => skill.name),
 		tools: toolPlan.tools,
 		extensions: capabilityCeiling?.denyExtensions ? [] : agentConfig.extensions,
-		subagentOnlyExtensions: capabilityCeiling?.denyExtensions ? [] : agentConfig.subagentOnlyExtensions,
+		...(childExtensions.length || agentConfig.subagentOnlyExtensions?.length
+			? {
+				subagentOnlyExtensions: [
+					...(capabilityCeiling?.denyExtensions ? [] : agentConfig.subagentOnlyExtensions ?? []),
+					...childExtensions.map((extension) => extension.path),
+				],
+			}
+			: {}),
 		mcpDirectTools: capabilityCeiling?.denyExtensions ? [] : agentConfig.mcpDirectTools,
 		...(outputPath ? { outputPath } : {}),
 		outputMode,
@@ -1126,6 +1182,7 @@ export function executeAsyncSingle(
 			...(ctx.currentModelProvider ? { preferredProvider: ctx.currentModelProvider } : {}),
 			...(programmaticThinking ? { thinking: programmaticThinking as SubagentRuntimeRunRequest["thinking"] } : {}),
 			...(toolPlan.tools ? { tools: toolPlan.tools } : {}),
+			childExtensions,
 			...(systemPrompt ? { systemPrompt } : {}),
 			systemPromptMode: agentConfig.systemPromptMode,
 			inheritProjectContext: agentConfig.inheritProjectContext,
@@ -1381,8 +1438,14 @@ function runnerStepToRequest(
 	childIndex: number,
 	cwd: string,
 	limits: Pick<ConsumeAsyncChainOptions, "deadlineAt" | "turnBudget">,
+	childExtensions: readonly SubagentChildExtension[],
 ): SubagentRuntimeRunRequest {
 	const programmaticModel = step.model ? splitKnownThinkingSuffix(step.model).baseModel : undefined;
+	const effectiveChildExtensions = step.childExtensions ?? childExtensions;
+	const childTools = childExtensionTools(effectiveChildExtensions);
+	const tools = step.tools && step.tools.length > 0
+		? [...new Set([...step.tools, ...childTools])]
+		: undefined;
 	const timeoutMs = limits.deadlineAt === undefined ? undefined : Math.max(0, limits.deadlineAt - Date.now());
 	return {
 		runId,
@@ -1397,7 +1460,8 @@ function runnerStepToRequest(
 		cwd: step.cwd ?? cwd,
 		...(programmaticModel ? { model: programmaticModel } : {}),
 		...(step.thinking ? { thinking: step.thinking as SubagentRuntimeRunRequest["thinking"] } : {}),
-		...(step.tools && step.tools.length > 0 ? { tools: step.tools } : {}),
+		...(tools ? { tools } : {}),
+		childExtensions: [...effectiveChildExtensions],
 		...(step.systemPrompt ? { systemPrompt: step.systemPrompt } : {}),
 		systemPromptMode: step.systemPromptMode ?? "append",
 		inheritProjectContext: step.inheritProjectContext,
@@ -1412,7 +1476,7 @@ function runnerStepToRequest(
 				},
 			}
 			: {}),
-		extensionProfile: step.tools?.includes("subagent")
+		extensionProfile: tools?.includes("subagent")
 			? ["provider", "runtime", "fanout"]
 			: ["provider", "runtime"],
 		...(step.toolBudget ? { toolBudget: step.toolBudget } : {}),
@@ -1593,6 +1657,10 @@ async function consumeAsyncChainRun(
 	options: ConsumeAsyncChainOptions,
 ): Promise<void> {
 	const { asyncDir, resultPath, eventsPath, runnerCwd, resultMode, sessionId } = options;
+	const childExtensions = resolveChildExtensions(runtime, {
+		denyExtensions: options.capabilityCeiling?.denyExtensions,
+		allowedTools: options.capabilityCeiling?.allowedTools,
+	});
 	const startedAt = Date.now();
 	const results: ProgrammaticLeafResult[] = [];
 	const active = new Map<number, SubagentRuntimeRunRequest>();
@@ -1708,6 +1776,7 @@ async function consumeAsyncChainRun(
 						baseIndex + taskIndex,
 						worktreeSetup?.worktrees[taskIndex]?.agentCwd ?? task.cwd ?? runnerCwd,
 						options,
+						childExtensions,
 					),
 				);
 				let groupFailed = false;
@@ -1804,6 +1873,7 @@ async function consumeAsyncChainRun(
 						index,
 						sequential.cwd ?? runnerCwd,
 						options,
+						childExtensions,
 					);
 					active.set(index, request);
 					markProgrammaticStep(asyncDir, index, { status: "running", startedAt: Date.now() });

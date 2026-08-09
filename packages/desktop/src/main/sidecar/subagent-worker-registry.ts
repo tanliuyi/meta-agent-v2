@@ -615,6 +615,18 @@ function validateRunRequest(request: SubagentRunRequest): void {
   if (request.tools?.some((tool) => tool.includes("/") || tool.includes("\\") || /\.[cm]?[jt]s$/i.test(tool))) {
     throw new Error("Subagent tools must be registered tool names, not extension paths");
   }
+  const childExtensionPaths = new Set<string>();
+  for (const extension of request.childExtensions ?? []) {
+    if (!isAbsolute(extension.path)) throw new Error("Child extension paths must be absolute");
+    if (childExtensionPaths.has(extension.path)) throw new Error("Child extension paths must be unique");
+    childExtensionPaths.add(extension.path);
+    if (
+      !extension.tools.length ||
+      extension.tools.some((tool) => tool.includes("/") || tool.includes("\\") || /\.[cm]?[jt]s$/i.test(tool))
+    ) {
+      throw new Error("Child extension tools must be registered tool names");
+    }
+  }
 }
 
 function validateRootRequest(request: SubagentRunRequest): void {
@@ -636,6 +648,9 @@ function validateNestedRequest(parent: SubagentRunRequest, request: SubagentRunR
   const expectedLineage = [...parent.lineage, { runId: parent.runId, childIndex: parent.childIndex }];
   if (!sameLineage(request.lineage, expectedLineage)) {
     throw new Error("Nested subagent request lineage does not match its parent worker");
+  }
+  if (!sameChildExtensions(parent.childExtensions, request.childExtensions)) {
+    throw new Error("Nested subagent request changed its approved child extensions");
   }
 }
 
@@ -660,6 +675,20 @@ function isDescendant(parent: SubagentRunRequest, candidate: SubagentRunRequest)
   }
   return candidate.lineage.some(
     (ancestor) => ancestor.runId === parent.runId && ancestor.childIndex === parent.childIndex,
+  );
+}
+
+function sameChildExtensions(
+  actual: SubagentRunRequest["childExtensions"],
+  expected: SubagentRunRequest["childExtensions"],
+): boolean {
+  const signature = (extensions: SubagentRunRequest["childExtensions"]): string[] =>
+    (extensions ?? []).map((extension) => `${extension.path}\0${[...extension.tools].sort().join("\0")}`).sort();
+  const actualSignature = signature(actual);
+  const expectedSignature = signature(expected);
+  return (
+    actualSignature.length === expectedSignature.length &&
+    actualSignature.every((item, index) => item === expectedSignature[index])
   );
 }
 

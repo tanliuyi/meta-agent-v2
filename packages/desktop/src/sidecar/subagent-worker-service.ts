@@ -1,5 +1,15 @@
-import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -35,6 +45,7 @@ import type { SidecarBinding, SidecarCommand } from "../shared/sidecar-contracts
 import { toJsonValue } from "../shared/sidecar-wire.ts";
 import {
   SUBAGENT_TIMEOUT_CODE,
+  type SubagentChildExtension,
   type SubagentRunRequest,
   type SubagentWorkerBinding,
   type SubagentWorkerCommand,
@@ -183,7 +194,11 @@ export class SubagentWorkerService implements SidecarService {
       ...(request.extensionProfile.includes("fanout") ? [createFanoutExtension(request, this.context)] : []),
       ...(this.dependencies.extensionFactories ?? []),
     ];
-    const extensionSet = childExtensionSet(request, extensionFactories);
+    const extensionSet = childExtensionSet(
+      request,
+      extensionFactories,
+      validateChildExtensions(request.childExtensions),
+    );
     const settingsManager = SettingsManager.create(request.cwd, this.binding.agentDir);
     if (this.binding.shellPath) settingsManager.applyDefaults({ shellPath: this.binding.shellPath });
     const modelRuntime = await ModelRuntime.create({
@@ -641,6 +656,7 @@ function createFanoutExtension(request: SubagentRunRequest, context: SidecarServ
     projectId: request.projectId,
     parentThreadId: request.parentThreadId,
     parentWorker: request,
+    childExtensions: request.childExtensions,
     requestHost: (hostRequest, onEvent) => context.requestHost(hostRequest, onEvent),
   });
   return {
@@ -706,17 +722,59 @@ function registerStructuredOutput(api: ExtensionAPI, request: SubagentRunRequest
   });
 }
 
-function childExtensionSet(request: SubagentRunRequest, factories: InlineExtension[]) {
+function validateChildExtensions(extensions: readonly SubagentChildExtension[] | undefined): SubagentChildExtension[] {
+  const seen = new Set<string>();
+  return (extensions ?? []).map((extension) => {
+    if (!isAbsolute(extension.path)) throw new Error(`Child extension path must be absolute: ${extension.path}`);
+    if (seen.has(extension.path)) throw new Error(`Duplicate child extension path: ${extension.path}`);
+    seen.add(extension.path);
+    const stats = lstatSync(extension.path);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error(`Child extension path must be a regular non-symlink file: ${extension.path}`);
+    }
+    if (realpathSync(extension.path) !== extension.path) {
+      throw new Error(`Child extension path must be canonical: ${extension.path}`);
+    }
+    if (!Array.isArray(extension.tools) || extension.tools.length === 0) {
+      throw new Error(`Child extension tools are required: ${extension.path}`);
+    }
+    const tools = extension.tools.map((tool) => {
+      if (!tool.trim() || tool.includes("/") || tool.includes("\\") || /\.[cm]?[jt]s$/i.test(tool)) {
+        throw new Error(`Child extension has an invalid tool name: ${tool}`);
+      }
+      return tool;
+    });
+    if (new Set(tools).size !== tools.length)
+      throw new Error(`Child extension tools are duplicated: ${extension.path}`);
+    return { path: extension.path, tools };
+  });
+}
+
+function childExtensionSet(
+  request: SubagentRunRequest,
+  factories: InlineExtension[],
+  childExtensions: readonly SubagentChildExtension[],
+) {
   return {
     generation: `subagent:${request.runId}:${request.childIndex}`,
     projectId: request.projectId,
-    entries: factories.map((factory, index) => ({
-      id: typeof factory === "function" ? `inline-${index}` : factory.name,
-      displayName: typeof factory === "function" ? `Inline ${index}` : factory.name,
-      source: "builtin" as const,
-      hostProfileVersion: 1 as const,
-      capabilities: [],
-    })),
+    entries: [
+      ...factories.map((factory, index) => ({
+        id: typeof factory === "function" ? `inline-${index}` : factory.name,
+        displayName: typeof factory === "function" ? `Inline ${index}` : factory.name,
+        source: "builtin" as const,
+        hostProfileVersion: 1 as const,
+        capabilities: [],
+      })),
+      ...childExtensions.map((extension, index) => ({
+        id: `child-extension-${index}`,
+        displayName: basename(extension.path),
+        source: "development" as const,
+        entryPath: extension.path,
+        hostProfileVersion: 1 as const,
+        capabilities: ["tools.register" as const],
+      })),
+    ],
     diagnostics: [],
     resolvedAt: Date.now(),
   };

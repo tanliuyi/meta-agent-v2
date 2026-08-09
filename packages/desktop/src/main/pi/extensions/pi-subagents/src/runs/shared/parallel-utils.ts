@@ -1,5 +1,5 @@
 // @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
-import type { ResolvedSubagentCapabilityCeiling, SubagentCapabilityAudit } from "./capability-ceiling.ts";
+import type { SubagentChildExtension } from "../../../../../../../shared/subagent-contracts.ts";
 import type { DynamicCollectSpec, DynamicExpandSpec } from "../../shared/settings.ts";
 import type {
 	AcceptanceInput,
@@ -35,6 +35,7 @@ export interface RunnerSubagentStep {
 	tools?: string[];
 	extensions?: string[];
 	subagentOnlyExtensions?: string[];
+	childExtensions?: SubagentChildExtension[];
 	mcpDirectTools?: string[];
 	completionGuard?: boolean;
 	systemPrompt?: string | null;

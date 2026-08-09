@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
 import { SessionRuntime } from "../main/pi/session-runtime.ts";
+import { getRegisteredSubagentChildExtensions } from "../main/pi/subagents/child-extension-registry.ts";
 import { DesktopSubagentRuntime } from "../main/pi/subagents/desktop-subagent-runtime.ts";
 import type {
   SidecarBinding,
@@ -42,9 +43,14 @@ export class ThreadWorkerService implements SidecarService {
       sessionManager = SessionManager.open(sessionFile, sessionDir, input.cwd);
     }
     const parentThreadId = input.mode === "create" ? input.sessionId : input.threadId;
+    const approvedChildExtensionPaths = new Set(
+      extensionSet.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
+    );
     const subagentRuntime = new DesktopSubagentRuntime({
       projectId: input.projectId,
       parentThreadId,
+      getChildExtensions: () =>
+        getRegisteredSubagentChildExtensions().filter((extension) => approvedChildExtensionPaths.has(extension.path)),
       requestHost: context.requestHost,
     });
     let runtime: SessionRuntime;

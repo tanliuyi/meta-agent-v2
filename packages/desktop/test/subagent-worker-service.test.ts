@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -161,6 +161,102 @@ describe("SubagentWorkerService", () => {
         (event) => event.type === "message_end" && JSON.stringify(event.message).includes("worker complete"),
       ),
     ).toBe(true);
+  });
+
+  it("loads an explicitly approved child extension and rejects implicit paths", async () => {
+    const root = join(tmpdir(), `desktop-child-extension-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(root, { recursive: true });
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const markerPath = join(root, "child-extension-loaded");
+    const childExtensionPath = join(root, "child-extension.js");
+    writeFileSync(
+      childExtensionPath,
+      `import { writeFileSync } from "node:fs"; import { Type } from "typebox"; export default function (pi) { writeFileSync(${JSON.stringify(markerPath)}, "loaded"); pi.registerTool({ name: "child_marker", label: "Child marker", description: "test", parameters: Type.Object({}), async execute() { return { content: [{ type: "text", text: "ok" }] }; } }); }\n`,
+    );
+    const canonicalChildExtensionPath = realpathSync(childExtensionPath);
+    const faux = registerFauxProvider({ models: [{ id: "child-model", reasoning: false }] });
+    faux.setResponses([fauxAssistantMessage("child complete")]);
+    cleanups.push(() => faux.unregister());
+    const model = faux.getModel();
+    const providerFactory = (api: ExtensionAPI): void => {
+      api.registerProvider(model.provider, {
+        baseUrl: model.baseUrl,
+        apiKey: "faux-key",
+        api: faux.api,
+        models: faux.models.map((registeredModel) => ({
+          id: registeredModel.id,
+          name: registeredModel.name,
+          api: registeredModel.api,
+          reasoning: registeredModel.reasoning,
+          input: registeredModel.input,
+          cost: registeredModel.cost,
+          contextWindow: registeredModel.contextWindow,
+          maxTokens: registeredModel.maxTokens,
+        })),
+      });
+    };
+    const created = await SubagentWorkerService.create(
+      {
+        role: "subagent",
+        value: {
+          projectId: "project",
+          parentThreadId: "thread",
+          runId: "run-1",
+          childIndex: 0,
+          agentDir: root,
+        },
+      },
+      {
+        emit: () => undefined,
+        requestHost: async () => undefined,
+        flushEvents: async () => undefined,
+      },
+      { extensionFactories: [providerFactory] },
+    );
+    cleanups.push(() => created.service.dispose());
+
+    await expect(
+      created.service.command({
+        type: "subagentRun",
+        request: {
+          ...baseRequest(),
+          cwd: root,
+          model: `${model.provider}/${model.id}`,
+          tools: ["read", "child_marker"],
+          childExtensions: [{ path: canonicalChildExtensionPath, tools: ["child_marker"] }],
+        },
+      }),
+    ).resolves.toMatchObject({ status: "completed" });
+    expect(existsSync(markerPath)).toBe(true);
+
+    const invalid = await SubagentWorkerService.create(
+      {
+        role: "subagent",
+        value: {
+          projectId: "project",
+          parentThreadId: "thread",
+          runId: "run-2",
+          childIndex: 0,
+          agentDir: root,
+        },
+      },
+      {
+        emit: () => undefined,
+        requestHost: async () => undefined,
+        flushEvents: async () => undefined,
+      },
+    );
+    await expect(
+      invalid.service.command({
+        type: "subagentRun",
+        request: {
+          ...baseRequest(),
+          runId: "run-2",
+          childExtensions: [{ path: "relative-child-extension.ts", tools: ["child_marker"] }],
+        },
+      }),
+    ).rejects.toThrow("absolute");
+    await invalid.service.dispose();
   });
 
   it("keeps structured_output available when the agent declares an explicit tool allowlist", async () => {

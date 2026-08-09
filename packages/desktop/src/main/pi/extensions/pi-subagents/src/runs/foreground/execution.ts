@@ -85,6 +85,7 @@ import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.t
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { agentDefinitionDigest, launchBindingDigest } from "../../shared/launch-contract.ts";
 import { resolveCurrentSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
+import { childExtensionTools, resolveChildExtensions } from "../../runtime/subagent-runtime.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, projectChildLifecycle, type ChildLifecycleAction, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
 import {
 	acceptChildWatchdogEvent,
@@ -299,6 +300,11 @@ async function runProgrammaticSingleAttempt(
 	const allowedToolSet = options.capabilityCeiling?.allowedTools === undefined
 		? undefined
 		: new Set(options.capabilityCeiling.allowedTools);
+	const childExtensions = resolveChildExtensions(runtime, {
+		denyExtensions: options.capabilityCeiling?.denyExtensions,
+		allowedTools: options.capabilityCeiling?.allowedTools,
+	});
+	const childTools = childExtensionTools(childExtensions);
 	if (shared.resolvedSkillNames?.length && allowedToolSet && !allowedToolSet.has("read")) {
 		throw new Error(`Capability ceiling from ${options.capabilityCeiling?.sources.join(", ") || "unknown source"} excludes required tool 'read' for lazy skill loading.`);
 	}
@@ -309,7 +315,7 @@ async function runProgrammaticSingleAttempt(
 			? ["read", ...requestedTools]
 			: requestedTools).filter((tool) => !allowedToolSet || allowedToolSet.has(tool));
 	const internalTools = options.structuredOutput ? ["structured_output"] : [];
-	const effectiveToolAllowlist = [...new Set([...declaredTools, ...internalTools])];
+	const effectiveToolAllowlist = [...new Set([...declaredTools, ...internalTools, ...childTools])];
 	const explicitToolAllowlist = requestedTools !== undefined || allowedToolSet !== undefined;
 	const toolNames = explicitToolAllowlist ? effectiveToolAllowlist : undefined;
 	const capabilityAudit = options.capabilityCeiling ? {
@@ -337,6 +343,7 @@ async function runProgrammaticSingleAttempt(
 		skills: shared.resolvedSkillNames ?? [],
 		tools: effectiveToolAllowlist,
 		extensions: [],
+		...(childExtensions.length ? { subagentOnlyExtensions: childExtensions.map((extension) => extension.path) } : {}),
 		mcpDirectTools: [],
 		...(options.outputPath ? { outputPath: options.outputPath } : {}),
 		outputMode: options.outputMode ?? "inline",
@@ -590,6 +597,7 @@ async function runProgrammaticSingleAttempt(
 			preferredProvider: options.preferredModelProvider,
 			thinking: effectiveThinking === false ? "off" : effectiveThinking,
 			tools: toolNames,
+			childExtensions,
 			systemPrompt: effectiveSystemPrompt,
 			systemPromptMode: agent.systemPromptMode,
 			inheritProjectContext: agent.inheritProjectContext,
