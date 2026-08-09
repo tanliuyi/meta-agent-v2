@@ -41,6 +41,7 @@ import type {
   ApproveDevelopmentExtensionInput,
   SaveDesktopExtensionSettingsInput,
 } from "../shared/desktop-extension-contracts.ts";
+import { filePathWithoutLocation } from "../shared/file-location.ts";
 import type {
   MutateMemoryEntryInput,
   RunMemoryMaintenanceInput,
@@ -850,10 +851,30 @@ async function openLink(projectId: string, target: string, projects: ProjectStor
   throw new Error(`Unsupported link protocol: ${url.protocol}`);
 }
 
+/** 打开项目内文件链接时，兼容 `path:line` 这类源代码位置标记。 */
+function normalizeLocalFilePath(path: string): string {
+  const pathWithoutLocation = filePathWithoutLocation(path);
+  if (pathWithoutLocation === path) return path;
+
+  // 真实文件名可能包含冒号；只有完整路径不存在而去掉后缀的文件存在时才解析位置标记。
+  try {
+    if (statSync(path).isFile()) return path;
+  } catch {
+    // 继续检查去掉位置标记后的候选路径。
+  }
+  try {
+    if (statSync(pathWithoutLocation).isFile()) return pathWithoutLocation;
+  } catch {
+    // 保留原路径，让调用方报告真实的文件错误。
+  }
+  return path;
+}
+
 /** 打开本地文件路径：位于项目 cwd 内时交回应用内打开，否则交给系统默认程序。 */
 async function openLocalPath(projectId: string, absolutePath: string, projects: ProjectStore): Promise<OpenLinkResult> {
+  const normalizedPath = normalizeLocalFilePath(absolutePath);
   const cwd = projects.getCwd(projectId);
-  const rel = relative(cwd, absolutePath);
+  const rel = relative(cwd, normalizedPath);
   if (rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
     // 目录链接应用内无法打开（文件面板仅支持文件），交回系统文件管理器。
     let isDirectory = false;
@@ -864,7 +885,7 @@ async function openLocalPath(projectId: string, absolutePath: string, projects: 
     }
     if (!isDirectory) return { openInApp: true, path: rel.split(sep).join("/") };
   }
-  await openPath(absolutePath);
+  await openPath(normalizedPath);
   return { openInApp: false };
 }
 
