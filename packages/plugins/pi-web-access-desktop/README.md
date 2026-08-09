@@ -10,7 +10,7 @@
 
 ## 桌面配置
 
-插件声明了 Marketplace 配置 schema（`WEB_ACCESS_CONFIGURATION_SCHEMA`，64 个字段，达到 Host Profile v1 上限）。从市场安装后，Desktop 会在 **Plugin detail > 配置** 渲染表单，并把用户保存的值通过 `pi.getConfig()` 交给插件；插件启动时将**显式设置的字段**合并写入上游配置文件（0600 权限，不覆盖文件中未涉及的已有配置，如 `shortcuts`、keychain 凭据）。配置路径与上游一致：优先 `PI_CODING_AGENT_DIR`，其次 `$XDG_CONFIG_HOME/pi`，最后 `~/.pi`。
+插件声明了 Marketplace 配置 schema（`WEB_ACCESS_CONFIGURATION_SCHEMA`，62 个字段）。从市场安装后，Desktop 会在 **Plugin detail > 配置** 渲染表单，并把用户保存的值通过 `pi.getConfig()` 交给插件；插件启动时将**显式设置的字段**合并写入上游配置文件（0600 权限，不覆盖文件中未涉及的已有配置，如 `shortcuts`、keychain 凭据）。配置路径与上游一致：优先 `PI_CODING_AGENT_DIR`，其次 `$XDG_CONFIG_HOME/pi`，最后 `~/.pi`。
 
 字段分组：
 
@@ -24,10 +24,10 @@
 | 浏览器与 Gemini Web | `chromeProfile`、`allowBrowserCookies` | 浏览器 cookie 登录态（涉及本机凭据，谨慎开启） |
 | GitHub 克隆 | `githubClone.*` | 仓库大小/超时/缓存目录 |
 | 视频、YouTube 与 PDF | `video.*`、`youtube.*`、`pdf.maxSizeMB` | 本地视频、YouTube 与 PDF 转 Markdown |
-| 抓取安全 | `ssrf.allowRanges`、`ssrf.trustEnvProxy`、`fetchContent.domainPolicy.*` | SSRF 网段与域名白/黑名单（textarea 按行拆分） |
+| 抓取策略 | `fetchContent.domainPolicy.*` | fetch_content 的域名白/黑名单（textarea 按行拆分）；不再执行本地 DNS 或私网地址 SSRF 预检 |
 | 工具命名 | `toolNames.*` | 为四个工具配置不冲突的公开名称 |
 
-嵌套字段（如 `githubClone.enabled`、`ssrf.allowRanges`）以点号 key 在表单中展开，写入时映射为 `web-search.json` 的嵌套结构。空字符串与未设置的值不会写入，避免覆盖用户已有的文件配置。
+嵌套字段（如 `githubClone.enabled`、`fetchContent.domainPolicy.allow`）以点号 key 在表单中展开，写入时映射为 `web-search.json` 的嵌套结构。空字符串与未设置的值不会写入，避免覆盖用户已有的文件配置。
 
 Developer Mode 本地加载时不提供市场配置表单；直接编辑 `~/.pi/web-search.json` 或使用环境变量。
 
@@ -56,17 +56,21 @@ Desktop 不提供 Pi TUI 快捷键和自定义 TUI 工具渲染，因此此入�
 npm install --ignore-scripts --omit=peer
 ```
 
-没有 install/postinstall 脚本。依赖固定使用 `pi-web-access@0.18.0`，其余 Pi host 包由 Desktop 提供；`--omit=peer` 可避免在插件目录重复安装 host 包。
+依赖固定使用本地维护的 `vendor/pi-web-access`（基于 `pi-web-access@0.18.0`），其余 Pi host 包由 Desktop 提供；`--omit=peer` 可避免在插件目录重复安装 host 包。
 
 ## 在 Desktop 中加载
 
 1. 打开 `设置 > Extensions > 本地插件`。
 2. 开启 `Developer Mode`。
-3. 选择 `添加本地插件`。
-4. 选择本目录中的 `index.ts`。
+3. 如果之前添加过裸 `index.ts`，先移除旧的本地开发条目。
+4. 选择 `添加本地插件`，选择本目录（包含 `market-manifest.json`），不要只选择 `index.ts`。manifest 声明的 `plugin.id` 是 `pi.web-access`，Host 会自动停用同 ID 的市场版本，避免工具重复注册。
 5. 对新会话直接生效；已有会话在 Composer 中运行 `/reload`。
 
-配置沿用上游路径 `~/.pi/web-search.json`。默认无需 API key，可使用 Exa MCP；其他 provider、浏览器 cookie、GitHub clone、视频和 SSRF 配置请参考上游文档。
+配置沿用上游路径 `~/.pi/web-search.json`。默认无需 API key，可使用 Exa MCP；其他 provider、浏览器 cookie、GitHub clone、视频和域名策略配置请参考上游文档。
+
+## 网络抓取边界
+
+`fetch_content` 已移除本地 DNS 解析、localhost/私网地址拦截和重定向目标的 SSRF 预检，目标请求交给 Desktop 运行时和系统网络代理处理；仍保留 `http/https` 协议检查、可选域名白/黑名单、超时和响应大小限制。该插件以当前账户权限运行，请只在信任的会话和网络环境中使用不受限的抓取目标。
 
 ## 权限与风险
 

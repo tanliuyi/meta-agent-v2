@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 
 export type PluginConfigurationValue = string | number | boolean;
 
+export type BrowserOpenTarget = "builtin" | "system";
+
 interface PluginConfigurationFieldBase {
   key: string;
   label: string;
@@ -13,6 +15,8 @@ interface PluginConfigurationFieldBase {
   deprecated?: boolean;
   deprecatedMessage?: string;
   required?: boolean;
+  widget?: "model-selector";
+  modelFormat?: "model-id" | "provider-model";
 }
 
 export type PluginConfigurationField =
@@ -63,6 +67,7 @@ export interface DesktopWebAccessConfig {
   workflow?: string;
   curatorTimeoutSeconds?: number;
   autoOpenBrowser?: boolean;
+  "browser.openTarget"?: BrowserOpenTarget;
   "curatorRemote.enabled"?: boolean;
   "curatorRemote.host"?: string;
   "curatorRemote.bind"?: string;
@@ -113,8 +118,7 @@ export interface DesktopWebAccessConfig {
   "youtube.enabled"?: boolean;
   "youtube.preferredModel"?: string;
   "pdf.maxSizeMB"?: number;
-  "ssrf.allowRanges"?: string;
-  "ssrf.trustEnvProxy"?: boolean;
+  /** 域名白/黑名单由 fetchContent.domainPolicy 控制。 */
   "fetchContent.domainPolicy.allow"?: string;
   "fetchContent.domainPolicy.deny"?: string;
   "toolNames.webSearch"?: string;
@@ -191,6 +195,8 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       key: "searchModel",
       label: "搜索模型",
       type: "text",
+      widget: "model-selector",
+      modelFormat: "model-id",
       placeholder: "gemini-3.6-flash",
       maxLength: 100,
       description: "Gemini API 搜索模型，默认 gemini-3.6-flash。",
@@ -201,6 +207,8 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       key: "summaryModel",
       label: "汇总模型",
       type: "text",
+      widget: "model-selector",
+      modelFormat: "provider-model",
       placeholder: "如 gemini-2.5-flash",
       maxLength: 100,
       description: "Search Curator 汇总使用的模型；留空时沿用上游默认。",
@@ -243,12 +251,32 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       order: 7,
     },
     {
+      key: "browser.openTarget",
+      label: "Curator 打开位置",
+      type: "select",
+      options: [
+        {
+          value: "builtin",
+          label: "内置浏览器",
+          description: "在当前 Desktop 会话的内置浏览器面板中打开。",
+        },
+        {
+          value: "system",
+          label: "系统默认",
+          description: "使用操作系统默认浏览器打开。",
+        },
+      ],
+      description: "选择 Search Curator 自动打开的位置。",
+      group: "Curator 网络",
+      order: 8,
+    },
+    {
       key: "curatorRemote.enabled",
       label: "允许远程访问 Curator",
       type: "boolean",
       description: "启用后 Curator 默认监听 0.0.0.0，并通过带明文 token 的 URL 访问；仅在可信网络开启。",
       group: "Curator 网络",
-      order: 8,
+      order: 9,
     },
     {
       key: "curatorRemote.host",
@@ -258,7 +286,7 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       placeholder: "用于访问链接的主机名",
       description: "只改变展示给用户的访问地址，不改变监听地址。",
       group: "Curator 网络",
-      order: 9,
+      order: 10,
     },
     {
       key: "curatorRemote.bind",
@@ -268,7 +296,7 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       placeholder: "0.0.0.0",
       description: "远程模式的监听地址；0.0.0.0 会暴露到所有网络接口。",
       group: "Curator 网络",
-      order: 10,
+      order: 11,
     },
     {
       key: "searchRouting.providers",
@@ -277,7 +305,7 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       placeholder: "每行一个 provider",
       description: "仅在未显式设置搜索提供商时生效；按行依次尝试，不等同于 all 并发搜索。",
       group: "搜索路由",
-      order: 11,
+      order: 12,
     },
     {
       key: "searchRouting.fallbackOn",
@@ -286,7 +314,7 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       placeholder: "transient\nquota\nnetwork",
       description: "每行一个：transient、quota 或 network。",
       group: "搜索路由",
-      order: 12,
+      order: 13,
     },
     secretField("openaiApiKey", "OpenAI API Key", "OPENAI_API_KEY", 20),
     {
@@ -567,30 +595,13 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       order: 85,
     },
     {
-      key: "ssrf.allowRanges",
-      label: "SSRF 允许网段",
-      type: "textarea",
-      placeholder: "如 10.0.0.0/8，每行一个 CIDR",
-      description: "fetch_content 允许访问的内网网段（CIDR，每行一个）。默认禁止私有网段。",
-      group: "抓取安全",
-      order: 90,
-    },
-    {
-      key: "ssrf.trustEnvProxy",
-      label: "信任环境代理",
-      type: "boolean",
-      description: "是否信任 HTTP(S)_PROXY 等环境代理变量（可能绕过 SSRF 限制）。",
-      group: "抓取安全",
-      order: 91,
-    },
-    {
       key: "fetchContent.domainPolicy.allow",
       label: "域名白名单",
       type: "textarea",
       placeholder: "每行一个域名，如 example.com",
-      description: "fetch_content 仅允许抓取这些域名（未配置时允许全部非私有地址）。",
-      group: "抓取安全",
-      order: 92,
+      description: "fetch_content 仅允许抓取这些域名（未配置时允许全部域名）。",
+      group: "抓取策略",
+      order: 90,
     },
     {
       key: "fetchContent.domainPolicy.deny",
@@ -598,8 +609,8 @@ export const WEB_ACCESS_CONFIGURATION_SCHEMA: PluginConfigurationSchema = {
       type: "textarea",
       placeholder: "每行一个域名",
       description: "fetch_content 禁止抓取的域名，优先于白名单。",
-      group: "抓取安全",
-      order: 93,
+      group: "抓取策略",
+      order: 91,
     },
     {
       key: "toolNames.webSearch",
@@ -672,7 +683,6 @@ function splitLines(value: string): string[] {
 }
 
 const TEXTAREA_KEYS = new Set([
-  "ssrf.allowRanges",
   "fetchContent.domainPolicy.allow",
   "fetchContent.domainPolicy.deny",
 ]);
@@ -787,6 +797,14 @@ function readExisting(path: string): JsonObject {
   } catch {
     return {};
   }
+}
+
+export function getBrowserOpenTarget(): BrowserOpenTarget {
+  const browser = readExisting(getWebSearchConfigPath()).browser;
+  if (browser && typeof browser === "object" && !Array.isArray(browser)) {
+    return (browser as JsonObject).openTarget === "builtin" ? "builtin" : "system";
+  }
+  return "system";
 }
 
 function atomicWrite(path: string, value: JsonObject): void {

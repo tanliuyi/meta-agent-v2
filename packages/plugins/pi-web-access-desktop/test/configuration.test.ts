@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import {
   applyDesktopConfig,
+  getBrowserOpenTarget,
   getWebSearchConfigPath,
   WEB_ACCESS_CONFIGURATION_SCHEMA,
 } from "../src/configuration.ts";
@@ -29,16 +30,17 @@ test.after(() => {
 test("schema is valid and flat-keyed", () => {
   assert.equal(WEB_ACCESS_CONFIGURATION_SCHEMA.version, 1);
   const keys = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.map((field) => field.key);
-  assert.equal(keys.length, 64);
+  assert.equal(keys.length, 63);
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(keys.includes("searchProvider"));
   assert.ok(keys.includes("searchRouting.providers"));
   assert.ok(keys.includes("curatorRemote.enabled"));
+  assert.ok(keys.includes("browser.openTarget"));
   assert.ok(keys.includes("searxngHeaders"));
   assert.ok(keys.includes("pdf.maxSizeMB"));
   assert.ok(keys.includes("toolNames.webSearch"));
   assert.ok(keys.includes("githubClone.enabled"));
-  assert.ok(keys.includes("ssrf.allowRanges"));
+  assert.ok(keys.includes("fetchContent.domainPolicy.allow"));
   const searchProvider = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find((field) => field.key === "searchProvider");
   assert.equal(searchProvider?.type, "select");
   if (searchProvider?.type !== "select") throw new Error("searchProvider field is missing");
@@ -68,6 +70,18 @@ test("schema is valid and flat-keyed", () => {
       "serpbase",
     ],
   );
+  const browserOpenTarget = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find(
+    (field) => field.key === "browser.openTarget",
+  );
+  assert.equal(browserOpenTarget?.type, "select");
+  if (browserOpenTarget?.type !== "select") throw new Error("browser.openTarget field is missing");
+  assert.deepEqual(browserOpenTarget.options.map((option) => option.value), ["builtin", "system"]);
+  const searchModel = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find((field) => field.key === "searchModel");
+  assert.equal(searchModel?.widget, "model-selector");
+  assert.equal(searchModel?.modelFormat, "model-id");
+  const summaryModel = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find((field) => field.key === "summaryModel");
+  assert.equal(summaryModel?.widget, "model-selector");
+  assert.equal(summaryModel?.modelFormat, "provider-model");
   const serpdiveModel = WEB_ACCESS_CONFIGURATION_SCHEMA.fields.find(
     (field) => field.key === "serpdiveModel",
   );
@@ -95,6 +109,28 @@ test("schema is valid and flat-keyed", () => {
   }
 });
 
+test("market manifest identifies the local plugin as pi.web-access", async () => {
+  const manifest = JSON.parse(
+    readFileSync(join(import.meta.dirname, "..", "market-manifest.json"), "utf8"),
+  );
+  assert.equal(manifest.plugin.id, "pi.web-access");
+  assert.equal(manifest.pi.entry, "index.ts");
+  assert.equal(manifest.desktop.hostProfileVersion, 1);
+  assert.deepEqual(manifest.configuration, WEB_ACCESS_CONFIGURATION_SCHEMA);
+  assert.deepEqual(manifest.capabilities, [
+    "events.subscribe",
+    "configuration.read",
+    "tools.register",
+    "commands.register",
+    "messages.enqueue",
+    "messages.custom",
+    "session.read",
+    "ui.notify",
+    "ui.dialog",
+    "ui.widget.text",
+  ]);
+});
+
 test("applyDesktopConfig writes only explicitly set values", () => {
   withTempHome();
   applyDesktopConfig({ searchProvider: "exa", openaiApiKey: "sk-test-key" });
@@ -113,6 +149,7 @@ test("applyDesktopConfig merges nested fields and preserves existing config", ()
   withTempHome();
   prewriteConfig({ toolNames: { fetch: "x" }, githubClone: { enabled: false } });
   applyDesktopConfig({
+    "browser.openTarget": "builtin",
     "githubClone.enabled": true,
     "githubClone.maxRepoSizeMB": 500,
     "video.preferredModel": "gemini-3.6-flash",
@@ -124,6 +161,7 @@ test("applyDesktopConfig merges nested fields and preserves existing config", ()
   const config = JSON.parse(readFileSync(getWebSearchConfigPath(), "utf8"));
   assert.deepEqual(config.toolNames, { fetch: "x", fetchContent: "desktop_fetch" });
   assert.deepEqual(config.githubClone, { enabled: true, maxRepoSizeMB: 500 });
+  assert.equal(config.browser.openTarget, "builtin");
   assert.equal(config.video.preferredModel, "gemini-3.6-flash");
   assert.equal(config.pdf.maxSizeMB, 30);
   assert.deepEqual(config.searchRouting, {
@@ -131,6 +169,12 @@ test("applyDesktopConfig merges nested fields and preserves existing config", ()
     fallbackOn: ["transient", "network"],
   });
   assert.equal(config.toolNames.fetchContent, "desktop_fetch");
+});
+
+test("getBrowserOpenTarget reads the configured browser target", () => {
+  withTempHome();
+  applyDesktopConfig({ "browser.openTarget": "builtin" });
+  assert.equal(getBrowserOpenTarget(), "builtin");
 });
 
 test("applyDesktopConfig serializes structured upstream settings", () => {
@@ -194,12 +238,12 @@ test("getWebSearchConfigPath follows upstream environment priority", () => {
 test("applyDesktopConfig splits textarea fields into arrays", () => {
   withTempHome();
   applyDesktopConfig({
-    "ssrf.allowRanges": "10.0.0.0/8\n192.168.0.0/16",
-    "fetchContent.domainPolicy.deny": "example.com",
+    "fetchContent.domainPolicy.allow": "example.com\nopenai.com",
+    "fetchContent.domainPolicy.deny": "blocked.example.com",
   });
   const config = JSON.parse(readFileSync(getWebSearchConfigPath(), "utf8"));
-  assert.deepEqual(config.ssrf.allowRanges, ["10.0.0.0/8", "192.168.0.0/16"]);
-  assert.deepEqual(config.fetchContent.domainPolicy.deny, ["example.com"]);
+  assert.deepEqual(config.fetchContent.domainPolicy.allow, ["example.com", "openai.com"]);
+  assert.deepEqual(config.fetchContent.domainPolicy.deny, ["blocked.example.com"]);
 });
 
 test("applyDesktopConfig ignores empty strings and undefined", () => {
