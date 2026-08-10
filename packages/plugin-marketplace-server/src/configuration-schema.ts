@@ -1,5 +1,5 @@
 import safeRegex from "safe-regex2";
-import type { PluginConfigurationField, PluginConfigurationSchema } from "./contracts.ts";
+import type { PluginConfigurationField, PluginConfigurationFieldBase, PluginConfigurationSchema } from "./contracts.ts";
 
 const FIELD_KEY = /^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/;
 const TEXT_TYPES = new Set(["text", "textarea", "path", "secret"]);
@@ -13,6 +13,8 @@ const BASE_KEYS = [
 	"order",
 	"deprecated",
 	"deprecatedMessage",
+	"widget",
+	"modelFormat",
 ];
 const MAX_GROUP_LENGTH = 64;
 const MAX_ORDER = 100_000;
@@ -163,7 +165,7 @@ function parseField(value: unknown): PluginConfigurationField {
 	throw new Error(`configuration field type is unsupported: ${value.type}`);
 }
 
-function parseBase(value: Record<string, unknown>) {
+function parseBase(value: Record<string, unknown>): PluginConfigurationFieldBase {
 	if (
 		typeof value.key !== "string" ||
 		!FIELD_KEY.test(value.key) ||
@@ -182,7 +184,11 @@ function parseBase(value: Record<string, unknown>) {
 		(value.deprecatedMessage !== undefined &&
 			(typeof value.deprecatedMessage !== "string" ||
 				value.deprecatedMessage.length > MAX_DEPRECATED_MESSAGE_LENGTH)) ||
-		(value.required !== undefined && typeof value.required !== "boolean")
+		(value.required !== undefined && typeof value.required !== "boolean") ||
+		(value.widget !== undefined && value.widget !== "model-selector") ||
+		(value.modelFormat !== undefined &&
+			(value.widget !== "model-selector" ||
+				(value.modelFormat !== "model-id" && value.modelFormat !== "provider-model")))
 	) {
 		throw new Error("configuration field metadata is invalid");
 	}
@@ -195,6 +201,10 @@ function parseBase(value: Record<string, unknown>) {
 		...(typeof value.deprecated === "boolean" ? { deprecated: value.deprecated } : {}),
 		...(typeof value.deprecatedMessage === "string" ? { deprecatedMessage: value.deprecatedMessage } : {}),
 		...(typeof value.required === "boolean" ? { required: value.required } : {}),
+		...(value.widget === "model-selector" ? { widget: value.widget } : {}),
+		...(value.modelFormat === "model-id" || value.modelFormat === "provider-model"
+			? { modelFormat: value.modelFormat }
+			: {}),
 	};
 }
 

@@ -157,4 +157,67 @@ describe("plugin configuration schema", () => {
 			fields: [{ key: "endpoint", label: "Endpoint", required: true, type: "text" }],
 		});
 	});
+
+	it("accepts model-selector widget and modelFormat metadata", () => {
+		const schema = parsePluginConfigurationSchema({
+			version: 1,
+			fields: [
+				{
+					key: "searchModel",
+					label: "Search model",
+					type: "text",
+					widget: "model-selector",
+					modelFormat: "model-id",
+				},
+				{
+					key: "summaryModel",
+					label: "Summary model",
+					type: "text",
+					widget: "model-selector",
+					modelFormat: "provider-model",
+				},
+			],
+		});
+
+		expect(schema).toEqual({
+			version: 1,
+			fields: [
+				{
+					key: "searchModel",
+					label: "Search model",
+					type: "text",
+					widget: "model-selector",
+					modelFormat: "model-id",
+				},
+				{
+					key: "summaryModel",
+					label: "Summary model",
+					type: "text",
+					widget: "model-selector",
+					modelFormat: "provider-model",
+				},
+			],
+		});
+	});
+
+	it("rejects invalid widget and modelFormat values", () => {
+		expect(() =>
+			parsePluginConfigurationSchema({
+				version: 1,
+				fields: [{ key: "m", label: "M", type: "text", widget: "input" }],
+			}),
+		).toThrow("metadata is invalid");
+		expect(() =>
+			parsePluginConfigurationSchema({
+				version: 1,
+				fields: [{ key: "m", label: "M", type: "text", widget: "model-selector", modelFormat: "full-id" }],
+			}),
+		).toThrow("metadata is invalid");
+		expect(() =>
+			parsePluginConfigurationSchema({
+				version: 1,
+				fields: [{ key: "m", label: "M", type: "text", modelFormat: "model-id" }],
+			}),
+		).toThrow("metadata is invalid");
+	});
 });

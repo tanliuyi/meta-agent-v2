@@ -21,7 +21,7 @@ export interface ArtifactTarget {
 
 export type PluginConfigurationValue = string | number | boolean;
 
-interface PluginConfigurationFieldBase {
+export interface PluginConfigurationFieldBase {
 	key: string;
 	label: string;
 	description?: string;
@@ -30,6 +30,8 @@ interface PluginConfigurationFieldBase {
 	deprecated?: boolean;
 	deprecatedMessage?: string;
 	required?: boolean;
+	widget?: "model-selector";
+	modelFormat?: "model-id" | "provider-model";
 }
 
 export type PluginConfigurationField =
