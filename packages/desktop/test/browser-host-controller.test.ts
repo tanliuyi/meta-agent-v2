@@ -124,6 +124,7 @@ class FakeWebContents extends EventEmitter {
         };
       case "DOM.getBoxModel":
         return { model: { content: this.box } };
+      case "Runtime.addBinding":
       case "Input.dispatchMouseEvent":
       case "Input.insertText":
       case "Input.dispatchKeyEvent":
@@ -141,6 +142,36 @@ afterEach(() => {
 });
 
 describe("WebContentsHostController CDP integration", () => {
+  test("Runtime binding 事件只交给宿主回调，不进入 Agent CDP 缓冲", async () => {
+    const webContents = new FakeWebContents();
+    const onRuntimeBinding = vi.fn();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, {
+      cdpTimeoutMs: 200,
+      onRuntimeBinding,
+    });
+    hosts.push(host);
+
+    await host.addRuntimeBinding("__piSecureBinding");
+    await host.addRuntimeBinding("__piSecureBinding");
+    expect(
+      webContents.debugger.sendCommand.mock.calls.filter(([method]) => method === "Runtime.addBinding"),
+    ).toHaveLength(1);
+    webContents.debugger.detach();
+    await host.addRuntimeBinding("__piSecureBinding");
+    expect(
+      webContents.debugger.sendCommand.mock.calls.filter(([method]) => method === "Runtime.addBinding"),
+    ).toHaveLength(2);
+    webContents.debugger.emit("message", {}, "Runtime.bindingCalled", {
+      name: "__piSecureBinding",
+      payload: "secret",
+    });
+
+    expect(onRuntimeBinding).toHaveBeenCalledWith("__piSecureBinding", "secret");
+    await expect(host.readCdpEvents()).resolves.not.toContainEqual(
+      expect.objectContaining({ method: "Runtime.bindingCalled" }),
+    );
+  });
+
   test("first action without a snapshot returns stale without deadlocking the queue", async () => {
     const webContents = new FakeWebContents();
     const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });

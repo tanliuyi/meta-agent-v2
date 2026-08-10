@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { registerIpc } from "../src/main/ipc.ts";
+import { registerIpc, sendBrowserPasswordOffer } from "../src/main/ipc.ts";
 import type { BrowserSessionIdentity } from "../src/shared/browser-contracts.ts";
 import { CHANNELS } from "../src/shared/channels.ts";
 
 const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, (...args: unknown[]) => unknown>(),
+  send: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -17,6 +18,9 @@ vi.mock("electron", () => ({
     on: (channel: string, listener: (...args: unknown[]) => unknown) => electron.listeners.set(channel, listener),
   },
   shell: { openExternal: vi.fn(), openPath: vi.fn() },
+  webContents: {
+    fromId: (id: number) => (id === 42 ? { isDestroyed: () => false, send: electron.send } : null),
+  },
 }));
 
 const IDENTITY: BrowserSessionIdentity = { projectId: "proj-a", threadId: "thread-a" };
@@ -44,12 +48,26 @@ describe("browser IPC", () => {
     listAnnotations: vi.fn(),
     removeAnnotation: vi.fn(),
     resolveAnnotationBounds: vi.fn(),
+    browserDataGet: vi.fn(),
+    browserHistoryDelete: vi.fn(),
+    browserHistoryClear: vi.fn(),
+    browserDownloadsClear: vi.fn(),
+    browserDownloadReveal: vi.fn(),
+    browserDownloadOpen: vi.fn(),
+    browserContactSave: vi.fn(),
+    browserContactDelete: vi.fn(),
+    browserPasswordSave: vi.fn(),
+    browserPasswordDelete: vi.fn(),
+    browserSitePermissionSave: vi.fn(),
+    browserSitePermissionDelete: vi.fn(),
+    browserPasswordOfferResolve: vi.fn(),
   };
 
   beforeEach(() => {
     electron.handles.clear();
     electron.listeners.clear();
     vi.clearAllMocks();
+    electron.send.mockClear();
     registerIpc(
       { list: vi.fn(), getActive: vi.fn() } as never,
       {} as never,
@@ -98,6 +116,19 @@ describe("browser IPC", () => {
     expect(electron.handles.has(CHANNELS.browserAnnotationList)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserAnnotationRemove)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserAnnotationResolve)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserDataGet)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserHistoryDelete)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserHistoryClear)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserDownloadsClear)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserDownloadReveal)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserDownloadOpen)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserContactSave)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserContactDelete)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserPasswordSave)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserPasswordDelete)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserSitePermissionSave)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserSitePermissionDelete)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserPasswordOfferResolve)).toBe(true);
   });
 
   test("attach 透传会话身份、webContentsId 与 requestId 并返回结果", async () => {
@@ -241,5 +272,90 @@ describe("browser IPC", () => {
     expect(browser.listAnnotations).toHaveBeenCalledWith(IDENTITY, 1);
     expect(browser.removeAnnotation).toHaveBeenCalledWith(IDENTITY, 1, "n1");
     expect(browser.resolveAnnotationBounds).toHaveBeenCalledWith(IDENTITY, 1, "n1");
+  });
+
+  test("浏览器数据通道透传（内部页：数据/历史/下载/联系人/密码/网站设置）", async () => {
+    const snapshot = { history: [], downloads: [], contacts: [], passwords: [], sitePermissions: [] };
+    browser.browserDataGet.mockResolvedValue(snapshot);
+    browser.browserHistoryDelete.mockResolvedValue({ ok: true, snapshot });
+    browser.browserHistoryClear.mockResolvedValue({ ok: true, snapshot });
+    browser.browserDownloadsClear.mockResolvedValue({ ok: true, snapshot });
+    browser.browserDownloadReveal.mockImplementation(() => undefined);
+    browser.browserDownloadOpen.mockResolvedValue({ ok: true });
+    browser.browserContactSave.mockResolvedValue({ ok: true, snapshot });
+    browser.browserContactDelete.mockResolvedValue({ ok: true, snapshot });
+    browser.browserPasswordSave.mockResolvedValue({ ok: true, snapshot });
+    browser.browserPasswordDelete.mockResolvedValue({ ok: true, snapshot });
+    browser.browserSitePermissionSave.mockResolvedValue({ ok: true, snapshot });
+    browser.browserSitePermissionDelete.mockResolvedValue({ ok: true, snapshot });
+    browser.browserPasswordOfferResolve.mockResolvedValue({ ok: true });
+
+    await expect(electron.handles.get(CHANNELS.browserDataGet)?.({})).resolves.toEqual(snapshot);
+    await expect(electron.handles.get(CHANNELS.browserHistoryDelete)?.({}, "https://a.com", 1)).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(electron.handles.get(CHANNELS.browserHistoryClear)?.({})).resolves.toMatchObject({ ok: true });
+    await expect(electron.handles.get(CHANNELS.browserDownloadsClear)?.({})).resolves.toMatchObject({ ok: true });
+    electron.handles.get(CHANNELS.browserDownloadReveal)?.({}, "/tmp/x.zip");
+    await expect(electron.handles.get(CHANNELS.browserDownloadOpen)?.({}, "/tmp/x.zip")).resolves.toEqual({ ok: true });
+    await expect(
+      electron.handles.get(CHANNELS.browserContactSave)?.({}, { contactId: null, contact: { fullName: "张三" } }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(electron.handles.get(CHANNELS.browserContactDelete)?.({}, "c1")).resolves.toMatchObject({ ok: true });
+    await expect(
+      electron.handles.get(CHANNELS.browserPasswordSave)?.(
+        {},
+        {
+          passwordId: null,
+          password: { origin: "https://a.com", username: "u", password: "p" },
+        },
+      ),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(electron.handles.get(CHANNELS.browserPasswordDelete)?.({}, "p1")).resolves.toMatchObject({ ok: true });
+    await expect(
+      electron.handles.get(CHANNELS.browserSitePermissionSave)?.({}, { site: "a.com", kind: "camera", value: "deny" }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(electron.handles.get(CHANNELS.browserSitePermissionDelete)?.({}, "s1")).resolves.toMatchObject({
+      ok: true,
+    });
+    await electron.handles.get(CHANNELS.browserPasswordOfferResolve)?.(
+      { sender: { id: 42 } },
+      IDENTITY,
+      "offer-1",
+      true,
+    );
+
+    expect(browser.browserDataGet).toHaveBeenCalledOnce();
+    expect(browser.browserHistoryDelete).toHaveBeenCalledWith("https://a.com", 1);
+    expect(browser.browserHistoryClear).toHaveBeenCalledOnce();
+    expect(browser.browserDownloadsClear).toHaveBeenCalledOnce();
+    expect(browser.browserDownloadReveal).toHaveBeenCalledWith("/tmp/x.zip");
+    expect(browser.browserDownloadOpen).toHaveBeenCalledWith("/tmp/x.zip");
+    expect(browser.browserContactSave).toHaveBeenCalledWith({ contactId: null, contact: { fullName: "张三" } });
+    expect(browser.browserContactDelete).toHaveBeenCalledWith("c1");
+    expect(browser.browserPasswordSave).toHaveBeenCalledWith({
+      passwordId: null,
+      password: { origin: "https://a.com", username: "u", password: "p" },
+    });
+    expect(browser.browserPasswordDelete).toHaveBeenCalledWith("p1");
+    expect(browser.browserSitePermissionSave).toHaveBeenCalledWith({ site: "a.com", kind: "camera", value: "deny" });
+    expect(browser.browserSitePermissionDelete).toHaveBeenCalledWith("s1");
+    expect(browser.browserPasswordOfferResolve).toHaveBeenCalledWith(IDENTITY, "offer-1", true, 42);
+  });
+
+  test("密码 offer 只发送到所属 renderer", () => {
+    const offer = {
+      id: "offer-1",
+      url: "https://example.com/login",
+      origin: "https://example.com",
+      username: "alice",
+      identity: IDENTITY,
+    };
+
+    sendBrowserPasswordOffer(offer, 42);
+    sendBrowserPasswordOffer(offer, 99);
+
+    expect(electron.send).toHaveBeenCalledOnce();
+    expect(electron.send).toHaveBeenCalledWith(CHANNELS.browserPasswordOffer, offer);
   });
 });

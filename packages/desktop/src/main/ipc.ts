@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell, webContents } from "electron";
 import type {
   AuthOauthLoginInput,
   AuthOauthLoginResponse,
@@ -14,6 +14,12 @@ import type {
   BrowserSessionIdentity,
   BrowserStateEvent,
 } from "../shared/browser-contracts.ts";
+import type {
+  BrowserContactInput,
+  BrowserPasswordInput,
+  BrowserPasswordOffer,
+  BrowserSitePermissionInput,
+} from "../shared/browser-data-contracts.ts";
 import type { SaveBrowserSettingsInput } from "../shared/browser-settings-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
@@ -296,6 +302,38 @@ export function registerIpc(
       CHANNELS.browserAnnotationResolve,
       (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
         browser.resolveAnnotationBounds(identity, tabId, id),
+    );
+    ipcMain.handle(CHANNELS.browserDataGet, (_event, includePasswords?: boolean) =>
+      browser.browserDataGet(includePasswords === true),
+    );
+    ipcMain.handle(CHANNELS.browserHistoryDelete, (_event, url: string, timestamp: number) =>
+      browser.browserHistoryDelete(url, timestamp),
+    );
+    ipcMain.handle(CHANNELS.browserHistoryClear, () => browser.browserHistoryClear());
+    ipcMain.handle(CHANNELS.browserDownloadsClear, () => browser.browserDownloadsClear());
+    ipcMain.handle(CHANNELS.browserDownloadReveal, (_event, path: string) => browser.browserDownloadReveal(path));
+    ipcMain.handle(CHANNELS.browserDownloadOpen, (_event, path: string) => browser.browserDownloadOpen(path));
+    ipcMain.handle(
+      CHANNELS.browserContactSave,
+      (_event, input: { contactId: string | null; contact: BrowserContactInput }) => browser.browserContactSave(input),
+    );
+    ipcMain.handle(CHANNELS.browserContactDelete, (_event, id: string) => browser.browserContactDelete(id));
+    ipcMain.handle(
+      CHANNELS.browserPasswordSave,
+      (_event, input: { passwordId: string | null; password: BrowserPasswordInput }) =>
+        browser.browserPasswordSave(input),
+    );
+    ipcMain.handle(CHANNELS.browserPasswordDelete, (_event, id: string) => browser.browserPasswordDelete(id));
+    ipcMain.handle(CHANNELS.browserSitePermissionSave, (_event, input: BrowserSitePermissionInput) =>
+      browser.browserSitePermissionSave(input),
+    );
+    ipcMain.handle(CHANNELS.browserSitePermissionDelete, (_event, id: string) =>
+      browser.browserSitePermissionDelete(id),
+    );
+    ipcMain.handle(
+      CHANNELS.browserPasswordOfferResolve,
+      (event, identity: BrowserSessionIdentity, offerId: string, save: boolean) =>
+        browser.browserPasswordOfferResolve(identity, offerId, save, event.sender.id),
     );
   }
   ipcMain.handle(CHANNELS.settingsChooseUserAvatar, async (event) => {
@@ -965,4 +1003,10 @@ export function broadcastBrowserCloseTabRequest(request: BrowserCloseTabRequest)
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCloseTabRequest, request);
   }
+}
+
+/** 只向提交表单所属的 renderer 发送无密码正文的保存请求。 */
+export function sendBrowserPasswordOffer(offer: BrowserPasswordOffer, ownerWebContentsId: number): void {
+  const owner = webContents.fromId(ownerWebContentsId);
+  if (owner && !owner.isDestroyed()) owner.send(CHANNELS.browserPasswordOffer, offer);
 }

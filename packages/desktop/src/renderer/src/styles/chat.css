@@ -643,6 +643,33 @@
   container-name: composer;
   container-type: inline-size;
 }
+.composer-wrap[data-draft-composer="true"] .composer-surface {
+  position: relative;
+  z-index: 1;
+}
+.draft-composer-drawer {
+  position: relative;
+  z-index: 0;
+  width: calc(100% - min(48px, 8%));
+  margin: -14px auto 0;
+  padding: 20px var(--space-4) var(--space-2);
+  overflow: hidden;
+  border: 1px solid hsl(var(--border) / 0.72);
+  border-top: 0;
+  border-radius: 0 0 var(--shape-radius-xl) var(--shape-radius-xl);
+  background: color-mix(in oklab, hsl(var(--muted)) 52%, hsl(var(--background)));
+  box-shadow: 0 8px 18px -14px hsl(var(--foreground) / 0.28);
+}
+.draft-composer-drawer-content {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.draft-composer-drawer .project-select-trigger {
+  max-width: min(224px, 100%);
+}
 .composer-toolbar-start {
   flex: 0 1 auto;
 }
@@ -668,10 +695,17 @@
   .composer-surface {
     --composer-padding: var(--space-3);
   }
+  .draft-composer-drawer {
+    width: calc(100% - var(--space-6));
+    padding-inline: var(--space-3);
+  }
 }
 @container composer (max-width: 440px) {
   .composer-wrap .project-select-trigger {
     max-width: 112px;
+  }
+  .draft-composer-drawer .project-select-trigger {
+    max-width: 100%;
   }
 }
 .composer-quotes {

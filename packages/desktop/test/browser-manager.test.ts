@@ -1,7 +1,10 @@
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WebContents } from "electron";
 import { describe, expect, test, vi } from "vitest";
+import { BrowserDataService } from "../src/main/browser/browser-data-service.ts";
+import { BROWSER_PASSWORD_OFFER_BINDING } from "../src/main/browser/browser-form-scripts.ts";
 import type {
   BrowserHostController,
   BrowserHostEvent,
@@ -93,6 +96,7 @@ class FakeHost implements BrowserHostController {
   snapshotCalls: Array<{ withScreenshot: boolean }> = [];
   performedActions: BrowserAction[] = [];
   updatedSettings: Array<{ cdpTimeoutMs: number; maxSnapshotNodes: number }> = [];
+  runtimeBindings: string[] = [];
   private readonly eventListeners = new Set<(event: BrowserHostEvent) => void>();
 
   onEvent(cb: (event: BrowserHostEvent) => void): () => void {
@@ -189,6 +193,10 @@ class FakeHost implements BrowserHostController {
   }
 
   cancelPendingOperations(): void {}
+
+  async addRuntimeBinding(name: string): Promise<void> {
+    this.runtimeBindings.push(name);
+  }
 
   async readConsoleLogs(_options?: {
     filter?: string;
@@ -297,7 +305,7 @@ const SESSION_C: BrowserSessionIdentity = { projectId: "proj-b", threadId: "thre
 
 function fakeWebContents(
   contentsSession: Electron.Session,
-  hostWebContents: WebContents | null = {} as WebContents,
+  hostWebContents: WebContents | null = { id: 9_001 } as WebContents,
   url = "about:blank",
 ): WebContents {
   return {
@@ -307,6 +315,11 @@ function fakeWebContents(
     getTitle: () => "",
     isLoading: () => false,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    on: () => ({}) as WebContents,
+    removeListener: () => ({}) as WebContents,
+    isDestroyed: () => false,
+    executeJavaScript: () => Promise.resolve(undefined),
+    disposeGuestListeners: () => undefined,
   } as unknown as WebContents;
 }
 
@@ -822,6 +835,24 @@ describe("BrowserManager 会话隔离", () => {
     expect(states).toHaveLength(0);
   });
 
+  test("retireSession 与 dispose 都移除 guest 表单监听", async () => {
+    const retiredRemoveListener = vi.fn(() => ({}) as WebContents);
+    const retiredGuest = fakeWebContents(sessionFor(SESSION_A));
+    retiredGuest.removeListener = retiredRemoveListener;
+    const retired = setup({ fromWebContentsId: () => retiredGuest });
+    await retired.manager.attach(SESSION_A, 101);
+    retired.manager.retireSession(SESSION_A);
+    expect(retiredRemoveListener).toHaveBeenCalledWith("did-finish-load", expect.any(Function));
+
+    const disposedRemoveListener = vi.fn(() => ({}) as WebContents);
+    const disposedGuest = fakeWebContents(sessionFor(SESSION_A));
+    disposedGuest.removeListener = disposedRemoveListener;
+    const disposed = setup({ fromWebContentsId: () => disposedGuest });
+    await disposed.manager.attach(SESSION_A, 102);
+    disposed.manager.dispose();
+    expect(disposedRemoveListener).toHaveBeenCalledWith("did-finish-load", expect.any(Function));
+  });
+
   test("始终允许策略放行点击后的跨站重定向", async () => {
     const { manager, hostOptions } = setup();
     const initial = await manager.getSettingsSnapshot();
@@ -906,7 +937,10 @@ describe("BrowserManager 会话隔离", () => {
       settings: {
         ...initial.settings,
         mediaDefault: "allow",
-        mediaPermissions: [{ site: "blocked.example.com", camera: "deny", microphone: "deny" }],
+        mediaPermissions: [
+          { site: "example.com", camera: "allow", microphone: "allow" },
+          { site: "blocked.example.com", camera: "deny", microphone: "deny" },
+        ],
       },
     });
     expect(saved.status).toBe("saved");
@@ -1238,5 +1272,361 @@ describe("BrowserManager 新能力透传（对齐 Codex browser_use）", () => {
 
     const missing = await manager.closeTab(SESSION_A, 999);
     expect(missing).toMatchObject({ ok: false, error: expect.stringContaining("不存在") });
+  });
+});
+
+// ── 浏览器用户数据集成（历史持久化 / 网站设置覆盖 / 密码保存请求）────────
+
+function makeDataService(dir: string): BrowserDataService {
+  return new BrowserDataService(dir, {
+    crypto: {
+      isAvailable: () => true,
+      encrypt: (value) => Buffer.from(value, "utf8").reverse().toString("base64"),
+      decrypt: (value) => Buffer.from(value, "base64").reverse().toString("utf8"),
+    },
+  });
+}
+
+describe("BrowserManager 用户数据", () => {
+  test("导航记录持久化到数据服务；标题更新合并", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-data-mgr-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    const { manager, hosts } = setup({ data });
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+
+    host.emit({ type: "navigated", url: "https://example.com/a", canGoBack: false, canGoForward: false });
+    const snapshot = await data.getSnapshot();
+    expect(snapshot.history.map((entry) => entry.url)).toEqual(["https://example.com/a"]);
+
+    host.emit({ type: "navigated", url: "https://example.com/b", canGoBack: true, canGoForward: false });
+    host.emit({ type: "title-updated", title: "B 页面" });
+    expect((await data.getSnapshot()).history).toMatchObject([
+      { url: "https://example.com/b", title: "B 页面" },
+      { url: "https://example.com/a" },
+    ]);
+
+    host.emit({ type: "navigated", url: "https://example.com/a", canGoBack: true, canGoForward: false });
+    expect((await data.getSnapshot()).history.map((entry) => entry.url)).toEqual([
+      "https://example.com/a",
+      "https://example.com/b",
+      "https://example.com/a",
+    ]);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  test("自动填充读取凭据期间跨站导航时不向新页面注入", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-autofill-race-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    let resolveSnapshot: ((value: Awaited<ReturnType<BrowserDataService["getSnapshot"]>>) => void) | undefined;
+    vi.spyOn(data, "getSnapshot").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+    let currentUrl = "https://example.com/login";
+    let didFinishLoad: (() => void) | undefined;
+    const guest = fakeWebContents(sessionFor(SESSION_A), { id: 42 } as WebContents, currentUrl);
+    guest.getURL = () => currentUrl;
+    guest.on = vi.fn((event: string, listener: () => void) => {
+      if (event === "did-finish-load") didFinishLoad = listener;
+      return guest;
+    }) as WebContents["on"];
+    const executeJavaScript = vi.fn(() => Promise.resolve(undefined));
+    guest.executeJavaScript = executeJavaScript;
+    const { manager } = setup({ data, fromWebContentsId: () => guest });
+    await manager.attach(SESSION_A, 101);
+
+    didFinishLoad?.();
+    await vi.waitFor(() => expect(data.getSnapshot).toHaveBeenCalledOnce());
+    currentUrl = "https://other.example/";
+    resolveSnapshot?.({
+      history: [],
+      downloads: [],
+      contacts: [],
+      sitePermissions: [],
+      passwords: [
+        {
+          id: "password-1",
+          origin: "https://example.com",
+          username: "alice",
+          password: "s3cret",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(executeJavaScript).toHaveBeenCalledOnce();
+    expect(executeJavaScript.mock.calls[0]?.[0]).toContain(BROWSER_PASSWORD_OFFER_BINDING);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  test("网站设置覆盖：非媒体权限 allow 放行、deny/无覆盖 fail-closed", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-data-mgr-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    const { manager } = setup({ data });
+    const browserSession = sessionFor(SESSION_A) as unknown as {
+      setPermissionRequestHandler: { mock: { calls: unknown[][] } };
+      setPermissionCheckHandler: { mock: { calls: unknown[][] } };
+    };
+    const requestHandler = browserSession.setPermissionRequestHandler.mock.calls.at(-1)?.[0] as (
+      webContents: WebContents,
+      permission: string,
+      callback: (granted: boolean) => void,
+      details: { requestingUrl: string; securityOrigin?: string },
+    ) => void;
+    const checkHandler = browserSession.setPermissionCheckHandler.mock.calls.at(-1)?.[0] as (
+      webContents: WebContents | null,
+      permission: string,
+      requestingOrigin: string,
+    ) => boolean;
+
+    // 无覆盖：fail-closed
+    const denied: boolean[] = [];
+    requestHandler({} as WebContents, "notifications", (granted) => denied.push(granted), {
+      requestingUrl: "https://example.com/",
+      securityOrigin: "https://example.com",
+    });
+    expect(denied).toEqual([false]);
+    expect(checkHandler(null, "notifications", "https://example.com")).toBe(false);
+
+    // 覆盖 allow：放行（含子域匹配）
+    const allowed = await manager.browserSitePermissionSave({
+      site: "example.com",
+      kind: "notifications",
+      value: "allow",
+    });
+    expect(allowed.ok).toBe(true);
+    const allowedRequests: boolean[] = [];
+    requestHandler({} as WebContents, "notifications", (granted) => allowedRequests.push(granted), {
+      requestingUrl: "https://news.example.com/",
+      securityOrigin: "https://news.example.com",
+    });
+    expect(allowedRequests).toEqual([true]);
+    expect(checkHandler(null, "notifications", "https://news.example.com")).toBe(true);
+
+    await manager.browserSitePermissionSave({
+      site: "news.example.com",
+      kind: "notifications",
+      value: "deny",
+    });
+    expect(checkHandler(null, "notifications", "https://news.example.com")).toBe(false);
+    // 其他站点不受影响
+    expect(checkHandler(null, "notifications", "https://other.com")).toBe(false);
+
+    // 覆盖 deny：拒绝
+    const deniedSaved = await manager.browserSitePermissionSave({
+      site: "other.com",
+      kind: "notifications",
+      value: "deny",
+    });
+    expect(deniedSaved.ok).toBe(true);
+    const deniedRequests: boolean[] = [];
+    requestHandler({} as WebContents, "notifications", (granted) => deniedRequests.push(granted), {
+      requestingUrl: "https://other.com/",
+      securityOrigin: "https://other.com",
+    });
+    expect(deniedRequests).toEqual([false]);
+    expect(checkHandler(null, "notifications", "https://other.com")).toBe(false);
+
+    // 删除覆盖后恢复 fail-closed
+    const list = await data.listSitePermissions();
+    const otherEntry = list.find((entry) => entry.site === "other.com");
+    expect(otherEntry).toBeDefined();
+    await manager.browserSitePermissionDelete(otherEntry!.id);
+    expect(checkHandler(null, "notifications", "https://other.com")).toBe(false);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  test("媒体权限逐类型应用站点覆盖并回退到全局默认", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-media-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    const { manager } = setup({ data });
+    const browserSession = sessionFor(SESSION_A) as unknown as {
+      setPermissionRequestHandler: { mock: { calls: unknown[][] } };
+    };
+    const requestHandler = browserSession.setPermissionRequestHandler.mock.calls.at(-1)?.[0] as (
+      webContents: WebContents,
+      permission: string,
+      callback: (granted: boolean) => void,
+      details: { requestingUrl: string; securityOrigin?: string; mediaTypes?: Array<"video" | "audio"> },
+    ) => void;
+    const initial = await manager.getSettingsSnapshot();
+    await manager.saveSettings({
+      expectedRevision: initial.revision,
+      settings: { ...initial.settings, mediaDefault: "allow" },
+    });
+    await manager.browserSitePermissionSave({ site: "example.com", kind: "camera", value: "allow" });
+
+    const results: boolean[] = [];
+    requestHandler({} as WebContents, "media", (granted) => results.push(granted), {
+      requestingUrl: "https://example.com/",
+      securityOrigin: "https://example.com",
+      mediaTypes: ["video", "audio"],
+    });
+    expect(results).toEqual([true]);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  test("冷启动网站设置未加载时权限 fail-closed，加载后恢复全局 fallback", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-permission-ready-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    let resolvePermissions:
+      | ((value: Awaited<ReturnType<BrowserDataService["listSitePermissions"]>>) => void)
+      | undefined;
+    vi.spyOn(data, "listSitePermissions").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePermissions = resolve;
+        }),
+    );
+    const { manager } = setup({ data });
+    const browserSession = sessionFor(SESSION_A) as unknown as {
+      setPermissionCheckHandler: { mock: { calls: unknown[][] } };
+    };
+    const checkHandler = browserSession.setPermissionCheckHandler.mock.calls.at(-1)?.[0] as (
+      webContents: WebContents | null,
+      permission: string,
+      requestingOrigin: string,
+      details: { mediaType?: "video" | "audio" },
+    ) => boolean;
+    const initial = await manager.getSettingsSnapshot();
+    await manager.saveSettings({
+      expectedRevision: initial.revision,
+      settings: { ...initial.settings, mediaDefault: "allow" },
+    });
+
+    expect(checkHandler(null, "media", "https://other.com", { mediaType: "video" })).toBe(false);
+    resolvePermissions?.([
+      {
+        id: "deny-camera",
+        site: "blocked.example.com",
+        kind: "camera",
+        value: "deny",
+        updatedAt: 1,
+      },
+    ]);
+    await vi.waitFor(() => {
+      expect(checkHandler(null, "media", "https://other.com", { mediaType: "video" })).toBe(true);
+    });
+    expect(checkHandler(null, "media", "https://blocked.example.com", { mediaType: "video" })).toBe(false);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  test("默认下载目录下仍记录完成状态", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-download-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    setup({ data });
+    const browserSession = sessionFor(SESSION_A) as unknown as { on: { mock: { calls: unknown[][] } } };
+    const onWillDownload = browserSession.on.mock.calls.filter(([name]) => name === "will-download").at(-1)?.[1] as (
+      event: Electron.Event,
+      item: Electron.DownloadItem,
+    ) => void;
+    let onDone: ((event: Electron.Event, state: "completed") => void) | undefined;
+    const setSavePath = vi.fn();
+    const item = {
+      getFilename: () => "file.zip",
+      getURL: () => "https://example.com/file.zip",
+      getSavePath: () => "/system/Downloads/file.zip",
+      getTotalBytes: () => 100,
+      getReceivedBytes: () => 100,
+      setSavePath,
+      once: (_event: string, listener: typeof onDone) => {
+        onDone = listener;
+      },
+    } as unknown as Electron.DownloadItem;
+
+    onWillDownload({} as Electron.Event, item);
+    expect(setSavePath).not.toHaveBeenCalled();
+    onDone?.({} as Electron.Event, "completed");
+    expect((await data.getSnapshot()).downloads).toMatchObject([
+      { filename: "file.zip", path: "/system/Downloads/file.zip", state: "completed" },
+    ]);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  test("浏览器数据通道：密码保存/删除与未知 offer 返回失败", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-data-mgr-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    const offers: Array<{ origin: string; username: string }> = [];
+    const { manager } = setup({
+      data,
+      onPasswordOffer: (offer) => offers.push({ origin: offer.origin, username: offer.username }),
+    });
+
+    // 未知/过期 offer：resolve 返回失败且不产生副作用
+    await expect(manager.browserPasswordOfferResolve(SESSION_A, "unknown-offer", true, 9_001)).resolves.toMatchObject({
+      ok: false,
+    });
+    expect((await data.getSnapshot()).passwords).toHaveLength(0);
+
+    const saved = await manager.browserPasswordSave({
+      passwordId: null,
+      password: { origin: "https://example.com", username: "alice", password: "s3cret" },
+    });
+    expect(saved.ok).toBe(true);
+    expect((await manager.browserDataGet()).passwords).toHaveLength(0);
+    const snapshot = await manager.browserDataGet(true);
+    expect(snapshot.passwords).toHaveLength(1);
+    expect(snapshot.passwords[0]).toMatchObject({ origin: "https://example.com", username: "alice" });
+
+    const deleted = await manager.browserPasswordDelete(snapshot.passwords[0].id);
+    expect(deleted.ok).toBe(true);
+    expect(await manager.browserDataGet()).toMatchObject({ passwords: [] });
+    expect(offers).toHaveLength(0);
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  test("密码 offer 不含正文、绑定当前 origin 且只能由所属会话保存", async () => {
+    const dataDir = join(tmpdir(), `desktop-browser-offer-${Date.now()}`);
+    const data = makeDataService(dataDir);
+    const offers: Array<{
+      offer: Parameters<NonNullable<BrowserManagerOptions["onPasswordOffer"]>>[0];
+      ownerId: number;
+    }> = [];
+    const { manager, hostOptions } = setup({
+      data,
+      onPasswordOffer: (offer, ownerId) => offers.push({ offer, ownerId }),
+      fromWebContentsId: () =>
+        fakeWebContents(sessionFor(SESSION_A), { id: 42 } as WebContents, "https://example.com/login"),
+    });
+    await manager.attach(SESSION_A, 101);
+
+    hostOptions
+      .get(101)
+      ?.onRuntimeBinding?.(
+        BROWSER_PASSWORD_OFFER_BINDING,
+        JSON.stringify({ url: "https://other.example/login", username: "mallory", password: "wrong" }),
+      );
+    expect(offers).toHaveLength(0);
+
+    hostOptions
+      .get(101)
+      ?.onRuntimeBinding?.(
+        BROWSER_PASSWORD_OFFER_BINDING,
+        JSON.stringify({ url: "https://example.com/login", username: "alice", password: "s3cret" }),
+      );
+    expect(offers).toHaveLength(1);
+    expect(offers[0]).toMatchObject({
+      ownerId: 42,
+      offer: { origin: "https://example.com", username: "alice", identity: SESSION_A },
+    });
+    expect(offers[0]!.offer).not.toHaveProperty("password");
+
+    const offerId = offers[0]!.offer.id;
+    await expect(manager.browserPasswordOfferResolve(SESSION_B, offerId, true, 42)).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(manager.browserPasswordOfferResolve(SESSION_A, offerId, true, 99)).resolves.toMatchObject({
+      ok: false,
+    });
+    await expect(manager.browserPasswordOfferResolve(SESSION_A, offerId, true, 42)).resolves.toEqual({ ok: true });
+    expect((await data.getSnapshot()).passwords).toMatchObject([
+      { origin: "https://example.com", username: "alice", password: "s3cret" },
+    ]);
+    await rm(dataDir, { recursive: true, force: true });
   });
 });

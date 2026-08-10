@@ -18,7 +18,15 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import type { WebContents } from "electron";
-import { BrowserWindow, clipboard, webContents as electronWebContents, Menu, nativeImage, session } from "electron";
+import {
+  BrowserWindow,
+  clipboard,
+  webContents as electronWebContents,
+  Menu,
+  nativeImage,
+  session,
+  shell,
+} from "electron";
 import {
   type BrowserAction,
   type BrowserActionResult,
@@ -46,6 +54,20 @@ import {
   browserSessionKey,
 } from "../../shared/browser-contracts.ts";
 import type {
+  BrowserContactInput,
+  BrowserDataMutateResult,
+  BrowserDataSnapshot,
+  BrowserPasswordInput,
+  BrowserPasswordOffer,
+  BrowserPasswordOfferResolveResult,
+  BrowserPermissionKind,
+  BrowserPermissionValue,
+  BrowserSitePermission,
+  BrowserSitePermissionInput,
+  ContactProfile,
+  SavedPassword,
+} from "../../shared/browser-data-contracts.ts";
+import type {
   BrowserSettings,
   BrowserSettingsSnapshot,
   SaveBrowserSettingsInput,
@@ -54,6 +76,13 @@ import type {
 import { defaultBrowserSettings } from "../../shared/browser-settings-contracts.ts";
 import { checkSiteAccess, defaultSiteApproval, siteMatches } from "../../shared/browser-site-policy.ts";
 import { type BrowserContextMenuActions, buildBrowserContextMenuTemplate } from "./browser-context-menu.ts";
+import type { BrowserDataService } from "./browser-data-service.ts";
+import {
+  BROWSER_PASSWORD_OFFER_BINDING,
+  BROWSER_PASSWORD_WATCHER_SCRIPT,
+  buildBrowserContactAutofillScript,
+  buildBrowserPasswordAutofillScript,
+} from "./browser-form-scripts.ts";
 import {
   type BrowserHostController,
   type BrowserHostEvent,
@@ -79,6 +108,10 @@ export interface BrowserManagerOptions {
   fromWebContentsId?: (webContentsId: number) => WebContents | null;
   /** 测试注入：覆盖设置文件路径。 */
   settingsPath?: string;
+  /** 浏览器用户数据服务（历史/下载/联系人/密码/网站设置持久化）。 */
+  data?: BrowserDataService;
+  /** 密码保存请求（不含密码正文）；由 index.ts 定向推送到所属 renderer。 */
+  onPasswordOffer?: (offer: BrowserPasswordOffer, ownerWebContentsId: number) => void;
 }
 
 export type BrowserOperationSource = "user" | "agent" | "popup";
@@ -86,8 +119,11 @@ export type BrowserOperationSource = "user" | "agent" | "popup";
 interface TabEntry {
   tabId: number;
   webContentsId: number;
+  ownerWebContentsId: number;
   host: BrowserHostController;
   tab: BrowserTab;
+  /** 移除 guest 事件监听（表单检测/填充）。 */
+  disposeGuestListeners: () => void;
 }
 
 interface PendingCreateTab {
@@ -136,6 +172,23 @@ export class BrowserManager {
   private readonly settingsReady: Promise<void>;
   private nextCreateRequestId = 1;
   private disposed = false;
+  /** 网站设置覆盖缓存（kind -> site -> value）；权限 handler 同步读取。 */
+  private sitePermissionOverrides = new Map<BrowserPermissionKind, Map<string, BrowserPermissionValue>>();
+  /** 持久化网站设置加载失败或尚未完成时，权限 handler 必须 fail-closed。 */
+  private sitePermissionOverridesLoaded = false;
+  private sitePermissionLoadGeneration = 0;
+  /** 未决密码保存请求（offerId -> renderer 归属 + 会话身份 + 凭据）；resolve 时校验归属。 */
+  private readonly passwordOffers = new Map<
+    string,
+    {
+      ownerWebContentsId: number;
+      identity: BrowserSessionIdentity;
+      origin: string;
+      username: string;
+      password: string;
+    }
+  >();
+  private readonly passwordOfferTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(userDataDir: string, options: BrowserManagerOptions = {}) {
     this.options = options;
@@ -143,6 +196,7 @@ export class BrowserManager {
       path: options.settingsPath,
     });
     this.settingsReady = this.refreshRuntimeSettings();
+    void this.loadSitePermissionOverrides();
   }
 
   /** 会话注册：由 thread worker 派生；每次新 worker 注册都会轮换 capability。 */
@@ -189,7 +243,17 @@ export class BrowserManager {
       pending.reject(new Error("浏览器会话已关闭"));
     }
     state.pendingCreates.clear();
-    for (const entry of state.entries.values()) entry.host.dispose();
+    for (const entry of state.entries.values()) {
+      entry.disposeGuestListeners();
+      entry.host.dispose();
+    }
+    for (const [offerId, offer] of this.passwordOffers) {
+      if (browserSessionKey(offer.identity) !== sessionKey) continue;
+      const timer = this.passwordOfferTimers.get(offerId);
+      if (timer) clearTimeout(timer);
+      this.passwordOfferTimers.delete(offerId);
+      this.passwordOffers.delete(offerId);
+    }
     state.entries.clear();
     state.byWebContentsId.clear();
     state.activeTabId = null;
@@ -270,10 +334,29 @@ export class BrowserManager {
         });
       },
       onContextMenu: (event, params) => this.handleContextMenu(state, tabId, resolved, event, params),
+      onRuntimeBinding: (name, payload) => {
+        if (name === BROWSER_PASSWORD_OFFER_BINDING) this.handlePasswordOfferMessage(state, tabId, payload);
+      },
     };
     const host =
       this.options.createHost?.(webContentsId, hostOptions) ?? new WebContentsHostController(resolved, hostOptions);
-    state.entries.set(tabId, { tabId, webContentsId, host, tab });
+    const onDidFinishLoad = (): void => {
+      if (resolved.isDestroyed()) return;
+      void this.injectFormScripts(resolved, host);
+    };
+    resolved.on("did-finish-load", onDidFinishLoad);
+    state.entries.set(tabId, {
+      tabId,
+      webContentsId,
+      ownerWebContentsId: resolved.hostWebContents.id,
+      host,
+      tab,
+      disposeGuestListeners: () => {
+        if (!resolved.isDestroyed()) {
+          resolved.removeListener("did-finish-load", onDidFinishLoad);
+        }
+      },
+    });
     state.byWebContentsId.set(webContentsId, tabId);
     host.onEvent((event) => this.handleHostEvent(state, tabId, event));
     state.activeTabId = tabId;
@@ -1176,17 +1259,25 @@ export class BrowserManager {
   }
 
   /** 显示 guest 页面原生 Chromium 右键菜单。 */
-  private handleContextMenu(
+  private async handleContextMenu(
     state: SessionState,
     tabId: number,
     webContents: WebContents,
     event: Electron.Event,
     params: Electron.ContextMenuParams,
-  ): void {
+  ): Promise<void> {
     const entry = state.entries.get(tabId);
     if (!entry || this.disposed) return;
 
     event.preventDefault();
+    let contacts: ContactProfile[] = [];
+    if (this.options.data) {
+      try {
+        contacts = (await this.options.data.getSnapshot()).contacts;
+      } catch (error) {
+        this.options.log?.(`browser context menu contacts failed: ${messageOf(error)}`);
+      }
+    }
     const actions: BrowserContextMenuActions = {
       openUrlInNewTab: (url) => {
         void this.openTab(state.identity, url, "user").catch((error: unknown) => {
@@ -1246,6 +1337,17 @@ export class BrowserManager {
           this.options.log?.(`browser context menu inspect failed: ${messageOf(error)}`);
         }
       },
+      autofillContacts: contacts.slice(0, 8).map((contact) => ({
+        id: contact.id,
+        label: [contact.fullName, contact.email, contact.phone].filter(Boolean).join(" · "),
+      })),
+      autofillContact: (id) => {
+        const contact = contacts.find((candidate) => candidate.id === id);
+        if (!contact) return;
+        void webContents.executeJavaScript(buildBrowserContactAutofillScript(contact), true).catch((error: unknown) => {
+          this.options.log?.(`browser contact autofill failed: ${messageOf(error)}`);
+        });
+      },
       canGoBack: entry.tab.canGoBack,
       canGoForward: entry.tab.canGoForward,
     };
@@ -1287,6 +1389,246 @@ export class BrowserManager {
     const state = this.requireSession(identity);
     if (!state) return [];
     return state.history.map((entry) => ({ ...entry }));
+  }
+
+  /** 浏览器用户数据快照（历史/下载/联系人/密码/网站设置；仅用户 UI）。 */
+  async browserDataGet(includePasswords = false): Promise<BrowserDataSnapshot> {
+    if (!this.options.data) {
+      return { history: [], downloads: [], contacts: [], passwords: [], sitePermissions: [] };
+    }
+    try {
+      const snapshot = await this.options.data.getSnapshot();
+      return includePasswords ? snapshot : { ...snapshot, passwords: [] };
+    } catch (error) {
+      this.options.log?.(`browser data get failed: ${messageOf(error)}`);
+      return { history: [], downloads: [], contacts: [], passwords: [], sitePermissions: [] };
+    }
+  }
+
+  /** 删除单条历史记录（按 url + timestamp 精确匹配）。 */
+  async browserHistoryDelete(url: string, timestamp: number): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    return redactPasswords(await this.options.data.deleteHistoryEntry(url, timestamp));
+  }
+
+  /** 清空全部浏览历史。 */
+  async browserHistoryClear(): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    return redactPasswords(await this.options.data.clearHistory());
+  }
+
+  /** 清空全部下载历史（不删除已下载文件）。 */
+  async browserDownloadsClear(): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    return redactPasswords(await this.options.data.clearDownloads());
+  }
+
+  /** 在系统文件管理器中显示已下载文件。 */
+  browserDownloadReveal(path: string): void {
+    if (path.length === 0) return;
+    shell.showItemInFolder(path);
+  }
+
+  /** 用系统默认程序打开已下载文件。 */
+  async browserDownloadOpen(path: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (path.length === 0) return { ok: false, error: "文件路径为空" };
+    const error = await shell.openPath(path);
+    return error ? { ok: false, error } : { ok: true };
+  }
+
+  /** 新增/更新联系信息（contactId 为 null 时新建）。 */
+  async browserContactSave(input: {
+    contactId: string | null;
+    contact: BrowserContactInput;
+  }): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    return redactPasswords(await this.options.data.saveContact(input));
+  }
+
+  /** 删除联系信息。 */
+  async browserContactDelete(id: string): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    return redactPasswords(await this.options.data.deleteContact(id));
+  }
+
+  /** 新增/更新保存的密码（passwordId 为 null 时新建）。 */
+  async browserPasswordSave(input: {
+    passwordId: string | null;
+    password: BrowserPasswordInput;
+  }): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    return this.options.data.savePassword(input);
+  }
+
+  /** 删除保存的密码。 */
+  async browserPasswordDelete(id: string): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    return this.options.data.deletePassword(id);
+  }
+
+  /** 新增/更新网站设置条目（同 site+kind 覆盖）。 */
+  async browserSitePermissionSave(input: BrowserSitePermissionInput): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    const result = await this.options.data.saveSitePermission(input);
+    if (result.ok) await this.loadSitePermissionOverrides();
+    return redactPasswords(result);
+  }
+
+  /** 删除网站设置条目。 */
+  async browserSitePermissionDelete(id: string): Promise<BrowserDataMutateResult> {
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    const result = await this.options.data.deleteSitePermission(id);
+    if (result.ok) await this.loadSitePermissionOverrides();
+    return redactPasswords(result);
+  }
+
+  /** 用户对密码保存请求的响应（保存 / 忽略）。 */
+  async browserPasswordOfferResolve(
+    identity: BrowserSessionIdentity,
+    offerId: string,
+    save: boolean,
+    ownerWebContentsId: number,
+  ): Promise<BrowserPasswordOfferResolveResult> {
+    const offer = this.passwordOffers.get(offerId);
+    if (
+      !offer ||
+      offer.ownerWebContentsId !== ownerWebContentsId ||
+      browserSessionKey(offer.identity) !== browserSessionKey(identity)
+    ) {
+      return { ok: false, error: "密码保存请求不存在或已过期。" };
+    }
+    const timer = this.passwordOfferTimers.get(offerId);
+    if (timer) clearTimeout(timer);
+    this.passwordOffers.delete(offerId);
+    this.passwordOfferTimers.delete(offerId);
+    if (!save) return { ok: true };
+    if (!this.options.data) return { ok: false, error: "浏览器数据服务不可用" };
+    try {
+      const existing = (await this.options.data.getSnapshot()).passwords.find(
+        (entry) => entry.origin === offer.origin && entry.username === offer.username,
+      );
+      const result = await this.options.data.savePassword({
+        passwordId: existing ? existing.id : null,
+        password: { origin: offer.origin, username: offer.username, password: offer.password },
+      });
+      return result.ok ? { ok: true } : result;
+    } catch (error) {
+      this.options.log?.(`browser password offer save failed: ${messageOf(error)}`);
+      return { ok: false, error: "密码保存失败。" };
+    }
+  }
+
+  /** 页面加载后注入表单脚本：登录检测 + 已保存凭据自动填充。 */
+  private async injectFormScripts(webContents: WebContents, host: BrowserHostController): Promise<void> {
+    if (webContents.isDestroyed()) return;
+    try {
+      await host.addRuntimeBinding(BROWSER_PASSWORD_OFFER_BINDING);
+      await webContents.executeJavaScript(BROWSER_PASSWORD_WATCHER_SCRIPT, true);
+    } catch {
+      return;
+    }
+    const dataService = this.options.data;
+    if (!dataService || webContents.isDestroyed()) return;
+    const origin = originOfUrl(webContents.getURL());
+    if (origin === null) return;
+    let passwords: SavedPassword[];
+    try {
+      passwords = (await dataService.getSnapshot()).passwords;
+    } catch {
+      return;
+    }
+    if (webContents.isDestroyed() || originOfUrl(webContents.getURL()) !== origin) return;
+    try {
+      await webContents.executeJavaScript(buildBrowserPasswordAutofillScript({ origin, passwords }), true);
+    } catch {
+      // 页面上下文可能已销毁
+    }
+  }
+
+  /** guest Runtime binding 上报登录表单提交：校验后发送无密码保存请求。 */
+  private handlePasswordOfferMessage(state: SessionState, tabId: number, payload: string): void {
+    if (!this.options.data || !this.options.onPasswordOffer) return;
+    let parsed: { url?: unknown; username?: unknown; password?: unknown };
+    try {
+      parsed = JSON.parse(payload) as { url?: unknown; username?: unknown; password?: unknown };
+    } catch {
+      return;
+    }
+    if (typeof parsed.password !== "string" || parsed.password.length === 0) return;
+    if (typeof parsed.username !== "string") return;
+    const rawUrl = typeof parsed.url === "string" ? parsed.url : "";
+    const origin = originOfUrl(rawUrl);
+    if (origin === null) return;
+    const entry = state.entries.get(tabId);
+    if (!entry || originOfUrl(entry.tab.url) !== origin) return;
+    const currentUrl = entry.tab.url;
+    const id = randomUUID();
+    this.passwordOffers.set(id, {
+      ownerWebContentsId: entry.ownerWebContentsId,
+      identity: { ...state.identity },
+      origin,
+      username: parsed.username,
+      password: parsed.password,
+    });
+    const timer = setTimeout(
+      () => {
+        this.passwordOffers.delete(id);
+        this.passwordOfferTimers.delete(id);
+      },
+      2 * 60 * 1000,
+    );
+    this.passwordOfferTimers.set(id, timer);
+    this.options.onPasswordOffer(
+      {
+        id,
+        url: currentUrl,
+        origin,
+        username: parsed.username,
+        identity: { ...state.identity },
+      },
+      entry.ownerWebContentsId,
+    );
+  }
+
+  /** 网站设置覆盖查询（同步；权限 handler 使用）。 */
+  private siteOverride(origin: string, kind: BrowserPermissionKind | null): BrowserPermissionValue | null {
+    if (kind === null || origin.length === 0) return null;
+    const bySite = this.sitePermissionOverrides.get(kind);
+    if (!bySite) return null;
+    const matches = [...bySite].filter(([site]) => siteMatches(site, origin));
+    matches.sort(([left], [right]) => right.length - left.length);
+    return matches[0]?.[1] ?? null;
+  }
+
+  private async loadSitePermissionOverrides(): Promise<void> {
+    const generation = ++this.sitePermissionLoadGeneration;
+    if (!this.options.data) {
+      this.sitePermissionOverridesLoaded = true;
+      return;
+    }
+    try {
+      const permissions = await this.options.data.listSitePermissions();
+      if (generation !== this.sitePermissionLoadGeneration) return;
+      this.rebuildSitePermissionOverrides(permissions);
+      this.sitePermissionOverridesLoaded = true;
+    } catch (error) {
+      if (generation !== this.sitePermissionLoadGeneration) return;
+      this.sitePermissionOverridesLoaded = false;
+      this.options.log?.(`browser site permission load failed: ${messageOf(error)}`);
+    }
+  }
+
+  private rebuildSitePermissionOverrides(permissions: BrowserSitePermission[]): void {
+    const overrides = new Map<BrowserPermissionKind, Map<string, BrowserPermissionValue>>();
+    for (const entry of permissions) {
+      let bySite = overrides.get(entry.kind);
+      if (!bySite) {
+        bySite = new Map();
+        overrides.set(entry.kind, bySite);
+      }
+      bySite.set(entry.site, entry.value);
+    }
+    this.sitePermissionOverrides = overrides;
   }
 
   /** 取视口坐标处元素（标注模式）：生成选择器与 bounds。 */
@@ -1401,6 +1743,9 @@ export class BrowserManager {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const timer of this.passwordOfferTimers.values()) clearTimeout(timer);
+    this.passwordOfferTimers.clear();
+    this.passwordOffers.clear();
     for (const state of this.sessions.values()) {
       state.browserSession.off("will-download", state.onWillDownload);
       for (const pending of state.pendingCreates.values()) {
@@ -1408,7 +1753,10 @@ export class BrowserManager {
         pending.reject(new Error("浏览器服务已关闭"));
       }
       state.pendingCreates.clear();
-      for (const entry of state.entries.values()) entry.host.dispose();
+      for (const entry of state.entries.values()) {
+        entry.disposeGuestListeners();
+        entry.host.dispose();
+      }
       state.entries.clear();
       state.byWebContentsId.clear();
       state.activeTabId = null;
@@ -1426,33 +1774,75 @@ export class BrowserManager {
     const partition = browserPartitionFor(identity);
     const browserSession = session.fromPartition(partition);
     // 分区权限默认 fail-closed：媒体权限按浏览器设置中的默认值和站点覆盖处理，
-    // 其他 Chromium 权限（地理位置、通知、剪贴板等）统一拒绝。
+    // 网站设置覆盖（camera/microphone/notifications/geolocation/clipboard/fullscreen）
+    // 优先于默认值，其他 Chromium 权限（地理位置、通知、剪贴板等）统一拒绝。
     browserSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
-      if (permission !== "media") return false;
-      const mediaType = (details as Electron.PermissionCheckHandlerHandlerDetails).mediaType;
-      return mediaType !== undefined && mediaType !== "unknown"
-        ? mediaPermissionAllowed(this.runtimeSettings, requestingOrigin, mediaType)
-        : false;
+      if (!this.sitePermissionOverridesLoaded) return false;
+      if (permission === "media") {
+        const mediaType = (details as Electron.PermissionCheckHandlerHandlerDetails).mediaType;
+        if (mediaType === "video" || mediaType === "audio") {
+          const override = this.siteOverride(requestingOrigin, mediaType === "video" ? "camera" : "microphone");
+          if (override !== null) return override === "allow";
+        }
+        return mediaType !== undefined && mediaType !== "unknown"
+          ? mediaPermissionAllowed(this.runtimeSettings, requestingOrigin, mediaType)
+          : false;
+      }
+      const override = this.siteOverride(requestingOrigin, permissionToPermissionKind(permission));
+      return override !== null && override === "allow";
     });
     browserSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-      if (permission !== "media") {
+      if (!this.sitePermissionOverridesLoaded) {
         callback(false);
         return;
       }
       const request = details as Electron.MediaAccessPermissionRequest;
-      const origin = request.securityOrigin ?? request.requestingUrl;
-      const mediaTypes = request.mediaTypes ?? [];
-      callback(
-        mediaTypes.length > 0 &&
-          mediaTypes.every((mediaType) => mediaPermissionAllowed(this.runtimeSettings, origin, mediaType)),
-      );
+      const origin = request.securityOrigin ?? request.requestingUrl ?? "";
+      if (permission === "media") {
+        const mediaTypes = request.mediaTypes ?? [];
+        const kinds = mediaTypes.map((mediaType) =>
+          mediaType === "video" ? ("camera" as const) : mediaType === "audio" ? ("microphone" as const) : null,
+        );
+        const allowed = kinds.every((kind, index) => {
+          if (kind === null) return false;
+          const override = this.siteOverride(origin, kind);
+          return override !== null
+            ? override === "allow"
+            : mediaPermissionAllowed(this.runtimeSettings, origin, mediaTypes[index]!);
+        });
+        callback(mediaTypes.length > 0 && allowed);
+        return;
+      }
+      const override = this.siteOverride(origin, permissionToPermissionKind(permission));
+      if (override !== null) {
+        callback(override === "allow");
+        return;
+      }
+      callback(false);
     });
     const onWillDownload = (_event: Electron.Event, item: Electron.DownloadItem): void => {
       const directory = this.runtimeSettings.downloadDirectory;
-      if (!directory) return;
       const filename = basename(item.getFilename());
       if (filename.length === 0) return;
-      item.setSavePath(join(directory, filename));
+      if (directory) item.setSavePath(join(directory, filename));
+      if (!this.options.data) return;
+      const url = item.getURL();
+      const startedAt = Date.now();
+      item.once("done", (_event, state) => {
+        const savePath = item.getSavePath();
+        void this.options.data
+          ?.recordDownload({
+            url,
+            filename,
+            path: state === "completed" ? savePath : null,
+            totalBytes: item.getTotalBytes(),
+            receivedBytes: item.getReceivedBytes(),
+            state: state === "completed" ? "completed" : state === "cancelled" ? "cancelled" : "interrupted",
+            startedAt,
+            endedAt: Date.now(),
+          })
+          .catch(() => undefined);
+      });
     };
     browserSession.on("will-download", onWillDownload);
     const state: SessionState = {
@@ -1516,6 +1906,9 @@ export class BrowserManager {
           const historyIndex = state.history.findIndex((item) => item.url === entry.tab.url);
           if (historyIndex !== -1) {
             state.history[historyIndex] = { ...state.history[historyIndex]!, title: event.title };
+            if (this.options.data) {
+              void this.options.data.updateLatestHistoryTitle(entry.tab.url, event.title).catch(() => undefined);
+            }
           }
         }
         break;
@@ -1549,6 +1942,7 @@ export class BrowserManager {
     if (state.activeTabId === tabId) {
       state.activeTabId = [...state.entries.keys()][0] ?? null;
     }
+    entry.disposeGuestListeners();
     entry.host.dispose();
     this.broadcast(state);
   }
@@ -1561,10 +1955,13 @@ export class BrowserManager {
     if (existing !== -1) {
       const current = state.history.splice(existing, 1)[0]!;
       state.history.unshift({ url, title: title || current.title, timestamp: Date.now() });
-      return;
+    } else {
+      state.history.unshift({ url, title, timestamp: Date.now() });
+      if (state.history.length > MAX_HISTORY_ENTRIES) state.history.length = MAX_HISTORY_ENTRIES;
     }
-    state.history.unshift({ url, title, timestamp: Date.now() });
-    if (state.history.length > MAX_HISTORY_ENTRIES) state.history.length = MAX_HISTORY_ENTRIES;
+    if (this.options.data) {
+      void this.options.data.recordHistory(url, title).catch(() => undefined);
+    }
   }
 
   private async refreshRuntimeSettings(): Promise<void> {
@@ -1753,12 +2150,45 @@ function parseHttpUrl(raw: string): URL | null {
 
 function mediaPermissionAllowed(settings: BrowserSettings, origin: string, mediaType: "video" | "audio"): boolean {
   if (!origin || checkSiteAccess(settings, origin) === "blocked") return false;
-  const sitePermission = settings.mediaPermissions.find((entry) => siteMatches(entry.site, origin));
+  const sitePermission = settings.mediaPermissions
+    .filter((entry) => siteMatches(entry.site, origin))
+    .sort((left, right) => right.site.length - left.site.length)[0];
   const decision =
     mediaType === "video"
       ? (sitePermission?.camera ?? settings.mediaDefault)
       : (sitePermission?.microphone ?? settings.mediaDefault);
   return decision === "allow";
+}
+
+/** Chromium 权限名 -> 网站设置权限类型；未纳入网站设置的权限返回 null。 */
+function permissionToPermissionKind(permission: string): BrowserPermissionKind | null {
+  switch (permission) {
+    case "notifications":
+      return "notifications";
+    case "geolocation":
+      return "geolocation";
+    case "clipboard-sanitized-write":
+    case "clipboard-read":
+      return "clipboard";
+    case "fullscreen":
+      return "fullscreen";
+    default:
+      return null;
+  }
+}
+
+/** http/https URL 的 origin（含端口）；其他协议返回 null。 */
+function originOfUrl(raw: string): string | null {
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function redactPasswords(result: BrowserDataMutateResult): BrowserDataMutateResult {
+  return result.ok ? { ok: true, snapshot: { ...result.snapshot, passwords: [] } } : result;
 }
 
 function messageOf(error: unknown): string {

@@ -32,6 +32,15 @@ import type {
   BrowserTab,
 } from "./browser-contracts.ts";
 import type {
+  BrowserContactInput,
+  BrowserDataMutateResult,
+  BrowserDataSnapshot,
+  BrowserPasswordInput,
+  BrowserPasswordOffer,
+  BrowserPasswordOfferResolveResult,
+  BrowserSitePermissionInput,
+} from "./browser-data-contracts.ts";
+import type {
   BrowserSettingsSnapshot,
   SaveBrowserSettingsInput,
   SaveBrowserSettingsResult,
@@ -387,6 +396,44 @@ export interface DesktopApi {
       tabId: number,
       id: string,
     ): Promise<BrowserAnnotationBounds | null>;
+    /** 浏览器用户数据快照（历史/下载/联系人/密码/网站设置；仅用户 UI）。 */
+    browserDataGet(includePasswords?: boolean): Promise<BrowserDataSnapshot>;
+    /** 删除单条历史记录（按 url + timestamp 精确匹配）。 */
+    browserHistoryDelete(url: string, timestamp: number): Promise<BrowserDataMutateResult>;
+    /** 清空全部浏览历史。 */
+    browserHistoryClear(): Promise<BrowserDataMutateResult>;
+    /** 清空全部下载历史（不删除已下载文件）。 */
+    browserDownloadsClear(): Promise<BrowserDataMutateResult>;
+    /** 在系统文件管理器中显示已下载文件。 */
+    browserDownloadReveal(path: string): Promise<void>;
+    /** 用系统默认程序打开已下载文件。 */
+    browserDownloadOpen(path: string): Promise<{ ok: true } | { ok: false; error: string }>;
+    /** 新增/更新联系信息（contactId 为 null 时新建）。 */
+    browserContactSave(input: {
+      contactId: string | null;
+      contact: BrowserContactInput;
+    }): Promise<BrowserDataMutateResult>;
+    /** 删除联系信息。 */
+    browserContactDelete(id: string): Promise<BrowserDataMutateResult>;
+    /** 新增/更新保存的密码（passwordId 为 null 时新建）。 */
+    browserPasswordSave(input: {
+      passwordId: string | null;
+      password: BrowserPasswordInput;
+    }): Promise<BrowserDataMutateResult>;
+    /** 删除保存的密码。 */
+    browserPasswordDelete(id: string): Promise<BrowserDataMutateResult>;
+    /** 新增/更新网站设置条目（同 site+kind 覆盖）。 */
+    browserSitePermissionSave(input: BrowserSitePermissionInput): Promise<BrowserDataMutateResult>;
+    /** 删除网站设置条目。 */
+    browserSitePermissionDelete(id: string): Promise<BrowserDataMutateResult>;
+    /** main 请求保存密码（登录表单提交后）；返回取消订阅函数。 */
+    onPasswordOffer(listener: (offer: BrowserPasswordOffer) => void): () => void;
+    /** 用户对密码保存请求的响应（保存 / 忽略）。 */
+    browserPasswordOfferResolve(
+      identity: BrowserSessionIdentity,
+      offerId: string,
+      save: boolean,
+    ): Promise<BrowserPasswordOfferResolveResult>;
     /** 订阅浏览器会话状态（携带 sessionKey，按身份路由）；返回取消订阅函数。 */
     onStateChanged(listener: (event: BrowserStateEvent) => void): () => void;
     /** main 请求创建新 tab（携带 sessionKey）；返回取消订阅函数。 */

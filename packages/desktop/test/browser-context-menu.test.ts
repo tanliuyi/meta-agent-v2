@@ -27,6 +27,8 @@ function createActions(): BrowserContextMenuActions {
     reload: vi.fn(),
     print: vi.fn(),
     inspect: vi.fn(),
+    autofillContacts: [],
+    autofillContact: vi.fn(),
     canGoBack: true,
     canGoForward: false,
   };
@@ -179,6 +181,18 @@ describe("browser Chromium context menu", () => {
     expect(actions.addWordToDictionary).toHaveBeenCalledWith("teh");
     expect(actions.cut).toHaveBeenCalledOnce();
     expect(actions.pasteAndMatchStyle).toHaveBeenCalledOnce();
+  });
+
+  test("adds saved contacts as an autofill submenu", () => {
+    const actions = createActions();
+    actions.autofillContacts = [{ id: "c1", label: "张三 · zhang@example.com" }];
+    const template = buildBrowserContextMenuTemplate(createParams(), actions);
+    const autofill = template.find((item) => item.label === "使用联系信息填充表单");
+    const submenu = autofill?.submenu as Electron.MenuItemConstructorOptions[];
+
+    expect(submenu).toHaveLength(1);
+    clickItem(submenu, "张三 · zhang@example.com");
+    expect(actions.autofillContact).toHaveBeenCalledWith("c1");
   });
 
   test("accepts only HTTP(S) URLs for browser navigation and downloads", () => {

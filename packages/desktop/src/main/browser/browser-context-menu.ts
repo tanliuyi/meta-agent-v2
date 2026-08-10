@@ -22,6 +22,10 @@ export interface BrowserContextMenuActions {
   reload(): void;
   print(): void;
   inspect(x: number, y: number): void;
+  /** 联系信息填充候选（右键菜单子菜单）；空数组不显示。 */
+  autofillContacts: ReadonlyArray<{ id: string; label: string }>;
+  /** 用指定联系信息填充当前表单。 */
+  autofillContact(id: string): void;
   canGoBack: boolean;
   canGoForward: boolean;
 }
@@ -110,6 +114,16 @@ export function buildBrowserContextMenuTemplate(
   items.push({ label: "前进", enabled: actions.canGoForward, click: () => actions.goForward() });
   items.push({ label: "重新加载", click: () => actions.reload() });
   appendSeparator(items);
+  if ((actions.autofillContacts?.length ?? 0) > 0 && !params.isEditable) {
+    items.push({
+      label: "使用联系信息填充表单",
+      submenu: actions.autofillContacts.map((contact) => ({
+        label: truncateMenuText(contact.label),
+        click: () => actions.autofillContact(contact.id),
+      })),
+    });
+    appendSeparator(items);
+  }
   if (isHttpUrl(pageUrl)) items.push({ label: "网页另存为...", click: () => actions.downloadUrl(pageUrl) });
   items.push({ label: "打印...", click: () => actions.print() });
   items.push({ label: "检查", click: () => actions.inspect(params.x, params.y) });

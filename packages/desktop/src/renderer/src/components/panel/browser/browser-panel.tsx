@@ -24,6 +24,11 @@ import {
   type BrowserTab,
   browserSessionKey,
 } from "../../../../../shared/browser-contracts.ts";
+import type {
+  BrowserDataMutateResult,
+  BrowserDataSnapshot,
+  BrowserPasswordOffer,
+} from "../../../../../shared/browser-data-contracts.ts";
 import { appendComposerQuote } from "../../../runtime/composer-quotes.ts";
 import { DropdownMenu } from "../../../shared/ui/dropdown-menu.tsx";
 import { DropdownMenuContent } from "../../../shared/ui/dropdown-menu-content.tsx";
@@ -55,6 +60,12 @@ import {
   tabIdOfView,
   webviewOf,
 } from "./browser-runtime-host.ts";
+import { BrowserContactsPage } from "./internal/browser-contacts-page.tsx";
+import { BrowserDownloadsPage } from "./internal/browser-downloads-page.tsx";
+import { BrowserHistoryPage } from "./internal/browser-history-page.tsx";
+import { type BrowserInternalPageId, BrowserInternalPages } from "./internal/browser-internal-pages.tsx";
+import { BrowserPasswordsPage } from "./internal/browser-passwords-page.tsx";
+import { BrowserSiteSettingsPage } from "./internal/browser-site-settings-page.tsx";
 
 /**
  * 内置浏览器（IAB）面板。
@@ -134,6 +145,11 @@ export function BrowserPanel() {
   const [deviceHeight, setDeviceHeight] = useState(1023);
   const [deviceZoomPercent, setDeviceZoomPercent] = useState(100);
   const [browserNotice, setBrowserNotice] = useState("");
+  // 内部页（浏览历史/下载/密码管理器/联系信息/网站设置）：覆盖在 webview 视口上。
+  const [internalPage, setInternalPage] = useState<BrowserInternalPageId | null>(null);
+  const [browserData, setBrowserData] = useState<BrowserDataSnapshot | null>(null);
+  // 密码保存请求（main 定向发送；renderer payload 不含密码正文）。
+  const [passwordOffer, setPasswordOffer] = useState<BrowserPasswordOffer | null>(null);
   // 标注模式（§11）：开关、当前 tab 标注、正在编辑的目标与编辑框位置。
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotations, setAnnotations] = useState<BrowserAnnotation[]>([]);
@@ -254,6 +270,17 @@ export function BrowserPanel() {
     // 外部原因（崩溃等）导致 guest 销毁重建期间跳过可见性切换，避免活跃回退闪烁。
     const activeRecord = runtime.views.find((view) => view.viewId === activeViewId);
     if (activeRecord?.rebuilding) return;
+    if (internalPage !== null) {
+      // 内部页（浏览历史/下载/密码/联系信息/网站设置）打开时隐藏全部 webview，
+      // 否则 active webview 以 fixed 定位覆盖视口，会截获全部鼠标事件。
+      for (const view of runtime.views) {
+        const viewElement = webviewOf(runtime, view.viewId);
+        if (viewElement && !viewElement.hasAttribute("data-hidden")) {
+          viewElement.setAttribute("data-hidden", "");
+        }
+      }
+      return;
+    }
     for (const view of runtime.views) {
       const viewElement = webviewOf(runtime, view.viewId);
       if (!viewElement) continue;
@@ -263,8 +290,7 @@ export function BrowserPanel() {
         viewElement.setAttribute("data-hidden", "");
       }
     }
-  }, [runtime, activeViewId]);
-
+  }, [runtime, activeViewId, internalPage]);
   // 视口尺寸/位置变化（窗口 resize、面板宽度拖拽）：同步容器定位。
   useEffect(() => {
     const viewport = viewportEl.current;
@@ -518,6 +544,7 @@ export function BrowserPanel() {
       setAddressError("没有可用的浏览器标签页");
       return;
     }
+    setInternalPage(null);
     const url = normalizeAddress(addressDraft);
     if (!url) {
       setAddressError("请输入有效的网址");
@@ -535,6 +562,7 @@ export function BrowserPanel() {
   const navigateToUrl = useCallback(
     (url: string) => {
       if (activeTabId === null) return;
+      setInternalPage(null);
       setAddressDraft(url);
       setAddressFocused(false);
       setAddressError("");
@@ -550,15 +578,8 @@ export function BrowserPanel() {
 
   const openDownloadsFolder = useCallback(() => {
     setMoreMenuOpen(false);
-    void window.desktop.browser
-      .openDownloads()
-      .then((result) => {
-        if (!result.ok) showBrowserNotice(`打开下载目录失败：${result.error}`);
-      })
-      .catch((value: unknown) =>
-        showBrowserNotice(`打开下载目录失败：${value instanceof Error ? value.message : String(value)}`),
-      );
-  }, [showBrowserNotice]);
+    setInternalPage("downloads");
+  }, []);
 
   const printPage = useCallback(() => {
     setMoreMenuOpen(false);
@@ -606,6 +627,25 @@ export function BrowserPanel() {
       });
   }, [identity, showBrowserNotice]);
 
+  const applyBrowserData = useCallback(
+    (result: BrowserDataMutateResult): BrowserDataMutateResult => {
+      if (result.ok) setBrowserData(result.snapshot);
+      else showBrowserNotice(result.error);
+      return result;
+    },
+    [showBrowserNotice],
+  );
+
+  const clearDownloadHistory = useCallback(() => {
+    setMoreMenuOpen(false);
+    void window.desktop.browser
+      .browserDownloadsClear()
+      .then(applyBrowserData)
+      .catch((error: unknown) => {
+        showBrowserNotice(`删除下载历史失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+  }, [applyBrowserData, showBrowserNotice]);
+
   const openBrowserSettings = useCallback(() => {
     setMoreMenuOpen(false);
     void navigate({
@@ -619,14 +659,57 @@ export function BrowserPanel() {
     });
   }, [navigate, sessionProjectId, sessionThreadId]);
 
+  const openInternalPage = useCallback((page: BrowserInternalPageId) => {
+    setMoreMenuOpen(false);
+    setInternalPage(page);
+  }, []);
+
+  // 内部页数据：仅密码页请求解密后的密码，其余页面保持 passwords 为空。
+  useEffect(() => {
+    if (internalPage === null) return;
+    void window.desktop.browser
+      .browserDataGet(internalPage === "passwords")
+      .then(setBrowserData)
+      .catch(() => setBrowserData(null));
+  }, [internalPage]);
+
+  // 密码保存请求：主进程已定向投递，renderer 再按会话身份防御性过滤。
+  useEffect(() => {
+    const unsubscribe = window.desktop.browser.onPasswordOffer((offer) => {
+      if (browserSessionKey(offer.identity) !== sessionKey) return;
+      setPasswordOffer((current) => (current === null ? offer : current));
+    });
+    return unsubscribe;
+  }, [sessionKey]);
+  const resolvePasswordOffer = useCallback(
+    (save: boolean) => {
+      if (!passwordOffer) return;
+      const offer = passwordOffer;
+      setPasswordOffer(null);
+      void window.desktop.browser
+        .browserPasswordOfferResolve(identity, offer.id, save)
+        .then((result) => {
+          if (!result.ok) {
+            showBrowserNotice(result.error);
+            return;
+          }
+          if (save) showBrowserNotice("密码已保存到密码管理器。");
+        })
+        .catch((error: unknown) => {
+          showBrowserNotice(`密码保存失败：${error instanceof Error ? error.message : String(error)}`);
+        });
+    },
+    [identity, passwordOffer, showBrowserNotice],
+  );
+
+  const applyBrowserDataCall = useCallback(
+    async (call: () => Promise<BrowserDataMutateResult>): Promise<BrowserDataMutateResult> =>
+      applyBrowserData(await call()),
+    [applyBrowserData],
+  );
   const showImportNotice = useCallback(() => {
     setMoreMenuOpen(false);
     showBrowserNotice("导入 Cookie 和密码暂不支持。");
-  }, [showBrowserNotice]);
-
-  const showAutofillContactNotice = useCallback(() => {
-    setMoreMenuOpen(false);
-    showBrowserNotice("联系人信息请在 Chromium 自动填充页面中管理。");
   }, [showBrowserNotice]);
 
   // 左下角统一错误条：attach 系统错误 > 用户操作错误 > 页面加载错误。
@@ -1028,15 +1111,14 @@ export function BrowserPanel() {
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={openDeviceToolbar}>显示设备工具栏</DropdownMenuItem>
             <DropdownMenuItem onSelect={capturePageScreenshot}>截取屏幕截图</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => openInternalPage("history")}>历史记录</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={showImportNotice}>导入 Cookie 和密码...</DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>密码和自动填充</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="browser-more-dropdown-subcontent">
-                <DropdownMenuItem onSelect={() => showBrowserNotice("密码管理器暂不支持。")}>
-                  密码管理器
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={showAutofillContactNotice}>联系人</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => openInternalPage("passwords")}>密码管理器</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => openInternalPage("contacts")}>联系人</DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuItem onSelect={openDownloadsFolder}>下载</DropdownMenuItem>
@@ -1045,9 +1127,10 @@ export function BrowserPanel() {
               <DropdownMenuSubContent className="browser-more-dropdown-subcontent">
                 <DropdownMenuItem onSelect={clearBrowserData}>清除 Cookie</DropdownMenuItem>
                 <DropdownMenuItem onSelect={clearBrowserData}>清除缓存</DropdownMenuItem>
-                <DropdownMenuItem onSelect={clearBrowserData}>删除下载历史记录</DropdownMenuItem>
+                <DropdownMenuItem onSelect={clearDownloadHistory}>删除下载历史记录</DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+            <DropdownMenuItem onSelect={() => openInternalPage("site-settings")}>网站设置</DropdownMenuItem>
             <DropdownMenuItem onSelect={openBrowserSettings}>浏览器设置</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -1203,7 +1286,78 @@ export function BrowserPanel() {
           </div>
         ) : null}
         <div className="browser-viewport" ref={viewportEl} data-device-toolbar={deviceToolbarOpen || undefined}>
-          {activeViewId !== undefined && !(views.find((view) => view.viewId === activeViewId)?.crashed ?? false) ? (
+          {passwordOffer ? (
+            <div className="browser-password-offer" role="status" aria-label="是否保存密码">
+              <span className="browser-password-offer-text">
+                保存 <strong>{passwordOffer.origin}</strong> 的登录信息？
+              </span>
+              <span className="browser-password-offer-actions">
+                <button
+                  type="button"
+                  className="browser-password-offer-ignore"
+                  onClick={() => resolvePasswordOffer(false)}
+                >
+                  忽略
+                </button>
+                <button
+                  type="button"
+                  className="browser-password-offer-save"
+                  onClick={() => resolvePasswordOffer(true)}
+                >
+                  保存密码
+                </button>
+              </span>
+            </div>
+          ) : null}
+          {internalPage ? (
+            <BrowserInternalPages page={internalPage} onNavigate={setInternalPage}>
+              {internalPage === "history" ? (
+                <BrowserHistoryPage
+                  snapshot={browserData}
+                  onOpenUrl={navigateToUrl}
+                  onDeleteEntry={(url, timestamp) =>
+                    void window.desktop.browser.browserHistoryDelete(url, timestamp).then(applyBrowserData)
+                  }
+                  onClearAll={() => void window.desktop.browser.browserHistoryClear().then(applyBrowserData)}
+                />
+              ) : null}
+              {internalPage === "downloads" ? (
+                <BrowserDownloadsPage
+                  snapshot={browserData}
+                  onReveal={(path) => window.desktop.browser.browserDownloadReveal(path)}
+                  onOpenFile={(path) => void window.desktop.browser.browserDownloadOpen(path)}
+                  onOpenFolder={() => {
+                    setMoreMenuOpen(false);
+                    void window.desktop.browser.openDownloads().catch(() => undefined);
+                  }}
+                  onClearAll={clearDownloadHistory}
+                />
+              ) : null}
+              {internalPage === "passwords" ? (
+                <BrowserPasswordsPage
+                  snapshot={browserData}
+                  onSave={(input) => applyBrowserDataCall(() => window.desktop.browser.browserPasswordSave(input))}
+                  onDelete={(id) => applyBrowserDataCall(() => window.desktop.browser.browserPasswordDelete(id))}
+                />
+              ) : null}
+              {internalPage === "contacts" ? (
+                <BrowserContactsPage
+                  snapshot={browserData}
+                  onSave={(input) => applyBrowserDataCall(() => window.desktop.browser.browserContactSave(input))}
+                  onDelete={(id) => applyBrowserDataCall(() => window.desktop.browser.browserContactDelete(id))}
+                />
+              ) : null}
+              {internalPage === "site-settings" ? (
+                <BrowserSiteSettingsPage
+                  snapshot={browserData}
+                  onSave={(input) =>
+                    applyBrowserDataCall(() => window.desktop.browser.browserSitePermissionSave(input))
+                  }
+                  onDelete={(id) => applyBrowserDataCall(() => window.desktop.browser.browserSitePermissionDelete(id))}
+                />
+              ) : null}
+            </BrowserInternalPages>
+          ) : activeViewId !== undefined && !(views.find((view) => view.viewId === activeViewId)?.crashed ?? false) ? (
             <>
               {activeTab?.loading ? (
                 <div className="browser-loading-indicator" role="status" aria-label="正在加载页面" />
@@ -1361,7 +1515,8 @@ export function BrowserPanel() {
           !activeTab?.loading &&
           !activeTab?.loadError &&
           !panelError &&
-          !runtimeError ? (
+          !runtimeError &&
+          !internalPage ? (
             <div className="browser-blank-state" aria-live="polite">
               <strong>开始浏览</strong>
               <span>输入 URL 以打开页面</span>

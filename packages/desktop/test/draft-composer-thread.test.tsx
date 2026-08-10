@@ -68,6 +68,7 @@ describe("DraftComposerThread", () => {
     const markup = renderToStaticMarkup(createElement(TestSurface));
 
     expect(markup).toContain('data-draft-composer="true"');
+    expect(markup).toContain("draft-composer-drawer");
     expect(markup).toContain("max-w-(--layout-draft-composer-max-width)");
     expect(markup).not.toContain("max-w-(--layout-thread-max-width)");
   });
@@ -155,6 +156,7 @@ describe("DraftComposerThread", () => {
     expect(markup).toContain("bg-background justify-end");
     expect(markup).not.toContain("bg-background justify-center");
     expect(markup).toContain('data-draft-composer="true"');
+    expect(markup).not.toContain("draft-composer-drawer");
   });
 
   it("非 compact 模式保留标题与居中（路由新会话）", () => {

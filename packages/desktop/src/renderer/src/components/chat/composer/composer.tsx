@@ -188,6 +188,39 @@ export function Composer(props: ComposerProps) {
   const configLoading = props.mode === "draft" && props.configLoading;
   const disabled = sending || selectingProject || materializing || (props.mode === "session" && !props.commandsReady);
   const attachmentsDisabled = disabled || readiness?.state !== "ready";
+  const draftOptionsInDrawer = props.mode === "draft" && !props.fixedProject;
+  const draftSelectionControls =
+    props.mode === "draft" ? (
+      <>
+        {!props.fixedProject ? (
+          <ProjectSelect
+            className="project-select-trigger max-w-56"
+            projects={props.projects}
+            projectId={props.project?.id ?? null}
+            disabled={disabled}
+            onValueChange={(projectId) => {
+              setError(null);
+              selectCommand(null);
+              setSelectingProject(true);
+              void props.onProjectChange(projectId).then(
+                () => setSelectingProject(false),
+                (value: unknown) => {
+                  setSelectingProject(false);
+                  reportError(value);
+                },
+              );
+            }}
+          />
+        ) : null}
+        <PluginSelect
+          plugins={props.config?.extensions.plugins ?? null}
+          value={props.config?.extensions.enabledPluginIds ?? null}
+          disabled={disabled || configLoading}
+          loading={configLoading}
+          onValueChange={props.onPluginsChange}
+        />
+      </>
+    ) : null;
 
   return (
     <div className="composer-wrap" data-draft-composer={props.mode === "draft" || undefined}>
@@ -242,7 +275,7 @@ export function Composer(props: ComposerProps) {
               <div className="composer-toolbar flex min-h-8 items-center justify-between gap-2">
                 <div className="composer-toolbar-start flex min-w-0 items-center gap-2">
                   <ComposerAddAttachment disabled={attachmentsDisabled} />
-                  {props.mode === "session" ? (
+                  {props.mode === "session" && !isRunning ? (
                     <PluginSelect
                       plugins={props.plugins}
                       value={props.enabledPluginIds}
@@ -272,35 +305,7 @@ export function Composer(props: ComposerProps) {
                       </div>
                     </div>
                   ) : null}
-                  {props.mode === "draft" && !props.fixedProject ? (
-                    <ProjectSelect
-                      className="max-w-36 project-select-trigger"
-                      projects={props.projects}
-                      projectId={props.project?.id ?? null}
-                      disabled={disabled}
-                      onValueChange={(projectId) => {
-                        setError(null);
-                        selectCommand(null);
-                        setSelectingProject(true);
-                        void props.onProjectChange(projectId).then(
-                          () => setSelectingProject(false),
-                          (value: unknown) => {
-                            setSelectingProject(false);
-                            reportError(value);
-                          },
-                        );
-                      }}
-                    />
-                  ) : null}
-                  {props.mode === "draft" ? (
-                    <PluginSelect
-                      plugins={props.config?.extensions.plugins ?? null}
-                      value={props.config?.extensions.enabledPluginIds ?? null}
-                      disabled={disabled || configLoading}
-                      loading={configLoading}
-                      onValueChange={props.onPluginsChange}
-                    />
-                  ) : null}
+                  {!draftOptionsInDrawer ? draftSelectionControls : null}
                   {isRunning ? (
                     <div className="mode-control shrink-0" role="group" aria-label="运行中消息模式">
                       <button
@@ -383,6 +388,11 @@ export function Composer(props: ComposerProps) {
           </ComposerPrimitive.AttachmentDropzone>
         </ComposerPrimitive.Root>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
+      {draftOptionsInDrawer ? (
+        <div className="draft-composer-drawer" role="group" aria-label="新会话设置">
+          <div className="draft-composer-drawer-content">{draftSelectionControls}</div>
+        </div>
+      ) : null}
       {error || readinessFeedback ? (
         <div className="composer-feedback-stack">
           {error ? <ComposerFeedback tone="error" message={error} /> : null}

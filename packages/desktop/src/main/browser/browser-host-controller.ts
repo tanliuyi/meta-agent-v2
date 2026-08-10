@@ -42,6 +42,7 @@ export interface WebContentsHostControllerOptions {
   onAgentNavigation?: AgentNavigationGuard;
   onPopup?: (url: string) => void;
   onContextMenu?: (event: Electron.Event, params: Electron.ContextMenuParams) => void;
+  onRuntimeBinding?: (name: string, payload: string) => void;
 }
 
 /** 宿主无关的浏览器控制接口（一个实例对应一个 tab 的 guest webContents）。 */
@@ -58,6 +59,8 @@ export interface BrowserHostController {
   clearData(): Promise<void>;
   updateSettings(options: { cdpTimeoutMs: number; maxSnapshotNodes: number }): void;
   cancelPendingOperations(): void;
+  /** 注册仅供宿主消费的 Runtime binding；事件不会进入 Agent 可读的 CDP 缓冲。 */
+  addRuntimeBinding(name: string): Promise<void>;
   /** 读取页面 console 日志（懒启用 Runtime 捕获；拉取即清空）。 */
   readConsoleLogs(options?: {
     filter?: string;
@@ -223,6 +226,8 @@ export class WebContentsHostController implements BrowserHostController {
   private readonly onAgentNavigation?: AgentNavigationGuard;
   private readonly onPopup?: (url: string) => void;
   private readonly onContextMenu?: (event: Electron.Event, params: Electron.ContextMenuParams) => void;
+  private readonly onRuntimeBinding?: (name: string, payload: string) => void;
+  private readonly runtimeBindings = new Set<string>();
   /** 命令串行队列：同一 tab 内 CDP 命令逐个执行。 */
   private cdpQueue: Promise<void> = Promise.resolve();
   private debuggerAttached = false;
@@ -253,6 +258,7 @@ export class WebContentsHostController implements BrowserHostController {
     this.onAgentNavigation = options.onAgentNavigation;
     this.onPopup = options.onPopup;
     this.onContextMenu = options.onContextMenu;
+    this.onRuntimeBinding = options.onRuntimeBinding;
     this.bindEvents();
     this.bindWindowOpenHandler();
     // 记录会话内下载（对齐 Codex downloadMedia；dispose 时清理）。
@@ -418,6 +424,14 @@ export class WebContentsHostController implements BrowserHostController {
     }
     const { width, height } = pngDimensions(result.data);
     return { dataUrl: `data:image/png;base64,${result.data}`, width, height };
+  }
+
+  /** 注册主进程专用 Runtime binding；对应事件不会暴露给 browser_cdp。 */
+  async addRuntimeBinding(name: string): Promise<void> {
+    if (!/^[$A-Z_a-z][$\w]*$/.test(name)) throw new Error(`无效的 Runtime binding 名称: ${name}`);
+    if (this.runtimeBindings.has(name)) return;
+    await this.sendCommand("Runtime.addBinding", { name });
+    this.runtimeBindings.add(name);
   }
 
   /** 读取页面 console 日志：懒启用 Runtime 捕获（对齐 Codex tab_dev_logs），拉取即清空。 */
@@ -1081,16 +1095,26 @@ export class WebContentsHostController implements BrowserHostController {
         this.debuggerAttached = false;
         this.domDomainEnabled = false;
         this.consoleCaptureEnabled = false;
+        this.runtimeBindings.clear();
         this.pendingDialog = null;
       });
       if (!this.cdpMessageListenerRegistered) {
         this.cdpMessageListenerRegistered = true;
         this.webContents.debugger.on("message", (_event, method, params) => {
-          this.recordConsoleEvent(method, params as Record<string, unknown>);
-          this.recordDialogEvent(method, params as Record<string, unknown>);
+          const eventParams = params as Record<string, unknown>;
+          if (method === "Runtime.bindingCalled") {
+            const name = typeof eventParams.name === "string" ? eventParams.name : "";
+            const payload = typeof eventParams.payload === "string" ? eventParams.payload : "";
+            if (this.runtimeBindings.has(name)) {
+              this.onRuntimeBinding?.(name, payload);
+              return;
+            }
+          }
+          this.recordConsoleEvent(method, eventParams);
+          this.recordDialogEvent(method, eventParams);
           // 除高频渲染事件外缓冲 CDP 事件（对齐 Codex readEvents）。
           if (!IGNORED_CDP_EVENTS.has(method)) {
-            this.cdpEventBuffer.push({ method, params: params as Record<string, unknown> });
+            this.cdpEventBuffer.push({ method, params: eventParams });
           }
         });
       }
@@ -1114,6 +1138,7 @@ export class WebContentsHostController implements BrowserHostController {
     }
     this.debuggerAttached = false;
     this.domDomainEnabled = false;
+    this.runtimeBindings.clear();
   }
 
   private async sendCommand(method: string, params?: unknown): Promise<unknown> {

@@ -7,6 +7,7 @@ import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-insta
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
 import { AuthConfigService } from "./auth/auth-config-service.ts";
+import { BrowserDataService } from "./browser/browser-data-service.ts";
 import { type BrowserHostServer, createBrowserHostServer } from "./browser/browser-host-server.ts";
 import { BrowserManager } from "./browser/browser-manager.ts";
 import { installBrowserWebviewSecurity } from "./browser/browser-webview-policy.ts";
@@ -22,6 +23,7 @@ import {
   broadcastTerminalEvent,
   broadcastThreadCatalogUpdate,
   registerIpc,
+  sendBrowserPasswordOffer,
 } from "./ipc.ts";
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
@@ -426,10 +428,20 @@ app.whenReady().then(async () => {
     modelRuntime: authModelRuntime,
     isDesktopProviderAvailable,
   });
+  const browserDataService = new BrowserDataService(userDataDir, {
+    crypto: {
+      isAvailable: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (value) => safeStorage.encryptString(value).toString("base64"),
+      decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
+    },
+    log: (text) => sidecarLog?.write("browser", text),
+  });
   browserManagerInstance = new BrowserManager(userDataDir, {
     onStateChanged: broadcastBrowserEvent,
     onCreateTabRequest: broadcastBrowserCreateTabRequest,
     onCloseTabRequest: broadcastBrowserCloseTabRequest,
+    onPasswordOffer: sendBrowserPasswordOffer,
+    data: browserDataService,
     log: (text) => sidecarLog?.write("browser", text),
   });
   browserManager = browserManagerInstance;

@@ -6,6 +6,7 @@ import type {
   BrowserCreateTabRequest,
   BrowserStateEvent,
 } from "../shared/browser-contracts.ts";
+import type { BrowserPasswordOffer } from "../shared/browser-data-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
   FileChangeSet,
@@ -451,6 +452,39 @@ const desktopApi: DesktopApi = {
     /** 按选择器重新解析标注 bounds；元素消失返回 null。 */
     annotationResolve: (identity, tabId, id) =>
       ipcRenderer.invoke(CHANNELS.browserAnnotationResolve, identity, tabId, id),
+    /** 浏览器用户数据快照（历史/下载/联系人/密码/网站设置；仅用户 UI）。 */
+    browserDataGet: (includePasswords) => ipcRenderer.invoke(CHANNELS.browserDataGet, includePasswords),
+    /** 删除单条历史记录（按 url + timestamp 精确匹配）。 */
+    browserHistoryDelete: (url, timestamp) => ipcRenderer.invoke(CHANNELS.browserHistoryDelete, url, timestamp),
+    /** 清空全部浏览历史。 */
+    browserHistoryClear: () => ipcRenderer.invoke(CHANNELS.browserHistoryClear),
+    /** 清空全部下载历史（不删除已下载文件）。 */
+    browserDownloadsClear: () => ipcRenderer.invoke(CHANNELS.browserDownloadsClear),
+    /** 在系统文件管理器中显示已下载文件。 */
+    browserDownloadReveal: (path) => ipcRenderer.invoke(CHANNELS.browserDownloadReveal, path),
+    /** 用系统默认程序打开已下载文件。 */
+    browserDownloadOpen: (path) => ipcRenderer.invoke(CHANNELS.browserDownloadOpen, path),
+    /** 新增/更新联系信息（contactId 为 null 时新建）。 */
+    browserContactSave: (input) => ipcRenderer.invoke(CHANNELS.browserContactSave, input),
+    /** 删除联系信息。 */
+    browserContactDelete: (id) => ipcRenderer.invoke(CHANNELS.browserContactDelete, id),
+    /** 新增/更新保存的密码（passwordId 为 null 时新建）。 */
+    browserPasswordSave: (input) => ipcRenderer.invoke(CHANNELS.browserPasswordSave, input),
+    /** 删除保存的密码。 */
+    browserPasswordDelete: (id) => ipcRenderer.invoke(CHANNELS.browserPasswordDelete, id),
+    /** 新增/更新网站设置条目（同 site+kind 覆盖）。 */
+    browserSitePermissionSave: (input) => ipcRenderer.invoke(CHANNELS.browserSitePermissionSave, input),
+    /** 删除网站设置条目。 */
+    browserSitePermissionDelete: (id) => ipcRenderer.invoke(CHANNELS.browserSitePermissionDelete, id),
+    /** 主进程请求保存密码（登录表单提交后）；返回取消订阅函数。 */
+    onPasswordOffer(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, offer: BrowserPasswordOffer) => listener(offer);
+      ipcRenderer.on(CHANNELS.browserPasswordOffer, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.browserPasswordOffer, handler);
+    },
+    /** 用户对密码保存请求的响应（保存 / 忽略）。 */
+    browserPasswordOfferResolve: (identity, offerId, save) =>
+      ipcRenderer.invoke(CHANNELS.browserPasswordOfferResolve, identity, offerId, save),
     /** 订阅浏览器会话状态（携带 sessionKey，按身份路由）；返回取消订阅函数。 */
     onStateChanged(listener) {
       const handler = (_event: Electron.IpcRendererEvent, stateEvent: BrowserStateEvent) => listener(stateEvent);

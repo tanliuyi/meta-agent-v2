@@ -115,6 +115,31 @@ interface DesktopApiBrowser {
 }
 ```
 
+P2 用户数据（内部页：浏览历史/下载/密码管理器/联系信息/网站设置）：
+
+```ts
+interface DesktopApiBrowserData {
+  dataGet(includePasswords?: boolean): Promise<BrowserDataSnapshot>; // 默认不解密密码，仅密码页传 true
+  historyDelete(url: string, timestamp: number): Promise<BrowserDataMutateResult>;
+  historyClear(): Promise<BrowserDataMutateResult>;
+  downloadsClear(): Promise<BrowserDataMutateResult>;
+  downloadReveal(path: string): void;                    // 文件管理器中显示
+  downloadOpen(path: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  contactSave(input: { contactId: string | null; contact: BrowserContactInput }): Promise<BrowserDataMutateResult>;
+  contactDelete(id: string): Promise<BrowserDataMutateResult>;
+  passwordSave(input: { passwordId: string | null; password: BrowserPasswordInput }): Promise<BrowserDataMutateResult>;
+  passwordDelete(id: string): Promise<BrowserDataMutateResult>;
+  sitePermissionSave(input: BrowserSitePermissionInput): Promise<BrowserDataMutateResult>;
+  sitePermissionDelete(id: string): Promise<BrowserDataMutateResult>;
+  passwordOfferResolve(
+    identity: BrowserSessionIdentity,
+    offerId: string,
+    save: boolean,
+  ): Promise<BrowserPasswordOfferResolveResult>;
+  onPasswordOffer(cb: (offer: BrowserPasswordOffer) => void): () => void; // 定向发送到所属 renderer，不含密码正文
+}
+```
+
 ## 6. Main：BrowserManager
 
 文件：`src/main/browser/browser-manager.ts`（服务类，由 `src/main/index.ts` 创建并注入 ipc.ts 与 pi-browser extension）。
@@ -265,6 +290,8 @@ browserStateChanged: "desktop:browser:state-changed",
 
 P1 增加（spec §5 原草案形状）：`browserTabsList`、`browserTabOpen/Close`、`browserSnapshot`、`browserAction`、`browserOpenPanel`（工具首次使用拉起面板）。
 
+P2 用户数据（`src/shared/browser-data-contracts.ts`，内部页）：`browserDataGet`、`browserHistoryDelete`、`browserHistoryClear`、`browserDownloadsClear`、`browserDownloadReveal`、`browserDownloadOpen`、`browserContactSave`、`browserContactDelete`、`browserPasswordSave`、`browserPasswordDelete`、`browserSitePermissionSave`、`browserSitePermissionDelete`、`browserPasswordOffer`（main→renderer）、`browserPasswordOfferResolve`。
+
 ### 9.2 契约类型（`src/shared/browser-contracts.ts` 新增）
 
 `BrowserTab`、`BrowserSnapshot`、`BrowserSnapshotNode`、`BrowserAction`（判别联合：click/type/scroll/back/forward/reload）、`BrowserActionResult`、`BrowserNavigateResult`、`BrowserSettings`、`BrowserStateEvent`（见第 6.4 节）。
@@ -296,8 +323,12 @@ interface BrowserSettings {
 - **分区隔离**：`persist:browser` 独立 partition；浏览器内登录态与主应用 session 无关；清除数据只影响该分区。
 - **权限请求**：partition session 同时安装 `setPermissionCheckHandler` 与 `setPermissionRequestHandler`。地理位置、通知、剪贴板等非媒体权限默认拒绝；摄像头/麦克风按 `mediaDefault` 和 `mediaPermissions` 的 host 覆盖决定，默认拒绝。
 - **弹窗**：`setWindowOpenHandler` → 全部转为新 tab（webview 内打开）；拒绝 `window.open` 直接创建新窗口。
-- **下载**：`will-download` → 存 `downloadDirectory` 或系统下载目录；不在 webview 内触发另存为 UI（P2 可加下载通知）。
+- **下载**：`will-download` → 存 `downloadDirectory` 或系统下载目录；不在 webview 内触发另存为 UI。下载完成/中断/取消记录到持久化下载历史（`browser-data.json`，上限 500 条），内部页“下载”展示并提供在文件管理器中显示/打开、清空历史。
 - **导航策略**：允许 `http`/`https`；`file://` 默认禁止（本地 Preview 场景 P2 显式白名单再开放）；`will-navigate` 记录并广播（用于 UI 展示与审计）。
+- **密码**：登录表单提交由主进程注入的表单脚本检测（`browser-form-scripts.ts`），通过宿主专用 CDP Runtime binding 上报；binding 事件不进入 Agent 可读的 console/CDP 缓冲。主进程仅向所属 renderer 定向发送不含密码正文的 offer，用户确认时同时校验会话 identity 和 IPC sender ownership。密码以系统 safeStorage（Keychain/DPAPI）加密存 `browser-passwords.json`，明文不落盘；页面加载时按 origin 精确匹配自动填充已保存凭据（仅填空字段），读取凭据后及脚本执行上下文内都会再次校验 origin，避免导航竞态造成跨站填充。持久化密码和未决 offer 正文不通过 Agent 工具暴露；自动填入共享页面后的字段值属于当前页面状态，和用户输入的其他表单内容一样可被页面及页面检查工具观察。除密码管理器外，其他内部页的数据快照不解密或返回密码。
+- **浏览历史**：导航事件持久化到 `browser-data.json`（同 URL 30 分钟内合并，上限 5000 条），内部页“浏览历史”支持逐条删除/清空；地址栏下拉仍用会话内历史。
+- **联系信息**：用户自管的联系人档案存 `browser-data.json`；右键菜单“使用联系信息填充表单”按 autocomplete/name 属性映射填写表单字段。
+- **网站设置**：内部页“网站设置”维护按站点的权限覆盖（摄像头/麦克风/通知/地理位置/剪贴板/全屏，allow/deny）；权限 handler 优先查询覆盖（子域匹配），无覆盖时回退媒体策略或默认拒绝。
 - **Agent 操作边界**：工具描述与模型指令要求——敏感动作（提交信息、购买、改权限、删除数据）先向用户说明并等待确认；页面内容视为不可信上下文（可注入指令攻击模型），快照/截图内容不得覆盖系统提示中的工具约束。
 - **不做**：不自动上传文件（同 Codex）；不实现 Chrome 扩展后端；Developer mode full CDP（Codex 的 `browser_use_full_cdp_access`）默认不做，P2 评估且需显式开关。
 
