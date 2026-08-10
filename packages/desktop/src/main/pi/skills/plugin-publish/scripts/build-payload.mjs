@@ -11,6 +11,9 @@
 //
 // Output: a ZIP whose names are validated payload-relative POSIX paths
 // (no absolute paths, backslashes, ".", "..", empty segments, control chars).
+// The marketplace repacks the ZIP under a payload/ prefix, so a name that
+// already starts with "payload/" is rejected: declare artifacts[].entry
+// relative to the ZIP root (e.g. index.js), never payload/index.js.
 // Exit code 1 with a listing of the offending names when validation fails.
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -50,12 +53,17 @@ function main() {
       (n) =>
         !n ||
         n.startsWith("/") ||
+        n.startsWith("payload/") ||
         n.includes("\\") ||
         /(^|\/)\.\.?(\/|$)/.test(n) ||
         /[\x00-\x1f]/.test(n),
     );
   if (bad.length) {
     console.error("INVALID PATHS:", bad.join(", "));
+    console.error(
+      "The marketplace repacks the ZIP under a payload/ prefix; the payload itself must not contain payload/ paths. " +
+        "Declare artifacts[].entry relative to the ZIP root (e.g. index.js), never payload/index.js.",
+    );
     process.exit(1);
   }
   const buf = zipToBuffer(out);

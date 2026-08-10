@@ -5,12 +5,17 @@
 // a 0600 file. Passwords never reach argv, shell history, or the agent.
 //
 // Usage:
-//   node login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--timeout <seconds>]
+//   node login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--open] [--timeout <seconds>]
 //
 // Modes: login (default) or register (--register). When publisherId is given,
 // membership is checked via /auth/me and the token file is removed on failure.
 // The server binds 127.0.0.1 on a random port, serves one page, and exits
 // after a successful login/registration or the timeout (default 300 s).
+//
+// Browser opening: by default the script does NOT open a browser; it prints
+// a machine-readable `BROWSER_URL <url>` line so the agent can open the url in
+// the built-in browser (browser_open). Pass --open to open the system default
+// browser instead (manual/headless-terminal runs).
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { writeFileSync, chmodSync, rmSync } from "node:fs";
@@ -18,17 +23,19 @@ import os from "node:os";
 
 const args = process.argv.slice(2);
 let register = false;
+let openSystem = false;
 let timeoutSec = 300;
 const positional = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--register") register = true;
+  else if (args[i] === "--open") openSystem = true;
   else if (args[i] === "--timeout" && args[i + 1]) timeoutSec = Number(args[++i]) || 300;
   else positional.push(args[i]);
 }
 const [apiRoot, tokenOut, publisherId] = positional;
 if (!apiRoot || !tokenOut) {
   console.error(
-    "usage: node login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--timeout <seconds>]",
+    "usage: node login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--open] [--timeout <seconds>]",
   );
   process.exitCode = 2;
 } else {
@@ -63,8 +70,9 @@ function run() {
   server.listen(0, "127.0.0.1", () => {
     const { port } = server.address();
     const url = `http://127.0.0.1:${port}/`;
-    console.log(`Open ${url} in your browser (closing this process in ${timeoutSec}s without a login)`);
-    openBrowser(url);
+    console.log(`BROWSER_URL ${url}`);
+    if (openSystem) openBrowser(url);
+    else console.log(`Not opening a browser automatically; open the url above (timeout ${timeoutSec}s)`);
     timeoutTimer = setTimeout(() => {
       finish(1, `TIMEOUT: no successful login within ${timeoutSec} seconds`);
     }, timeoutSec * 1000);

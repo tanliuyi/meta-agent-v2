@@ -42,9 +42,9 @@ Never place passwords, session tokens, admin tokens, signing private keys, or SS
 Reusable Node scripts live in `scripts/` next to this file (Node 18+, `fetch`, zero npm dependencies). They keep credential handling uniform: secrets are read from files, never from argv, and the session token is written with mode 0600. Prefer these scripts over regenerating ad-hoc equivalents; use them as building blocks when the workflow needs extra steps (e.g. admin-token operations).
 
 - `scripts/discover.mjs <publicBaseUrl>` — fetch `/.well-known/meta-agent-marketplace.json` and print `{ apiRoot, marketplaceId, protocolVersion, fingerprint, signingKey }`. Compare the fingerprint against previously trusted values; require explicit trust on first sight and on change.
-- `scripts/build-payload.mjs <pluginDir> <out.zip> [entry...]` — assemble the payload ZIP with validated POSIX-relative paths. Default entries are `index.ts src`; excludes tests, `node_modules`, `dist`, `.git`, source maps, env/log/lock files, and `market-manifest.json`. Runs from any directory with Node only (no jszip needed).
+- `scripts/build-payload.mjs <pluginDir> <out.zip> [entry...]` — assemble the payload ZIP with validated POSIX-relative paths. Default entries are `index.ts src`; excludes tests, `node_modules`, `dist`, `.git`, source maps, env/log/lock files, and `market-manifest.json`. Names are stored relative to the ZIP root; the marketplace repacks the ZIP under a `payload/` prefix, so the ZIP itself must not contain `payload/` paths (the script rejects them). Runs from any directory with Node only (no jszip needed).
 - `scripts/login.mjs <apiRoot> <username> <passwordFile> <tokenOut> <publisherId>` — authenticate, confirm publisher membership via `/auth/me`, write the session token to a 0600 file. The password is read from a file; delete both files after publishing.
-- `scripts/login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--timeout <seconds>]` — preferred interactive login: starts a loopback HTTP server, opens the browser, and the user enters credentials on a page (login or register mode). The page submits to the local server, which forwards to the marketplace auth API, checks publisher membership, and writes the token to a 0600 file. Passwords never reach argv, shell history, or the agent. The server exits after a successful auth or the timeout (default 300 s).
+- `scripts/login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--open] [--timeout <seconds>]` — preferred interactive login: starts a loopback HTTP server and serves the login/register page. By default it does NOT open a browser; it prints a machine-readable `BROWSER_URL <url>` line that the agent should open in the built-in browser (`browser_open`). Pass `--open` to open the system default browser instead (manual runs). The page submits to the local server, which forwards to the marketplace auth API, checks publisher membership, and writes the token to a 0600 file. Passwords never reach argv, shell history, or the agent. The server exits after a successful auth or the timeout (default 300 s).
 - `scripts/publish.mjs <apiRoot> <tokenFile> <spec.json> <payload.zip>... [--yes]` — declare plugin metadata, create the draft version, upload every declared artifact, then publish. The spec mirrors the API request bodies; see `scripts/spec.example.json`. Pauses 3 seconds before publishing unless `--yes` is passed, so an unintended run can be Ctrl-C'd.
 - `scripts/verify.mjs <apiRoot> <pluginId> <version> [--out <dir>] [--key <publicKeyFile>]` — check the public catalog reports `available`, follow the download endpoint's `url` field to fetch real artifact bytes, compare SHA-256 and size, unpack the `.meta-plugin`, cross-check `market-manifest.json` against the payload file set, and optionally verify the Ed25519 signature.
 
@@ -53,7 +53,7 @@ Typical sequence:
 ```bash
 node scripts/discover.mjs https://marketplace.example.com
 node scripts/build-payload.mjs ./plugin-dir ./payload.zip
-node scripts/login-web.mjs "$API_ROOT" ./token.tmp admin
+node scripts/login-web.mjs "$API_ROOT" ./token.tmp admin   # prints BROWSER_URL <url>; open it in the built-in browser
 node scripts/publish.mjs "$API_ROOT" ./token.tmp ./spec.json ./payload.zip --yes
 node scripts/verify.mjs "$API_ROOT" pi.example 1.0.0 --out ./verify-out
 rm -f ./token.tmp ./payload.zip
@@ -64,6 +64,8 @@ Use `login-web.mjs` whenever a browser is available (credentials stay out of the
 ## Artifact Rules
 
 - The entry must be a regular `.ts`, `.js`, `.mjs`, or `.cjs` file with a default Pi Extension factory export.
+- Declare `artifacts[].entry` relative to the payload ZIP root (e.g. `index.js`). The server repacks the ZIP under a `payload/` prefix and the signed manifest entry becomes `payload/<zip-relative-path>`; never write `payload/index.js` as the entry and never place a `payload/` directory in the ZIP (build-payload rejects it).
+- `configuration` follows the Desktop configuration-schema contract: fields may declare `widget: "model-selector"` and `modelFormat: "model-id" | "provider-model"` (modelFormat is valid only with that widget). The marketplace validates metadata the same way Desktop does; see `desktop-plugin-development/references/configuration-schema.md` for the full field rules.
 - Keep Pi host packages external: `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, and `typebox`.
 - Include all other runtime dependencies in the payload. Marketplace installation does not run `npm install`, lifecycle scripts, or on-device compilation.
 - Bundle dependencies when an expanded dependency tree would exceed marketplace file-count or path limits. Test the bundled entry itself, not only the source entry.

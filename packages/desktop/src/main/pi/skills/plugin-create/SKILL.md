@@ -56,7 +56,7 @@ Do not retain placeholder tools or comments in the finished plugin.
 Prefer surfaces supported by Desktop Host Profile v1:
 
 - Standard extension events, tools, commands, custom messages, session reads, and abort. Use compaction only when the installed Desktop characterization covers the exact flow; Host Profile v1 treats it as conditionally supported.
-- `pi.getConfig()` returns the immutable, host-validated configuration scoped to the current extension. Marketplace configuration schemas are artifact metadata; Desktop renders their fields, stores non-secret values in an owner-only settings file, encrypts secret values with Electron `safeStorage`, and never returns secret plaintext to the renderer.
+- `pi.getConfig()` returns the immutable, host-validated configuration scoped to the current extension. Marketplace configuration schemas are artifact metadata; Desktop renders their fields, stores non-secret values in an owner-only settings file, encrypts secret values with Electron `safeStorage`, and never returns secret plaintext to the renderer. Configuration fields may declare `widget: "model-selector"` with `modelFormat: "model-id" | "provider-model"` so Desktop renders a model picker instead of a text input; the marketplace validates these exactly like Developer Mode manifests (see `desktop-plugin-development/references/configuration-schema.md`).
 - `ctx.ui.select`, `confirm`, `input`, `editor`, `notify`, `setStatus`, `setTitle`, `setEditorText`, and `pasteToEditor`.
 - `ctx.ui.setWidget` only with `string[]` content.
 - `ctx.ui.setWorkingMessage` and `setWorkingVisible`; the working message is shown above the composer while the session is running.
