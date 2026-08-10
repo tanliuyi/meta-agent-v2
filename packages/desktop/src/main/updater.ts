@@ -2,14 +2,16 @@ import type { AppUpdater, ProgressInfo, UpdateCheckResult, UpdateInfo } from "el
 import updaterPackage from "electron-updater";
 import type { UpdaterState } from "../shared/updater-contracts.ts";
 
-const { autoUpdater } = updaterPackage;
-
 declare const __DESKTOP_UPDATE_URLS__: string;
 
 const GITHUB_OWNER = "tanliuyi";
 const GITHUB_REPO = "meta-agent-harness";
 const INITIAL_CHECK_DELAY_MS = 10_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000;
+
+// 注意：不要在此处顶层访问 updaterPackage.autoUpdater。electron-updater 的 autoUpdater
+// 在非打包进程（electron-vite dev）中加载即崩溃（ElectronAppAdapter 访问 app.getVersion
+// 时 app 未就绪），只能在确认 isPackaged 后再惰性获取。
 
 type FeedConfiguration = Parameters<AppUpdater["setFeedURL"]>[0];
 
@@ -36,7 +38,7 @@ interface AutoUpdateServiceOptions {
 /** Owns updater state and preserves electron-updater verification across ordered download sources. */
 export class AutoUpdateService {
   private state: UpdaterState;
-  private readonly updater: AppUpdater;
+  private updater: AppUpdater | undefined;
   private readonly app: UpdateApp;
   private readonly sources: readonly UpdateSource[];
   private readonly listeners = new Set<(state: UpdaterState) => void>();
@@ -47,13 +49,16 @@ export class AutoUpdateService {
 
   constructor(options: AutoUpdateServiceOptions) {
     this.app = options.app;
-    this.updater = options.updater ?? autoUpdater;
     this.sources = options.sources ?? getDefaultUpdateSources();
     this.log = options.log ?? console;
     this.state = {
       status: options.app.isPackaged ? "idle" : "unsupported",
       currentVersion: options.app.getVersion(),
     };
+
+    // 非打包进程（dev）不加载 electron-updater：其 autoUpdater getter 在加载时即崩溃。
+    if (!options.app.isPackaged && options.updater === undefined) return;
+    this.updater = options.updater ?? updaterPackage.autoUpdater;
 
     this.updater.autoDownload = false;
     this.updater.autoInstallOnAppQuit = true;
@@ -115,7 +120,7 @@ export class AutoUpdateService {
 
   install(): void {
     if (this.state.status !== "ready") throw new Error("The update has not finished downloading");
-    setImmediate(() => this.updater.quitAndInstall());
+    setImmediate(() => this.updater!.quitAndInstall());
   }
 
   private async checkAcrossSources(): Promise<void> {
@@ -135,7 +140,7 @@ export class AutoUpdateService {
       const source = this.sources[index];
       try {
         this.configureSource(index);
-        const result = await this.updater.checkForUpdates();
+        const result = await this.updater!.checkForUpdates();
         if (!result) throw new Error("Update provider returned no result");
         if (!result.isUpdateAvailable) {
           this.publish({
@@ -164,7 +169,7 @@ export class AutoUpdateService {
       try {
         if (index !== this.activeSourceIndex) {
           this.configureSource(index);
-          const result = await this.updater.checkForUpdates();
+          const result = await this.updater!.checkForUpdates();
           if (!result?.isUpdateAvailable) throw new Error(`未提供版本 ${expectedVersion}`);
           if (result.updateInfo.version !== expectedVersion) {
             throw new Error(`版本不一致，期望 ${expectedVersion}，实际 ${result.updateInfo.version}`);
@@ -178,7 +183,7 @@ export class AutoUpdateService {
           percent: 0,
           error: undefined,
         });
-        await this.updater.downloadUpdate();
+        await this.updater!.downloadUpdate();
         this.publish({
           status: "ready",
           source: source.label,
@@ -196,7 +201,7 @@ export class AutoUpdateService {
 
   private configureSource(index: number): void {
     const source = this.sources[index];
-    this.updater.setFeedURL(source.feed);
+    this.updater!.setFeedURL(source.feed);
     this.log.info(`Auto-update source: ${source.label}`);
   }
 
