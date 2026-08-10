@@ -10,6 +10,13 @@ export interface SubagentRunAncestor {
   childIndex: number;
 }
 
+export interface SubagentChildExtension {
+  /** Trusted, Desktop-approved extension entry path. */
+  path: string;
+  /** Registered tool names that the child allowlist must expose. */
+  tools: string[];
+}
+
 export interface SubagentRunRequest {
   projectId: string;
   parentThreadId: string;
@@ -35,6 +42,7 @@ export interface SubagentRunRequest {
   inheritProjectContext: boolean;
   inheritSkills: boolean;
   extensionProfile: SubagentExtensionProfile[];
+  childExtensions?: SubagentChildExtension[];
   timeoutMs?: number;
   turnBudget?: { maxTurns: number; graceTurns: number };
   toolBudget?: { hard: number; soft?: number; block: "*" | string[] };

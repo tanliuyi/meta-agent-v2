@@ -7,6 +7,7 @@ import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import type { ChangeEvent } from "react";
 import type { PluginConfigurationField } from "../../../../shared/plugin-configuration-contracts.ts";
 import { PluginConfigurationFieldLabelRow } from "./plugin-configuration-field-label-row.tsx";
+import { PluginConfigurationModelSelector } from "./plugin-configuration-model-selector.tsx";
 import type { PluginConfigurationController } from "./use-plugin-configuration.ts";
 
 export function PluginConfigurationFieldControl({
@@ -18,6 +19,9 @@ export function PluginConfigurationFieldControl({
 }) {
   const id = `plugin-configuration-${field.key}`;
   const error = controller.fieldErrors.get(field.key);
+  if (field.widget === "model-selector") {
+    return <PluginConfigurationModelSelector field={field} controller={controller} />;
+  }
   const descriptionId = field.description ? `${id}-description` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const describedBy = [descriptionId, errorId].filter(Boolean).join(" ") || undefined;

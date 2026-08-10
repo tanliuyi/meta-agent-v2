@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "pi-web-access": "0.18.0"
+    "pi-web-access": "file:vendor/pi-web-access"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

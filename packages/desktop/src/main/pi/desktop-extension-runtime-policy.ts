@@ -8,6 +8,12 @@ import {
   type ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
 
+const NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES = new Set(["DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT"]);
+
+export function isBlockingExtensionDiagnostic(diagnostic: Pick<DesktopExtensionDiagnostic, "code">): boolean {
+  return !NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES.has(diagnostic.code);
+}
+
 export async function validateResolvedExtensionSet(
   projectId: string,
   set: ResolvedExtensionSet,

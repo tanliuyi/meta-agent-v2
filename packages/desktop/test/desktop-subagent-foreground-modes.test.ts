@@ -11,7 +11,7 @@ import type {
   SubagentRuntime,
   SubagentRuntimeRunRequest,
 } from "../src/main/pi/extensions/pi-subagents/src/runtime/subagent-runtime.ts";
-import { SUBAGENT_TIMEOUT_CODE } from "../src/shared/subagent-contracts.ts";
+import { SUBAGENT_TIMEOUT_CODE, type SubagentChildExtension } from "../src/shared/subagent-contracts.ts";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -79,6 +79,17 @@ class RecordingRuntime implements SubagentRuntime {
     return this.run(request);
   }
   async dispose() {}
+}
+
+class ChildExtensionRecordingRuntime extends RecordingRuntime {
+  getChildExtensions(): readonly SubagentChildExtension[] {
+    return [
+      {
+        path: "/approved/billion-context/index.ts",
+        tools: ["compress", "decompress", "search_context", "acp_status"],
+      },
+    ];
+  }
 }
 
 class TranscriptRuntime implements SubagentRuntime {
@@ -203,6 +214,28 @@ const agents: AgentConfig[] = ["first", "second"].map((name) => ({
 }));
 
 describe("Desktop foreground programmatic modes", () => {
+  it("adds approved child extension tools to an explicit child allowlist", async () => {
+    const childAgent: AgentConfig = {
+      ...agents[0]!,
+      tools: ["read"],
+    };
+    const runtime = new ChildExtensionRecordingRuntime();
+    const result = await runSync(process.cwd(), [childAgent], childAgent.name, "compress your own context", {
+      subagentRuntime: runtime,
+      runId: "child-context-tools",
+      acceptance: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(runtime.requests[0]?.tools).toEqual(["read", "compress", "decompress", "search_context", "acp_status"]);
+    expect(runtime.requests[0]?.childExtensions).toEqual([
+      {
+        path: "/approved/billion-context/index.ts",
+        tools: ["compress", "decompress", "search_context", "acp_status"],
+      },
+    ]);
+  });
+
   it("supports concurrent children under one foreground parallel run identity", async () => {
     const runtime = new RecordingRuntime(2);
     const results = await Promise.all(

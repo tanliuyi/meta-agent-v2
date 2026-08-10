@@ -3,11 +3,12 @@ import {
   type Attachment,
   type ExternalStoreAdapter,
   type ExternalThreadQueueAdapter,
+  type QueueItemState,
   type ThreadMessage,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import type { SessionControlState } from "../../../shared/contracts.ts";
+import type { PiQueueItem, SessionControlState } from "../../../shared/contracts.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
 import { useToast } from "../shared/ui/use-toast.ts";
 import { imageAttachmentAdapter, restoreComposerAttachments } from "./image-attachments.ts";
@@ -77,11 +78,13 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
 
   const queue = useMemo<ExternalThreadQueueAdapter>(
     () => ({
-      items: snapshot.queue.map(({ id, prompt }) => ({ id, prompt })),
+      items: snapshot.queue.filter(({ mode }) => mode !== "steer").map(toQueueItemState),
+      steerItems: snapshot.queue.filter(({ mode }) => mode === "steer").map(toQueueItemState),
       enqueue: coordinator.enqueue,
-      steer: coordinator.unsupportedQueueOperation,
+      steer: coordinator.steer,
+      move: coordinator.unsupportedQueueOperation,
+      edit: coordinator.unsupportedQueueOperation,
       remove: coordinator.unsupportedQueueOperation,
-      clear: coordinator.observeFrameworkClear,
     }),
     [coordinator, snapshot.queue],
   );
@@ -189,6 +192,10 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
 
   const clearQueue = useCallback(() => coordinator.clearQueue(snapshotRef.current.queue), [coordinator]);
   return useMemo(() => ({ runtime, clearQueue }), [clearQueue, runtime]);
+}
+
+function toQueueItemState({ id, prompt }: PiQueueItem): QueueItemState {
+  return { id, prompt, parts: [{ type: "text", text: prompt }] };
 }
 
 function selectReadiness(control: SessionControlState | null): SessionControlState["readiness"] | undefined {

@@ -1,4 +1,8 @@
-import type { SubagentRunEvent, SubagentRunRequest } from "../../../shared/subagent-contracts.ts";
+import type {
+  SubagentChildExtension,
+  SubagentRunEvent,
+  SubagentRunRequest,
+} from "../../../shared/subagent-contracts.ts";
 import type {
   SubagentRuntime,
   SubagentRuntimeResumeRequest,
@@ -23,6 +27,8 @@ interface DesktopSubagentRuntimeOptions {
         },
     onEvent?: (event: SubagentRunEvent) => void,
   ): Promise<unknown>;
+  childExtensions?: readonly SubagentChildExtension[];
+  getChildExtensions?(): readonly SubagentChildExtension[];
 }
 
 class SubagentEventStream implements AsyncIterable<SubagentRunEvent> {
@@ -133,6 +139,11 @@ export class DesktopSubagentRuntime implements SubagentRuntime {
 
   resume(request: SubagentRuntimeResumeRequest): AsyncIterable<SubagentRunEvent> {
     return this.run(request);
+  }
+
+  getChildExtensions(): readonly SubagentChildExtension[] {
+    const extensions = this.options.getChildExtensions?.() ?? this.options.childExtensions ?? [];
+    return extensions.map((extension) => ({ path: extension.path, tools: [...extension.tools] }));
   }
 
   async cancel(runId: string, childIndex: number): Promise<void> {

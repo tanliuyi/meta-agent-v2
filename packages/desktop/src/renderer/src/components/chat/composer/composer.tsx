@@ -8,7 +8,7 @@ import {
 import Command from "lucide-react/dist/esm/icons/command.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SessionControlState } from "../../../../../shared/contracts.ts";
+import type { Readiness, SessionControlState } from "../../../../../shared/contracts.ts";
 import { appendComposerQuote, type ComposerQuoteTarget } from "../../../runtime/composer-quotes.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
 import { subscribeBrowserAnnotationToComposer } from "../../../state/browser-composer-bridge.ts";
@@ -19,7 +19,9 @@ import { ModelSelect } from "../model-select.tsx";
 import { ProjectSelect } from "../project-select.tsx";
 import { ThinkingSelect } from "../thinking-select.tsx";
 import { slashCommandAcceptsArguments, slashCommandText } from "./composer-command-trigger.tsx";
+import { ComposerContextUsage } from "./composer-context-usage.tsx";
 import { ComposerExtensionCommand } from "./composer-extension-command.tsx";
+import { ComposerFeedback } from "./composer-feedback.tsx";
 import { ComposerInput } from "./composer-input.tsx";
 import { ComposerQueue } from "./composer-queue.tsx";
 import { ComposerQuotes } from "./composer-quotes.tsx";
@@ -181,7 +183,7 @@ export function Composer(props: ComposerProps) {
   };
 
   const readiness = props.mode === "draft" ? props.config?.readiness : props.readiness;
-  const readinessError = readiness?.state === "ready" ? null : readiness?.message;
+  const readinessFeedback = readiness ? getReadinessFeedback(readiness) : null;
   const configLoading = props.mode === "draft" && props.configLoading;
   const disabled = sending || selectingProject || materializing || (props.mode === "session" && !props.commandsReady);
   const attachmentsDisabled = disabled || readiness?.state !== "ready";
@@ -345,6 +347,7 @@ export function Composer(props: ComposerProps) {
                       />
                     </>
                   )}
+                  {props.mode === "session" ? <ComposerContextUsage usage={props.context} /> : null}
                   <ComposerSubmitControl
                     composer={props}
                     disabled={disabled}
@@ -361,11 +364,37 @@ export function Composer(props: ComposerProps) {
           </ComposerPrimitive.AttachmentDropzone>
         </ComposerPrimitive.Root>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
-      {error || readinessError ? (
-        <p className="composer-error" role="status" aria-live="polite">
-          {error ?? readinessError}
-        </p>
+      {error || readinessFeedback ? (
+        <div className="composer-feedback-stack">
+          {error ? <ComposerFeedback tone="error" message={error} /> : null}
+          {!error && readinessFeedback ? (
+            <ComposerFeedback tone={readinessFeedback.tone} message={readinessFeedback.message} />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
+}
+
+function getReadinessFeedback(readiness: Readiness): {
+  tone: "warning" | "error";
+  message: string;
+} | null {
+  if (readiness.state === "ready") return null;
+  if (readiness.state === "missing-model") {
+    return {
+      tone: "warning",
+      message: readiness.message ?? "请先配置一个可用模型。",
+    };
+  }
+  if (readiness.state === "missing-credentials") {
+    return {
+      tone: "error",
+      message: readiness.message ?? "请先配置模型凭据后再发送。",
+    };
+  }
+  return {
+    tone: "error",
+    message: readiness.message ?? "请选择其他可用模型后再发送。",
+  };
 }

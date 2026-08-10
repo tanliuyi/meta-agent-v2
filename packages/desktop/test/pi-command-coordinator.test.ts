@@ -42,9 +42,9 @@ describe("PiCommandCoordinator", () => {
   it("idle 与 running enqueue 都统一调用 sessions.prompt，并保留 desiredMode", async () => {
     const coordinator = createCoordinator();
 
-    coordinator.enqueue(userMessage("first"), { steer: false });
+    coordinator.enqueue(userMessage("first"));
     phase = "running";
-    coordinator.enqueue(userMessage("second"), { steer: true });
+    coordinator.steer(userMessage("second"));
 
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(2));
     expect(prompt).toHaveBeenNthCalledWith(
@@ -57,7 +57,7 @@ describe("PiCommandCoordinator", () => {
   it("/reload 显示进行中和完成 Toast 且不恢复 Composer", async () => {
     const coordinator = createCoordinator();
 
-    coordinator.enqueue(userMessage("/reload"), { steer: false });
+    coordinator.enqueue(userMessage("/reload"));
 
     await vi.waitFor(() => expect(reloadResources).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(updateNotification).toHaveBeenCalledOnce());
@@ -80,7 +80,7 @@ describe("PiCommandCoordinator", () => {
     reloadResources.mockResolvedValueOnce({ accepted: false, queued: false, error: "reload blocked" });
     const coordinator = createCoordinator();
 
-    coordinator.enqueue(userMessage("/reload"), { steer: false });
+    coordinator.enqueue(userMessage("/reload"));
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
     expect(notify).toHaveBeenCalledTimes(1);
@@ -98,13 +98,10 @@ describe("PiCommandCoordinator", () => {
 
   it("将 assistant-ui quote metadata 作为结构化 IPC 字段发送", async () => {
     const coordinator = createCoordinator();
-    coordinator.enqueue(
-      {
-        ...userMessage("请解释这段内容"),
-        metadata: { custom: { quote: { text: "第一行\n第二行", messageId: "assistant-1" } } },
-      },
-      { steer: false },
-    );
+    coordinator.enqueue({
+      ...userMessage("请解释这段内容"),
+      metadata: { custom: { quote: { text: "第一行\n第二行", messageId: "assistant-1" } } },
+    });
 
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
     expect(prompt).toHaveBeenCalledWith(
@@ -121,13 +118,10 @@ describe("PiCommandCoordinator", () => {
       { text: "第一段", messageId: "assistant-1" },
       { text: "第二段", messageId: "assistant-2" },
     ];
-    coordinator.enqueue(
-      {
-        ...userMessage("请比较这两段内容"),
-        metadata: { custom: { quote: { ...quotes[0], quotes } } },
-      },
-      { steer: false },
-    );
+    coordinator.enqueue({
+      ...userMessage("请比较这两段内容"),
+      metadata: { custom: { quote: { ...quotes[0], quotes } } },
+    });
 
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
     expect(prompt).toHaveBeenCalledWith(expect.objectContaining({ text: "请比较这两段内容", quotes }));
@@ -138,7 +132,7 @@ describe("PiCommandCoordinator", () => {
     prompt.mockRejectedValueOnce(error);
     const coordinator = createCoordinator();
 
-    expect(coordinator.enqueue(userMessage("retry me"), { steer: false })).toBeUndefined();
+    expect(coordinator.enqueue(userMessage("retry me"))).toBeUndefined();
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledWith(error));
     expect(setText).toHaveBeenCalledWith("retry me");
@@ -152,13 +146,10 @@ describe("PiCommandCoordinator", () => {
       { text: "第二段", messageId: "assistant-2" },
     ];
 
-    coordinator.enqueue(
-      {
-        ...userMessage("retry me"),
-        metadata: { custom: { quote: { ...quotes[0], quotes } } },
-      },
-      { steer: false },
-    );
+    coordinator.enqueue({
+      ...userMessage("retry me"),
+      metadata: { custom: { quote: { ...quotes[0], quotes } } },
+    });
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
     expect(setQuote).toHaveBeenCalledWith(expect.objectContaining({ quotes }));
@@ -168,7 +159,7 @@ describe("PiCommandCoordinator", () => {
     prompt.mockResolvedValueOnce({ accepted: false, queued: false, error: "missing credentials" });
     const coordinator = createCoordinator();
 
-    coordinator.enqueue(userMessage("retry me"), { steer: false });
+    coordinator.enqueue(userMessage("retry me"));
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
     expect(setText).toHaveBeenCalledWith("retry me");
@@ -178,7 +169,7 @@ describe("PiCommandCoordinator", () => {
     prompt.mockResolvedValueOnce({ accepted: true, queued: false, error: "provider failed" });
     const coordinator = createCoordinator();
 
-    coordinator.enqueue(userMessage("accepted"), { steer: false });
+    coordinator.enqueue(userMessage("accepted"));
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledWith("provider failed"));
     expect(setText).not.toHaveBeenCalled();
@@ -188,7 +179,7 @@ describe("PiCommandCoordinator", () => {
     const coordinator = createCoordinator();
     phase = "compacting";
 
-    coordinator.enqueue(userMessage("blocked"), { steer: false });
+    coordinator.enqueue(userMessage("blocked"));
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
     const reported = report.mock.calls[0]?.[0];
@@ -207,7 +198,7 @@ describe("PiCommandCoordinator", () => {
       attachments: [imageAttachment()],
     };
 
-    coordinator.enqueue(message, { steer: false });
+    coordinator.enqueue(message);
 
     await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
     expect(prompt).not.toHaveBeenCalled();
@@ -242,11 +233,10 @@ describe("PiCommandCoordinator", () => {
     expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(edit.mock.invocationCallOrder[0] ?? 0);
   });
 
-  it("不支持单项 queue 操作 fail fast，framework clear 只记录 advisory", () => {
+  it("不支持单项 queue 操作 fail fast", () => {
     const coordinator = createCoordinator();
 
-    expect(() => coordinator.unsupportedQueueOperation()).toThrow("不支持单项 remove/promote");
-    expect(coordinator.observeFrameworkClear()).toBeUndefined();
+    expect(() => coordinator.unsupportedQueueOperation()).toThrow("不支持单项 move/edit/remove");
     expect(clearQueue).not.toHaveBeenCalled();
   });
 
@@ -262,7 +252,7 @@ describe("PiCommandCoordinator", () => {
       attachments: [imageAttachment()],
       metadata: { custom: { quote: { ...quotes[0], quotes } } },
     };
-    coordinator.enqueue(message, { steer: true });
+    coordinator.steer(message);
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
     const input = prompt.mock.calls[0]?.[0] as SessionPromptInput | undefined;
     if (!input) throw new Error("prompt input missing");
@@ -287,7 +277,7 @@ describe("PiCommandCoordinator", () => {
     phase = "running";
     const coordinator = createCoordinator();
     prompt.mockResolvedValueOnce({ accepted: true, queued: true });
-    coordinator.enqueue({ ...userMessage("queued"), attachments: [imageAttachment()] }, { steer: false });
+    coordinator.enqueue({ ...userMessage("queued"), attachments: [imageAttachment()] });
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
     const input = prompt.mock.calls[0]?.[0] as SessionPromptInput | undefined;
     if (!input) throw new Error("prompt input missing");
@@ -313,7 +303,7 @@ describe("PiCommandCoordinator", () => {
   it("queue item 被消费后释放原始图片输入", async () => {
     const coordinator = createCoordinator();
     prompt.mockResolvedValueOnce({ accepted: true, queued: true });
-    coordinator.enqueue({ ...userMessage("queued"), attachments: [imageAttachment()] }, { steer: true });
+    coordinator.steer({ ...userMessage("queued"), attachments: [imageAttachment()] });
     await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
     const input = prompt.mock.calls[0]?.[0] as SessionPromptInput | undefined;
     if (!input) throw new Error("prompt input missing");

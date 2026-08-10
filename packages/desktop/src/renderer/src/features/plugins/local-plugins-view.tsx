@@ -24,8 +24,16 @@ export function LocalPluginsView({ controller, onOpen }: LocalPluginsViewProps) 
       </header>
 
       {snapshot?.diagnostics.length ? (
-        <div className="plugin-marketplace-notice" data-tone="warning" role="status">
-          {snapshot.diagnostics.map((diagnostic) => `${diagnostic.extensionId}: ${diagnostic.message}`).join("\n")}
+        <div className="plugin-local-diagnostics" role="status">
+          {snapshot.diagnostics.map((diagnostic) => (
+            <div
+              key={`${diagnostic.phase}:${diagnostic.code}`}
+              className="plugin-marketplace-notice"
+              data-tone={diagnostic.code === "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT" ? "info" : "warning"}
+            >
+              {diagnostic.message}
+            </div>
+          ))}
         </div>
       ) : null}
       {controller.error ? (

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import type { Project, WorkbenchState } from "../../shared/contracts.ts";
-import { GENERAL_WORKSPACE_ID } from "../../shared/contracts.ts";
+import { GENERAL_WORKSPACE_ID, type Project, type WorkbenchState } from "../../shared/contracts.ts";
+import { filePathWithoutLocation } from "../../shared/file-location.ts";
 
 type ProjectStatus = "available" | "missing" | "permissionDenied" | "invalid";
 
@@ -223,8 +223,9 @@ export class ProjectStore {
 
   getWorkbench(projectId: string, threadId: string): WorkbenchState {
     this.assertProjectAccessible(projectId);
-    return (
-      this.desktopState.workbenches[workbenchKey(projectId, threadId)] ?? {
+    const stored = this.desktopState.workbenches[workbenchKey(projectId, threadId)];
+    if (!stored) {
+      return {
         projectId,
         threadId,
         panelOpen: false,
@@ -235,8 +236,9 @@ export class ProjectStore {
         expandedPaths: [],
         tabs: [],
         activeTabKey: null,
-      }
-    );
+      };
+    }
+    return normalizeWorkbenchFilePaths(stored, this.getCwd(projectId));
   }
 
   async setWorkbench(value: WorkbenchState): Promise<void> {
@@ -394,6 +396,31 @@ function isDesktopState(value: unknown): value is LegacyDesktopState {
     typeof state.workbenches === "object" &&
     state.workbenches !== null
   );
+}
+
+function normalizeWorkbenchFilePaths(value: WorkbenchState, cwd: string): WorkbenchState {
+  const normalize = (path: string): string => {
+    const pathWithoutLocation = filePathWithoutLocation(path);
+    if (pathWithoutLocation === path) return path;
+    try {
+      if (statSync(resolve(cwd, path)).isFile()) return path;
+    } catch {
+      // 继续检查去掉位置标记后的候选路径。
+    }
+    try {
+      if (statSync(resolve(cwd, pathWithoutLocation)).isFile()) return pathWithoutLocation;
+    } catch {
+      // 保留原路径，避免把未知路径误判为位置标记。
+    }
+    return path;
+  };
+  const openFiles = [...new Set(value.openFiles.map(normalize))];
+  return {
+    ...value,
+    openFiles,
+    activeFile: value.activeFile ? normalize(value.activeFile) : undefined,
+    previewFile: value.previewFile ? normalize(value.previewFile) : undefined,
+  };
 }
 
 function workbenchKey(projectId: string, threadId: string): string {

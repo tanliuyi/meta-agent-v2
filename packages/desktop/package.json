@@ -1,6 +1,6 @@
 {
   "name": "meta-agent",
-  "version": "0.0.34",
+  "version": "0.0.35",
   "private": true,
   "description": "Meta Agent desktop application",
   "homepage": "https://github.com/tanliuyi/meta-agent-harness",
@@ -51,10 +51,10 @@
     "semver": "7.8.0"
   },
   "devDependencies": {
-    "@assistant-ui/react": "0.14.26",
-    "@assistant-ui/react-devtools": "1.2.8",
-    "@assistant-ui/react-lexical": "0.2.5",
-    "@assistant-ui/react-streamdown": "0.3.5",
+    "@assistant-ui/react": "0.15.12",
+    "@assistant-ui/react-devtools": "1.2.13",
+    "@assistant-ui/react-lexical": "0.2.9",
+    "@assistant-ui/react-streamdown": "0.3.10",
     "@radix-ui/react-alert-dialog": "1.1.19",
     "@radix-ui/react-avatar": "1.2.2",
     "@radix-ui/react-checkbox": "1.3.7",

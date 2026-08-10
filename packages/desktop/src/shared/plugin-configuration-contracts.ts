@@ -11,6 +11,8 @@ interface PluginConfigurationFieldBase {
   deprecated?: boolean;
   deprecatedMessage?: string;
   required?: boolean;
+  widget?: "model-selector";
+  modelFormat?: "model-id" | "provider-model";
 }
 
 export interface PluginTextConfigurationField extends PluginConfigurationFieldBase {
@@ -375,7 +377,11 @@ function parseFieldBase(value: Record<string, unknown>): PluginConfigurationFiel
     (value.deprecatedMessage !== undefined &&
       (typeof value.deprecatedMessage !== "string" ||
         value.deprecatedMessage.length > MAX_DEPRECATED_MESSAGE_LENGTH)) ||
-    (value.required !== undefined && typeof value.required !== "boolean")
+    (value.required !== undefined && typeof value.required !== "boolean") ||
+    (value.widget !== undefined && value.widget !== "model-selector") ||
+    (value.modelFormat !== undefined &&
+      (value.widget !== "model-selector" ||
+        (value.modelFormat !== "model-id" && value.modelFormat !== "provider-model")))
   ) {
     throw new Error("Plugin configuration field metadata is invalid");
   }
@@ -388,6 +394,10 @@ function parseFieldBase(value: Record<string, unknown>): PluginConfigurationFiel
     ...(typeof value.deprecated === "boolean" ? { deprecated: value.deprecated } : {}),
     ...(typeof value.deprecatedMessage === "string" ? { deprecatedMessage: value.deprecatedMessage } : {}),
     ...(typeof value.required === "boolean" ? { required: value.required } : {}),
+    ...(value.widget === "model-selector" ? { widget: value.widget } : {}),
+    ...(value.modelFormat === "model-id" || value.modelFormat === "provider-model"
+      ? { modelFormat: value.modelFormat }
+      : {}),
   };
 }
 
@@ -400,7 +410,19 @@ function fieldError(
 }
 
 function baseKeys(): string[] {
-  return ["key", "label", "description", "group", "order", "deprecated", "deprecatedMessage", "required", "type"];
+  return [
+    "key",
+    "label",
+    "description",
+    "group",
+    "order",
+    "deprecated",
+    "deprecatedMessage",
+    "required",
+    "widget",
+    "modelFormat",
+    "type",
+  ];
 }
 
 function optionalFiniteNumber(value: unknown, key: string): number | undefined {

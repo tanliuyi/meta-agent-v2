@@ -28,6 +28,7 @@ export type ComposerProps =
       model: SessionControlState["model"];
       models: SessionControlState["models"];
       commands: SessionControlState["commands"];
+      context: SessionControlState["context"];
       thinkingLevel: SessionControlState["thinkingLevel"];
       thinkingLevels: SessionControlState["thinkingLevels"];
       readiness: SessionControlState["readiness"];

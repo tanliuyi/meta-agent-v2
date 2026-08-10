@@ -110,13 +110,7 @@ export function NewSessionSurface() {
         if (!active) return;
         setConfig(applyStoredDraftSelection(next, projectId));
         setConfigProjectId(projectId);
-        setLoadError(
-          next.extensions.diagnostics.length > 0
-            ? next.extensions.diagnostics
-                .map((diagnostic) => `${diagnostic.extensionId}: ${diagnostic.message}`)
-                .join("\n")
-            : null,
-        );
+        setLoadError(null);
       })
       .catch((reason: unknown) => {
         if (active) setLoadError(reason instanceof Error ? reason.message : String(reason));
@@ -201,7 +195,7 @@ export function NewSessionSurface() {
 
   if (phase === "no-project") {
     return (
-      <NewSessionShell disabled={!projectId} error={null}>
+      <NewSessionShell disabled={!projectId}>
         <EmptyChatState
           title="没有可用工作区"
           detail={loadError ?? "通用工作区不可用，且没有可用的 Project。请添加一个 Project。"}
@@ -211,13 +205,15 @@ export function NewSessionSurface() {
   }
 
   return (
-    <NewSessionShell disabled={!projectId} error={loadError}>
+    <NewSessionShell disabled={!projectId}>
       <DraftComposerThread
         projects={projects}
         project={project}
         config={config}
         configLoading={config === null}
         phase={phase === "materializing" ? "materializing" : "editing"}
+        error={loadError}
+        diagnostics={config?.extensions.diagnostics}
         onProjectChange={selectProject}
         onModelChange={selectModel}
         onThinkingChange={selectThinking}

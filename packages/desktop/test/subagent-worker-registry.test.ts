@@ -1034,6 +1034,7 @@ describe("SubagentWorkerRegistry", () => {
       ...runRequest("root", 0),
       maxDepth: 2,
       extensionProfile: ["provider", "memory", "runtime", "fanout"],
+      childExtensions: [{ path: "/approved/billion-context/index.ts", tools: ["compress"] }],
     };
     const parentRun = registry.handleHostRequest({ type: "subagent.run", request: parentRequest }, () => undefined);
     await Promise.resolve();
@@ -1044,6 +1045,7 @@ describe("SubagentWorkerRegistry", () => {
       depth: 2,
       maxDepth: 2,
       lineage: [{ runId: "root", childIndex: 0 }],
+      childExtensions: [{ path: "/approved/billion-context/index.ts", tools: ["compress"] }],
     };
     await expect(clients[0]?.hostRequest({ type: "subagent.run", request: nestedRequest })).resolves.toEqual({
       status: "completed",
@@ -1051,9 +1053,13 @@ describe("SubagentWorkerRegistry", () => {
     await expect(
       clients[0]?.hostRequest({
         type: "subagent.run",
-        request: { ...nestedRequest, runId: "forged", lineage: [] },
+        request: {
+          ...nestedRequest,
+          runId: "forged-child-extension",
+          childExtensions: [{ path: "/unapproved/extension.ts", tools: ["compress"] }],
+        },
       }),
-    ).rejects.toThrow("lineage does not match");
+    ).rejects.toThrow("approved child extensions");
     expect(clients).toHaveLength(2);
 
     release();

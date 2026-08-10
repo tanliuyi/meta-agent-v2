@@ -38,6 +38,7 @@ import {
   controlledResourceLoaderOptions,
   extensionLoadDiagnostics,
   extensionServiceDiagnostics,
+  isBlockingExtensionDiagnostic,
   sanitizeExtensionMessage,
 } from "./desktop-extension-runtime-policy.ts";
 import { getDesktopCheckpointDiff, restoreDesktopCheckpoint } from "./extensions/pi-rewind/src/index.ts";
@@ -157,8 +158,9 @@ export class SessionRuntime {
       ...extensionLoadDiagnostics(extensionSet, services.resourceLoader.getExtensions()),
       ...extensionServiceDiagnostics(extensionSet, services.diagnostics),
     ];
-    if (extensionDiagnostics.length > 0) {
-      throw new DesktopExtensionStartupError(extensionSet.generation, extensionDiagnostics);
+    const blockingExtensionDiagnostics = extensionDiagnostics.filter(isBlockingExtensionDiagnostic);
+    if (blockingExtensionDiagnostics.length > 0) {
+      throw new DesktopExtensionStartupError(extensionSet.generation, blockingExtensionDiagnostics);
     }
     const sessionManager = options.sessionManager ?? SessionManager.create(services.cwd);
     const isNewSession = options.createInput !== undefined || options.sessionManager === undefined;
@@ -198,7 +200,9 @@ export class SessionRuntime {
     runtime.lastError = joinRuntimeDiagnostics(
       result.modelFallbackMessage,
       services.diagnostics.map(({ message }) => message),
-      runtime.extensionDiagnostics.map(({ extensionId, message }) => `扩展加载失败 ${extensionId}: ${message}`),
+      runtime.extensionDiagnostics.flatMap(({ extensionId, message, ...diagnostic }) =>
+        isBlockingExtensionDiagnostic(diagnostic) ? [`扩展加载失败 ${extensionId}: ${message}`] : [],
+      ),
       services.resourceLoader
         .getSkills()
         .diagnostics.filter(({ type }) => type === "error")
@@ -268,7 +272,9 @@ export class SessionRuntime {
     } finally {
       runtime.extensionPhase = "runtime";
     }
-    const startupDiagnostics = runtime.extensionDiagnostics.filter(({ phase }) => phase === "start");
+    const startupDiagnostics = runtime.extensionDiagnostics.filter(
+      (diagnostic) => diagnostic.phase === "start" && isBlockingExtensionDiagnostic(diagnostic),
+    );
     if (bindingFailure || startupDiagnostics.length > 0) {
       runtime.extensionHost.dispose();
       result.session.dispose();
@@ -409,7 +415,9 @@ export class SessionRuntime {
       ];
       this.lastError = joinRuntimeDiagnostics(
         undefined,
-        this.extensionDiagnostics.map(({ extensionId, message }) => `扩展加载失败 ${extensionId}: ${message}`),
+        this.extensionDiagnostics.flatMap(({ extensionId, message, ...diagnostic }) =>
+          isBlockingExtensionDiagnostic(diagnostic) ? [`扩展加载失败 ${extensionId}: ${message}`] : [],
+        ),
         resourceErrorMessages("Skill", this.session.resourceLoader.getSkills().diagnostics),
         resourceErrorMessages("Prompt", this.session.resourceLoader.getPrompts().diagnostics),
       );

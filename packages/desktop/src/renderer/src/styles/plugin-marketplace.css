@@ -27,6 +27,7 @@
   align-items: center;
   gap: var(--space-2);
   margin-right: 96px;
+  margin-left: 0;
   overflow: hidden;
   color: hsl(var(--foreground));
   font-size: var(--type-size-control);
@@ -76,11 +77,7 @@
   color: hsl(var(--muted-foreground));
 }
 
-.app-frame[data-platform="darwin"] .sidebar:not([data-collapsed="true"]) ~ .workspace .plugin-marketplace-breadcrumb {
-  margin-left: 76px;
-}
-
-.app-frame[data-platform="linux"] .plugin-marketplace-breadcrumb {
+.app-frame[data-platform="linux"] .sidebar[data-collapsed="true"] ~ .workspace .plugin-marketplace-breadcrumb {
   margin-left: 32px;
 }
 

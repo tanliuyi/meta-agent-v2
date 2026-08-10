@@ -5,15 +5,7 @@ import { BottomTerminal } from "./panel/terminal/bottom-terminal.tsx";
 import { WorkbenchPanel } from "./panel/workbench-panel.tsx";
 
 /** 新会话页面的会话壳：topbar + 主工作区 + 底部终端 + 右侧 Panel（草稿模式复用 session-scoped 组件）。 */
-export function NewSessionShell({
-  disabled,
-  error,
-  children,
-}: {
-  disabled: boolean;
-  error: string | null;
-  children: ReactNode;
-}) {
+export function NewSessionShell({ disabled, children }: { disabled: boolean; children: ReactNode }) {
   return (
     <>
       <div className="session-surface-shell">
@@ -29,7 +21,6 @@ export function NewSessionShell({
         <div className="workspace-row">
           <main className="chat-workspace">{children}</main>
         </div>
-        {error ? <div className="composer-error">{error}</div> : null}
       </div>
       <BottomTerminal />
       <WorkbenchPanel />

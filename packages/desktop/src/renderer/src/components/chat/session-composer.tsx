@@ -18,6 +18,7 @@ export function SessionComposer() {
   const model = useSessionControlSelector((control) => control?.model);
   const models = useSessionControlSelector((control) => control?.models ?? EMPTY_MODELS);
   const commands = useSessionControlSelector((control) => control?.commands ?? EMPTY_COMMANDS);
+  const context = useSessionControlSelector((control) => control?.context);
   const thinkingLevel = useSessionControlSelector((control) => control?.thinkingLevel ?? "off");
   const thinkingLevels = useSessionControlSelector((control) => control?.thinkingLevels ?? EMPTY_THINKING_LEVELS);
   const readiness = useSessionControlSelector((control) => control?.readiness);
@@ -64,6 +65,7 @@ export function SessionComposer() {
       model={model}
       models={models}
       commands={commands}
+      context={context}
       thinkingLevel={thinkingLevel}
       thinkingLevels={thinkingLevels}
       readiness={readiness}

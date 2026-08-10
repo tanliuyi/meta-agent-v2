@@ -35,6 +35,26 @@ describe("ProjectStore", () => {
     });
   });
 
+  it("读取 Workbench 时恢复带行号后缀的文件路径", async () => {
+    const { project, store } = await createStore();
+    const filePath = join(project.cwd, "__root__.tsx");
+    await writeFile(filePath, "export {}\n");
+    const workbench = store.getWorkbench(project.id, "thread-1");
+
+    await store.setWorkbench({
+      ...workbench,
+      openFiles: ["__root__.tsx:6"],
+      activeFile: "__root__.tsx:6",
+      previewFile: "__root__.tsx:6",
+    });
+
+    expect(store.getWorkbench(project.id, "thread-1")).toMatchObject({
+      openFiles: ["__root__.tsx"],
+      activeFile: "__root__.tsx",
+      previewFile: "__root__.tsx",
+    });
+  });
+
   it("并发保存后状态文件仍是完整 JSON", async () => {
     const { file, project, store } = await createStore();
     await Promise.all(Array.from({ length: 20 }, (_, index) => store.setArchived(project.id, `thread-${index}`, true)));

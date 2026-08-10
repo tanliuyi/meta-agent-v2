@@ -43,10 +43,15 @@ vi.mock("../src/renderer/src/components/layout/update-banner.tsx", () => ({
 
 vi.mock("../src/renderer/src/state/desktop-context.tsx", () => ({
   useDesktopActions: () => ({ chooseProject: vi.fn() }),
+  useDesktopSelector: (selector: (state: unknown) => unknown) => selector({ projects: [], threadCatalogs: {} }),
 }));
 
 vi.mock("../src/renderer/src/state/session-cache-context.tsx", () => ({
   useSessionDraftMaterializing: () => false,
+}));
+
+vi.mock("../src/renderer/src/state/draft-session-context.tsx", () => ({
+  useDraftSession: () => ({ projectId: null }),
 }));
 
 describe("FloatingSidebar", () => {
@@ -60,20 +65,23 @@ describe("FloatingSidebar", () => {
     expect(markup).toContain('class="floating-sidebar"');
     expect(markup).toContain('class="floating-sidebar-trigger"');
     expect(markup).toContain('class="floating-sidebar-panel"');
-    expect(markup).toContain('style="width:280px"');
+    // 面板宽度由拖拽调宽的 CSS 变量驱动,初始值取存储宽度。
+    expect(markup).toContain('style="--resizable-region-size:280px"');
     expect(markup).not.toContain('data-open="true"');
-    // win32 窗口标题栏下方起始,避免遮挡窗口控制。
-    expect(markup).toContain('style="top:var(--layout-window-header-height)"');
   });
 
-  it("浮出面板内复用 Sidebar 并强制展开内容", () => {
+  it("浮出面板复用 Sidebar 并强制展开内容,面板右缘提供拖拽调宽手柄", () => {
     const markup = renderSidebar("0");
 
     expect(markup).toContain('class="sidebar" data-collapsed="false" data-floating="true"');
     expect(markup).toContain('id="floating-sidebar-content" class="sidebar-content"');
-    expect(markup).not.toContain("resize-handle-sidebar");
-    // 浮出预览内的展开按钮用于固定侧边栏。
-    expect(markup).toContain('aria-label="展开侧边栏"');
+    // 浮出面板自身的调宽手柄,与主侧边栏一致的语义属性。
+    expect(markup).toContain("resize-handle-sidebar");
+    expect(markup).toContain('aria-label="调整侧边栏宽度"');
+    expect(markup).toContain('aria-controls="floating-sidebar-content"');
+    expect(markup).toContain('aria-valuemin="220"');
+    expect(markup).toContain('aria-valuemax="420"');
+    expect(markup).toContain('aria-valuenow="280"');
   });
 });
 
