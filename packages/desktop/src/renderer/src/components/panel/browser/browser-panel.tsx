@@ -17,7 +17,6 @@ import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  BROWSER_INTERNAL_PAGES,
   type BrowserAnnotation,
   type BrowserAnnotationBounds,
   type BrowserAnnotationPickResult,
@@ -549,13 +548,17 @@ export function BrowserPanel() {
     [activeTabId, identity],
   );
 
-  const navigateInternalPage = useCallback(
-    (url: string) => {
-      setMoreMenuOpen(false);
-      navigateToUrl(url);
-    },
-    [navigateToUrl],
-  );
+  const openDownloadsFolder = useCallback(() => {
+    setMoreMenuOpen(false);
+    void window.desktop.browser
+      .openDownloads()
+      .then((result) => {
+        if (!result.ok) showBrowserNotice(`打开下载目录失败：${result.error}`);
+      })
+      .catch((value: unknown) =>
+        showBrowserNotice(`打开下载目录失败：${value instanceof Error ? value.message : String(value)}`),
+      );
+  }, [showBrowserNotice]);
 
   const printPage = useCallback(() => {
     setMoreMenuOpen(false);
@@ -1030,22 +1033,13 @@ export function BrowserPanel() {
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>密码和自动填充</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="browser-more-dropdown-subcontent">
-                <DropdownMenuItem onSelect={() => navigateInternalPage(BROWSER_INTERNAL_PAGES.passwordManager)}>
+                <DropdownMenuItem onSelect={() => showBrowserNotice("密码管理器暂不支持。")}>
                   密码管理器
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    showAutofillContactNotice();
-                    navigateInternalPage(BROWSER_INTERNAL_PAGES.autofill);
-                  }}
-                >
-                  联系人
-                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={showAutofillContactNotice}>联系人</DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuItem onSelect={() => navigateInternalPage(BROWSER_INTERNAL_PAGES.downloads)}>
-              下载
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={openDownloadsFolder}>下载</DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>清除浏览数据</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="browser-more-dropdown-subcontent">

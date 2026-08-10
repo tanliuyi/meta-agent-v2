@@ -10,7 +10,6 @@ import type {
 import { StaleReferenceError } from "../src/main/browser/browser-host-controller.ts";
 import { BrowserManager, type BrowserManagerOptions } from "../src/main/browser/browser-manager.ts";
 import {
-  BROWSER_INTERNAL_PAGES,
   type BrowserAction,
   type BrowserAnnotationBounds,
   type BrowserConsoleEntry,
@@ -678,17 +677,17 @@ describe("BrowserManager 会话隔离", () => {
     expect(hosts.get(101)?.navigatedUrls).toEqual(["https://example.com/"]);
   });
 
-  test("用户可打开 Chromium 内置页，Agent 仍不能导航到 chrome 协议", async () => {
+  test("用户与 Agent 均不能导航到 chrome 协议（Electron 无浏览器 UI 内置页）", async () => {
     const { manager, hosts } = setup();
     await manager.attach(SESSION_A, 101);
 
-    await expect(manager.navigate(SESSION_A, 1, BROWSER_INTERNAL_PAGES.passwordManager)).resolves.toMatchObject({
-      ok: true,
-    });
-    await expect(manager.navigate(SESSION_A, 1, BROWSER_INTERNAL_PAGES.downloads, "agent")).resolves.toMatchObject({
-      ok: false,
-    });
-    expect(hosts.get(101)?.navigatedUrls).toEqual([BROWSER_INTERNAL_PAGES.passwordManager]);
+    for (const source of ["user", "agent"] as const) {
+      await expect(manager.navigate(SESSION_A, 1, "chrome://downloads/", source)).resolves.toMatchObject({
+        ok: false,
+        error: "仅支持 http/https 链接",
+      });
+    }
+    expect(hosts.get(101)?.navigatedUrls).toEqual([]);
   });
 
   test("copyScreenshot 将 PNG 写入系统剪贴板", async () => {

@@ -20,7 +20,6 @@ import { basename, join } from "node:path";
 import type { WebContents } from "electron";
 import { BrowserWindow, clipboard, webContents as electronWebContents, Menu, nativeImage, session } from "electron";
 import {
-  BROWSER_INTERNAL_PAGES,
   type BrowserAction,
   type BrowserActionResult,
   type BrowserAnnotation,
@@ -513,8 +512,8 @@ export class BrowserManager {
       const settingsError = this.agentSettingsError();
       if (settingsError !== null) return { ok: false, error: settingsError };
     }
-    const normalized = normalizeNavigateUrl(url) ?? (source === "user" ? normalizeInternalBrowserPage(url) : null);
-    if (!normalized) return { ok: false, error: "仅支持 http/https 链接或受支持的 Chromium 内置页面" };
+    const normalized = normalizeNavigateUrl(url);
+    if (!normalized) return { ok: false, error: "仅支持 http/https 链接" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
@@ -1741,10 +1740,6 @@ function normalizeNavigateUrl(raw: string): string | null {
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
   return parsed.href;
-}
-
-function normalizeInternalBrowserPage(raw: string): string | null {
-  return Object.values(BROWSER_INTERNAL_PAGES).find((page) => page === raw) ?? null;
 }
 
 function parseHttpUrl(raw: string): URL | null {

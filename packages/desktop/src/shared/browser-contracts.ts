@@ -41,13 +41,6 @@ function fnv1a64Hex(input: string): string {
   return hash.toString(16).padStart(16, "0");
 }
 
-/** Chromium 内置页仅供用户在浏览器面板中打开，Agent 导航仍限制为 http/https。 */
-export const BROWSER_INTERNAL_PAGES = {
-  passwordManager: "chrome://password-manager/passwords",
-  autofill: "chrome://settings/addresses",
-  downloads: "chrome://downloads/",
-} as const;
-
 /** 内置浏览器中的一个 tab（对应一个已 attach 的 webview）。 */
 export interface BrowserTab {
   /** BrowserManager 自增分配，稳定标识；renderer 侧用于与 webview 元素映射。 */
