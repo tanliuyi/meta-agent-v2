@@ -6,7 +6,7 @@ import type {
   SessionRemoveResult,
   Thread,
 } from "../../shared/contracts.ts";
-import type { ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
+import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
 import type {
   ColdOperationLease,
   CreationReservation,
@@ -55,7 +55,12 @@ export class MetadataWorkerClient {
     );
   }
 
-  getDraftConfig(projectId: string, cwd: string, extensionSet: ResolvedExtensionSet): Promise<DraftSessionConfig> {
+  getDraftConfig(
+    projectId: string,
+    cwd: string,
+    extensionSet: ResolvedExtensionSet,
+    allEntries: ResolvedExtensionEntry[],
+  ): Promise<DraftSessionConfig> {
     return this.enqueue(async () => {
       if (this.draftExtensionGeneration !== undefined && this.draftExtensionGeneration !== extensionSet.generation) {
         const previous = this.client;
@@ -64,7 +69,13 @@ export class MetadataWorkerClient {
       }
       this.draftExtensionGeneration = extensionSet.generation;
       this.generationReferences?.retain("metadata:draft", extensionSet);
-      return this.safeRequest<DraftSessionConfig>({ type: "getDraftConfig", projectId, cwd, extensionSet });
+      return this.safeRequest<DraftSessionConfig>({
+        type: "getDraftConfig",
+        projectId,
+        cwd,
+        extensionSet,
+        allEntries,
+      });
     });
   }
 

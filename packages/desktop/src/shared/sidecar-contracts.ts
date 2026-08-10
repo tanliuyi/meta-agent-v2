@@ -17,7 +17,7 @@ import type {
   SessionResourceReloadInput,
   Thread,
 } from "./contracts.ts";
-import type { ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
+import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
 import type { SessionCheckpointDiffResult, SessionCheckpointRestoreResult } from "./pi-rewind-contracts.ts";
 import type {
   SubagentHostRequest,
@@ -65,6 +65,8 @@ export type ThreadWorkerBinding =
       threadId: string;
       sessionFile: string;
       initialUpdatedAt?: number;
+      /** 会话级激活的插件子集（来自索引）；缺失表示继承项目级（全部激活）。 */
+      enabledPluginIds?: string[];
       extensionSet: ResolvedExtensionSet;
     };
 
@@ -270,7 +272,14 @@ export interface ColdOperationLease {
 export type MetadataSidecarCommand =
   | { type: "listSessions"; projectId: string; cwd: string }
   | { type: "listSessionsWithPaths"; projectId: string; cwd: string }
-  | { type: "getDraftConfig"; projectId: string; cwd: string; extensionSet: ResolvedExtensionSet }
+  | {
+      type: "getDraftConfig";
+      projectId: string;
+      cwd: string;
+      extensionSet: ResolvedExtensionSet;
+      /** 全部可构建的插件中心条目（含项目作用域外），供会话级插件选择。 */
+      allEntries: ResolvedExtensionEntry[];
+    }
   | { type: "resolveSession"; projectId: string; cwd: string; threadId: string }
   | { type: "upsertSession"; projectId: string; cwd: string; sessionFile: string; thread: Thread }
   | { type: "registerExternalSession"; projectId: string; cwd: string; sessionFile: string; thread: Thread }

@@ -75,9 +75,22 @@ export interface ResolvedExtensionSet {
   resolvedAt: number;
 }
 
+/** 新会话草稿中可被用户按会话激活的插件（插件中心管理的来源）。 */
+export interface DraftSelectablePlugin {
+  id: string;
+  displayName: string;
+  source: "marketplace" | "development";
+  /** 是否对当前项目开放（项目级作用域允许）；false 表示需在本会话单独启用。 */
+  available: boolean;
+}
+
 export interface DraftExtensionContext {
   extensionSetGeneration: string;
   diagnostics: DesktopExtensionDiagnostic[];
+  /** 该项目当前可激活的插件（继承项目级作用域后的全集）。 */
+  plugins: DraftSelectablePlugin[];
+  /** 会话级激活子集；null 表示继承项目级（全部激活）。 */
+  enabledPluginIds: string[] | null;
 }
 
 export interface DesktopExtensionHostState {
@@ -149,6 +162,20 @@ export interface ApplyDesktopExtensionSetInput {
   projectId: string;
   threadId: string;
   expectedDesiredGeneration: string;
+  abortRunning?: boolean;
+}
+
+/** 会话级插件选择查询结果（已有会话，数据源为项目全量可构建条目）。 */
+export interface SessionPluginOptions {
+  plugins: DraftSelectablePlugin[];
+  enabledPluginIds: string[] | null;
+}
+
+export interface ApplySessionPluginSelectionInput {
+  projectId: string;
+  threadId: string;
+  /** 会话级激活子集；null 表示继承项目级（全部激活）。 */
+  enabledPluginIds: string[] | null;
   abortRunning?: boolean;
 }
 

@@ -5,12 +5,14 @@ import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionControlSelector, useSessionScope, useSessionTimelineSelector } from "../session-context.tsx";
 import { Composer } from "./composer/composer.tsx";
 import { ReadOnlySessionStatus } from "./session-read-only-status.tsx";
+import { useSessionPlugins } from "./use-session-plugins.ts";
 
 /** Reads Composer control data from the owning cached session record. */
 export function SessionComposer() {
   const { record, clearQueue, commandsReady, modelsRefreshing, refreshModels, setModel, setThinking } =
     useSessionScope();
   const actions = useDesktopActions();
+  const plugins = useSessionPlugins(record.identity.projectId, record.identity.threadId);
   const [pendingStop, setPendingStop] = useState(false);
   const [stopping, setStopping] = useState(false);
   const hasControl = useSessionControlSelector((control) => control !== null);
@@ -58,29 +60,49 @@ export function SessionComposer() {
     );
   }
   return (
-    <Composer
-      mode="session"
-      projectId={record.identity.projectId}
-      threadId={record.identity.threadId}
-      model={model}
-      models={models}
-      commands={commands}
-      context={context}
-      thinkingLevel={thinkingLevel}
-      thinkingLevels={thinkingLevels}
-      readiness={readiness}
-      phase={phase}
-      queue={queue}
-      widgets={widgets}
-      composerCommand={composerCommand}
-      working={working}
-      commandsReady={commandsReady}
-      modelsLoading={modelsRefreshing}
-      onClearQueue={clearQueue}
-      onRefreshModels={refreshModels}
-      onSetModel={setModel}
-      onSetThinking={setThinking}
-    />
+    <>
+      <Composer
+        mode="session"
+        projectId={record.identity.projectId}
+        threadId={record.identity.threadId}
+        model={model}
+        models={models}
+        commands={commands}
+        context={context}
+        thinkingLevel={thinkingLevel}
+        thinkingLevels={thinkingLevels}
+        readiness={readiness}
+        phase={phase}
+        queue={queue}
+        widgets={widgets}
+        composerCommand={composerCommand}
+        working={working}
+        commandsReady={commandsReady}
+        modelsLoading={modelsRefreshing}
+        onClearQueue={clearQueue}
+        onRefreshModels={refreshModels}
+        onSetModel={setModel}
+        onSetThinking={setThinking}
+        plugins={plugins.plugins}
+        enabledPluginIds={plugins.enabledPluginIds}
+        pluginsLoading={plugins.loading}
+        pluginsDisabled={plugins.applying}
+        onPluginsChange={(enabledPluginIds) => {
+          plugins.clearError();
+          void plugins.apply(enabledPluginIds);
+        }}
+      />
+      <ConfirmDialog
+        open={plugins.pendingAbortSelection !== null}
+        title="切换会话插件"
+        description="当前会话正在运行，更改插件会中止运行中的任务。已经生成的内容会保留。"
+        confirmLabel="中止并切换"
+        onOpenChange={(open) => {
+          if (!open) plugins.clearPendingAbort();
+        }}
+        onConfirm={() => void plugins.applyConfirmedAbort()}
+      />
+    </>
   );
 }
 

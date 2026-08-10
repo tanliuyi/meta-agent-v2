@@ -145,6 +145,11 @@ export function NewSessionSurface() {
     setConfig(next);
   }
 
+  function selectPlugins(enabledPluginIds: string[] | null) {
+    if (!config) return;
+    setConfig({ ...config, extensions: { ...config.extensions, enabledPluginIds } });
+  }
+
   async function submit() {
     if (submitInFlight.current) return;
     if (!projectId || !config?.model || config.readiness.state !== "ready") return;
@@ -162,6 +167,7 @@ export function NewSessionSurface() {
           model: { provider: config.model.provider, id: config.model.id },
           thinkingLevel: config.thinkingLevel,
           extensionSetGeneration: config.extensions.extensionSetGeneration,
+          ...(config.extensions.enabledPluginIds ? { enabledPluginIds: config.extensions.enabledPluginIds } : {}),
           text: state.text,
           images,
         },
@@ -217,6 +223,7 @@ export function NewSessionSurface() {
         onProjectChange={selectProject}
         onModelChange={selectModel}
         onThinkingChange={selectThinking}
+        onPluginsChange={selectPlugins}
         onSubmit={submit}
       />
     </NewSessionShell>

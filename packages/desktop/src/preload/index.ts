@@ -219,6 +219,9 @@ const desktopApi: DesktopApi = {
     saveConfig: (input) => ipcRenderer.invoke(CHANNELS.extensionsSaveConfig, input),
     chooseDevelopmentEntry: (input) => ipcRenderer.invoke(CHANNELS.extensionsChooseDevelopmentEntry, input),
     apply: (input) => ipcRenderer.invoke(CHANNELS.extensionsApply, input),
+    getSessionPlugins: (projectId, threadId) =>
+      ipcRenderer.invoke(CHANNELS.extensionsGetSessionPlugins, projectId, threadId),
+    applySessionPlugins: (input) => ipcRenderer.invoke(CHANNELS.extensionsApplySessionPlugins, input),
     getPluginConfiguration: (pluginId) => ipcRenderer.invoke(CHANNELS.extensionsGetPluginConfiguration, pluginId),
     savePluginConfiguration: (input) => ipcRenderer.invoke(CHANNELS.extensionsSavePluginConfiguration, input),
   },
@@ -432,6 +435,8 @@ const desktopApi: DesktopApi = {
     clearAllData: () => ipcRenderer.invoke(CHANNELS.browserClearAllData),
     /** 会话内访问历史（最近在前，仅用户 UI；Agent 不可见）。 */
     browserHistory: (identity) => ipcRenderer.invoke(CHANNELS.browserHistory, identity),
+    /** 在系统文件管理器中打开下载目录。 */
+    openDownloads: () => ipcRenderer.invoke(CHANNELS.browserOpenDownloads),
     /** 取视口坐标处元素（标注模式）：生成选择器与 bounds。 */
     annotationPick: (identity, tabId, x, y) =>
       ipcRenderer.invoke(CHANNELS.browserAnnotationPick, identity, tabId, x, y),

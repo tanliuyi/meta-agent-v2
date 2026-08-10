@@ -71,10 +71,12 @@ import type {
 import type {
   ApplyDesktopExtensionSetInput,
   ApplyDesktopExtensionSetResult,
+  ApplySessionPluginSelectionInput,
   ApproveDevelopmentExtensionInput,
   DesktopExtensionSettingsSnapshot,
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
+  SessionPluginOptions,
 } from "./desktop-extension-contracts.ts";
 import type {
   MemoryMaintenanceResult,
@@ -220,6 +222,8 @@ export interface DesktopApi {
     saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult>;
     chooseDevelopmentEntry(input: ApproveDevelopmentExtensionInput): Promise<SaveDesktopExtensionSettingsResult>;
     apply(input: ApplyDesktopExtensionSetInput): Promise<ApplyDesktopExtensionSetResult>;
+    getSessionPlugins(projectId: string, threadId: string): Promise<SessionPluginOptions>;
+    applySessionPlugins(input: ApplySessionPluginSelectionInput): Promise<ApplyDesktopExtensionSetResult>;
     getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
     savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
   };
@@ -358,6 +362,8 @@ export interface DesktopApi {
     clearAllData(): Promise<void>;
     /** 会话内访问历史（最近在前，仅用户 UI；Agent 不可见）。 */
     browserHistory(identity: BrowserSessionIdentity): Promise<BrowserHistoryEntry[]>;
+    /** 在系统文件管理器中打开下载目录。 */
+    openDownloads(): Promise<{ ok: true } | { ok: false; error: string }>;
     /** 取视口坐标处元素（标注模式）：生成选择器与 bounds。 */
     annotationPick(
       identity: BrowserSessionIdentity,

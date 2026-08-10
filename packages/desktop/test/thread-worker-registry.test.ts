@@ -19,6 +19,7 @@ import {
   type SessionPushPayload,
   type Thread,
 } from "../src/shared/contracts.ts";
+import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "../src/shared/desktop-extension-contracts.ts";
 import {
   SIDECAR_PROTOCOL_VERSION,
   type SidecarCommand,
@@ -188,6 +189,7 @@ describe("ThreadWorkerRegistry", () => {
       "project",
       "/workspace",
       expect.objectContaining({ generation: "extensions-generation" }),
+      [],
     );
     expect(harness.clients).toHaveLength(0);
     await registry.dispose();
@@ -431,6 +433,125 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("filters the session plugin subset from the create binding", async () => {
+    const harness = createHarness(userDataDir);
+    harness.resolveExtensions.mockImplementation(async () => fullExtensionSet());
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.create({
+      projectId: "project",
+      createRequestId: "create-request",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+      enabledPluginIds: ["marketplace:second", "development:dev"],
+    });
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    expect(client.bindingExtensionEntries.map(({ id }) => id)).toEqual([
+      "builtin:pi-browser",
+      "curated:test",
+      "marketplace:second",
+      "development:dev",
+    ]);
+    await registry.dispose();
+  });
+
+  it("adds out-of-scope plugins to the binding when selected at session level", async () => {
+    const harness = createHarness(userDataDir);
+    const set = fullExtensionSet();
+    harness.resolveWithAll.mockImplementation(async () => ({
+      set,
+      allEntries: [
+        ...set.entries,
+        {
+          id: "marketplace:out-of-scope",
+          displayName: "Out of Scope",
+          source: "marketplace",
+          entryPath: "/tmp/m3.ts",
+          hostProfileVersion: 1,
+          capabilities: [],
+        },
+      ],
+    }));
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.create({
+      projectId: "project",
+      createRequestId: "create-request",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+      enabledPluginIds: ["marketplace:out-of-scope"],
+    });
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    expect(client.bindingExtensionEntries.map(({ id }) => id)).toEqual([
+      "builtin:pi-browser",
+      "curated:test",
+      "marketplace:out-of-scope",
+    ]);
+    await registry.dispose();
+  });
+
+  it("keeps the full extension set when the session inherits the project scope", async () => {
+    const harness = createHarness(userDataDir);
+    harness.resolveExtensions.mockImplementation(async () => fullExtensionSet());
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.create({
+      projectId: "project",
+      createRequestId: "create-request",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+    });
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    expect(client.bindingExtensionEntries.map(({ id }) => id)).toEqual([
+      "builtin:pi-browser",
+      "curated:test",
+      "marketplace:first",
+      "marketplace:second",
+      "development:dev",
+    ]);
+    await registry.dispose();
+  });
+
+  it("restores the session plugin subset from the metadata index when opening", async () => {
+    const harness = createHarness(userDataDir);
+    harness.resolveExtensions.mockImplementation(async () => fullExtensionSet());
+    harness.metadataList.mockResolvedValue([{ ...thread("thread"), enabledPluginIds: ["marketplace:second"] }]);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    expect(client.bindingExtensionEntries.map(({ id }) => id)).toEqual([
+      "builtin:pi-browser",
+      "curated:test",
+      "marketplace:second",
+    ]);
+    registry.detach("project", "thread");
+    await registry.dispose();
+  });
+
+  it("merges the session plugin subset into persisted summaries", async () => {
+    const harness = createHarness(userDataDir);
+    harness.resolveExtensions.mockImplementation(async () => fullExtensionSet());
+    harness.metadataList.mockResolvedValue([{ ...thread("thread"), enabledPluginIds: ["marketplace:second"] }]);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    client.emit({ type: "summary-changed", summary: thread("thread") });
+    await waitFor(() => harness.upsert.mock.calls.length > 0);
+    expect(harness.upsert).toHaveBeenCalledWith(
+      "project",
+      "/workspace",
+      join(userDataDir, "thread.jsonl"),
+      expect.objectContaining({ enabledPluginIds: ["marketplace:second"] }),
+    );
+    registry.detach("project", "thread");
+    await registry.dispose();
+  });
+
   it("rejects a stale draft generation before spawning a writer", async () => {
     const harness = createHarness(userDataDir);
     const registry = new ThreadWorkerRegistry(harness.options);
@@ -467,6 +588,124 @@ describe("ThreadWorkerRegistry", () => {
       "extension-set-applying",
       "extension-set-applied",
     ]);
+    await registry.dispose();
+  });
+
+  it("applies a session plugin subset through worker replacement", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const original = harness.clients[0];
+    if (!original) throw new Error("Original worker missing");
+    harness.resolveExtensions.mockImplementation(async () => fullExtensionSet());
+
+    await expect(registry.applySessionPluginSelection("project", "thread", ["marketplace:second"])).resolves.toEqual({
+      status: "applied",
+      generation: "extensions-generation",
+    });
+
+    expect(original.shutdownCount).toBe(1);
+    expect(harness.clients[1]?.bindingExtensionEntries.map(({ id }) => id)).toEqual([
+      "builtin:pi-browser",
+      "curated:test",
+      "marketplace:second",
+    ]);
+    expect(harness.resync.mock.calls.map((call) => call[2])).toEqual([
+      "extension-set-applying",
+      "extension-set-applied",
+    ]);
+    await waitFor(() => harness.upsert.mock.calls.length > 0);
+    expect(harness.upsert).toHaveBeenCalledWith(
+      "project",
+      "/workspace",
+      join(userDataDir, "thread.jsonl"),
+      expect.objectContaining({ enabledPluginIds: ["marketplace:second"] }),
+    );
+    await registry.dispose();
+  });
+
+  it("keeps the worker when the session plugin selection is unchanged", async () => {
+    const harness = createHarness(userDataDir);
+    harness.metadataList.mockResolvedValue([{ ...thread("thread"), enabledPluginIds: ["marketplace:second"] }]);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const original = harness.clients[0];
+    if (!original) throw new Error("Original worker missing");
+
+    await expect(registry.applySessionPluginSelection("project", "thread", ["marketplace:second"])).resolves.toEqual({
+      status: "unchanged",
+      generation: "extensions-generation",
+    });
+    expect(original.shutdownCount).toBe(0);
+    expect(harness.clients).toHaveLength(1);
+    await registry.dispose();
+  });
+
+  it("requires abort confirmation when the thread is running", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    harness.resolveExtensions.mockImplementation(async () => fullExtensionSet());
+    client.emit({ type: "summary-changed", summary: { ...thread("thread"), running: true } });
+
+    await expect(registry.applySessionPluginSelection("project", "thread", ["marketplace:second"])).rejects.toThrow(
+      "confirm abort",
+    );
+    expect(harness.clients).toHaveLength(1);
+    await registry.dispose();
+  });
+
+  it("aborts the running thread when explicitly confirmed", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const original = harness.clients[0];
+    if (!original) throw new Error("Original worker missing");
+    harness.resolveExtensions.mockImplementation(async () => fullExtensionSet());
+    original.emit({ type: "summary-changed", summary: { ...thread("thread"), running: true } });
+
+    await expect(
+      registry.applySessionPluginSelection("project", "thread", ["marketplace:second"], true),
+    ).resolves.toEqual({ status: "applied", generation: "extensions-generation" });
+
+    expect(original.requests).toContain("cancel");
+    expect(harness.clients[1]?.bindingExtensionEntries.map(({ id }) => id)).toEqual([
+      "builtin:pi-browser",
+      "curated:test",
+      "marketplace:second",
+    ]);
+    await registry.dispose();
+  });
+
+  it("reports selectable plugins with availability for an open session", async () => {
+    const harness = createHarness(userDataDir);
+    const set = fullExtensionSet();
+    harness.resolveWithAll.mockImplementation(async () => ({
+      set,
+      allEntries: [
+        ...set.entries,
+        {
+          id: "marketplace:out-of-scope",
+          displayName: "Out of Scope",
+          source: "marketplace",
+          entryPath: "/tmp/m3.ts",
+          hostProfileVersion: 1,
+          capabilities: [],
+        },
+      ],
+    }));
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    await expect(registry.getSessionPluginOptions("project", "thread")).resolves.toEqual({
+      plugins: expect.arrayContaining([
+        expect.objectContaining({ id: "marketplace:first", available: true }),
+        expect.objectContaining({ id: "marketplace:out-of-scope", available: false }),
+      ]),
+      enabledPluginIds: null,
+    });
     await registry.dispose();
   });
 
@@ -1071,6 +1310,8 @@ interface Harness {
   metadataPromoteCold: ReturnType<typeof vi.fn>;
   cleanupSessionCheckpoints: ReturnType<typeof vi.fn>;
   resolveExtensions: ReturnType<typeof vi.fn>;
+  resolveWithAll: ReturnType<typeof vi.fn>;
+  upsert: ReturnType<typeof vi.fn>;
   resync: ReturnType<typeof vi.fn>;
 }
 
@@ -1126,8 +1367,13 @@ function createHarness(
     invalidateProject: vi.fn(async () => {}),
   } as unknown as MetadataWorkerClient;
   const resolveExtensions = vi.fn(async (projectId: string) => extensionSet(projectId));
+  const resolveWithAll = vi.fn(async (projectId: string) => ({
+    set: await resolveExtensions(projectId),
+    allEntries: [] as ResolvedExtensionEntry[],
+  }));
   const extensionSourcePolicy = {
     resolve: resolveExtensions,
+    resolveWithAll,
   } as unknown as DesktopExtensionSourcePolicy;
   const resync = vi.fn();
   const options: ThreadWorkerRegistryOptions = {
@@ -1172,6 +1418,8 @@ function createHarness(
     metadataPromoteCold,
     cleanupSessionCheckpoints,
     resolveExtensions,
+    resolveWithAll,
+    upsert: metadata.upsert,
     resync,
   };
 }
@@ -1185,6 +1433,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   readonly bindingGeneration: string;
   readonly shellPath: string | undefined;
   readonly bindingParentSessionFile: string | undefined;
+  readonly bindingExtensionEntries: ReadonlyArray<{ id: string; source: string }>;
   readyStarted = false;
   shutdownCount = 0;
   private readonly options: WorkerClientOptions;
@@ -1219,6 +1468,10 @@ class FakeWorkerClient implements ThreadWorkerClient {
     this.shellPath = options.binding.value.shellPath;
     this.bindingParentSessionFile =
       options.binding.value.mode === "create" ? options.binding.value.parentSessionFile : undefined;
+    this.bindingExtensionEntries = options.binding.value.extensionSet.entries.map((entry) => ({
+      id: entry.id,
+      source: entry.source,
+    }));
     this.bootstrap = bootstrap(threadId, this.bindingGeneration);
   }
 
@@ -1332,6 +1585,57 @@ function extensionSet(projectId = "project", generation = "extensions-generation
           },
         ]
       : [],
+    diagnostics: [],
+    resolvedAt: 0,
+  };
+}
+
+function fullExtensionSet(): ResolvedExtensionSet {
+  return {
+    generation: "extensions-generation",
+    projectId: "project",
+    entries: [
+      {
+        id: "builtin:pi-browser",
+        displayName: "Browser",
+        source: "builtin",
+        entryPath: "/tmp/builtin.ts",
+        hostProfileVersion: 1,
+        capabilities: [],
+      },
+      {
+        id: "curated:test",
+        displayName: "Curated",
+        source: "curated",
+        entryPath: "/tmp/curated.ts",
+        hostProfileVersion: 1,
+        capabilities: [],
+      },
+      {
+        id: "marketplace:first",
+        displayName: "Market First",
+        source: "marketplace",
+        entryPath: "/tmp/m1.ts",
+        hostProfileVersion: 1,
+        capabilities: [],
+      },
+      {
+        id: "marketplace:second",
+        displayName: "Market Second",
+        source: "marketplace",
+        entryPath: "/tmp/m2.ts",
+        hostProfileVersion: 1,
+        capabilities: [],
+      },
+      {
+        id: "development:dev",
+        displayName: "Dev Plugin",
+        source: "development",
+        entryPath: "/tmp/dev.ts",
+        hostProfileVersion: 1,
+        capabilities: [],
+      },
+    ],
     diagnostics: [],
     resolvedAt: 0,
   };

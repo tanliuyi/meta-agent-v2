@@ -33,6 +33,13 @@ interface DesktopExtensionSourcePolicyOptions {
 interface CachedSet {
   fingerprint: string;
   set: ResolvedExtensionSet;
+  /** 所有构建成功的插件中心条目（marketplace/development，含项目作用域外），供会话级选择。 */
+  allEntries: ResolvedExtensionEntry[];
+}
+
+interface ResolveResult {
+  set: ResolvedExtensionSet;
+  allEntries: ResolvedExtensionEntry[];
 }
 
 /** Main-owned allowlist resolver for every draft and live worker generation. */
@@ -44,11 +51,22 @@ export class DesktopExtensionSourcePolicy {
     this.options = options;
   }
 
+  /** 项目作用域过滤后的扩展集（会话加载的默认全集）。 */
   async resolve(projectId: string): Promise<ResolvedExtensionSet> {
+    return (await this.resolveInternal(projectId)).set;
+  }
+
+  /** 项目作用域过滤后的扩展集 + 全部可构建的插件中心条目（含作用域外），供会话级选择。 */
+  async resolveWithAll(projectId: string): Promise<ResolveResult> {
+    return this.resolveInternal(projectId);
+  }
+
+  private async resolveInternal(projectId: string): Promise<ResolveResult> {
     if (!projectId) throw new Error("Extension source policy requires a project ID");
     const settings = await this.options.settings.getInternalConfig();
     const diagnostics: DesktopExtensionDiagnostic[] = [];
     const pathEntries: ResolvedExtensionEntry[] = [];
+    const allEntries: ResolvedExtensionEntry[] = [];
     const fingerprintParts = [settings.revision, projectId];
     const curatedDefinitions = this.options.getCuratedDefinitions();
     for (const definition of curatedDefinitions) {
@@ -65,20 +83,19 @@ export class DesktopExtensionSourcePolicy {
       const localPluginIds = collectLocalPluginIds(settings.developmentEntries, projectId);
       for (const plugin of marketplace.plugins) {
         if (!plugin.enabled || plugin.state !== "installed") continue;
-        if (plugin.scope === "project" && !(plugin.projectIds ?? []).includes(projectId)) {
-          fingerprintParts.push(`${plugin.id}:out-of-scope:${(plugin.projectIds ?? []).join(",")}`);
-          continue;
-        }
+        const inScope = !(plugin.scope === "project" && !(plugin.projectIds ?? []).includes(projectId));
         const localPlugin = localPluginIds.get(plugin.id);
         if (localPlugin) {
           fingerprintParts.push(`${plugin.id}:superseded-by-local`);
-          diagnostics.push({
-            extensionId: plugin.id,
-            source: "marketplace",
-            phase: "resolve",
-            code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
-            message: `本地插件“${localPlugin}”已覆盖市场插件“${plugin.displayName}”，当前使用本地版本。停用或移除本地插件后，市场版本将自动恢复。`,
-          });
+          if (inScope) {
+            diagnostics.push({
+              extensionId: plugin.id,
+              source: "marketplace",
+              phase: "resolve",
+              code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
+              message: `本地插件“${localPlugin}”已覆盖市场插件“${plugin.displayName}”，当前使用本地版本。停用或移除本地插件后，市场版本将自动恢复。`,
+            });
+          }
           continue;
         }
         try {
@@ -91,7 +108,7 @@ export class DesktopExtensionSourcePolicy {
           fingerprintParts.push(
             `${plugin.id}:${plugin.scope}:${(plugin.projectIds ?? []).join(",")}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`,
           );
-          pathEntries.push({
+          const entry: ResolvedExtensionEntry = {
             id: plugin.id,
             displayName: plugin.displayName,
             source: "marketplace",
@@ -99,26 +116,27 @@ export class DesktopExtensionSourcePolicy {
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [...plugin.capabilities],
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
-          });
+          };
+          allEntries.push(entry);
+          if (inScope) pathEntries.push(entry);
         } catch {
           fingerprintParts.push(`${plugin.id}:broken`);
-          diagnostics.push({
-            extensionId: plugin.id,
-            source: "marketplace",
-            phase: "resolve",
-            code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-            message: `市场插件“${plugin.displayName}”暂不可用，本次会话不会加载该插件。`,
-          });
+          if (inScope) {
+            diagnostics.push({
+              extensionId: plugin.id,
+              source: "marketplace",
+              phase: "resolve",
+              code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
+              message: `市场插件“${plugin.displayName}”暂不可用，本次会话不会加载该插件。`,
+            });
+          }
         }
       }
     }
     if (settings.developerMode) {
       for (const entry of settings.developmentEntries) {
         if (!entry.enabled) continue;
-        if (entry.scope === "project" && !(entry.projectIds ?? []).includes(projectId)) {
-          fingerprintParts.push(`${entry.id}:out-of-scope:${(entry.projectIds ?? []).join(",")}`);
-          continue;
-        }
+        const inScope = !(entry.scope === "project" && !(entry.projectIds ?? []).includes(projectId));
         try {
           const info = await lstat(entry.entryPath);
           if (!info.isFile() || info.isSymbolicLink()) throw new Error("entry is not a regular non-symlink file");
@@ -133,7 +151,7 @@ export class DesktopExtensionSourcePolicy {
           fingerprintParts.push(
             `${entry.id}:${entry.scope ?? "global"}:${(entry.projectIds ?? []).join(",")}:${entry.pluginId ?? ""}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
           );
-          pathEntries.push({
+          const resolved: ResolvedExtensionEntry = {
             id: entry.id,
             displayName: entry.displayName,
             source: "development",
@@ -142,16 +160,20 @@ export class DesktopExtensionSourcePolicy {
             capabilities: [...entry.capabilities],
             ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
-          });
+          };
+          allEntries.push(resolved);
+          if (inScope) pathEntries.push(resolved);
         } catch {
           fingerprintParts.push(`${entry.id}:missing`);
-          diagnostics.push({
-            extensionId: entry.id,
-            source: "development",
-            phase: "resolve",
-            code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-            message: `本地插件“${entry.displayName}”暂不可用，本次会话不会加载该插件。`,
-          });
+          if (inScope) {
+            diagnostics.push({
+              extensionId: entry.id,
+              source: "development",
+              phase: "resolve",
+              code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
+              message: `本地插件“${entry.displayName}”暂不可用，本次会话不会加载该插件。`,
+            });
+          }
         }
       }
     }
@@ -164,7 +186,9 @@ export class DesktopExtensionSourcePolicy {
     assertUniqueIds(entries);
     const fingerprint = fingerprintParts.join("\0");
     const current = this.cache.get(projectId);
-    if (current?.fingerprint === fingerprint) return cloneSet(current.set);
+    if (current?.fingerprint === fingerprint) {
+      return { set: cloneSet(current.set), allEntries: cloneEntries(current.allEntries) };
+    }
     const generation = this.options.createGeneration?.() ?? randomUUID();
     const set: ResolvedExtensionSet = {
       generation,
@@ -180,8 +204,8 @@ export class DesktopExtensionSourcePolicy {
       })),
       resolvedAt: Date.now(),
     };
-    this.cache.set(projectId, { fingerprint, set });
-    return cloneSet(set);
+    this.cache.set(projectId, { fingerprint, set, allEntries });
+    return { set: cloneSet(set), allEntries: cloneEntries(allEntries) };
   }
 
   invalidate(projectId?: string): void {
@@ -236,14 +260,18 @@ function assertUniqueIds(entries: ResolvedExtensionEntry[]): void {
   }
 }
 
+function cloneEntries(entries: ResolvedExtensionEntry[]): ResolvedExtensionEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    capabilities: [...entry.capabilities],
+    ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
+  }));
+}
+
 function cloneSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
   return {
     ...set,
-    entries: set.entries.map((entry) => ({
-      ...entry,
-      capabilities: [...entry.capabilities],
-      ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
-    })),
+    entries: cloneEntries(set.entries),
     diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
   };
 }

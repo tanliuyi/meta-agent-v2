@@ -30,7 +30,9 @@ import {
 import type {
   ApplyDesktopExtensionSetResult,
   DesktopExtensionDiagnostic,
+  ResolvedExtensionEntry,
   ResolvedExtensionSet,
+  SessionPluginOptions,
   StaleDraftExtensionSetErrorDetails,
 } from "../../shared/desktop-extension-contracts.ts";
 import type {
@@ -81,6 +83,8 @@ interface WorkerRecord {
   createRequestId?: string;
   sessionFile?: string;
   extensionSet: ResolvedExtensionSet;
+  /** 会话级激活的插件子集；缺失表示继承项目级（全部激活）。 */
+  enabledPluginIds?: string[];
   desiredExtensionGeneration: string;
   desiredExtensionDiagnostics: DesktopExtensionDiagnostic[];
   extensionDiagnostics: DesktopExtensionDiagnostic[];
@@ -244,8 +248,8 @@ export class ThreadWorkerRegistry {
   async getDraftConfig(projectId: string): Promise<DraftSessionConfig> {
     this.assertProjectAvailable(projectId);
     const cwd = this.options.getCwd(projectId);
-    const extensionSet = await this.options.extensionSourcePolicy.resolve(projectId);
-    return this.options.metadata.getDraftConfig(projectId, cwd, extensionSet);
+    const { set: extensionSet, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
+    return this.options.metadata.getDraftConfig(projectId, cwd, extensionSet, allEntries);
   }
 
   async getExtensionState(projectId: string, threadId: string) {
@@ -267,6 +271,132 @@ export class ThreadWorkerRegistry {
         : (current?.desiredExtensionDiagnostics ?? desired.diagnostics)
       ).map((diagnostic) => ({ ...diagnostic })),
     };
+  }
+
+  /** 会话级插件选择：返回全量可构建插件（含项目作用域外）与当前会话激活子集。 */
+  async getSessionPluginOptions(projectId: string, threadId: string): Promise<SessionPluginOptions> {
+    this.assertProjectAvailable(projectId);
+    const { set, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
+    const record = this.records.get(workerKey(projectId, threadId));
+    return {
+      plugins: allEntries.map((entry) => ({
+        id: entry.id,
+        displayName: entry.displayName,
+        source: entry.source === "development" ? ("development" as const) : ("marketplace" as const),
+        available: set.entries.some((active) => active.id === entry.id),
+      })),
+      enabledPluginIds: record?.enabledPluginIds ?? null,
+    };
+  }
+
+  /** 替换当前 worker 以应用会话级插件选择（replacement spawn，失败回滚到旧子集）。 */
+  async applySessionPluginSelection(
+    projectId: string,
+    threadId: string,
+    enabledPluginIds: string[] | null,
+    abortRunning = false,
+  ): Promise<ApplyDesktopExtensionSetResult> {
+    const normalized = enabledPluginIds ? [...enabledPluginIds] : undefined;
+    const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    this.assertWorkspaceNotExclusive(workspaceKey);
+    this.assertNotActiveSubagent(projectId, threadId);
+    const key = workerKey(projectId, threadId);
+    if (this.drainingThreads.has(key))
+      throw new Error(`Extension set apply is already running for ${projectId}/${threadId}`);
+    let completeApply!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      completeApply = resolve;
+    });
+    this.drainingThreads.add(key);
+    this.extensionApplyCompletions.set(key, completion);
+    try {
+      return await this.withThreadLock(key, async () => {
+        this.assertWorkspaceNotExclusive(workspaceKey);
+        const current = await this.requireUnlocked(projectId, threadId);
+        if (equalStringLists(current.enabledPluginIds, normalized)) {
+          return { status: "unchanged" as const, generation: current.extensionSet.generation };
+        }
+        const { set: desired, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
+        if (current.inFlight > 0) throw new Error(`Cannot apply extensions while thread commands are in flight`);
+        if (current.summary?.running) {
+          if (!abortRunning) throw new Error("Thread is running; confirm abort before applying extensions");
+          await current.client.request({ type: "cancel" }, null);
+          await waitForIdleSummary(current);
+        }
+        if (!current.sessionFile) throw new Error("Cannot apply extensions before the session file is materialized");
+        const previousSet = cloneExtensionSet(current.extensionSet);
+        const previousEnabled = current.enabledPluginIds;
+        const attachments = current.attachments;
+        const sessionFile = current.sessionFile;
+        this.options.resync(projectId, threadId, "extension-set-applying");
+        current.retired = true;
+        await this.awaitRecordShutdown(current);
+        if (this.records.get(key) === current) this.records.delete(key);
+        let replacement: WorkerRecord | undefined;
+        try {
+          replacement = await this.spawn({
+            mode: "open",
+            projectId,
+            cwd: this.options.getCwd(projectId),
+            agentDir: this.options.agentDir,
+            ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
+            threadId,
+            sessionFile,
+            ...(normalized ? { enabledPluginIds: normalized } : {}),
+            extensionSet: buildSessionExtensionSet(desired, allEntries, normalized),
+          });
+        } catch (error) {
+          try {
+            if (replacement && !replacement.retired) {
+              replacement.retired = true;
+              await this.awaitRecordShutdown(replacement);
+              if (this.records.get(key) === replacement) this.records.delete(key);
+            }
+          } finally {
+            const rollback = await this.spawn({
+              mode: "open",
+              projectId,
+              cwd: this.options.getCwd(projectId),
+              agentDir: this.options.agentDir,
+              ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
+              threadId,
+              sessionFile,
+              ...(previousEnabled ? { enabledPluginIds: previousEnabled } : {}),
+              extensionSet: previousSet,
+            });
+            activateAppliedRecord(rollback, attachments);
+            rollback.desiredExtensionGeneration = desired.generation;
+            rollback.desiredExtensionDiagnostics = [
+              ...desired.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+              ...desired.entries.map((entry) => ({
+                extensionId: entry.id,
+                source: entry.source,
+                extensionSetGeneration: desired.generation,
+                projectId,
+                threadId,
+                phase: "start" as const,
+                code: "DESKTOP_EXTENSION_STARTUP_FAILED",
+                message: error instanceof Error ? error.message : String(error),
+              })),
+            ];
+            this.options.resync(projectId, threadId, "extension-set-rollback");
+          }
+          return {
+            status: "rolled-back" as const,
+            generation: previousSet.generation,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+        if (!replacement) throw new Error("Replacement worker is unavailable after successful startup");
+        activateAppliedRecord(replacement, attachments);
+        this.options.resync(projectId, threadId, "extension-set-applied");
+        return { status: "applied" as const, generation: desired.generation };
+      });
+    } finally {
+      this.drainingThreads.delete(key);
+      if (this.extensionApplyCompletions.get(key) === completion) this.extensionApplyCompletions.delete(key);
+      completeApply();
+    }
   }
 
   async extensionSettingsChanged(): Promise<void> {
@@ -302,7 +432,7 @@ export class ThreadWorkerRegistry {
     const recovered = await this.recoverCreationRequest(input.projectId, input.createRequestId);
     if (recovered) return recovered;
     const cwd = this.options.getCwd(input.projectId);
-    const extensionSet = await this.options.extensionSourcePolicy.resolve(input.projectId);
+    const { set: extensionSet, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(input.projectId);
     if (input.extensionSetGeneration !== extensionSet.generation) {
       throw new StaleDraftExtensionSetError(input.extensionSetGeneration, extensionSet.generation);
     }
@@ -323,7 +453,7 @@ export class ThreadWorkerRegistry {
       sessionId,
       createInput: input,
       ...(parentSessionFile ? { parentSessionFile } : {}),
-      extensionSet,
+      extensionSet: buildSessionExtensionSet(extensionSet, allEntries, input.enabledPluginIds),
     };
     const record = await this.spawn(binding);
     if (record.retired || record.client.available === false) {
@@ -598,7 +728,7 @@ export class ThreadWorkerRegistry {
       return await this.withThreadLock(key, async () => {
         this.assertWorkspaceNotExclusive(workspaceKey);
         const current = await this.requireUnlocked(projectId, threadId);
-        const desired = await this.options.extensionSourcePolicy.resolve(projectId);
+        const { set: desired, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
         if (desired.generation !== expectedDesiredGeneration) {
           throw new StaleExtensionSetApplyError(expectedDesiredGeneration, desired.generation);
         }
@@ -632,7 +762,8 @@ export class ThreadWorkerRegistry {
             ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
             threadId,
             sessionFile,
-            extensionSet: desired,
+            ...(current.enabledPluginIds ? { enabledPluginIds: current.enabledPluginIds } : {}),
+            extensionSet: buildSessionExtensionSet(desired, allEntries, current.enabledPluginIds),
           });
           latestDesired = await this.options.extensionSourcePolicy.resolve(projectId);
           if (latestDesired.generation !== expectedDesiredGeneration) {
@@ -734,7 +865,7 @@ export class ThreadWorkerRegistry {
               projectId,
               this.options.getCwd(projectId),
               current.sessionFile,
-              current.summary,
+              withSessionEnabledPluginIds(current, current.summary),
             );
           }
         } catch (error) {
@@ -1108,7 +1239,9 @@ export class ThreadWorkerRegistry {
       this.options.metadata.resolve(projectId, cwd, threadId),
     ]);
     const initialUpdatedAt = threads.find(({ id }) => id === threadId)?.updatedAt;
-    const extensionSet = await this.options.extensionSourcePolicy.resolve(projectId);
+    const indexedThread = threads.find(({ id }) => id === threadId);
+    const { set: extensionSet, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
+    const enabledPluginIds = indexedThread?.enabledPluginIds;
     return this.spawn({
       mode: "open",
       projectId,
@@ -1118,7 +1251,8 @@ export class ThreadWorkerRegistry {
       threadId,
       sessionFile: session.path,
       ...(initialUpdatedAt !== undefined ? { initialUpdatedAt } : {}),
-      extensionSet,
+      ...(enabledPluginIds ? { enabledPluginIds } : {}),
+      extensionSet: buildSessionExtensionSet(extensionSet, allEntries, enabledPluginIds),
     });
   }
 
@@ -1243,6 +1377,13 @@ export class ThreadWorkerRegistry {
       createRequestId: binding.mode === "create" ? binding.createInput.createRequestId : undefined,
       sessionFile: binding.mode === "open" ? binding.sessionFile : undefined,
       extensionSet: cloneExtensionSet(binding.extensionSet),
+      ...(binding.mode === "create"
+        ? binding.createInput.enabledPluginIds
+          ? { enabledPluginIds: binding.createInput.enabledPluginIds }
+          : {}
+        : binding.enabledPluginIds
+          ? { enabledPluginIds: binding.enabledPluginIds }
+          : {}),
       desiredExtensionGeneration: binding.extensionSet.generation,
       desiredExtensionDiagnostics: binding.extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
       extensionDiagnostics: binding.extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
@@ -1269,7 +1410,7 @@ export class ThreadWorkerRegistry {
           record.projectId,
           this.options.getCwd(record.projectId),
           record.sessionFile,
-          record.summary,
+          withSessionEnabledPluginIds(record, record.summary),
         );
       }
       return record;
@@ -1345,7 +1486,12 @@ export class ThreadWorkerRegistry {
         return;
       }
       void this.options.metadata
-        .upsert(record.projectId, this.options.getCwd(record.projectId), record.sessionFile, record.summary)
+        .upsert(
+          record.projectId,
+          this.options.getCwd(record.projectId),
+          record.sessionFile,
+          withSessionEnabledPluginIds(record, record.summary),
+        )
         .catch((error: unknown) => this.options.log?.(`metadata:${record.projectId}`, String(error)))
         .finally(() => record.client.acknowledge(event.sequence));
     } else if (event.event.type === "resync-required") {
@@ -1704,13 +1850,50 @@ function cloneExtensionSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
   };
 }
 
+/** 索引持久化时把会话级插件子集合入 summary，避免后续 summary 推送覆盖丢失。 */
+function withSessionEnabledPluginIds(record: WorkerRecord, summary: Thread): Thread {
+  return record.enabledPluginIds ? { ...summary, enabledPluginIds: record.enabledPluginIds } : summary;
+}
+
+/** 两个字符串列表是否相等（顺序无关）。 */
+function equalStringLists(left: string[] | undefined, right: string[] | undefined): boolean {
+  if (!left || !right) return left === right;
+  if (left.length !== right.length) return false;
+  const set = new Set(right);
+  return left.every((id) => set.has(id));
+}
+
+/** 会话级激活子集过滤：builtin/curated 恒加载（来自项目扩展集），marketplace/development 按选中集从全量条目重建（含项目作用域外插件）；generation 不变。 */
+function buildSessionExtensionSet(
+  set: ResolvedExtensionSet,
+  allEntries: ResolvedExtensionEntry[],
+  enabledPluginIds: string[] | undefined,
+): ResolvedExtensionSet {
+  if (!enabledPluginIds) return set;
+  const selected = new Set(enabledPluginIds);
+  const outOfScope = allEntries.filter(
+    (entry) => selected.has(entry.id) && !set.entries.some((active) => active.id === entry.id),
+  );
+  const entries = [
+    ...set.entries.filter((entry) => {
+      if (entry.source === "marketplace" || entry.source === "development") return selected.has(entry.id);
+      return true;
+    }),
+    ...outOfScope,
+  ];
+  return {
+    ...set,
+    entries: entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+  };
+}
+
 function summaryFromBootstrap(bootstrap: SessionBootstrap): Thread {
   const nodes = bootstrap.timeline.nodes.filter((node) => node.kind === "user" || node.kind === "assistant");
-  const firstUser = nodes.find((node) => node.kind === "user");
   const lastNode = nodes.at(-1);
   const lastUser = lastNode ? [...nodes].reverse().find((node) => node.kind === "user") : undefined;
   const nodeText = (node: (typeof nodes)[number]) =>
     node.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  const firstUser = nodes.find((node) => node.kind === "user");
   const preview = firstUser?.kind === "user" ? nodeText(firstUser).slice(0, 120) : "";
   const lastUserPreview = lastUser ? previewFirstLines(nodeText(lastUser), THREAD_USER_PREVIEW_MAX_CHARS) : undefined;
   const lastAssistantPreview =

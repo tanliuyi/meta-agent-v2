@@ -20,6 +20,7 @@ interface DraftComposerThreadProps {
   onProjectChange(projectId: string): Promise<void>;
   onModelChange(provider: string, modelId: string): void;
   onThinkingChange(level: ThinkingLevel): void;
+  onPluginsChange(enabledPluginIds: string[] | null): void;
   onSubmit(): Promise<void>;
 }
 

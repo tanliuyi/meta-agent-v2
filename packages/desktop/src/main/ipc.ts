@@ -38,6 +38,7 @@ import type { ShellRuntimeProgress, ShellRuntimeStatus } from "../shared/desktop
 import type {
   ApplyDesktopExtensionSetInput,
   ApplyDesktopExtensionSetResult,
+  ApplySessionPluginSelectionInput,
   ApproveDevelopmentExtensionInput,
   SaveDesktopExtensionSettingsInput,
 } from "../shared/desktop-extension-contracts.ts";
@@ -271,6 +272,10 @@ export function registerIpc(
     ipcMain.handle(CHANNELS.browserHistory, (_event, identity: BrowserSessionIdentity) =>
       browser.browserHistory(identity),
     );
+    ipcMain.handle(CHANNELS.browserOpenDownloads, async () => {
+      const error = await shell.openPath(app.getPath("downloads"));
+      return error ? { ok: false as const, error } : { ok: true as const };
+    });
     ipcMain.handle(
       CHANNELS.browserAnnotationPick,
       (_event, identity: BrowserSessionIdentity, tabId: number, x: number, y: number) =>
@@ -459,6 +464,12 @@ export function registerIpc(
     );
     ipcMain.handle(CHANNELS.extensionsApply, (_event, input: ApplyDesktopExtensionSetInput) =>
       sessions.applyExtensionSet(input.projectId, input.threadId, input.expectedDesiredGeneration, input.abortRunning),
+    );
+    ipcMain.handle(CHANNELS.extensionsGetSessionPlugins, (_event, projectId: string, threadId: string) =>
+      sessions.getSessionPluginOptions(projectId, threadId),
+    );
+    ipcMain.handle(CHANNELS.extensionsApplySessionPlugins, (_event, input: ApplySessionPluginSelectionInput) =>
+      sessions.applySessionPluginSelection(input.projectId, input.threadId, input.enabledPluginIds, input.abortRunning),
     );
     ipcMain.handle(CHANNELS.extensionsGetPluginConfiguration, async (_event, pluginId: string) => {
       if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");

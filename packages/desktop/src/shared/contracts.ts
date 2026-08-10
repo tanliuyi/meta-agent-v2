@@ -59,6 +59,8 @@ export interface Thread {
   origin?: "branch" | "subagent";
   /** Configured agent identity for subagent sessions; independent from the user-editable title. */
   agentName?: string;
+  /** 会话级激活的插件子集（sidecar 索引持久化）；缺失表示继承项目级（全部激活）。 */
+  enabledPluginIds?: string[];
 }
 
 /** Thread 加 session.jsonl 绝对路径，用于 @ 提及会话引用。 */
@@ -120,6 +122,8 @@ export interface SessionCreateInput {
   thinkingLevel: ThinkingLevel;
   /** 创建为该会话的子会话（侧边栏草稿等场景），写入 session header 的 parentSession。 */
   parentThreadId?: string;
+  /** 会话级激活的插件子集；缺省表示继承项目级（全部激活）。 */
+  enabledPluginIds?: string[];
 }
 
 /** Composer 可补全的 Pi slash command。 */

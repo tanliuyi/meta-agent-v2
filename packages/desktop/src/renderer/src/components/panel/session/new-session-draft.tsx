@@ -83,6 +83,11 @@ export function NewSessionDraft() {
     draft.setConfig(next);
   };
 
+  const selectPlugins = (enabledPluginIds: string[] | null): void => {
+    if (!draft.config) return;
+    draft.setConfig({ ...draft.config, extensions: { ...draft.config.extensions, enabledPluginIds } });
+  };
+
   const submit = async (): Promise<void> => {
     if (draft.submitInFlight) return;
     if (!draft.config?.model || draft.config.readiness.state !== "ready") return;
@@ -101,6 +106,9 @@ export function NewSessionDraft() {
           model: { provider: draft.config.model.provider, id: draft.config.model.id },
           thinkingLevel: draft.config.thinkingLevel,
           extensionSetGeneration: draft.config.extensions.extensionSetGeneration,
+          ...(draft.config.extensions.enabledPluginIds
+            ? { enabledPluginIds: draft.config.extensions.enabledPluginIds }
+            : {}),
           text: state.text,
           images,
         },
@@ -155,6 +163,7 @@ export function NewSessionDraft() {
           onProjectChange={async () => undefined}
           onModelChange={selectModel}
           onThinkingChange={selectThinking}
+          onPluginsChange={selectPlugins}
           onSubmit={submit}
         />
       </div>

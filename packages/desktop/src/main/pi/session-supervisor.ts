@@ -229,6 +229,19 @@ export class SessionSupervisor {
     return this.workers.applyExtensionSet(projectId, threadId, expectedDesiredGeneration, abortRunning);
   }
 
+  getSessionPluginOptions(projectId: string, threadId: string) {
+    return this.workers.getSessionPluginOptions(projectId, threadId);
+  }
+
+  applySessionPluginSelection(
+    projectId: string,
+    threadId: string,
+    enabledPluginIds: string[] | null,
+    abortRunning = false,
+  ) {
+    return this.workers.applySessionPluginSelection(projectId, threadId, enabledPluginIds, abortRunning);
+  }
+
   rename(projectId: string, threadId: string, title: string): Promise<void> {
     return this.workers.rename(projectId, threadId, title);
   }

@@ -55,6 +55,8 @@ interface DraftMaterializationInput {
   model: SessionCreateInput["model"];
   thinkingLevel: SessionCreateInput["thinkingLevel"];
   extensionSetGeneration: string;
+  /** 会话级激活的插件子集；缺省表示继承项目级（全部激活）。 */
+  enabledPluginIds?: string[];
   /** 创建为该会话的子会话（侧边栏草稿等场景）。 */
   parentThreadId?: string;
   text: string;
@@ -84,6 +86,7 @@ export async function materializeDraftSession(
     extensionSetGeneration: input.extensionSetGeneration,
     model: input.model,
     thinkingLevel: input.thinkingLevel,
+    ...(input.enabledPluginIds ? { enabledPluginIds: input.enabledPluginIds } : {}),
     ...(input.parentThreadId ? { parentThreadId: input.parentThreadId } : {}),
   });
   dependencies.requestIds.delete(input.projectId);

@@ -8,6 +8,7 @@ import {
 import type { DraftSessionConfig, Readiness, SessionCreateInput, ThinkingLevel } from "../../shared/contracts.ts";
 import {
   DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+  type ResolvedExtensionEntry,
   type ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
 import { DesktopBuiltinProviderRegistry } from "./desktop-builtin-provider.ts";
@@ -31,6 +32,8 @@ export async function loadDraftSessionConfig(
   services?: SessionConfigurationServices,
   agentDir?: string,
   resolvedExtensionSet?: ResolvedExtensionSet,
+  /** 全部可构建的插件中心条目（含项目作用域外），供会话级插件选择；缺省回退到扩展集内条目。 */
+  allEntries?: ResolvedExtensionEntry[],
 ): Promise<DraftSessionConfig> {
   const extensionSet = resolvedExtensionSet ?? fallbackExtensionSet(cwd);
   let models: ModelRuntime;
@@ -81,6 +84,19 @@ export async function loadDraftSessionConfig(
         ...(resources ? extensionLoadDiagnostics(extensionSet, resources.getExtensions()) : extensionSet.diagnostics),
         ...extensionServiceDiagnostics(extensionSet, serviceDiagnostics),
       ],
+      plugins: (allEntries ?? extensionSet.entries).flatMap((entry) =>
+        entry.source === "marketplace" || entry.source === "development"
+          ? [
+              {
+                id: entry.id,
+                displayName: entry.displayName,
+                source: entry.source,
+                available: extensionSet.entries.some((active) => active.id === entry.id),
+              },
+            ]
+          : [],
+      ),
+      enabledPluginIds: null,
     },
   };
 }
