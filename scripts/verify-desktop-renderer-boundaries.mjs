@@ -25,6 +25,7 @@ const LOCAL_STYLE_IMPORTS = new Map([
 	["memory-settings.css", '@import "./memory-settings.css" layer(components);'],
 	["auto-title-settings.css", '@import "./auto-title-settings.css" layer(components);'],
 	["providers-settings.css", '@import "./providers-settings.css" layer(components);'],
+	["keyboard-shortcuts-settings.css", '@import "./keyboard-shortcuts-settings.css" layer(components);'],
 	["chat.css", '@import "./chat.css" layer(components);'],
 	["image-preview.css", '@import "./image-preview.css";'],
 	["markdown.css", '@import "./markdown.css" layer(components);'],

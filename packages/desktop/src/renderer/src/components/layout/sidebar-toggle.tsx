@@ -1,5 +1,7 @@
 import PanelLeft from "lucide-react/dist/esm/icons/panel-left.mjs";
 import { useEffect, useRef } from "react";
+import { useKeyboardShortcuts } from "../../state/keyboard-shortcut-provider.tsx";
+import { formatKeyboardShortcut } from "../../state/keyboard-shortcuts.ts";
 import { useLayout } from "../../state/layout.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 
@@ -14,6 +16,12 @@ export function SidebarToggle({
   floating?: boolean;
 }) {
   const { sidebarOpen, toggleSidebar } = useLayout();
+  const { getBindings } = useKeyboardShortcuts();
+  const shortcut = getBindings("layout.sidebar.toggle")[0];
+  const actionLabel = sidebarOpen ? "收起侧边栏" : "展开侧边栏";
+  const tooltip = shortcut
+    ? `${actionLabel} · ${formatKeyboardShortcut(shortcut, window.desktop.platform)}`
+    : actionLabel;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const visible = floating ? true : location === "sidebar" ? sidebarOpen : location === "topbar" ? !sidebarOpen : true;
 
@@ -32,10 +40,10 @@ export function SidebarToggle({
       variant="ghost"
       size="icon"
       className="sidebar-toggle size-6 fixed z-999"
-      aria-label={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
+      aria-label={actionLabel}
       aria-controls="sidebar-content"
       aria-expanded={sidebarOpen}
-      tooltip={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
+      tooltip={tooltip}
       side="bottom"
       onClick={() => {
         transferSidebarToggleFocus = document.activeElement === buttonRef.current;

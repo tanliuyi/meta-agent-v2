@@ -22,6 +22,7 @@ import { Route as SettingsAutoTitleRouteImport } from './routes/settings.auto-ti
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsDependenciesRouteImport } from './routes/settings.dependencies'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
+import { Route as SettingsKeyboardRouteImport } from './routes/settings.keyboard'
 import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
@@ -95,6 +96,11 @@ const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
   path: '/extensions',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsKeyboardRoute = SettingsKeyboardRouteImport.update({
+  id: '/keyboard',
+  path: '/keyboard',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsMemoryRoute = SettingsMemoryRouteImport.update({
   id: '/memory',
   path: '/memory',
@@ -150,6 +156,7 @@ export interface FileRoutesByFullPath {
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
+  '/settings/keyboard': typeof SettingsKeyboardRoute
   '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
@@ -169,6 +176,7 @@ export interface FileRoutesByTo {
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
+  '/settings/keyboard': typeof SettingsKeyboardRoute
   '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
+  '/settings/keyboard': typeof SettingsKeyboardRoute
   '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
@@ -218,6 +227,7 @@ export interface FileRouteTypes {
     | '/settings/browser'
     | '/settings/dependencies'
     | '/settings/extensions'
+    | '/settings/keyboard'
     | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/settings/browser'
     | '/settings/dependencies'
     | '/settings/extensions'
+    | '/settings/keyboard'
     | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
@@ -260,6 +271,7 @@ export interface FileRouteTypes {
     | '/settings/browser'
     | '/settings/dependencies'
     | '/settings/extensions'
+    | '/settings/keyboard'
     | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
@@ -370,6 +382,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsExtensionsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/keyboard': {
+      id: '/settings/keyboard'
+      path: '/keyboard'
+      fullPath: '/settings/keyboard'
+      preLoaderRoute: typeof SettingsKeyboardRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/memory': {
       id: '/settings/memory'
       path: '/memory'
@@ -470,6 +489,7 @@ interface SettingsRouteChildren {
   SettingsBrowserRoute: typeof SettingsBrowserRoute
   SettingsDependenciesRoute: typeof SettingsDependenciesRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
+  SettingsKeyboardRoute: typeof SettingsKeyboardRoute
   SettingsMemoryRoute: typeof SettingsMemoryRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
@@ -485,6 +505,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsBrowserRoute: SettingsBrowserRoute,
   SettingsDependenciesRoute: SettingsDependenciesRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
+  SettingsKeyboardRoute: SettingsKeyboardRoute,
   SettingsMemoryRoute: SettingsMemoryRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,

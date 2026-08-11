@@ -5,6 +5,8 @@ import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import { useEffect, useRef, useState } from "react";
+import { useKeyboardShortcuts } from "../../state/keyboard-shortcut-provider.tsx";
+import { formatKeyboardShortcut } from "../../state/keyboard-shortcuts.ts";
 import {
   readStoredProjectExpanded,
   SIDEBAR_PROJECTS_SECTION_ID,
@@ -33,6 +35,11 @@ interface ProjectSectionProps {
 /** 项目导航的可折叠分组。 */
 export function ProjectSection({ activeProjectId, newTaskDisabled, onNewTask, onAddProject }: ProjectSectionProps) {
   const [expanded, setExpanded] = useState(() => readStoredProjectExpanded(SIDEBAR_PROJECTS_SECTION_ID, true));
+  const { getBindings } = useKeyboardShortcuts();
+  const addProjectShortcut = getBindings("project.open")[0];
+  const addProjectTooltip = addProjectShortcut
+    ? `添加项目 · ${formatKeyboardShortcut(addProjectShortcut, window.desktop.platform)}`
+    : "添加项目";
   const wasActive = useRef(activeProjectId);
 
   useEffect(() => {
@@ -66,7 +73,7 @@ export function ProjectSection({ activeProjectId, newTaskDisabled, onNewTask, on
             variant="ghost"
             size="icon"
             aria-label="添加项目"
-            tooltip="添加项目"
+            tooltip={addProjectTooltip}
             side="top"
             className="sidebar-section-control"
             onClick={() => void onAddProject().catch(() => undefined)}

@@ -10,12 +10,14 @@ import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
 import Brain from "lucide-react/dist/esm/icons/brain.mjs";
 import Globe from "lucide-react/dist/esm/icons/globe.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
+import Keyboard from "lucide-react/dist/esm/icons/keyboard.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Server from "lucide-react/dist/esm/icons/server.mjs";
 import Sparkles from "lucide-react/dist/esm/icons/sparkles.mjs";
 
 const SETTINGS_LINKS = [
   { to: "/settings/personalization", label: "个性化", icon: Palette },
+  { to: "/settings/keyboard", label: "键盘快捷键", icon: Keyboard },
   { to: "/settings/models", label: "模型服务商", icon: Server },
   { to: "/settings/auto-title", label: "自动标题", icon: Sparkles },
   { to: "/settings/browser", label: "浏览器", icon: Globe },

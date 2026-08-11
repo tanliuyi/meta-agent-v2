@@ -13,6 +13,12 @@ vi.mock("../src/renderer/src/components/layout/project-list.tsx", () => ({
   ProjectList: () => <ul data-slot="project-list" />,
 }));
 
+vi.mock("../src/renderer/src/state/keyboard-shortcut-provider.tsx", () => ({
+  useKeyboardShortcuts: () => ({
+    getBindings: () => [{ modifiers: ["mod"], key: "o" }],
+  }),
+}));
+
 beforeEach(() => {
   preferencesStorage.reset();
   vi.stubGlobal("window", {
