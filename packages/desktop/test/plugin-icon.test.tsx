@@ -24,6 +24,21 @@ vi.mock("electron", () => ({
 }));
 
 const roots: string[] = [];
+const pluginIconFixtures = [
+  {
+    fileName: "icon.svg",
+    contentType: "image/svg+xml; charset=utf-8",
+    source: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+  },
+  { fileName: "icon.png", contentType: "image/png", source: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) },
+  { fileName: "icon.jpg", contentType: "image/jpeg", source: new Uint8Array([0xff, 0xd8, 0xff]) },
+  { fileName: "icon.jpeg", contentType: "image/jpeg", source: new Uint8Array([0xff, 0xd8, 0xff]) },
+  { fileName: "icon.webp", contentType: "image/webp", source: new Uint8Array([0x52, 0x49, 0x46, 0x46]) },
+  { fileName: "icon.gif", contentType: "image/gif", source: new Uint8Array([0x47, 0x49, 0x46, 0x38]) },
+  { fileName: "icon.avif", contentType: "image/avif", source: new Uint8Array([0x66, 0x74, 0x79, 0x70]) },
+  { fileName: "icon.bmp", contentType: "image/bmp", source: new Uint8Array([0x42, 0x4d]) },
+  { fileName: "icon.ico", contentType: "image/x-icon", source: new Uint8Array([0x00, 0x00, 0x01, 0x00]) },
+] as const;
 
 afterEach(async () => {
   electron.handlers.clear();
@@ -47,56 +62,58 @@ describe("plugin icons", () => {
     );
 
     expect(markup).toContain(`src="${marketplacePluginIconUrl("dev.meta-agent.market")}"`);
-    expect(markup).toContain('class="block size-[18px] aspect-square');
     expect(markup).toContain(">L</span>");
   });
 
-  it("serves the immutable installed artifact icon through the controlled protocol", async () => {
-    const root = join(tmpdir(), `plugin-icon-${crypto.randomUUID()}`);
-    roots.push(root);
-    const artifactHash = "abc123";
-    const iconPath = join(root, ".versions", artifactHash, "payload", "assets", "icon.svg");
-    await mkdir(join(iconPath, ".."), { recursive: true });
-    await writeFile(iconPath, '<svg xmlns="http://www.w3.org/2000/svg"/>', "utf8");
+  it.each(pluginIconFixtures)(
+    "serves the installed $fileName icon through the controlled protocol",
+    async (fixture) => {
+      const root = join(tmpdir(), `plugin-icon-${crypto.randomUUID()}`);
+      roots.push(root);
+      const artifactHash = "abc123";
+      const iconPath = join(root, ".versions", artifactHash, "payload", "assets", fixture.fileName);
+      await mkdir(join(root, ".versions", artifactHash, "payload", "assets"), { recursive: true });
+      await writeFile(iconPath, fixture.source);
 
-    registerLocalImageSchemes();
-    handleMarketplacePluginIconRequests({
-      getInternalSnapshot: async () => ({
-        revision: "revision",
-        plugins: [
-          {
-            id: "dev.meta-agent.market",
-            displayName: "Market",
-            marketplaceId: "market",
-            version: "1.0.0",
-            artifactId: "artifact",
-            artifactHash,
-            enabled: true,
-            capabilities: [],
-            containsNativeCode: false,
-            state: "installed",
-            installedAt: 0,
-            scope: "global",
-            entryPath: join(root, ".versions", artifactHash, "payload", "index.ts"),
-            rootPath: root,
-          },
-        ],
-      }),
-    });
+      registerLocalImageSchemes();
+      handleMarketplacePluginIconRequests({
+        getInternalSnapshot: async () => ({
+          revision: "revision",
+          plugins: [
+            {
+              id: "dev.meta-agent.market",
+              displayName: "Market",
+              marketplaceId: "market",
+              version: "1.0.0",
+              artifactId: "artifact",
+              artifactHash,
+              enabled: true,
+              capabilities: [],
+              containsNativeCode: false,
+              state: "installed",
+              installedAt: 0,
+              scope: "global",
+              entryPath: join(root, ".versions", artifactHash, "payload", "index.ts"),
+              rootPath: root,
+            },
+          ],
+        }),
+      });
 
-    expect(electron.schemes[0]).toEqual(
-      expect.arrayContaining([expect.objectContaining({ scheme: MARKETPLACE_PLUGIN_ICON_SCHEME })]),
-    );
-    const handler = electron.handlers.get(MARKETPLACE_PLUGIN_ICON_SCHEME);
-    if (!handler) throw new Error("Plugin icon protocol handler was not registered");
+      expect(electron.schemes[0]).toEqual(
+        expect.arrayContaining([expect.objectContaining({ scheme: MARKETPLACE_PLUGIN_ICON_SCHEME })]),
+      );
+      const handler = electron.handlers.get(MARKETPLACE_PLUGIN_ICON_SCHEME);
+      if (!handler) throw new Error("Plugin icon protocol handler was not registered");
 
-    const response = await handler(new Request(marketplacePluginIconUrl("dev.meta-agent.market")));
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    await expect(response.text()).resolves.toContain("<svg");
+      const response = await handler(new Request(marketplacePluginIconUrl("dev.meta-agent.market")));
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe(fixture.contentType);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(fixture.source);
 
-    const missing = await handler(new Request(marketplacePluginIconUrl("dev.meta-agent.missing")));
-    expect(missing.status).toBe(404);
-  });
+      const missing = await handler(new Request(marketplacePluginIconUrl("dev.meta-agent.missing")));
+      expect(missing.status).toBe(404);
+    },
+  );
 });

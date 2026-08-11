@@ -13,11 +13,13 @@ import {
   listPlugins,
   logout,
   MarketplaceApiError,
+  type PluginIconUploadResult,
   type PublishPluginInput,
   type PublishVersionInput,
   publishManagedVersion,
   ratePlugin,
   uploadManagedArtifact,
+  uploadManagedIcon,
   upsertManagedPlugin,
 } from "./api.ts";
 import { clearSession, readSession, type SessionState, writeSession } from "./lib/marketplace-ui.ts";
@@ -187,12 +189,12 @@ export function useManagedPlugins(token: string | null | undefined) {
   });
 }
 
-function useManagedPluginMutation<TVariables extends { token: string }>(
-  mutationFn: (variables: TVariables) => Promise<unknown>,
+function useManagedPluginMutation<TVariables extends { token: string }, TResult = unknown>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
   pluginId: (variables: TVariables) => string,
 ) {
   const queryClient = useQueryClient();
-  return useMutation({
+  return useMutation<TResult, Error, TVariables>({
     mutationFn: (variables: TVariables) => withSessionAuth(queryClient, variables.token, () => mutationFn(variables)),
     onSuccess: (_data, variables) =>
       Promise.all([
@@ -234,6 +236,14 @@ export function useUploadManagedArtifact() {
       file: File;
       token: string;
     }) => uploadManagedArtifact(pluginId, version, artifactId, file, token),
+    ({ pluginId }) => pluginId,
+  );
+}
+
+export function useUploadManagedIcon() {
+  return useManagedPluginMutation(
+    ({ pluginId, file, token }: { pluginId: string; file: File; token: string }): Promise<PluginIconUploadResult> =>
+      uploadManagedIcon(pluginId, file, token),
     ({ pluginId }) => pluginId,
   );
 }

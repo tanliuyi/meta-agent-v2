@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS plugins (
 	updated_at BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS plugin_icons (
+	plugin_id TEXT PRIMARY KEY REFERENCES plugins(id) ON DELETE CASCADE,
+	asset_id TEXT NOT NULL,
+	content_type TEXT NOT NULL,
+	sha256 TEXT NOT NULL,
+	size BIGINT NOT NULL,
+	bytes BYTEA,
+	object_key TEXT,
+	updated_at BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS plugin_versions (
 	plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
 	version TEXT NOT NULL,

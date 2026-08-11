@@ -17,6 +17,8 @@ export interface PluginSummary {
   description: string;
   publisher: PublisherRecord;
   categories: string[];
+  iconAssetId?: string;
+  iconUrl?: string;
   latestVersion?: string;
   compatibleVersion?: string;
   capabilities: string[];
@@ -176,6 +178,14 @@ export interface ArtifactUploadResult {
   size: number;
 }
 
+export interface PluginIconUploadResult {
+  pluginId: string;
+  iconAssetId: string;
+  contentType: string;
+  sha256: string;
+  size: number;
+}
+
 interface MarketplaceErrorBody {
   error?: {
     code?: string;
@@ -233,6 +243,11 @@ export function getPlugin(pluginId: string): Promise<PluginDetail> {
   return request<PluginDetail>(`/v1/plugins/${encodeURIComponent(pluginId)}`);
 }
 
+export function getPluginIconUrl(pluginId: string, iconAssetId?: string): string {
+  const cacheKey = iconAssetId ? `?asset=${encodeURIComponent(iconAssetId)}` : "";
+  return `${API_BASE_URL}/v1/plugins/${encodeURIComponent(pluginId)}/icon${cacheKey}`;
+}
+
 export function getRatings(pluginId: string): Promise<RatingsResponse> {
   return request<RatingsResponse>(`/v1/plugins/${encodeURIComponent(pluginId)}/ratings`);
 }
@@ -285,6 +300,14 @@ export function upsertManagedPlugin(
   return request<{ plugin: PublishPluginState }>(
     `/v1/publish/plugins/${encodeURIComponent(pluginId)}`,
     { method: "PUT", body: JSON.stringify(input) },
+    token,
+  );
+}
+
+export function uploadManagedIcon(pluginId: string, file: File, token: string): Promise<PluginIconUploadResult> {
+  return request<PluginIconUploadResult>(
+    `/v1/publish/plugins/${encodeURIComponent(pluginId)}/icon`,
+    { method: "PUT", headers: { "content-type": file.type }, body: file },
     token,
   );
 }

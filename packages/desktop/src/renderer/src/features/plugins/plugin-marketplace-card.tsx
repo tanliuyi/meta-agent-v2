@@ -38,7 +38,7 @@ export function MarketplacePluginCard({
     >
       <span className="plugin-marketplace-card-header">
         <span className="plugin-marketplace-card-icon" aria-hidden="true">
-          <PluginIcon name={name} iconUrl={plugin?.iconUrl} />
+          <PluginIcon name={name} iconUrl={plugin?.iconUrl} className="size-10" />
         </span>
         <span className="plugin-marketplace-card-title">
           <strong>{name}</strong>

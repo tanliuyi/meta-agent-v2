@@ -47,7 +47,7 @@ export function PluginDetailPage({ pluginId }: { pluginId: string }) {
         <CardHeader className="border-b">
           <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
             <div className="flex min-w-0 gap-4">
-              <PluginAvatar name={plugin.name} className="size-12" />
+              <PluginAvatar name={plugin.name} iconUrl={plugin.iconUrl} className="size-12" />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <CardTitle className="truncate text-lg">{plugin.name}</CardTitle>

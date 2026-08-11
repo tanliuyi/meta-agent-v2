@@ -13,10 +13,11 @@ const PLUGIN_ICON_TONES = [
 interface PluginIconProps {
   name: string;
   iconUrl?: string;
+  className?: string;
 }
 
 /** Stable initials and semantic color generated from a plugin display name. */
-export function PluginIcon({ name, iconUrl }: PluginIconProps) {
+export function PluginIcon({ name, iconUrl, className }: PluginIconProps) {
   const [iconFailed, setIconFailed] = useState(false);
   useEffect(() => {
     setIconFailed(false);
@@ -27,7 +28,7 @@ export function PluginIcon({ name, iconUrl }: PluginIconProps) {
       <img
         src={iconUrl}
         alt=""
-        className="block size-[18px] aspect-square shrink-0 rounded-[inherit] object-contain"
+        className={cn("block size-[18px] aspect-square shrink-0 rounded-[inherit] object-contain", className)}
         onError={() => setIconFailed(true)}
       />
     );
@@ -40,6 +41,7 @@ export function PluginIcon({ name, iconUrl }: PluginIconProps) {
     <span
       className={cn(
         "flex size-[18px] aspect-square shrink-0 items-center justify-center rounded-full text-[9px] font-semibold leading-none tracking-normal uppercase shadow-xs",
+        className,
         PLUGIN_ICON_TONES[toneIndex % PLUGIN_ICON_TONES.length],
       )}
       aria-hidden="true"

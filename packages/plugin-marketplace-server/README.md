@@ -27,6 +27,7 @@ Public read API:
 - `GET /health`
 - `GET /v1/plugins`
 - `GET /v1/plugins/:pluginId`
+- `GET /v1/plugins/:pluginId/icon`
 - `GET /v1/plugins/:pluginId/versions`
 - `GET /v1/plugins/:pluginId/versions/:version`
 - `GET /v1/plugins/:pluginId/versions/:version/artifacts`
@@ -52,6 +53,7 @@ Publishing (publisher member or admin token):
 - `GET /v1/publish/plugins` — list plugins managed by the current publisher memberships, including drafts
 - `GET /v1/publish/plugins/:pluginId` — publisher view including drafts
 - `PUT /v1/publish/plugins/:pluginId` — create or update plugin metadata
+- `PUT /v1/publish/plugins/:pluginId/icon` — replace the standalone plugin icon without creating a version; accepts supported `image/*` raw bodies up to 1 MiB
 - `POST /v1/publish/plugins/:pluginId/versions` — declare a draft version and its artifacts
 - `PUT /v1/publish/plugins/:pluginId/versions/:version/artifacts/:artifactId` — upload a payload zip (`application/zip` or `application/octet-stream` raw body)
 - `POST /v1/publish/plugins/:pluginId/versions/:version/publish`
@@ -73,7 +75,7 @@ Administration (`MARKETPLACE_ADMIN_TOKEN` bearer token):
 
 State lives in PostgreSQL through the `pg` connection pool configured by `MARKETPLACE_DATABASE_URL`. Startup creates missing tables and seeds `catalog/plugins.json` only when the database has not previously been seeded. A transaction-scoped PostgreSQL advisory lock serializes schema seeding across concurrent server instances.
 
-Artifact archives from new uploads are stored in `BYTEA`; accounts, sessions, publisher memberships, ratings, and download counters are stored in relational tables. For compatibility with the already deployed PostgreSQL schema, rows that have an `object_key` but no `bytes` are read from the path beneath `MARKETPLACE_DATA_DIR`; path traversal and SHA-256/size mismatches are rejected. Tests inject isolated pg-mem pools and never use the configured production database.
+Artifact archives from new uploads are stored in `BYTEA`; standalone plugin icons are stored separately in the plugin-level `plugin_icons` table and never become version artifacts. Accounts, sessions, publisher memberships, ratings, and download counters are stored in relational tables. For compatibility with the already deployed PostgreSQL schema, rows that have an `object_key` but no `bytes` are read from the path beneath `MARKETPLACE_DATA_DIR`; path traversal and SHA-256/size mismatches are rejected. Tests inject isolated pg-mem pools and never use the configured production database.
 
 ### Migrating an existing SQLite database
 

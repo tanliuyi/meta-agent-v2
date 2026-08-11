@@ -5,6 +5,17 @@ import { MARKETPLACE_PLUGIN_ICON_SCHEME } from "../../shared/plugin-icon-contrac
 import type { InstalledMarketplacePluginRecord, MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
 
 const MAX_PLUGIN_ICON_BYTES = 1024 * 1024;
+const PLUGIN_ICON_ASSETS = [
+  { fileName: "icon.svg", contentType: "image/svg+xml; charset=utf-8" },
+  { fileName: "icon.png", contentType: "image/png" },
+  { fileName: "icon.jpg", contentType: "image/jpeg" },
+  { fileName: "icon.jpeg", contentType: "image/jpeg" },
+  { fileName: "icon.webp", contentType: "image/webp" },
+  { fileName: "icon.gif", contentType: "image/gif" },
+  { fileName: "icon.avif", contentType: "image/avif" },
+  { fileName: "icon.bmp", contentType: "image/bmp" },
+  { fileName: "icon.ico", contentType: "image/x-icon" },
+] as const;
 
 export function handleMarketplacePluginIconRequests(
   registry: Pick<MarketplacePluginRegistry, "getInternalSnapshot">,
@@ -25,21 +36,25 @@ export function handleMarketplacePluginIconRequests(
 }
 
 async function serveInstalledPluginIcon(plugin: InstalledMarketplacePluginRecord): Promise<Response> {
-  const iconPath = join(plugin.rootPath, ".versions", plugin.artifactHash, "payload", "assets", "icon.svg");
-  try {
-    const info = await lstat(iconPath);
-    if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_PLUGIN_ICON_BYTES) return notFound();
-    const icon = await readFile(iconPath);
-    return new Response(icon, {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "no-store",
-        "Content-Type": "image/svg+xml; charset=utf-8",
-      },
-    });
-  } catch {
-    return notFound();
+  const iconRoot = join(plugin.rootPath, ".versions", plugin.artifactHash, "payload", "assets");
+  for (const asset of PLUGIN_ICON_ASSETS) {
+    const iconPath = join(iconRoot, asset.fileName);
+    try {
+      const info = await lstat(iconPath);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_PLUGIN_ICON_BYTES) continue;
+      const icon = await readFile(iconPath);
+      return new Response(icon, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-store",
+          "Content-Type": asset.contentType,
+        },
+      });
+    } catch {
+      // Try the next supported icon format.
+    }
   }
+  return notFound();
 }
 
 function notFound(): Response {

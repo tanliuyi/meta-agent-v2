@@ -7,6 +7,8 @@ import type {
 	ArtifactContentInput,
 	ArtifactUploadContext,
 	MarketplacePluginPage,
+	PluginIconContent,
+	PluginIconContentInput,
 	PluginRatingEntry,
 	PublishArtifactAuditContent,
 	PublisherAdminView,
@@ -31,6 +33,8 @@ export type {
 	ArtifactContent,
 	ArtifactContentInput,
 	ArtifactUploadContext,
+	PluginIconContent,
+	PluginIconContentInput,
 	PublishArtifactAuditContent,
 } from "../contracts.ts";
 export type { SessionUser, StoredUser } from "./user-store.ts";
@@ -145,6 +149,14 @@ export class MarketplaceStore {
 		artifactId: string,
 	): Promise<ArtifactContent | undefined> {
 		return this.pluginStore.getArtifactContent(pluginId, version, artifactId);
+	}
+
+	async getPluginIcon(pluginId: string): Promise<PluginIconContent | undefined> {
+		return this.pluginStore.getPluginIcon(pluginId);
+	}
+
+	async putPluginIcon(pluginId: string, content: PluginIconContentInput): Promise<PluginIconContent> {
+		return this.pluginStore.putPluginIcon(pluginId, content, Math.trunc(this.clock()));
 	}
 
 	// --- users and sessions ---

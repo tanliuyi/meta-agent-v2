@@ -26,7 +26,14 @@ const PLUGIN_ID = "com.acme.tools";
 const ARTIFACT_ID = "tools-universal";
 const ENTRY_SOURCE = "export default function acmeTools(): void {\n\t// marketplace upload fixture\n}\n";
 const HELPER_SOURCE = "export const helper = true;\n";
-const ICON_SOURCE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><title>Test</title></svg>\n';
+const ICON_BYTES = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+	"base64",
+);
+const UPDATED_ICON_BYTES = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+	"base64",
+);
 
 let app: INestApplication;
 let aliceToken = "";
@@ -404,7 +411,7 @@ describe("publishing", () => {
 		});
 
 		const icon = await request(app.getHttpServer())
-			.get(`/v1/plugins/${PLUGIN_ID}/icon.svg`)
+			.get(`/v1/plugins/${PLUGIN_ID}/icon`)
 			.buffer(true)
 			.parse((response, callback) => {
 				const chunks: Buffer[] = [];
@@ -413,8 +420,73 @@ describe("publishing", () => {
 				response.on("error", (error: Error) => callback(error, Buffer.alloc(0)));
 			})
 			.expect(200);
-		expect(icon.headers["content-type"]).toContain("image/svg+xml");
-		expect((icon.body as Buffer).toString("utf8")).toBe(ICON_SOURCE);
+		expect(icon.headers["content-type"]).toContain("image/png");
+		expect(icon.body as Buffer).toEqual(ICON_BYTES);
+
+		const versionBeforeIcon = await request(app.getHttpServer())
+			.get(`/v1/plugins/${PLUGIN_ID}/versions/1.0.0`)
+			.expect(200);
+		await request(app.getHttpServer()).put(`/v1/publish/plugins/${PLUGIN_ID}/icon`).send(ICON_BYTES).expect(401);
+		await request(app.getHttpServer())
+			.put(`/v1/publish/plugins/${PLUGIN_ID}/icon`)
+			.set("authorization", `Bearer ${bobToken}`)
+			.set("content-type", "image/png")
+			.send(ICON_BYTES)
+			.expect(403);
+		await request(app.getHttpServer())
+			.put(`/v1/publish/plugins/${PLUGIN_ID}/icon`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.set("content-type", "text/plain")
+			.send(ICON_BYTES)
+			.expect(415);
+		await request(app.getHttpServer())
+			.put(`/v1/publish/plugins/${PLUGIN_ID}/icon`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.set("content-type", "image/png")
+			.send(Buffer.alloc(1024 * 1024 + 1))
+			.expect(413);
+
+		const standaloneUpload = await request(app.getHttpServer())
+			.put(`/v1/publish/plugins/${PLUGIN_ID}/icon`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.set("content-type", "image/png")
+			.send(UPDATED_ICON_BYTES)
+			.expect(200);
+		const iconSha256 = createHash("sha256").update(UPDATED_ICON_BYTES).digest("hex");
+		expect(standaloneUpload.body).toEqual({
+			pluginId: PLUGIN_ID,
+			iconAssetId: iconSha256,
+			contentType: "image/png",
+			sha256: iconSha256,
+			size: UPDATED_ICON_BYTES.byteLength,
+		});
+
+		const versionAfterIcon = await request(app.getHttpServer())
+			.get(`/v1/plugins/${PLUGIN_ID}/versions/1.0.0`)
+			.expect(200);
+		expect(versionAfterIcon.body).toEqual(versionBeforeIcon.body);
+		const updatedDetail = await request(app.getHttpServer()).get(`/v1/plugins/${PLUGIN_ID}`).expect(200);
+		expect(updatedDetail.body).toMatchObject({ iconAssetId: iconSha256 });
+		const updatedIcon = await request(app.getHttpServer())
+			.get(`/v1/plugins/${PLUGIN_ID}/icon`)
+			.buffer(true)
+			.parse((response, callback) => {
+				const chunks: Buffer[] = [];
+				response.on("data", (chunk: Buffer | Uint8Array) => chunks.push(Buffer.from(chunk)));
+				response.on("end", () => callback(null, Buffer.concat(chunks)));
+				response.on("error", (error: Error) => callback(error, Buffer.alloc(0)));
+			})
+			.expect(200);
+		expect(updatedIcon.headers["content-type"]).toContain("image/png");
+		expect(updatedIcon.body as Buffer).toEqual(UPDATED_ICON_BYTES);
+
+		await request(app.getHttpServer())
+			.put(`/v1/publish/plugins/${PLUGIN_ID}`)
+			.set("authorization", `Bearer ${aliceToken}`)
+			.send(pluginMetadata())
+			.expect(200);
+		const detailAfterMetadata = await request(app.getHttpServer()).get(`/v1/plugins/${PLUGIN_ID}`).expect(200);
+		expect(detailAfterMetadata.body).toMatchObject({ iconAssetId: iconSha256 });
 
 		const state = await request(app.getHttpServer())
 			.get(`/v1/publish/plugins/${PLUGIN_ID}`)
@@ -449,7 +521,7 @@ describe("publishing", () => {
 		const archive = unzipSync(bytes);
 		expect(Object.keys(archive).sort()).toEqual([
 			"market-manifest.json",
-			"payload/assets/icon.svg",
+			"payload/assets/icon.png",
 			"payload/index.ts",
 			"payload/lib/helper.ts",
 		]);
@@ -477,7 +549,7 @@ describe("publishing", () => {
 				"payload/index.ts": {
 					mode: "0644",
 				},
-				"payload/assets/icon.svg": {
+				"payload/assets/icon.png": {
 					mode: "0644",
 				},
 			},
@@ -762,7 +834,7 @@ function versionDeclaration(version: string) {
 function payloadArchive(): Uint8Array {
 	return zipSync({
 		"index.ts": strToU8(ENTRY_SOURCE),
-		"assets/icon.svg": strToU8(ICON_SOURCE),
+		"assets/icon.png": ICON_BYTES,
 		"lib/": new Uint8Array(0),
 		"lib/helper.ts": strToU8(HELPER_SOURCE),
 	});

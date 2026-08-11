@@ -97,15 +97,24 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
               <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <>
-                <span className="isolate flex -space-x-1.5" aria-hidden="true">
-                  {selectedPlugins.slice(0, 2).map((plugin, index) => (
-                    <span key={plugin.id} className={index === 0 ? "relative z-10" : "relative z-20"}>
-                      <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} />
+                <span className="isolate flex -space-x-1" aria-hidden="true">
+                  {selectedPlugins.slice(0, enabledCount > 3 ? 2 : 3).map((plugin, index) => (
+                    <span
+                      key={plugin.id}
+                      className={cn(
+                        "relative flex size-[22px] aspect-square shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted/95 shadow-sm",
+                        enabledCount > 1 ? "ring-2 ring-(--composer-background)" : undefined,
+                        index === 0 ? "z-10" : index === 1 ? "z-20" : "z-30",
+                      )}
+                    >
+                      <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} className="size-5" />
                     </span>
                   ))}
-                  <span className="relative z-30 flex size-[18px] aspect-square shrink-0 items-center justify-center rounded-full bg-muted-foreground/12 text-[9px] font-semibold tabular-nums text-muted-foreground shadow-xs">
-                    {enabledCount}
-                  </span>
+                  {enabledCount > 3 ? (
+                    <span className="relative z-30 flex size-[22px] aspect-square shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground shadow-sm ring-2 ring-(--composer-background)">
+                      {enabledCount}
+                    </span>
+                  ) : null}
                 </span>
               </>
             )}
@@ -164,7 +173,9 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
                       onValueChange(withPluginToggled(value, plugins, plugin.id, next === true))
                     }
                   />
-                  <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} />
+                  <span className="flex size-[20px] aspect-square shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted/95 shadow-sm">
+                    <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} className="size-[18px]" />
+                  </span>
                   <label
                     htmlFor={checkboxId}
                     className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 self-stretch text-xs select-none"

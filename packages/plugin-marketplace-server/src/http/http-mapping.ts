@@ -10,7 +10,7 @@ import type {
 } from "../contracts.ts";
 
 export function pluginIconUrl(publicBaseUrl: string, pluginId: string): string {
-	return `${publicBaseUrl.replace(/\/$/, "")}/v1/plugins/${encodeURIComponent(pluginId)}/icon.svg`;
+	return `${publicBaseUrl.replace(/\/$/, "")}/v1/plugins/${encodeURIComponent(pluginId)}/icon`;
 }
 
 export function pluginDetail(

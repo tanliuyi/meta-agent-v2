@@ -298,6 +298,21 @@ export interface ArtifactContent {
 	size: number;
 }
 
+export interface PluginIconContentInput {
+	contentType: string;
+	bytes: Uint8Array;
+	sha256: string;
+	size: number;
+}
+
+export interface PluginIconContent {
+	assetId: string;
+	contentType: string;
+	bytes: Uint8Array;
+	sha256: string;
+	size: number;
+}
+
 export interface PublishArtifactAuditContent {
 	artifactId: string;
 	containsNativeCode: boolean;

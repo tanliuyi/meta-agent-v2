@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Body, Headers, Param, Req, type Type } from "@nestjs/common";
 import { valid as validSemver } from "semver";
 import { buildArtifact, extractPayloadArchive, validatePayloadPath } from "../artifact-builder.ts";
@@ -28,6 +29,7 @@ import {
 	mapStoreErrorsAsync,
 	notFound,
 	type RawUploadRequest,
+	readPluginIconBody,
 	readUploadBody,
 	requirePrincipal,
 } from "./http-util.ts";
@@ -36,6 +38,14 @@ export interface ArtifactUploadResponse {
 	pluginId: string;
 	version: string;
 	artifactId: string;
+	sha256: string;
+	size: number;
+}
+
+export interface PluginIconUploadResponse {
+	pluginId: string;
+	iconAssetId: string;
+	contentType: string;
 	sha256: string;
 	size: number;
 }
@@ -73,6 +83,32 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 			}
 			const plugin = await mapStoreErrorsAsync(() => runtime.store.upsertPlugin(pluginId, request));
 			return { plugin };
+		}
+
+		async uploadIcon(
+			pluginId: string,
+			authorization: string | undefined,
+			request: RawUploadRequest,
+		): Promise<PluginIconUploadResponse> {
+			validatePluginId(pluginId);
+			await requirePluginMember(runtime, authorization, pluginId);
+			const uploaded = await readPluginIconBody(request);
+			const sha256 = createHash("sha256").update(uploaded.bytes).digest("hex");
+			const icon = await mapStoreErrorsAsync(() =>
+				runtime.store.putPluginIcon(pluginId, {
+					contentType: uploaded.contentType,
+					bytes: uploaded.bytes,
+					sha256,
+					size: uploaded.bytes.byteLength,
+				}),
+			);
+			return {
+				pluginId,
+				iconAssetId: icon.assetId,
+				contentType: icon.contentType,
+				sha256: icon.sha256,
+				size: icon.size,
+			};
 		}
 
 		async createVersion(
@@ -173,6 +209,10 @@ export function createPublishControllers(runtime: MarketplaceHttpRuntime): Type<
 	applyParameter(PublishController.prototype, "upsertPlugin", 0, Param("pluginId"));
 	applyParameter(PublishController.prototype, "upsertPlugin", 1, Body());
 	applyParameter(PublishController.prototype, "upsertPlugin", 2, Headers("authorization"));
+	applyRoute(PublishController.prototype, "uploadIcon", "put", ":pluginId/icon");
+	applyParameter(PublishController.prototype, "uploadIcon", 0, Param("pluginId"));
+	applyParameter(PublishController.prototype, "uploadIcon", 1, Headers("authorization"));
+	applyParameter(PublishController.prototype, "uploadIcon", 2, Req());
 	applyRoute(PublishController.prototype, "createVersion", "post", ":pluginId/versions");
 	applyParameter(PublishController.prototype, "createVersion", 0, Param("pluginId"));
 	applyParameter(PublishController.prototype, "createVersion", 1, Body());

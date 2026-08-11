@@ -256,34 +256,70 @@ export interface RawUploadRequest extends AsyncIterable<Uint8Array | string> {
 }
 
 const UPLOAD_CONTENT_TYPES = new Set(["application/zip", "application/octet-stream"]);
+const PLUGIN_ICON_CONTENT_TYPES = new Set([
+	"image/svg+xml",
+	"image/png",
+	"image/jpeg",
+	"image/webp",
+	"image/gif",
+	"image/avif",
+	"image/bmp",
+	"image/x-icon",
+	"image/vnd.microsoft.icon",
+]);
+export const MAX_PLUGIN_ICON_BYTES = 1024 * 1024;
 
 export async function readUploadBody(request: RawUploadRequest, maxBytes: number): Promise<Uint8Array> {
-	const contentTypeHeader = request.headers["content-type"];
-	const contentType = (Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader)
-		?.split(";", 1)[0]
-		?.trim()
-		.toLowerCase();
+	const contentType = requestContentType(request);
 	if (!contentType || !UPLOAD_CONTENT_TYPES.has(contentType)) {
 		throw unsupportedMediaType(
 			"UPLOAD_CONTENT_TYPE_INVALID",
 			"Artifact uploads must use application/zip or application/octet-stream",
 		);
 	}
+	return readRawRequestBody(request, maxBytes, "PAYLOAD_TOO_LARGE", "PAYLOAD_EMPTY");
+}
+
+export async function readPluginIconBody(
+	request: RawUploadRequest,
+): Promise<{ contentType: string; bytes: Uint8Array }> {
+	const contentType = requestContentType(request);
+	if (!contentType || !PLUGIN_ICON_CONTENT_TYPES.has(contentType)) {
+		throw unsupportedMediaType(
+			"PLUGIN_ICON_CONTENT_TYPE_INVALID",
+			"Plugin icons must use a supported image content type",
+		);
+	}
+	return {
+		contentType,
+		bytes: await readRawRequestBody(request, MAX_PLUGIN_ICON_BYTES, "PLUGIN_ICON_TOO_LARGE", "PLUGIN_ICON_EMPTY"),
+	};
+}
+
+function requestContentType(request: RawUploadRequest): string | undefined {
+	const header = request.headers["content-type"];
+	return (Array.isArray(header) ? header[0] : header)?.split(";", 1)[0]?.trim().toLowerCase();
+}
+
+async function readRawRequestBody(
+	request: RawUploadRequest,
+	maxBytes: number,
+	overflowCode: string,
+	emptyCode: string,
+): Promise<Uint8Array> {
 	const declaredLength = request.headers["content-length"];
 	const declared = Number(Array.isArray(declaredLength) ? declaredLength[0] : declaredLength);
 	if (Number.isSafeInteger(declared) && declared > maxBytes) {
-		throw payloadTooLarge("PAYLOAD_TOO_LARGE", "Artifact payload exceeds the size limit");
+		throw payloadTooLarge(overflowCode, "Uploaded content exceeds the size limit");
 	}
 	const chunks: Buffer[] = [];
 	let total = 0;
 	for await (const chunk of request) {
 		const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : Buffer.from(chunk);
 		total += buffer.byteLength;
-		if (total > maxBytes) {
-			throw payloadTooLarge("PAYLOAD_TOO_LARGE", "Artifact payload exceeds the size limit");
-		}
+		if (total > maxBytes) throw payloadTooLarge(overflowCode, "Uploaded content exceeds the size limit");
 		chunks.push(buffer);
 	}
-	if (total === 0) throw badRequest("PAYLOAD_EMPTY", "Artifact payload is empty");
+	if (total === 0) throw badRequest(emptyCode, "Uploaded content cannot be empty");
 	return Buffer.concat(chunks);
 }

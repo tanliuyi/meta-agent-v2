@@ -113,7 +113,7 @@ export function CatalogPage() {
                   <TableRow key={plugin.id}>
                     <TableCell className="pl-6">
                       <div className="flex min-w-64 items-center gap-3">
-                        <PluginAvatar name={plugin.name} />
+                        <PluginAvatar name={plugin.name} iconUrl={plugin.iconUrl} />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <strong className="truncate text-sm font-medium">{plugin.name}</strong>

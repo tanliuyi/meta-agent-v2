@@ -1,7 +1,7 @@
-import { CircleAlert, LoaderCircle, Save } from "lucide-react";
+import { CircleAlert, ImagePlus, LoaderCircle, Save } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import type { PublishPluginInput, PublishPluginState } from "@/api.ts";
-import { useUpsertManagedPlugin } from "@/api-hooks.ts";
+import { getPluginIconUrl, type PublishPluginInput, type PublishPluginState } from "@/api.ts";
+import { useUploadManagedIcon, useUpsertManagedPlugin } from "@/api-hooks.ts";
 import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import {
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input.tsx";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { errorMessage } from "@/lib/marketplace-ui.ts";
+import { PluginAvatar } from "./plugin-avatar.tsx";
 import { PluginFormField } from "./plugin-form-field.tsx";
 import { splitList } from "./plugin-form-utils.ts";
 
@@ -35,12 +36,14 @@ export function PluginMetadataDialog({
   onSaved(pluginId: string): void;
 }) {
   const mutation = useUpsertManagedPlugin();
+  const iconMutation = useUploadManagedIcon();
   const [pluginId, setPluginId] = useState("");
   const [publisherId, setPublisherId] = useState(publisherIds[0] ?? "");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [categories, setCategories] = useState("");
   const [iconAssetId, setIconAssetId] = useState("");
+  const [iconFile, setIconFile] = useState<File>();
 
   useEffect(() => {
     if (!open) return;
@@ -50,8 +53,10 @@ export function PluginMetadataDialog({
     setDescription(plugin?.description ?? "");
     setCategories(plugin?.categories.join(", ") ?? "");
     setIconAssetId(plugin?.iconAssetId ?? "");
+    setIconFile(undefined);
     mutation.reset();
-  }, [open, plugin, publisherIds, mutation.reset]);
+    iconMutation.reset();
+  }, [open, plugin, publisherIds, mutation.reset, iconMutation.reset]);
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -60,11 +65,21 @@ export function PluginMetadataDialog({
       description: description.trim(),
       publisherId,
       categories: splitList(categories),
-      ...(iconAssetId.trim() ? { iconAssetId: iconAssetId.trim() } : {}),
     };
     try {
       await mutation.mutateAsync({ pluginId: pluginId.trim(), input, token });
       onSaved(pluginId.trim());
+    } catch {
+      // Mutation state renders the error.
+    }
+  }
+
+  async function uploadIcon(): Promise<void> {
+    if (!pluginId.trim() || !iconFile) return;
+    try {
+      const result = await iconMutation.mutateAsync({ pluginId: pluginId.trim(), file: iconFile, token });
+      setIconAssetId(result.iconAssetId);
+      setIconFile(undefined);
     } catch {
       // Mutation state renders the error.
     }
@@ -131,14 +146,44 @@ export function PluginMetadataDialog({
               onChange={(event) => setCategories(event.target.value)}
             />
           </PluginFormField>
-          <PluginFormField label="图标资源 ID" htmlFor="plugin-icon" hint="可选">
-            <Input
-              id="plugin-icon"
-              maxLength={128}
-              value={iconAssetId}
-              onChange={(event) => setIconAssetId(event.target.value)}
-            />
+          <PluginFormField
+            label="插件图标"
+            htmlFor="plugin-icon"
+            hint={plugin ? "图标独立保存，不会创建新的插件版本。" : "先保存插件资料后才能上传独立图标。"}
+          >
+            <div className="flex items-center gap-3">
+              <PluginAvatar
+                name={name}
+                iconUrl={pluginId ? getPluginIconUrl(pluginId, iconAssetId) : undefined}
+                className="size-12 rounded-xl"
+              />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Input
+                  id="plugin-icon"
+                  type="file"
+                  accept="image/svg+xml,image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp,image/x-icon"
+                  disabled={!plugin || iconMutation.isPending}
+                  onChange={(event) => setIconFile(event.target.files?.[0])}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!plugin || !iconFile || iconMutation.isPending}
+                  onClick={() => void uploadIcon()}
+                >
+                  {iconMutation.isPending ? <LoaderCircle className="animate-spin" /> : <ImagePlus />}
+                  上传图标
+                </Button>
+              </div>
+            </div>
           </PluginFormField>
+          {iconMutation.isError ? (
+            <Alert variant="destructive">
+              <CircleAlert />
+              <AlertDescription>{errorMessage(iconMutation.error)}</AlertDescription>
+            </Alert>
+          ) : null}
           {mutation.isError ? (
             <Alert variant="destructive">
               <CircleAlert />

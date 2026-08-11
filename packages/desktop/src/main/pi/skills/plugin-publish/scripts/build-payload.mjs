@@ -5,8 +5,8 @@
 //   node build-payload.mjs <pluginDir> <out.zip> [entry...]
 //
 // Each entry is a file or directory relative to pluginDir. Directories are
-// walked recursively. Default entries use the manifest's "pi.entry", plus
-// "src" and "assets/icon.svg". Standard plugins must ship the SVG resource.
+// walked recursively. Default entries include the manifest's "pi.entry", "src",
+// and one supported "assets/icon.<format>" file. Standard plugins must ship an icon asset.
 // The marketplace can use this packaged artwork without a separate asset upload.
 // Default exclusions (never packaged): test*, *.test.*, node_modules,
 // dist, .git, *.map, .DS_Store, .env*, *.log, package-lock.json, market-manifest.json.
@@ -22,6 +22,18 @@ import path from "node:path";
 import { zipToBuffer } from "./lib/zip.mjs";
 
 const EXCLUDE = /(^|\/)(node_modules|dist|\.git)(\/|$)|\.test\.[jt]s$|\.map$|\.DS_Store$|\.env(\.|$)|\.log$|package-lock\.json$|market-manifest\.json$/;
+
+const SUPPORTED_PLUGIN_ICON_FILES = [
+  "icon.svg",
+  "icon.png",
+  "icon.jpg",
+  "icon.jpeg",
+  "icon.webp",
+  "icon.gif",
+  "icon.avif",
+  "icon.bmp",
+  "icon.ico",
+];
 
 function collect(dir, base, out) {
   for (const name of readdirSync(dir)) {
@@ -46,7 +58,24 @@ function getDefaultEntries(root) {
   if (typeof entry !== "string" || !entry) {
     throw new Error(`${manifestPath} must declare a non-empty pi.entry`);
   }
-  return [entry, "src", "assets/icon.svg"];
+  const manifestFiles = manifest?.files;
+  const iconFiles =
+    manifestFiles && typeof manifestFiles === "object" && !Array.isArray(manifestFiles)
+      ? SUPPORTED_PLUGIN_ICON_FILES.filter((fileName) =>
+          Object.prototype.hasOwnProperty.call(manifestFiles, path.posix.join("assets", fileName)),
+        )
+      : SUPPORTED_PLUGIN_ICON_FILES;
+  for (const fileName of iconFiles) {
+    const iconPath = path.join(root, "assets", fileName);
+    try {
+      if (statSync(iconPath).isFile()) return [entry, "src", path.posix.join("assets", fileName)];
+    } catch {
+      // Try the next supported icon format.
+    }
+  }
+  throw new Error(
+    `${root} must include one of: ${SUPPORTED_PLUGIN_ICON_FILES.map((fileName) => `assets/${fileName}`).join(", ")}`,
+  );
 }
 
 function main() {

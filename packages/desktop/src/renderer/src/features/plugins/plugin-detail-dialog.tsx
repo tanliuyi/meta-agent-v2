@@ -62,7 +62,7 @@ export function PluginDetailDialog({
         <DialogHeader className="plugin-marketplace-detail-header">
           <div className="plugin-marketplace-detail-identity">
             <div className="plugin-marketplace-detail-icon" aria-hidden="true">
-              <PluginIcon name={name} iconUrl={plugin?.iconUrl} />
+              <PluginIcon name={name} iconUrl={plugin?.iconUrl} className="size-11" />
             </div>
             <div>
               <DialogTitle>{name}</DialogTitle>

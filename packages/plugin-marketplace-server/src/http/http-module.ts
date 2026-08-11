@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type DynamicModule, Module, Param, Req, Res, type Type } from "@nestjs/common";
 import { rcompare } from "semver";
 import { extractPayloadArchive } from "../artifact-builder.ts";
@@ -31,6 +32,35 @@ interface DownloadRequestLike {
 interface ResponseLike {
 	setHeader(name: string, value: string | number): void;
 	send(body: Uint8Array): unknown;
+}
+
+const PLUGIN_ICON_ASSETS = [
+	{ fileName: "icon.svg", contentType: "image/svg+xml; charset=utf-8" },
+	{ fileName: "icon.png", contentType: "image/png" },
+	{ fileName: "icon.jpg", contentType: "image/jpeg" },
+	{ fileName: "icon.jpeg", contentType: "image/jpeg" },
+	{ fileName: "icon.webp", contentType: "image/webp" },
+	{ fileName: "icon.gif", contentType: "image/gif" },
+	{ fileName: "icon.avif", contentType: "image/avif" },
+	{ fileName: "icon.bmp", contentType: "image/bmp" },
+	{ fileName: "icon.ico", contentType: "image/x-icon" },
+] as const;
+
+function findPluginIcon(files: Map<string, Uint8Array>) {
+	for (const asset of PLUGIN_ICON_ASSETS) {
+		const bytes = files.get(`payload/assets/${asset.fileName}`);
+		if (bytes) return { bytes, contentType: asset.contentType };
+	}
+	return undefined;
+}
+
+function sendPluginIcon(response: ResponseLike, contentType: string, bytes: Uint8Array, sha256: string): unknown {
+	response.setHeader("content-type", contentType);
+	response.setHeader("content-length", bytes.byteLength);
+	response.setHeader("cache-control", "public, max-age=300");
+	response.setHeader("etag", `"sha256-${sha256}"`);
+	response.setHeader("x-content-type-options", "nosniff");
+	return response.send(bytes);
 }
 
 export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): DynamicModule {
@@ -161,6 +191,9 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 
 		async icon(pluginId: string, response: ResponseLike): Promise<unknown> {
 			const plugin = await requirePlugin(runtime, pluginId);
+			const standalone = await runtime.store.getPluginIcon(pluginId);
+			if (standalone) return sendPluginIcon(response, standalone.contentType, standalone.bytes, standalone.sha256);
+
 			const version = [...plugin.versions]
 				.filter(({ draft }) => !draft)
 				.sort((left, right) => rcompare(left.version, right.version))[0];
@@ -169,12 +202,14 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			const content = await runtime.store.getArtifactContent(pluginId, version.version, artifact.id);
 			if (!content) throw notFound("PLUGIN_ICON_NOT_FOUND", `Plugin icon not found: ${pluginId}`);
 			const files = mapStoreErrors(() => extractPayloadArchive(content.bytes, 5 * runtime.config.maxArtifactBytes));
-			const icon = files.get("payload/assets/icon.svg");
+			const icon = findPluginIcon(files);
 			if (!icon) throw notFound("PLUGIN_ICON_NOT_FOUND", `Plugin icon not found: ${pluginId}`);
-			response.setHeader("content-type", "image/svg+xml; charset=utf-8");
-			response.setHeader("content-length", icon.byteLength);
-			response.setHeader("cache-control", "public, max-age=300");
-			return response.send(icon);
+			return sendPluginIcon(
+				response,
+				icon.contentType,
+				icon.bytes,
+				createHash("sha256").update(icon.bytes).digest("hex"),
+			);
 		}
 
 		async versions(pluginId: string): Promise<MarketplacePluginVersionDetail[]> {
@@ -263,7 +298,7 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	applyParameter(PluginsController.prototype, "list", 0, Req());
 	applyRoute(PluginsController.prototype, "detail", "get", ":pluginId");
 	applyParameter(PluginsController.prototype, "detail", 0, Param("pluginId"));
-	applyRoute(PluginsController.prototype, "icon", "get", ":pluginId/icon.svg");
+	applyRoute(PluginsController.prototype, "icon", "get", ":pluginId/icon");
 	applyParameter(PluginsController.prototype, "icon", 0, Param("pluginId"));
 	applyParameter(PluginsController.prototype, "icon", 1, Res());
 	applyRoute(PluginsController.prototype, "versions", "get", ":pluginId/versions");

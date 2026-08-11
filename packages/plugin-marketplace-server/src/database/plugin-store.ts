@@ -11,6 +11,8 @@ import type {
 	ArtifactTarget,
 	ArtifactUploadContext,
 	MarketplacePluginPage,
+	PluginIconContent,
+	PluginIconContentInput,
 	PluginStatus,
 	PublishArtifactAuditContent,
 	PublishPluginRequest,
@@ -127,6 +129,85 @@ export class PluginStore {
 		return { bytes, sha256: row.sha256, size: row.size };
 	}
 
+	async getPluginIcon(pluginId: string): Promise<PluginIconContent | undefined> {
+		const result = await this.pool.query(
+			"SELECT asset_id, content_type, bytes, object_key, sha256, size FROM plugin_icons WHERE plugin_id = $1",
+			[pluginId],
+		);
+		const row = result.rows[0] as
+			| {
+					asset_id: string;
+					content_type: string;
+					bytes: Buffer | null;
+					object_key: string | null;
+					sha256: string;
+					size: number;
+			  }
+			| undefined;
+		if (!row) return undefined;
+		const storedBytes =
+			row.bytes ??
+			(row.object_key && this.artifactDirectory
+				? await readArtifactFile(this.artifactDirectory, row.object_key)
+				: undefined);
+		if (!storedBytes) return undefined;
+		const bytes = Buffer.from(storedBytes);
+		const size = Number(row.size);
+		if (bytes.byteLength !== size || createHash("sha256").update(bytes).digest("hex") !== row.sha256) {
+			throw new Error("Stored plugin icon content does not match its PostgreSQL metadata");
+		}
+		return {
+			assetId: row.asset_id,
+			contentType: row.content_type,
+			bytes,
+			sha256: row.sha256,
+			size,
+		};
+	}
+
+	async putPluginIcon(pluginId: string, content: PluginIconContentInput, now: number): Promise<PluginIconContent> {
+		const client = await this.pool.connect();
+		try {
+			await client.query("BEGIN");
+			const plugin = await client.query("SELECT 1 FROM plugins WHERE id = $1", [pluginId]);
+			if (plugin.rowCount === 0) throw new Error("PLUGIN_NOT_FOUND");
+			const assetId = content.sha256;
+			await client.query(
+				`INSERT INTO plugin_icons (plugin_id, asset_id, content_type, sha256, size, bytes, object_key, updated_at)
+				 VALUES ($1, $2, $3, $4, $5, decode($6, 'hex'), NULL, $7)
+				 ON CONFLICT (plugin_id) DO UPDATE SET
+				   asset_id = EXCLUDED.asset_id,
+				   content_type = EXCLUDED.content_type,
+				   sha256 = EXCLUDED.sha256,
+				   size = EXCLUDED.size,
+				   bytes = EXCLUDED.bytes,
+				   object_key = EXCLUDED.object_key,
+				   updated_at = EXCLUDED.updated_at`,
+				[
+					pluginId,
+					assetId,
+					content.contentType,
+					content.sha256,
+					content.size,
+					Buffer.from(content.bytes).toString("hex"),
+					now,
+				],
+			);
+			await client.query("UPDATE plugins SET icon_asset_id = $1, updated_at = $2 WHERE id = $3", [
+				assetId,
+				now,
+				pluginId,
+			]);
+			await client.query("COMMIT");
+			return { assetId, ...content };
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	// --- publishing ---
 
 	async getPluginPublisherId(pluginId: string): Promise<string | undefined> {
@@ -143,7 +224,7 @@ export class PluginStore {
 			   name = EXCLUDED.name,
 			   description = EXCLUDED.description,
 			   categories = EXCLUDED.categories,
-			   icon_asset_id = EXCLUDED.icon_asset_id,
+			   icon_asset_id = COALESCE(EXCLUDED.icon_asset_id, plugins.icon_asset_id),
 			   updated_at = EXCLUDED.updated_at
 			 WHERE plugins.publisher_id = EXCLUDED.publisher_id
 			 RETURNING publisher_id`,

@@ -1,6 +1,6 @@
 import { Pencil, Plus } from "lucide-react";
 import { useState } from "react";
-import type { PublishPluginState } from "@/api.ts";
+import { getPluginIconUrl, type PublishPluginState } from "@/api.ts";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card.tsx";
@@ -25,7 +25,11 @@ export function PluginWorkspace({
       <CardHeader className="border-b">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div className="flex min-w-0 gap-3">
-            <PluginAvatar name={plugin.name} className="size-11" />
+            <PluginAvatar
+              name={plugin.name}
+              iconUrl={getPluginIconUrl(plugin.id, plugin.iconAssetId)}
+              className="size-11"
+            />
             <div className="min-w-0">
               <CardTitle className="truncate text-base">{plugin.name}</CardTitle>
               <CardDescription className="mt-1 truncate font-mono text-xs">{plugin.id}</CardDescription>
@@ -56,7 +60,7 @@ export function PluginWorkspace({
           <TabsContent value="metadata" className="m-0 p-6">
             <dl className="grid gap-5 text-sm sm:grid-cols-2">
               <MetadataItem label="发布者" value={plugin.publisherId} technical />
-              <MetadataItem label="图标资源 ID" value={plugin.iconAssetId ?? "未设置"} technical />
+              <MetadataItem label="图标" value={plugin.iconAssetId ? "独立图标" : "版本图标"} technical />
               <div className="sm:col-span-2">
                 <dt className="text-xs font-medium text-muted-foreground">分类</dt>
                 <dd className="mt-2 flex flex-wrap gap-2">

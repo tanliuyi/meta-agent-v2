@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Box, CircleAlert, LogIn, PackagePlus, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import type { PublishPluginState } from "@/api.ts";
+import { getPluginIconUrl, type PublishPluginState } from "@/api.ts";
 import { useCurrentUser, useManagedPlugins, useSession } from "@/api-hooks.ts";
 import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
@@ -106,7 +106,7 @@ export function PluginManagementPage() {
                   onClick={() => setSelectedPluginId(plugin.id)}
                   key={plugin.id}
                 >
-                  <PluginAvatar name={plugin.name} />
+                  <PluginAvatar name={plugin.name} iconUrl={getPluginIconUrl(plugin.id, plugin.iconAssetId)} />
                   <span className="min-w-0 flex-1">
                     <strong className="block truncate text-sm font-medium">{plugin.name}</strong>
                     <small className="block truncate font-mono text-xs text-muted-foreground">{plugin.id}</small>
