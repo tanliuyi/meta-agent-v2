@@ -1,8 +1,12 @@
 import { ComposerPrimitive, MessagePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@renderer/shared/ui/button";
+import { type ChangeEvent, type CompositionEvent, useRef, useState } from "react";
 
 export function EditComposer() {
   const aui = useAui();
+  const isComposingRef = useRef(false);
+  const composerText = useAuiState((state) => state.composer.text);
+  const [inputValue, setInputValue] = useState(composerText);
   const canSend = useAuiState((state) => state.composer.canSend);
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const canQueue = useAuiState((state) => state.thread.capabilities.queue);
@@ -16,6 +20,21 @@ export function EditComposer() {
         <ComposerPrimitive.Input
           className="aui-edit-composer-input text-foreground min-h-14 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm outline-none"
           autoFocus
+          value={inputValue}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={(event: CompositionEvent<HTMLTextAreaElement>) => {
+            isComposingRef.current = false;
+            setInputValue(event.currentTarget.value);
+          }}
+          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
+            setInputValue(event.target.value);
+            if (isComposingRef.current || event.nativeEvent.isComposing) {
+              // Keep assistant-ui from replacing the active IME buffer with its controlled value.
+              event.preventDefault();
+            }
+          }}
         />
         <div className="aui-edit-composer-footer mx-2.5 mb-2.5 flex items-center gap-1.5 self-end">
           <ComposerPrimitive.Cancel asChild>
