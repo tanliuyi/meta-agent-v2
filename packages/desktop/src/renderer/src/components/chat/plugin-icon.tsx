@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { cn } from "../../shared/lib/cn.ts";
 
 const PLUGIN_ICON_TONES = [
@@ -11,10 +12,27 @@ const PLUGIN_ICON_TONES = [
 
 interface PluginIconProps {
   name: string;
+  iconUrl?: string;
 }
 
 /** Stable initials and semantic color generated from a plugin display name. */
-export function PluginIcon({ name }: PluginIconProps) {
+export function PluginIcon({ name, iconUrl }: PluginIconProps) {
+  const [iconFailed, setIconFailed] = useState(false);
+  useEffect(() => {
+    setIconFailed(false);
+  }, [iconUrl]);
+
+  if (iconUrl && !iconFailed) {
+    return (
+      <img
+        src={iconUrl}
+        alt=""
+        className="block size-[18px] aspect-square shrink-0 rounded-[inherit] object-contain"
+        onError={() => setIconFailed(true)}
+      />
+    );
+  }
+
   const label = [...name.trim()][0] ?? "?";
   const toneIndex = [...name].reduce((hash, character) => hash + (character.codePointAt(0) ?? 0), 0);
 

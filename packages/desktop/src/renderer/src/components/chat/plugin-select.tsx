@@ -1,6 +1,7 @@
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import { useId, useState } from "react";
 import type { DraftSelectablePlugin } from "../../../../shared/desktop-extension-contracts.ts";
+import { marketplacePluginIconUrl } from "../../../../shared/plugin-icon-contracts.ts";
 import { cn } from "../../shared/lib/cn.ts";
 import { Checkbox } from "../../shared/ui/checkbox.tsx";
 import { Popover } from "../../shared/ui/popover.tsx";
@@ -49,6 +50,10 @@ function equalIds(left: string[], right: string[]): boolean {
   return left.every((id) => set.has(id));
 }
 
+function pluginIconUrl(plugin: DraftSelectablePlugin): string | undefined {
+  return plugin.source === "marketplace" ? marketplacePluginIconUrl(plugin.id) : undefined;
+}
+
 /** 新会话草稿的插件激活选择：默认继承项目级作用域，项目未开放的插件也可在本会话单独启用。 */
 export function PluginSelect({ plugins, value, disabled = false, loading = false, onValueChange }: PluginSelectProps) {
   const [open, setOpen] = useState(false);
@@ -95,7 +100,7 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
                 <span className="isolate flex -space-x-1.5" aria-hidden="true">
                   {selectedPlugins.slice(0, 2).map((plugin, index) => (
                     <span key={plugin.id} className={index === 0 ? "relative z-10" : "relative z-20"}>
-                      <PluginIcon name={plugin.displayName} />
+                      <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} />
                     </span>
                   ))}
                   <span className="relative z-30 flex size-[18px] aspect-square shrink-0 items-center justify-center rounded-full bg-muted-foreground/12 text-[9px] font-semibold tabular-nums text-muted-foreground shadow-xs">
@@ -159,7 +164,7 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
                       onValueChange(withPluginToggled(value, plugins, plugin.id, next === true))
                     }
                   />
-                  <PluginIcon name={plugin.displayName} />
+                  <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} />
                   <label
                     htmlFor={checkboxId}
                     className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 self-stretch text-xs select-none"

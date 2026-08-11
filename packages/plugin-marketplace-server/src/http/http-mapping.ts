@@ -9,6 +9,10 @@ import type {
 	StoredPluginVersion,
 } from "../contracts.ts";
 
+export function pluginIconUrl(publicBaseUrl: string, pluginId: string): string {
+	return `${publicBaseUrl.replace(/\/$/, "")}/v1/plugins/${encodeURIComponent(pluginId)}/icon.svg`;
+}
+
 export function pluginDetail(
 	plugin: StoredPlugin,
 	publicBaseUrl: string,
@@ -22,6 +26,7 @@ export function pluginDetail(
 		publisher: { ...plugin.publisher },
 		categories: [...plugin.categories],
 		...(plugin.iconAssetId ? { iconAssetId: plugin.iconAssetId } : {}),
+		iconUrl: pluginIconUrl(publicBaseUrl, plugin.id),
 		publishedAt: plugin.publishedAt,
 		updatedAt: plugin.updatedAt,
 		...(latestVersion ? { latestVersion } : {}),

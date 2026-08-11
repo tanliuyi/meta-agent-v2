@@ -26,6 +26,7 @@ const PLUGIN_ID = "com.acme.tools";
 const ARTIFACT_ID = "tools-universal";
 const ENTRY_SOURCE = "export default function acmeTools(): void {\n\t// marketplace upload fixture\n}\n";
 const HELPER_SOURCE = "export const helper = true;\n";
+const ICON_SOURCE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><title>Test</title></svg>\n';
 
 let app: INestApplication;
 let aliceToken = "";
@@ -402,6 +403,19 @@ describe("publishing", () => {
 			downloadCount: 0,
 		});
 
+		const icon = await request(app.getHttpServer())
+			.get(`/v1/plugins/${PLUGIN_ID}/icon.svg`)
+			.buffer(true)
+			.parse((response, callback) => {
+				const chunks: Buffer[] = [];
+				response.on("data", (chunk: Buffer | Uint8Array) => chunks.push(Buffer.from(chunk)));
+				response.on("end", () => callback(null, Buffer.concat(chunks)));
+				response.on("error", (error: Error) => callback(error, Buffer.alloc(0)));
+			})
+			.expect(200);
+		expect(icon.headers["content-type"]).toContain("image/svg+xml");
+		expect((icon.body as Buffer).toString("utf8")).toBe(ICON_SOURCE);
+
 		const state = await request(app.getHttpServer())
 			.get(`/v1/publish/plugins/${PLUGIN_ID}`)
 			.set("authorization", `Bearer ${aliceToken}`)
@@ -435,6 +449,7 @@ describe("publishing", () => {
 		const archive = unzipSync(bytes);
 		expect(Object.keys(archive).sort()).toEqual([
 			"market-manifest.json",
+			"payload/assets/icon.svg",
 			"payload/index.ts",
 			"payload/lib/helper.ts",
 		]);
@@ -460,6 +475,9 @@ describe("publishing", () => {
 			},
 			files: {
 				"payload/index.ts": {
+					mode: "0644",
+				},
+				"payload/assets/icon.svg": {
 					mode: "0644",
 				},
 			},
@@ -744,6 +762,7 @@ function versionDeclaration(version: string) {
 function payloadArchive(): Uint8Array {
 	return zipSync({
 		"index.ts": strToU8(ENTRY_SOURCE),
+		"assets/icon.svg": strToU8(ICON_SOURCE),
 		"lib/": new Uint8Array(0),
 		"lib/helper.ts": strToU8(HELPER_SOURCE),
 	});

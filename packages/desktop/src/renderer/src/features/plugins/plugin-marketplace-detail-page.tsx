@@ -4,10 +4,10 @@ import { useDesktopSelector } from "@renderer/state/desktop-context";
 import { selectProjects } from "@renderer/state/desktop-selectors";
 import { useNavigate } from "@tanstack/react-router";
 import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
-import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
 import { useEffect, useState } from "react";
+import { PluginIcon } from "../../components/chat/plugin-icon.tsx";
 import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
 import { MarketplaceSettingsDialog } from "./marketplace-settings-dialog.tsx";
 import { PluginDetailActions } from "./plugin-detail-actions.tsx";
@@ -160,7 +160,7 @@ export function PluginMarketplaceDetailPage({
                 <div className="plugin-marketplace-detail-header-main">
                   <div className="plugin-marketplace-detail-identity">
                     <div className="plugin-marketplace-detail-icon" aria-hidden="true">
-                      <Blocks />
+                      <PluginIcon name={name} iconUrl={plugin?.iconUrl} />
                     </div>
                     <div>
                       <h1>{name}</h1>

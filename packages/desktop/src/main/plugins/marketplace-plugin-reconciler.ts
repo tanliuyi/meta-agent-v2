@@ -2,6 +2,7 @@ import type { Dirent } from "node:fs";
 import { lstat, readdir, rm, rmdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
+  MarketplacePluginRootMismatchError,
   markMarketplaceVersionInactive,
   readMarketplaceRootOwnership,
   validateInstalledMarketplacePlugin,
@@ -9,6 +10,7 @@ import {
   writeMarketplaceProjection,
   writeMarketplaceUninstallTombstone,
 } from "./marketplace-installed-plugin.ts";
+import { withMarketplacePluginLock } from "./marketplace-plugin-lock.ts";
 import type { InstalledMarketplacePluginRecord, MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
 
 interface MarketplacePluginReconcilerOptions {
@@ -36,6 +38,7 @@ const ARTIFACT_HASH = /^[a-f0-9]{64}$/;
 export class MarketplacePluginReconciler {
   private readonly registry: MarketplacePluginRegistry;
   private readonly marketplaceRoot: string;
+  private readonly lockDirectory: string;
   private readonly userDataDir: string;
   private readonly now: () => number;
   private readonly log: (message: string) => void;
@@ -48,6 +51,7 @@ export class MarketplacePluginReconciler {
   ) {
     this.registry = registry;
     this.marketplaceRoot = join(agentDir, "extensions");
+    this.lockDirectory = join(userDataDir, "plugins", "locks");
     this.userDataDir = userDataDir;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (() => undefined);
@@ -57,13 +61,19 @@ export class MarketplacePluginReconciler {
     await this.cleanupOrphanStaging();
     await this.cleanupLegacyTransactionJournal();
     const internal = await this.registry.getInternalSnapshot();
-    const registered = new Map(internal.plugins.map((plugin) => [plugin.id, plugin]));
     for (const record of internal.plugins) {
-      await this.reconcileRegistered(record);
+      await withMarketplacePluginLock(this.lockDirectory, record.id, async () => {
+        const latest = (await this.registry.getInternalSnapshot()).plugins.find((plugin) => plugin.id === record.id);
+        if (latest) await this.reconcileRegistered(latest);
+      });
     }
     for (const entry of await this.marketplaceEntries()) {
-      if (registered.has(entry.name)) continue;
-      await this.reconcileUnownedRoot(entry.name);
+      await withMarketplacePluginLock(this.lockDirectory, entry.name, async () => {
+        const registered = (await this.registry.getInternalSnapshot()).plugins.some(
+          (plugin) => plugin.id === entry.name,
+        );
+        if (!registered) await this.reconcileUnownedRoot(entry.name);
+      });
     }
   }
 
@@ -71,7 +81,34 @@ export class MarketplacePluginReconciler {
     try {
       await validateInstalledMarketplacePlugin(record, this.marketplaceRoot);
     } catch (error) {
-      await this.markBroken(record, error);
+      if (error instanceof MarketplacePluginRootMismatchError) {
+        this.log(
+          `Skipped marketplace plugin from a different agent directory while reconciling ${record.id}: ${record.rootPath}`,
+        );
+        return;
+      }
+      if (record.state !== "broken") await this.markBroken(record, error);
+      return;
+    }
+    if (record.state === "broken") {
+      const repaired: InstalledMarketplacePluginRecord = { ...record, state: "installed", enabled: true };
+      try {
+        await writeMarketplaceProjection(repaired);
+        await this.registry.markInstalled(record.id, record.artifactHash);
+        this.log(`Repaired marketplace plugin ${record.id}`);
+      } catch (error) {
+        await this.markBroken(repaired, error);
+      }
+      return;
+    }
+    const ownership = await readMarketplaceRootOwnership(record.rootPath);
+    if (ownership?.record.artifactHash !== record.artifactHash) {
+      try {
+        await writeMarketplaceProjection(record);
+        this.log(`Repaired marketplace projection for ${record.id}`);
+      } catch (error) {
+        await this.markBroken(record, error);
+      }
       return;
     }
     const projection = join(record.rootPath, "index.ts");

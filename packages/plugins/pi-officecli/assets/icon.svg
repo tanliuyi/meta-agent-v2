@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title" fill="none" stroke="#1F3A4D" stroke-linecap="round" stroke-linejoin="round" stroke-width="3">
+  <title id="title">Office Documents</title>
+  <path d="M20 12h18l8 8v32H20z"/>
+  <path d="M38 12v9h8"/>
+  <path d="M27 31h12M27 38h12M27 45h8"/>
+</svg>

@@ -3,6 +3,13 @@ import { lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/prom
 import { isAbsolute, relative, resolve } from "node:path";
 import type { InstalledMarketplacePluginRecord } from "./marketplace-plugin-registry.ts";
 
+export class MarketplacePluginRootMismatchError extends Error {
+  constructor(pluginId: string) {
+    super(`Marketplace extension is outside its managed root: ${pluginId}`);
+    this.name = "MarketplacePluginRootMismatchError";
+  }
+}
+
 export async function validateInstalledMarketplacePlugin(
   plugin: InstalledMarketplacePluginRecord,
   marketplaceRoot: string,
@@ -10,16 +17,34 @@ export async function validateInstalledMarketplacePlugin(
   if (!isAbsolute(plugin.rootPath) || !isAbsolute(plugin.entryPath)) {
     throw new Error(`Marketplace extension paths must be absolute: ${plugin.id}`);
   }
+  const configuredRoot = resolve(plugin.rootPath);
+  const expectedRoot = resolve(marketplaceRoot, plugin.id);
+  let canonicalMarketplaceRoot: string | undefined;
+  let canonicalRoot: string | undefined;
+  if (configuredRoot !== expectedRoot) {
+    try {
+      [canonicalMarketplaceRoot, canonicalRoot] = await Promise.all([
+        realpath(marketplaceRoot),
+        realpath(plugin.rootPath),
+      ]);
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) throw new MarketplacePluginRootMismatchError(plugin.id);
+      throw error;
+    }
+    if (canonicalRoot !== resolve(canonicalMarketplaceRoot, plugin.id)) {
+      throw new MarketplacePluginRootMismatchError(plugin.id);
+    }
+  }
   const rootInfo = await lstat(plugin.rootPath);
   const entryInfo = await lstat(plugin.entryPath);
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || !entryInfo.isFile() || entryInfo.isSymbolicLink()) {
     throw new Error(`Marketplace extension entry is not a regular managed file: ${plugin.id}`);
   }
-  const canonicalMarketplaceRoot = await realpath(marketplaceRoot);
-  const canonicalRoot = await realpath(plugin.rootPath);
+  canonicalMarketplaceRoot ??= await realpath(marketplaceRoot);
+  canonicalRoot ??= await realpath(plugin.rootPath);
   const canonicalEntry = await realpath(plugin.entryPath);
   if (canonicalRoot !== resolve(canonicalMarketplaceRoot, plugin.id)) {
-    throw new Error(`Marketplace extension is outside its managed root: ${plugin.id}`);
+    throw new MarketplacePluginRootMismatchError(plugin.id);
   }
   const withinRoot = relative(canonicalRoot, canonicalEntry);
   if (!withinRoot || withinRoot.startsWith("..") || isAbsolute(withinRoot)) {
@@ -224,6 +249,10 @@ async function syncDirectory(path: string): Promise<void> {
   } finally {
     await handle.close();
   }
+}
+
+function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

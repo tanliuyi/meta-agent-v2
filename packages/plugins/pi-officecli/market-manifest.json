@@ -58,6 +58,9 @@
   "files": {
     "index.ts": {
       "mode": "0644"
+    },
+    "assets/icon.svg": {
+      "mode": "0644"
     }
   }
 }

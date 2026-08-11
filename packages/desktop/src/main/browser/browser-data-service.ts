@@ -30,6 +30,7 @@ import {
   MAX_PERSISTED_HISTORY,
   normalizeBrowserDataSnapshot,
 } from "../../shared/browser-data-contracts.ts";
+import { parseBrowserInternalPage } from "../../shared/browser-internal-contracts.ts";
 import { normalizeSitePattern } from "../../shared/browser-site-policy.ts";
 
 /** 同 URL 历史条目合并窗口（毫秒）。 */
@@ -108,6 +109,7 @@ export class BrowserDataService {
 
   /** 记录一次页面访问；与现有条目同 URL 且在合并窗口内时更新时间戳与标题。 */
   recordHistory(url: string, title: string): Promise<void> {
+    if (url === "about:blank" || parseBrowserInternalPage(url) !== null) return Promise.resolve();
     return this.mutateDataFile((data) => {
       const now = Date.now();
       const first = data.history[0];
@@ -218,23 +220,24 @@ export class BrowserDataService {
     const cipher = this.crypto.encrypt(`${plain.origin}\u0000${plain.username}\u0000${plain.password}`);
     const result = this.mutatePasswordsFile((data) => {
       const now = Date.now();
-      if (input.passwordId) {
-        const existing = data.entries.find((entry) => entry.id === input.passwordId);
-        if (existing) {
-          data.entries = data.entries.map((entry) =>
-            entry.id === input.passwordId
-              ? {
-                  id: entry.id,
-                  origin: plain.origin,
-                  username: plain.username,
-                  cipher,
-                  createdAt: entry.createdAt,
-                  updatedAt: now,
-                }
-              : entry,
-          );
-          return;
-        }
+      const existing = data.entries.find(
+        (entry) =>
+          entry.id === input.passwordId || (entry.origin === plain.origin && entry.username === plain.username),
+      );
+      if (existing) {
+        data.entries = data.entries.map((entry) =>
+          entry.id === existing.id
+            ? {
+                id: entry.id,
+                origin: plain.origin,
+                username: plain.username,
+                cipher,
+                createdAt: entry.createdAt,
+                updatedAt: now,
+              }
+            : entry,
+        );
+        return;
       }
       data.entries.unshift({
         id: this.createId(),

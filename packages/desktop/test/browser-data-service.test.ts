@@ -45,8 +45,13 @@ describe("BrowserDataService", () => {
     });
   });
 
-  test("记录历史：同 URL 连续访问合并更新，隔开访问各留一条", async () => {
+  test("记录历史：忽略空白页，同 URL 连续访问合并更新，隔开访问各留一条", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(500);
+    await service.recordHistory("about:blank", "");
+    await service.recordHistory("browser://history", "浏览历史");
+    expect((await service.getSnapshot()).history).toEqual([]);
+
     vi.setSystemTime(1_000);
     await service.recordHistory("https://example.com/a", "A");
     vi.setSystemTime(2_000);
@@ -112,7 +117,7 @@ describe("BrowserDataService", () => {
     expect(result.ok && result.snapshot.downloads).toHaveLength(0);
   });
 
-  test("保存/更新/删除密码：密文落盘，快照返回明文", async () => {
+  test("保存/更新/删除密码：同站点账号自动更新，密文落盘，快照返回明文", async () => {
     const created = await service.savePassword({
       passwordId: null,
       password: { origin: "https://example.com", username: "alice", password: "s3cret" },
@@ -140,6 +145,15 @@ describe("BrowserDataService", () => {
       password: { origin: "https://example.com", username: "alice", password: "n3w" },
     });
     expect((await service.getSnapshot()).passwords[0]).toMatchObject({ password: "n3w", username: "alice" });
+
+    // 未提供 id 时，同站点 + 同账号仍应更新原条目，而不是新建重复密码。
+    await service.savePassword({
+      passwordId: null,
+      password: { origin: "https://example.com", username: "alice", password: "latest" },
+    });
+    const updatedSnapshot = await service.getSnapshot();
+    expect(updatedSnapshot.passwords).toHaveLength(1);
+    expect(updatedSnapshot.passwords[0]).toMatchObject({ id: createdId, password: "latest", username: "alice" });
 
     await service.deletePassword(createdId);
     expect((await service.getSnapshot()).passwords).toHaveLength(0);

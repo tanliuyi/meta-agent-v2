@@ -5,7 +5,9 @@
 //   node build-payload.mjs <pluginDir> <out.zip> [entry...]
 //
 // Each entry is a file or directory relative to pluginDir. Directories are
-// walked recursively. Default entries: "index.ts" "src" (fail if absent).
+// walked recursively. Default entries use the manifest's "pi.entry", plus
+// "src" and "assets/icon.svg". Standard plugins must ship the SVG resource.
+// The marketplace can use this packaged artwork without a separate asset upload.
 // Default exclusions (never packaged): test*, *.test.*, node_modules,
 // dist, .git, *.map, .DS_Store, .env*, *.log, package-lock.json, market-manifest.json.
 //
@@ -32,13 +34,28 @@ function collect(dir, base, out) {
   }
 }
 
+function getDefaultEntries(root) {
+  const manifestPath = path.join(root, "market-manifest.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (err) {
+    throw new Error(`cannot read ${manifestPath}: ${err.message}`);
+  }
+  const entry = manifest?.pi?.entry;
+  if (typeof entry !== "string" || !entry) {
+    throw new Error(`${manifestPath} must declare a non-empty pi.entry`);
+  }
+  return [entry, "src", "assets/icon.svg"];
+}
+
 function main() {
   const [root, outZip, ...entries] = process.argv.slice(2);
   if (!root || !outZip) {
     console.error("usage: node build-payload.mjs <pluginDir> <out.zip> [entry...]");
     process.exit(2);
   }
-  const list = entries.length ? entries : ["index.ts", "src"];
+  const list = entries.length ? entries : getDefaultEntries(root);
   const out = [];
   for (const e of list) {
     const full = path.join(root, e);

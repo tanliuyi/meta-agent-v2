@@ -25,12 +25,24 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        output: { format: "cjs" },
+        input: {
+          index: resolve("src/preload/index.ts"),
+          "browser-internal": resolve("src/preload/browser-internal.ts"),
+        },
+        output: { format: "cjs", entryFileNames: "[name].cjs" },
       },
     },
     plugins: [externalizeDepsPlugin()],
   },
   renderer: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve("src/renderer/index.html"),
+          "browser-internal": resolve("src/renderer/browser-internal.html"),
+        },
+      },
+    },
     optimizeDeps: {
       include: ["@rc-component/image"],
     },

@@ -1,5 +1,6 @@
 import type { WebContents } from "electron";
 import { isBrowserSessionPartition } from "../../shared/browser-contracts.ts";
+import { parseBrowserInternalPage } from "../../shared/browser-internal-contracts.ts";
 
 /**
  * Install the main-process policy for every webview attached to the app window.
@@ -9,7 +10,10 @@ import { isBrowserSessionPartition } from "../../shared/browser-contracts.ts";
  * 身份与分区的绑定由 BrowserManager.attach 在 main 侧校验（webContents 的
  * session 必须与会话身份对应的 partition session 一致）。
  */
-export function installBrowserWebviewSecurity(webContents: WebContents): () => void {
+export function installBrowserWebviewSecurity(
+  webContents: WebContents,
+  browserInternalPreloadPath?: string,
+): () => void {
   const onWillAttach = (
     event: Electron.Event,
     webPreferences: Electron.WebPreferences,
@@ -27,6 +31,9 @@ export function installBrowserWebviewSecurity(webContents: WebContents): () => v
     webPreferences.webSecurity = true;
     webPreferences.allowRunningInsecureContent = false;
     webPreferences.webviewTag = false;
+    if (browserInternalPreloadPath && parseBrowserInternalPage(params.src) !== null) {
+      webPreferences.preload = browserInternalPreloadPath;
+    }
 
     const partition = params.partition ?? "";
     if (!isBrowserSessionPartition(partition)) {
@@ -43,13 +50,13 @@ export function installBrowserWebviewSecurity(webContents: WebContents): () => v
   return () => webContents.off("will-attach-webview", onWillAttach);
 }
 
-/** Initial URLs accepted by the browser guest. Later navigations are checked by BrowserManager. */
+/** Initial URLs accepted by the browser guest. browser:// is restricted to known internal pages. */
 export function isBrowserWebviewUrl(raw: string | undefined): boolean {
   if (raw === "about:blank") return true;
   if (typeof raw !== "string" || raw.length === 0) return false;
   try {
     const url = new URL(raw);
-    return url.protocol === "http:" || url.protocol === "https:";
+    return url.protocol === "http:" || url.protocol === "https:" || parseBrowserInternalPage(raw) !== null;
   } catch {
     return false;
   }

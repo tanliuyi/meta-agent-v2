@@ -261,6 +261,10 @@ export interface CreationReservation {
   updatedAt: number;
 }
 
+export type CreationReservationRecovery =
+  | { status: "active"; retryAfterMs: number }
+  | { status: "committed" | "orphan" };
+
 export interface ColdOperationLease {
   projectId: string;
   threadId: string;

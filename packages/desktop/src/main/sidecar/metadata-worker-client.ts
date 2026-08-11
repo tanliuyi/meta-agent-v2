@@ -10,6 +10,7 @@ import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "../../shared/
 import type {
   ColdOperationLease,
   CreationReservation,
+  CreationReservationRecovery,
   MetadataSidecarCommand,
 } from "../../shared/sidecar-contracts.ts";
 import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
@@ -132,7 +133,7 @@ export class MetadataWorkerClient {
     });
   }
 
-  recoverCreationReservation(reservation: CreationReservation): Promise<{ status: "active" | "committed" | "orphan" }> {
+  recoverCreationReservation(reservation: CreationReservation): Promise<CreationReservationRecovery> {
     return this.enqueue(() => this.safeRequest({ type: "recoverCreationReservation", reservation }));
   }
 

@@ -6,7 +6,7 @@ const pkg = JSON.parse(
 );
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: ["index.ts"],
   format: ["esm"],
   target: "es2022",
   dts: false,

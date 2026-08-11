@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import geminiModelIcon from "../src/renderer/src/assets/models/gemini.svg";
+import qwenModelIcon from "../src/renderer/src/assets/models/qwen.svg";
 import antgroupIcon from "../src/renderer/src/assets/providers/antgroup.svg";
 import kimiIcon from "../src/renderer/src/assets/providers/kimi.svg";
 import moonshotIcon from "../src/renderer/src/assets/providers/moonshot.svg";
@@ -36,7 +37,7 @@ describe("model selector icons", () => {
 
   test("uses the model family asset before the transport provider asset", () => {
     expect(getModelIconSource(baseModel.provider, baseModel.modelId, baseModel.name)).toBe(providerIcon("anthropic"));
-    expect(getModelIconSource("together", "Qwen/Qwen3.6-Plus", "Qwen3.6 Plus")).toBe(providerIcon("qwen-token-plan"));
+    expect(getModelIconSource("together", "Qwen/Qwen3.6-Plus", "Qwen3.6 Plus")).toBe(qwenModelIcon);
     expect(getModelIconSource("github-copilot", "gemini-3.1-pro-preview", "Gemini 3.1 Pro")).toBe(geminiModelIcon);
   });
 

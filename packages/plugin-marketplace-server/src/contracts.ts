@@ -179,6 +179,7 @@ export interface MarketplacePluginSummary {
 	publisher: PublisherRecord;
 	categories: string[];
 	iconAssetId?: string;
+	iconUrl?: string;
 	latestVersion?: string;
 	compatibleVersion?: string;
 	capabilities: string[];
@@ -217,6 +218,7 @@ export interface MarketplacePluginVersionDetail {
 }
 
 export interface MarketplacePluginDetail extends Omit<CatalogPlugin, "versions"> {
+	iconUrl?: string;
 	latestVersion?: string;
 	versions: MarketplacePluginVersionDetail[];
 	rating: PluginRatingAggregate;

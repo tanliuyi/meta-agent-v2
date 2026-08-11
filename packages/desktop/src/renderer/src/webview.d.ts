@@ -57,6 +57,12 @@ export interface BrowserWebviewFailLoadEvent extends Event {
   isMainFrame: boolean;
 }
 
+/** ipc-message 事件 payload（仅 browser:// WebUI 的 sendToHost）。 */
+export interface BrowserWebviewIpcMessageEvent extends Event {
+  channel: string;
+  args: unknown[];
+}
+
 /** found-in-page 事件 payload。 */
 export interface BrowserWebviewFoundInPageEvent extends Event {
   result: {

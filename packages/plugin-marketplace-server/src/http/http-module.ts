@@ -1,4 +1,5 @@
 import { type DynamicModule, Module, Param, Req, Res, type Type } from "@nestjs/common";
+import { rcompare } from "semver";
 import { extractPayloadArchive } from "../artifact-builder.ts";
 import type {
 	MarketplaceArtifactMetadata,
@@ -13,7 +14,7 @@ import { createAdminControllers } from "./http-admin.ts";
 import { createAuthControllers } from "./http-auth.ts";
 import { createCommunityControllers } from "./http-community.ts";
 import { applyController, applyParameter, applyRoute } from "./http-decorators.ts";
-import { artifactMetadata, artifactUrl, pluginDetail, versionDetail } from "./http-mapping.ts";
+import { artifactMetadata, artifactUrl, pluginDetail, pluginIconUrl, versionDetail } from "./http-mapping.ts";
 import { createPublishControllers } from "./http-publish.ts";
 import { badRequest, type MarketplaceHttpRuntime, mapStoreErrors, notFound } from "./http-util.ts";
 
@@ -124,7 +125,7 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			const limit = parseLimit(query.limit);
 			const runtimeQuery = parseRuntimeQuery(query);
 			try {
-				return await runtime.store.list({
+				const page = await runtime.store.list({
 					...(optionalQueryString(query.query, "query")
 						? { query: optionalQueryString(query.query, "query") }
 						: {}),
@@ -137,6 +138,13 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 					limit,
 					runtime: runtimeQuery,
 				});
+				return {
+					...page,
+					plugins: page.plugins.map((plugin) => ({
+						...plugin,
+						iconUrl: pluginIconUrl(runtime.config.publicBaseUrl, plugin.id),
+					})),
+				};
 			} catch (error) {
 				if (error instanceof Error && error.message.startsWith("CURSOR_")) {
 					throw badRequest(error.message, "Pagination cursor is invalid");
@@ -149,6 +157,24 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 			const plugin = await requirePlugin(runtime, pluginId);
 			const aggregates = await runtime.store.pluginAggregates(pluginId);
 			return pluginDetail(plugin, runtime.config.publicBaseUrl, aggregates);
+		}
+
+		async icon(pluginId: string, response: ResponseLike): Promise<unknown> {
+			const plugin = await requirePlugin(runtime, pluginId);
+			const version = [...plugin.versions]
+				.filter(({ draft }) => !draft)
+				.sort((left, right) => rcompare(left.version, right.version))[0];
+			const artifact = version?.artifacts.find(({ preferred }) => preferred) ?? version?.artifacts[0];
+			if (!version || !artifact) throw notFound("PLUGIN_ICON_NOT_FOUND", `Plugin icon not found: ${pluginId}`);
+			const content = await runtime.store.getArtifactContent(pluginId, version.version, artifact.id);
+			if (!content) throw notFound("PLUGIN_ICON_NOT_FOUND", `Plugin icon not found: ${pluginId}`);
+			const files = mapStoreErrors(() => extractPayloadArchive(content.bytes, 5 * runtime.config.maxArtifactBytes));
+			const icon = files.get("payload/assets/icon.svg");
+			if (!icon) throw notFound("PLUGIN_ICON_NOT_FOUND", `Plugin icon not found: ${pluginId}`);
+			response.setHeader("content-type", "image/svg+xml; charset=utf-8");
+			response.setHeader("content-length", icon.byteLength);
+			response.setHeader("cache-control", "public, max-age=300");
+			return response.send(icon);
 		}
 
 		async versions(pluginId: string): Promise<MarketplacePluginVersionDetail[]> {
@@ -237,6 +263,9 @@ export function createMarketplaceHttpModule(runtime: MarketplaceHttpRuntime): Dy
 	applyParameter(PluginsController.prototype, "list", 0, Req());
 	applyRoute(PluginsController.prototype, "detail", "get", ":pluginId");
 	applyParameter(PluginsController.prototype, "detail", 0, Param("pluginId"));
+	applyRoute(PluginsController.prototype, "icon", "get", ":pluginId/icon.svg");
+	applyParameter(PluginsController.prototype, "icon", 0, Param("pluginId"));
+	applyParameter(PluginsController.prototype, "icon", 1, Res());
 	applyRoute(PluginsController.prototype, "versions", "get", ":pluginId/versions");
 	applyParameter(PluginsController.prototype, "versions", 0, Param("pluginId"));
 	applyRoute(PluginsController.prototype, "version", "get", ":pluginId/versions/:version");

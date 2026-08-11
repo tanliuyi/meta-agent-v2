@@ -15,11 +15,12 @@ describe("browser form scripts", () => {
     expect(BROWSER_PASSWORD_WATCHER_SCRIPT).not.toContain("console.log");
   });
 
-  test("密码自动填充脚本：main 侧按 origin 过滤后内嵌候选，空字段才填", () => {
+  test("密码自动填充脚本：按 origin 过滤，支持延迟表单与同站点多账号", () => {
     const script = buildBrowserPasswordAutofillScript({
       origin: "https://example.com",
       passwords: [
         { id: "p1", origin: "https://example.com", username: "alice", password: "s3cret", createdAt: 1, updatedAt: 3 },
+        { id: "p3", origin: "https://example.com", username: "carol", password: "pw3", createdAt: 1, updatedAt: 2 },
         { id: "p2", origin: "https://other.com", username: "bob", password: "pw2", createdAt: 1, updatedAt: 2 },
       ],
     });
@@ -29,6 +30,9 @@ describe("browser form scripts", () => {
     // other.com 的凭据在 main 侧按 origin 过滤，不进入脚本
     expect(script).not.toContain("bob");
     expect(script).toContain("location.origin !== data.origin");
+    expect(script).toContain("entry.username === enteredUsername");
+    expect(script).toContain("new MutationObserver(fill)");
+    expect(script).toContain('document.addEventListener("focusin", fill, true)');
     // 只填充空字段
     expect(script).toContain("!usernameField.value");
     expect(script).toContain("!passwordField.value");

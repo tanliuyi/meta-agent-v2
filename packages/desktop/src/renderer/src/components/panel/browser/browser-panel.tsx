@@ -24,11 +24,11 @@ import {
   type BrowserTab,
   browserSessionKey,
 } from "../../../../../shared/browser-contracts.ts";
-import type {
-  BrowserDataMutateResult,
-  BrowserDataSnapshot,
-  BrowserPasswordOffer,
-} from "../../../../../shared/browser-data-contracts.ts";
+import type { BrowserPasswordOffer } from "../../../../../shared/browser-data-contracts.ts";
+import {
+  type BrowserInternalPageId,
+  parseBrowserInternalPage,
+} from "../../../../../shared/browser-internal-contracts.ts";
 import { appendComposerQuote } from "../../../runtime/composer-quotes.ts";
 import { DropdownMenu } from "../../../shared/ui/dropdown-menu.tsx";
 import { DropdownMenuContent } from "../../../shared/ui/dropdown-menu-content.tsx";
@@ -45,6 +45,7 @@ import type { BrowserWebviewElement, BrowserWebviewFoundInPageEvent } from "../.
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../../session-context.tsx";
 import { BROWSER_PANEL_KIND } from "../builtin-panel-kinds.ts";
+import { BrowserNetworkErrorPage, failedAddressDisplay } from "./browser-network-error-page.tsx";
 import type { SessionBrowserRuntime } from "./browser-runtime-host.ts";
 import {
   activeViewIdOf,
@@ -54,18 +55,14 @@ import {
   createBlankView,
   createView,
   ensureBrowserRuntime,
+  openInternalPageView,
   rebuildView,
   remountView,
+  replaceView,
   subscribeBrowserRuntime,
   tabIdOfView,
   webviewOf,
 } from "./browser-runtime-host.ts";
-import { BrowserContactsPage } from "./internal/browser-contacts-page.tsx";
-import { BrowserDownloadsPage } from "./internal/browser-downloads-page.tsx";
-import { BrowserHistoryPage } from "./internal/browser-history-page.tsx";
-import { type BrowserInternalPageId, BrowserInternalPages } from "./internal/browser-internal-pages.tsx";
-import { BrowserPasswordsPage } from "./internal/browser-passwords-page.tsx";
-import { BrowserSiteSettingsPage } from "./internal/browser-site-settings-page.tsx";
 
 /**
  * 内置浏览器（IAB）面板。
@@ -145,9 +142,6 @@ export function BrowserPanel() {
   const [deviceHeight, setDeviceHeight] = useState(1023);
   const [deviceZoomPercent, setDeviceZoomPercent] = useState(100);
   const [browserNotice, setBrowserNotice] = useState("");
-  // 内部页（浏览历史/下载/密码管理器/联系信息/网站设置）：覆盖在 webview 视口上。
-  const [internalPage, setInternalPage] = useState<BrowserInternalPageId | null>(null);
-  const [browserData, setBrowserData] = useState<BrowserDataSnapshot | null>(null);
   // 密码保存请求（main 定向发送；renderer payload 不含密码正文）。
   const [passwordOffer, setPasswordOffer] = useState<BrowserPasswordOffer | null>(null);
   // 标注模式（§11）：开关、当前 tab 标注、正在编辑的目标与编辑框位置。
@@ -270,9 +264,9 @@ export function BrowserPanel() {
     // 外部原因（崩溃等）导致 guest 销毁重建期间跳过可见性切换，避免活跃回退闪烁。
     const activeRecord = runtime.views.find((view) => view.viewId === activeViewId);
     if (activeRecord?.rebuilding) return;
-    if (internalPage !== null) {
-      // 内部页（浏览历史/下载/密码/联系信息/网站设置）打开时隐藏全部 webview，
-      // 否则 active webview 以 fixed 定位覆盖视口，会截获全部鼠标事件。
+    if (activeTab?.loadError) {
+      // 网络错误页活跃时隐藏 webview；常驻 fixed 容器不属于 viewport DOM 子树，
+      // 不能依赖错误页自身的 z-index 覆盖 guest。
       for (const view of runtime.views) {
         const viewElement = webviewOf(runtime, view.viewId);
         if (viewElement && !viewElement.hasAttribute("data-hidden")) {
@@ -290,7 +284,7 @@ export function BrowserPanel() {
         viewElement.setAttribute("data-hidden", "");
       }
     }
-  }, [runtime, activeViewId, internalPage]);
+  }, [runtime, activeViewId, activeTab?.loadError]);
   // 视口尺寸/位置变化（窗口 resize、面板宽度拖拽）：同步容器定位。
   useEffect(() => {
     const viewport = viewportEl.current;
@@ -355,14 +349,13 @@ export function BrowserPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey]);
 
-  // 地址栏跟随活跃 tab（用户输入中不覆盖；加载失败时保留输入便于修改重试）。
+  // 地址栏跟随活跃 tab；用户编辑中不覆盖，失败页按 Chrome 隐藏协议与根路径。
   useEffect(() => {
     if (addressFocused) return;
     const active = tabs.find((tab) => tab.tabId === activeTabId);
-    const current = active?.url ?? "";
-    if (active?.loadError && addressDraft.length > 0 && addressDraft !== current) return;
+    const current = active?.loadError ? failedAddressDisplay(active.loadError.url) : (active?.url ?? "");
     setAddressDraft(current);
-  }, [activeTabId, addressFocused, tabs, addressDraft]);
+  }, [activeTabId, addressFocused, tabs]);
 
   const activeAnnotationUrl = tabs.find((tab) => tab.tabId === activeTabId)?.url ?? "";
 
@@ -539,47 +532,55 @@ export function BrowserPanel() {
     [setPageZoomFactor],
   );
 
+  const navigateCurrentTabToUrl = useCallback(
+    (url: string) => {
+      if (activeTabId === null) return;
+      setAddressDraft(url);
+      setAddressFocused(false);
+      setAddressError("");
+      if (
+        activeViewId !== undefined &&
+        (parseBrowserInternalPage(activeTab?.url) !== null ||
+          parseBrowserInternalPage(views.find((view) => view.viewId === activeViewId)?.pendingUrl) !== null)
+      ) {
+        replaceView(runtime, activeViewId, url);
+        return;
+      }
+      void window.desktop.browser
+        .navigate(identity, activeTabId, url)
+        .then((result) => {
+          if (!result.ok && !result.loadError) setAddressError(result.error);
+        })
+        .catch((value: unknown) => setAddressError(value instanceof Error ? value.message : String(value)));
+    },
+    [activeTab?.url, activeTabId, activeViewId, identity, runtime, views],
+  );
+
   const submitAddress = useCallback(() => {
+    const internalPage = parseBrowserInternalPage(addressDraft);
+    if (internalPage !== null) {
+      setAddressFocused(false);
+      setAddressError("");
+      openInternalPageView(runtime, internalPage);
+      return;
+    }
     if (activeTabId === null) {
       setAddressError("没有可用的浏览器标签页");
       return;
     }
-    setInternalPage(null);
     const url = normalizeAddress(addressDraft);
     if (!url) {
       setAddressError("请输入有效的网址");
       return;
     }
-    setAddressError("");
-    void window.desktop.browser
-      .navigate(identity, activeTabId, url)
-      .then((result) => {
-        if (!result.ok) setAddressError(result.error);
-      })
-      .catch((value: unknown) => setAddressError(value instanceof Error ? value.message : String(value)));
-  }, [activeTabId, addressDraft, identity]);
+    navigateCurrentTabToUrl(url);
+  }, [activeTabId, addressDraft, navigateCurrentTabToUrl, runtime]);
 
-  const navigateToUrl = useCallback(
-    (url: string) => {
-      if (activeTabId === null) return;
-      setInternalPage(null);
-      setAddressDraft(url);
-      setAddressFocused(false);
-      setAddressError("");
-      void window.desktop.browser
-        .navigate(identity, activeTabId, url)
-        .then((result) => {
-          if (!result.ok) setAddressError(result.error);
-        })
-        .catch((value: unknown) => setAddressError(value instanceof Error ? value.message : String(value)));
-    },
-    [activeTabId, identity],
-  );
-
-  const openDownloadsFolder = useCallback(() => {
+  const openDownloadsPage = useCallback(() => {
     setMoreMenuOpen(false);
-    setInternalPage("downloads");
-  }, []);
+    setFindOpen(false);
+    openInternalPageView(runtime, "downloads");
+  }, [runtime]);
 
   const printPage = useCallback(() => {
     setMoreMenuOpen(false);
@@ -627,24 +628,17 @@ export function BrowserPanel() {
       });
   }, [identity, showBrowserNotice]);
 
-  const applyBrowserData = useCallback(
-    (result: BrowserDataMutateResult): BrowserDataMutateResult => {
-      if (result.ok) setBrowserData(result.snapshot);
-      else showBrowserNotice(result.error);
-      return result;
-    },
-    [showBrowserNotice],
-  );
-
   const clearDownloadHistory = useCallback(() => {
     setMoreMenuOpen(false);
     void window.desktop.browser
       .browserDownloadsClear()
-      .then(applyBrowserData)
+      .then((result) => {
+        if (!result.ok) showBrowserNotice(result.error);
+      })
       .catch((error: unknown) => {
         showBrowserNotice(`删除下载历史失败：${error instanceof Error ? error.message : String(error)}`);
       });
-  }, [applyBrowserData, showBrowserNotice]);
+  }, [showBrowserNotice]);
 
   const openBrowserSettings = useCallback(() => {
     setMoreMenuOpen(false);
@@ -659,19 +653,14 @@ export function BrowserPanel() {
     });
   }, [navigate, sessionProjectId, sessionThreadId]);
 
-  const openInternalPage = useCallback((page: BrowserInternalPageId) => {
-    setMoreMenuOpen(false);
-    setInternalPage(page);
-  }, []);
-
-  // 内部页数据：仅密码页请求解密后的密码，其余页面保持 passwords 为空。
-  useEffect(() => {
-    if (internalPage === null) return;
-    void window.desktop.browser
-      .browserDataGet(internalPage === "passwords")
-      .then(setBrowserData)
-      .catch(() => setBrowserData(null));
-  }, [internalPage]);
+  const openInternalPage = useCallback(
+    (page: BrowserInternalPageId) => {
+      setMoreMenuOpen(false);
+      setFindOpen(false);
+      openInternalPageView(runtime, page);
+    },
+    [runtime],
+  );
 
   // 密码保存请求：主进程已定向投递，renderer 再按会话身份防御性过滤。
   useEffect(() => {
@@ -702,19 +691,14 @@ export function BrowserPanel() {
     [identity, passwordOffer, showBrowserNotice],
   );
 
-  const applyBrowserDataCall = useCallback(
-    async (call: () => Promise<BrowserDataMutateResult>): Promise<BrowserDataMutateResult> =>
-      applyBrowserData(await call()),
-    [applyBrowserData],
-  );
   const showImportNotice = useCallback(() => {
     setMoreMenuOpen(false);
     showBrowserNotice("导入 Cookie 和密码暂不支持。");
   }, [showBrowserNotice]);
 
-  // 左下角统一错误条：attach 系统错误 > 用户操作错误 > 页面加载错误。
+  // 系统/输入错误保留现有操作反馈；主框架网络错误改由标签页内容区展示。
   const runtimeError = runtime.attachError ?? null;
-  const bottomError = panelError || runtimeError || addressError || activeTab?.loadError || "";
+  const bottomError = panelError || runtimeError || addressError;
 
   const retryBottomError = useCallback(() => {
     if (panelError || runtimeError) {
@@ -724,17 +708,28 @@ export function BrowserPanel() {
       return;
     }
     if (activeTabId === null) return;
-    // 加载失败重试当前页；其余用地址栏当前输入。
-    const url = activeTab?.loadError ? activeTab.url : normalizeAddress(addressDraft);
+    const url = normalizeAddress(addressDraft);
     if (!url) return;
     setAddressError("");
     void window.desktop.browser
       .navigate(identity, activeTabId, url)
       .then((result) => {
-        if (!result.ok) setAddressError(result.error);
+        if (!result.ok && !result.loadError) setAddressError(result.error);
       })
       .catch((value: unknown) => setAddressError(value instanceof Error ? value.message : String(value)));
-  }, [activeTab, activeTabId, addressDraft, identity, panelError, runtime, runtimeError, views, activeViewId]);
+  }, [activeTabId, addressDraft, identity, panelError, runtime, runtimeError, views, activeViewId]);
+
+  const retryNetworkError = useCallback(() => {
+    if (activeTabId === null || !activeTab?.loadError) return;
+    const url = activeTab.loadError.url || activeTab.url;
+    setAddressError("");
+    void window.desktop.browser
+      .navigate(identity, activeTabId, url)
+      .then((result) => {
+        if (!result.ok && !result.loadError) setAddressError(result.error);
+      })
+      .catch((value: unknown) => setAddressError(value instanceof Error ? value.message : String(value)));
+  }, [activeTab, activeTabId, identity]);
 
   // 标注模式：关闭时清理编辑态。
   const toggleAnnotationMode = useCallback(() => {
@@ -1041,7 +1036,7 @@ export function BrowserPanel() {
                       role="option"
                       title={entry.url}
                       onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => navigateToUrl(entry.url)}
+                      onClick={() => navigateCurrentTabToUrl(entry.url)}
                     >
                       <HistoryIcon size={13} aria-hidden="true" />
                       <span className="browser-history-item-text">
@@ -1121,7 +1116,7 @@ export function BrowserPanel() {
                 <DropdownMenuItem onSelect={() => openInternalPage("contacts")}>联系人</DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuItem onSelect={openDownloadsFolder}>下载</DropdownMenuItem>
+            <DropdownMenuItem onSelect={openDownloadsPage}>下载</DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>清除浏览数据</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="browser-more-dropdown-subcontent">
@@ -1309,60 +1304,12 @@ export function BrowserPanel() {
               </span>
             </div>
           ) : null}
-          {internalPage ? (
-            <BrowserInternalPages page={internalPage} onNavigate={setInternalPage}>
-              {internalPage === "history" ? (
-                <BrowserHistoryPage
-                  snapshot={browserData}
-                  onOpenUrl={navigateToUrl}
-                  onDeleteEntry={(url, timestamp) =>
-                    void window.desktop.browser.browserHistoryDelete(url, timestamp).then(applyBrowserData)
-                  }
-                  onClearAll={() => void window.desktop.browser.browserHistoryClear().then(applyBrowserData)}
-                />
-              ) : null}
-              {internalPage === "downloads" ? (
-                <BrowserDownloadsPage
-                  snapshot={browserData}
-                  onReveal={(path) => window.desktop.browser.browserDownloadReveal(path)}
-                  onOpenFile={(path) => void window.desktop.browser.browserDownloadOpen(path)}
-                  onOpenFolder={() => {
-                    setMoreMenuOpen(false);
-                    void window.desktop.browser.openDownloads().catch(() => undefined);
-                  }}
-                  onClearAll={clearDownloadHistory}
-                />
-              ) : null}
-              {internalPage === "passwords" ? (
-                <BrowserPasswordsPage
-                  snapshot={browserData}
-                  onSave={(input) => applyBrowserDataCall(() => window.desktop.browser.browserPasswordSave(input))}
-                  onDelete={(id) => applyBrowserDataCall(() => window.desktop.browser.browserPasswordDelete(id))}
-                />
-              ) : null}
-              {internalPage === "contacts" ? (
-                <BrowserContactsPage
-                  snapshot={browserData}
-                  onSave={(input) => applyBrowserDataCall(() => window.desktop.browser.browserContactSave(input))}
-                  onDelete={(id) => applyBrowserDataCall(() => window.desktop.browser.browserContactDelete(id))}
-                />
-              ) : null}
-              {internalPage === "site-settings" ? (
-                <BrowserSiteSettingsPage
-                  snapshot={browserData}
-                  onSave={(input) =>
-                    applyBrowserDataCall(() => window.desktop.browser.browserSitePermissionSave(input))
-                  }
-                  onDelete={(id) => applyBrowserDataCall(() => window.desktop.browser.browserSitePermissionDelete(id))}
-                />
-              ) : null}
-            </BrowserInternalPages>
-          ) : activeViewId !== undefined && !(views.find((view) => view.viewId === activeViewId)?.crashed ?? false) ? (
+          {activeViewId !== undefined && !(views.find((view) => view.viewId === activeViewId)?.crashed ?? false) ? (
             <>
               {activeTab?.loading ? (
                 <div className="browser-loading-indicator" role="status" aria-label="正在加载页面" />
               ) : null}
-              {annotationMode ? (
+              {annotationMode && !activeTab?.loadError ? (
                 <div className="browser-annotation-layer" aria-label="标注模式">
                   <div
                     className="browser-annotation-hitarea"
@@ -1478,6 +1425,9 @@ export function BrowserPanel() {
                   )}
                 </div>
               ) : null}
+              {activeTab?.loadError ? (
+                <BrowserNetworkErrorPage error={activeTab.loadError} onRetry={retryNetworkError} />
+              ) : null}
               {bottomError && (
                 <div className="browser-panel-error" role="alert">
                   <span className="browser-panel-error-text" title={bottomError}>
@@ -1515,8 +1465,7 @@ export function BrowserPanel() {
           !activeTab?.loading &&
           !activeTab?.loadError &&
           !panelError &&
-          !runtimeError &&
-          !internalPage ? (
+          !runtimeError ? (
             <div className="browser-blank-state" aria-live="polite">
               <strong>开始浏览</strong>
               <span>输入 URL 以打开页面</span>

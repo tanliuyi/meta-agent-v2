@@ -13,7 +13,7 @@ export function ThinkingSelect({ value, levels, disabled = false, onValueChange 
   return (
     <Select
       value={value}
-      className="max-w-24 text-(length:--type-size-ui) ps-2 pe-2 font-medium"
+      className="max-w-24 text-(length:--type-size-ui) ps-2 pe-2 font-medium [&>svg]:hidden"
       tooltip="选择思考等级"
       options={levels.map((level) => ({ value: level, label: level }))}
       disabled={disabled || levels.length === 0}

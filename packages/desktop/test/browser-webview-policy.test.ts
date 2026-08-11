@@ -85,10 +85,39 @@ describe("browser webview security policy", () => {
     remove();
   });
 
-  test("recognizes only about:blank and HTTP(S) URLs", () => {
+  test("只给已知 browser:// WebUI 注入受信 preload", () => {
+    const webContents = new EventEmitter() as unknown as WebContents;
+    const remove = installBrowserWebviewSecurity(webContents, "/app/preload/browser-internal.cjs");
+    const internalEvent = attachEvent();
+    const internalPreferences: Electron.WebPreferences = {};
+    webContents.emit("will-attach-webview", internalEvent, internalPreferences, {
+      partition: SESSION_PARTITION,
+      src: "browser://history",
+      preload: "/tmp/attacker-preload.js",
+    });
+    expect(internalEvent.preventDefault).not.toHaveBeenCalled();
+    expect(internalPreferences.preload).toBe("/app/preload/browser-internal.cjs");
+
+    const websiteEvent = attachEvent();
+    const websitePreferences: Electron.WebPreferences = { preload: "/tmp/attacker-preload.js" };
+    webContents.emit("will-attach-webview", websiteEvent, websitePreferences, {
+      partition: SESSION_PARTITION,
+      src: "https://example.com/",
+      preload: "/tmp/attacker-preload.js",
+    });
+    expect(websiteEvent.preventDefault).not.toHaveBeenCalled();
+    expect(websitePreferences.preload).toBeUndefined();
+    remove();
+  });
+
+  test("recognizes only about:blank, HTTP(S), and known browser:// URLs", () => {
     expect(isBrowserWebviewUrl("about:blank")).toBe(true);
     expect(isBrowserWebviewUrl("https://example.com/")).toBe(true);
     expect(isBrowserWebviewUrl("http://localhost:3000/")).toBe(true);
+    expect(isBrowserWebviewUrl("browser://history")).toBe(true);
+    expect(isBrowserWebviewUrl("browser://passwords/")).toBe(true);
+    expect(isBrowserWebviewUrl("browser://unknown")).toBe(false);
+    expect(isBrowserWebviewUrl("browser://history/extra")).toBe(false);
     expect(isBrowserWebviewUrl("file:///tmp/index.html")).toBe(false);
     expect(isBrowserWebviewUrl("javascript:alert(1)")).toBe(false);
     expect(isBrowserWebviewUrl(undefined)).toBe(false);

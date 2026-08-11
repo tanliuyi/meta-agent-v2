@@ -41,6 +41,15 @@ function fnv1a64Hex(input: string): string {
   return hash.toString(16).padStart(16, "0");
 }
 
+export interface BrowserLoadError {
+  /** Chromium net error code（例如 ERR_CONNECTION_REFUSED = -102）。 */
+  code: number;
+  /** Chromium 标准错误名（例如 ERR_CONNECTION_REFUSED）。 */
+  description: string;
+  /** 失败的主框架 URL。 */
+  url: string;
+}
+
 /** 内置浏览器中的一个 tab（对应一个已 attach 的 webview）。 */
 export interface BrowserTab {
   /** BrowserManager 自增分配，稳定标识；renderer 侧用于与 webview 元素映射。 */
@@ -53,8 +62,8 @@ export interface BrowserTab {
   loading: boolean;
   /** guest 渲染进程崩溃（render-process-gone），需重建 webview。 */
   crashed: boolean;
-  /** 最近一次加载失败的网络错误（did-fail-load；DNS/连接/证书等），无则缺省。 */
-  loadError?: string;
+  /** 最近一次主框架加载失败，由 Chromium did-fail-load 原样提供。 */
+  loadError?: BrowserLoadError;
   canGoBack: boolean;
   canGoForward: boolean;
   createdAt: number;
@@ -64,7 +73,9 @@ export interface BrowserTab {
 export type BrowserAttachResult = { ok: true; tab: BrowserTab } | { ok: false; error: string };
 
 /** 导航结果；失败（非法 URL、加载失败）返回结构化错误而非 throw。 */
-export type BrowserNavigateResult = { ok: true; tab: BrowserTab } | { ok: false; error: string; staleRef?: boolean };
+export type BrowserNavigateResult =
+  | { ok: true; tab: BrowserTab }
+  | { ok: false; error: string; loadError?: BrowserLoadError; staleRef?: boolean };
 
 /** 截图结果；dataUrl 为 PNG base64。 */
 export type BrowserScreenshotResult =

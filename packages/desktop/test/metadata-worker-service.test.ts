@@ -16,7 +16,7 @@ import type { MetadataSidecarCommand } from "../src/shared/sidecar-contracts.ts"
 import { resolveDesktopSessionDirectory } from "../src/sidecar/desktop-session-directory.ts";
 import { MetadataWorkerService } from "../src/sidecar/metadata-worker-service.ts";
 
-describe("MetadataWorkerService session tree removal", () => {
+describe("MetadataWorkerService", () => {
   let root: string;
   let service: MetadataWorkerService;
 
@@ -49,6 +49,30 @@ describe("MetadataWorkerService session tree removal", () => {
     });
     expect(existsSync(parentFile)).toBe(false);
     expect(JSON.parse(readFileSync(childFile, "utf8").split("\n", 1)[0]!).parentSession).toBe(grandparentFile);
+  });
+
+  it("keeps a recent reservation active before recovering its committed session", async () => {
+    const path = sessionFile("committed");
+    await register(thread("committed"), path);
+    const reservation = {
+      projectId: "project",
+      cwd: root,
+      sessionId: "committed",
+      createRequestId: "create-request",
+      state: "reserved" as const,
+      updatedAt: Date.now(),
+    };
+
+    await expect(service.command({ type: "recoverCreationReservation", reservation })).resolves.toMatchObject({
+      status: "active",
+      retryAfterMs: expect.any(Number),
+    });
+    await expect(
+      service.command({
+        type: "recoverCreationReservation",
+        reservation: { ...reservation, updatedAt: Date.now() - 30_001 },
+      }),
+    ).resolves.toEqual({ status: "committed" });
   });
 
   it("promotes a child session to root by clearing its parentSession header", async () => {

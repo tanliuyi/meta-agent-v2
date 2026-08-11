@@ -60,6 +60,7 @@ export interface MarketplacePluginSummary {
   publisher: MarketplacePublisherSummary;
   categories: string[];
   iconAssetId?: string;
+  iconUrl?: string;
   latestVersion?: string;
   compatibleVersion?: string;
   containsNativeCode: boolean;

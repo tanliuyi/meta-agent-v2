@@ -22,8 +22,14 @@ import type {
   BrowserTab,
 } from "../../../../../shared/browser-contracts.ts";
 import { browserPartitionFor, browserSessionKey } from "../../../../../shared/browser-contracts.ts";
+import {
+  BROWSER_INTERNAL_HOST_CHANNEL,
+  type BrowserInternalPageId,
+  browserInternalUrl,
+  parseBrowserInternalPage,
+} from "../../../../../shared/browser-internal-contracts.ts";
 import { registerBrowserRuntimeRetirer } from "../../../state/session-cache-context.tsx";
-import type { BrowserWebviewElement } from "../../../webview.d.ts";
+import type { BrowserWebviewElement, BrowserWebviewIpcMessageEvent } from "../../../webview.d.ts";
 
 /** renderer 侧一个浏览器视图（对应一个 <webview> 元素）。 */
 export interface BrowserViewRecord {
@@ -423,6 +429,36 @@ export function createView(runtime: SessionBrowserRuntime, pendingUrl: string): 
   createViewInternal(internals, pendingUrl, undefined);
 }
 
+/** 在同一标签位置重建 webview，用于跨越 browser:// 特权边界。 */
+export function replaceView(runtime: SessionBrowserRuntime, viewId: number, pendingUrl: string): void {
+  const internals = internalsOf(runtime);
+  const index = runtime.views.findIndex((view) => view.viewId === viewId);
+  if (index === -1) return;
+  removeViewInternal(internals, viewId);
+  createViewInternal(internals, pendingUrl, undefined, index);
+  markChanged(internals);
+}
+
+/** 打开或复用一个真实 browser:// WebUI 标签；标签位置由 runtime.views 自然维护。 */
+export function openInternalPageView(runtime: SessionBrowserRuntime, page: BrowserInternalPageId): void {
+  const internals = internalsOf(runtime);
+  const url = browserInternalUrl(page);
+  const existing = runtime.views.find(
+    (view) => parseBrowserInternalPage(tabUrlOf(internals, view.viewId) || view.pendingUrl) !== null,
+  );
+  if (!existing) {
+    createViewInternal(internals, url, undefined);
+    return;
+  }
+
+  existing.pendingUrl = url;
+  const tabId = internals.tabIdByView.get(existing.viewId);
+  if (tabId !== undefined) void window.desktop.browser.selectTab(runtime.identity, tabId);
+  const element = internals.elementByView.get(existing.viewId);
+  if (element && element.getAttribute("src") !== url) void element.loadURL(url);
+  markChanged(internals);
+}
+
 /** 关闭视图：detach + 移除元素与映射。 */
 export function closeView(runtime: SessionBrowserRuntime, viewId: number): void {
   const internals = internalsOf(runtime);
@@ -528,7 +564,12 @@ function createViewForRequest(internals: RuntimeInternals, requestId: number): v
   createViewInternal(internals, request.url, requestId);
 }
 
-function createViewInternal(internals: RuntimeInternals, pendingUrl: string, pendingRequestId?: number): void {
+function createViewInternal(
+  internals: RuntimeInternals,
+  pendingUrl: string,
+  pendingRequestId?: number,
+  insertIndex = internals.runtime.views.length,
+): void {
   const runtime = internals.runtime;
   const viewId = nextViewId++;
   const record: BrowserViewRecord = {
@@ -538,19 +579,19 @@ function createViewInternal(internals: RuntimeInternals, pendingUrl: string, pen
     ...(pendingRequestId !== undefined ? { pendingRequestId } : {}),
     remountEpoch: 1,
   };
-  runtime.views.push(record);
-  const element = createWebviewElement(runtime);
+  runtime.views.splice(insertIndex, 0, record);
+  const element = createWebviewElement(runtime, pendingUrl);
   internals.elementByView.set(viewId, element);
   bindElementEvents(internals, viewId, element);
   runtime.container.appendChild(element);
   markChanged(internals);
 }
 
-function createWebviewElement(runtime: SessionBrowserRuntime): BrowserWebviewElement {
+function createWebviewElement(runtime: SessionBrowserRuntime, initialUrl: string): BrowserWebviewElement {
   const element =
     runtimeOptions.createWebviewElement?.() ?? (document.createElement("webview") as unknown as BrowserWebviewElement);
   element.setAttribute("partition", runtime.partition);
-  element.setAttribute("src", "about:blank");
+  element.setAttribute("src", parseBrowserInternalPage(initialUrl) === null ? "about:blank" : initialUrl);
   // 必须为 true：allowpopups=false 时 guest 的 window.open/target=_blank 会被
   // Chromium 直接吞掉，main 侧 setWindowOpenHandler 不会触发；置 true 后请求
   // 进入 handler，由 main 统一 deny 并转应用内新 tab（guest 不会真正弹窗）。
@@ -565,10 +606,25 @@ function bindElementEvents(internals: RuntimeInternals, viewId: number, element:
   const onAttachQuiet = (): void => attachView(internals, viewId, element, true);
   const onGone = (): void => handleCrash(internals, viewId, element);
   const onDestroyed = (): void => handleGuestDestroyed(internals, viewId, element);
+  const onIpcMessage = (rawEvent: Event): void => {
+    const event = rawEvent as BrowserWebviewIpcMessageEvent;
+    if (event.channel !== BROWSER_INTERNAL_HOST_CHANNEL) return;
+    const payload = event.args[0];
+    if (typeof payload !== "object" || payload === null) return;
+    const command = payload as { type?: unknown; url?: unknown };
+    if (command.type !== "open-url" || typeof command.url !== "string") return;
+    try {
+      const url = new URL(command.url);
+      if (url.protocol === "http:" || url.protocol === "https:") createView(internals.runtime, url.href);
+    } catch {
+      // browser:// WebUI 只能请求新建 http(s) 标签。
+    }
+  };
   element.addEventListener("did-attach", onAttach);
   element.addEventListener("dom-ready", onAttach);
   element.addEventListener("render-process-gone", onGone);
   element.addEventListener("destroyed", onDestroyed);
+  element.addEventListener("ipc-message", onIpcMessage);
   let attempts = 0;
   const timer = setInterval(() => {
     attempts += 1;
@@ -594,6 +650,7 @@ function bindElementEvents(internals: RuntimeInternals, viewId: number, element:
     element.removeEventListener("dom-ready", onAttach);
     element.removeEventListener("render-process-gone", onGone);
     element.removeEventListener("destroyed", onDestroyed);
+    element.removeEventListener("ipc-message", onIpcMessage);
     internals.pollTimers.delete(viewId);
   });
 }
@@ -678,7 +735,7 @@ function attachView(internals: RuntimeInternals, viewId: number, element: Browse
         view.viewId === viewId ? { ...view, pendingRequestId: undefined, rebuilding: false } : view,
       );
       const latest = runtime.views.find((view) => view.viewId === viewId);
-      if (latest?.pendingUrl && requestId === undefined) {
+      if (latest?.pendingUrl && requestId === undefined && parseBrowserInternalPage(latest.pendingUrl) === null) {
         void window.desktop.browser.navigate(runtime.identity, result.tab.tabId, latest.pendingUrl);
       }
       markChanged(internals);

@@ -135,6 +135,20 @@ export class MarketplacePluginRegistry {
     return operation;
   }
 
+  markInstalled(pluginId: string, artifactHash: string): Promise<InstalledMarketplacePluginsSnapshot> {
+    const operation = this.saveTail.then(async () => {
+      const current = await this.getInternalSnapshot();
+      const record = current.plugins.find((plugin) => plugin.id === pluginId);
+      if (!record || record.artifactHash !== artifactHash) return this.getSnapshot();
+      return this.reconcilePluginLocked(pluginId, artifactHash, { ...record, state: "installed", enabled: true });
+    });
+    this.saveTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   markBroken(pluginId: string, artifactHash: string): Promise<InstalledMarketplacePluginsSnapshot> {
     const operation = this.saveTail.then(async () => {
       const current = await this.getInternalSnapshot();

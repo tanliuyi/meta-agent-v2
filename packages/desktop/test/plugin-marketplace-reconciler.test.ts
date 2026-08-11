@@ -1,9 +1,10 @@
-import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   readMarketplaceVersionOwner,
+  writeMarketplaceBrokenMarker,
   writeMarketplaceProjection,
 } from "../src/main/plugins/marketplace-installed-plugin.ts";
 import { MarketplacePluginReconciler } from "../src/main/plugins/marketplace-plugin-reconciler.ts";
@@ -50,6 +51,111 @@ describe("MarketplacePluginReconciler", () => {
     expect(snapshot.plugins).toEqual([
       expect.objectContaining({ id: harness.record.id, state: "installed", enabled: true }),
     ]);
+  });
+
+  it("does not damage registry entries owned by another agent directory", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+    await writeMarketplaceProjection(harness.record);
+    const logs: string[] = [];
+    const temporaryAgentDir = join(harness.root, "temporary-agent");
+    const reconciler = new MarketplacePluginReconciler(harness.registry, temporaryAgentDir, harness.userDataDir, {
+      log: (message) => logs.push(message),
+    });
+
+    await reconciler.reconcile();
+
+    await expect(harness.registry.getSnapshot()).resolves.toEqual(installed.snapshot);
+    await expect(pathExists(join(harness.record.rootPath, "index.ts"))).resolves.toBe(true);
+    expect(logs).toEqual([
+      expect.stringContaining(
+        `Skipped marketplace plugin from a different agent directory while reconciling ${harness.record.id}`,
+      ),
+    ]);
+  });
+
+  it("does not damage a foreign registry entry after its agent directory is removed", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+    await rm(harness.agentDir, { recursive: true, force: true });
+    const logs: string[] = [];
+    const temporaryAgentDir = join(harness.root, "temporary-agent");
+    const reconciler = new MarketplacePluginReconciler(harness.registry, temporaryAgentDir, harness.userDataDir, {
+      log: (message) => logs.push(message),
+    });
+
+    await reconciler.reconcile();
+
+    await expect(harness.registry.getSnapshot()).resolves.toEqual(installed.snapshot);
+    expect(logs).toEqual([
+      expect.stringContaining(
+        `Skipped marketplace plugin from a different agent directory while reconciling ${harness.record.id}`,
+      ),
+    ]);
+  });
+
+  it("accepts an equivalent agent directory reached through a filesystem alias", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+    await writeMarketplaceProjection(harness.record);
+    const aliasedAgentDir = join(harness.root, "aliased-agent");
+    await symlink(harness.agentDir, aliasedAgentDir, process.platform === "win32" ? "junction" : "dir");
+    const logs: string[] = [];
+    const reconciler = new MarketplacePluginReconciler(harness.registry, aliasedAgentDir, harness.userDataDir, {
+      log: (message) => logs.push(message),
+    });
+
+    await reconciler.reconcile();
+
+    await expect(harness.registry.getSnapshot()).resolves.toEqual(installed.snapshot);
+    await expect(pathExists(join(harness.record.rootPath, "index.ts"))).resolves.toBe(true);
+    expect(logs).toEqual([]);
+  });
+
+  it("repairs a broken plugin when its managed payload is intact", async () => {
+    const harness = await createHarness();
+    await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    await writeMarketplaceProjection(harness.record);
+    await harness.registry.markBroken(harness.record.id, harness.record.artifactHash);
+    await writeMarketplaceBrokenMarker({ ...harness.record, state: "broken", enabled: false });
+
+    await harness.reconciler.reconcile();
+
+    const snapshot = await harness.registry.getInternalSnapshot();
+    expect(snapshot.plugins).toEqual([
+      expect.objectContaining({ id: harness.record.id, state: "installed", enabled: true }),
+    ]);
+    await expect(readFile(join(harness.record.rootPath, "index.ts"), "utf8")).resolves.toContain(
+      `./.versions/${harness.record.artifactHash}/payload/index.ts`,
+    );
+    expect(JSON.parse(await readFile(join(harness.record.rootPath, ".meta-agent-market.json"), "utf8"))).toMatchObject({
+      version: 1,
+      state: "installed",
+    });
+  });
+
+  it("rewrites a stale projection that belongs to a different artifact", async () => {
+    const harness = await createHarness();
+    await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    await writeMarketplaceProjection(harness.record);
+    const markerPath = join(harness.record.rootPath, ".meta-agent-market.json");
+    const marker = JSON.parse(await readFile(markerPath, "utf8"));
+    marker.record.artifactHash = "b".repeat(64);
+    await writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+    await writeFile(join(harness.record.rootPath, "index.ts"), "export { default } from './old.ts';\n", "utf8");
+
+    await harness.reconciler.reconcile();
+
+    await expect(readFile(join(harness.record.rootPath, "index.ts"), "utf8")).resolves.toContain(
+      `./.versions/${harness.record.artifactHash}/payload/index.ts`,
+    );
+    expect(JSON.parse(await readFile(markerPath, "utf8"))).toMatchObject({
+      state: "installed",
+      record: { artifactHash: harness.record.artifactHash },
+    });
   });
 
   it("marks a committed plugin broken when its version payload is missing", async () => {

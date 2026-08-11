@@ -9,6 +9,7 @@ import { CHANNELS } from "../shared/channels.ts";
 import { AuthConfigService } from "./auth/auth-config-service.ts";
 import { BrowserDataService } from "./browser/browser-data-service.ts";
 import { type BrowserHostServer, createBrowserHostServer } from "./browser/browser-host-server.ts";
+import { handleBrowserInternalPageRequests } from "./browser/browser-internal-page-protocol.ts";
 import { BrowserManager } from "./browser/browser-manager.ts";
 import { installBrowserWebviewSecurity } from "./browser/browser-webview-policy.ts";
 import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extension-registry.ts";
@@ -35,6 +36,7 @@ import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service
 import { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
 import { MarketplaceGenerationReferenceTracker } from "./plugins/marketplace-generation-reference-tracker.ts";
 import { MarketplacePluginGarbageCollector } from "./plugins/marketplace-plugin-garbage-collector.ts";
+import { handleMarketplacePluginIconRequests } from "./plugins/marketplace-plugin-icon-protocol.ts";
 import { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
 import { MarketplacePluginReconciler } from "./plugins/marketplace-plugin-reconciler.ts";
 import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
@@ -63,6 +65,7 @@ import { resolveWorkspaceMutationKey } from "./sidecar/workspace-mutation-key.ts
 import { ProjectStore } from "./store/project-store.ts";
 import { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
 import { createTerminalShellResolver, TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
+import { TrayController } from "./tray.ts";
 import { AutoUpdateService, scheduleAutoUpdateChecks } from "./updater.ts";
 import { WindowDirtyGuard } from "./window-dirty-guard.ts";
 
@@ -80,6 +83,13 @@ const dirtyGuard = new WindowDirtyGuard({
   beforeReload: (window) => sessions?.detachAll(window.webContents.id),
 });
 const appDir = dirname(fileURLToPath(import.meta.url));
+const trayController = new TrayController({
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  appDir,
+  resourcesPath: process.resourcesPath,
+  quit: () => app.quit(),
+});
 const runtimeSetupSelection = parseRuntimeSetupSelection(process.argv);
 const defaultWindowBounds = { width: 1440, height: 920 };
 const minimumWindowBounds = { width: 1024, height: 680 };
@@ -146,10 +156,14 @@ function createWindow(): void {
   windowState.manage(window);
 
   dirtyGuard.attach(window);
+  trayController.attach(window);
   window.once("ready-to-show", () => window.show());
   window.on("maximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, true));
   window.on("unmaximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, false));
-  const removeBrowserWebviewSecurity = installBrowserWebviewSecurity(window.webContents);
+  const removeBrowserWebviewSecurity = installBrowserWebviewSecurity(
+    window.webContents,
+    join(appDir, "../preload/browser-internal.cjs"),
+  );
   window.once("closed", removeBrowserWebviewSecurity);
   window.webContents.on("preload-error", (_event, path, error) => {
     console.error(`Preload 加载失败: ${path}`, error);
@@ -204,6 +218,7 @@ function scheduleMarketplaceGarbageCollection(
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   handleLocalImageRequests();
+  handleBrowserInternalPageRequests(join(appDir, "../renderer"), process.env.ELECTRON_RENDERER_URL);
   Menu.setApplicationMenu(null);
   const userDataDir = app.getPath("userData");
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
@@ -262,6 +277,7 @@ app.whenReady().then(async () => {
     defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
   });
   const marketplaceRegistry = new MarketplacePluginRegistry(userDataDir);
+  handleMarketplacePluginIconRequests(marketplaceRegistry);
   const marketplaceLockDirectory = join(userDataDir, "plugins", "locks");
   const pluginConfigurations = new PluginConfigurationService(userDataDir, marketplaceRegistry, {
     isAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -584,6 +600,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", (event) => {
+  trayController.markQuitting();
   if (!dirtyGuard.isApplicationQuitConfirmed() && dirtyGuard.hasDirtyWindows(BrowserWindow.getAllWindows())) {
     event.preventDefault();
     if (!quitGuardPending) {
@@ -603,6 +620,7 @@ app.on("before-quit", (event) => {
   stopAutoUpdateChecks = undefined;
   stopMarketplaceGarbageCollection?.();
   stopMarketplaceGarbageCollection = undefined;
+  trayController.dispose();
   if (!sessions && !metadata && !sidecarLog && !subagents && !terminals) return;
   sidecarLog?.write("main", "Desktop shutdown started");
   event.preventDefault();

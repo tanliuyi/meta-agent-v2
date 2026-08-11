@@ -81,20 +81,21 @@ export class MetadataWorkerService implements SidecarService {
       }
       case "recoverCreationReservation": {
         const { reservation } = command;
+        const reservationAgeMs = Date.now() - reservation.updatedAt;
         if (
           reservation.state === "reserved" &&
-          Number.isFinite(reservation.updatedAt) &&
-          Date.now() - reservation.updatedAt < CREATION_RESERVATION_GRACE_MS
+          Number.isFinite(reservationAgeMs) &&
+          reservationAgeMs >= 0 &&
+          reservationAgeMs < CREATION_RESERVATION_GRACE_MS
         ) {
           // Keep the main-to-worker hand-off window from being mistaken for an orphaned creation.
-          return { status: "active" };
+          return { status: "active", retryAfterMs: CREATION_RESERVATION_GRACE_MS - reservationAgeMs };
         }
         try {
           await this.index.resolve(reservation.projectId, reservation.cwd, reservation.sessionId);
           return { status: "committed" };
         } catch {
-          const project = await this.index.rebuild(reservation.projectId, reservation.cwd);
-          return { status: project.sessions.some(({ id }) => id === reservation.sessionId) ? "committed" : "orphan" };
+          return { status: "orphan" };
         }
       }
       case "invalidateProject":

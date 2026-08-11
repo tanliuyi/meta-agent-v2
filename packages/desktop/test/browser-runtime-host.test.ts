@@ -13,6 +13,8 @@ import {
   createBlankView,
   ensureBrowserRuntime,
   getBrowserRuntime,
+  openInternalPageView,
+  replaceView,
   resetBrowserRuntimeHostForTest,
   retireBrowserRuntime,
   subscribeBrowserCreateRequest,
@@ -29,7 +31,7 @@ class FakeNode {
   className = "";
   style: Record<string, string> = {};
   private readonly attributes = new Map<string, string>();
-  private readonly listeners = new Map<string, Set<() => void>>();
+  private readonly listeners = new Map<string, Set<(event: Event) => void>>();
   private webContentsId = -1;
 
   setAttribute(name: string, value: string): void {
@@ -58,7 +60,7 @@ class FakeNode {
     this.parentElement?.removeChild(this);
   }
 
-  addEventListener(type: string, listener: () => void): void {
+  addEventListener(type: string, listener: (event: Event) => void): void {
     let set = this.listeners.get(type);
     if (!set) {
       set = new Set();
@@ -67,12 +69,16 @@ class FakeNode {
     set.add(listener);
   }
 
-  removeEventListener(type: string, listener: () => void): void {
+  removeEventListener(type: string, listener: (event: Event) => void): void {
     this.listeners.get(type)?.delete(listener);
   }
 
-  emit(type: string): void {
-    for (const listener of [...(this.listeners.get(type) ?? [])]) listener();
+  emit(type: string, event: Event = new Event(type)): void {
+    for (const listener of [...(this.listeners.get(type) ?? [])]) listener(event);
+  }
+
+  async loadURL(url: string): Promise<void> {
+    this.setAttribute("src", url);
   }
 
   setWebContentsId(id: number): void {
@@ -98,6 +104,7 @@ interface DesktopStub {
   attach: ReturnType<typeof vi.fn>;
   detach: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.fn>;
+  selectTab: ReturnType<typeof vi.fn>;
   sessionRetire: ReturnType<typeof vi.fn>;
   onStateChanged: ReturnType<typeof vi.fn>;
   onCreateTabRequest: ReturnType<typeof vi.fn>;
@@ -113,6 +120,7 @@ const SESSION_B: BrowserSessionIdentity = { projectId: "proj-a", threadId: "thre
 let desktop: DesktopStub;
 let parking: FakeNode;
 let elements: FakeNode[] = [];
+let nextTabId = 0;
 
 function makeTab(tabId: number, url: string): BrowserTab {
   return {
@@ -131,13 +139,15 @@ beforeEach(() => {
   resetBrowserRuntimeHostForTest();
   parking = new FakeNode();
   elements = [];
+  nextTabId = 0;
   desktop = {
     attach: vi.fn(async (_identity: BrowserSessionIdentity, _webContentsId: number, requestId?: number) => ({
       ok: true,
-      tab: makeTab(requestId ?? 1, "about:blank"),
+      tab: makeTab(requestId ?? ++nextTabId, "about:blank"),
     })),
     detach: vi.fn(async () => undefined),
     navigate: vi.fn(async () => ({ ok: true })),
+    selectTab: vi.fn(async () => null),
     sessionRetire: vi.fn(async () => undefined),
     onStateChanged: vi.fn((handler) => {
       desktop.stateHandler = handler;
@@ -202,6 +212,44 @@ describe("browser runtime host 会话路由", () => {
     // 每个 runtime 有独立 parking 容器（parking host 之下）。
     const parkingHostEl = parking.children[0];
     expect(parkingHostEl.children).toHaveLength(2);
+  });
+
+  test("browser:// WebUI 是普通有序 view，切换内部页面复用原位置", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    createBlankView(runtime);
+    openInternalPageView(runtime, "history");
+    createBlankView(runtime);
+    await flushAttach();
+
+    expect(runtime.views.map((view) => view.pendingUrl)).toEqual(["", "browser://history", ""]);
+    const webviews = elements.filter((node) => node.getAttribute("src") !== undefined);
+    expect(webviews.map((node) => node.getAttribute("src"))).toEqual([
+      "about:blank",
+      "browser://history",
+      "about:blank",
+    ]);
+    expect(desktop.navigate).not.toHaveBeenCalledWith(SESSION_A, expect.any(Number), "browser://history");
+
+    openInternalPageView(runtime, "passwords");
+    expect(runtime.views.map((view) => view.pendingUrl)).toEqual(["", "browser://passwords", ""]);
+    expect(webviews[1]?.getAttribute("src")).toBe("browser://passwords");
+    expect(desktop.selectTab).toHaveBeenCalledWith(SESSION_A, 2);
+  });
+
+  test("跨 browser:// 特权边界时原位重建普通 webview", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    createBlankView(runtime);
+    openInternalPageView(runtime, "history");
+    createBlankView(runtime);
+    await flushAttach();
+    const internalView = runtime.views[1];
+    expect(internalView).toBeDefined();
+
+    replaceView(runtime, internalView!.viewId, "https://example.com/");
+    await flushAttach();
+
+    expect(runtime.views.map((view) => view.pendingUrl)).toEqual(["", "https://example.com/", ""]);
+    expect(desktop.navigate).toHaveBeenCalledWith(SESSION_A, 4, "https://example.com/");
   });
 
   test("状态广播按 sessionKey 路由：A 的广播不影响 B", async () => {

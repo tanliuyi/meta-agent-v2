@@ -690,6 +690,18 @@ describe("BrowserManager 会话隔离", () => {
     expect(hosts.get(101)?.navigatedUrls).toEqual(["https://example.com/"]);
   });
 
+  test("browser:// 特权 tab 不能直接导航到网站", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    hosts.get(101)?.emit({ type: "navigated", url: "browser://history", canGoBack: false, canGoForward: false });
+
+    await expect(manager.navigate(SESSION_A, 1, "https://example.com/")).resolves.toEqual({
+      ok: false,
+      error: "browser:// 标签需要重建 webview 后才能导航到网站",
+    });
+    expect(hosts.get(101)?.navigatedUrls).toEqual([]);
+  });
+
   test("用户与 Agent 均不能导航到 chrome 协议（Electron 无浏览器 UI 内置页）", async () => {
     const { manager, hosts } = setup();
     await manager.attach(SESSION_A, 101);
@@ -1112,6 +1124,10 @@ describe("BrowserManager 会话隔离", () => {
     const hostA = hosts.get(101)!;
     const hostB = hosts.get(201)!;
 
+    hostA.emit({ type: "navigated", url: "about:blank", canGoBack: false, canGoForward: false });
+    hostA.emit({ type: "navigated", url: "browser://history", canGoBack: true, canGoForward: false });
+    expect(manager.browserHistory(SESSION_A)).toEqual([]);
+
     hostA.emit({ type: "navigated", url: "https://example.com/a", canGoBack: false, canGoForward: false });
     hostA.emit({ type: "title-updated", title: "A 页面" });
     hostA.emit({ type: "navigated", url: "https://example.com/b", canGoBack: true, canGoForward: false });
@@ -1191,14 +1207,29 @@ describe("BrowserManager 会话隔离", () => {
     const host = hosts.get(101)!;
 
     host.emit({ type: "load-failed", url: "https://www.baidu.com/", code: -105, description: "ERR_NAME_NOT_RESOLVED" });
-    expect(states.at(-1)?.tabs[0]?.loadError).toContain("域名解析失败（DNS）");
+    expect(states.at(-1)?.tabs[0]).toMatchObject({
+      url: "https://www.baidu.com/",
+      title: "www.baidu.com",
+      loading: false,
+    });
+    expect(states.at(-1)?.tabs[0]?.loadError).toEqual({
+      code: -105,
+      description: "ERR_NAME_NOT_RESOLVED",
+      url: "https://www.baidu.com/",
+    });
     expect(states.at(-1)?.tabs[0]?.loading).toBe(false);
 
     host.emit({ type: "loading-changed", loading: true });
     expect(states.at(-1)?.tabs[0]?.loadError).toBeUndefined();
 
-    host.emit({ type: "load-failed", url: "https://example.com/", code: -106, description: "ERR_CONNECTION_REFUSED" });
-    expect(states.at(-1)?.tabs[0]?.loadError).toContain("无法连接服务器");
+    host.emit({ type: "load-failed", url: "https://example.com/", code: -102, description: "ERR_CONNECTION_REFUSED" });
+    expect(states.at(-1)?.tabs[0]?.loadError).toEqual({
+      code: -102,
+      description: "ERR_CONNECTION_REFUSED",
+      url: "https://example.com/",
+    });
+    expect(states.at(-1)?.tabs[0]?.url).toBe("https://example.com/");
+    expect(states.at(-1)?.tabs[0]?.title).toBe("example.com");
     host.emit({ type: "navigated", url: "https://example.com/", canGoBack: false, canGoForward: false });
     expect(states.at(-1)?.tabs[0]?.loadError).toBeUndefined();
   });

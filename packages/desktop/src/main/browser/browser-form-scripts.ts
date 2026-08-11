@@ -78,10 +78,7 @@ export function buildBrowserPasswordAutofillScript(input: { origin: string; pass
   return `(() => {
   try {
     const data = ${payload};
-    if (location.origin !== data.origin) return;
-    const passwordFields = Array.from(document.querySelectorAll('input[type="password"]'));
-    if (data.candidates.length === 0 || passwordFields.length === 0) return;
-    const candidate = data.candidates[0];
+    if (location.origin !== data.origin || data.candidates.length === 0) return;
     const setValue = (element, value) => {
       if (!element || element.value === value) return;
       const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
@@ -90,13 +87,28 @@ export function buildBrowserPasswordAutofillScript(input: { origin: string; pass
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
     };
-    const usernameField =
-      document.querySelector('input[autocomplete="username"]') ||
-      document.querySelector('input[name*="user" i]') ||
-      document.querySelector('input[type="email"]');
-    if (usernameField && !usernameField.value) setValue(usernameField, candidate.username);
-    const passwordField = passwordFields[0];
-    if (passwordField && !passwordField.value) setValue(passwordField, candidate.password);
+    let observer;
+    const fill = () => {
+      const passwordField = document.querySelector('input[type="password"]');
+      if (!passwordField) return false;
+      const usernameField =
+        document.querySelector('input[autocomplete="username"]') ||
+        document.querySelector('input[name*="user" i]') ||
+        document.querySelector('input[type="email"]') ||
+        document.querySelector('input[type="text"]');
+      const enteredUsername = usernameField?.value?.trim();
+      const candidate =
+        (enteredUsername && data.candidates.find((entry) => entry.username === enteredUsername)) || data.candidates[0];
+      if (usernameField && !usernameField.value) setValue(usernameField, candidate.username);
+      if (!passwordField.value) setValue(passwordField, candidate.password);
+      if (passwordField.value) observer?.disconnect();
+      return Boolean(passwordField.value);
+    };
+    if (!fill()) {
+      observer = new MutationObserver(fill);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+    document.addEventListener("focusin", fill, true);
   } catch {}
 })();`;
 }

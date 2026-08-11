@@ -4,6 +4,7 @@ import KeyRoundIcon from "lucide-react/dist/esm/icons/key-round.mjs";
 import ShieldIcon from "lucide-react/dist/esm/icons/shield.mjs";
 import UsersIcon from "lucide-react/dist/esm/icons/users.mjs";
 import type { ComponentType, ReactNode, SVGProps } from "react";
+import type { BrowserInternalPageId } from "../../../../../../shared/browser-internal-contracts.ts";
 
 /** lucide 图标的本地类型（避免 barrel 类型导入）。 */
 type InternalPageIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string }>;
@@ -13,8 +14,6 @@ type InternalPageIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number 
  * 左侧导航 + 右侧内容区，覆盖在 webview 视口之上。
  * 仅用户 UI 入口，Agent 侧（browser_* 工具）不可见。
  */
-
-export type BrowserInternalPageId = "history" | "downloads" | "passwords" | "contacts" | "site-settings";
 
 export const BROWSER_INTERNAL_PAGES: ReadonlyArray<{
   id: BrowserInternalPageId;

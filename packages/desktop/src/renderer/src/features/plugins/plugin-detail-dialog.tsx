@@ -4,13 +4,13 @@ import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogHeader } from "@renderer/shared/ui/dialog-header";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
-import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import type { Project } from "../../../../shared/contracts.ts";
 import type {
   InstalledMarketplacePluginSummary,
   MarketplacePluginScope,
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
+import { PluginIcon } from "../../components/chat/plugin-icon.tsx";
 import { PluginDetailActions } from "./plugin-detail-actions.tsx";
 import { PluginDetailContent } from "./plugin-detail-content.tsx";
 import { PluginDetailStatusBadges } from "./plugin-detail-status.tsx";
@@ -62,7 +62,7 @@ export function PluginDetailDialog({
         <DialogHeader className="plugin-marketplace-detail-header">
           <div className="plugin-marketplace-detail-identity">
             <div className="plugin-marketplace-detail-icon" aria-hidden="true">
-              <Blocks />
+              <PluginIcon name={name} iconUrl={plugin?.iconUrl} />
             </div>
             <div>
               <DialogTitle>{name}</DialogTitle>

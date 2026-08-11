@@ -440,9 +440,16 @@ button.plugin-local-row-main:hover strong {
   height: 36px;
 }
 
-.plugin-marketplace-card-icon svg {
-  width: 18px;
-  height: 18px;
+.plugin-marketplace-card-icon svg,
+.plugin-marketplace-card-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.plugin-marketplace-card-icon img,
+.plugin-marketplace-detail-icon img {
+  object-fit: contain;
 }
 
 .plugin-marketplace-card-title {
@@ -849,7 +856,8 @@ button.plugin-local-row-main:hover strong {
   height: 44px;
 }
 
-.plugin-marketplace-detail-icon svg {
+.plugin-marketplace-detail-icon svg,
+.plugin-marketplace-detail-icon img {
   width: 22px;
   height: 22px;
 }

@@ -1683,9 +1683,10 @@ export class ThreadWorkerRegistry {
       if (reservation.projectId !== projectId || reservation.createRequestId !== createRequestId) continue;
       const current = this.records.get(workerKey(projectId, reservation.sessionId));
       if (current) return current.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
-      const recovery = await this.options.metadata.recoverCreationReservation(reservation);
-      if (recovery.status === "active") {
-        throw new Error("Session creation has an unknown outcome while its previous writer is still active");
+      let recovery = await this.options.metadata.recoverCreationReservation(reservation);
+      while (recovery.status === "active") {
+        await delay(Math.max(1, recovery.retryAfterMs));
+        recovery = await this.options.metadata.recoverCreationReservation(reservation);
       }
       if (recovery.status === "committed") {
         return this.use(projectId, reservation.sessionId, (record) =>

@@ -76,6 +76,7 @@ export function KeyboardShortcutsSettingsPage() {
             value={query}
             placeholder="搜索快捷键"
             aria-label="搜索快捷键"
+            style={{ paddingLeft: "2.25rem" }}
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>

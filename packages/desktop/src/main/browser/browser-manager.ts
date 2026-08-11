@@ -67,6 +67,7 @@ import type {
   ContactProfile,
   SavedPassword,
 } from "../../shared/browser-data-contracts.ts";
+import { parseBrowserInternalPage } from "../../shared/browser-internal-contracts.ts";
 import type {
   BrowserSettings,
   BrowserSettingsSnapshot,
@@ -341,7 +342,7 @@ export class BrowserManager {
     const host =
       this.options.createHost?.(webContentsId, hostOptions) ?? new WebContentsHostController(resolved, hostOptions);
     const onDidFinishLoad = (): void => {
-      if (resolved.isDestroyed()) return;
+      if (resolved.isDestroyed() || parseBrowserInternalPage(resolved.getURL()) !== null) return;
       void this.injectFormScripts(resolved, host);
     };
     resolved.on("did-finish-load", onDidFinishLoad);
@@ -578,7 +579,7 @@ export class BrowserManager {
     return node ? { ok: true, node } : { ok: false, error: "元素编号已失效，请重新获取页面快照", staleRef: true };
   }
 
-  /** 导航到 URL；用户操作支持 http/https 和受限的 Chromium 内置页，Agent 仍只允许 http/https。
+  /** 导航到 URL；仅支持 http/https，browser:// 页面由 renderer 以受信 webview 加载。
    *  loadURL 挂起（连接无响应）时按 NAVIGATE_TIMEOUT_MS 超时返回错误。 */
   async navigate(
     identity: BrowserSessionIdentity,
@@ -599,10 +600,11 @@ export class BrowserManager {
     if (!normalized) return { ok: false, error: "仅支持 http/https 链接" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
-    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    if (source === "agent") {
-      this.activateAgentTab(state, tabId);
+    if (parseBrowserInternalPage(entry.tab.url) !== null) {
+      return { ok: false, error: "browser:// 标签需要重建 webview 后才能导航到网站" };
     }
+    if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    if (source === "agent") this.activateAgentTab(state, tabId);
     if (source === "agent") {
       const currentPolicyError = this.blockedAgentSiteError(entry.tab.url);
       if (currentPolicyError !== null) return { ok: false, error: currentPolicyError };
@@ -611,6 +613,8 @@ export class BrowserManager {
         return { ok: false, error: `站点 ${new URL(normalized).host} 已列入禁止访问列表，无法操作` };
       }
     }
+    entry.tab.loadError = undefined;
+    this.broadcast(state);
     try {
       await withAbort(
         () =>
@@ -625,7 +629,7 @@ export class BrowserManager {
       );
     } catch (error) {
       this.options.log?.(`browser navigate failed: ${messageOf(error)}`);
-      return { ok: false, error: messageOf(error) };
+      return { ok: false, error: messageOf(error), loadError: entry.tab.loadError };
     }
     // did-navigate 事件最终更新 tab.url；此处返回当前状态即可。
     return { ok: true, tab: { ...entry.tab } };
@@ -1918,7 +1922,17 @@ export class BrowserManager {
         break;
       case "load-failed":
         entry.tab.loading = false;
-        entry.tab.loadError = describeLoadError(event.code, event.description, event.url);
+        entry.tab.url = event.url || entry.tab.url;
+        try {
+          entry.tab.title = new URL(entry.tab.url).hostname || entry.tab.url;
+        } catch {
+          entry.tab.title = entry.tab.url;
+        }
+        entry.tab.loadError = {
+          code: event.code,
+          description: event.description,
+          url: event.url,
+        };
         break;
       case "crashed":
         entry.tab.crashed = true;
@@ -1947,8 +1961,9 @@ export class BrowserManager {
     this.broadcast(state);
   }
 
-  /** 记录访问历史：同一 tab 重复导航同 URL 不重复；会话内同 URL 合并并提前。 */
+  /** 记录访问历史：忽略空白页和 browser:// WebUI；同一 tab 重复导航同 URL 不重复。 */
   private recordHistory(state: SessionState, tabId: number, url: string, title: string): void {
+    if (url === "about:blank" || parseBrowserInternalPage(url) !== null) return;
     if (state.lastHistoryUrlByTab.get(tabId) === url) return;
     state.lastHistoryUrlByTab.set(tabId, url);
     const existing = state.history.findIndex((entry) => entry.url === url);
@@ -2029,25 +2044,6 @@ const MAX_HISTORY_ENTRIES = 200;
 
 /** loadURL 挂起保护（连接无响应时避免工具/地址栏一直等待）。 */
 const NAVIGATE_TIMEOUT_MS = 30_000;
-
-/** 把 did-fail-load 错误码转成用户可读文案。 */
-function describeLoadError(code: number, description: string, url: string): string {
-  const known = new Map<number, string>([
-    [-105, "域名解析失败（DNS）"],
-    [-106, "无法连接服务器"],
-    [-102, "连接被拒绝"],
-    [-118, "连接超时"],
-    [-200, "网络连接已断开"],
-    [-201, "网络访问被拒绝（可能需要代理）"],
-    [-202, "无法解析代理服务器"],
-    [-130, "证书错误（HTTPS）"],
-    [-113, "TLS 连接失败"],
-    [-137, "连接已重置"],
-    [-7, "加载超时"],
-  ]);
-  const label = known.get(code);
-  return `${label ?? `网络错误 ${code}`}（${description}）：${url}`;
-}
 
 /** 带超时的 Promise 包装；超时会触发取消回调并返回结构化错误。 */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => void, message: string): Promise<T> {

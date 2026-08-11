@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,7 @@ import {
 } from "../src/shared/contracts.ts";
 import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "../src/shared/desktop-extension-contracts.ts";
 import {
+  type CreationReservationRecovery,
   SIDECAR_PROTOCOL_VERSION,
   type SidecarCommand,
   type SidecarEventBody,
@@ -387,6 +388,50 @@ describe("ThreadWorkerRegistry", () => {
     const [first, second] = await Promise.all([registry.create(input), registry.create(input)]);
 
     expect(first.threadId).toBe(second.threadId);
+    expect(harness.clients).toHaveLength(1);
+    await registry.dispose();
+  });
+
+  it("retries an active orphaned creation reservation instead of rejecting the draft", async () => {
+    const harness = createHarness(userDataDir);
+    writeCreationReservation(userDataDir, "stale-session");
+    harness.metadataRecoverCreationReservation
+      .mockResolvedValueOnce({ status: "active", retryAfterMs: 1 })
+      .mockResolvedValueOnce({ status: "orphan" });
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    const created = await registry.create({
+      projectId: "project",
+      createRequestId: "create-request",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+    });
+
+    expect(created.threadId).not.toBe("stale-session");
+    expect(harness.metadataRecoverCreationReservation).toHaveBeenCalledTimes(2);
+    expect(harness.clients).toHaveLength(1);
+    await registry.dispose();
+  });
+
+  it("waits for an active creation reservation before recovering its committed session", async () => {
+    const harness = createHarness(userDataDir);
+    writeCreationReservation(userDataDir, "committed-session");
+    harness.metadataRecoverCreationReservation
+      .mockResolvedValueOnce({ status: "active", retryAfterMs: 1 })
+      .mockResolvedValueOnce({ status: "committed" });
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    const recovered = await registry.create({
+      projectId: "project",
+      createRequestId: "create-request",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+    });
+
+    expect(recovered.threadId).toBe("committed-session");
+    expect(harness.metadataRecoverCreationReservation).toHaveBeenCalledTimes(2);
     expect(harness.clients).toHaveLength(1);
     await registry.dispose();
   });
@@ -1308,6 +1353,7 @@ interface Harness {
   metadataList: ReturnType<typeof vi.fn>;
   metadataRemoveCold: ReturnType<typeof vi.fn>;
   metadataPromoteCold: ReturnType<typeof vi.fn>;
+  metadataRecoverCreationReservation: ReturnType<typeof vi.fn>;
   cleanupSessionCheckpoints: ReturnType<typeof vi.fn>;
   resolveExtensions: ReturnType<typeof vi.fn>;
   resolveWithAll: ReturnType<typeof vi.fn>;
@@ -1346,6 +1392,9 @@ function createHarness(
     removedThreadIds: [],
     reparentedThreads: [{ ...thread(threadId), parentThreadId: undefined }],
   }));
+  const metadataRecoverCreationReservation = vi.fn(
+    async (): Promise<CreationReservationRecovery> => ({ status: "orphan" }),
+  );
   const cleanupSessionCheckpoints = vi.fn(async () => undefined);
   const metadata = {
     list: metadataList,
@@ -1363,7 +1412,7 @@ function createHarness(
     renameCold: metadataRenameCold,
     removeCold: metadataRemoveCold,
     promoteCold: metadataPromoteCold,
-    recoverCreationReservation: vi.fn(async () => ({ status: "orphan" as const })),
+    recoverCreationReservation: metadataRecoverCreationReservation,
     invalidateProject: vi.fn(async () => {}),
   } as unknown as MetadataWorkerClient;
   const resolveExtensions = vi.fn(async (projectId: string) => extensionSet(projectId));
@@ -1416,6 +1465,7 @@ function createHarness(
     metadataList,
     metadataRemoveCold,
     metadataPromoteCold,
+    metadataRecoverCreationReservation,
     cleanupSessionCheckpoints,
     resolveExtensions,
     resolveWithAll,
@@ -1531,6 +1581,22 @@ class FakeWorkerClient implements ThreadWorkerClient {
 }
 
 let fakeWorkerSequence = 1;
+
+function writeCreationReservation(userDataDir: string, sessionId: string): void {
+  const directory = join(userDataDir, "creation-reservations");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, `${sessionId}.json`),
+    JSON.stringify({
+      projectId: "project",
+      cwd: "/workspace",
+      sessionId,
+      createRequestId: "create-request",
+      state: "reserved",
+      updatedAt: Date.now(),
+    }),
+  );
+}
 
 function bootstrap(threadId: string, extensionGeneration = "extensions-generation"): SessionBootstrap {
   return {

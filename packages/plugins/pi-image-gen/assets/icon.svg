@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title" fill="none" stroke="#1F3A4D" stroke-linecap="round" stroke-linejoin="round" stroke-width="3">
+  <title id="title">Image Generation</title>
+  <rect x="13" y="18" width="36" height="29" rx="4"/>
+  <circle cx="40" cy="26" r="3"/>
+  <path d="m16 43 9-10 7 7 6-6 9 9"/>
+  <path d="M52 15v8M48 19h8"/>
+</svg>

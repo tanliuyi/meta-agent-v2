@@ -2,6 +2,7 @@ import cohereModelIcon from "@renderer/assets/models/cohere.svg";
 import geminiModelIcon from "@renderer/assets/models/gemini.svg";
 import grokModelIcon from "@renderer/assets/models/grok.svg";
 import metaModelIcon from "@renderer/assets/models/meta.svg";
+import qwenModelIcon from "@renderer/assets/models/qwen.svg";
 import zhipuModelIcon from "@renderer/assets/models/zhipu.svg";
 import { providerIcon } from "@renderer/shared/lib/provider-icons";
 import type { ReactNode } from "react";
@@ -21,7 +22,7 @@ const MODEL_ICON_MATCHERS: readonly ModelIconMatcher[] = [
   { pattern: /\b(?:gpt|o[134])(?:[-_.:/]|$)/, source: providerIcon("openai") },
   { pattern: /\b(?:gemini|gemma)(?:[-_.:/]|$)/, source: geminiModelIcon },
   { pattern: /\bdeepseek(?:[-_.:/]|$)/, source: providerIcon("deepseek") },
-  { pattern: /\bqwen(?:[-_.:/]|$)/, source: providerIcon("qwen-token-plan") },
+  { pattern: /\bqwen(?:[-_.:/]|$)/, source: qwenModelIcon },
   { pattern: /\b(?:kimi|moonshotai)(?:[-_.:/]|$)/, source: providerIcon("kimi-coding") },
   { pattern: /\b(?:glm|chatglm)(?:[-_.:/]|$)/, source: zhipuModelIcon },
   { pattern: /\bminimax(?:ai)?(?:[-_.:/]|$)/, source: providerIcon("minimax") },

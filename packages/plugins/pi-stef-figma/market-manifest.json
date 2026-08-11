@@ -69,6 +69,7 @@
     "src/transform/implementationContext.ts": { "mode": "0644" },
     "src/transform/text.ts": { "mode": "0644" },
     "src/transform/tokens.ts": { "mode": "0644" },
-    "src/url.ts": { "mode": "0644" }
+    "src/url.ts": { "mode": "0644" },
+    "assets/icon.svg": { "mode": "0644" }
   }
 }

@@ -187,6 +187,7 @@ function parsePluginSummary(value: unknown): MarketplacePluginSummary {
     !Array.isArray(value.categories) ||
     !value.categories.every((entry) => typeof entry === "string") ||
     (value.iconAssetId !== undefined && typeof value.iconAssetId !== "string") ||
+    (value.iconUrl !== undefined && typeof value.iconUrl !== "string") ||
     (value.latestVersion !== undefined && typeof value.latestVersion !== "string") ||
     (value.compatibleVersion !== undefined && typeof value.compatibleVersion !== "string") ||
     typeof value.containsNativeCode !== "boolean" ||
@@ -211,6 +212,7 @@ function parsePluginSummary(value: unknown): MarketplacePluginSummary {
     },
     categories: [...value.categories],
     ...(value.iconAssetId ? { iconAssetId: value.iconAssetId } : {}),
+    ...(value.iconUrl ? { iconUrl: value.iconUrl } : {}),
     ...(value.latestVersion ? { latestVersion: value.latestVersion } : {}),
     ...(value.compatibleVersion ? { compatibleVersion: value.compatibleVersion } : {}),
     containsNativeCode: value.containsNativeCode,

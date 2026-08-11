@@ -1,9 +1,9 @@
 import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
-import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import type {
   InstalledMarketplacePluginSummary,
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
+import { PluginIcon } from "../../components/chat/plugin-icon.tsx";
 import { cardState } from "./plugin-marketplace-utils.ts";
 
 interface MarketplacePluginCardProps {
@@ -38,7 +38,7 @@ export function MarketplacePluginCard({
     >
       <span className="plugin-marketplace-card-header">
         <span className="plugin-marketplace-card-icon" aria-hidden="true">
-          <Blocks />
+          <PluginIcon name={name} iconUrl={plugin?.iconUrl} />
         </span>
         <span className="plugin-marketplace-card-title">
           <strong>{name}</strong>

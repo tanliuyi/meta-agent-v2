@@ -286,6 +286,134 @@
   font-size: 13px;
 }
 
+.browser-network-error {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: auto;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.browser-network-error-content {
+  width: min(600px, calc(100% - 64px));
+  margin: max(64px, 12vh) auto 48px;
+}
+
+.browser-network-error-icon {
+  margin-bottom: 22px;
+  color: hsl(var(--muted-foreground));
+}
+
+.browser-network-error h1 {
+  margin: 0 0 16px;
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.browser-network-error-summary,
+.browser-network-error-suggestions,
+.browser-network-error-code,
+.browser-network-error-details p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.browser-network-error-summary {
+  color: hsl(var(--foreground));
+}
+
+.browser-network-error-suggestions {
+  margin-top: 20px;
+}
+
+.browser-network-error-suggestions ul {
+  margin: 6px 0 0;
+  padding-left: 22px;
+}
+
+.browser-network-error-code {
+  margin-top: 18px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.browser-network-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.browser-network-error-reload,
+.browser-network-error-details summary {
+  min-height: 32px;
+  padding: 7px 14px;
+  border-radius: var(--shape-radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.browser-network-error-reload {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid hsl(var(--primary));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.browser-network-error-reload:hover {
+  filter: brightness(0.94);
+}
+
+.browser-network-error-details summary {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  list-style: none;
+}
+
+.browser-network-error-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.browser-network-error-details[open] {
+  flex-basis: 100%;
+}
+
+.browser-network-error-details[open] summary {
+  margin-bottom: 16px;
+}
+
+.browser-network-error-details > div {
+  padding-top: 14px;
+  border-top: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  overflow-wrap: anywhere;
+}
+
+.browser-network-error-details p + p {
+  margin-top: 6px;
+}
+
+@media (max-width: 640px) {
+  .browser-network-error-content {
+    width: calc(100% - 40px);
+    margin-top: 40px;
+  }
+
+  .browser-network-error h1 {
+    font-size: 24px;
+  }
+}
+
 .browser-crash-overlay {
   position: absolute;
   inset: 0;
