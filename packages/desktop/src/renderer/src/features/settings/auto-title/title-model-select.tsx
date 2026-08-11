@@ -3,6 +3,10 @@ import { ModelSelectorEmpty } from "@renderer/components/assistant-ui/model-sele
 import { ModelSelectorGroup } from "@renderer/components/assistant-ui/model-selector/model-selector-group";
 import { ModelSelectorItem } from "@renderer/components/assistant-ui/model-selector/model-selector-item";
 import { ModelSelectorList } from "@renderer/components/assistant-ui/model-selector/model-selector-list";
+import {
+  createModelSelectorOption,
+  groupModelSelectorOptions,
+} from "@renderer/components/assistant-ui/model-selector/model-selector-options";
 import { ModelSelectorRoot } from "@renderer/components/assistant-ui/model-selector/model-selector-root";
 import { ModelSelectorSearch } from "@renderer/components/assistant-ui/model-selector/model-selector-search";
 import { ModelSelectorTrigger } from "@renderer/components/assistant-ui/model-selector/model-selector-trigger";
@@ -27,12 +31,12 @@ interface TitleModelSelectProps {
 }
 
 function toModelOption(option: AutoTitleModelOption): ModelOption {
-  return {
+  return createModelSelectorOption({
     id: autoTitleModelOptionId(option),
+    provider: option.provider,
+    modelId: option.modelId,
     name: option.name,
-    description: option.modelId,
-    keywords: [option.provider],
-  };
+  });
 }
 
 /** 从模型服务商已配置的提供商与模型中选择标题模型；空值表示继承当前会话模型。 */
@@ -41,14 +45,6 @@ export function TitleModelSelect({ providerId, modelId, options, onChange }: Tit
 
   const { models, groups, selectionMissing } = useMemo(() => {
     const modelOptions = options.map(toModelOption);
-    const groups = new Map<string, ModelOption[]>();
-    for (let index = 0; index < options.length; index++) {
-      const option = modelOptions[index]!;
-      const provider = options[index]!.provider;
-      const group = groups.get(provider);
-      if (group) group.push(option);
-      else groups.set(provider, [option]);
-    }
     const missing =
       selectedId.length > 0 && !modelOptions.some((option) => option.id === selectedId)
         ? {
@@ -56,7 +52,7 @@ export function TitleModelSelect({ providerId, modelId, options, onChange }: Tit
             name: `${selectedId}（当前配置，不在可选列表中）`,
           }
         : undefined;
-    return { models: modelOptions, groups, selectionMissing: missing };
+    return { models: modelOptions, groups: groupModelSelectorOptions(modelOptions), selectionMissing: missing };
   }, [options, selectedId]);
 
   return (
@@ -86,11 +82,9 @@ export function TitleModelSelect({ providerId, modelId, options, onChange }: Tit
             {selectionMissing ? <ModelSelectorItem model={selectionMissing} /> : null}
           </ModelSelectorGroup>
           {[...groups].map(([provider, providerModels]) => (
-            <ModelSelectorGroup key={provider} heading={provider}>
+            <ModelSelectorGroup key={provider} provider={provider} heading={provider}>
               {providerModels.map((option) => (
-                <ModelSelectorItem key={option.id} model={option}>
-                  {option.name}
-                </ModelSelectorItem>
+                <ModelSelectorItem key={option.id} model={option} />
               ))}
             </ModelSelectorGroup>
           ))}

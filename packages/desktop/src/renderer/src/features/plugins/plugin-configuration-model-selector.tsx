@@ -3,6 +3,10 @@ import { ModelSelectorEmpty } from "@renderer/components/assistant-ui/model-sele
 import { ModelSelectorGroup } from "@renderer/components/assistant-ui/model-selector/model-selector-group";
 import { ModelSelectorItem } from "@renderer/components/assistant-ui/model-selector/model-selector-item";
 import { ModelSelectorList } from "@renderer/components/assistant-ui/model-selector/model-selector-list";
+import {
+  createModelSelectorOption,
+  groupModelSelectorOptions,
+} from "@renderer/components/assistant-ui/model-selector/model-selector-options";
 import { ModelSelectorRoot } from "@renderer/components/assistant-ui/model-selector/model-selector-root";
 import { ModelSelectorSearch } from "@renderer/components/assistant-ui/model-selector/model-selector-search";
 import { ModelSelectorTrigger } from "@renderer/components/assistant-ui/model-selector/model-selector-trigger";
@@ -67,12 +71,7 @@ export function PluginConfigurationModelSelector({
             disabled: true,
           }
         : undefined;
-    const groups = new Map<string, ModelOption[]>();
-    for (let index = 0; index < modelOptions.length; index += 1) {
-      const option = modelOptions[index]!;
-      const provider = availableModels[index]!.provider;
-      groups.set(provider, [...(groups.get(provider) ?? []), option]);
-    }
+    const groups = groupModelSelectorOptions(modelOptions);
     return {
       models: modelOptions,
       groups,
@@ -116,7 +115,7 @@ export function PluginConfigurationModelSelector({
               {selectedMissing ? <ModelSelectorItem model={selectedMissing} /> : null}
             </ModelSelectorGroup>
             {[...groups].map(([provider, providerModels]) => (
-              <ModelSelectorGroup key={provider} heading={provider}>
+              <ModelSelectorGroup key={provider} provider={provider} heading={provider}>
                 {providerModels.map((model) => (
                   <ModelSelectorItem key={model.id} model={model} />
                 ))}
@@ -135,12 +134,12 @@ export function PluginConfigurationModelSelector({
 }
 
 function toModelOption(option: AutoTitleModelOption): ModelOption {
-  return {
+  return createModelSelectorOption({
     id: `${option.provider}/${option.modelId}`,
+    provider: option.provider,
+    modelId: option.modelId,
     name: option.name,
-    description: option.modelId,
-    keywords: [option.provider, option.modelId],
-  };
+  });
 }
 
 function matchesConfiguredValue(option: ModelOption, value: string, format: ModelFormat): boolean {

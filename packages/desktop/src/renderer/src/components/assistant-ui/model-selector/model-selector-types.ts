@@ -8,6 +8,8 @@ export interface ModelSelectorEffortOption {
 export interface ModelOption {
   id: string;
   name: string;
+  /** Runtime provider key used to render the provider group icon. */
+  provider?: string;
   description?: string;
   icon?: ReactNode;
   disabled?: boolean;

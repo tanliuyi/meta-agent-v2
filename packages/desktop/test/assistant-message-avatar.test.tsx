@@ -1,6 +1,7 @@
 import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getModelIconSource } from "../src/renderer/src/components/assistant-ui/model-selector/model-selector-icons.tsx";
 import {
   AssistantMessage,
   piAssistantProvenance,
@@ -72,6 +73,15 @@ vi.mock("../src/renderer/src/components/chat/message/assistant-message-action-ba
   ),
 }));
 
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#x27;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 describe("AssistantMessage avatar", () => {
   beforeEach(() => {
     viewState.showAvatars = true;
@@ -105,6 +115,23 @@ describe("AssistantMessage avatar", () => {
     const html = renderToStaticMarkup(<AssistantMessage />);
 
     expect(html).not.toContain("message-avatar");
+  });
+
+  it("头像模式使用模型品牌头像而不是聚合 provider 头像", () => {
+    viewState.pi = {
+      status: { type: "complete" },
+      provenance: { provider: "openrouter", model: "google/gemini-3.1-pro-preview", thinkingLevel: "medium" },
+    };
+
+    const html = renderToStaticMarkup(<AssistantMessage />);
+    const modelIcon = getModelIconSource(
+      "openrouter",
+      "google/gemini-3.1-pro-preview",
+      "google/gemini-3.1-pro-preview",
+    );
+
+    expect(modelIcon).toBeDefined();
+    expect(html).toContain(escapeHtmlAttribute(modelIcon!));
   });
 
   it("用户消息后的首条 assistant 消息显示头像", () => {

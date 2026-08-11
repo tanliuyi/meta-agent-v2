@@ -60,7 +60,7 @@ export function AssistantMessage() {
     >
       {showAvatars && isTurnFirst && provenanceProvider !== undefined && provenanceModel !== undefined ? (
         <div data-slot="message-avatar-header" className="flex min-w-0 items-center gap-2 pb-1">
-          <MessageAvatar provider={provenanceProvider} />
+          <MessageAvatar provider={provenanceProvider} model={provenanceModel} />
           <div className="min-w-0 flex flex-col gap-1">
             <div className="message-avatar-name">{provenanceModel}</div>
             {provenanceThinking !== undefined ? (

@@ -89,7 +89,7 @@ export function ModelSelect({
         <ModelSelectorList>
           <ModelSelectorEmpty />
           {[...groups].map(([provider, providerModels]) => (
-            <ModelSelectorGroup key={provider} heading={provider}>
+            <ModelSelectorGroup key={provider} provider={provider} heading={provider}>
               {providerModels.map((option) => (
                 <ModelSelectorItem key={option.id} model={option} />
               ))}

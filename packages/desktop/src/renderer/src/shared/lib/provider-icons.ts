@@ -1,4 +1,5 @@
 import amazonBedrockIcon from "@renderer/assets/providers/amazon-bedrock.svg";
+import antgroupIcon from "@renderer/assets/providers/antgroup.svg";
 import anthropicIcon from "@renderer/assets/providers/anthropic.svg";
 import azureOpenaiIcon from "@renderer/assets/providers/azure-openai-responses.svg";
 import cerebrasIcon from "@renderer/assets/providers/cerebras.svg";
@@ -10,13 +11,16 @@ import googleIcon from "@renderer/assets/providers/google.svg";
 import googleVertexIcon from "@renderer/assets/providers/google-vertex.svg";
 import groqIcon from "@renderer/assets/providers/groq.svg";
 import huggingfaceIcon from "@renderer/assets/providers/huggingface.svg";
+import kimiIcon from "@renderer/assets/providers/kimi.svg";
 import minimaxIcon from "@renderer/assets/providers/minimax.svg";
 import mistralIcon from "@renderer/assets/providers/mistral.svg";
+import moonshotIcon from "@renderer/assets/providers/moonshot.svg";
 import nvidiaIcon from "@renderer/assets/providers/nvidia.svg";
 import openaiIcon from "@renderer/assets/providers/openai.svg";
 import opencodeIcon from "@renderer/assets/providers/opencode.svg";
 import openrouterIcon from "@renderer/assets/providers/openrouter.svg";
 import qwenIcon from "@renderer/assets/providers/qwen-token-plan.svg";
+import togetherIcon from "@renderer/assets/providers/together.svg";
 import vercelIcon from "@renderer/assets/providers/vercel-ai-gateway.svg";
 import xaiIcon from "@renderer/assets/providers/xai.svg";
 import xiaomiIcon from "@renderer/assets/providers/xiaomi.svg";
@@ -25,10 +29,11 @@ import zaiIcon from "@renderer/assets/providers/zai.svg";
 /**
  * Official brand SVG icons for built-in provider keys.
  *
- * Provider ids without an official SVG icon (e.g. kimi/moonshot, together,
- * radius, ant-ling) resolve to undefined and fall back to the letter avatar.
+ * Provider ids without an official SVG icon (e.g. radius) resolve to undefined
+ * and fall back to the letter avatar.
  */
 const PROVIDER_ICONS: Readonly<Record<string, string>> = {
+  "ant-ling": antgroupIcon,
   anthropic: anthropicIcon,
   openai: openaiIcon,
   "openai-codex": openaiIcon,
@@ -53,10 +58,15 @@ const PROVIDER_ICONS: Readonly<Record<string, string>> = {
   "opencode-go": opencodeIcon,
   huggingface: huggingfaceIcon,
   fireworks: fireworksIcon,
+  "kimi-coding": kimiIcon,
   minimax: minimaxIcon,
   "minimax-cn": minimaxIcon,
+  moonshotai: moonshotIcon,
+  "moonshotai-cn": moonshotIcon,
+  qwen: qwenIcon,
   "qwen-token-plan": qwenIcon,
   "qwen-token-plan-cn": qwenIcon,
+  together: togetherIcon,
   xiaomi: xiaomiIcon,
   "xiaomi-token-plan-cn": xiaomiIcon,
   "xiaomi-token-plan-ams": xiaomiIcon,
