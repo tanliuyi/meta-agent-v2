@@ -30,7 +30,8 @@ export function EditComposer() {
           }}
           onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
             setInputValue(event.target.value);
-            if (isComposingRef.current || event.nativeEvent.isComposing) {
+            const nativeIsComposing = "isComposing" in event.nativeEvent && event.nativeEvent.isComposing === true;
+            if (isComposingRef.current || nativeIsComposing) {
               // Keep assistant-ui from replacing the active IME buffer with its controlled value.
               event.preventDefault();
             }
