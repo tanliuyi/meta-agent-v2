@@ -19,6 +19,7 @@ const AX_TREE = {
     },
   ],
 };
+const SCREENSHOT_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 class FakeWebContents extends EventEmitter {
   destroyed = false;
@@ -124,6 +125,8 @@ class FakeWebContents extends EventEmitter {
         };
       case "DOM.getBoxModel":
         return { model: { content: this.box } };
+      case "Page.captureScreenshot":
+        return { data: SCREENSHOT_PNG };
       case "Runtime.addBinding":
       case "Input.dispatchMouseEvent":
       case "Input.insertText":
@@ -142,6 +145,18 @@ afterEach(() => {
 });
 
 describe("WebContentsHostController CDP integration", () => {
+  test("captureScreenshot 从 guest surface 获取截图，避免截入宿主窗口", async () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
+    hosts.push(host);
+
+    await expect(host.captureScreenshot()).resolves.toMatchObject({ width: 1, height: 1 });
+    expect(webContents.debugger.sendCommand).toHaveBeenCalledWith("Page.captureScreenshot", {
+      format: "png",
+      fromSurface: true,
+    });
+  });
+
   test("Runtime binding 事件只交给宿主回调，不进入 Agent CDP 缓冲", async () => {
     const webContents = new FakeWebContents();
     const onRuntimeBinding = vi.fn();

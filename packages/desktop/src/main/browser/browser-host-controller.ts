@@ -402,13 +402,13 @@ export class WebContentsHostController implements BrowserHostController {
   async captureScreenshot(
     options: { fullPage?: boolean } = {},
   ): Promise<{ dataUrl: string; width: number; height: number }> {
-    // 统一走 CDP Page.captureScreenshot：fromSurface:false 从内存主帧捕获，
-    // 后台/屏幕外/非活跃标签页（guest 被 Chromium occlusion 后台化）也能实时截图，
-    // 不依赖屏幕合成（Electron capturePage 在不可见时会挂起）。
+    // 统一走 CDP Page.captureScreenshot，并显式从 guest surface 捕获。
+    // 对 Electron <webview> guest 使用 fromSurface:false 会回退到宿主 view，
+    // 结果可能把承载 Agent 的 renderer 窗口一并截入图片。
     const result = (await withTimeout(
       this.sendCommand("Page.captureScreenshot", {
         format: "png",
-        fromSurface: false,
+        fromSurface: true,
         ...(options.fullPage === true ? { captureBeyondViewport: true } : {}),
       }),
       5_000,
