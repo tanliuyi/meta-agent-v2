@@ -15,7 +15,7 @@ Fetch `GET /.well-known/meta-agent-marketplace.json` from the marketplace public
 }
 ```
 
-Registration returns a 30-day user session token and can be disabled by the marketplace.
+Registration returns a 30-day user session. The response includes the bearer `token` and its absolute millisecond `expiresAt`; cache both values together and stop reusing the session after that time.
 
 ### Login
 
@@ -27,6 +27,8 @@ Registration returns a 30-day user session token and can be disabled by the mark
   "password": "secret-from-secure-input"
 }
 ```
+
+The response includes `{ "token": "...", "expiresAt": 0, "user": { ... } }`. `expiresAt` is supplied by the server and must be treated as the cache expiry; do not invent a local lifetime.
 
 ### Current Principal
 
@@ -46,7 +48,7 @@ The static server admin token returns `admin: true`; the username `admin` has no
 
 ### Logout
 
-`POST {apiRoot}/auth/logout` returns `204` and invalidates the supplied user session token.
+`POST {apiRoot}/auth/logout` returns `204` and invalidates the supplied user session token. Remove the corresponding local session JSON after logout or when the user explicitly signs out.
 
 ## Publisher Administration
 
@@ -85,6 +87,26 @@ The caller must be a member of `publisherId` or use the static admin token. Plug
 ```
 
 `GET {apiRoot}/publish/plugins/:pluginId` returns publisher-visible state including drafts and upload completion.
+
+Replace the standalone plugin icon without creating a draft version or changing any artifact:
+
+`PUT {apiRoot}/publish/plugins/:pluginId/icon`
+
+The caller must be a member of the plugin publisher or use the static admin token. Send the raw image body with one of the supported image content types (`image/svg+xml`, `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/avif`, `image/bmp`, `image/x-icon`, or `image/vnd.microsoft.icon`). The maximum size is 1 MiB.
+
+Successful upload returns:
+
+```json
+{
+  "pluginId": "com.acme.tools",
+  "iconAssetId": "<sha256>",
+  "contentType": "image/png",
+  "sha256": "...",
+  "size": 12345
+}
+```
+
+The public `GET {apiRoot}/plugins/:pluginId/icon` route serves the standalone icon when present and otherwise falls back to the icon in the latest preferred artifact. Uploading an icon does not create a version, change artifact hashes, or invoke publication.
 
 ## Draft Version
 
@@ -217,6 +239,7 @@ Published versions cannot be deleted through the draft endpoint. Security withdr
 After publication, verify:
 
 - `GET {apiRoot}/plugins/:pluginId`
+- `GET {apiRoot}/plugins/:pluginId/icon`
 - `GET {apiRoot}/plugins/:pluginId/versions/:version`
 - `GET {apiRoot}/plugins/:pluginId/versions/:version/artifacts`
 - `GET {apiRoot}/plugins/:pluginId/versions/:version/artifacts/:artifactId/download`
@@ -232,7 +255,8 @@ Recompute the downloaded archive SHA-256 and compare its byte length with catalo
 - `404`: plugin/version/artifact does not exist for that route.
 - `409`: state conflict such as duplicate draft/version, incomplete version, already published/deprecated, or publisher mismatch.
 - `410`: artifact listing, download metadata, or artifact bytes were requested for a withdrawn or blocked version. Version detail remains readable and reports the revoked status.
-- `413`: artifact upload exceeds server size limits.
+- `413`: artifact or standalone icon upload exceeds server size limits.
+- `415`: artifact or standalone icon upload uses an unsupported content type.
 - `429 AUTH_RATE_LIMITED`: repeated failed logins exceeded the configured window.
 
 After a timeout or connection loss on any mutation, query publisher state before retrying to avoid duplicate version or publication operations.

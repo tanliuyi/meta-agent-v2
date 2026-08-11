@@ -19,14 +19,15 @@ Marketplace operations cross explicit trust boundaries:
 - Artifact upload and version publication change public marketplace state. Publication is irreversible through the draft-delete API.
 - Plugins are full-trust Node code, not sandboxed. Capability declarations are review metadata, not enforcement.
 
-Never place passwords, session tokens, admin tokens, signing private keys, or SSH passwords in source, committed files, command-line arguments, logs, final responses, or persistent memory. Prefer an existing authenticated session. When temporary credential files are unavoidable, create them outside the plugin payload with owner-only permissions, use them for one operation, and remove them in a `finally`/trap path. Never upload `.env`, auth files, private keys, test fixtures containing credentials, or local configuration such as `~/.pi/web-search.json`.
+Never place passwords, session tokens, admin tokens, signing private keys, or SSH passwords in source, committed files, command-line arguments, logs, final responses, or persistent memory. Prefer the cached Marketplace session when its server-provided `expiresAt` has not passed. The session record is stored outside the repository with owner-only permissions; remove it when it expires, is revoked, or the user requests logout. Password files remain temporary and must be removed after login.
 
 ## Workflow
 
 1. Establish the marketplace URL and fetch `/.well-known/meta-agent-marketplace.json`. Parse the signed `{ data, signature }` envelope; protocol version, API root, marketplace ID, artifact origins, and Ed25519 signing identity are under `data`. Require explicit trust for a first-seen fingerprint, verify the envelope with the trusted Ed25519 public key, and never silently accept a changed fingerprint. `data.apiRoot` already includes `/v1`; do not append another `/v1`.
 2. Establish account state:
    - Register only when the user asks to create an account and registration is enabled.
-   - Login through `{apiRoot}/auth/login`; treat the returned bearer token as a secret.
+   - Resolve the session path with `scripts/session-path.mjs`; if the session JSON exists and its `expiresAt` is still in the future, reuse its bearer token without opening the login page.
+   - When no valid cached session exists, login through `{apiRoot}/auth/login`; store the returned token and `expiresAt` in the owner-only session file.
    - Call `{apiRoot}/auth/me` and confirm the required `publisherId` appears in `publisherIds`.
    - If membership is absent, ask a marketplace administrator to create the publisher and add the username. Use the static admin token only when the user explicitly authorizes administrator operations.
 3. Inspect the plugin entry, dependencies, license obligations, Host Profile compatibility, and all runtime behavior before packaging. Re-run focused typechecks and deterministic tests without paid provider calls.
@@ -43,9 +44,10 @@ Reusable Node scripts live in `scripts/` next to this file (Node 18+, `fetch`, z
 
 - `scripts/discover.mjs <publicBaseUrl>` — fetch `/.well-known/meta-agent-marketplace.json` and print `{ apiRoot, marketplaceId, protocolVersion, fingerprint, signingKey }`. Compare the fingerprint against previously trusted values; require explicit trust on first sight and on change.
 - `scripts/build-payload.mjs <pluginDir> <out.zip> [entry...]` — assemble the payload ZIP with validated POSIX-relative paths. Without explicit entries, it reads the plugin entry from `market-manifest.json` (`pi.entry`) and also includes `src` plus the first supported icon asset under `assets/` (`icon.svg`, `icon.png`, `icon.jpg`, `icon.jpeg`, `icon.webp`, `icon.gif`, `icon.avif`, `icon.bmp`, or `icon.ico`); standard plugins must ship one of these icon resources. It excludes tests, `node_modules`, `dist`, `.git`, source maps, env/log/lock files, and `market-manifest.json`. Names are stored relative to the ZIP root; the marketplace repacks the ZIP under a `payload/` prefix, so the ZIP itself must not contain `payload/` paths (the script rejects them). Runs from any directory with Node only (no jszip needed).
-- `scripts/login.mjs <apiRoot> <username> <passwordFile> <tokenOut> <publisherId>` — authenticate, confirm publisher membership via `/auth/me`, write the session token to a 0600 file. The password is read from a file; delete both files after publishing.
-- `scripts/login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--open] [--timeout <seconds>]` — preferred interactive login: starts a loopback HTTP server and serves the login/register page. By default it does NOT open a browser; it prints a machine-readable `BROWSER_URL <url>` line that the agent should open in the built-in browser (`browser_open`). Pass `--open` to open the system default browser instead (manual runs). The page submits to the local server, which forwards to the marketplace auth API, checks publisher membership, and writes the token to a 0600 file. Passwords never reach argv, shell history, or the agent. The server exits after a successful auth or the timeout (default 300 s).
-- `scripts/publish.mjs <apiRoot> <tokenFile> <spec.json> <payload.zip>... [--yes]` — declare plugin metadata, create the draft version, upload every declared artifact, then publish. The spec mirrors the API request bodies; see `scripts/spec.example.json`. Pauses 3 seconds before publishing unless `--yes` is passed, so an unintended run can be Ctrl-C'd.
+- `scripts/login.mjs <apiRoot> <username> <passwordFile> <tokenOut> <publisherId>` — authenticate, confirm publisher membership via `/auth/me`, and write `{ token, expiresAt }` to a 0600 session file. The password is read from a file; delete the password file afterwards.
+- `scripts/session-path.mjs <apiRoot> [publisherId]` — print the stable per-marketplace session path under the user's config directory.
+- `scripts/login-web.mjs <apiRoot> [tokenOut] [publisherId] [--token-out <path>] [--publisher-id <id>] [--force] [--register] [--open] [--timeout <seconds>]` — preferred interactive login. It reuses an unexpired session file and exits with `AUTH_REUSED`; only missing or expired sessions start the loopback login page. `--force` replaces a still-valid cached session. The page submits to the local server, which forwards to the marketplace auth API, checks publisher membership, and writes the token plus server-provided expiry to a 0600 file. Passwords never reach argv, shell history, or the agent.
+- `scripts/publish.mjs <apiRoot> <tokenFile> <spec.json> <payload.zip>... [--yes]` — reads the cached session, refuses missing or expired sessions, then declares plugin metadata, creates the draft, uploads every declared artifact, and publishes.
 - `scripts/verify.mjs <apiRoot> <pluginId> <version> [--out <dir>] [--key <publicKeyFile>]` — check the public catalog reports `available`, follow the download endpoint's `url` field to fetch real artifact bytes, compare SHA-256 and size, unpack the `.meta-plugin`, cross-check `market-manifest.json` against the payload file set, and optionally verify the Ed25519 signature.
 
 Typical sequence:
@@ -53,13 +55,14 @@ Typical sequence:
 ```bash
 node scripts/discover.mjs https://marketplace.example.com
 node scripts/build-payload.mjs ./plugin-dir ./payload.zip
-node scripts/login-web.mjs "$API_ROOT" ./token.tmp admin   # prints BROWSER_URL <url>; open it in the built-in browser
-node scripts/publish.mjs "$API_ROOT" ./token.tmp ./spec.json ./payload.zip --yes
+TOKEN_FILE="$(node scripts/session-path.mjs "$API_ROOT" admin)"
+node scripts/login-web.mjs "$API_ROOT" "$TOKEN_FILE" admin   # prints AUTH_REUSED when the cached session is still valid
+node scripts/publish.mjs "$API_ROOT" "$TOKEN_FILE" ./spec.json ./payload.zip --yes
 node scripts/verify.mjs "$API_ROOT" pi.example 1.0.0 --out ./verify-out
 rm -f ./token.tmp ./payload.zip
 ```
 
-Use `login-web.mjs` whenever a browser is available (credentials stay out of the session entirely); fall back to `login.mjs` for headless runs. `password.tmp` and `token.tmp` must be created with owner-only permissions and removed in a `finally`/trap path. Never commit them or the spec's credentials (the spec itself is secret-free).
+Use `login-web.mjs` whenever a browser is available (credentials stay out of the session entirely); it reuses the cached session until the server-provided expiry and supports `--force` for manual rotation. Fall back to `login.mjs` for headless runs. Password files are temporary; the session JSON is intentionally persistent outside the repository with owner-only permissions. Never commit it or upload it in a payload.
 
 ## Artifact Rules
 

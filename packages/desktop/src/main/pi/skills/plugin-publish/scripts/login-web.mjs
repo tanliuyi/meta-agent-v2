@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 // Web login/register: start a loopback HTTP server, open the browser, and let
 // the user enter credentials on a page. The page submits to the local server,
-// which forwards to the marketplace auth API and writes the session token to
-// a 0600 file. Passwords never reach argv, shell history, or the agent.
+// which forwards to the marketplace auth API and writes an expiring session record
+// to a 0600 file. Existing unexpired sessions are reused without opening a page.
 //
 // Usage:
-//   node login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--open] [--timeout <seconds>]
+//   node login-web.mjs <apiRoot> [tokenOut] [publisherId] [--token-out <path>] [--publisher-id <id>]
+//
+// Without tokenOut, the session is stored under the user's config directory and
+// reused until the marketplace-provided expiresAt. Pass --force to authenticate
+// again and replace the cached session.
 //
 // Modes: login (default) or register (--register). When publisherId is given,
-// membership is checked via /auth/me and the token file is removed on failure.
+// membership is checked via /auth/me; a new session is not written on failure.
 // The server binds 127.0.0.1 on a random port, serves one page, and exits
 // after a successful login/registration or the timeout (default 300 s).
 //
@@ -18,28 +22,41 @@
 // browser instead (manual/headless-terminal runs).
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { writeFileSync, chmodSync, rmSync } from "node:fs";
 import os from "node:os";
+import { defaultSessionPath, readSession, writeSession } from "./session.mjs";
 
 const args = process.argv.slice(2);
 let register = false;
 let openSystem = false;
 let timeoutSec = 300;
+let force = false;
+let tokenOutArg;
+let publisherIdArg;
 const positional = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--register") register = true;
   else if (args[i] === "--open") openSystem = true;
+  else if (args[i] === "--force") force = true;
+  else if (args[i] === "--token-out" && args[i + 1]) tokenOutArg = args[++i];
+  else if (args[i] === "--publisher-id" && args[i + 1]) publisherIdArg = args[++i];
   else if (args[i] === "--timeout" && args[i + 1]) timeoutSec = Number(args[++i]) || 300;
   else positional.push(args[i]);
 }
-const [apiRoot, tokenOut, publisherId] = positional;
+const [apiRoot, legacyTokenOut, legacyPublisherId] = positional;
+const publisherId = publisherIdArg ?? legacyPublisherId;
+const tokenOut = tokenOutArg ?? legacyTokenOut ?? (apiRoot ? defaultSessionPath(apiRoot, publisherId) : undefined);
 if (!apiRoot || !tokenOut) {
   console.error(
-    "usage: node login-web.mjs <apiRoot> <tokenOut> [publisherId] [--register] [--open] [--timeout <seconds>]",
+    "usage: node login-web.mjs <apiRoot> [tokenOut] [publisherId] [--token-out <path>] [--publisher-id <id>] [--force] [--register] [--open] [--timeout <seconds>]",
   );
   process.exitCode = 2;
 } else {
-  run();
+  const existing = force || register ? undefined : readSession(tokenOut);
+  if (existing) {
+    console.log(`AUTH_REUSED session ${tokenOut} (expires ${new Date(existing.expiresAt).toISOString()})`);
+  } else {
+    run();
+  }
 }
 
 function run() {
@@ -245,9 +262,10 @@ function run() {
           return;
         }
         const token = authData.token;
-        if (!token) {
+        const expiresAt = authData.expiresAt;
+        if (!token || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) {
           res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "认证响应缺少令牌" }));
+          res.end(JSON.stringify({ ok: false, error: "认证响应缺少有效的令牌有效期" }));
           return;
         }
         // Verify publisher membership when requested; drop the token on failure.
@@ -265,9 +283,8 @@ function run() {
             return;
           }
         }
-        writeFileSync(tokenOut, token, { mode: 0o600 });
-        chmodSync(tokenOut, 0o600);
-        console.log(`AUTH_OK token written to ${tokenOut} (user: ${username})`);
+        writeSession(tokenOut, { token, expiresAt });
+        console.log(`AUTH_OK session written to ${tokenOut} (user: ${username}, expires: ${new Date(expiresAt).toISOString()})`);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
         // One successful auth is enough; give the page a moment to render the

@@ -14,6 +14,7 @@
 // Default behavior pauses 3 seconds before publishing so an unintended run
 // can be Ctrl-C'd; pass --yes to skip the pause.
 import { readFileSync } from "node:fs";
+import { readSession } from "./session.mjs";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -24,13 +25,18 @@ async function main() {
     process.exitCode = 2;
     return;
   }
-  const token = readFileSync(tokenFile, "utf8").trim();
+  const session = readSession(tokenFile);
+  if (!session) {
+    throw new Error(`session file is missing, invalid, or expired: ${tokenFile}; run login-web.mjs again`);
+  }
+  const token = session.token;
   const spec = JSON.parse(readFileSync(specFile, "utf8"));
   const { pluginId, version, artifacts } = spec;
   if (!pluginId || !version || !Array.isArray(artifacts) || !artifacts.length) {
     throw new Error("spec must contain pluginId, version, and a non-empty artifacts array");
   }
 
+  console.log(`using cached Marketplace session (expires: ${new Date(session.expiresAt).toISOString()})`);
   const auth = { Authorization: `Bearer ${token}` };
   const json = { ...auth, "Content-Type": "application/json" };
 
