@@ -63,5 +63,11 @@ describe("Desktop sidecar build cleanup", () => {
       "Marketplace Publish API v1",
     );
     expect(existsSync(join(outputRoot, "main", "pi", "extensions", "pi-subagents", "skills"))).toBe(true);
+    const subagentsRoot = join(outputRoot, "main", "pi", "extensions", "pi-subagents");
+    expect(readFileSync(join(subagentsRoot, "README.md"), "utf8")).toContain("# pi-subagents");
+    expect(readFileSync(join(subagentsRoot, "CHANGELOG.md"), "utf8")).toContain("## [0.47.0]");
+    expect(readFileSync(join(subagentsRoot, "package.json"), "utf8")).toContain('"name": "pi-subagents"');
+    expect(readFileSync(join(subagentsRoot, "install.mjs"), "utf8")).toContain("pi-subagents installer");
+    expect(readFileSync(join(subagentsRoot, "docs", "workflows.md"), "utf8")).toContain("workflow");
   });
 });

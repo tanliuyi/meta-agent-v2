@@ -136,6 +136,15 @@ export function resolvePiCliScript(
 	return undefined;
 }
 
+export function getPiSpawnEnvironment(
+	command: string,
+	baseEnvironment: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+	const normalized = path.resolve(command);
+	if (!process.versions.electron || normalized !== path.resolve(process.execPath)) return baseEnvironment;
+	return { ...baseEnvironment, ELECTRON_RUN_AS_NODE: "1" };
+}
+
 export function getPiSpawnCommand(
 	args: string[],
 	deps: PiSpawnDeps = {},

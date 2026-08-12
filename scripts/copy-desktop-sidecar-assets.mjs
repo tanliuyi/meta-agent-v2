@@ -13,9 +13,13 @@ export function copyDesktopSidecarAssets(outputRoot = defaultOutputRoot) {
   for (const directory of ["agents", "prompts", "skills"]) {
     cpSync(join(subagentsSourceRoot, directory), join(subagentsOutputRoot, directory), { recursive: true });
   }
-  for (const file of ["LICENSE", "UPSTREAM.md", "README.upstream.md", "CHANGELOG.upstream.md", "package.upstream.json"]) {
+  for (const file of ["LICENSE", "UPSTREAM.md", "README.md", "CHANGELOG.md", "install.mjs", "package.json"]) {
     cpSync(join(subagentsSourceRoot, file), join(subagentsOutputRoot, file));
   }
+  for (const file of ["README.upstream.md", "CHANGELOG.upstream.md", "package.upstream.json"]) {
+    cpSync(join(subagentsSourceRoot, file), join(subagentsOutputRoot, file));
+  }
+  cpSync(join(subagentsSourceRoot, "docs"), join(subagentsOutputRoot, "docs"), { recursive: true });
 
   cpSync(join(desktopSourceRoot, "skills"), join(outputRoot, "main", "pi", "skills"), { recursive: true });
 }

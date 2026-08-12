@@ -161,7 +161,7 @@ export type SubagentLaunchContractResult =
 	| { ok: false; code: SubagentLaunchContractReasonCode; message: string; diagnostics: SubagentLaunchContractDiagnostic[] };
 
 function packageVersion(): string {
-	const packagePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.upstream.json");
+	const packagePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
 	const parsed = JSON.parse(fs.readFileSync(packagePath, "utf-8")) as { version?: unknown };
 	if (typeof parsed.version !== "string" || !parsed.version.trim()) {
 		throw new Error(`Invalid package version in '${packagePath}'.`);

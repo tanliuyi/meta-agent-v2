@@ -88,6 +88,7 @@ import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { agentDefinitionDigest, launchBindingDigest } from "../../shared/launch-contract.ts";
 import { resolveCurrentSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
 import { childExtensionTools, resolveChildExtensions } from "../../runtime/subagent-runtime.ts";
+import { canUseProgrammaticSubagentRuntime } from "../shared/programmatic-runtime-capabilities.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, projectChildLifecycle, type ChildLifecycleAction, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
 import {
 	acceptChildWatchdogEvent,
@@ -96,6 +97,7 @@ import {
 	resolveChildWatchdogConfig,
 	type ChildWatchdogStateSnapshot,
 } from "../../watchdog/child-status.ts";
+import { runSync as runCliSync } from "./execution-cli.ts";
 
 const artifactOutputByResult = new WeakMap<SingleResult, string>();
 const acceptanceOutputByResult = new WeakMap<SingleResult, string>();
@@ -773,10 +775,6 @@ export async function runSync(
 	task: string,
 	options: RunSyncOptions,
 ): Promise<SingleResult> {
-	options = {
-		...options,
-		capabilityCeiling: options.capabilityCeiling ?? resolveCurrentSubagentCapabilityCeiling(options.parentSessionId),
-	};
 	const agent = agents.find((a) => a.name === agentName);
 	if (!agent) {
 		return withRunContext({
@@ -788,6 +786,13 @@ export async function runSync(
 			error: `Unknown agent: ${agentName}`,
 		}, options.context);
 	}
+	if (!options.subagentRuntime || !canUseProgrammaticSubagentRuntime(agent, { cwd: options.cwd ?? runtimeCwd, permissions: options.permissions, allowIntercomDetach: options.allowIntercomDetach })) {
+		return runCliSync(runtimeCwd, agents, agentName, task, options);
+	}
+	options = {
+		...options,
+		capabilityCeiling: options.capabilityCeiling ?? resolveCurrentSubagentCapabilityCeiling(options.parentSessionId),
+	};
 	const outputModeValidationError = validateFileOnlyOutputMode(options.outputMode, options.outputPath, `Single run (${agentName})`);
 	if (outputModeValidationError) {
 		return withRunContext({

@@ -62,7 +62,7 @@ import {
 	getAsyncConfigPath,
 	resolveChildMaxSubagentDepth,
 } from "../../shared/types.ts";
-import { resolvePiPackageRoot } from "../shared/pi-spawn.ts";
+import { resolvePiPackageRoot, getPiSpawnEnvironment } from "../shared/pi-spawn.ts";
 import { nestedResultsPath, nestedSummaryFromAsyncStatus, resolveInheritedNestedRouteFromEnv, resolveNestedParentAddressFromEnv, writeNestedEvent } from "../shared/nested-events.ts";
 import { appendTurnBudgetSystemPrompt, initialTurnBudgetState } from "../shared/turn-budget.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
@@ -71,6 +71,7 @@ import { finalizeProcessTerminal, readProcessTerminal } from "./process-terminal
 import { SUBAGENT_PROCESS_TERMINAL_EVENT } from "../../shared/types.ts";
 import { resolveCurrentSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
 import { resolvePermissionRules } from "../shared/permissions.ts";
+import { canUseProgrammaticSubagentRuntime } from "../shared/programmatic-runtime-capabilities.ts";
 import { cleanupWorktrees, createWorktrees, diffWorktrees, formatWorktreeDiffSummary, type WorktreeSetup } from "../shared/worktree.ts";
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup } from "../shared/parallel-handoff.ts";
 import type { SessionLeaseRequest } from "../shared/session-lease.ts";
@@ -380,6 +381,7 @@ function canUseCurrentNodeExecutable(execPath: string): boolean {
 }
 
 function resolveAsyncRunnerNodeCommand(): string {
+	if (process.versions.electron) return process.execPath;
 	if (isNodeExecutableName(process.execPath) && canUseCurrentNodeExecutable(process.execPath)) return process.execPath;
 	return process.platform === "win32" ? "node.exe" : "node";
 }
@@ -493,8 +495,8 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal
 	const runnerProcessInstanceId = randomUUID();
 	const launchConfig = { ...cfg, runnerProcessInstanceId };
 	fs.writeFileSync(cfgPath, JSON.stringify(launchConfig));
-	const runner = path.join(path.dirname(fileURLToPath(import.meta.url)), "subagent-runner.ts");
 	const nodeCommand = resolveAsyncRunnerNodeCommand();
+	const runner = path.join(path.dirname(fileURLToPath(import.meta.url)), "subagent-runner.ts");
 	const launchForStartup = launchConfig as typeof launchConfig & { asyncDir?: unknown; revivalLease?: unknown };
 	const launchAsyncDir = typeof launchForStartup.asyncDir === "string" ? launchForStartup.asyncDir : undefined;
 	const startupPath = typeof launchForStartup.revivalLease === "object" && launchAsyncDir
@@ -515,15 +517,16 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal
 			stdoutFd = fs.openSync(logPaths.stdoutPath, "a");
 			stderrFd = fs.openSync(logPaths.stderrPath, "a");
 		}
+		const runnerEnvironment = getPiSpawnEnvironment(nodeCommand, {
+				...process.env,
+				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
+			});
 		const proc = spawn(nodeCommand, [jitiCliPath, runner, cfgPath], {
 			cwd,
 			detached: true,
 			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
 			windowsHide: true,
-			env: {
-				...process.env,
-				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
-			},
+			env: runnerEnvironment,
 		});
 		closeFd(stdoutFd);
 		closeFd(stderrFd);
@@ -1075,6 +1078,24 @@ export function executeAsyncChain(
 		}
 		return [childIntercomTarget(step.agent, childTargetIndex++)];
 	}) : undefined;
+	const capabilityFallbackRequired = params.subagentRuntime && steps.some((step) => {
+		if ("parallel" in step && Array.isArray(step.parallel)) {
+			return step.parallel.some((task) => {
+				const agent = agents.find((candidate) => candidate.name === task.agent);
+				return !agent || !canUseProgrammaticSubagentRuntime(agent, { cwd: task.cwd ?? runnerCwd, permissions: params.ctx.permissions });
+			});
+		}
+		if ("parallel" in step && !Array.isArray(step.parallel)) {
+			const agent = agents.find((candidate) => candidate.name === step.parallel.agent);
+			return !agent || !canUseProgrammaticSubagentRuntime(agent, { cwd: runnerCwd, permissions: params.ctx.permissions });
+		}
+		if ("checkpoint" in step) return false;
+		const agent = agents.find((candidate) => candidate.name === step.agent);
+		return !agent || !canUseProgrammaticSubagentRuntime(agent, { cwd: step.cwd ?? runnerCwd, permissions: params.ctx.permissions });
+	});
+	// Keep the complete upstream runner for capabilities not yet represented by
+	// the Desktop worker; never silently drop an extension, MCP, permission, or watchdog request.
+	if (capabilityFallbackRequired) params.subagentRuntime = undefined;
 
 	// Programmatic branch: use SubagentRuntime instead of detached CLI runner
 	if (params.subagentRuntime) {
@@ -1598,6 +1619,10 @@ export function executeAsyncSingle(
 	} catch (error) {
 		return formatAsyncStartError("single", `Failed to persist async recovery descriptor for '${id}': ${error instanceof Error ? error.message : String(error)}`);
 	}
+	const capabilityFallbackRequired = params.subagentRuntime && !canUseProgrammaticSubagentRuntime(agentConfig, { cwd: runnerCwd, permissions: params.ctx.permissions });
+	// Keep the complete upstream runner for capabilities not yet represented by
+	// the Desktop worker; never silently drop an extension, MCP, permission, or watchdog request.
+	if (capabilityFallbackRequired) params.subagentRuntime = undefined;
 
 	// Programmatic branch: use SubagentRuntime instead of detached CLI runner
 	if (params.subagentRuntime) {

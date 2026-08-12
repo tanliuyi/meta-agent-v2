@@ -154,7 +154,7 @@ describe("DesktopSubagentRuntime", () => {
     });
   });
 
-  it("rejects extension paths instead of falling back to the CLI adapter", async () => {
+  it("falls back to the upstream CLI adapter for configured extension paths", async () => {
     const runtime: SubagentRuntime = {
       async *run() {
         yield { type: "failed", runId: "unexpected", error: "runtime should not start" };
@@ -177,13 +177,13 @@ describe("DesktopSubagentRuntime", () => {
       filePath: "custom.md",
       extensions: ["C:\\extensions\\custom.ts"],
     };
-    await expect(
-      runSync(process.cwd(), [agent], "custom", "Inspect", {
-        subagentRuntime: runtime,
-        runId: "no-cli-fallback",
-        acceptance: false,
-      }),
-    ).rejects.toThrow("do not accept extension file paths");
+    const result = await runSync(process.cwd(), [agent], "custom", "Inspect", {
+      subagentRuntime: runtime,
+      runId: "no-cli-fallback",
+      acceptance: false,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.error).toContain("Failed to load extension");
   });
 
   it("authorizes nested requests from the bound parent worker lineage", async () => {

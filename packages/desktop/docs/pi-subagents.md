@@ -17,9 +17,9 @@ Thread sidecar / pi-subagents
 
 - 保留独立进程隔离，不在父 thread worker 内并发创建多个 `AgentSession`。
 - Main 进程持有 subagent worker，避免 thread worker reload 后留下孤儿进程。
-- 使用 `createAgentSessionServices()` 和 `createAgentSessionFromServices()`，不经过 Pi CLI。
-- 扩展只按 Desktop extension ID/profile 注册，不接受任意 child extension 文件路径。
-- 前台、并行、chain 和 async 最终共享同一 worker protocol。
+- 使用 `createAgentSessionServices()` 和 `createAgentSessionFromServices()` 作为 programmatic worker 的执行入口；需要上游 CLI 才能完整承载的能力由同一 embedded Node sidecar 中的上游 runner 回退路径提供。
+- Programmatic worker 只按 Desktop extension ID/profile 注册，不接受任意 child extension 文件路径；无法表达的上游扩展能力由完整上游 runner 承载。
+- 前台、并行、chain 和 async 优先共享同一 worker protocol；不满足 programmatic capability contract 时必须回退到完整上游语义，不能静默丢失能力。
 
 **阶段 0：冻结行为**
 先为现有功能补 characterization tests，作为迁移基线：
@@ -188,14 +188,12 @@ result/error
 
 Manifest 改为记录并验证 `subagent` sidecar entry，不再记录 Pi CLI entry。
 
-**完成标准**
-- 代码中不存在 child `pi-cli.js`、PATH `pi`、jiti 或 CLI 参数构造。
-- 所有 child 都由 Main registry 管理。
-- Hermes 和其他 builtins 每个 worker 只注册一次。
-- 任意用户 extension path 无法进入 child worker。
-- Foreground、parallel、chain、async、cancel、steer、resume 回归测试通过。
-- Thread worker replacement 和 Desktop shutdown 不产生孤儿进程。
-- Sidecar build、smoke、package afterPack 和 `npm run check` 全部通过。
+**对齐完成标准**
+
+- Programmatic worker 不允许任意用户 extension path 进入 worker；对应的上游能力必须由 host-approved adapter 或完整上游 runner 提供。
+- 普通单次、parallel、chain、async、cancel、steer、resume 和 watchdog 行为与上游一致；能力不匹配时不得静默降级。
+- CLI/jiti 回退只能运行在 Desktop embedded Node sidecar 中，所有进程边界保留现有环境过滤、路径校验和生命周期管理。
+- Sidecar build、资源复制、package/guide smoke、聚焦回归测试和 `npm run check` 全部通过。
 
 第一实施批次应限定为阶段 0 至阶段 4，并只切换 foreground single。这样可以先证明 programmatic `AgentSession`、扩展加载、事件流和取消语义正确，再扩大到调度和恢复。
 
@@ -211,7 +209,7 @@ Manifest 改为记录并验证 `subagent` sidecar entry，不再记录 Pi CLI en
 - 新增 Main-owned `SubagentWorkerRegistry`，包含 run identity、全局/线程容量、取消、steer、事件确认和 shutdown ownership。
 - Thread worker 会校验 host request 的 project/thread identity，开发扩展不能跨 thread 启动或控制 worker。
 - Subagent worker 直接调用 `createAgentSessionServices()`、`createAgentSessionFromServices()`、`bindExtensions()`、`subscribe()` 和 `prompt()`。
-- Child resource loader 强制 `noExtensions: true`，只加载 provider、Hermes 和 programmatic runtime inline factories；不接受 extension 文件路径。
+- Child resource loader 强制 `noExtensions: true`，只加载 provider、Hermes 和 programmatic runtime inline factories；programmatic worker 不接受任意 extension 文件路径，完整上游 runner 仍负责这些能力。
 - Foreground single 已切换为 typed worker events，不再构造 CLI 参数或解析 stdout JSONL。
 - Faux provider tests 覆盖 programmatic AgentSession、single result projection、stream events、Main registry ownership、重复 run 拒绝和 identity isolation。
 - Sidecar/package smoke 现在验证 subagent worker entry、protocol handshake 和 ping。
@@ -357,19 +355,18 @@ Manifest 改为记录并验证 `subagent` sidecar entry，不再记录 Pi CLI en
 - 动态 fanout 的 async 模式仍需 CLI runner。
 - `pi-spawn.ts`、`pi-args.ts`、`desktop-child-extension.ts`、`PI_DESKTOP_PI_ENTRY`、`subagent-runner.js` 暂保留。
 
-### 第九批：CLI fallback 清理
+### 第九批：恢复上游执行能力
 
 已完成：
 
-- 删除 `async-execution.ts` 中 `spawnRunner()`、`resolveAsyncRunnerNodeCommand()`、`resolveAsyncRunnerLogPaths()` 及所有 CLI runner 函数。
-- 删除 `execution.ts` 中 `runSync` 和 `runSingleAttempt` 的整个 CLI fallback 分支。
-- 删除 `import { applyThinkingSuffix } from "../shared/pi-args.ts"` 等 CLI-only import。
-- `isAsyncAvailable()` 现在直接返回 `false`（不再尝试调用已删除的 `resolveAsyncRunnerNodeCommand`）。
-- `async-execution.ts` 和 `execution.ts` 中所有执行路径现在只通过 `SubagentRuntime` 走 programmatic 模式。
-- Typecheck、25 个子代理测试、sidecar build/smoke 全部通过。
+- 保留 Desktop `SubagentRuntime` 作为普通、可安全表达的 programmatic launch 首选路径。
+- 恢复上游 0.47.0 的完整 foreground CLI runner，并在 programmatic runtime 不具备某项上游能力时回退到该 runner。
+- 恢复 async runner 的 jiti 探测、启动握手、process-terminal、日志、取消和 nested completion 路径；Desktop 使用 Electron embedded Node 承载它。
+- 配置了 extension path、MCP direct tools、permission、watchdog、intercom detach 或非 programmatic runner 的请求不会被静默降级，而是走完整上游执行路径。
+- sidecar 复制上游 `package.json`、`install.mjs`、`README.md`、`CHANGELOG.md` 和 `docs/`，并将 `jiti`、`typebox`、`yaml` 声明为 Desktop 运行时依赖。
 
-本批明确未迁移（仍保留但不再被 programmatic 路径引用）：
+仍需后续迁移为 typed sidecar 能力的边界：
 
-- Watchdog child runtime 仍使用 CLI-bound 过渡实现。
-- 动态 fanout 的 async 模式仍需 CLI runner。
-- `pi-spawn.ts`、`pi-args.ts`、`desktop-child-extension.ts`、`PI_DESKTOP_PI_ENTRY`、`subagent-runner.js` 暂保留（但 `async-execution.ts` 和 `execution.ts` 不再引用它们）。
+- programmatic worker 仍只加载 host-approved extensions/providers；
+- programmatic worker 尚未实现 MCP direct tool adapter、permission ask、child watchdog 和 intercom detach 的等价 typed contract；这些请求当前由上游 runner完整承载；
+- 所有回退路径必须继续通过 Desktop embedded Node 和现有 capability/路径校验，不能重新引入未受控的外部 runtime。
