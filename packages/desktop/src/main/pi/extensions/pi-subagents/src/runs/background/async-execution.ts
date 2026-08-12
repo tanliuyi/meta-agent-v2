@@ -43,6 +43,7 @@ import {
 	type AcceptanceLedger,
 	type AgentContract,
 	type ArtifactConfig,
+	type AsyncStatus,
 	type ChainOutputMap,
 	type Details,
 	type JsonSchemaObject,
@@ -537,9 +538,9 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal
 			if (!persisted) return;
 			if (launch.nestedRoute && launch.nestedSelf) {
 				try {
-					let status: import("../../shared/types.ts").AsyncStatus;
+					let status: AsyncStatus;
 					try {
-						status = JSON.parse(fs.readFileSync(path.join(asyncDir, "status.json"), "utf-8")) as import("../../shared/types.ts").AsyncStatus;
+						status = JSON.parse(fs.readFileSync(path.join(asyncDir, "status.json"), "utf-8")) as AsyncStatus;
 						status.processTerminal = persisted;
 					} catch {
 						status = { runId, mode: "single", state: persisted.state === "observed" ? "complete" : "failed", startedAt: persisted.observedAt ?? Date.now(), lastUpdate: Date.now(), processTerminal: persisted };
