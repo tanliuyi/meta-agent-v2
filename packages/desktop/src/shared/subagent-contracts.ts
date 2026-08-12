@@ -241,9 +241,48 @@ export interface SubagentExtensionConfig {
   artifactDir?: "project" | "session" | "temp";
   scheduledRuns?: {
     enabled?: boolean;
-    maxLatenessMs?: number;
     maxPending?: number;
+    storeRoot?: string;
   };
+  // 以下字段与上游 pi-subagents ExtensionConfig 对齐（fleetView/fleetViewPlacement/
+  // fleetKeybindings 为 TUI 专属，GUI 不暴露）。
+  legacyChainControls?: boolean;
+  inlineToolDisplay?: "rich" | "summary";
+  forceTopLevelAsync?: boolean;
+  waitTool?: { enabled?: boolean };
+  defaultSessionDir?: string;
+  singleRunOutputBaseDir?: string;
+  worktreeSetupHook?: string;
+  worktreeSetupHookTimeoutMs?: number;
+  worktreeBaseDir?: string;
+  intercomBridge?: {
+    mode?: "off" | "fork-only" | "always";
+    instructionFile?: string;
+    resultDelivery?: boolean;
+  };
+  proactiveSkillSubagents?: { enabled?: boolean; preferredAgent?: string } | false;
+  missions?: { enabled?: boolean };
+  authorityPolicy?: Partial<
+    Record<
+      "discardWorktree" | "destructiveCleanup" | "spawnBudgetGrant" | "scheduleCreate" | "stopRun" | "steerRun",
+      "auto" | "confirm" | "forbid"
+    >
+  >;
+  parallel?: { maxTasks?: number; concurrency?: number };
+  chain?: { dynamicFanout?: { maxItems?: number } };
+  turnBudget?: { maxTurns: number; graceTurns?: number };
+  toolBudget?: { soft?: number; hard: number };
+  control?: {
+    enabled?: boolean;
+    needsAttentionAfterMs?: number;
+    activeNoticeAfterMs?: number;
+  };
+  completionBatch?: { enabled?: boolean; debounceMs?: number; maxWaitMs?: number };
+  usageBudget?: {
+    tokens?: { soft?: number; hard?: number };
+    costUsd?: { soft?: number; hard?: number };
+  };
+  permissions?: { rules?: Record<string, "allow" | "ask" | "deny"> };
 }
 
 export interface SubagentWatchdogEndpointSettings {

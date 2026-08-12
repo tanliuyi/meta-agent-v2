@@ -235,6 +235,40 @@
   border-top: 0;
 }
 
+.subagent-config-group {
+  border-top: 1px solid hsl(var(--border) / 0.8);
+}
+
+.subagent-config-group:first-child {
+  border-top: 0;
+}
+
+.subagent-config-group-heading {
+  padding: 10px 16px;
+  color: hsl(var(--muted-foreground));
+  font-size: var(--type-size-control);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.subagent-config-group-heading:hover {
+  background: hsl(var(--foreground) / 0.025);
+}
+
+.subagent-config-group-heading::-webkit-details-marker {
+  display: none;
+}
+
+.subagent-config-permissions-input {
+  min-height: 72px;
+  font-family: var(--font-mono);
+  font-size: var(--type-size-meta);
+  resize: vertical;
+}
+
 .subagent-watchdog-group {
   padding: 16px;
   border-top: 1px solid hsl(var(--border) / 0.8);

@@ -27,9 +27,27 @@ import {
   mergeBuiltinAgentOverride,
 } from "../pi/extensions/pi-subagents/src/agents/agents.ts";
 import { discoverAvailableSkills } from "../pi/extensions/pi-subagents/src/agents/skills.ts";
-import { getConfigPath, loadConfigStrict, saveConfig } from "../pi/extensions/pi-subagents/src/extension/config.ts";
+import {
+  getConfigPath,
+  loadConfigStrict,
+  resolveAsyncByDefault,
+  saveConfig,
+} from "../pi/extensions/pi-subagents/src/extension/config.ts";
+import { AUTHORITY_ACTIONS, type AuthorityAction } from "../pi/extensions/pi-subagents/src/policy/authority.ts";
+import { resolveWaitToolConfig } from "../pi/extensions/pi-subagents/src/runs/background/wait-config.ts";
+
+// 与上游 authority.ts 的 DEFAULT_AUTHORITY_POLICY 保持一致（该常量未导出）。
+const DEFAULT_AUTHORITY_POLICY: Record<AuthorityAction, "auto" | "confirm" | "forbid"> = {
+  discardWorktree: "confirm",
+  destructiveCleanup: "confirm",
+  spawnBudgetGrant: "confirm",
+  scheduleCreate: "auto",
+  stopRun: "auto",
+  steerRun: "auto",
+};
+
 import { getSupportedThinkingLevels, toModelInfo } from "../pi/extensions/pi-subagents/src/shared/model-info.ts";
-import type { ExtensionConfig } from "../pi/extensions/pi-subagents/src/shared/types.ts";
+import { DEFAULT_SUBAGENT_MAX_DEPTH, type ExtensionConfig } from "../pi/extensions/pi-subagents/src/shared/types.ts";
 import {
   readWatchdogSettingsOverride,
   resolveWatchdogConfig,
@@ -492,15 +510,51 @@ function builtinOverrideConfig(config: SubagentAgentConfigInput): BuiltinOverrid
 }
 
 function selectExtensionConfig(config: ExtensionConfig): SubagentExtensionConfig {
+  const waitTool = resolveWaitToolConfig(config.waitTool);
+  const authorityPolicy: NonNullable<SubagentExtensionConfig["authorityPolicy"]> = {};
+  for (const action of AUTHORITY_ACTIONS as readonly AuthorityAction[]) {
+    authorityPolicy[action] = config.authorityPolicy?.[action] ?? DEFAULT_AUTHORITY_POLICY[action];
+  }
+  const proactiveSkillSubagents =
+    config.proactiveSkillSubagents === undefined || config.proactiveSkillSubagents === false
+      ? { enabled: false }
+      : config.proactiveSkillSubagents;
   return {
-    asyncByDefault: config.asyncByDefault ?? false,
+    // 默认值与上游运行时语义保持一致（resolveAsyncByDefault 缺省 true、
+    // DEFAULT_SUBAGENT_MAX_DEPTH=2、scheduledRuns.enabled 缺省 true），
+    // 保证 UI 展示与 pi-subagents 实际行为一致。
+    asyncByDefault: resolveAsyncByDefault(config),
     asyncWidget: config.asyncWidget ?? true,
-    maxSubagentDepth: config.maxSubagentDepth ?? 1,
+    maxSubagentDepth: config.maxSubagentDepth ?? DEFAULT_SUBAGENT_MAX_DEPTH,
     maxSubagentSpawnsPerSession: config.maxSubagentSpawnsPerSession ?? 0,
     globalConcurrencyLimit: config.globalConcurrencyLimit ?? 20,
     toolDescriptionMode: config.toolDescriptionMode ?? "full",
     artifactDir: config.artifactDir ?? "project",
-    scheduledRuns: { ...config.scheduledRuns, enabled: config.scheduledRuns?.enabled ?? false },
+    scheduledRuns: {
+      ...config.scheduledRuns,
+      enabled: config.scheduledRuns?.enabled ?? true,
+    },
+    legacyChainControls: config.legacyChainControls ?? false,
+    inlineToolDisplay: config.inlineToolDisplay ?? "rich",
+    forceTopLevelAsync: config.forceTopLevelAsync ?? false,
+    waitTool: { enabled: waitTool.enabled },
+    defaultSessionDir: config.defaultSessionDir,
+    singleRunOutputBaseDir: config.singleRunOutputBaseDir,
+    worktreeSetupHook: config.worktreeSetupHook,
+    worktreeSetupHookTimeoutMs: config.worktreeSetupHookTimeoutMs,
+    worktreeBaseDir: config.worktreeBaseDir,
+    intercomBridge: config.intercomBridge,
+    proactiveSkillSubagents,
+    missions: { enabled: config.missions?.enabled ?? true },
+    authorityPolicy,
+    parallel: config.parallel,
+    chain: config.chain,
+    turnBudget: config.turnBudget,
+    toolBudget: config.toolBudget,
+    control: config.control,
+    completionBatch: config.completionBatch,
+    usageBudget: config.usageBudget,
+    permissions: config.permissions,
   };
 }
 
@@ -509,16 +563,113 @@ function validateExtensionConfig(config: ExtensionConfig): void {
     ["maxSubagentDepth", config.maxSubagentDepth, 0],
     ["maxSubagentSpawnsPerSession", config.maxSubagentSpawnsPerSession, 0],
     ["globalConcurrencyLimit", config.globalConcurrencyLimit, 1],
+    ["worktreeSetupHookTimeoutMs", config.worktreeSetupHookTimeoutMs, 0],
+    ["parallel.maxTasks", config.parallel?.maxTasks, 1],
+    ["parallel.concurrency", config.parallel?.concurrency, 1],
+    ["chain.dynamicFanout.maxItems", config.chain?.dynamicFanout?.maxItems, 1],
+    ["scheduledRuns.maxPending", config.scheduledRuns?.maxPending, 1],
   ] as const) {
     if (value !== undefined && (!Number.isInteger(value) || value < minimum)) {
       throw new Error(`${name} must be an integer >= ${minimum}`);
     }
   }
-  if (config.toolDescriptionMode && !["full", "compact", "custom"].includes(config.toolDescriptionMode)) {
-    throw new Error("toolDescriptionMode is invalid");
+  for (const [name, value] of [
+    ["toolDescriptionMode", config.toolDescriptionMode],
+    ["inlineToolDisplay", config.inlineToolDisplay],
+    ["intercomBridge.mode", config.intercomBridge?.mode],
+  ] as const) {
+    if (value === undefined) continue;
+    const allowed =
+      name === "toolDescriptionMode"
+        ? ["full", "compact", "custom"]
+        : name === "inlineToolDisplay"
+          ? ["rich", "summary"]
+          : ["off", "fork-only", "always"];
+    if (!allowed.includes(value)) {
+      throw new Error(`${name} is invalid`);
+    }
   }
   if (config.artifactDir && !["project", "session", "temp"].includes(config.artifactDir)) {
     throw new Error("artifactDir is invalid");
+  }
+  for (const [name, value] of [
+    ["legacyChainControls", config.legacyChainControls],
+    ["forceTopLevelAsync", config.forceTopLevelAsync],
+  ] as const) {
+    if (value !== undefined && typeof value !== "boolean") {
+      throw new Error(`${name} must be a boolean`);
+    }
+  }
+  for (const [name, value] of [
+    ["defaultSessionDir", config.defaultSessionDir],
+    ["singleRunOutputBaseDir", config.singleRunOutputBaseDir],
+    ["worktreeSetupHook", config.worktreeSetupHook],
+    ["worktreeBaseDir", config.worktreeBaseDir],
+    ["intercomBridge.instructionFile", config.intercomBridge?.instructionFile],
+    ["scheduledRuns.storeRoot", config.scheduledRuns?.storeRoot],
+  ] as const) {
+    if (value !== undefined && (typeof value !== "string" || !value.trim())) {
+      throw new Error(`${name} must be a non-empty string`);
+    }
+  }
+  if (config.worktreeSetupHook && config.worktreeSetupHookTimeoutMs === 0) {
+    throw new Error("worktreeSetupHookTimeoutMs must be > 0 when worktreeSetupHook is set");
+  }
+  for (const [name, value] of [
+    ["turnBudget.maxTurns", config.turnBudget?.maxTurns],
+    ["turnBudget.graceTurns", config.turnBudget?.graceTurns],
+    ["toolBudget.soft", config.toolBudget?.soft],
+    ["toolBudget.hard", config.toolBudget?.hard],
+    ["control.needsAttentionAfterMs", config.control?.needsAttentionAfterMs],
+    ["control.activeNoticeAfterMs", config.control?.activeNoticeAfterMs],
+    ["completionBatch.debounceMs", config.completionBatch?.debounceMs],
+    ["completionBatch.maxWaitMs", config.completionBatch?.maxWaitMs],
+    ["usageBudget.tokens.soft", config.usageBudget?.tokens?.soft],
+    ["usageBudget.tokens.hard", config.usageBudget?.tokens?.hard],
+    ["usageBudget.costUsd.soft", config.usageBudget?.costUsd?.soft],
+    ["usageBudget.costUsd.hard", config.usageBudget?.costUsd?.hard],
+  ] as const) {
+    if (value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+      throw new Error(`${name} must be a positive number`);
+    }
+  }
+  for (const [name, value] of [
+    [
+      "waitTool.enabled",
+      config.waitTool === undefined
+        ? undefined
+        : typeof config.waitTool === "boolean"
+          ? config.waitTool
+          : config.waitTool.enabled,
+    ],
+    ["intercomBridge.resultDelivery", config.intercomBridge?.resultDelivery],
+  ] as const) {
+    if (value !== undefined && typeof value !== "boolean") {
+      throw new Error(`${name} must be a boolean`);
+    }
+  }
+  if (config.missions !== undefined && typeof config.missions !== "object") {
+    throw new Error("missions must be an object");
+  }
+  if (config.authorityPolicy !== undefined) {
+    const allowed = new Set<string>(AUTHORITY_ACTIONS);
+    const decisions = new Set<string>(["auto", "confirm", "forbid"]);
+    for (const [action, decision] of Object.entries(config.authorityPolicy)) {
+      if (!allowed.has(action)) throw new Error(`authorityPolicy.${action} is unknown`);
+      if (!decisions.has(decision as string))
+        throw new Error(`authorityPolicy.${action} must be auto, confirm, or forbid`);
+    }
+  }
+  if (config.permissions !== undefined && config.permissions.rules !== undefined) {
+    if (typeof config.permissions.rules !== "object" || Array.isArray(config.permissions.rules)) {
+      throw new Error("permissions.rules must be an object");
+    }
+    for (const [tool, decision] of Object.entries(config.permissions.rules)) {
+      if (!tool.trim()) throw new Error("permissions.rules contains an empty tool name");
+      if (!["allow", "ask", "deny"].includes(decision)) {
+        throw new Error(`permissions.rules.${tool} must be allow, ask, or deny`);
+      }
+    }
   }
 }
 

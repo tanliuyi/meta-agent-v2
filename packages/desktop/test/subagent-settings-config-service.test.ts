@@ -180,14 +180,15 @@ describe("SubagentSettingsConfigService", () => {
       expect.arrayContaining(["reviewer", "worker", "oracle", "researcher", "scout", "delegate"]),
     );
     expect(snapshot.extensionConfig).toMatchObject({
-      asyncByDefault: false,
+      // 默认值与上游运行时语义一致：asyncByDefault 缺省 true、maxSubagentDepth=2、scheduledRuns.enabled 缺省 true
+      asyncByDefault: true,
       asyncWidget: true,
-      maxSubagentDepth: 1,
+      maxSubagentDepth: 2,
       maxSubagentSpawnsPerSession: 0,
       globalConcurrencyLimit: 20,
       toolDescriptionMode: "full",
       artifactDir: "project",
-      scheduledRuns: { enabled: false },
+      scheduledRuns: { enabled: true },
     });
     expect(snapshot.projectScopeAvailable).toBe(true);
   });
@@ -322,15 +323,80 @@ describe("SubagentSettingsConfigService", () => {
       expectedSnapshotRevision: snapshot.revision,
       mutation: {
         type: "update-extension-config",
-        config: { maxSubagentDepth: 3, globalConcurrencyLimit: 8, scheduledRuns: { enabled: true } },
+        config: {
+          maxSubagentDepth: 3,
+          globalConcurrencyLimit: 8,
+          scheduledRuns: { enabled: true, maxPending: 5 },
+          legacyChainControls: true,
+          inlineToolDisplay: "summary",
+          forceTopLevelAsync: true,
+          waitTool: { enabled: false },
+          worktreeSetupHook: "./scripts/setup.mjs",
+          worktreeSetupHookTimeoutMs: 30000,
+          intercomBridge: { mode: "always", resultDelivery: true },
+          proactiveSkillSubagents: false,
+          missions: { enabled: false },
+          authorityPolicy: { scheduleCreate: "confirm", stopRun: "forbid" },
+          parallel: { maxTasks: 4, concurrency: 2 },
+          chain: { dynamicFanout: { maxItems: 3 } },
+          turnBudget: { maxTurns: 5, graceTurns: 1 },
+          toolBudget: { hard: 50, soft: 40 },
+          control: { enabled: true, needsAttentionAfterMs: 120000 },
+          completionBatch: { enabled: true, debounceMs: 500, maxWaitMs: 2000 },
+          usageBudget: { tokens: { hard: 100000, soft: 80000 } },
+          permissions: { rules: { web_search: "ask" } },
+        },
       },
     });
     expect(result.status).toBe("saved");
+    if (result.status !== "saved") return;
+    snapshot = result.snapshot;
+    expect(snapshot.extensionConfig).toMatchObject({
+      maxSubagentDepth: 3,
+      globalConcurrencyLimit: 8,
+      scheduledRuns: { enabled: true, maxPending: 5 },
+      legacyChainControls: true,
+      inlineToolDisplay: "summary",
+      forceTopLevelAsync: true,
+      waitTool: { enabled: false },
+      worktreeSetupHook: "./scripts/setup.mjs",
+      worktreeSetupHookTimeoutMs: 30000,
+      intercomBridge: { mode: "always", resultDelivery: true },
+      proactiveSkillSubagents: { enabled: false },
+      missions: { enabled: false },
+      authorityPolicy: { scheduleCreate: "confirm", stopRun: "forbid" },
+      parallel: { maxTasks: 4, concurrency: 2 },
+      chain: { dynamicFanout: { maxItems: 3 } },
+      turnBudget: { maxTurns: 5, graceTurns: 1 },
+      toolBudget: { hard: 50, soft: 40 },
+      control: { enabled: true, needsAttentionAfterMs: 120000 },
+      completionBatch: { enabled: true, debounceMs: 500, maxWaitMs: 2000 },
+      usageBudget: { tokens: { hard: 100000, soft: 80000 } },
+      permissions: { rules: { web_search: "ask" } },
+    });
     const stored = JSON.parse(await readFile(join(agentDir, "extensions", "subagent", "config.json"), "utf8"));
     expect(stored).toMatchObject({
       maxSubagentDepth: 3,
       globalConcurrencyLimit: 8,
-      scheduledRuns: { enabled: true },
+      scheduledRuns: { enabled: true, maxPending: 5 },
+      legacyChainControls: true,
+      inlineToolDisplay: "summary",
+      forceTopLevelAsync: true,
+      waitTool: { enabled: false },
+      worktreeSetupHook: "./scripts/setup.mjs",
+      worktreeSetupHookTimeoutMs: 30000,
+      intercomBridge: { mode: "always", resultDelivery: true },
+      proactiveSkillSubagents: false,
+      missions: { enabled: false },
+      authorityPolicy: { scheduleCreate: "confirm", stopRun: "forbid" },
+      parallel: { maxTasks: 4, concurrency: 2 },
+      chain: { dynamicFanout: { maxItems: 3 } },
+      turnBudget: { maxTurns: 5, graceTurns: 1 },
+      toolBudget: { hard: 50, soft: 40 },
+      control: { enabled: true, needsAttentionAfterMs: 120000 },
+      completionBatch: { enabled: true, debounceMs: 500, maxWaitMs: 2000 },
+      usageBudget: { tokens: { hard: 100000, soft: 80000 } },
+      permissions: { rules: { web_search: "ask" } },
     });
   });
 
