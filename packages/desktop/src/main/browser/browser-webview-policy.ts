@@ -2,6 +2,12 @@ import type { WebContents } from "electron";
 import { isBrowserSessionPartition } from "../../shared/browser-contracts.ts";
 import { parseBrowserInternalPage } from "../../shared/browser-internal-contracts.ts";
 
+const internalBrowserWebContentsIds = new Set<number>();
+
+export function isBrowserInternalWebContents(webContentsId: number): boolean {
+  return internalBrowserWebContentsIds.has(webContentsId);
+}
+
 /**
  * Install the main-process policy for every webview attached to the app window.
  *
@@ -14,6 +20,7 @@ export function installBrowserWebviewSecurity(
   webContents: WebContents,
   browserInternalPreloadPath?: string,
 ): () => void {
+  const guestCleanups = new Set<() => void>();
   const onWillAttach = (
     event: Electron.Event,
     webPreferences: Electron.WebPreferences,
@@ -45,9 +52,45 @@ export function installBrowserWebviewSecurity(
       event.preventDefault();
     }
   };
+  const onDidAttach = (_event: Electron.Event, guest: WebContents): void => {
+    const preferences = (
+      guest as WebContents & { getLastWebPreferences(): Electron.WebPreferences }
+    ).getLastWebPreferences();
+    let internal = browserInternalPreloadPath !== undefined && preferences.preload === browserInternalPreloadPath;
+    if (internal) internalBrowserWebContentsIds.add(guest.id);
+    const markInternal = (url: string): void => {
+      if (parseBrowserInternalPage(url) === null) return;
+      internal = true;
+      internalBrowserWebContentsIds.add(guest.id);
+    };
+    const guardInternalNavigation = (event: Electron.Event, url: string): void => {
+      markInternal(guest.getURL());
+      if (internal && parseBrowserInternalPage(url) === null) event.preventDefault();
+    };
+    const onDidNavigate = (_event: Electron.Event, url: string): void => markInternal(url);
+    const cleanup = (): void => {
+      internalBrowserWebContentsIds.delete(guest.id);
+      guest.off("will-navigate", guardInternalNavigation);
+      guest.off("will-redirect", guardInternalNavigation);
+      guest.off("did-navigate", onDidNavigate);
+      guest.off("destroyed", cleanup);
+      guestCleanups.delete(cleanup);
+    };
+    markInternal(guest.getURL());
+    guest.on("will-navigate", guardInternalNavigation);
+    guest.on("will-redirect", guardInternalNavigation);
+    guest.on("did-navigate", onDidNavigate);
+    guest.once("destroyed", cleanup);
+    guestCleanups.add(cleanup);
+  };
 
   webContents.on("will-attach-webview", onWillAttach);
-  return () => webContents.off("will-attach-webview", onWillAttach);
+  webContents.on("did-attach-webview", onDidAttach);
+  return () => {
+    for (const cleanup of [...guestCleanups]) cleanup();
+    webContents.off("will-attach-webview", onWillAttach);
+    webContents.off("did-attach-webview", onDidAttach);
+  };
 }
 
 /** Initial URLs accepted by the browser guest. browser:// is restricted to known internal pages. */

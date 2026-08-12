@@ -274,8 +274,9 @@ describe("browser IPC", () => {
     expect(browser.resolveAnnotationBounds).toHaveBeenCalledWith(IDENTITY, 1, "n1");
   });
 
-  test("浏览器数据通道透传（内部页：数据/历史/下载/联系人/密码/网站设置）", async () => {
+  test("浏览器数据通道仅向受信内部页透传", async () => {
     const snapshot = { history: [], downloads: [], contacts: [], passwords: [], sitePermissions: [] };
+    const internalEvent = { sender: { mainFrame: {} }, senderFrame: { url: "browser://history" } };
     browser.browserDataGet.mockResolvedValue(snapshot);
     browser.browserHistoryDelete.mockResolvedValue({ ok: true, snapshot });
     browser.browserHistoryClear.mockResolvedValue({ ok: true, snapshot });
@@ -290,34 +291,48 @@ describe("browser IPC", () => {
     browser.browserSitePermissionDelete.mockResolvedValue({ ok: true, snapshot });
     browser.browserPasswordOfferResolve.mockResolvedValue({ ok: true });
 
-    await expect(electron.handles.get(CHANNELS.browserDataGet)?.({})).resolves.toEqual(snapshot);
-    await expect(electron.handles.get(CHANNELS.browserHistoryDelete)?.({}, "https://a.com", 1)).resolves.toMatchObject({
+    await expect(electron.handles.get(CHANNELS.browserDataGet)?.(internalEvent)).resolves.toEqual(snapshot);
+    await expect(
+      electron.handles.get(CHANNELS.browserHistoryDelete)?.(internalEvent, "https://a.com", 1),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(electron.handles.get(CHANNELS.browserHistoryClear)?.(internalEvent)).resolves.toMatchObject({
       ok: true,
     });
-    await expect(electron.handles.get(CHANNELS.browserHistoryClear)?.({})).resolves.toMatchObject({ ok: true });
-    await expect(electron.handles.get(CHANNELS.browserDownloadsClear)?.({})).resolves.toMatchObject({ ok: true });
-    electron.handles.get(CHANNELS.browserDownloadReveal)?.({}, "/tmp/x.zip");
-    await expect(electron.handles.get(CHANNELS.browserDownloadOpen)?.({}, "/tmp/x.zip")).resolves.toEqual({ ok: true });
-    await expect(
-      electron.handles.get(CHANNELS.browserContactSave)?.({}, { contactId: null, contact: { fullName: "张三" } }),
-    ).resolves.toMatchObject({ ok: true });
-    await expect(electron.handles.get(CHANNELS.browserContactDelete)?.({}, "c1")).resolves.toMatchObject({ ok: true });
-    await expect(
-      electron.handles.get(CHANNELS.browserPasswordSave)?.(
-        {},
-        {
-          passwordId: null,
-          password: { origin: "https://a.com", username: "u", password: "p" },
-        },
-      ),
-    ).resolves.toMatchObject({ ok: true });
-    await expect(electron.handles.get(CHANNELS.browserPasswordDelete)?.({}, "p1")).resolves.toMatchObject({ ok: true });
-    await expect(
-      electron.handles.get(CHANNELS.browserSitePermissionSave)?.({}, { site: "a.com", kind: "camera", value: "deny" }),
-    ).resolves.toMatchObject({ ok: true });
-    await expect(electron.handles.get(CHANNELS.browserSitePermissionDelete)?.({}, "s1")).resolves.toMatchObject({
+    await expect(electron.handles.get(CHANNELS.browserDownloadsClear)?.(internalEvent)).resolves.toMatchObject({
       ok: true,
     });
+    electron.handles.get(CHANNELS.browserDownloadReveal)?.(internalEvent, "/tmp/x.zip");
+    await expect(electron.handles.get(CHANNELS.browserDownloadOpen)?.(internalEvent, "/tmp/x.zip")).resolves.toEqual({
+      ok: true,
+    });
+    await expect(
+      electron.handles.get(CHANNELS.browserContactSave)?.(internalEvent, {
+        contactId: null,
+        contact: { fullName: "张三" },
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(electron.handles.get(CHANNELS.browserContactDelete)?.(internalEvent, "c1")).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(
+      electron.handles.get(CHANNELS.browserPasswordSave)?.(internalEvent, {
+        passwordId: null,
+        password: { origin: "https://a.com", username: "u", password: "p" },
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(electron.handles.get(CHANNELS.browserPasswordDelete)?.(internalEvent, "p1")).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(
+      electron.handles.get(CHANNELS.browserSitePermissionSave)?.(internalEvent, {
+        site: "a.com",
+        kind: "camera",
+        value: "deny",
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      electron.handles.get(CHANNELS.browserSitePermissionDelete)?.(internalEvent, "s1"),
+    ).resolves.toMatchObject({ ok: true });
     await electron.handles.get(CHANNELS.browserPasswordOfferResolve)?.(
       { sender: { id: 42 } },
       IDENTITY,
@@ -341,6 +356,15 @@ describe("browser IPC", () => {
     expect(browser.browserSitePermissionSave).toHaveBeenCalledWith({ site: "a.com", kind: "camera", value: "deny" });
     expect(browser.browserSitePermissionDelete).toHaveBeenCalledWith("s1");
     expect(browser.browserPasswordOfferResolve).toHaveBeenCalledWith(IDENTITY, "offer-1", true, 42);
+  });
+
+  test("浏览器数据通道拒绝外部 webview sender", async () => {
+    const externalEvent = { sender: { mainFrame: {} }, senderFrame: { url: "https://evil.example/" } };
+
+    expect(() => electron.handles.get(CHANNELS.browserDataGet)?.(externalEvent, true)).toThrow(
+      "拒绝非受信页面访问浏览器内部数据",
+    );
+    expect(browser.browserDataGet).not.toHaveBeenCalled();
   });
 
   test("密码 offer 只发送到所属 renderer", () => {

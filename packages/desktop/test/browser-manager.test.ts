@@ -9,6 +9,7 @@ import type {
   BrowserHostController,
   BrowserHostEvent,
   PickElementResult,
+  WebContentsHostControllerOptions,
 } from "../src/main/browser/browser-host-controller.ts";
 import { StaleReferenceError } from "../src/main/browser/browser-host-controller.ts";
 import { BrowserManager, type BrowserManagerOptions } from "../src/main/browser/browser-manager.ts";
@@ -312,6 +313,7 @@ function fakeWebContents(
     session: contentsSession,
     hostWebContents,
     getURL: () => url,
+    getLastWebPreferences: () => ({}),
     getTitle: () => "",
     isLoading: () => false,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
@@ -690,6 +692,27 @@ describe("BrowserManager 会话隔离", () => {
     expect(hosts.get(101)?.navigatedUrls).toEqual(["https://example.com/"]);
   });
 
+  test("browser:// 特权 guest 永久限制导航且拒绝 Agent 页面操作", async () => {
+    const internalContents = fakeWebContents(sessionFor(SESSION_A), { id: 9_001 } as WebContents, "browser://history");
+    const { manager, hosts, hostOptions } = setup({ fromWebContentsId: () => internalContents });
+    await manager.attach(SESSION_A, 101);
+
+    const allowNavigation = hostOptions.get(101)?.allowNavigation;
+    expect(allowNavigation?.("browser://passwords")).toBe(true);
+    expect(allowNavigation?.("https://evil.example/")).toBe(false);
+
+    const results = await Promise.all([
+      manager.snapshot(SESSION_A, 1, {}, "agent"),
+      manager.evaluate(SESSION_A, 1, "window.browserInternal.dataGet(true)"),
+      manager.cdpSend(SESSION_A, 1, "Runtime.evaluate", { expression: "location.href='https://evil.example/'" }),
+      manager.readCdpEvents(SESSION_A, 1),
+    ]);
+    for (const result of results) {
+      expect(result).toEqual({ ok: false, error: "browser:// 内部页面仅供用户操作" });
+    }
+    expect(hosts.get(101)?.snapshotCalls).toEqual([]);
+  });
+
   test("browser:// 特权 tab 不能直接导航到网站", async () => {
     const { manager, hosts } = setup();
     await manager.attach(SESSION_A, 101);
@@ -798,13 +821,37 @@ describe("BrowserManager 会话隔离", () => {
     expect(manager.selectTab(SESSION_A, 42)).toBeNull();
   });
 
-  test("关闭活跃 tab 后活跃回退到剩余第一个 tab", async () => {
+  test("关闭最后一个活跃 tab 后活跃回退到左侧相邻 tab", async () => {
     const { manager, states } = setup();
     await manager.attach(SESSION_A, 101); // tab 1（active）
     await manager.attach(SESSION_A, 102); // tab 2（active）
 
     await manager.detach(SESSION_A, 102);
 
+    expect(states.at(-1)?.activeTabId).toBe(1);
+    expect(manager.tabsList(SESSION_A).map((tab) => tab.tabId)).toEqual([1]);
+  });
+
+  test("关闭活跃 tab 后选中相邻 tab：优先右侧，最后关闭时选左侧", async () => {
+    const { manager, states } = setup();
+    await manager.attach(SESSION_A, 101); // tab 1
+    await manager.attach(SESSION_A, 102); // tab 2
+    await manager.attach(SESSION_A, 103); // tab 3
+
+    // 关闭中间活跃 tab：选中右侧相邻 tab 3
+    manager.selectTab(SESSION_A, 2);
+    await manager.detach(SESSION_A, 102);
+    expect(states.at(-1)?.activeTabId).toBe(3);
+
+    // 关闭最后一个活跃 tab：选中左侧相邻 tab 1
+    manager.selectTab(SESSION_A, 3);
+    await manager.detach(SESSION_A, 103);
+    expect(states.at(-1)?.activeTabId).toBe(1);
+
+    // 关闭非活跃 tab：保持当前活跃不变
+    manager.selectTab(SESSION_A, 1);
+    await manager.attach(SESSION_A, 104); // tab 4
+    await manager.detach(SESSION_A, 104);
     expect(states.at(-1)?.activeTabId).toBe(1);
     expect(manager.tabsList(SESSION_A).map((tab) => tab.tabId)).toEqual([1]);
   });

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { BrowserInternalApi } from "../shared/browser-internal-contracts.ts";
+import type { BrowserInternalApi, BrowserInternalHostMessage } from "../shared/browser-internal-contracts.ts";
 
 // Sandbox preload 必须是单文件，不能运行时 require Rollup shared chunks。
 // 这些字面量与 shared/channels.ts 的主进程注册点保持一一对应。
@@ -34,7 +34,10 @@ const browserInternalApi: BrowserInternalApi = {
   passwordDelete: (id) => ipcRenderer.invoke(INTERNAL_CHANNELS.passwordDelete, id),
   sitePermissionSave: (input) => ipcRenderer.invoke(INTERNAL_CHANNELS.sitePermissionSave, input),
   sitePermissionDelete: (id) => ipcRenderer.invoke(INTERNAL_CHANNELS.sitePermissionDelete, id),
-  openUrl: (url) => ipcRenderer.sendToHost(INTERNAL_CHANNELS.host, { type: "open-url", url }),
+  openUrl: (url) => {
+    const message: BrowserInternalHostMessage = { type: "open-url", url };
+    ipcRenderer.sendToHost(INTERNAL_CHANNELS.host, message);
+  },
 };
 
 contextBridge.exposeInMainWorld("browserInternal", browserInternalApi);

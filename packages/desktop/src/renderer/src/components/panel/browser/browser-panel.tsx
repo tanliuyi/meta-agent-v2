@@ -164,6 +164,15 @@ export function BrowserPanel() {
   const activeViewId = activeViewIdOf(runtime);
   const activeTab = tabs.find((tab) => tab.tabId === activeTabId) ?? null;
   const activeUrl = activeTab?.url ?? "";
+  const sessionUrlsRef = useRef<string[]>([]);
+  const urlByTabId = new Map(tabs.map((tab) => [tab.tabId, tab.url]));
+  sessionUrlsRef.current = views
+    .map((view) => {
+      const tabId = tabIdOfView(runtime, view.viewId);
+      const tabUrl = (tabId === undefined ? "" : urlByTabId.get(tabId)) ?? "";
+      return tabUrl === "about:blank" && view.pendingUrl ? view.pendingUrl : tabUrl || view.pendingUrl;
+    })
+    .filter((url) => url.length > 0);
   const annotationGeneration = useRef(0);
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
@@ -216,10 +225,7 @@ export function BrowserPanel() {
           createBlankView(runtime);
           return;
         }
-        for (const url of urls) {
-          if (runtime.views.some((view) => view.pendingUrl === url)) continue;
-          createView(runtime, url);
-        }
+        for (const url of urls) createView(runtime, url);
         if (runtime.views.length === 0) createBlankView(runtime);
       })
       .catch(() => {
@@ -338,7 +344,7 @@ export function BrowserPanel() {
   // 面板卸载时保存当前 tab URL（下次挂载恢复）；不 detach 任何 webview。
   useEffect(() => {
     return () => {
-      const urls = tabs.map((tab) => tab.url).filter((url) => url.length > 0);
+      const urls = sessionUrlsRef.current;
       lastBrowserSessionByKey.set(sessionKey, urls);
       try {
         window.localStorage.setItem(sessionStorageKey(sessionKey), JSON.stringify(urls));
@@ -1488,7 +1494,10 @@ function readStoredSessionUrls(sessionKey: string): string[] {
   } catch {
     stored = [];
   }
-  return [...memory, ...stored].filter((url, index, all) => url.length > 0 && all.indexOf(url) === index);
+  // memory 优先于 stored：内存态是当前 renderer 生命周期最新值，避免已关闭的旧 URL 复活。
+  // 不去重：会话内允许多个相同 URL 的标签，恢复时应保持一致。
+  const urls = memory.length > 0 ? memory : stored;
+  return urls.filter((url) => url.length > 0);
 }
 
 /** 面板卸载时保存的 tab URL（内存态；会话键隔离）。 */

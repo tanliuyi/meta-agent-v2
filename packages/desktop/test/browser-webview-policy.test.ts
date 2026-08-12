@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
 import type { WebContents } from "electron";
 import { describe, expect, test, vi } from "vitest";
-import { installBrowserWebviewSecurity, isBrowserWebviewUrl } from "../src/main/browser/browser-webview-policy.ts";
+import {
+  installBrowserWebviewSecurity,
+  isBrowserInternalWebContents,
+  isBrowserWebviewUrl,
+} from "../src/main/browser/browser-webview-policy.ts";
 import { browserPartitionFor, isBrowserSessionPartition } from "../src/shared/browser-contracts.ts";
 
 const SESSION_PARTITION = browserPartitionFor({ projectId: "proj-a", threadId: "thread-a" });
@@ -107,6 +111,79 @@ describe("browser webview security policy", () => {
     });
     expect(websiteEvent.preventDefault).not.toHaveBeenCalled();
     expect(websitePreferences.preload).toBeUndefined();
+    remove();
+  });
+
+  test("登记并清理 browser:// 特权 guest 身份", () => {
+    const webContents = new EventEmitter() as unknown as WebContents;
+    const guestEmitter = new EventEmitter();
+    const guest = Object.assign(guestEmitter, {
+      id: 72,
+      getURL: () => "",
+      getLastWebPreferences: () => ({ preload: "/app/preload/browser-internal.cjs" }),
+    }) as unknown as WebContents;
+    const remove = installBrowserWebviewSecurity(webContents, "/app/preload/browser-internal.cjs");
+
+    webContents.emit(
+      "will-attach-webview",
+      attachEvent(),
+      {},
+      {
+        partition: SESSION_PARTITION,
+        src: "browser://history",
+      },
+    );
+    webContents.emit("did-attach-webview", {}, guest);
+    guestEmitter.emit("did-navigate", {}, "browser://history");
+    expect(isBrowserInternalWebContents(72)).toBe(true);
+
+    guestEmitter.emit("destroyed");
+    expect(isBrowserInternalWebContents(72)).toBe(false);
+    remove();
+  });
+
+  test("交错 attach 不会把普通 guest 误标为特权 guest", () => {
+    const webContents = new EventEmitter() as unknown as WebContents;
+    const internalEmitter = new EventEmitter();
+    const externalEmitter = new EventEmitter();
+    const internalGuest = Object.assign(internalEmitter, {
+      id: 73,
+      getURL: () => "",
+      getLastWebPreferences: () => ({ preload: "/app/preload/browser-internal.cjs" }),
+    }) as unknown as WebContents;
+    const externalGuest = Object.assign(externalEmitter, {
+      id: 74,
+      getURL: () => "https://example.com/",
+      getLastWebPreferences: () => ({}),
+    }) as unknown as WebContents;
+    const remove = installBrowserWebviewSecurity(webContents, "/app/preload/browser-internal.cjs");
+
+    webContents.emit(
+      "will-attach-webview",
+      attachEvent(),
+      {},
+      {
+        partition: SESSION_PARTITION,
+        src: "browser://history",
+      },
+    );
+    webContents.emit(
+      "will-attach-webview",
+      attachEvent(),
+      {},
+      {
+        partition: SESSION_PARTITION,
+        src: "https://example.com/",
+      },
+    );
+    webContents.emit("did-attach-webview", {}, externalGuest);
+    webContents.emit("did-attach-webview", {}, internalGuest);
+
+    expect(isBrowserInternalWebContents(73)).toBe(true);
+    expect(isBrowserInternalWebContents(74)).toBe(false);
+    const externalNavigation = attachEvent();
+    internalEmitter.emit("will-navigate", externalNavigation, "https://evil.example/");
+    expect(externalNavigation.preventDefault).toHaveBeenCalledOnce();
     remove();
   });
 

@@ -9,7 +9,10 @@ import { CHANNELS } from "../shared/channels.ts";
 import { AuthConfigService } from "./auth/auth-config-service.ts";
 import { BrowserDataService } from "./browser/browser-data-service.ts";
 import { type BrowserHostServer, createBrowserHostServer } from "./browser/browser-host-server.ts";
-import { handleBrowserInternalPageRequests } from "./browser/browser-internal-page-protocol.ts";
+import {
+  handleBrowserInternalPageRequests,
+  registerBrowserInternalScheme,
+} from "./browser/browser-internal-page-protocol.ts";
 import { BrowserManager } from "./browser/browser-manager.ts";
 import { installBrowserWebviewSecurity } from "./browser/browser-webview-policy.ts";
 import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extension-registry.ts";
@@ -97,6 +100,7 @@ const minimumWindowBounds = { width: 1024, height: 680 };
 const hasSingleInstanceLock = runtimeSetupSelection || !app.isPackaged ? true : app.requestSingleInstanceLock();
 
 registerLocalImageSchemes();
+registerBrowserInternalScheme();
 
 if (!hasSingleInstanceLock) app.quit();
 
@@ -458,6 +462,8 @@ app.whenReady().then(async () => {
     onCloseTabRequest: broadcastBrowserCloseTabRequest,
     onPasswordOffer: sendBrowserPasswordOffer,
     data: browserDataService,
+    onSessionCreated: (browserSession) =>
+      handleBrowserInternalPageRequests(join(appDir, "../renderer"), process.env.ELECTRON_RENDERER_URL, browserSession),
     log: (text) => sidecarLog?.write("browser", text),
   });
   browserManager = browserManagerInstance;

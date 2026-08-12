@@ -1,7 +1,16 @@
 import { statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell, webContents } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  type OpenDialogOptions,
+  shell,
+  webContents,
+} from "electron";
 import type {
   AuthOauthLoginInput,
   AuthOauthLoginResponse,
@@ -20,6 +29,7 @@ import type {
   BrowserPasswordOffer,
   BrowserSitePermissionInput,
 } from "../shared/browser-data-contracts.ts";
+import { parseBrowserInternalPage } from "../shared/browser-internal-contracts.ts";
 import type { SaveBrowserSettingsInput } from "../shared/browser-settings-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
 import type {
@@ -108,6 +118,14 @@ const providerEditorWebContents = new Set<number>();
 const memoryEditorWebContents = new Set<number>();
 const autoTitleEditorWebContents = new Set<number>();
 const browserEditorWebContents = new Set<number>();
+
+function handleTrustedBrowserDataRequest<T>(event: IpcMainInvokeEvent, request: () => T): T {
+  const isMainRenderer =
+    Boolean(BrowserWindow.fromWebContents(event.sender)) && event.senderFrame === event.sender.mainFrame;
+  const isInternalPage = parseBrowserInternalPage(event.senderFrame?.url) !== null;
+  if (!isMainRenderer && !isInternalPage) throw new Error("拒绝非受信页面访问浏览器内部数据");
+  return request();
+}
 
 export function registerIpc(
   projects: ProjectStore,
@@ -303,32 +321,45 @@ export function registerIpc(
       (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
         browser.resolveAnnotationBounds(identity, tabId, id),
     );
-    ipcMain.handle(CHANNELS.browserDataGet, (_event, includePasswords?: boolean) =>
-      browser.browserDataGet(includePasswords === true),
+    ipcMain.handle(CHANNELS.browserDataGet, (event, includePasswords?: boolean) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserDataGet(includePasswords === true)),
     );
-    ipcMain.handle(CHANNELS.browserHistoryDelete, (_event, url: string, timestamp: number) =>
-      browser.browserHistoryDelete(url, timestamp),
+    ipcMain.handle(CHANNELS.browserHistoryDelete, (event, url: string, timestamp: number) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserHistoryDelete(url, timestamp)),
     );
-    ipcMain.handle(CHANNELS.browserHistoryClear, () => browser.browserHistoryClear());
-    ipcMain.handle(CHANNELS.browserDownloadsClear, () => browser.browserDownloadsClear());
-    ipcMain.handle(CHANNELS.browserDownloadReveal, (_event, path: string) => browser.browserDownloadReveal(path));
-    ipcMain.handle(CHANNELS.browserDownloadOpen, (_event, path: string) => browser.browserDownloadOpen(path));
+    ipcMain.handle(CHANNELS.browserHistoryClear, (event) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserHistoryClear()),
+    );
+    ipcMain.handle(CHANNELS.browserDownloadsClear, (event) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserDownloadsClear()),
+    );
+    ipcMain.handle(CHANNELS.browserDownloadReveal, (event, path: string) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserDownloadReveal(path)),
+    );
+    ipcMain.handle(CHANNELS.browserDownloadOpen, (event, path: string) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserDownloadOpen(path)),
+    );
     ipcMain.handle(
       CHANNELS.browserContactSave,
-      (_event, input: { contactId: string | null; contact: BrowserContactInput }) => browser.browserContactSave(input),
+      (event, input: { contactId: string | null; contact: BrowserContactInput }) =>
+        handleTrustedBrowserDataRequest(event, () => browser.browserContactSave(input)),
     );
-    ipcMain.handle(CHANNELS.browserContactDelete, (_event, id: string) => browser.browserContactDelete(id));
+    ipcMain.handle(CHANNELS.browserContactDelete, (event, id: string) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserContactDelete(id)),
+    );
     ipcMain.handle(
       CHANNELS.browserPasswordSave,
-      (_event, input: { passwordId: string | null; password: BrowserPasswordInput }) =>
-        browser.browserPasswordSave(input),
+      (event, input: { passwordId: string | null; password: BrowserPasswordInput }) =>
+        handleTrustedBrowserDataRequest(event, () => browser.browserPasswordSave(input)),
     );
-    ipcMain.handle(CHANNELS.browserPasswordDelete, (_event, id: string) => browser.browserPasswordDelete(id));
-    ipcMain.handle(CHANNELS.browserSitePermissionSave, (_event, input: BrowserSitePermissionInput) =>
-      browser.browserSitePermissionSave(input),
+    ipcMain.handle(CHANNELS.browserPasswordDelete, (event, id: string) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserPasswordDelete(id)),
     );
-    ipcMain.handle(CHANNELS.browserSitePermissionDelete, (_event, id: string) =>
-      browser.browserSitePermissionDelete(id),
+    ipcMain.handle(CHANNELS.browserSitePermissionSave, (event, input: BrowserSitePermissionInput) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserSitePermissionSave(input)),
+    );
+    ipcMain.handle(CHANNELS.browserSitePermissionDelete, (event, id: string) =>
+      handleTrustedBrowserDataRequest(event, () => browser.browserSitePermissionDelete(id)),
     );
     ipcMain.handle(
       CHANNELS.browserPasswordOfferResolve,

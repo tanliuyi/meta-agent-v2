@@ -26,6 +26,7 @@ import {
   BROWSER_INTERNAL_HOST_CHANNEL,
   type BrowserInternalPageId,
   browserInternalUrl,
+  isBrowserInternalHostMessage,
   parseBrowserInternalPage,
 } from "../../../../../shared/browser-internal-contracts.ts";
 import { registerBrowserRuntimeRetirer } from "../../../state/session-cache-context.tsx";
@@ -436,7 +437,6 @@ export function replaceView(runtime: SessionBrowserRuntime, viewId: number, pend
   if (index === -1) return;
   removeViewInternal(internals, viewId);
   createViewInternal(internals, pendingUrl, undefined, index);
-  markChanged(internals);
 }
 
 /** 打开或复用一个真实 browser:// WebUI 标签；标签位置由 runtime.views 自然维护。 */
@@ -602,26 +602,44 @@ function createWebviewElement(runtime: SessionBrowserRuntime, initialUrl: string
 }
 
 function bindElementEvents(internals: RuntimeInternals, viewId: number, element: BrowserWebviewElement): void {
-  const onAttach = (): void => attachView(internals, viewId, element, false);
-  const onAttachQuiet = (): void => attachView(internals, viewId, element, true);
+  const waitsForInternalDocument = parseBrowserInternalPage(element.getAttribute("src") ?? undefined) !== null;
+  let documentReady = !waitsForInternalDocument;
+  const onAttach = (): void => {
+    if (documentReady) attachView(internals, viewId, element, false);
+  };
+  const onDomReady = (): void => {
+    documentReady = true;
+    attachView(internals, viewId, element, false);
+  };
+  // 内部页等 dom-ready 才 attach（让 main 拿到正确 URL）；加载失败（协议/资源异常）
+  // 不会触发 dom-ready，用 did-fail-load 兜底，让 Chromium 原生错误页照常显示可重试。
+  // 普通页 dom-ready 已就绪，此回调是 no-op；attachView 本身幂等。
+  const onFailLoad = (): void => {
+    if (!documentReady) {
+      documentReady = true;
+      attachView(internals, viewId, element, false);
+    }
+  };
+  const onAttachQuiet = (): void => {
+    if (documentReady) attachView(internals, viewId, element, true);
+  };
   const onGone = (): void => handleCrash(internals, viewId, element);
   const onDestroyed = (): void => handleGuestDestroyed(internals, viewId, element);
   const onIpcMessage = (rawEvent: Event): void => {
     const event = rawEvent as BrowserWebviewIpcMessageEvent;
     if (event.channel !== BROWSER_INTERNAL_HOST_CHANNEL) return;
     const payload = event.args[0];
-    if (typeof payload !== "object" || payload === null) return;
-    const command = payload as { type?: unknown; url?: unknown };
-    if (command.type !== "open-url" || typeof command.url !== "string") return;
+    if (!isBrowserInternalHostMessage(payload)) return;
     try {
-      const url = new URL(command.url);
+      const url = new URL(payload.url);
       if (url.protocol === "http:" || url.protocol === "https:") createView(internals.runtime, url.href);
     } catch {
       // browser:// WebUI 只能请求新建 http(s) 标签。
     }
   };
   element.addEventListener("did-attach", onAttach);
-  element.addEventListener("dom-ready", onAttach);
+  element.addEventListener("dom-ready", onDomReady);
+  element.addEventListener("did-fail-load", onFailLoad);
   element.addEventListener("render-process-gone", onGone);
   element.addEventListener("destroyed", onDestroyed);
   element.addEventListener("ipc-message", onIpcMessage);
@@ -647,7 +665,8 @@ function bindElementEvents(internals: RuntimeInternals, viewId: number, element:
   internals.elementCleanups.set(viewId, () => {
     clearInterval(timer);
     element.removeEventListener("did-attach", onAttach);
-    element.removeEventListener("dom-ready", onAttach);
+    element.removeEventListener("dom-ready", onDomReady);
+    element.removeEventListener("did-fail-load", onFailLoad);
     element.removeEventListener("render-process-gone", onGone);
     element.removeEventListener("destroyed", onDestroyed);
     element.removeEventListener("ipc-message", onIpcMessage);
