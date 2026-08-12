@@ -666,6 +666,35 @@ body.is-resizing-column .sidebar {
   display: none;
 }
 
+/* 全屏期间主会话的浮动入口与 modal（AssistantModalPrimitive，portal 到 body）。
+   入口按钮固定在右下角，modal 面板响应式约束尺寸，且层级高于 workbench（--stack-dialog）。 */
+.session-modal-anchor {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: var(--stack-dialog);
+}
+
+.session-modal-trigger {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--shape-radius-round);
+  box-shadow: var(--elevation-composer);
+}
+
+.session-modal-content {
+  width: min(720px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 32px));
+  max-width: min(720px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 32px));
+  overflow: hidden;
+  z-index: var(--stack-dialog);
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  background: hsl(var(--background));
+  box-shadow: var(--elevation-workbench);
+}
+
 .topbar {
   position: relative;
   display: flex;
