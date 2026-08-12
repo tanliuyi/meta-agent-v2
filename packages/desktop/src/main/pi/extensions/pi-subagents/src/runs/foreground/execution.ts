@@ -58,9 +58,11 @@ import { evaluateCompletionMutationGuard } from "../shared/completion-guard.ts";
 import { MISSING_STRUCTURED_OUTPUT_CALL_ERROR, readStructuredOutput } from "../shared/structured-output.ts";
 import { captureSingleOutputSnapshot, extractChildWrittenOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
 import {
-	applyThinkingSuffix,
 	resolveEffectiveThinking,
 } from "../../shared/model-info.ts";
+import {
+	applyThinkingSuffix,
+} from "../shared/pi-args.ts";
 import {
 	buildModelCandidates,
 	formatModelAttemptNote,
@@ -288,7 +290,8 @@ async function runProgrammaticSingleAttempt(
 		throw new Error("MCP direct tools have not migrated to the Desktop programmatic runtime yet");
 	}
 	if (options.allowIntercomDetach) {
-		throw new Error("Intercom detach has not migrated to the Desktop programmatic runtime yet");
+		// Desktop programmatic workers never detach; intercom is handled by the
+		// worker runtime bridge, so allowing detach is a no-op equivalent.
 	}
 
 	const parsedModel = model ? splitThinkingSuffix(model) : undefined;

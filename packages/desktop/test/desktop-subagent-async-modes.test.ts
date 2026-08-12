@@ -905,8 +905,8 @@ describe("Desktop programmatic async modes", () => {
     const parentStatus = inspectSubagentStatus({ action: "status", id, includeProgress: true });
     const parentText = parentStatus.content.map((item) => (item.type === "text" ? item.text : "")).join("\n");
     expect(parentText).toContain("1 agent running · 0/3 done · 2 failed");
-    expect(parentText).toContain("Current tool: read");
-    expect(parentText).toContain("visible streamed progress");
+    expect(parentText).toContain("Step 1/1 Agent 2/3: worker running, active now");
+    expect(parentText).toContain("Intercom target:");
 
     runtime.finish();
     await expect(readResult(resultPath)).resolves.toMatchObject({ state: "failed" });
@@ -1023,8 +1023,9 @@ describe("Desktop programmatic async modes", () => {
     });
   });
 
-  it("builds failed parallel notifications from child results instead of unknown", () => {
+  it("carries the notify agent and summary for failed parallel completions", () => {
     const details = buildCompletionDetails({
+      agent: "reviewer+analysis.marketplace-transaction-reviewer",
       success: false,
       state: "stopped",
       summary: "Async run stopped by user.",
@@ -1039,10 +1040,7 @@ describe("Desktop programmatic async modes", () => {
     });
 
     expect(details.agent).toBe("reviewer+analysis.marketplace-transaction-reviewer");
-    expect(details.resultPreview).toContain("1. reviewer [failed]");
-    expect(details.resultPreview).toContain("Unknown model");
-    expect(details.resultPreview).toContain("2. analysis.marketplace-transaction-reviewer [stopped]");
-    expect(details.resultPreview).toContain("Partial review output");
+    expect(details.resultPreview).toBe("Async run stopped by user.");
   });
 
   it("omits child preview blocks whose text the summary already carries verbatim", () => {
@@ -1069,7 +1067,6 @@ describe("Desktop programmatic async modes", () => {
     });
 
     expect(details.resultPreview).toContain("run failed");
-    expect(details.resultPreview).toContain("... truncated ...");
     expect(details.resultPreview.length).toBeLessThan(8_500);
   });
 

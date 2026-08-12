@@ -118,9 +118,19 @@ function taskSpec(record: Readonly<Record<string, unknown>>, step?: number): Sub
   const count = readNumber(record, "count");
   return {
     ...(step === undefined ? {} : { step }),
-    agent: readString(record, "agent") ?? "?",
+    agent: readString(record, "agent") ?? "…",
     task: readString(record, "task") ?? readString(record, "label") ?? "",
     ...(count !== undefined && count > 1 ? { count } : {}),
+  };
+}
+
+/** 从 workflowScript 文本提取首个 runs.run 的 agent 与 task（0.47.0 顶层参数形态）。 */
+function workflowScriptSpec(script: string): SubagentTaskSpec {
+  const agent = script.match(/agent\s*:\s*["']([^"']+)["']/)?.[1];
+  const task = script.match(/task\s*:\s*["']([^"']+)["']/)?.[1];
+  return {
+    agent: agent ?? "…",
+    task: task ?? firstLineSummary(script),
   };
 }
 
@@ -176,13 +186,22 @@ export function parseSubagentCall(name: string, args: Readonly<Record<string, un
     return { mode: "parallel", async, taskCount, specs };
   }
 
+  if (typeof args.workflowScript === "string" && args.workflowScript.trim().length > 0) {
+    return {
+      mode: "single",
+      async,
+      taskCount: 1,
+      specs: [workflowScriptSpec(args.workflowScript)],
+    };
+  }
+
   const agent = readString(args, "agent");
   const task = readString(args, "task");
   return {
     mode: "single",
     async,
     taskCount: 1,
-    specs: [{ agent: agent ?? "?", task: task ?? "" }],
+    specs: [{ agent: agent ?? "…", task: task ?? "" }],
   };
 }
 

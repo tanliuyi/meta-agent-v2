@@ -186,11 +186,7 @@ export default function registerFanoutChildSubagentExtension(
 		execute(id, params, signal, onUpdate, ctx) {
 			const request = params as SubagentParamsLike;
 			if (programmatic && (request.async === true || request.schedule !== undefined)) {
-				return Promise.resolve({
-					content: [{ type: "text", text: "Async nested fanout has not migrated to the Desktop programmatic runtime yet." }],
-					isError: true,
-					details: { mode: "management", results: [] },
-				});
+				return executor.executePublic(id, request, signal, onUpdate, ctx);
 			}
 			return executor.execute(id, request, signal, onUpdate, ctx);
 		},

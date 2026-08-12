@@ -1,37 +1,26 @@
-// @ts-nocheck -- Vendored upstream module adapted to the Desktop programmatic runtime.
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildAgentMemoryInjection } from "../agents/agent-memory.ts";
+import { discoverAgents, discoverAgentsAll, resolveAgentName, type AgentConfig, type AgentScope, type AgentSource } from "../agents/agents.ts";
 import { resolveExecutionAgentScope } from "../agents/agent-scope.ts";
-import { discoverAgents, discoverAgentsAll, type AgentConfig, type AgentScope, type AgentSource } from "../agents/agents.ts";
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../agents/skills.ts";
-import {
-	intersectSubagentCapabilityCeilings,
-	type ResolvedSubagentCapabilityCeiling,
-	type SubagentCapabilityAudit,
-} from "../runs/shared/capability-ceiling.ts";
-import { resolveMcpDirectToolSelections, type ResolvedMcpDirectToolSelection } from "../runs/shared/mcp-direct-tool-allowlist.ts";
+import { buildAgentMemoryInjection } from "../agents/agent-memory.ts";
 import { buildModelCandidates, resolveEffectiveSubagentModel, type AvailableModelInfo, type ParentModel } from "../runs/shared/model-fallback.ts";
-import { nestedResultsPath } from "../runs/shared/nested-events.ts";
+import { applyThinkingSuffix, resolvePiLaunchToolPlan, type PiLaunchToolPlan } from "../runs/shared/pi-args.ts";
 import { injectOutputPathSystemPrompt, normalizeSingleOutputOverride, resolveSingleOutputPath } from "../runs/shared/single-output.ts";
-import { appendTurnBudgetSystemPrompt } from "../runs/shared/turn-budget.ts";
 import { getArtifactPaths, getArtifactsDir } from "../shared/artifacts.ts";
-import { agentDefinitionDigest, AGENT_DEFINITION_PROJECTION_VERSION, launchBindingDigest } from "../shared/launch-contract.ts";
-import { applyThinkingSuffix, resolveEffectiveThinking } from "../shared/model-info.ts";
+import { resolveEffectiveThinking } from "../shared/model-info.ts";
+import { SUBAGENT_LIFECYCLE_ARTIFACT_VERSION, type ArtifactDirPreference, type ArtifactPaths, type JsonSchemaObject, type OutputMode } from "../shared/types.ts";
+import { capabilityCeilingAgentRestrictionMessage, intersectSubagentCapabilityCeilings, type ResolvedSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "../runs/shared/capability-ceiling.ts";
+import { appendTurnBudgetSystemPrompt } from "../runs/shared/turn-budget.ts";
+import type { ResolvedTurnBudget } from "../shared/types.ts";
+import type { ResolvedMcpDirectToolSelection } from "../runs/shared/mcp-direct-tool-allowlist.ts";
 import { resolveStepBehavior } from "../shared/settings.ts";
-import {
-	ASYNC_DIR,
-	RESULTS_DIR,
-	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
-	TEMP_ROOT_DIR,
-	type ArtifactDirPreference,
-	type ArtifactPaths,
-	type JsonSchemaObject,
-	type OutputMode,
-	type ResolvedTurnBudget,
-} from "../shared/types.ts";
+import { agentDefinitionDigest, AGENT_DEFINITION_PROJECTION_VERSION, launchBindingDigest } from "../shared/launch-contract.ts";
+import { DIRS, TEMP_ROOT_DIR } from "../shared/types.ts";
+import { processTerminalCandidatePath, processTerminalPath } from "../runs/background/process-terminal.ts";
+import { nestedResultsPath } from "../runs/shared/nested-events.ts";
 
 export const SUBAGENT_LAUNCH_CONTRACT_VERSION = 2 as const;
 
@@ -42,7 +31,8 @@ export type SubagentLaunchContractReasonCode =
 	| "denied_required_tool"
 	| "invalid_artifact_dir"
 	| "invalid_cwd"
-	| "unsupported_mode";
+	| "unsupported_mode"
+	| "restricted_agent";
 
 export interface SubagentLaunchContractDiagnostic {
 	code: SubagentLaunchContractReasonCode | "host_required" | "snapshot_warning";
@@ -137,6 +127,8 @@ export interface SubagentLaunchContractRoots {
 		resultPath: string;
 		statusPath: string;
 		eventsPath: string;
+		processTerminalPath: string;
+		processTerminalCandidatePath: string;
 	};
 }
 
@@ -167,25 +159,6 @@ export interface SubagentLaunchContract {
 export type SubagentLaunchContractResult =
 	| { ok: true; contract: SubagentLaunchContract }
 	| { ok: false; code: SubagentLaunchContractReasonCode; message: string; diagnostics: SubagentLaunchContractDiagnostic[] };
-
-interface DesktopToolPlan {
-	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
-	requestedBuiltinTools: string[];
-	declaredBuiltinTools: string[];
-	toolExtensionPaths: string[];
-	mcp: ResolvedMcpDirectToolSelection[];
-	effectiveMcpTools: string[];
-	explicitToolAllowlist: boolean;
-	internalTools: string[];
-	effectiveToolAllowlist: string[];
-	requiredChildTools: string[];
-	fanoutAuthorized: boolean;
-	runtimeExtensions: string[];
-	configuredExtensions: string[];
-	extensionArgs: string[];
-	disableAmbientExtensions: boolean;
-	capabilityAudit?: SubagentCapabilityAudit;
-}
 
 function packageVersion(): string {
 	const packagePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.upstream.json");
@@ -219,7 +192,7 @@ function normalizeAvailableModels(models: SubagentLaunchContractInput["available
 function candidateList(inputAgent: string, selected: AgentConfig | undefined, cwd: string): SubagentLaunchContractAgentCandidate[] {
 	const all = discoverAgentsAll(cwd);
 	return [...all.builtin, ...all.package, ...all.user, ...all.project]
-		.filter((agent) => agent.name === inputAgent || agent.localName === inputAgent)
+		.filter((agent) => Boolean(resolveAgentName(inputAgent, [agent]).agent))
 		.map((agent) => ({
 			name: agent.name,
 			...(agent.localName ? { localName: agent.localName } : {}),
@@ -229,83 +202,6 @@ function candidateList(inputAgent: string, selected: AgentConfig | undefined, cw
 			...(agent.disabled === true ? { disabled: true } : {}),
 			selected: Boolean(selected && agent.filePath === selected.filePath && agent.name === selected.name),
 		}));
-}
-
-function isExtensionTool(tool: string): boolean {
-	return tool.includes("/") || tool.endsWith(".ts") || tool.endsWith(".js");
-}
-
-function resolveDesktopToolPlan(input: {
-	tools?: string[];
-	extensions?: string[];
-	subagentOnlyExtensions?: string[];
-	mcpDirectTools?: string[];
-	cwd: string;
-	requireReadTool: boolean;
-	structuredOutput: boolean;
-	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
-	inheritedCapabilityCeiling?: ResolvedSubagentCapabilityCeiling;
-}): DesktopToolPlan {
-	const capabilityCeiling = intersectSubagentCapabilityCeilings(input.capabilityCeiling, input.inheritedCapabilityCeiling);
-	const allowedToolSet = capabilityCeiling?.allowedTools === undefined ? undefined : new Set(capabilityCeiling.allowedTools);
-	const requestedBuiltinTools = input.tools?.filter((tool) => !isExtensionTool(tool)) ?? [];
-	if (input.requireReadTool && allowedToolSet && !allowedToolSet.has("read")) {
-		throw new Error(`Capability ceiling from ${capabilityCeiling?.sources.join(", ") || "unknown source"} excludes required tool 'read' for lazy skill loading.`);
-	}
-	const declaredBuiltinTools = input.tools === undefined
-		? (allowedToolSet ? [...allowedToolSet] : [])
-		: (input.requireReadTool && requestedBuiltinTools.length > 0 && !requestedBuiltinTools.includes("read") && !allowedToolSet
-			? ["read", ...requestedBuiltinTools]
-			: requestedBuiltinTools).filter((tool) => !allowedToolSet || allowedToolSet.has(tool));
-	const toolExtensionPaths = (input.tools ?? []).filter(isExtensionTool);
-	const resolvedMcp = resolveMcpDirectToolSelections(input.mcpDirectTools, input.cwd);
-	const resolvedMcpSelectors = new Set(resolvedMcp.map((selection) => selection.selector));
-	const mcp = [
-		...resolvedMcp,
-		...(input.mcpDirectTools ?? [])
-			.filter((selector) => !resolvedMcpSelectors.has(selector))
-			.map((selector) => ({ name: selector, selector })),
-	];
-	const configuredExtensions = [...new Set([
-		...toolExtensionPaths,
-		...(input.extensions ?? []),
-		...(input.subagentOnlyExtensions ?? []),
-	])];
-	const explicitToolAllowlist = input.tools !== undefined || allowedToolSet !== undefined;
-	const internalTools = input.structuredOutput ? ["structured_output"] : [];
-	const effectiveToolAllowlist = [...new Set([...declaredBuiltinTools, ...internalTools])];
-	const requiredChildTools = explicitToolAllowlist ? [...effectiveToolAllowlist] : [...internalTools];
-	const fanoutAuthorized = declaredBuiltinTools.includes("subagent");
-	const requestedToolNames = input.tools === undefined ? undefined : [...new Set(requestedBuiltinTools)];
-	const capabilityAudit = capabilityCeiling ? {
-		ceiling: capabilityCeiling,
-		...(requestedToolNames ? { requestedTools: requestedToolNames } : {}),
-		effectiveTools: effectiveToolAllowlist,
-		removedTools: requestedToolNames?.filter((tool) => !effectiveToolAllowlist.includes(tool)) ?? [],
-		internalTools,
-		extensionsDenied: capabilityCeiling.denyExtensions,
-		removedExtensionCount: capabilityCeiling.denyExtensions ? configuredExtensions.length : 0,
-		requestedMcpToolCount: input.mcpDirectTools?.length ?? 0,
-		effectiveMcpTools: [],
-	} satisfies SubagentCapabilityAudit : undefined;
-	return {
-		...(capabilityCeiling ? { capabilityCeiling } : {}),
-		requestedBuiltinTools,
-		declaredBuiltinTools,
-		toolExtensionPaths,
-		mcp,
-		effectiveMcpTools: [],
-		explicitToolAllowlist,
-		internalTools,
-		effectiveToolAllowlist,
-		requiredChildTools,
-		fanoutAuthorized,
-		runtimeExtensions: [],
-		configuredExtensions,
-		extensionArgs: [],
-		disableAmbientExtensions: true,
-		...(capabilityAudit ? { capabilityAudit } : {}),
-	};
 }
 
 export async function resolveSubagentLaunchContract(input: SubagentLaunchContractInput): Promise<SubagentLaunchContractResult> {
@@ -326,18 +222,21 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		return { ok: false, code: "invalid_artifact_dir", message: `Unsupported artifactDir '${String(input.artifactDir)}'; expected 'project', 'session', or 'temp'.`, diagnostics };
 	}
 	if (input.context === "fork") {
-		diagnostics.push({ code: "host_required", severity: "host-required", message: "Exact fork session branching and fork-thinking downgrade checks require a Desktop host session and model-registry snapshot." });
+		diagnostics.push({ code: "host_required", severity: "host-required", message: "Exact fork session branching and fork-thinking downgrade checks require Pi host session and model-registry snapshots." });
 	}
 	const scope = resolveExecutionAgentScope(input.agentScope);
 	const discovered = discoverAgents(effectiveCwd, scope);
-	const matches = discovered.agents.filter((agent) => agent.name === input.agent || agent.localName === input.agent);
-	if (matches.length === 0) {
+	const resolvedAgent = resolveAgentName(input.agent, discovered.agents);
+	if (resolvedAgent.error) {
+		return { ok: false, code: "ambiguous_agent", message: resolvedAgent.error, diagnostics };
+	}
+	if (!resolvedAgent.agent) {
 		return { ok: false, code: "missing_agent", message: `Unknown agent: ${input.agent}`, diagnostics };
 	}
-	if (matches.length > 1) {
-		return { ok: false, code: "ambiguous_agent", message: `Ambiguous agent: ${input.agent}`, diagnostics };
-	}
-	const agent = matches[0]!;
+	const agent = resolvedAgent.agent;
+	const effectiveCapabilityCeiling = intersectSubagentCapabilityCeilings(input.capabilityCeiling, input.inheritedCapabilityCeiling);
+	const restrictionMessage = capabilityCeilingAgentRestrictionMessage(agent.name, effectiveCapabilityCeiling);
+	if (restrictionMessage) return { ok: false, code: "restricted_agent", message: restrictionMessage, diagnostics };
 	const runId = input.runId ?? "preflight";
 	const skillInput = normalizeSkillInput(input.skill);
 	const outputOverride = normalizeSingleOutputOverride(input.output, agent.output);
@@ -358,9 +257,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	if (resolvedSkills.missing.includes("pi-subagents")) {
 		return { ok: false, code: "missing_skill", message: "The pi-subagents orchestration skill is not child-injectable.", diagnostics };
 	}
-	if (resolvedSkills.missing.length > 0) {
-		diagnostics.push({ code: "missing_skill", severity: "error", message: `Missing skills: ${resolvedSkills.missing.join(", ")}` });
-	}
+	if (resolvedSkills.missing.length > 0) diagnostics.push({ code: "missing_skill", severity: "error", message: `Missing skills: ${resolvedSkills.missing.join(", ")}` });
 
 	const availableModels = normalizeAvailableModels(input.availableModels);
 	const preferredProvider = input.preferredProvider ?? input.parentModel?.provider;
@@ -369,9 +266,9 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	const model = applyThinkingSuffix(primaryModel, effectiveThinkingConfig, input.thinking !== undefined);
 	const modelCandidates = buildModelCandidates(primaryModel, agent.fallbackModels, availableModels, preferredProvider, { scope: discovered.modelScope })
 		.map((candidate) => applyThinkingSuffix(candidate, effectiveThinkingConfig, input.thinking !== undefined) ?? candidate);
-	let toolPlan: DesktopToolPlan;
+	let toolPlan: PiLaunchToolPlan;
 	try {
-		toolPlan = resolveDesktopToolPlan({
+		toolPlan = resolvePiLaunchToolPlan({
 			tools: agent.tools,
 			extensions: agent.extensions,
 			subagentOnlyExtensions: agent.subagentOnlyExtensions,
@@ -379,29 +276,14 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 			cwd: effectiveCwd,
 			requireReadTool: resolvedSkills.resolved.length > 0,
 			structuredOutput: Boolean(input.outputSchema),
-			capabilityCeiling: input.capabilityCeiling,
-			inheritedCapabilityCeiling: input.inheritedCapabilityCeiling,
+			capabilityCeiling: effectiveCapabilityCeiling,
+			agentName: agent.name,
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		diagnostics.push({ code: "denied_required_tool", severity: "error", message });
 		return { ok: false, code: "denied_required_tool", message, diagnostics };
 	}
-	if (toolPlan.configuredExtensions.length > 0) {
-		diagnostics.push({
-			code: "host_required",
-			severity: "host-required",
-			message: "Extension paths are listed for preflight visibility, but Desktop programmatic subagents do not load direct extension paths.",
-		});
-	}
-	if ((agent.mcpDirectTools?.length ?? 0) > 0) {
-		diagnostics.push({
-			code: "host_required",
-			severity: "host-required",
-			message: "Direct MCP selections are listed for preflight visibility, but direct MCP tools require Desktop host support and are not added to the effective tool allowlist.",
-		});
-	}
-
 	const artifactsEnabled = input.artifacts !== false;
 	const artifactsDir = artifactsEnabled ? getArtifactsDir(input.parentSessionFile ?? null, effectiveCwd, input.artifactDir ?? "project") : undefined;
 	const artifactPaths = artifactsDir ? getArtifactPaths(artifactsDir, runId, agent.name, 0) : undefined;
@@ -410,15 +292,13 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	const sessionDir = sessionRoot ? path.join(sessionRoot, "run-0") : undefined;
 	const lifecycleAsyncDir = input.nestedRootRunId
 		? path.join(TEMP_ROOT_DIR, "nested-subagent-runs", input.nestedRootRunId, runId)
-		: path.join(ASYNC_DIR, runId);
+		: path.join(DIRS.async, runId);
 	const lifecycleResultPath = input.nestedRootRunId
 		? nestedResultsPath(input.nestedRootRunId, runId)
-		: path.join(RESULTS_DIR, `${runId}.json`);
-	if (!sessionDir) {
-		diagnostics.push({ code: "host_required", severity: "host-required", message: "No sessionRoot/sessionDir was supplied; exact child session paths require the Desktop host session-root policy." });
-	}
+		: path.join(DIRS.results, `${runId}.json`);
+	if (!sessionDir) diagnostics.push({ code: "host_required", severity: "host-required", message: "No sessionRoot/sessionDir was supplied; exact child session paths require the Pi host session-root policy." });
 	if (input.availableModels === undefined && (input.model || agent.model || input.parentModel)) {
-		diagnostics.push({ code: "host_required", severity: "host-required", message: "No availableModels snapshot was supplied; model resolution may differ from the active Desktop host registry." });
+		diagnostics.push({ code: "host_required", severity: "host-required", message: "No availableModels snapshot was supplied; model resolution may differ from the active Pi host registry." });
 	}
 	if (resolvedSkills.missing.length > 0) {
 		return { ok: false, code: "missing_skill", message: `Missing skills: ${resolvedSkills.missing.join(", ")}`, diagnostics };
@@ -436,7 +316,6 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	const candidates = candidateList(input.agent, agent, effectiveCwd);
 	const shadowedCandidates = candidates.filter((candidate) => !candidate.selected);
 	const definitionDigest = agentDefinitionDigest(agent);
-	const thinking = resolveEffectiveThinking(model, effectiveThinkingConfig);
 	const contractBase: Omit<SubagentLaunchContract, "digest"> = {
 		version: SUBAGENT_LAUNCH_CONTRACT_VERSION,
 		runId,
@@ -453,7 +332,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		context: input.context ?? agent.defaultContext ?? "fresh",
 		...(model ? { model } : {}),
 		modelCandidates,
-		...(thinking ? { thinking } : {}),
+		...(resolveEffectiveThinking(model, effectiveThinkingConfig) ? { thinking: resolveEffectiveThinking(model, effectiveThinkingConfig) } : {}),
 		systemPromptMode: agent.systemPromptMode,
 		inheritProjectContext: agent.inheritProjectContext,
 		inheritSkills: agent.inheritSkills,
@@ -469,7 +348,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 			explicitAllowlist: toolPlan.explicitToolAllowlist,
 			requiredChildTools: toolPlan.requiredChildTools,
 			internalTools: toolPlan.internalTools,
-			mcp: toolPlan.mcp,
+			mcp: toolPlan.effectiveMcpSelections,
 			effectiveMcpTools: toolPlan.effectiveMcpTools,
 			toolExtensionPaths: toolPlan.toolExtensionPaths,
 			runtimeExtensions: toolPlan.runtimeExtensions,
@@ -492,6 +371,8 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 				resultPath: lifecycleResultPath,
 				statusPath: path.join(lifecycleAsyncDir, "status.json"),
 				eventsPath: path.join(lifecycleAsyncDir, "events.jsonl"),
+				processTerminalPath: processTerminalPath(lifecycleAsyncDir),
+				processTerminalCandidatePath: processTerminalCandidatePath(lifecycleAsyncDir),
 			},
 		},
 		protocol: {
@@ -504,15 +385,15 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 			definitionDigest,
 			...(model ? { model } : {}),
 			modelCandidates,
-			...(thinking ? { thinking } : {}),
+			...(resolveEffectiveThinking(model, effectiveThinkingConfig) ? { thinking: resolveEffectiveThinking(model, effectiveThinkingConfig) } : {}),
 			systemPrompt: effectiveSystemPrompt,
 			systemPromptMode: agent.systemPromptMode,
 			inheritProjectContext: agent.inheritProjectContext,
 			inheritSkills: agent.inheritSkills,
 			skills: requestedSkills,
 			tools: toolPlan.effectiveToolAllowlist,
-			extensions: [],
-			mcpDirectTools: [],
+			extensions: toolPlan.extensionArgs,
+			mcpDirectTools: toolPlan.effectiveMcpTools,
 			...(outputPath ? { outputPath } : {}),
 			outputMode: input.outputMode ?? "inline",
 			...(input.outputSchema ? { structuredOutputSchema: input.outputSchema } : {}),

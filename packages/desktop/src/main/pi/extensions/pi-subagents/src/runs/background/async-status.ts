@@ -1,24 +1,27 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { formatDuration, formatModelThinking, formatTokens, shortenPath } from "../../shared/formatters.ts";
 import { formatActivityLabel, formatParallelOutcome } from "../../shared/status-format.ts";
-import { type ActivityState, type AsyncJobStep, type AsyncParallelGroupStatus, type AsyncStatus, type CostSummary, type NestedRunSummary, type SteeringStatus, type SubagentRunMode, type TokenUsage, type TurnBudgetState } from "../../shared/types.ts";
-import { readStatus } from "../../shared/utils.ts";
+import { type ActivityState, type AsyncJobStep, type AsyncParallelGroupStatus, type AsyncStatus, type CostSummary, type Details, type LaunchResolvedChildExtensionsV1, type RuntimeAcknowledgedChildExtensionsV1, type NestedRunSummary, type SteeringStatus, type SubagentRunMode, type TokenUsage, type TurnBudgetState, type UsageBudgetState, type ChainCheckpointState } from "../../shared/types.ts";
+import type { ResolvedSubagentCapabilityCeiling, SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
+import { pruneStatusCacheForAsyncRoot, readStatus } from "../../shared/utils.ts";
 import { attachRootChildrenToSteps, buildNestedRouteIndex, type NestedRoute, projectNestedEvents } from "../shared/nested-events.ts";
 import { formatNestedRunStatusLines } from "../shared/nested-render.ts";
 import { flatToLogicalStepIndex, normalizeParallelGroups } from "./parallel-groups.ts";
 import { contextModeLabel, summarizeContextModes, type ContextMode, type ContextSummary } from "../shared/context-mode.ts";
 import { reconcileAsyncRun, reconcileNestedAsyncDescendants } from "./stale-run-reconciler.ts";
+import { readProcessTerminal, sanitizeProcessTerminal } from "./process-terminal.ts";
 
 interface AsyncRunStepSummary {
 	index: number;
 	agent: string;
 	context?: ContextMode;
 	label?: string;
+	description?: string;
 	phase?: string;
 	outputName?: string;
 	structured?: boolean;
+	checkpoint?: ChainCheckpointState;
 	status: AsyncJobStep["status"];
 	activityState?: ActivityState;
 	lastActivityAt?: number;
@@ -38,7 +41,6 @@ interface AsyncRunStepSummary {
 	model?: string;
 	thinking?: string;
 	attemptedModels?: string[];
-	launchContractDigest?: string;
 	sessionFile?: string;
 	transcriptPath?: string;
 	error?: string;
@@ -52,14 +54,20 @@ interface AsyncRunStepSummary {
 	execution?: AsyncJobStep["execution"];
 	review?: AsyncJobStep["review"];
 	effects?: AsyncJobStep["effects"];
+	processTerminal?: AsyncJobStep["processTerminal"];
+	launchResolvedExtensions?: LaunchResolvedChildExtensionsV1;
+	runtimeAcknowledgedExtensions?: RuntimeAcknowledgedChildExtensionsV1;
+	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	capabilityAudit?: SubagentCapabilityAudit;
 	children?: NestedRunSummary[];
 }
 
 export interface AsyncRunSummary {
 	id: string;
 	asyncDir: string;
+	toolCallId?: string;
 	sessionId?: string;
-	state: "queued" | "running" | "complete" | "failed" | "paused" | "stopped";
+	state: "queued" | "running" | "complete" | "failed" | "paused" | "stopped" | "rejected";
 	error?: string;
 	activityState?: ActivityState;
 	lastActivityAt?: number;
@@ -87,20 +95,31 @@ export interface AsyncRunSummary {
 	pendingAppends?: number;
 	parallelGroups?: AsyncParallelGroupStatus[];
 	steps: AsyncRunStepSummary[];
+	checkpoint?: ChainCheckpointState;
 	sessionDir?: string;
 	outputFile?: string;
 	totalTokens?: TokenUsage;
 	totalCost?: CostSummary;
+	usageBudget?: UsageBudgetState;
 	sessionFile?: string;
-	launchContractDigest?: string;
 	nestedChildren?: NestedRunSummary[];
 	nestedWarnings?: string[];
+	processTerminal?: AsyncStatus["processTerminal"];
+	launchResolvedExtensions?: LaunchResolvedChildExtensionsV1;
+	runtimeAcknowledgedExtensions?: RuntimeAcknowledgedChildExtensionsV1;
+	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	capabilityAudit?: SubagentCapabilityAudit;
+	parentWorkflowRunId?: string;
+	workflowKey?: string;
+	workflow?: Details["workflow"];
 }
 
 interface AsyncRunListOptions {
 	states?: Array<AsyncRunSummary["state"]>;
 	sessionId?: string;
 	limit?: number;
+	/** Limits status-file reads after candidates are ordered by status mtime. */
+	entryLimit?: number;
 	resultsDir?: string;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
@@ -136,7 +155,10 @@ type TargetedAsyncRunResolution =
 	| { kind: "scan" }
 	| { kind: "reject" };
 
-/** Resolve a targeted run without following a symlink outside the async root. */
+/**
+ * Resolve an exact targeted run without following a run-directory symlink or
+ * accepting a path whose canonical location escaped the async root.
+ */
 export function resolveTargetedAsyncRun(asyncDirRoot: string, id: string, sessionId?: string): TargetedAsyncRunResolution {
 	if (!id || id === "." || id === ".." || path.basename(id) !== id) return { kind: "reject" };
 	const asyncDir = path.join(asyncDirRoot, id);
@@ -185,7 +207,10 @@ function deriveAsyncActivityState(asyncDir: string, status: AsyncStatus): { acti
 	const currentStep = typeof status.currentStep === "number" ? status.steps?.[status.currentStep] : undefined;
 	return {
 		activityState: status.activityState,
-		lastActivityAt: status.lastActivityAt ?? outputFileMtime(outputPath) ?? currentStep?.lastActivityAt ?? currentStep?.startedAt ?? status.startedAt,
+		lastActivityAt: status.lastActivityAt
+			?? outputFileMtime(outputPath)
+			?? currentStep?.lastActivityAt
+			?? (status.mode === "workflow" ? undefined : currentStep?.startedAt ?? status.startedAt),
 	};
 }
 
@@ -194,6 +219,8 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 		throw new Error(`Invalid async status '${path.join(asyncDir, "status.json")}': sessionId must be a string.`);
 	}
 	const { activityState, lastActivityAt } = deriveAsyncActivityState(asyncDir, status);
+	const processTerminal = readProcessTerminal(asyncDir, { runId: status.runId, runnerProcessInstanceId: status.processTerminal?.runnerProcessInstanceId })
+		?? sanitizeProcessTerminal(status.processTerminal, { runId: status.runId, runnerProcessInstanceId: status.processTerminal?.runnerProcessInstanceId }, path.join(asyncDir, "status.json"));
 	const steps = status.steps ?? [];
 	const chainStepCount = status.chainStepCount ?? steps.length;
 	const parallelGroups = normalizeParallelGroups(status.parallelGroups, steps.length, chainStepCount);
@@ -215,9 +242,11 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 			agent: step.agent,
 			...(step.context ? { context: step.context } : {}),
 			...(step.label ? { label: step.label } : {}),
+			...(step.description ? { description: step.description } : {}),
 			...(step.phase ? { phase: step.phase } : {}),
 			...(step.outputName ? { outputName: step.outputName } : {}),
 			...(step.structured ? { structured: step.structured } : {}),
+			...(step.checkpoint ? { checkpoint: step.checkpoint } : {}),
 			status: step.status,
 			...(stepActivityState ? { activityState: stepActivityState } : {}),
 			...(stepLastActivityAt ? { lastActivityAt: stepLastActivityAt } : {}),
@@ -237,7 +266,6 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 			...(step.model ? { model: step.model } : {}),
 			...(step.thinking ? { thinking: step.thinking } : {}),
 			...(step.attemptedModels ? { attemptedModels: step.attemptedModels } : {}),
-			...(step.launchContractDigest ? { launchContractDigest: step.launchContractDigest } : {}),
 			...(step.sessionFile ? { sessionFile: step.sessionFile } : {}),
 			...(step.transcriptPath ? { transcriptPath: step.transcriptPath } : {}),
 			...(step.error ? { error: step.error } : {}),
@@ -248,9 +276,15 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 			...(step.wrapUpRequested !== undefined ? { wrapUpRequested: step.wrapUpRequested } : {}),
 			...(step.acceptance ? { acceptance: step.acceptance } : {}),
 			...(step.agentContract ? { agentContract: step.agentContract } : {}),
+			...(step.launchContractDigest ? { launchContractDigest: step.launchContractDigest } : {}),
+			...(step.launchResolvedExtensions ? { launchResolvedExtensions: step.launchResolvedExtensions } : {}),
+			...(step.runtimeAcknowledgedExtensions ? { runtimeAcknowledgedExtensions: step.runtimeAcknowledgedExtensions } : {}),
 			...(step.execution ? { execution: step.execution } : {}),
 			...(step.review ? { review: step.review } : {}),
 			...(step.effects ? { effects: step.effects } : {}),
+			...(step.processTerminal ? { processTerminal: sanitizeProcessTerminal(step.processTerminal, { runId: status.runId, runnerProcessInstanceId: step.processTerminal.runnerProcessInstanceId }, `${path.join(asyncDir, "status.json")} step ${index}`) } : {}),
+			...(step.capabilityCeiling ? { capabilityCeiling: step.capabilityCeiling } : {}),
+			...(step.capabilityAudit ? { capabilityAudit: step.capabilityAudit } : {}),
 			...(step.children?.length ? { children: step.children } : {}),
 		};
 	});
@@ -258,6 +292,7 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 	return {
 		id: status.runId || path.basename(asyncDir),
 		asyncDir,
+		...(status.toolCallId ? { toolCallId: status.toolCallId } : {}),
 		...(status.sessionId ? { sessionId: status.sessionId } : {}),
 		state: status.state,
 		...(status.error ? { error: status.error } : {}),
@@ -287,13 +322,23 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 		...(status.pendingAppends !== undefined ? { pendingAppends: status.pendingAppends } : {}),
 		...(parallelGroups.length ? { parallelGroups } : {}),
 		steps: summarizedSteps,
+		...(status.checkpoint ? { checkpoint: status.checkpoint } : {}),
 		...(nestedChildren.length ? { nestedChildren } : {}),
 		...(nestedWarnings.length ? { nestedWarnings } : {}),
+		...(processTerminal ? { processTerminal } : {}),
 		...(status.launchContractDigest ? { launchContractDigest: status.launchContractDigest } : {}),
+		...(status.launchResolvedExtensions ? { launchResolvedExtensions: status.launchResolvedExtensions } : {}),
+		...(status.runtimeAcknowledgedExtensions ? { runtimeAcknowledgedExtensions: status.runtimeAcknowledgedExtensions } : {}),
+		...(status.capabilityCeiling ? { capabilityCeiling: status.capabilityCeiling } : {}),
+		...(status.capabilityAudit ? { capabilityAudit: status.capabilityAudit } : {}),
+		...(status.parentWorkflowRunId ? { parentWorkflowRunId: status.parentWorkflowRunId } : {}),
+		...(status.workflowKey ? { workflowKey: status.workflowKey } : {}),
+		...(status.workflow ? { workflow: status.workflow } : {}),
 		...(status.sessionDir ? { sessionDir: status.sessionDir } : {}),
 		...(status.outputFile ? { outputFile: status.outputFile } : {}),
 		...(status.totalTokens ? { totalTokens: status.totalTokens } : {}),
 		...(status.totalCost ? { totalCost: status.totalCost } : {}),
+		...(status.usageBudget ? { usageBudget: status.usageBudget } : {}),
 		...(status.sessionFile ? { sessionFile: status.sessionFile } : {}),
 	};
 }
@@ -311,6 +356,7 @@ function sortRuns(runs: AsyncRunSummary[]): AsyncRunSummary[] {
 			case "stopped": return 2;
 			case "paused": return 2;
 			case "complete": return 3;
+			default: return 4;
 		}
 	};
 	return [...runs].sort((a, b) => {
@@ -324,6 +370,7 @@ function sortRuns(runs: AsyncRunSummary[]): AsyncRunSummary[] {
 
 export function listAsyncRuns(asyncDirRoot: string, options: AsyncRunListOptions = {}): AsyncRunSummary[] {
 	let entries: string[];
+	let scannedCompleteRoot = false;
 	try {
 		if (options.runId !== undefined) {
 			const resolution = resolveTargetedAsyncRun(asyncDirRoot, options.runId, options.sessionId);
@@ -337,6 +384,7 @@ export function listAsyncRuns(asyncDirRoot: string, options: AsyncRunListOptions
 					: [];
 		} else {
 			entries = fs.readdirSync(asyncDirRoot).filter((entry) => isAsyncRunDir(asyncDirRoot, entry));
+			scannedCompleteRoot = true;
 		}
 	} catch (error) {
 		if (isNotFoundError(error)) return [];
@@ -344,6 +392,28 @@ export function listAsyncRuns(asyncDirRoot: string, options: AsyncRunListOptions
 			cause: error instanceof Error ? error : undefined,
 		});
 	}
+
+	if (options.entryLimit !== undefined) {
+		scannedCompleteRoot = false;
+		const limit = Math.max(0, Math.floor(options.entryLimit));
+		entries = entries
+			.map((entry) => {
+				try {
+					return { entry, mtimeMs: fs.statSync(path.join(asyncDirRoot, entry, "status.json")).mtimeMs };
+				} catch (error) {
+					if (isNotFoundError(error)) return undefined;
+					throw new Error(`Failed to inspect async status file for '${entry}': ${getErrorMessage(error)}`, {
+						cause: error instanceof Error ? error : undefined,
+					});
+				}
+			})
+			.filter((candidate): candidate is { entry: string; mtimeMs: number } => candidate !== undefined)
+			.sort((left, right) => right.mtimeMs - left.mtimeMs)
+			.slice(0, limit)
+			.map((candidate) => candidate.entry);
+	}
+
+	if (scannedCompleteRoot) pruneStatusCacheForAsyncRoot(asyncDirRoot, entries);
 
 	const allowedStates = options.states ? new Set(options.states) : undefined;
 	const runs: AsyncRunSummary[] = [];

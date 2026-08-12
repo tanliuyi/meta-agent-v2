@@ -10,6 +10,7 @@ type SubagentExecutionContext = "fresh" | "fork";
 interface BranchSessionEntry {
 	type: string;
 	id?: string;
+	cwd?: string;
 	parentId?: string | null;
 	timestamp?: string;
 	message?: {
@@ -78,8 +79,9 @@ function isUnsafeAnthropicThinkingBlock(message: BranchSessionEntry["message"], 
 	const isAnthropic = provider === "anthropic" || api === "anthropic-messages" || model.startsWith("anthropic/");
 	if (block.type === "redacted_thinking") return true;
 	if (block.type !== "thinking" || !isAnthropic) return false;
-	const signature = "thinkingSignature" in block ? block.thinkingSignature : "signature" in block ? block.signature : undefined;
-	return block.redacted === true || (typeof signature === "string" && signature.length > 0);
+	const record = block as Record<string, unknown>;
+	const signature = "thinkingSignature" in record ? record.thinkingSignature : "signature" in record ? record.signature : undefined;
+	return record.redacted === true || (typeof signature === "string" && signature.length > 0);
 }
 
 function createEntryId(entries: BranchSessionEntry[]): string {
@@ -126,6 +128,18 @@ function readSessionEntries(sessionFile: string): BranchSessionEntry[] {
 			throw new Error(`Unable to inspect forked session ${sessionFile}: invalid JSONL on line ${index + 1}: ${cause.message}`, { cause });
 		}
 	});
+}
+
+/** Keep Pi from restoring a forked session into the parent's cwd instead of the child launch cwd. */
+export function alignForkedSessionCwd(sessionFile: string, cwd: string): void {
+	const entries = readSessionEntries(sessionFile);
+	const header = entries[0];
+	if (header?.type !== "session") throw new Error(`Forked session ${sessionFile} does not start with a session header.`);
+	const resolvedCwd = path.resolve(cwd);
+	const effectiveCwd = fs.realpathSync.native(resolvedCwd);
+	if (header.cwd === effectiveCwd) return;
+	header.cwd = effectiveCwd;
+	fs.writeFileSync(sessionFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf-8");
 }
 
 export function createForkContextResolver(

@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 /**
  * Cross-OS control channel for async subagent runs.
  *
@@ -10,9 +9,8 @@
  * This module adds a portable, file-based control inbox inside the run directory.
  * The parent drops an interrupt request file; the runner watches the inbox and
  * routes the request into its existing graceful `interruptRunner()` (pause +
- * resumable), identically on every platform. The OS signal is kept only as an
- * opportunistic fast-path; its failure is non-fatal because the file inbox is
- * authoritative.
+ * resumable), identically on every platform. The file inbox is authoritative and
+ * avoids signaling a PID that the extension cannot prove belongs to the runner.
  */
 
 import { randomUUID } from "node:crypto";
@@ -22,14 +20,17 @@ import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { POLL_INTERVAL_MS } from "../../shared/types.ts";
 import { resolveWatchPath } from "../../shared/utils.ts";
 
-/**
- * Opportunistic fast-path interrupt signal. On Unix `SIGUSR2` is trapped by the
- * runner; on Windows `process.kill(pid, "SIGBREAK")` is not deliverable
- * cross-process and throws `ENOSYS`, so the file inbox below is the real channel.
- */
-export const INTERRUPT_SIGNAL: NodeJS.Signals = process.platform === "win32" ? "SIGBREAK" : "SIGUSR2";
-
 export type ControlChannelFs = Pick<typeof fs, "mkdirSync" | "existsSync" | "rmSync" | "watch" | "readdirSync" | "readFileSync" | "realpathSync">;
+
+function writeJsonToExistingDir(filePath: string, payload: object): void {
+	const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
+	try {
+		fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), { encoding: "utf-8", flag: "wx" });
+		fs.renameSync(tempPath, filePath);
+	} finally {
+		fs.rmSync(tempPath, { force: true });
+	}
+}
 export type ControlChannelTimers = { setInterval: typeof setInterval; clearInterval: typeof clearInterval };
 type KillFn = (pid: number, signal?: NodeJS.Signals | 0) => unknown;
 
@@ -54,11 +55,22 @@ export interface StopRequest {
 	reason?: string;
 }
 
+export interface CheckpointDecisionRequest {
+	type: "approve-checkpoint" | "reject-checkpoint";
+	ts?: number;
+	source?: string;
+	reason?: string;
+}
+
+export type SteerDeliveryMode = "steer" | "follow_up" | "auto";
+export type SteerDeliveryStatus = "delivered" | "queued";
+
 export interface SteerRequest {
 	type: "steer";
 	id: string;
 	ts: number;
 	message: string;
+	mode?: SteerDeliveryMode;
 	targetIndex?: number;
 	targetIndexes?: number[];
 	source?: string;
@@ -79,11 +91,14 @@ export interface SteerAck {
 	requestId: string;
 	index: number;
 	ts: number;
-	state: "delivered" | "failed";
+	state: "delivered" | "queued" | "failed";
+	deliveryStatus?: SteerDeliveryStatus;
 	message: string;
 }
 
 const STEER_REQUESTS_DIR = "steer-requests";
+const REVIVAL_BRIEFS_DIR = "revival-briefs";
+export const MAX_STEER_QUEUE_SIZE = 20;
 const STEER_TARGETS_DIR = "steer-targets";
 const STEER_CAPABILITIES_DIR = "steer-capabilities";
 const STEER_ACKS_DIR = "steer-acks";
@@ -109,6 +124,14 @@ export function timeoutRequestPath(asyncDir: string): string {
 /** Path of the portable manual stop request file. */
 export function stopRequestPath(asyncDir: string): string {
 	return path.join(controlInboxDir(asyncDir), "stop.json");
+}
+
+export function approveCheckpointRequestPath(asyncDir: string): string {
+	return path.join(controlInboxDir(asyncDir), "approve-checkpoint.json");
+}
+
+export function rejectCheckpointRequestPath(asyncDir: string): string {
+	return path.join(controlInboxDir(asyncDir), "reject-checkpoint.json");
 }
 
 /** Directory of parent-to-runner steering requests. */
@@ -172,6 +195,7 @@ function validSteerRequest(request: Partial<SteerRequest>): request is SteerRequ
 		&& typeof request.message === "string"
 		&& Boolean(request.message.trim())
 		&& Buffer.byteLength(request.message, "utf8") <= MAX_STEER_MESSAGE_BYTES
+		&& (request.mode === undefined || request.mode === "steer" || request.mode === "follow_up" || request.mode === "auto")
 		&& (request.targetIndex === undefined || (Number.isInteger(request.targetIndex) && request.targetIndex >= 0 && request.targetIndex <= 1_000_000))
 		&& (request.targetIndexes === undefined || (
 			request.targetIndex === undefined
@@ -191,6 +215,13 @@ export function writeSteerRequestToDir(dir: string, request: SteerRequest): stri
 	return requestPath;
 }
 
+export function writeSteerRequestToExistingDir(dir: string, request: SteerRequest): string {
+	if (!validSteerRequest(request)) throw new Error("steer request is malformed or exceeds transport limits.");
+	const requestPath = path.join(dir, steerRequestFileName(request));
+	writeJsonToExistingDir(requestPath, request);
+	return requestPath;
+}
+
 export function writeSteerCapabilityAt(filePath: string, capability: Omit<SteerCapability, "type" | "protocolVersion">): string {
 	assertChildIndex(capability.index);
 	if (!Number.isInteger(capability.pid) || capability.pid <= 0) throw new Error("steer capability pid must be a positive integer.");
@@ -204,14 +235,26 @@ export function writeSteerCapability(asyncDir: string, capability: Omit<SteerCap
 	return writeSteerCapabilityAt(steerCapabilityPath(asyncDir, capability.index), capability);
 }
 
+function steerAckWritePath(filePath: string, ack: Omit<SteerAck, "type" | "protocolVersion">): string {
+	const parsed = path.parse(filePath);
+	const stateOrder = ack.state === "queued" ? "0" : ack.state === "delivered" ? "1" : "2";
+	const timestamp = String(Math.trunc(ack.ts)).padStart(13, "0");
+	for (let suffix = 0; suffix < 1_000; suffix += 1) {
+		const candidate = path.join(parsed.dir, `${parsed.name}-${timestamp}-${stateOrder}-${ack.state}${suffix === 0 ? "" : `-${suffix}`}${parsed.ext}`);
+		if (!fs.existsSync(candidate)) return candidate;
+	}
+	throw new Error("steer acknowledgment queue is full.");
+}
+
 export function writeSteerAckAt(filePath: string, ack: Omit<SteerAck, "type" | "protocolVersion">): string {
 	assertChildIndex(ack.index);
 	if (!/^[^\s]+$/.test(ack.requestId) || ack.requestId.length > 256) throw new Error("steer acknowledgment requestId is invalid.");
 	if (!Number.isFinite(ack.ts) || ack.ts <= 0) throw new Error("steer acknowledgment ts must be a finite timestamp.");
 	if (!ack.message.trim() || ack.message.length > 1000) throw new Error("steer acknowledgment message is invalid.");
 	const record: SteerAck = { type: "steer-ack", protocolVersion: 1, ...ack, message: ack.message.trim() };
-	writeAtomicJson(filePath, record);
-	return filePath;
+	const ackPath = steerAckWritePath(filePath, ack);
+	writeAtomicJson(ackPath, record);
+	return ackPath;
 }
 
 export function writeSteerAck(asyncDir: string, ack: Omit<SteerAck, "type" | "protocolVersion">): string {
@@ -255,9 +298,21 @@ export function requestAsyncStop(
 	return requestPath;
 }
 
+export function requestAsyncCheckpointDecision(
+	asyncDir: string,
+	type: CheckpointDecisionRequest["type"],
+	payload: Omit<CheckpointDecisionRequest, "type"> = {},
+	deps: { now?: () => number } = {},
+): string {
+	const requestPath = type === "approve-checkpoint" ? approveCheckpointRequestPath(asyncDir) : rejectCheckpointRequestPath(asyncDir);
+	const request: CheckpointDecisionRequest = { ...payload, ts: payload.ts ?? deps.now?.() ?? Date.now(), type };
+	writeAtomicJson(requestPath, request);
+	return requestPath;
+}
+
 export function requestAsyncSteer(
 	asyncDir: string,
-	payload: { message: string; targetIndex?: number; targetIndexes?: number[]; source?: string; id?: string; ts?: number },
+	payload: { message: string; mode?: SteerDeliveryMode; targetIndex?: number; targetIndexes?: number[]; source?: string; id?: string; ts?: number },
 	deps: { now?: () => number; randomId?: () => string } = {},
 ): string {
 	const message = payload.message.trim();
@@ -283,6 +338,7 @@ export function requestAsyncSteer(
 		id: payload.id ?? deps.randomId?.() ?? randomUUID(),
 		ts: payload.ts ?? deps.now?.() ?? Date.now(),
 		message,
+		...(payload.mode && payload.mode !== "steer" ? { mode: payload.mode } : {}),
 		...(payload.targetIndex !== undefined ? { targetIndex: payload.targetIndex } : {}),
 		...(payload.targetIndexes !== undefined ? { targetIndexes: [...payload.targetIndexes] } : {}),
 		...(payload.source ? { source: payload.source } : {}),
@@ -305,19 +361,22 @@ function parseSteerCapability(raw: unknown): SteerCapability | undefined {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
 	const input = raw as Partial<SteerCapability>;
 	if (input.type !== "steer-capability" || input.protocolVersion !== 1) return undefined;
-	if (!Number.isInteger(input.index) || input.index < 0 || input.index > 1_000_000) return undefined;
-	if (!Number.isInteger(input.pid) || input.pid <= 0 || !Number.isFinite(input.readyAt) || input.readyAt <= 0 || typeof input.supported !== "boolean") return undefined;
-	return { type: "steer-capability", protocolVersion: 1, index: input.index, pid: input.pid, readyAt: input.readyAt, supported: input.supported };
+	const { index, pid, readyAt, supported } = input;
+	if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index > 1_000_000) return undefined;
+	if (typeof pid !== "number" || typeof readyAt !== "number" || !Number.isInteger(pid) || pid <= 0 || !Number.isFinite(readyAt) || readyAt <= 0 || typeof supported !== "boolean") return undefined;
+	return { type: "steer-capability", protocolVersion: 1, index, pid, readyAt, supported };
 }
 
 function parseSteerAck(raw: unknown): SteerAck | undefined {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
 	const input = raw as Partial<SteerAck>;
 	if (input.type !== "steer-ack" || input.protocolVersion !== 1 || typeof input.requestId !== "string" || !/^[^\s]+$/.test(input.requestId) || input.requestId.length > 256) return undefined;
-	if (!Number.isInteger(input.index) || input.index < 0 || input.index > 1_000_000 || !Number.isFinite(input.ts) || input.ts <= 0) return undefined;
-	if (input.state !== "delivered" && input.state !== "failed") return undefined;
-	if (typeof input.message !== "string" || !input.message.trim() || input.message.length > 1000) return undefined;
-	return { type: "steer-ack", protocolVersion: 1, requestId: input.requestId, index: input.index, ts: input.ts, state: input.state, message: input.message.trim() };
+	const { index, ts, state, message } = input;
+	if (typeof index !== "number" || typeof ts !== "number" || !Number.isInteger(index) || index < 0 || index > 1_000_000 || !Number.isFinite(ts) || ts <= 0) return undefined;
+	if (state !== "delivered" && state !== "queued" && state !== "failed") return undefined;
+	if (input.deliveryStatus !== undefined && input.deliveryStatus !== "delivered" && input.deliveryStatus !== "queued") return undefined;
+	if (typeof message !== "string" || !message.trim() || message.length > 1000) return undefined;
+	return { type: "steer-ack", protocolVersion: 1, requestId: input.requestId, index, ts, state, ...(input.deliveryStatus ? { deliveryStatus: input.deliveryStatus } : {}), message: message.trim() };
 }
 
 export function readSteerCapability(asyncDir: string, index: number): SteerCapability | undefined {
@@ -341,6 +400,25 @@ export function consumeSteerCapabilities(asyncDir: string, fsImpl: Pick<typeof f
 		}
 	}
 	return capabilities;
+}
+
+export function consumeSteerAckFromDir(
+	dir: string,
+	requestId: string,
+	fsImpl: Pick<typeof fs, "existsSync" | "readdirSync" | "readFileSync" | "rmSync"> = fs,
+): SteerAck | undefined {
+	if (!fsImpl.existsSync(dir)) return undefined;
+	let entries: string[];
+	try { entries = fsImpl.readdirSync(dir).filter((name) => name.endsWith(".json")).sort(); } catch { return undefined; }
+	for (const entry of entries) {
+		const target = path.join(dir, entry);
+		let ack: SteerAck | undefined;
+		try { ack = parseSteerAck(JSON.parse(fsImpl.readFileSync(target, "utf-8"))); } catch { ack = undefined; }
+		if (ack?.requestId !== requestId) continue;
+		try { fsImpl.rmSync(target, { force: true }); } catch { return undefined; }
+		return ack;
+	}
+	return undefined;
 }
 
 export function consumeSteerAcks(asyncDir: string, fsImpl: Pick<typeof fs, "existsSync" | "readdirSync" | "readFileSync" | "rmSync"> = fs): SteerAck[] {
@@ -373,6 +451,7 @@ function parseSteerRequest(raw: unknown): SteerRequest | undefined {
 		id: input.id.trim(),
 		ts: input.ts,
 		message: input.message.trim(),
+		...(input.mode ? { mode: input.mode } : {}),
 		...(input.targetIndex !== undefined ? { targetIndex: input.targetIndex } : {}),
 		...(input.targetIndexes !== undefined ? { targetIndexes: [...input.targetIndexes] } : {}),
 		...(typeof input.source === "string" && input.source.trim() ? { source: input.source } : {}),
@@ -381,8 +460,15 @@ function parseSteerRequest(raw: unknown): SteerRequest | undefined {
 
 export function consumeSteerRequestsFromDir(dir: string, fsImpl: Pick<typeof fs, "existsSync" | "rmSync" | "readdirSync" | "readFileSync"> = fs): SteerRequest[] {
 	if (!fsImpl.existsSync(dir)) return [];
+	let entries: string[];
+	try {
+		entries = fsImpl.readdirSync(dir).filter((name) => name.endsWith(".json")).sort();
+	} catch {
+		// Leave requests in place so the periodic poll can retry the scan.
+		return [];
+	}
 	const requests: SteerRequest[] = [];
-	for (const entry of fsImpl.readdirSync(dir).filter((name) => name.endsWith(".json")).sort()) {
+	for (const entry of entries) {
 		const requestPath = path.join(dir, entry);
 		let parsed: SteerRequest | undefined;
 		try {
@@ -403,6 +489,27 @@ export function consumeSteerRequestsFromDir(dir: string, fsImpl: Pick<typeof fs,
 
 export function consumeSteerRequests(asyncDir: string, fsImpl: Pick<typeof fs, "existsSync" | "rmSync" | "readdirSync" | "readFileSync"> = fs): SteerRequest[] {
 	return consumeSteerRequestsFromDir(steerRequestsDir(asyncDir), fsImpl);
+}
+
+export function queueRevivalBrief(asyncDir: string, request: SteerRequest): string {
+	const dir = path.join(controlInboxDir(asyncDir), REVIVAL_BRIEFS_DIR);
+	const queued = fs.existsSync(dir) ? fs.readdirSync(dir).filter((entry) => entry.endsWith(".json")).length : 0;
+	if (queued >= MAX_STEER_QUEUE_SIZE) throw new Error(`Follow-up queue is full (${MAX_STEER_QUEUE_SIZE} messages).`);
+	return writeSteerRequestToDir(dir, { ...request, mode: "follow_up" });
+}
+
+export function readRevivalBriefs(asyncDir: string): Array<{ request: SteerRequest; path: string }> {
+	const dir = path.join(controlInboxDir(asyncDir), REVIVAL_BRIEFS_DIR);
+	if (!fs.existsSync(dir)) return [];
+	return fs.readdirSync(dir).filter((entry) => entry.endsWith(".json")).sort().flatMap((entry) => {
+		const filePath = path.join(dir, entry);
+		try {
+			const request = parseSteerRequest(JSON.parse(fs.readFileSync(filePath, "utf-8")));
+			return request ? [{ request, path: filePath }] : [];
+		} catch {
+			return [];
+		}
+	});
 }
 
 /**
@@ -451,38 +558,28 @@ export function consumeStopRequest(
 	return true;
 }
 
-/**
- * Parent side: portable interrupt = authoritative file request + best-effort OS
- * signal. The signal is only a latency optimization on Unix; ENOSYS on Windows
- * is swallowed because the file inbox is authoritative there. Other signal
- * failures are surfaced because they usually mean the runner is not alive to
- * consume the request.
- */
+export function consumeCheckpointDecisionRequest(
+	asyncDir: string,
+	fsImpl: Pick<typeof fs, "existsSync" | "rmSync"> = fs,
+): "approved" | "rejected" | undefined {
+	if (fsImpl.existsSync(rejectCheckpointRequestPath(asyncDir))) {
+		try { fsImpl.rmSync(rejectCheckpointRequestPath(asyncDir), { force: true, recursive: true }); } catch {}
+		return "rejected";
+	}
+	if (fsImpl.existsSync(approveCheckpointRequestPath(asyncDir))) {
+		try { fsImpl.rmSync(approveCheckpointRequestPath(asyncDir), { force: true, recursive: true }); } catch {}
+		return "approved";
+	}
+	return undefined;
+}
+
+/** Parent side: write the authoritative portable interrupt request. */
 export function deliverInterruptRequest(input: {
 	asyncDir: string;
-	pid?: number;
-	kill?: KillFn;
-	signal?: NodeJS.Signals;
 	now?: () => number;
 	source?: string;
 }): void {
-	const requestPath = requestAsyncInterrupt(input.asyncDir, input.source ? { source: input.source } : {}, { now: input.now });
-	if (typeof input.pid === "number" && input.pid > 0) {
-		try {
-			(input.kill ?? process.kill)(input.pid, input.signal ?? INTERRUPT_SIGNAL);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOSYS") {
-				// File inbox is authoritative when custom cross-process signals are unavailable.
-				return;
-			}
-			try {
-				fs.rmSync(requestPath, { force: true });
-			} catch {
-				// Best effort cleanup; the caller still gets the signal failure.
-			}
-			throw error;
-		}
-	}
+	requestAsyncInterrupt(input.asyncDir, input.source ? { source: input.source } : {}, { now: input.now });
 }
 
 export function deliverTimeoutRequest(input: {
@@ -507,6 +604,21 @@ export function deliverStopRequest(input: {
 	requestAsyncStop(input.asyncDir, input.source ? { source: input.source } : {}, { now: input.now });
 }
 
+export function deliverCheckpointDecisionRequest(input: {
+	asyncDir: string;
+	decision: "approved" | "rejected";
+	now?: () => number;
+	source?: string;
+	reason?: string;
+}): void {
+	requestAsyncCheckpointDecision(
+		input.asyncDir,
+		input.decision === "approved" ? "approve-checkpoint" : "reject-checkpoint",
+		{ ...(input.source ? { source: input.source } : {}), ...(input.reason ? { reason: input.reason } : {}) },
+		{ now: input.now },
+	);
+}
+
 /**
  * Runner side: watch the control inbox and route interrupt requests into
  * `onInterrupt`. Uses `fs.watch` when available plus an interval poll as a
@@ -520,6 +632,7 @@ export function watchAsyncControlInbox(
 		onTimeout?: () => void;
 		onStop?: () => void;
 		onSteer?: (request: SteerRequest) => void;
+		onCheckpointDecision?: (decision: "approved" | "rejected") => void;
 		onSteerCapability?: (capability: SteerCapability) => void;
 		onSteerAck?: (ack: SteerAck) => void;
 		pollIntervalMs?: number;
@@ -543,6 +656,8 @@ export function watchAsyncControlInbox(
 			if (consumeStopRequest(asyncDir, fsImpl)) opts.onStop?.();
 			if (consumeTimeoutRequest(asyncDir, fsImpl)) opts.onTimeout?.();
 			if (consumeInterruptRequest(asyncDir, fsImpl)) opts.onInterrupt();
+			const checkpointDecision = consumeCheckpointDecisionRequest(asyncDir, fsImpl);
+			if (checkpointDecision) opts.onCheckpointDecision?.(checkpointDecision);
 			for (const request of consumeSteerRequests(asyncDir, fsImpl)) opts.onSteer?.(request);
 			for (const capability of consumeSteerCapabilities(asyncDir, fsImpl)) opts.onSteerCapability?.(capability);
 			for (const ack of consumeSteerAcks(asyncDir, fsImpl)) opts.onSteerAck?.(ack);

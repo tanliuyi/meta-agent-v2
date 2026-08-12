@@ -9,6 +9,7 @@ import {
 	type NestedRunSummary,
 	type ParallelHandoffReference,
 	type SubagentResultIntercomChild,
+	type SubagentOutputState,
 	type SubagentState,
 } from "../../shared/types.ts";
 import {
@@ -20,6 +21,8 @@ import {
 } from "../../intercom/result-intercom.ts";
 import { projectNestedRegistryForRoot, sanitizeSummary } from "../shared/nested-events.ts";
 import { resolveWatchPath } from "../../shared/utils.ts";
+import { recordWaitCompletion } from "./wait-completions.ts";
+import { syncMissionFromAsyncCompletion } from "../../missions/lifecycle.ts";
 import type { CompletionNotifier, CompletionNotification } from "./notify.ts";
 
 const WATCHER_RESTART_DELAY_MS = 3000;
@@ -39,6 +42,8 @@ type ResultWatcherDeps = {
 	fs?: ResultWatcherFs;
 	timers?: ResultWatcherTimers;
 	notifier?: Pick<CompletionNotifier, "deliver">;
+	/** Receives persisted completions before active-session delivery filtering. */
+	observeCompletion?: (result: CompletionNotification & { runId: string }) => void;
 	/** External grouped-result transport. Disable when native completion notifications own delivery. */
 	deliverIntercomResults?: boolean;
 };
@@ -46,10 +51,16 @@ type ResultWatcherDeps = {
 type ResultFileChild = {
 	agent?: string;
 	output?: string;
+	structuredOutput?: unknown;
+	outputState?: SubagentOutputState;
 	error?: string;
 	success?: boolean;
 	state?: string;
+	interrupted?: boolean;
+	timedOut?: boolean;
 	stopped?: boolean;
+	turnBudgetExceeded?: boolean;
+	processSignal?: string | null;
 	sessionFile?: string;
 	artifactPaths?: { outputPath?: string };
 	intercomTarget?: string;
@@ -116,6 +127,7 @@ export function createResultWatcher(
 	const processing = new Set<string>();
 	let deliveryActive = true;
 	let deliveryEpoch = 0;
+	let resultScanTimer: ReturnType<typeof setInterval> | null = null;
 	// The sole in-memory ownership lease. It is acquired for one active session
 	// and revoked before the watcher, queues, or callbacks are torn down.
 	let activeSessionId: string | null = null;
@@ -139,10 +151,25 @@ export function createResultWatcher(
 		try {
 			const data = JSON.parse(fsApi.readFileSync(resultPath, "utf-8")) as ResultFileData;
 			if (typeof data.sessionId !== "string" || !data.sessionId) return;
+			const runId = data.runId ?? data.id ?? file.replace(/\.json$/i, "");
+			try {
+				syncMissionFromAsyncCompletion({ ...data, runId });
+			} catch (error) {
+				console.error(`Mission completion sync failed for '${resultPath}':`, error);
+			}
+			try {
+				deps.observeCompletion?.({ ...data, runId });
+			} catch (error) {
+				console.error(`Completion observer failed for '${resultPath}':`, error);
+			}
 			const epoch = deliveryEpoch;
 			if (!ownsSession(data.sessionId, epoch)) return;
-
-			const runId = data.runId ?? data.id ?? file.replace(/\.json$/i, "");
+			// Recorded before dedupe and before the unlink below so subagent_wait can
+			// use the in-memory record or its bounded durable replay after cleanup.
+			recordWaitCompletion(state, runId, data, Date.now(), completionTtlMs, {
+				resultsDir,
+				sessionId: data.sessionId,
+			});
 			const hasExplicitNestedChildren = data.nestedChildren !== undefined;
 			let nestedChildren = compactNestedResultChildren(sanitizeNestedResultChildren(data.nestedChildren, resultPath, "nestedChildren"));
 			if (!nestedChildren?.length && !hasExplicitNestedChildren) {
@@ -175,11 +202,12 @@ export function createResultWatcher(
 			const hasResultChildren = Array.isArray(data.results) && data.results.length > 0;
 			const resultChildren: ResultFileChild[] = hasResultChildren
 				? data.results!
-				: [{ agent: data.agent ?? undefined, output: data.summary, success: data.success }];
+				: [{ agent: data.agent ?? undefined, output: data.summary, outputState: "unknown", success: data.success }];
 			const normalizedChildren = attachNestedChildrenToResultChildren(runId, resultChildren.map((result = {}, index): SubagentResultIntercomChild => {
-				const baseOutput = result.output ?? data.summary;
+				const baseOutput = hasResultChildren ? result.output : result.output ?? data.summary;
 				const hasRealOutput = typeof baseOutput === "string" && baseOutput.trim().length > 0;
-				const output = hasRealOutput ? baseOutput : "(no output)";
+				const structuredPreview = result.structuredOutput === undefined ? undefined : JSON.stringify(result.structuredOutput, null, 2).slice(0, 4_000);
+				const output = hasRealOutput ? baseOutput : structuredPreview ? `Structured output:\n${structuredPreview}` : "(no output)";
 				const summary = result.success === false && result.error
 					? `${result.error}${hasRealOutput ? `\n\nOutput:\n${baseOutput}` : ""}`
 					: output;
@@ -194,7 +222,18 @@ export function createResultWatcher(
 							: undefined;
 				return {
 					agent: result.agent ?? data.agent ?? `step-${index + 1}`,
-					status: resolveSubagentResultStatus({ success: result.success, state: childState }),
+					status: resolveSubagentResultStatus({
+						success: result.success,
+						state: childState,
+						interrupted: result.interrupted,
+						timedOut: result.timedOut,
+						stopped: result.stopped,
+						turnBudgetExceeded: result.turnBudgetExceeded,
+						processSignal: result.processSignal,
+					}),
+					outputState: result.outputState === "present" || result.outputState === "absent" || result.outputState === "unknown"
+						? result.outputState
+						: "unknown",
 					summary,
 					index,
 					artifactPath: result.artifactPaths?.outputPath,
@@ -207,7 +246,7 @@ export function createResultWatcher(
 			const intercomTarget = data.intercomTarget?.trim();
 			let intercomDelivered = false;
 			if (deliverIntercomResults && intercomTarget && triggerTurn) {
-				const mode = data.mode === "single" || data.mode === "parallel" || data.mode === "chain"
+				const mode = data.mode === "single" || data.mode === "parallel" || data.mode === "chain" || data.mode === "workflow"
 					? data.mode
 					: resultChildren.length > 1 ? "chain" : "single";
 				intercomDelivered = await deliverSubagentResultIntercomEvent(pi.events, buildSubagentResultIntercomPayload({
@@ -216,7 +255,7 @@ export function createResultWatcher(
 					mode,
 					source: "async",
 					children: normalizedChildren,
-					asyncId: data.id,
+					asyncId: data.id ?? undefined,
 					asyncDir: data.asyncDir,
 					...(data.parallelHandoff ? { parallelHandoff: data.parallelHandoff } : {}),
 				}));
@@ -306,9 +345,15 @@ export function createResultWatcher(
 		}
 	};
 
+	const clearResultScan = () => {
+		if (resultScanTimer) timers.clearInterval(resultScanTimer);
+		resultScanTimer = null;
+	};
+
 	const startPolling = (reason: unknown) => {
 		state.watcher?.close();
 		state.watcher = null;
+		clearResultScan();
 		if (state.watcherRestartTimer) return;
 		console.error(`Subagent result watcher for '${resultsDir}' fell back to polling because native fs.watch is unavailable (${errorCode(reason) ?? "unknown error"}).`);
 		primeExistingResults();
@@ -317,6 +362,7 @@ export function createResultWatcher(
 	};
 
 	const scheduleRestart = () => {
+		clearResultScan();
 		if (state.watcherRestartTimer) return;
 		state.watcherRestartTimer = timers.setTimeout(() => {
 			state.watcherRestartTimer = null;
@@ -344,8 +390,11 @@ export function createResultWatcher(
 		}
 		try {
 			const watchDir = resolveWatchPath(resultsDir, fsApi.realpathSync.native);
-			state.watcher = fsApi.watch(watchDir, (event, file) => {
-				if (event !== "rename" || !file) return;
+			state.watcher = fsApi.watch(watchDir, (_event, file) => {
+				if (!file) {
+					primeExistingResults();
+					return;
+				}
 				const fileName = file.toString();
 				if (fileName.endsWith(".json")) scheduleResult(fileName, true);
 			});
@@ -357,6 +406,8 @@ export function createResultWatcher(
 				scheduleRestart();
 			});
 			state.watcher.unref?.();
+			resultScanTimer = timers.setInterval(primeExistingResults, POLL_INTERVAL_MS);
+			resultScanTimer.unref?.();
 		} catch (error) {
 			if (shouldPoll(error)) return startPolling(error);
 			console.error(`Failed to start subagent result watcher for '${resultsDir}':`, error);
@@ -376,6 +427,7 @@ export function createResultWatcher(
 			timers.clearInterval(state.watcherRestartTimer);
 		}
 		state.watcherRestartTimer = null;
+		clearResultScan();
 		state.resultFileCoalescer.clear();
 		pendingTriggerTurn.clear();
 		processing.clear();

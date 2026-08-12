@@ -1,8 +1,8 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
-import { RESULTS_DIR, type AsyncParallelGroupStatus, type AsyncStatus, type NestedRunSummary, type SubagentRunMode } from "../../shared/types.ts";
+import { readStatus } from "../../shared/utils.ts";
+import { DIRS, type AsyncParallelGroupStatus, type AsyncStatus, type NestedRunSummary, type SubagentRunMode } from "../../shared/types.ts";
 import { resolveEffectiveThinking } from "../../shared/model-info.ts";
 import { normalizeParallelGroups } from "./parallel-groups.ts";
 import { nestedSummaryFromAsyncStatus, projectNestedEvents, resolveNestedAsyncDir, writeNestedEvent, type NestedRoute } from "../shared/nested-events.ts";
@@ -82,26 +82,6 @@ function appendJsonlBestEffort(filePath: string, payload: object): void {
 	} catch {
 		// Repair status/result writes are the important path. A broken or full
 		// diagnostic event log must not make stale-run reconciliation fail.
-	}
-}
-
-function readStatusFile(asyncDir: string): AsyncStatus | null {
-	const statusPath = path.join(asyncDir, "status.json");
-	let content: string;
-	try {
-		content = fs.readFileSync(statusPath, "utf-8");
-	} catch (error) {
-		if (isNotFoundError(error)) return null;
-		throw new Error(`Failed to read async status file '${statusPath}': ${getErrorMessage(error)}`, {
-			cause: error instanceof Error ? error : undefined,
-		});
-	}
-	try {
-		return JSON.parse(content) as AsyncStatus;
-	} catch (error) {
-		throw new Error(`Failed to parse async status file '${statusPath}': ${getErrorMessage(error)}`, {
-			cause: error instanceof Error ? error : undefined,
-		});
 	}
 }
 
@@ -309,7 +289,7 @@ export function reconcileNestedAsyncDescendants(route: NestedRoute, options: Rec
 		if (!asyncDir) continue;
 		const result = reconcileAsyncRun(asyncDir, {
 			...options,
-			resultsDir: path.join(options.resultsDir ?? RESULTS_DIR, "nested", route.rootRunId),
+			resultsDir: path.join(options.resultsDir ?? DIRS.results, "nested", route.rootRunId),
 		});
 		const status = result.status;
 		if (!status) continue;
@@ -349,7 +329,7 @@ export function checkPidLiveness(pid: number, kill: KillFn = process.kill): PidL
 
 export function reconcileAsyncRun(asyncDir: string, options: ReconcileAsyncRunOptions = {}): ReconcileAsyncRunResult {
 	const now = options.now?.() ?? Date.now();
-	const status = readStatusFile(asyncDir);
+	const status = readStatus(asyncDir);
 	const startedStatus = !status && options.startedRun ? buildStartedStatus(asyncDir, options.startedRun, now) : undefined;
 	const effectiveStatus = status ?? startedStatus;
 	if (!effectiveStatus) return { status: null, repaired: false };
@@ -361,7 +341,7 @@ export function reconcileAsyncRun(asyncDir: string, options: ReconcileAsyncRunOp
 	}
 
 	const runId = effectiveStatus.runId || path.basename(asyncDir);
-	const resultPath = path.join(options.resultsDir ?? RESULTS_DIR, `${runId}.json`);
+	const resultPath = path.join(options.resultsDir ?? DIRS.results, `${runId}.json`);
 	if (fs.existsSync(resultPath)) {
 		const terminalStatus = effectiveStatus.state === "running" || effectiveStatus.state === "queued"
 			? terminalStatusFromResult(effectiveStatus, resultPath, now)

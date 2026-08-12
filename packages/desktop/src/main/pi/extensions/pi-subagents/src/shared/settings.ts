@@ -4,6 +4,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentConfig } from "../agents/agents.ts";
 import { normalizeSkillInput } from "../agents/skills.ts";
@@ -24,8 +25,10 @@ export interface ResolvedStepBehavior {
 	model?: string;
 }
 
+export type OutputOverrideInput = string | boolean;
+
 export interface StepOverrides {
-	output?: string | false;
+	output?: OutputOverrideInput;
 	outputMode?: OutputMode;
 	reads?: string[] | false;
 	progress?: boolean;
@@ -33,8 +36,10 @@ export interface StepOverrides {
 	model?: string;
 }
 
-function normalizeOutputOverride(output: string | false | undefined): string | false | undefined {
-	return output === "false" ? false : output;
+function normalizeOutputOverride(output: unknown): string | false | undefined {
+	if (output === false || output === "false") return false;
+	if (output === true || output === "true") return undefined;
+	return typeof output === "string" && output.length > 0 ? output : undefined;
 }
 
 // =============================================================================
@@ -50,7 +55,7 @@ export interface SequentialStep {
 	as?: string;
 	outputSchema?: JsonSchemaObject;
 	cwd?: string;
-	output?: string | false;
+	output?: OutputOverrideInput;
 	outputMode?: OutputMode;
 	reads?: string[] | false;
 	progress?: boolean;
@@ -72,7 +77,7 @@ export interface ParallelTaskItem {
 	outputSchema?: JsonSchemaObject;
 	cwd?: string;
 	count?: number;
-	output?: string | false;
+	output?: OutputOverrideInput;
 	outputMode?: OutputMode;
 	reads?: string[] | false;
 	progress?: boolean;
@@ -115,6 +120,24 @@ export interface DynamicParallelStep {
 	gateOn?: ChainGateLayer;
 }
 
+/** Approval checkpoint: pause before later chain steps until parent approval. */
+export interface CheckpointStep {
+	checkpoint: string;
+	message?: string;
+	phase?: string;
+	label?: string;
+	agent?: string;
+	task?: string;
+	as?: string;
+	output?: OutputOverrideInput;
+	outputMode?: OutputMode;
+	reads?: string[] | false;
+	progress?: boolean;
+	skill?: string | string[] | false;
+	skills?: string[] | false;
+	model?: string;
+}
+
 /** Parallel step: multiple agents running concurrently */
 export interface ParallelStep {
 	parallel: ParallelTaskItem[];
@@ -127,11 +150,15 @@ export interface ParallelStep {
 }
 
 /** Union type for chain steps */
-export type ChainStep = SequentialStep | ParallelStep | DynamicParallelStep;
+export type ChainStep = SequentialStep | ParallelStep | DynamicParallelStep | CheckpointStep;
 
 // =============================================================================
 // Type Guards
 // =============================================================================
+
+export function isCheckpointStep(step: ChainStep): step is CheckpointStep {
+	return "checkpoint" in step;
+}
 
 export function isParallelStep(step: ChainStep): step is ParallelStep {
 	return "parallel" in step && Array.isArray((step as ParallelStep).parallel);
@@ -143,6 +170,9 @@ export function isDynamicParallelStep(step: ChainStep): step is DynamicParallelS
 
 /** Get all agent names in a step (single for sequential, multiple for parallel) */
 export function getStepAgents(step: ChainStep): string[] {
+	if (isCheckpointStep(step)) {
+		return [];
+	}
 	if (isParallelStep(step)) {
 		return step.parallel.map((t) => t.agent);
 	}
@@ -210,6 +240,7 @@ export function resolveChainTemplates(
 	steps: ChainStep[],
 ): ResolvedTemplates {
 	return steps.map((step, i) => {
+		if (isCheckpointStep(step)) return "";
 		if (isParallelStep(step)) {
 			// Parallel step: resolve each task's template
 			return step.parallel.map((task) => {
@@ -305,10 +336,34 @@ export function suppressProgressForReadOnlyTask(behavior: ResolvedStepBehavior, 
 // =============================================================================
 
 /**
- * Resolve a file path: absolute paths pass through, relative paths get chainDir prepended.
+ * Expand a leading `~`/`~/` to the user's home directory. Other forms (relative,
+ * absolute, `~user/`) pass through unchanged.
  */
-function resolveChainPath(filePath: string, chainDir: string): string {
-	return path.isAbsolute(filePath) ? filePath : path.join(chainDir, filePath);
+export function expandHomePath(filePath: string): string {
+	if (filePath === "~") return os.homedir();
+	if (filePath.startsWith("~/")) return path.join(os.homedir(), filePath.slice(2));
+	return filePath;
+}
+
+/**
+ * Resolve a file path: `~`/`~/` expand to home first, then absolute paths pass
+ * through and relative paths get chainDir prepended.
+ */
+export function resolveChainPath(filePath: string, chainDir: string): string {
+	const expanded = expandHomePath(filePath);
+	return path.isAbsolute(expanded) ? expanded : path.join(chainDir, expanded);
+}
+
+export function resolveExistingReadInstructionPaths(reads: readonly string[], instructionCwd: string, existenceCwd = instructionCwd): string[] {
+	return reads.flatMap((filePath) => {
+		const instructionPath = resolveChainPath(filePath, instructionCwd);
+		const existencePath = resolveChainPath(filePath, existenceCwd);
+		return fs.existsSync(existencePath) ? [instructionPath] : [];
+	});
+}
+
+export function resolveExistingReadPaths(reads: readonly string[], cwd: string): string[] {
+	return resolveExistingReadInstructionPaths(reads, cwd);
 }
 
 /**
@@ -325,14 +380,15 @@ export function buildChainInstructions(
 	chainDir: string,
 	isFirstProgressAgent: boolean,
 	previousSummary?: string,
+	readExistenceDir = chainDir,
 ): { prefix: string; suffix: string } {
 	const prefixParts: string[] = [];
 	const suffixParts: string[] = [];
 
 	// READS - prepend to override any hardcoded filenames in task text
 	if (behavior.reads && behavior.reads.length > 0) {
-		const files = behavior.reads.map((f) => resolveChainPath(f, chainDir));
-		prefixParts.push(`[Read from: ${files.join(", ")}]`);
+		const files = resolveExistingReadInstructionPaths(behavior.reads, chainDir, readExistenceDir);
+		if (files.length > 0) prefixParts.push(`[Read from: ${files.join(", ")}]`);
 	}
 
 	// OUTPUT - prepend so agent knows where to write

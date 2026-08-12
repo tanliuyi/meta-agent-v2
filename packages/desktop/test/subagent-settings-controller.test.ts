@@ -3,7 +3,7 @@ import {
   resolveSubagentSettingsActiveTab,
   subagentSettingsSnapshotForTarget,
   subagentSettingsTargetKey,
-} from "../src/renderer/src/features/settings/use-subagent-settings-controller.ts";
+} from "../src/renderer/src/features/settings/subagents/use-subagent-settings-controller.ts";
 import type { SubagentSettingsSnapshot } from "../src/shared/subagent-contracts.ts";
 
 const SNAPSHOT = { revision: "project-a" } as SubagentSettingsSnapshot;

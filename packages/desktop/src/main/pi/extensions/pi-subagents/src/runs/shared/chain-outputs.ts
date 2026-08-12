@@ -1,5 +1,5 @@
 // @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
-import { isDynamicParallelStep, isParallelStep, type ChainStep, type SequentialStep } from "../../shared/settings.ts";
+import { isCheckpointStep, isDynamicParallelStep, isParallelStep, type ChainStep, type SequentialStep } from "../../shared/settings.ts";
 import type { ChainOutputMap, ChainOutputMapEntry, SingleResult } from "../../shared/types.ts";
 import { getSingleResultOutput } from "../../shared/utils.ts";
 import { DynamicFanoutError, hasDynamicFanoutFields, type DynamicFanoutConfig, validateDynamicStepShape } from "./dynamic-fanout.ts";
@@ -15,6 +15,7 @@ export interface ChainOutputValidationContext {
 }
 
 function outputNamesForStep(step: ChainStep): string[] {
+	if (isCheckpointStep(step)) return [];
 	if (isParallelStep(step)) return step.parallel.map((task) => task.as).filter((name): name is string => Boolean(name));
 	if (isDynamicParallelStep(step)) return [step.collect.as];
 	const name = (step as SequentialStep).as;
@@ -22,6 +23,7 @@ function outputNamesForStep(step: ChainStep): string[] {
 }
 
 function taskTemplatesForStep(step: ChainStep): string[] {
+	if (isCheckpointStep(step)) return [];
 	if (isParallelStep(step)) return step.parallel.map((task) => task.task ?? "{previous}");
 	if (isDynamicParallelStep(step)) return [step.parallel.task ?? "{previous}", step.parallel.label ?? ""].filter(Boolean);
 	return [(step as SequentialStep).task ?? "{previous}"];

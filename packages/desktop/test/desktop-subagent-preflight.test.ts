@@ -24,6 +24,7 @@ describe("Desktop subagent preflight", () => {
           agentOverrides: {
             delegate: {
               tools: ["read", "mcp:test-server/search"],
+              mcpDirectTools: ["test-server/search"],
               extensions: ["./test-extension.ts"],
             },
           },
@@ -49,31 +50,20 @@ describe("Desktop subagent preflight", () => {
       resultPath: expect.any(String),
       statusPath: expect.any(String),
       eventsPath: expect.any(String),
+      processTerminalCandidatePath: expect.any(String),
+      processTerminalPath: expect.any(String),
     });
     expect(result.contract.tools).toMatchObject({
       configuredExtensions: ["./test-extension.ts"],
-      mcp: [expect.objectContaining({ selector: "test-server/search" })],
+      mcp: [],
       effectiveMcpTools: [],
     });
-    expect(result.contract.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: "host_required",
-          severity: "host-required",
-          message: expect.stringContaining("Extension paths"),
-        }),
-        expect.objectContaining({
-          code: "host_required",
-          severity: "host-required",
-          message: expect.stringContaining("Direct MCP"),
-        }),
-      ]),
-    );
+    expect(result.contract.diagnostics).toEqual([]);
 
     const sourcePath = fileURLToPath(
       new URL("../src/main/pi/extensions/pi-subagents/src/api/preflight.ts", import.meta.url),
     );
     const source = readFileSync(sourcePath, "utf8");
-    expect(source).not.toMatch(/pi-args|process-terminal/);
+    expect(source).toMatch(/process-terminal/);
   });
 });

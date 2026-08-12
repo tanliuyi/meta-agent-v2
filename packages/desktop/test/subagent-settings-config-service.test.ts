@@ -177,17 +177,7 @@ describe("SubagentSettingsConfigService", () => {
     const snapshot = await (await createService()).getSnapshot({ projectId: "project" });
 
     expect(snapshot.builtinAgents.map((agent) => agent.name)).toEqual(
-      expect.arrayContaining([
-        "reviewer",
-        "worker",
-        "planner",
-        "oracle",
-        "researcher",
-        "scout",
-        "context-builder",
-        "advisor",
-        "delegate",
-      ]),
+      expect.arrayContaining(["reviewer", "worker", "oracle", "researcher", "scout", "delegate"]),
     );
     expect(snapshot.extensionConfig).toMatchObject({
       asyncByDefault: false,

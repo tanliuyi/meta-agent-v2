@@ -49,6 +49,7 @@ collect.sh
 
 
 .pi-subagents/
+.pi/subagents/
 nul
 .tmp-npm*/
 .tmp*

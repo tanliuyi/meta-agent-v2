@@ -1,8 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { SubagentAgentSection } from "../src/renderer/src/features/settings/subagent-agent-section.tsx";
-import { SubagentWatchdogPanel } from "../src/renderer/src/features/settings/subagent-watchdog-panel.tsx";
+import { SubagentAgentSection } from "../src/renderer/src/features/settings/subagents/subagent-agent-section.tsx";
+import { SubagentWatchdogPanel } from "../src/renderer/src/features/settings/subagents/subagent-watchdog-panel.tsx";
 import { builtinSubagentDisplayName } from "../src/renderer/src/shared/lib/builtin-subagent-name.ts";
 import type { AgentSummary, SubagentWatchdogSettings } from "../src/shared/subagent-contracts.ts";
 
@@ -94,7 +94,7 @@ describe("subagent settings components", () => {
       <SubagentAgentSection title="内置智能体" agents={[agent]} mutating={false} builtin readOnly />,
     );
 
-    expect(markup).toContain('<strong title="delegate">委派代理</strong>');
+    expect(markup).toContain("<strong>委派代理</strong>");
     expect(markup).toContain('aria-label="delegate 启用状态"');
   });
 });

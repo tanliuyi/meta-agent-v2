@@ -16,10 +16,11 @@ import {
 	resolveCompletionBatchConfig,
 } from "./completion-batcher.ts";
 import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ParallelHandoffReference, type SubagentState } from "../../shared/types.ts";
+import { isUnexplainedProcessSignal } from "../shared/process-signal.ts";
 
 export interface SubagentNotifyDetails {
 	agent: string;
-	status: "completed" | "failed" | "paused";
+	status: "completed" | "failed" | "paused" | "stopped";
 	source?: "async" | "foreground";
 	taskInfo?: string;
 	resultPreview: string;
@@ -27,16 +28,6 @@ export interface SubagentNotifyDetails {
 	sessionLabel?: string;
 	sessionValue?: string;
 	handoffPath?: string;
-}
-
-export interface CompletionNotificationChild {
-	agent?: string;
-	status?: "completed" | "failed" | "paused" | "stopped";
-	summary?: string;
-	output?: string;
-	error?: string;
-	success?: boolean;
-	state?: string;
 }
 
 export interface CompletionNotification {
@@ -48,6 +39,21 @@ export interface CompletionNotification {
 	summary?: string;
 	exitCode?: number;
 	state?: string;
+	processSignal?: string | null;
+	interrupted?: boolean;
+	timedOut?: boolean;
+	stopped?: boolean;
+	turnBudgetExceeded?: boolean;
+	results?: Array<{
+		status?: string;
+		success?: boolean;
+		exitCode?: number | null;
+		processSignal?: string | null;
+		interrupted?: boolean;
+		timedOut?: boolean;
+		stopped?: boolean;
+		turnBudgetExceeded?: boolean;
+	}>;
 	timestamp?: number;
 	durationMs?: number;
 	cwd?: string;
@@ -62,7 +68,6 @@ export interface CompletionNotification {
 	/** True when an acknowledged grouped intercom relay already delivered this run. */
 	intercomDelivered?: boolean;
 	parallelHandoff?: ParallelHandoffReference;
-	results?: CompletionNotificationChild[];
 }
 
 interface NotifyTimerApi {
@@ -104,7 +109,7 @@ export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 
 export function parseSubagentNotifyContent(content: string): SubagentNotifyDetails | undefined {
 	const lines = content.split("\n");
-	const match = (lines[0] ?? "").match(/^(Background task|Detached foreground task) (completed|failed|paused): \*\*(.+?)\*\*(?:\s+(\([^)]*\)))?$/);
+	const match = (lines[0] ?? "").match(/^(Background task|Detached foreground task) (completed|failed|paused|stopped): \*\*(.+?)\*\*(?:\s+(\([^)]*\)))?$/);
 	if (!match) return undefined;
 	const body = lines.slice(2);
 	let sessionIndex = -1;
@@ -166,13 +171,13 @@ function sendCompletion(pi: Pick<ExtensionAPI, "sendMessage">, items: PendingCom
 	if (items.length === 0) return true;
 	const details = items.map((item) => item.details);
 	const content = details.length === 1 ? formatSingleCompletion(details[0]!) : formatGroupedCompletion(details);
+	const display = details.some((detail) => detail.source === "foreground" || detail.status !== "completed");
 	try {
 		pi.sendMessage(
 			{
 				customType: "subagent-notify",
 				content,
-				display: true,
-				details: details.length === 1 ? details[0] : { items: details },
+				display,
 			},
 			{ triggerTurn: items.some((item) => item.triggerTurn) },
 		);
@@ -189,48 +194,21 @@ function completionBatchKey(result: CompletionNotification): string {
 	return cwd ? `cwd:${cwd}` : "unknown";
 }
 
-function compactCompletionPreview(text: string): string {
-	const trimmed = text.trim();
-	if (trimmed.length <= 6_000) return trimmed;
-	return `${trimmed.slice(0, 3_000)}\n\n... truncated ...\n\n${trimmed.slice(-3_000)}`;
-}
-
-const CHILD_COMPLETION_PREVIEW_TOTAL_CHARS = 8_000;
-
-function childCompletionPreview(children: CompletionNotificationChild[], summary = ""): string {
-	const joined = children
-		.map((child, index) => {
-			const rawBody = (child.summary ?? child.error ?? child.output ?? "").trim();
-			// Skip children whose text is already carried verbatim by the top-level summary.
-			if (rawBody && summary.includes(rawBody)) return undefined;
-			const agent = child.agent?.trim() || `step-${index + 1}`;
-			const status = child.status
-				?? (child.state === "paused" || child.state === "stopped" ? child.state : child.success ? "completed" : "failed");
-			const body = compactCompletionPreview(rawBody || "(no output)");
-			return `${index + 1}. ${agent} [${status}]\n${body}`;
-		})
-		.filter((block): block is string => block !== undefined)
-		.join("\n\n");
-	if (joined.length <= CHILD_COMPLETION_PREVIEW_TOTAL_CHARS) return joined;
-	return `${joined.slice(0, CHILD_COMPLETION_PREVIEW_TOTAL_CHARS)}\n\n... truncated ...`;
-}
-
 export function buildCompletionDetails(result: CompletionNotification): SubagentNotifyDetails {
-	const children = Array.isArray(result.results) ? result.results : [];
-	const childAgents = children
-		.map((child) => child.agent?.trim())
-		.filter((agent): agent is string => Boolean(agent));
-	const agent = result.agent ?? (childAgents.length > 0 ? childAgents.join("+") : "unknown");
-	const topSummary = typeof result.summary === "string" ? result.summary : "";
-	const summary = !result.success && children.length > 0
-		? [topSummary, childCompletionPreview(children, topSummary)].filter((value) => value.trim().length > 0).join("\n\n")
-		: topSummary;
-	const paused = !result.success && (
+	const agent = result.agent ?? "unknown";
+	const summary = typeof result.summary === "string" ? result.summary : "";
+	const stopped = result.stopped === true
+		|| result.state === "stopped"
+		|| (result.success !== true && result.exitCode !== 0 && isUnexplainedProcessSignal(result))
+		|| result.results?.some((child) => child.stopped === true
+			|| child.status === "stopped"
+			|| (child.success !== true && child.exitCode !== 0 && isUnexplainedProcessSignal(child))) === true;
+	const paused = !stopped && !result.success && (
 		result.exitCode === 0
 		|| result.state === "paused"
 		|| summary.startsWith("Paused after interrupt.")
 	);
-	const status = paused ? "paused" : result.success ? "completed" : "failed";
+	const status = stopped ? "stopped" : paused ? "paused" : result.success ? "completed" : "failed";
 	const taskInfo =
 		result.taskIndex !== undefined && result.totalTasks !== undefined
 			? ` (${result.taskIndex + 1}/${result.totalTasks})`

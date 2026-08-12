@@ -38,7 +38,7 @@ describe("Desktop subagent accessible directories", () => {
     const source = readFileSync(extensionPath, "utf8");
 
     expect(source).toContain('import { ensureAccessibleDir } from "../shared/accessible-dir.ts";');
-    expect(source).toContain("ensureAccessibleDir(RESULTS_DIR);");
-    expect(source).toContain("ensureAccessibleDir(ASYNC_DIR);");
+    expect(source).toContain("ensureAccessibleDir(DIRS.results);");
+    expect(source).toContain("ensureAccessibleDir(DIRS.async);");
   });
 });

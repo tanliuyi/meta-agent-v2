@@ -1,7 +1,7 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
+import { previewSimpleWorkflowRun } from "../workflows/scripted-workflow.ts";
 import type { SlashSubagentResponse, SlashSubagentUpdate } from "./slash-bridge.ts";
 import { type Details, type SingleResult, type Usage, SLASH_RESULT_TYPE } from "../shared/types.ts";
 
@@ -52,16 +52,17 @@ function createPlaceholderResult(
 	agent: string,
 	task: string,
 	status: "pending" | "running",
-	index?: number,
+	index: number,
 ): SingleResult {
 	return {
 		agent,
 		task,
+		index,
 		exitCode: 0,
 		messages: EMPTY_MESSAGES,
 		usage: cloneUsage(),
 		progress: {
-			...(index !== undefined ? { index } : {}),
+			index,
 			agent,
 			status,
 			task,
@@ -156,15 +157,17 @@ function buildChainInitialResult(params: SubagentParamsLike): AgentToolResult<De
 }
 
 function buildSingleInitialResult(params: SubagentParamsLike): AgentToolResult<Details> {
-	const agent = params.agent ?? "subagent";
-	const task = params.task ?? "";
+	const preview = previewSimpleWorkflowRun(params.workflowScript) ?? {};
+	const agent = params.agent ?? preview.agent ?? "subagent";
+	const task = params.task ?? preview.task ?? "";
 	return {
 		content: [{ type: "text", text: task }],
 		details: {
 			mode: "single",
 			...(params.context ? { context: params.context } : {}),
-			results: [createPlaceholderResult(agent, task, "running")],
+			results: [createPlaceholderResult(agent, task, "running", 0)],
 			progress: [{
+				index: 0,
 				agent,
 				status: "running",
 				task,

@@ -39,6 +39,7 @@ interface ServerEntry {
 	exposeResources?: boolean;
 	includeTools?: string[];
 	excludeTools?: string[];
+	protocolVersion?: string;
 	directTools?: boolean | string[];
 }
 
@@ -285,6 +286,7 @@ export function computeMcpServerHash(definition: ServerEntry): string {
 		exposeResources: definition.exposeResources,
 		includeTools: definition.includeTools,
 		excludeTools: definition.excludeTools,
+		protocolVersion: definition.protocolVersion,
 	};
 	return createHash("sha256").update(stableStringify(identity)).digest("hex");
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -8,10 +7,20 @@ import { deliverStopRequest } from "../runs/background/control-channel.ts";
 import { reconcileAsyncRun } from "../runs/background/stale-run-reconciler.ts";
 import type { SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { resolveCurrentSessionId } from "../shared/session-identity.ts";
-import { type Details, ASYNC_DIR, RESULTS_DIR, SUBAGENT_ASYNC_COMPLETE_EVENT } from "../shared/types.ts";
+import {
+	type AsyncJobStep,
+	type Details,
+	type SubagentState,
+	DIRS,
+	SUBAGENT_ASYNC_COMPLETE_EVENT,
+	SUBAGENT_PROCESS_TERMINAL_EVENT,
+	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
+} from "../shared/types.ts";
+import { sanitizeDisplayText, truncateDisplayText } from "../shared/display-text.ts";
 import { readStatus } from "../shared/utils.ts";
 import { SubagentParams } from "./schemas.ts";
-import { validateChainInput } from "./chain-validation.ts";
+import { formatWorkflowJsonPreview } from "../workflows/scripted-workflow.ts";
+import { normalizePublicSubagentExecution } from "./public-execution.ts";
 
 export const SUBAGENT_RPC_PROTOCOL_VERSION = 1;
 export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
@@ -64,6 +73,207 @@ interface EventBus {
 	emit(event: string, data: unknown): void;
 }
 
+export interface SubagentRpcFleetEntry {
+	/** Opaque key for client-side reconciliation; never a run or async identifier. */
+	key: string;
+	/** Resolved child agent/role name. */
+	agent: string;
+	role?: string;
+	model?: string;
+	effort?: string;
+	startedAt: number;
+	tokens: { input: number; output: number; total: number };
+	goal?: string;
+}
+
+export interface SubagentRpcFleetStatus {
+	version: 1;
+	entries: SubagentRpcFleetEntry[];
+	/** Total active children before the bounded entries window. */
+	totalActive: number;
+	omitted: number;
+}
+
+const MAX_FLEET_ENTRIES = 16;
+const MAX_FLEET_CANDIDATES = 256;
+const MAX_AGENT_LENGTH = 96;
+const MAX_GOAL_LENGTH = 512;
+const MAX_METADATA_LENGTH = 128;
+
+function displayText(value: unknown, maxLength: number): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const normalized = sanitizeDisplayText(value.slice(0, 4_096));
+	return normalized ? truncateDisplayText(normalized, maxLength) : undefined;
+}
+
+function publicTokens(value: unknown): { input: number; output: number; total: number } {
+	const record = isRecord(value) ? value : {};
+	const count = (field: "input" | "output" | "total") => {
+		const raw = record[field];
+		return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
+			? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(raw))
+			: 0;
+	};
+	const input = count("input");
+	const output = count("output");
+	const sum = Math.min(Number.MAX_SAFE_INTEGER, input + output);
+	return { input, output, total: Math.max(sum, count("total")) };
+}
+
+function activeState(value: unknown): boolean {
+	return value === "running" || value === "queued" || value === "pending";
+}
+
+interface FleetKeyState {
+	sessionId: string | null;
+	next: number;
+	keys: Map<string, string>;
+}
+
+interface FleetCandidate {
+	internalKey: string;
+	agent: unknown;
+	role?: unknown;
+	model?: unknown;
+	effort?: unknown;
+	startedAt: unknown;
+	tokens?: unknown;
+	goal?: unknown;
+}
+
+function buildFleetStatus(
+	state: SubagentState | undefined,
+	keyState: FleetKeyState,
+	sessionId: string | null | undefined,
+): SubagentRpcFleetStatus {
+	const authoritativeSessionId = sessionId ?? null;
+	if (keyState.sessionId !== authoritativeSessionId) {
+		keyState.sessionId = authoritativeSessionId;
+		keyState.next = 0;
+		keyState.keys.clear();
+	}
+	if (!state || !authoritativeSessionId || state.currentSessionId !== authoritativeSessionId) {
+		keyState.keys.clear();
+		return { version: 1, entries: [], totalActive: 0, omitted: 0 };
+	}
+
+	let totalActive = 0;
+	const candidates: FleetCandidate[] = [];
+	const addCandidate = (candidate: FleetCandidate) => {
+		totalActive += 1;
+		if (candidates.length < MAX_FLEET_CANDIDATES) candidates.push(candidate);
+	};
+	for (const control of state.foregroundControls.values()) {
+		if (control.sessionId !== authoritativeSessionId) continue;
+		if (control.activeChildren?.size) {
+			for (const child of control.activeChildren.values()) addCandidate({
+				internalKey: `foreground:${control.runId}:${child.index}`,
+				agent: child.agent,
+				model: child.model,
+				effort: child.thinking,
+				startedAt: child.startedAt,
+				tokens: { input: child.inputTokens ?? 0, output: child.outputTokens ?? 0, total: child.tokens ?? 0 },
+				goal: child.description ?? control.description,
+			});
+		} else {
+			addCandidate({
+				internalKey: `foreground:${control.runId}:${control.currentIndex ?? 0}`,
+				agent: control.currentAgent ?? control.mode,
+				model: control.model,
+				effort: control.thinking,
+				startedAt: control.startedAt,
+				tokens: { input: control.inputTokens ?? 0, output: control.outputTokens ?? 0, total: control.tokens ?? 0 },
+				goal: control.description,
+			});
+		}
+	}
+	for (const job of state.asyncJobs.values()) {
+		if (job.sessionId !== authoritativeSessionId || !activeState(job.status)) continue;
+		const startedAt = job.startedAt ?? job.updatedAt;
+		if (job.mode === "workflow") {
+			const latestEmit = job.workflow?.emits?.length ? formatWorkflowJsonPreview(job.workflow.emits.at(-1), 120) : undefined;
+			addCandidate({
+				internalKey: `async:${job.asyncId}`,
+				agent: "workflow",
+				startedAt,
+				tokens: job.totalTokens,
+				goal: latestEmit !== undefined ? `latest emit: ${latestEmit}` : job.description,
+			});
+			continue;
+		}
+		const steps: AsyncJobStep[] | undefined = job.steps?.length
+			? job.steps
+			: job.agents?.map((agent, index) => ({
+				agent,
+				index,
+				status: job.status === "queued" ? "pending" : "running",
+			}));
+		if (!steps?.length) {
+			addCandidate({
+				internalKey: `async:${job.asyncId}`,
+				agent: job.mode ?? "subagent",
+				startedAt,
+				tokens: job.totalTokens,
+				goal: job.description,
+			});
+			continue;
+		}
+		for (const [offset, step] of steps.entries()) {
+			if (!activeState(step.status)) continue;
+			const index = step.index ?? offset;
+			if (step.status === "pending" && job.mode === "chain" && !job.activeParallelGroup && index !== (job.currentStep ?? 0)) continue;
+			addCandidate({
+				internalKey: `async:${job.asyncId}:${index}`,
+				agent: step.agent,
+				role: step.label,
+				model: step.model,
+				effort: step.thinking,
+				startedAt: step.startedAt ?? startedAt,
+				tokens: step.tokens ?? (steps.length === 1 ? job.totalTokens : undefined),
+				goal: job.description,
+			});
+		}
+	}
+
+	candidates.sort((left, right) => {
+		const leftStarted = typeof left.startedAt === "number" ? left.startedAt : Number.MAX_SAFE_INTEGER;
+		const rightStarted = typeof right.startedAt === "number" ? right.startedAt : Number.MAX_SAFE_INTEGER;
+		return leftStarted - rightStarted || left.internalKey.localeCompare(right.internalKey);
+	});
+	const activeKeys = new Set(candidates.map((candidate) => candidate.internalKey));
+	const entries: SubagentRpcFleetEntry[] = [];
+	for (const candidate of candidates) {
+		if (entries.length >= MAX_FLEET_ENTRIES) break;
+		const agent = displayText(candidate.agent, MAX_AGENT_LENGTH);
+		const startedAt = candidate.startedAt;
+		if (!agent || typeof startedAt !== "number" || !Number.isSafeInteger(startedAt) || startedAt < 0) continue;
+		let key = keyState.keys.get(candidate.internalKey);
+		if (!key) {
+			key = `fleet-${++keyState.next}`;
+			keyState.keys.set(candidate.internalKey, key);
+		}
+		const role = displayText(candidate.role, MAX_AGENT_LENGTH);
+		const model = displayText(candidate.model, MAX_METADATA_LENGTH);
+		const effort = displayText(candidate.effort, MAX_METADATA_LENGTH);
+		const goal = displayText(candidate.goal, MAX_GOAL_LENGTH);
+		entries.push({
+			key,
+			agent,
+			...(role ? { role } : {}),
+			...(model ? { model } : {}),
+			...(effort ? { effort } : {}),
+			startedAt,
+			tokens: publicTokens(candidate.tokens),
+			...(goal ? { goal } : {}),
+		});
+	}
+	for (const internalKey of keyState.keys.keys()) {
+		if (!activeKeys.has(internalKey)) keyState.keys.delete(internalKey);
+	}
+	const omitted = Math.max(0, totalActive - entries.length);
+	return { version: 1, entries, totalActive, omitted };
+}
+
 interface RegisterSubagentRpcBridgeOptions {
 	events: EventBus;
 	getContext: () => ExtensionContext | null;
@@ -78,6 +288,8 @@ interface RegisterSubagentRpcBridgeOptions {
 	resultsDir?: string;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
+	/** Native live state, projected into the optional public fleet-status capability. */
+	state?: SubagentState;
 }
 
 class SubagentRpcError extends Error {
@@ -114,13 +326,6 @@ function assertRecordParams(params: unknown, method: SubagentRpcMethod): Record<
 }
 
 function assertSubagentParams(params: SubagentParamsLike, label: string): void {
-	// Friendly chain validation first: name the disallowed property, list allowed
-	// ones, and show a valid example instead of raw TypeBox diagnostics.
-	try {
-		validateChainInput(params);
-	} catch (error) {
-		throw new SubagentRpcError("invalid_params", `${label}: ${error instanceof Error ? error.message : String(error)}`);
-	}
 	if (subagentParamsValidator.Check(params)) return;
 	const messages = [...subagentParamsValidator.Errors(params)]
 		.slice(0, 4)
@@ -135,7 +340,9 @@ function textFromToolResult(result: AgentToolResult<Details>): string {
 		.join("\n");
 }
 
-function dataFromToolResult(result: AgentToolResult<Details>): { text: string; details?: Details; isError?: boolean } {
+type ToolResultWithError = AgentToolResult<Details> & { isError?: boolean };
+
+function dataFromToolResult(result: ToolResultWithError): { text: string; details?: Details; isError?: boolean } {
 	return {
 		text: textFromToolResult(result),
 		...(result.details ? { details: result.details } : {}),
@@ -143,7 +350,7 @@ function dataFromToolResult(result: AgentToolResult<Details>): { text: string; d
 	};
 }
 
-function failIfToolError(result: AgentToolResult<Details>): void {
+function failIfToolError(result: ToolResultWithError): void {
 	if (!result.isError) return;
 	throw new SubagentRpcError("execution_failed", textFromToolResult(result) || "Subagent RPC execution failed.");
 }
@@ -173,18 +380,23 @@ function pingData(ctx: ExtensionContext | null) {
 		methods: [...SUBAGENT_RPC_METHODS],
 		capabilities: {
 			status: true,
+			fleetStatus: { version: 1 },
 			asyncSpawn: true,
 			steer: true,
 			nonRecoveringSteer: true,
 			interrupt: true,
 			stop: true,
 			resume: true,
+			launchResolvedExtensions: { version: 1, source: "launch-resolved" },
+			runtimeAcknowledgedExtensions: { version: 1, source: "child-runtime", event: "subagent:acknowledge-extension" },
+			processTerminalProof: { version: 1, lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION },
 		},
 		events: {
 			ready: SUBAGENT_RPC_READY_EVENT,
 			request: SUBAGENT_RPC_REQUEST_EVENT,
 			replyPrefix: SUBAGENT_RPC_REPLY_EVENT_PREFIX,
 			asyncComplete: SUBAGENT_ASYNC_COMPLETE_EVENT,
+			processTerminal: SUBAGENT_PROCESS_TERMINAL_EVENT,
 		},
 		session: sessionData(ctx),
 	};
@@ -206,16 +418,15 @@ async function executeChecked(
 
 function spawnParams(params: unknown): SubagentParamsLike {
 	const input = assertRecordParams(params, "spawn");
-	if (input.action !== undefined) {
+	const normalized = normalizePublicSubagentExecution(input);
+	if (!normalized.ok) throw new SubagentRpcError("invalid_params", normalized.error);
+	if (normalized.params.action !== undefined) {
 		throw new SubagentRpcError("invalid_params", "RPC spawn does not accept management/control actions. Use status or interrupt RPC methods instead.");
 	}
 	if (input.async === false) {
 		throw new SubagentRpcError("invalid_params", "RPC spawn only supports detached async launches; omit async or set async: true.");
 	}
-	if (input.clarify === true) {
-		throw new SubagentRpcError("invalid_params", "RPC spawn cannot open the clarify UI; omit clarify or set clarify: false.");
-	}
-	return { ...(input as SubagentParamsLike), async: true, clarify: false };
+	return { ...(normalized.params as SubagentParamsLike), async: true };
 }
 
 function steerParams(params: unknown): SubagentParamsLike {
@@ -224,10 +435,12 @@ function steerParams(params: unknown): SubagentParamsLike {
 		throw new SubagentRpcError("invalid_params", "RPC steer requires a non-empty message.");
 	const target = normalizeTargetParams(input, "steer");
 	if (!target.id && !target.runId && !target.dir) throw new SubagentRpcError("invalid_params", "RPC steer requires id, runId, or dir.");
+	if (input.mode !== undefined && input.mode !== "steer" && input.mode !== "follow_up" && input.mode !== "auto") throw new SubagentRpcError("invalid_params", "RPC steer mode must be steer, follow_up, or auto.");
 	return {
 		action: "steer",
 		...target,
 		message: input.message.trim(),
+		...(typeof input.mode === "string" ? { mode: input.mode as "steer" | "follow_up" | "auto" } : {}),
 		steeringRecovery: false,
 	};
 }
@@ -257,8 +470,8 @@ function stopAsyncRun(
 ): { runId: string; asyncDir: string; previousState: string; state: "stopping"; message: string } {
 	const target = normalizeTargetParams(params, "stop");
 	assertSubagentParams({ action: "status", ...target }, "RPC stop target params");
-	const asyncDirRoot = options.asyncDirRoot ?? ASYNC_DIR;
-	const resultsDir = options.resultsDir ?? RESULTS_DIR;
+	const asyncDirRoot = options.asyncDirRoot ?? DIRS.async;
+	const resultsDir = options.resultsDir ?? DIRS.results;
 	let location;
 	try {
 		location = resolveAsyncRunLocation(target, asyncDirRoot, resultsDir);
@@ -316,6 +529,7 @@ function stopAsyncRun(
 async function handleRequest(
 	request: SubagentRpcRequestEnvelope,
 	options: RegisterSubagentRpcBridgeOptions,
+	fleetKeys: FleetKeyState,
 ): Promise<unknown> {
 	const ctx = options.getContext();
 	if (request.method === "ping") return pingData(ctx);
@@ -325,7 +539,21 @@ async function handleRequest(
 		return executeChecked(options, ctx, request.requestId, request.method, spawnParams(request.params));
 	}
 	if (request.method === "status") {
-		return executeChecked(options, ctx, request.requestId, request.method, { action: "status", ...normalizeTargetParams(request.params, "status") });
+		const status = await executeChecked(
+			options,
+			ctx,
+			request.requestId,
+			request.method,
+			{ action: "status", ...normalizeTargetParams(request.params, "status") },
+		);
+		return {
+			...status,
+			fleet: buildFleetStatus(
+				options.state,
+				fleetKeys,
+				resolveCurrentSessionId(ctx.sessionManager),
+			),
+		};
 	}
 	if (request.method === "steer") {
 		return executeChecked(options, ctx, request.requestId, request.method, steerParams(request.params));
@@ -392,11 +620,12 @@ export function registerSubagentRpcBridge(options: RegisterSubagentRpcBridgeOpti
 	emitReady: (ctx?: ExtensionContext | null) => void;
 	dispose: () => void;
 } {
+	const fleetKeys: FleetKeyState = { sessionId: null, next: 0, keys: new Map() };
 	const unsubscribe = options.events.on(SUBAGENT_RPC_REQUEST_EVENT, async (raw) => {
 		let request: SubagentRpcRequestEnvelope | undefined;
 		try {
 			request = parseRequest(raw);
-			const data = await handleRequest(request, options);
+			const data = await handleRequest(request, options, fleetKeys);
 			options.events.emit(subagentRpcReplyEvent(request.requestId), {
 				version: SUBAGENT_RPC_PROTOCOL_VERSION,
 				requestId: request.requestId,

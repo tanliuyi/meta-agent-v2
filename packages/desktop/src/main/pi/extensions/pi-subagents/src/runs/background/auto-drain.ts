@@ -1,7 +1,7 @@
 // @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { snapshotBackgroundWork } from "../../api/background-work.ts";
-import { ASYNC_DIR, RESULTS_DIR, type Details, type SubagentState } from "../../shared/types.ts";
+import { DIRS, type Details, type SubagentState } from "../../shared/types.ts";
 import { listAsyncRuns } from "./async-status.ts";
 import { waitForSubagents, type SubagentWaitDeps, type SubagentWaitParams, type WaitEventBus } from "./subagent-wait.ts";
 
@@ -25,10 +25,10 @@ function resultText(value: AgentToolResult<Details>): string {
 }
 
 function hasOutstandingWork(sessionId: string, nowMs: number): boolean {
-	const asyncRuns = listAsyncRuns(ASYNC_DIR, {
+	const asyncRuns = listAsyncRuns(DIRS.async, {
 		states: ["queued", "running"],
 		sessionId,
-		resultsDir: RESULTS_DIR,
+		resultsDir: DIRS.results,
 		now: () => nowMs,
 	});
 	return asyncRuns.length > 0 || snapshotBackgroundWork(sessionId, nowMs).items.length > 0;

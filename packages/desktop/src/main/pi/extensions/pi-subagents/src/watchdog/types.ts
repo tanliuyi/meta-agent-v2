@@ -93,6 +93,14 @@ export interface WatchdogGuidanceConfig {
 	systemPromptPath: string | null;
 }
 
+export interface WatchdogScopeConfig {
+	enabled: boolean;
+}
+
+export interface WatchdogCadenceConfig {
+	everyNTools: number | null;
+}
+
 export interface WatchdogEndpointConfig {
 	enabled: boolean;
 	model?: string;
@@ -160,6 +168,8 @@ export interface ResolvedWatchdogConfig {
 	maxWarnings: number | null;
 	guidance: WatchdogGuidanceConfig;
 	autoFollow: WatchdogAutoFollowConfig;
+	scope: WatchdogScopeConfig;
+	cadence: WatchdogCadenceConfig;
 	main: WatchdogEndpointConfig;
 	children: WatchdogChildrenConfig;
 	asyncCompletion: WatchdogAsyncCompletionConfig;

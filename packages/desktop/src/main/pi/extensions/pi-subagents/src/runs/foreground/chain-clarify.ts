@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 /**
  * Chain Clarification TUI Component
  *
@@ -341,10 +340,10 @@ export class ChainClarifyComponent implements Component {
 			? rawAgentName.slice(0, maxAgentLen - 1) + "…"
 			: rawAgentName;
 		// Use mode-appropriate terminology
-		const stepLabel = this.mode === 'single'
-			? agentName
-			: this.mode === 'parallel'
-				? `Task ${this.editingStep! + 1}: ${agentName}`
+		const stepLabel = this.mode === 'single' 
+			? agentName 
+			: this.mode === 'parallel' 
+				? `Task ${this.editingStep! + 1}: ${agentName}` 
 				: `Step ${this.editingStep! + 1}: ${agentName}`;
 		const headerText = ` Editing ${fieldName} (${stepLabel}) `;
 		lines.push(this.renderHeader(headerText));
@@ -452,13 +451,13 @@ export class ChainClarifyComponent implements Component {
 			return;
 		}
 
-		if (matchesKey(data, "up")) {
+		if (matchesKey(data, "up") || matchesKey(data, "k")) {
 			this.selectedStep = Math.max(0, this.selectedStep - 1);
 			this.tui.requestRender();
 			return;
 		}
 
-		if (matchesKey(data, "down")) {
+		if (matchesKey(data, "down") || matchesKey(data, "j")) {
 			const maxStep = Math.max(0, this.agentConfigs.length - 1);
 			this.selectedStep = Math.min(maxStep, this.selectedStep + 1);
 			this.tui.requestRender();
@@ -533,7 +532,7 @@ export class ChainClarifyComponent implements Component {
 			buffer = template.split("\n")[0] ?? "";
 		} else if (mode === "output") {
 			const behavior = this.getEffectiveBehavior(this.selectedStep);
-			buffer = behavior.output === false ? "" : (behavior.output || "");
+			buffer = typeof behavior.output === "string" ? behavior.output : "";
 		} else if (mode === "reads") {
 			const behavior = this.getEffectiveBehavior(this.selectedStep);
 			buffer = behavior.reads === false ? "" : (behavior.reads?.join(", ") || "");
@@ -776,22 +775,26 @@ export class ChainClarifyComponent implements Component {
 
 	private handleEditInput(data: string): void {
 		const textWidth = this.width - 4; // Must match render: innerW - 2 = (width - 2) - 2
-		if (matchesKey(data, "shift+up") || matchesKey(data, "pageup")) {
+		if (matchesKey(data, "shift+up") || matchesKey(data, "pageUp")) {
 			const { lines: wrapped, starts } = wrapText(this.editState.buffer, textWidth);
 			const cursorPos = getCursorDisplayPos(this.editState.cursor, starts);
 			const targetLine = Math.max(0, cursorPos.line - this.EDIT_VIEWPORT_HEIGHT);
+			const targetStart = starts[targetLine];
+			if (targetStart === undefined) return;
 			const targetCol = Math.min(cursorPos.col, wrapped[targetLine]?.length ?? 0);
-			this.editState = { ...this.editState, cursor: starts[targetLine] + targetCol };
+			this.editState = { ...this.editState, cursor: targetStart + targetCol };
 			this.tui.requestRender();
 			return;
 		}
 
-		if (matchesKey(data, "shift+down") || matchesKey(data, "pagedown")) {
+		if (matchesKey(data, "shift+down") || matchesKey(data, "pageDown")) {
 			const { lines: wrapped, starts } = wrapText(this.editState.buffer, textWidth);
 			const cursorPos = getCursorDisplayPos(this.editState.cursor, starts);
 			const targetLine = Math.min(wrapped.length - 1, cursorPos.line + this.EDIT_VIEWPORT_HEIGHT);
+			const targetStart = starts[targetLine];
+			if (targetStart === undefined) return;
 			const targetCol = Math.min(cursorPos.col, wrapped[targetLine]?.length ?? 0);
-			this.editState = { ...this.editState, cursor: starts[targetLine] + targetCol };
+			this.editState = { ...this.editState, cursor: targetStart + targetCol };
 			this.tui.requestRender();
 			return;
 		}
@@ -860,7 +863,7 @@ export class ChainClarifyComponent implements Component {
 		// Check all downstream steps (steps that come after the changed step)
 		for (let i = changedStepIndex + 1; i < this.agentConfigs.length; i++) {
 			const behavior = this.getEffectiveBehavior(i);
-
+			
 			// Skip if reads is disabled or empty
 			if (behavior.reads === false || !behavior.reads || behavior.reads.length === 0) {
 				continue;
@@ -869,7 +872,7 @@ export class ChainClarifyComponent implements Component {
 			// Check if this step reads the old output file
 			const readsArray = behavior.reads;
 			const oldIndex = readsArray.indexOf(oldOutput);
-
+			
 			if (oldIndex !== -1) {
 				// Replace old filename with new filename in reads
 				const newReads = [...readsArray];
@@ -879,25 +882,22 @@ export class ChainClarifyComponent implements Component {
 		}
 	}
 
-	render(_width: number): string[] {
+	render(width: number): string[] {
+		let lines: string[] = [];
 		if (this.editingStep !== null) {
-			if (this.editMode === "model") {
-				return this.renderModelSelector();
+			if (this.editMode === "model") lines = this.renderModelSelector();
+			else if (this.editMode === "thinking") lines = this.renderThinkingSelector();
+			else if (this.editMode === "skills") lines = this.renderSkillSelector();
+			else lines = this.renderFullEditMode();
+		} else {
+			switch (this.mode) {
+				case 'single': lines = this.renderSingleMode(); break;
+				case 'parallel': lines = this.renderParallelMode(); break;
+				case 'chain': lines = this.renderChainMode(); break;
 			}
-			if (this.editMode === "thinking") {
-				return this.renderThinkingSelector();
-			}
-			if (this.editMode === "skills") {
-				return this.renderSkillSelector();
-			}
-			return this.renderFullEditMode();
 		}
-		// Mode-based navigation rendering
-		switch (this.mode) {
-			case 'single': return this.renderSingleMode();
-			case 'parallel': return this.renderParallelMode();
-			case 'chain': return this.renderChainMode();
-		}
+		const renderWidth = Math.max(0, Math.min(this.width, Math.floor(width)));
+		return lines.map((line) => truncateToWidth(line, renderWidth));
 	}
 
 	/** Render the model selector view */
@@ -907,10 +907,10 @@ export class ChainClarifyComponent implements Component {
 
 		// Header (mode-aware terminology)
 		const agentName = this.agentConfigs[this.editingStep!]?.name ?? "unknown";
-		const stepLabel = this.mode === 'single'
-			? agentName
-			: this.mode === 'parallel'
-				? `Task ${this.editingStep! + 1}: ${agentName}`
+		const stepLabel = this.mode === 'single' 
+			? agentName 
+			: this.mode === 'parallel' 
+				? `Task ${this.editingStep! + 1}: ${agentName}` 
 				: `Step ${this.editingStep! + 1}: ${agentName}`;
 		const headerText = ` Select Model (${stepLabel}) `;
 		lines.push(this.renderHeader(headerText));
@@ -981,10 +981,10 @@ export class ChainClarifyComponent implements Component {
 		const lines: string[] = [];
 
 		const agentName = this.agentConfigs[this.editingStep!]?.name ?? "unknown";
-		const stepLabel = this.mode === 'single'
-			? agentName
-			: this.mode === 'parallel'
-				? `Task ${this.editingStep! + 1}: ${agentName}`
+		const stepLabel = this.mode === 'single' 
+			? agentName 
+			: this.mode === 'parallel' 
+				? `Task ${this.editingStep! + 1}: ${agentName}` 
 				: `Step ${this.editingStep! + 1}: ${agentName}`;
 		const headerText = ` Thinking Level (${stepLabel}) `;
 		lines.push(this.renderHeader(headerText));
@@ -1124,7 +1124,7 @@ export class ChainClarifyComponent implements Component {
 	private getFooterText(): string {
 		return this.mode === 'single'
 			? " [Enter] Run • [Esc] Cancel "
-			: " [Enter] Run • [Esc] Cancel • [↑↓] Navigate ";
+			: " [Enter] Run • [Esc] Cancel • [↑↓/jk] Navigate ";
 	}
 
 	private appendNotice(lines: string[]): void {
@@ -1165,7 +1165,9 @@ export class ChainClarifyComponent implements Component {
 
 		const writesValue = behavior.output === false
 			? th.fg("dim", "(disabled)")
-			: (behavior.output || th.fg("dim", "(none)"));
+			: (typeof behavior.output === "string" && behavior.output
+				? behavior.output
+				: th.fg("dim", "(none)"));
 		const writesLabel = th.fg("dim", "writes: ");
 		lines.push(this.row(`     ${writesLabel}${truncateToWidth(writesValue, innerW - 14)}`));
 
@@ -1296,7 +1298,9 @@ export class ChainClarifyComponent implements Component {
 
 			const writesValue = behavior.output === false
 				? th.fg("dim", "(disabled)")
-				: (behavior.output || th.fg("dim", "(none)"));
+				: (typeof behavior.output === "string" && behavior.output
+					? behavior.output
+					: th.fg("dim", "(none)"));
 			const writesLabel = th.fg("dim", "writes: ");
 			lines.push(this.row(`     ${writesLabel}${truncateToWidth(writesValue, innerW - 14)}`));
 
@@ -1316,7 +1320,7 @@ export class ChainClarifyComponent implements Component {
 
 			if (progressEnabled) {
 				const isFirstStep = i === 0;
-				const progressAction = isFirstStep
+				const progressAction = isFirstStep 
 					? th.fg("success", "writes progress.md")
 					: th.fg("accent", "reads progress.md");
 				const progressLabel = th.fg("dim", "progress: ");

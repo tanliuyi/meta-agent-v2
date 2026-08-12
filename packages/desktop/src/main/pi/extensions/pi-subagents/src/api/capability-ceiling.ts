@@ -1,3 +1,4 @@
+// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 export {
 	SUBAGENT_CAPABILITY_CEILING_ENV,
 	SUBAGENT_CAPABILITY_CEILING_REGISTRY_KEY,

@@ -35,38 +35,37 @@ describe("subagent tool schema", () => {
     ).toBe(true);
   });
 
-  it("rejects inferred-only reviewed acceptance before tool execution", () => {
-    expect(Value.Check(SubagentParams, { agent: "reviewer", task: "Review", acceptance: "reviewed" })).toBe(false);
+  it("defers reviewed rejection to acceptance validation (schema keeps it deprecated)", () => {
+    expect(Value.Check(SubagentParams, { agent: "reviewer", task: "Review", acceptance: "reviewed" })).toBe(true);
     expect(
       Value.Check(SubagentParams, {
         agent: "reviewer",
         task: "Review",
         acceptance: { level: "reviewed" },
       }),
-    ).toBe(false);
-    expect(
-      Value.Check(SubagentParams, {
-        tasks: [{ agent: "reviewer", task: "Review", acceptance: "reviewed" }],
-      }),
-    ).toBe(false);
-    expect(
-      Value.Check(SubagentParams, {
-        tasks: [{ agent: "reviewer", task: "Review", acceptance: { level: "reviewed" } }],
-      }),
-    ).toBe(false);
-  });
-
-  it("exposes the verify field and explains the unsupported commands alias", () => {
-    expect(JSON.stringify(SubagentParams)).toContain('"verify"');
-    expect(validateAcceptanceInput({ commands: [{ id: "check", command: "npm run check" }] })).toEqual([
-      "acceptance.commands is not supported; use acceptance.verify for runtime verification commands.",
+    ).toBe(true);
+    expect(validateAcceptanceInput("reviewed", "acceptance")).toEqual([
+      "acceptance is an achieved status, not a requestable acceptance level. For a read-only reviewer call, omit acceptance. To require independent review of a writer result, use acceptance.review.required and orchestrate the reviewer separately.",
+    ]);
+    expect(validateAcceptanceInput({ level: "reviewed" }, "acceptance")).toEqual([
+      "acceptance.level is an achieved status, not a requestable acceptance level. For a read-only reviewer call, omit acceptance. To require independent review of a writer result, use acceptance.review.required and orchestrate the reviewer separately.",
     ]);
   });
 
-  it("tells orchestrators that reviewed acceptance is inferred-only", () => {
-    expect(FULL_SUBAGENT_TOOL_DESCRIPTION).toContain("reviewed is inferred-only and must never be passed explicitly");
-    expect(COMPACT_SUBAGENT_TOOL_DESCRIPTION).toContain(
-      "reviewed is inferred-only and must never be passed explicitly",
+  it("explains the unsupported commands alias and requires verify arrays for verified", () => {
+    expect(validateAcceptanceInput({ level: "verified", verify: [{ id: "check", command: "npm run check" }] })).toEqual(
+      [],
     );
+    expect(validateAcceptanceInput({ level: "verified" })).toEqual([
+      'acceptance.verify must contain at least one runtime command when level is verified. Use level "checked" or provide a non-empty acceptance.verify array.',
+    ]);
+    expect(validateAcceptanceInput({ commands: [{ id: "check", command: "npm run check" }] })).toEqual([
+      "acceptance.commands is not supported.",
+    ]);
+  });
+
+  it("tells orchestrators how reviewer acceptance works", () => {
+    expect(FULL_SUBAGENT_TOOL_DESCRIPTION).toContain("acceptance.review.required requests independent writer review");
+    expect(COMPACT_SUBAGENT_TOOL_DESCRIPTION).toContain("Omit acceptance for reviewer/read-only calls");
   });
 });

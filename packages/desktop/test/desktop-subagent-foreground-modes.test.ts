@@ -639,9 +639,11 @@ describe("Desktop foreground programmatic modes", () => {
       "utf8",
     );
     expect(source).toMatch(
-      /runSync\(input\.ctx\.cwd, input\.agents, task\.agent, taskText, \{\s*subagentRuntime: input\.subagentRuntime/,
+      /runSync\(input\.ctx\.cwd, input\.agents, task\.agent, taskText, compactOptional<Parameters<typeof runSync>\[4\]>\(\{\s*subagentRuntime: input\.subagentRuntime/,
     );
-    expect(source).toMatch(/subagentRuntime: deps\.subagentRuntime,\s*\}\);\s*for \(let i = 0; i < results\.length/);
+    expect(source).toMatch(
+      /executeAsyncChain\(id, compactOptional<Parameters<typeof executeAsyncChain>\[1\]>\(\{\s*subagentRuntime: deps\.subagentRuntime,/,
+    );
   });
 });
 

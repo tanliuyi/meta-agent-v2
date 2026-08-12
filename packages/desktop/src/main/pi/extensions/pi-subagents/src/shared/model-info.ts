@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = typeof THINKING_LEVELS[number];
 export type ThinkingLevelMap = Partial<Record<ThinkingLevel, string | null>>;
@@ -79,17 +78,4 @@ export function getSupportedThinkingLevels(model: ModelInfo | undefined): Thinki
 		return true;
 	});
 	return levels;
-}
-
-/** Append a thinking suffix (`:high`, `:off`, etc.) to a model string.
- *  If `replaceExisting` is false (default), a model that already ends with a known
- *  thinking suffix is returned unchanged. When `replaceExisting` is true, the existing
- *  suffix is replaced with the new one. */
-export function applyThinkingSuffix(model: string | undefined, thinking: string | false | undefined, replaceExisting = false): string | undefined {
-	if (!model || !thinking) return model;
-	const colonIdx = model.lastIndexOf(":");
-	if (colonIdx !== -1 && THINKING_LEVELS.some((level) => level === model.substring(colonIdx + 1))) {
-		return replaceExisting ? `${model.slice(0, colonIdx)}:${thinking}` : model;
-	}
-	return `${model}:${thinking}`;
 }

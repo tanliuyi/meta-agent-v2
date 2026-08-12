@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -15,6 +14,7 @@ import {
 import { serializeAgent } from "../agents/agent-serializer.ts";
 import { editableAgentConfig, preservedAgentFrontmatterFields } from "../agents/agent-management.ts";
 import { findModelInfo, getSupportedThinkingLevels, toModelInfo } from "../shared/model-info.ts";
+import { SelectorComponent, type SelectorItem, type SelectorResult } from "./selector.ts";
 
 const ADMIN_MESSAGE_TYPE = "subagents-admin";
 const INHERIT_MODEL_CHOICE = "Default / inherit session model";
@@ -51,6 +51,10 @@ function agentChoices(agents: AgentConfig[]): Map<string, AgentConfig> {
 	}));
 }
 
+function agentSelectItems(byLabel: Map<string, AgentConfig>): SelectorItem[] {
+	return [...byLabel.keys()].map((label) => ({ value: label, label }));
+}
+
 function agentMatches(agent: AgentConfig, rawName: string): boolean {
 	const name = rawName.trim();
 	return agent.name === name || frontmatterNameForConfig(agent) === name;
@@ -73,31 +77,29 @@ function liveAvailableModels(ctx: ExtensionContext) {
 		ctx.modelRegistry.refresh?.();
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		ctx.ui.notify(`Could not refresh the model registry; using the last loaded choices. ${message}`, "warning", {
-			customType: "subagents.warning",
-		});
+		ctx.ui.notify(`Could not refresh the model registry; using the last loaded choices. ${message}`, "warning");
 	}
 	return ctx.modelRegistry.getAvailable();
 }
 
 function buildBuiltinBase(agent: AgentConfig): BuiltinAgentOverrideBase {
 	return {
-		model: agent.model,
-		fallbackModels: agent.fallbackModels ? [...agent.fallbackModels] : undefined,
-		thinking: agent.thinking,
+		...(agent.model !== undefined ? { model: agent.model } : {}),
+		...(agent.fallbackModels !== undefined ? { fallbackModels: [...agent.fallbackModels] } : {}),
+		...(agent.thinking !== undefined ? { thinking: agent.thinking } : {}),
 		systemPromptMode: agent.systemPromptMode,
 		inheritProjectContext: agent.inheritProjectContext,
 		inheritSkills: agent.inheritSkills,
-		defaultContext: agent.defaultContext,
-		acceptanceRole: agent.acceptanceRole,
-		disabled: agent.disabled,
+		...(agent.defaultContext !== undefined ? { defaultContext: agent.defaultContext } : {}),
+		...(agent.acceptanceRole !== undefined ? { acceptanceRole: agent.acceptanceRole } : {}),
+		...(agent.disabled !== undefined ? { disabled: agent.disabled } : {}),
 		systemPrompt: agent.systemPrompt,
-		skills: agent.skills ? [...agent.skills] : undefined,
-		tools: agent.tools ? [...agent.tools] : undefined,
-		mcpDirectTools: agent.mcpDirectTools ? [...agent.mcpDirectTools] : undefined,
-		subagentOnlyExtensions: agent.subagentOnlyExtensions ? [...agent.subagentOnlyExtensions] : undefined,
-		completionGuard: agent.completionGuard,
-		toolBudget: agent.toolBudget,
+		...(agent.skills !== undefined ? { skills: [...agent.skills] } : {}),
+		...(agent.tools !== undefined ? { tools: [...agent.tools] } : {}),
+		...(agent.mcpDirectTools !== undefined ? { mcpDirectTools: [...agent.mcpDirectTools] } : {}),
+		...(agent.subagentOnlyExtensions !== undefined ? { subagentOnlyExtensions: [...agent.subagentOnlyExtensions] } : {}),
+		...(agent.completionGuard !== undefined ? { completionGuard: agent.completionGuard } : {}),
+		...(agent.toolBudget !== undefined ? { toolBudget: agent.toolBudget } : {}),
 	};
 }
 
@@ -157,7 +159,7 @@ async function selectAgent(ctx: ExtensionContext, args: string): Promise<AgentSe
 		if (matches.length > 1 && !ctx.hasUI) return { kind: "ambiguous", requestedName, matches };
 		if (matches.length > 1) {
 			const byLabel = agentChoices(matches);
-			const choice = await ctx.ui.select(`Multiple subagents named '${requestedName}'`, [...byLabel.keys()]);
+			const choice = await selectFromList(ctx, `Multiple subagents named '${requestedName}'`, undefined, agentSelectItems(byLabel));
 			return choice ? { kind: "selected", agent: byLabel.get(choice)! } : { kind: "cancelled" };
 		}
 		return { kind: "not-found", agents, requestedName };
@@ -165,7 +167,7 @@ async function selectAgent(ctx: ExtensionContext, args: string): Promise<AgentSe
 
 	if (!ctx.hasUI) return { kind: "not-found", agents };
 	const byLabel = agentChoices(agents);
-	const choice = await ctx.ui.select("Select subagent", [...byLabel.keys()]);
+	const choice = await selectFromList(ctx, "Select subagent", undefined, agentSelectItems(byLabel));
 	return choice ? { kind: "selected", agent: byLabel.get(choice)! } : { kind: "cancelled" };
 }
 
@@ -199,13 +201,33 @@ function metadataFor(agent: AgentConfig): string {
 	return lines.join("\n");
 }
 
+async function selectFromList(ctx: ExtensionContext, title: string, subtitle: string | undefined, items: SelectorItem[]): Promise<string | undefined> {
+	if (typeof ctx.ui.custom === "function") {
+		const result = await ctx.ui.custom<SelectorResult>(
+			(tui, theme, kb, done) => new SelectorComponent(tui, theme, kb, { title, subtitle, items, done }),
+			{ overlay: false },
+		);
+		return result?.confirmed ? result.value : undefined;
+	}
+	const flatTitle = subtitle ? `${title}\nCurrent: ${subtitle}` : title;
+	const labelToValue = new Map(items.map((item) => [item.label, item.value] as const));
+	const choice = await ctx.ui.select(flatTitle, items.map((item) => item.value));
+	return choice ? (items.find((item) => item.value === choice)?.value ?? labelToValue.get(choice)) : undefined;
+}
+
 async function chooseModel(ctx: ExtensionContext, agent: AgentConfig): Promise<string | undefined | null> {
-	const models = liveAvailableModels(ctx).map((model) => modelFullId(model));
+	const models = liveAvailableModels(ctx);
 	const current = agent.model ?? INHERIT_MODEL_CHOICE;
-	const choices = [INHERIT_MODEL_CHOICE, ...models.filter((model) => model !== agent.model)];
-	if (agent.model && !choices.includes(agent.model)) choices.splice(1, 0, agent.model);
-	const choice = await ctx.ui.select(`Select model for ${agent.name}\nCurrent: ${current}`, choices);
-	if (!choice) return null;
+	const items: SelectorItem[] = [{ value: INHERIT_MODEL_CHOICE, label: INHERIT_MODEL_CHOICE, current: !agent.model }];
+	if (agent.model && !models.some((model) => modelFullId(model) === agent.model)) {
+		items.push({ value: agent.model, label: agent.model, current: true });
+	}
+	for (const model of models) {
+		const fullId = modelFullId(model);
+		items.push({ value: fullId, label: model.id, badge: model.provider, current: fullId === agent.model });
+	}
+	const choice = await selectFromList(ctx, `Select model for ${agent.name}`, current, items);
+	if (choice === undefined) return null;
 	return choice === INHERIT_MODEL_CHOICE ? undefined : choice;
 }
 
@@ -215,18 +237,16 @@ async function chooseThinking(ctx: ExtensionContext, agent: AgentConfig): Promis
 	const modelInfo = findModelInfo(effectiveModel, availableModels, ctx.model?.provider);
 	const levels = getSupportedThinkingLevels(modelInfo);
 	const current = agent.thinking === false ? "off" : agent.thinking ?? INHERIT_THINKING_CHOICE;
-	const choices: string[] = [INHERIT_THINKING_CHOICE, ...levels];
-	if (current !== INHERIT_THINKING_CHOICE && !choices.includes(current)) choices.splice(1, 0, current);
+	const values: string[] = [INHERIT_THINKING_CHOICE, ...levels];
+	if (current !== INHERIT_THINKING_CHOICE && !values.includes(current)) values.splice(1, 0, current);
 	const modelNote = agent.model
 		? `Model: ${agent.model}`
 		: effectiveModel
 			? `Session model: ${effectiveModel}`
 			: "Model: default / inherit";
-	const choice = await ctx.ui.select(
-		`Select thinking level for ${agent.name}\n${modelNote} · Current: ${current}`,
-		choices,
-	);
-	if (!choice) return null;
+	const items: SelectorItem[] = values.map((value) => ({ value, label: value, current: value === current }));
+	const choice = await selectFromList(ctx, `Select thinking level for ${agent.name}`, `${modelNote} · ${current}`, items);
+	if (choice === undefined) return null;
 	return choice === INHERIT_THINKING_CHOICE ? undefined : choice;
 }
 
@@ -270,7 +290,9 @@ async function saveAgentModel(ctx: ExtensionContext, agent: AgentConfig, selecte
 
 	const readOnlyMessage = readOnlyAgentMessage(agent, "model");
 	if (readOnlyMessage) return readOnlyMessage;
-	const updated: AgentConfig = { ...editableAgentConfig(agent), model: selectedModel };
+	const updated = editableAgentConfig(agent);
+	if (selectedModel === undefined) delete updated.model;
+	else updated.model = selectedModel;
 	fs.writeFileSync(updated.filePath, serializeAgent(updated, {
 		preserveFrontmatterFields: preservedAgentFrontmatterFields(agent, { model: selectedModel }),
 	}), "utf-8");
@@ -291,7 +313,9 @@ async function saveAgentThinking(ctx: ExtensionContext, agent: AgentConfig, sele
 
 	const readOnlyMessage = readOnlyAgentMessage(agent, "thinking");
 	if (readOnlyMessage) return readOnlyMessage;
-	const updated: AgentConfig = { ...editableAgentConfig(agent), thinking: selectedThinking };
+	const updated = editableAgentConfig(agent);
+	if (selectedThinking === undefined) delete updated.thinking;
+	else updated.thinking = selectedThinking;
 	fs.writeFileSync(updated.filePath, serializeAgent(updated, {
 		preserveFrontmatterFields: preservedAgentFrontmatterFields(agent, { thinking: selectedThinking }),
 	}), "utf-8");
@@ -382,19 +406,19 @@ export async function openSubagentsAdmin(pi: ExtensionAPI, ctx: ExtensionContext
 			if (selectedModel === null) return;
 			const message = await saveAgentModel(ctx, agent, selectedModel);
 			if (message === null) return;
-			ctx.ui.notify(message, "info", { customType: "subagents.info" });
+			ctx.ui.notify(message, "info");
 			sendAdminMessage(pi, message);
 		} else if (action === "Change thinking level") {
 			const selectedThinking = await chooseThinking(ctx, agent);
 			if (selectedThinking === null) return;
 			const message = await saveAgentThinking(ctx, agent, selectedThinking);
 			if (message === null) return;
-			ctx.ui.notify(message, "info", { customType: "subagents.info" });
+			ctx.ui.notify(message, "info");
 			sendAdminMessage(pi, message);
 		} else if (action === "Edit system prompt") {
 			const message = await editSystemPrompt(ctx, agent);
 			if (message === null) return;
-			ctx.ui.notify(message, "info", { customType: "subagents.info" });
+			ctx.ui.notify(message, "info");
 			sendAdminMessage(pi, message);
 		} else if (action === "Show details") {
 			// Full metadata is now opt-in (previously always posted to the thread).
@@ -402,7 +426,7 @@ export async function openSubagentsAdmin(pi: ExtensionAPI, ctx: ExtensionContext
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		ctx.ui.notify(message, "error", { customType: "subagents.error" });
+		ctx.ui.notify(message, "error");
 		sendAdminMessage(pi, `Failed to update '${agent.name}': ${message}`);
 	}
 }

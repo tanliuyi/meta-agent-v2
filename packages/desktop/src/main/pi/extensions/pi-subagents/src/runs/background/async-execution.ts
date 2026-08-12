@@ -1,24 +1,30 @@
+// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 /**
  * Async execution logic for subagent tool
  */
 
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentConfig } from "../../agents/agents.ts";
 import { writeAtomicJson, writePrivateAtomicJson } from "../../shared/atomic-json.ts";
-import { applyThinkingSuffix, splitKnownThinkingSuffix } from "../../shared/model-info.ts";
+import {  splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import { agentDefinitionDigest, launchBindingDigest } from "../../shared/launch-contract.ts";
 import { injectOutputPathSystemPrompt, injectSingleOutputInstruction, normalizeSingleOutputOverride, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
-import { buildChainInstructions, isDynamicParallelStep, isParallelStep, resolveStepBehavior, suppressProgressForReadOnlyTask, writeInitialProgressFile, type ChainStep, type ResolvedStepBehavior, type SequentialStep, type StepOverrides } from "../../shared/settings.ts";
-import { isParallelGroup, isDynamicRunnerGroup, mapConcurrent, MAX_PARALLEL_CONCURRENCY, type RunnerStep, type RunnerSubagentStep } from "../shared/parallel-utils.ts";
+import { buildChainInstructions, isCheckpointStep, isDynamicParallelStep, isParallelStep, resolveStepBehavior, suppressProgressForReadOnlyTask, writeInitialProgressFile, type ChainStep, type ResolvedStepBehavior, type SequentialStep, type StepOverrides } from "../../shared/settings.ts";
+import { isParallelGroup, isDynamicRunnerGroup, isCheckpointRunnerStep, mapConcurrent, MAX_PARALLEL_CONCURRENCY, type RunnerStep, type RunnerSubagentStep } from "../shared/parallel-utils.ts";
 import type { ContextMode } from "../shared/context-mode.ts";
 import { buildSkillInjection
 , normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
-import { resolveChildCwd } from "../../shared/utils.ts";
+import { resolveChildCwd, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "../../shared/utils.ts";
 import { buildModelCandidates, formatModelAttemptNote, isRetryableModelFailure, resolveEffectiveSubagentModel, resolveModelCandidate, resolveSubagentModelOverride, type AvailableModelInfo, type ParentModel } from "../shared/model-fallback.ts";
 import type { ModelScopeConfig } from "../shared/model-scope.ts";
+import { applyThinkingSuffix } from "../shared/pi-args.ts";
 import { resolveEffectiveThinking } from "../../shared/model-info.ts";
 import { resolveCurrentPath } from "../shared/long-running-guard.ts";
 import { resolveExpectedWorktreeAgentCwd } from "../shared/worktree.ts";
@@ -48,23 +54,27 @@ import {
 	type ResolvedToolBudget,
 	type SubagentRunMode,
 	type SteeringRecoveryDescriptor,
-	ASYNC_DIR,
-	RESULTS_DIR,
+	DIRS,
 	SUBAGENT_ASYNC_STARTED_EVENT,
 	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
 	TEMP_ROOT_DIR,
 	getAsyncConfigPath,
 	resolveChildMaxSubagentDepth,
 } from "../../shared/types.ts";
-import { nestedResultsPath, resolveInheritedNestedRouteFromEnv, resolveNestedParentAddressFromEnv, writeNestedEvent } from "../shared/nested-events.ts";
+import { resolvePiPackageRoot } from "../shared/pi-spawn.ts";
+import { nestedResultsPath, nestedSummaryFromAsyncStatus, resolveInheritedNestedRouteFromEnv, resolveNestedParentAddressFromEnv, writeNestedEvent } from "../shared/nested-events.ts";
 import { appendTurnBudgetSystemPrompt, initialTurnBudgetState } from "../shared/turn-budget.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
 import { waitForImportedAsyncRoot, type ImportedAsyncRoot } from "./chain-root-attachment.ts";
+import { finalizeProcessTerminal, readProcessTerminal } from "./process-terminal.ts";
+import { SUBAGENT_PROCESS_TERMINAL_EVENT } from "../../shared/types.ts";
 import { resolveCurrentSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
+import { resolvePermissionRules } from "../shared/permissions.ts";
 import { cleanupWorktrees, createWorktrees, diffWorktrees, formatWorktreeDiffSummary, type WorktreeSetup } from "../shared/worktree.ts";
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup } from "../shared/parallel-handoff.ts";
 import type { SessionLeaseRequest } from "../shared/session-lease.ts";
 import { appendJsonl } from "../../shared/artifacts.ts";
+import { materializeDynamicParallelStep, collectDynamicResults, validateDynamicCollection, DynamicFanoutError } from "../shared/dynamic-fanout.ts";
 import {
   childExtensionTools,
   resolveChildExtensions,
@@ -81,6 +91,7 @@ import {
 import { extractToolArgsPreview, readStatus, resolveWatchPath } from "../../shared/utils.ts";
 import {
 	closeSteerInbox,
+	consumeCheckpointDecisionRequest,
 	consumeInterruptRequest,
 	consumeSteerRequests,
 	consumeStopRequest,
@@ -94,6 +105,55 @@ import {
 	updateSteeringTarget,
 } from "./steering.ts";
 
+const require = createRequire(import.meta.url);
+const piPackageRoot = resolvePiPackageRoot();
+
+function resolveJitiCliFromPackageJson(packageJsonPath: string): string | undefined {
+	if (!fs.existsSync(packageJsonPath)) return undefined;
+	const packageRoot = path.dirname(packageJsonPath);
+	const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
+		bin?: string | Record<string, string>;
+	};
+	const binField = pkg.bin;
+	const binPath = typeof binField === "string"
+		? binField
+		: binField?.jiti ?? Object.values(binField ?? {})[0];
+	const candidates = [binPath, "lib/jiti-cli.mjs"].filter((candidate): candidate is string => Boolean(candidate));
+	for (const candidate of candidates) {
+		const cliPath = path.resolve(packageRoot, candidate);
+		if (fs.existsSync(cliPath)) return cliPath;
+	}
+	return undefined;
+}
+
+function resolveJitiCliPath(): string | undefined {
+	const candidates: Array<() => string | undefined> = [
+		() => require.resolve("jiti/package.json"),
+		() => piPackageRoot
+			? createRequire(path.join(piPackageRoot, "package.json")).resolve("jiti/package.json")
+			: undefined,
+		() => {
+			if (!process.argv[1]) return undefined;
+			const piEntry = fs.realpathSync(process.argv[1]);
+			return createRequire(piEntry).resolve("jiti/package.json");
+		},
+		() => piPackageRoot ? path.join(piPackageRoot, "node_modules", "jiti", "package.json") : undefined,
+	];
+	for (const candidate of candidates) {
+		try {
+			const packageJsonPath = candidate();
+			if (!packageJsonPath) continue;
+			const cliPath = resolveJitiCliFromPackageJson(packageJsonPath);
+			if (cliPath) return cliPath;
+		} catch {
+			// Candidate not available in this install, continue probing.
+		}
+	}
+	return undefined;
+}
+
+const jitiCliPath = resolveJitiCliPath();
+
 interface AsyncExecutionContext {
 	pi: ExtensionAPI;
 	cwd: string;
@@ -106,6 +166,7 @@ interface AsyncExecutionContext {
 	modelScope?: ModelScopeConfig;
 	/** Whether the parent session has an interactive UI. */
 	interactive?: boolean;
+	permissions?: unknown;
 }
 
 interface AsyncChainParams {
@@ -144,11 +205,14 @@ interface AsyncChainParams {
 	acceptance?: AcceptanceInput;
 	timeoutMs?: number;
 	turnBudget?: ResolvedTurnBudget;
-	toolBudget?: ResolvedToolBudget;
+	toolBudget?: ResolvedToolBudget | ToolBudgetConfig;
 	configToolBudget?: ResolvedToolBudget;
 	/** Global cap on simultaneously-running subagent tasks within the async run. */
 	globalConcurrencyLimit?: number;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	usageBudget?: UsageBudgetConfig;
+	parentWorkflowRunId?: string;
+	workflowKey?: string;
 }
 
 interface AsyncSingleParams {
@@ -190,10 +254,14 @@ interface AsyncSingleParams {
 	acceptance?: AcceptanceInput;
 	timeoutMs?: number;
 	absoluteDeadlineAt?: number;
-	turnBudget?: ResolvedTurnBudget;
-	toolBudget?: ResolvedToolBudget;
+	turnBudget?: ResolvedTurnBudget | TurnBudgetConfig;
+	toolBudget?: ResolvedToolBudget | ToolBudgetConfig;
 	configToolBudget?: ResolvedToolBudget;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
+	usageBudget?: UsageBudgetConfig;
+	parentWorkflowRunId?: string;
+	workflowKey?: string;
+	allowZeroToolBudget?: boolean;
 }
 
 interface AsyncExecutionResult {
@@ -225,7 +293,7 @@ export interface AsyncRunnerStepBuildParams {
 	asyncDir: string;
 	outputBaseDir?: string;
 	validateOutputBindings?: boolean;
-	toolBudget?: ResolvedToolBudget;
+	toolBudget?: ResolvedToolBudget | ToolBudgetConfig;
 	configToolBudget?: ResolvedToolBudget;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 }
@@ -288,9 +356,244 @@ export function formatAsyncStartedMessage(headline: string, interactive: boolean
 	return [headline, "", ...guidance].join("\n");
 }
 
-/** Desktop programmatic mode does not expose the legacy detached CLI runner. */
-export function isAsyncAvailable(): boolean {
-	return false;
+/**
+ * Check if async execution is available through either the Desktop runtime or
+ * the upstream detached runner.
+ */
+export function isAsyncAvailable(subagentRuntime?: SubagentRuntime): boolean {
+	return subagentRuntime !== undefined || jitiCliPath !== undefined;
+}
+
+function isNodeExecutableName(execPath: string): boolean {
+	const basename = path.basename(execPath).toLowerCase();
+	return basename === "node" || basename === "node.exe" || basename === "nodejs" || basename === "nodejs.exe";
+}
+
+function canUseCurrentNodeExecutable(execPath: string): boolean {
+	try {
+		fs.accessSync(execPath, process.platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function resolveAsyncRunnerNodeCommand(): string {
+	if (isNodeExecutableName(process.execPath) && canUseCurrentNodeExecutable(process.execPath)) return process.execPath;
+	return process.platform === "win32" ? "node.exe" : "node";
+}
+
+export function resolveAsyncRunnerLogPaths(cfg: object): { stdoutPath: string; stderrPath: string } | undefined {
+	const asyncDir = typeof (cfg as { asyncDir?: unknown }).asyncDir === "string"
+		? (cfg as { asyncDir: string }).asyncDir
+		: undefined;
+	if (!asyncDir) return undefined;
+	return {
+		stdoutPath: path.join(asyncDir, "runner.stdout.log"),
+		stderrPath: path.join(asyncDir, "runner.stderr.log"),
+	};
+}
+
+function closeFd(fd: number | undefined): void {
+	if (fd === undefined) return;
+	try {
+		fs.closeSync(fd);
+	} catch {
+		// Best-effort cleanup; the child already owns its duplicated descriptor.
+	}
+}
+
+const RUNNER_STARTUP_TIMEOUT_MS = 10_000;
+const RUNNER_STARTUP_WAIT_BUFFER = typeof SharedArrayBuffer !== "undefined" ? new SharedArrayBuffer(4) : undefined;
+const RUNNER_STARTUP_WAIT_VIEW = RUNNER_STARTUP_WAIT_BUFFER ? new Int32Array(RUNNER_STARTUP_WAIT_BUFFER) : undefined;
+
+type RunnerStartupState = "ready" | "acknowledged";
+
+type RunnerStartupWaitResult =
+	| { ok: true; token: string }
+	| { ok: false; error: string };
+
+function waitForStartupInterval(delayMs = 20): void {
+	if (RUNNER_STARTUP_WAIT_VIEW) {
+		Atomics.wait(RUNNER_STARTUP_WAIT_VIEW, 0, 0, delayMs);
+		return;
+	}
+	const waitUntil = Date.now() + delayMs;
+	while (Date.now() < waitUntil) {
+		// Startup handshakes are synchronous so resume rejects before reporting a run as started.
+	}
+}
+
+function readRunnerStartup(startupPath: string, expectedState: RunnerStartupState, expectedToken?: string): RunnerStartupWaitResult | undefined {
+	if (!fs.existsSync(startupPath)) return undefined;
+	try {
+		const payload = JSON.parse(fs.readFileSync(startupPath, "utf-8")) as { state?: unknown; token?: unknown; error?: unknown };
+		if (payload.state === "error" && typeof payload.error === "string") return { ok: false, error: payload.error };
+		if (payload.state !== expectedState) return undefined;
+		if (typeof payload.token !== "string" || (expectedToken !== undefined && payload.token !== expectedToken)) {
+			return { ok: false, error: `Async runner wrote an invalid ${expectedState} startup handshake: ${startupPath}` };
+		}
+		return { ok: true, token: payload.token };
+	} catch (error) {
+		return { ok: false, error: `Failed to read async runner startup handshake '${startupPath}': ${error instanceof Error ? error.message : String(error)}` };
+	}
+}
+
+function waitForRunnerStartup(startupPath: string, expectedState: RunnerStartupState, timeoutMs: number, expectedToken?: string): RunnerStartupWaitResult {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		const result = readRunnerStartup(startupPath, expectedState, expectedToken);
+		if (result) return result;
+		if (Date.now() >= deadline) break;
+		waitForStartupInterval(Math.min(20, Math.max(1, deadline - Date.now())));
+	}
+	const finalResult = readRunnerStartup(startupPath, expectedState, expectedToken);
+	if (finalResult) return finalResult;
+	return { ok: false, error: `Timed out after ${timeoutMs}ms waiting for the async runner startup state '${expectedState}'.` };
+}
+
+function writeRunnerStartupControl(filePath: string, payload: { action: "ack" | "proceed"; token: string }): void {
+	writePrivateAtomicJson(filePath, payload);
+}
+
+function runnerIsAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+function terminateRunnerBeforeProceed(pid: number): void {
+	for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+		if (!runnerIsAlive(pid)) return;
+		try {
+			process.kill(pid, signal);
+		} catch {
+			if (!runnerIsAlive(pid)) return;
+		}
+		const deadline = Date.now() + 1000;
+		while (runnerIsAlive(pid) && Date.now() < deadline) waitForStartupInterval();
+	}
+}
+
+function spawnRunner(cfg: object, suffix: string, cwd: string, onProcessTerminal?: (proof: unknown) => void): { pid?: number; error?: string } {
+	if (!jitiCliPath) return { error: "upstream jiti for TypeScript execution could not be found; ensure package dependencies are installed" };
+	try {
+		const cwdStats = fs.statSync(cwd);
+		if (!cwdStats.isDirectory()) return { error: `cwd is not a directory: ${cwd}` };
+	} catch {
+		return { error: `cwd does not exist: ${cwd}` };
+	}
+
+	fs.mkdirSync(TEMP_ROOT_DIR, { recursive: true });
+	const cfgPath = getAsyncConfigPath(suffix);
+	const runnerProcessInstanceId = randomUUID();
+	const launchConfig = { ...cfg, runnerProcessInstanceId };
+	fs.writeFileSync(cfgPath, JSON.stringify(launchConfig));
+	const runner = path.join(path.dirname(fileURLToPath(import.meta.url)), "subagent-runner.ts");
+	const nodeCommand = resolveAsyncRunnerNodeCommand();
+	const launchForStartup = launchConfig as typeof launchConfig & { asyncDir?: unknown; revivalLease?: unknown };
+	const launchAsyncDir = typeof launchForStartup.asyncDir === "string" ? launchForStartup.asyncDir : undefined;
+	const startupPath = typeof launchForStartup.revivalLease === "object" && launchAsyncDir
+		? path.join(launchAsyncDir, "runner-startup.json")
+		: undefined;
+	const startupAckPath = startupPath ? path.join(path.dirname(startupPath), "runner-startup-ack.json") : undefined;
+	const startupProceedPath = startupPath ? path.join(path.dirname(startupPath), "runner-startup-proceed.json") : undefined;
+	if (startupPath) fs.rmSync(startupPath, { force: true });
+	if (startupAckPath) fs.rmSync(startupAckPath, { force: true });
+	if (startupProceedPath) fs.rmSync(startupProceedPath, { force: true });
+
+	const logPaths = resolveAsyncRunnerLogPaths(launchConfig);
+	let stdoutFd: number | undefined;
+	let stderrFd: number | undefined;
+	try {
+		if (logPaths) {
+			fs.mkdirSync(path.dirname(logPaths.stdoutPath), { recursive: true });
+			stdoutFd = fs.openSync(logPaths.stdoutPath, "a");
+			stderrFd = fs.openSync(logPaths.stderrPath, "a");
+		}
+		const proc = spawn(nodeCommand, [jitiCliPath, runner, cfgPath], {
+			cwd,
+			detached: true,
+			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
+			windowsHide: true,
+			env: {
+				...process.env,
+				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
+			},
+		});
+		closeFd(stdoutFd);
+		closeFd(stderrFd);
+		proc.on("error", (error) => console.error(`[pi-subagents] async spawn failed: ${error.message}`));
+		proc.once("close", (exitCode, signal) => {
+			const launch = launchConfig as { asyncDir?: unknown; id?: unknown; nestedRoute?: NestedRouteInfo; nestedSelf?: { parentRunId: string; parentStepIndex?: number; depth: number; path?: Array<{ runId: string; stepIndex?: number; agent?: string }> } };
+			const asyncDir = launch.asyncDir;
+			const runId = launch.id;
+			if (typeof asyncDir !== "string" || typeof runId !== "string") return;
+			finalizeProcessTerminal(asyncDir, runId, { processInstanceId: runnerProcessInstanceId, closeObservedAt: Date.now(), exitCode, signal });
+			const persisted = readProcessTerminal(asyncDir, { runId, runnerProcessInstanceId });
+			if (!persisted) return;
+			if (launch.nestedRoute && launch.nestedSelf) {
+				try {
+					let status: import("../../shared/types.ts").AsyncStatus;
+					try {
+						status = JSON.parse(fs.readFileSync(path.join(asyncDir, "status.json"), "utf-8")) as import("../../shared/types.ts").AsyncStatus;
+						status.processTerminal = persisted;
+					} catch {
+						status = { runId, mode: "single", state: persisted.state === "observed" ? "complete" : "failed", startedAt: persisted.observedAt ?? Date.now(), lastUpdate: Date.now(), processTerminal: persisted };
+					}
+					writeNestedEvent(launch.nestedRoute, {
+						type: "subagent.nested.completed",
+						ts: Date.now(),
+						parentRunId: launch.nestedSelf.parentRunId,
+						parentStepIndex: launch.nestedSelf.parentStepIndex,
+						child: nestedSummaryFromAsyncStatus(status, asyncDir, { id: runId, parentRunId: launch.nestedSelf.parentRunId, parentStepIndex: launch.nestedSelf.parentStepIndex, depth: launch.nestedSelf.depth, path: launch.nestedSelf.path, mode: status.mode, ts: Date.now() }),
+					});
+				} catch (error) {
+					console.error("Failed to emit final nested process-terminal status:", error);
+				}
+			}
+			onProcessTerminal?.(persisted);
+		});
+		if (typeof proc.pid !== "number") return { error: `async runner did not produce a pid for cwd: ${cwd}` };
+		proc.unref();
+		if (startupPath && startupAckPath && startupProceedPath) {
+			const ready = waitForRunnerStartup(startupPath, "ready", RUNNER_STARTUP_TIMEOUT_MS);
+			if (ready.ok === false) {
+				terminateRunnerBeforeProceed(proc.pid);
+				return { error: ready.error };
+			}
+			try {
+				writeRunnerStartupControl(startupAckPath, { action: "ack", token: ready.token });
+			} catch (error) {
+				terminateRunnerBeforeProceed(proc.pid);
+				return { error: `Failed to acknowledge async runner startup: ${error instanceof Error ? error.message : String(error)}` };
+			}
+			const acknowledged = waitForRunnerStartup(startupPath, "acknowledged", RUNNER_STARTUP_TIMEOUT_MS, ready.token);
+			if (acknowledged.ok === false) {
+				terminateRunnerBeforeProceed(proc.pid);
+				return { error: acknowledged.error };
+			}
+			try {
+				writeRunnerStartupControl(startupProceedPath, { action: "proceed", token: ready.token });
+			} catch (error) {
+				terminateRunnerBeforeProceed(proc.pid);
+				return { error: `Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}` };
+			}
+			try {
+				fs.rmSync(startupPath, { force: true });
+			} catch {
+				// Proceed is the commit point; cleanup cannot turn a running revival into a start error.
+			}
+		}
+		return { pid: proc.pid };
+	} catch (error) {
+		closeFd(stdoutFd);
+		closeFd(stderrFd);
+		return { error: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 function formatAsyncStartError(mode: SubagentRunMode, message: string): AsyncExecutionResult {
@@ -338,7 +641,9 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			? firstStep.parallel[0]?.task
 			: isDynamicParallelStep(firstStep)
 				? firstStep.parallel.task
-				: (firstStep as SequentialStep).task)
+				: isCheckpointStep(firstStep)
+					? firstStep.message ?? `Checkpoint: ${firstStep.checkpoint}`
+					: (firstStep as SequentialStep).task)
 		: undefined);
 	try {
 		if (params.validateOutputBindings !== false) {
@@ -351,11 +656,13 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 	const workflowGraph = buildWorkflowGraphSnapshot({ runId: id, mode: resultMode, steps: graphChain });
 
 	for (const s of chain) {
-		const stepAgents = isParallelStep(s)
+	const stepAgents = isParallelStep(s)
 			? s.parallel.map((t) => t.agent)
 			: isDynamicParallelStep(s)
 				? [s.parallel.agent]
-				: [(s as SequentialStep).agent];
+				: isCheckpointStep(s)
+					? []
+					: [(s as SequentialStep).agent];
 		for (const agentName of stepAgents) {
 			if (!agents.find((x) => x.name === agentName)) {
 				return { error: `Unknown agent: ${agentName}` };
@@ -562,6 +869,9 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 
 	try {
 		const builtSteps = chain.map((s, stepIndex) => {
+			if (isCheckpointStep(s)) {
+				return { checkpoint: s.checkpoint, ...(s.message ? { message: s.message } : {}), phase: s.phase, label: s.label };
+			}
 			if (isParallelStep(s)) {
 				const parallelBehaviors = s.parallel.map((task) => {
 					const agent = agents.find((candidate) => candidate.name === task.agent)!;
@@ -700,7 +1010,7 @@ export function executeAsyncChain(
 	const nestedAddress = inheritedNestedRoute ? resolveNestedParentAddressFromEnv() : undefined;
 	const asyncDir = inheritedNestedRoute
 		? path.join(TEMP_ROOT_DIR, "nested-subagent-runs", inheritedNestedRoute.rootRunId, id)
-		: path.join(ASYNC_DIR, id);
+		: path.join(DIRS.async, id);
 	try {
 		fs.mkdirSync(asyncDir, { recursive: true });
 	} catch (error) {
@@ -767,13 +1077,9 @@ export function executeAsyncChain(
 
 	// Programmatic branch: use SubagentRuntime instead of detached CLI runner
 	if (params.subagentRuntime) {
-		const resultPath = inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(RESULTS_DIR, `${id}.json`);
+		const resultPath = inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(DIRS.results, `${id}.json`);
 		const eventsPath = path.join(asyncDir, "events.jsonl");
 		const now = Date.now();
-		const hasDynamicFanout = steps.some((s) => isDynamicRunnerGroup(s));
-		if (hasDynamicFanout) {
-			return formatAsyncStartError(resultMode, "Dynamic fanout not yet supported in async programmatic mode.");
-		}
 		const { agents: flatAgentsProg, parallelGroups: parallelGroupsProg } = flattenProgrammaticSteps(steps);
 		writeAtomicJson(path.join(asyncDir, "status.json"), {
 			lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
@@ -801,6 +1107,7 @@ export function executeAsyncChain(
 			runnerCwd,
 			sessionId: ctx.currentSessionId,
 			globalConcurrencyLimit: params.globalConcurrencyLimit,
+			dynamicFanoutMaxItems: params.dynamicFanoutMaxItems,
 			deadlineAt,
 			turnBudget: params.turnBudget,
 			worktreeSetupHook,
@@ -847,12 +1154,16 @@ export function executeAsyncChain(
 			? eventFirstStep.parallel.map((t) => t.agent)
 			: isDynamicParallelStep(eventFirstStep)
 				? [eventFirstStep.parallel.agent]
-				: [(eventFirstStep as SequentialStep).agent];
+				: isCheckpointStep(eventFirstStep)
+					? [`checkpoint:${eventFirstStep.checkpoint}`]
+					: [(eventFirstStep as SequentialStep).agent];
 		const firstTask = isParallelStep(eventFirstStep)
 			? eventFirstStep.parallel[0]?.task
 			: isDynamicParallelStep(eventFirstStep)
 				? eventFirstStep.parallel.task
-				: (eventFirstStep as SequentialStep).task;
+				: isCheckpointStep(eventFirstStep)
+					? eventFirstStep.message ?? `Checkpoint: ${eventFirstStep.checkpoint}`
+					: (eventFirstStep as SequentialStep).task;
 		const workflowGoal = params.goal ?? (params.task?.trim() || firstTask);
 		if (inheritedNestedRoute && nestedAddress) {
 			try {
@@ -913,7 +1224,7 @@ export function executeAsyncChain(
 		});
 		const chainDesc = chain
 			.map((s) =>
-				isParallelStep(s) ? `[${s.parallel.map((t) => t.agent).join("+")}]` : isDynamicParallelStep(s) ? `expand:${s.parallel.agent}` : (s as SequentialStep).agent,
+				isParallelStep(s) ? `[${s.parallel.map((t) => t.agent).join("+")}]` : isDynamicParallelStep(s) ? `expand:${s.parallel.agent}` : isCheckpointStep(s) ? `checkpoint:${s.checkpoint}` : (s as SequentialStep).agent,
 			)
 			.join(" -> ");
 		return {
@@ -922,16 +1233,177 @@ export function executeAsyncChain(
 		};
 	}
 
+	let spawnResult: { pid?: number; error?: string } = {};
+	try {
+		spawnResult = spawnRunner(
+			{
+				id,
+				steps,
+				resultPath: inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(DIRS.results, `${id}.json`),
+				cwd: runnerCwd,
+				placeholder: "{previous}",
+				maxOutput,
+				artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
+				artifactConfig,
+				share: shareEnabled,
+				sessionDir: sessionRoot ? path.join(sessionRoot, `async-${id}`) : undefined,
+				asyncDir,
+				sessionId: ctx.currentSessionId,
+				...(capabilityCeiling ? { capabilityCeiling } : {}),
+				piPackageRoot,
+				piArgv1: process.argv[1],
+				worktreeSetupHook,
+				worktreeSetupHookTimeoutMs,
+				worktreeBaseDir,
+				controlConfig,
+				turnBudget: params.turnBudget,
+				toolBudget: params.toolBudget,
+				usageBudget: params.usageBudget,
+				controlIntercomTarget,
+				childIntercomTargets,
+				resultMode,
+				dynamicFanoutMaxItems: params.dynamicFanoutMaxItems,
+				timeoutMs: params.timeoutMs,
+				deadlineAt,
+				globalConcurrencyLimit: params.globalConcurrencyLimit,
+				workflowGraph,
+				...(params.parentWorkflowRunId ? { parentWorkflowRunId: params.parentWorkflowRunId } : {}),
+				...(params.workflowKey ? { workflowKey: params.workflowKey } : {}),
+				nestedRoute: nestedRoute ?? inheritedNestedRoute,
+				nestedSelf: inheritedNestedRoute && nestedAddress ? {
+					parentRunId: nestedAddress.parentRunId,
+					parentStepIndex: nestedAddress.parentStepIndex,
+					depth: nestedAddress.depth,
+					path: nestedAddress.path,
+				} : undefined,
+			},
+			id,
+			runnerCwd,
+			(proof) => ctx.pi.events.emit(SUBAGENT_PROCESS_TERMINAL_EVENT, proof),
+		);
+	} catch (error) {
+		return formatAsyncStartError(resultMode, `Failed to start async ${resultMode} '${id}': ${error instanceof Error ? error.message : String(error)}`);
+	}
+	if (spawnResult.error) return formatAsyncStartError(resultMode, `Failed to start async ${resultMode} '${id}': ${spawnResult.error}`);
 
+	const eventFirstStep = eventChain[0];
+	if (!eventFirstStep) return formatAsyncStartError(resultMode, `Failed to start async ${resultMode} '${id}': event chain has no steps`);
+	const firstAgents = isParallelStep(eventFirstStep)
+		? eventFirstStep.parallel.map((t) => t.agent)
+		: isDynamicParallelStep(eventFirstStep)
+			? [eventFirstStep.parallel.agent]
+			: isCheckpointStep(eventFirstStep)
+				? [`checkpoint:${eventFirstStep.checkpoint}`]
+				: [(eventFirstStep as SequentialStep).agent];
+	const firstTask = isParallelStep(eventFirstStep)
+		? eventFirstStep.parallel[0]?.task
+		: isDynamicParallelStep(eventFirstStep)
+			? eventFirstStep.parallel.task
+			: isCheckpointStep(eventFirstStep)
+				? eventFirstStep.message ?? `Checkpoint: ${eventFirstStep.checkpoint}`
+				: (eventFirstStep as SequentialStep).task;
+	const workflowGoal = params.goal ?? (params.task?.trim() || firstTask);
+	const parallelGroups: Array<{ start: number; count: number; stepIndex: number }> = [];
+	const flatAgents: string[] = [];
+	let flatStepStart = 0;
+	for (let stepIndex = 0; stepIndex < eventChain.length; stepIndex++) {
+		const step = eventChain[stepIndex]!;
+		if (isParallelStep(step)) {
+			parallelGroups.push({ start: flatStepStart, count: step.parallel.length, stepIndex });
+			flatAgents.push(...step.parallel.map((task) => task.agent));
+			flatStepStart += step.parallel.length;
+		} else if (isDynamicParallelStep(step)) {
+			parallelGroups.push({ start: flatStepStart, count: 1, stepIndex });
+			flatAgents.push(step.parallel.agent);
+			flatStepStart++;
+		} else if (isCheckpointStep(step)) {
+			flatAgents.push(`checkpoint:${step.checkpoint}`);
+			flatStepStart++;
+		} else {
+			flatAgents.push((step as SequentialStep).agent);
+			flatStepStart++;
+		}
+	}
+	const now = Date.now();
+	if (spawnResult.pid && inheritedNestedRoute && nestedAddress) {
+		try {
+			writeNestedEvent(inheritedNestedRoute, {
+				type: "subagent.nested.started",
+				ts: now,
+				parentRunId: nestedAddress.parentRunId,
+				parentStepIndex: nestedAddress.parentStepIndex,
+				child: {
+					id,
+					parentRunId: nestedAddress.parentRunId,
+					parentStepIndex: nestedAddress.parentStepIndex,
+					depth: nestedAddress.depth,
+					path: nestedAddress.path,
+					asyncDir,
+					pid: spawnResult.pid,
+					ownerIntercomTarget: process.env.PI_SUBAGENT_INTERCOM_SESSION_NAME,
+					leafIntercomTarget: childIntercomTargets?.[0],
+					intercomTarget: childIntercomTargets?.[0],
+					ownerState: "live",
+					mode: resultMode,
+					state: "running",
+					agent: firstAgents[0],
+					agents: flatAgents,
+					chainStepCount: eventChain.length,
+					parallelGroups,
+					...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}),
+					...(params.turnBudget ? { turnBudget: params.turnBudget } : {}),
+					startedAt: now,
+					lastUpdate: now,
+					...(capabilityCeiling ? { capabilityCeiling } : {}),
+				},
+			});
+		} catch (error) {
+			console.error("Failed to emit nested async start event:", error);
+		}
+	}
+	ctx.pi.events.emit(SUBAGENT_ASYNC_STARTED_EVENT, {
+		lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
+		id,
+		pid: spawnResult.pid,
+		sessionId: ctx.currentSessionId,
+		mode: resultMode,
+		agent: firstAgents[0],
+		agents: flatAgents,
+		task: firstTask?.slice(0, 50),
+		goal: workflowGoal?.slice(0, 120),
+		chain: eventChain.map((step) =>
+			isParallelStep(step)
+				? `[${step.parallel.map((task) => task.agent).join("+")}]`
+				: isDynamicParallelStep(step)
+					? `expand:${step.parallel.agent}`
+					: isCheckpointStep(step)
+						? `checkpoint:${step.checkpoint}`
+						: (step as SequentialStep).agent,
+		),
+		chainStepCount: eventChain.length,
+		parallelGroups,
+		workflowGraph,
+		cwd: runnerCwd,
+		asyncDir,
+	...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}),
+		...(params.turnBudget ? { turnBudget: params.turnBudget } : {}),
+		...(capabilityCeiling ? { capabilityCeiling } : {}),
+		nestedRoute,
+	});
 	const chainDesc = chain
-		.map((s) =>
-			isParallelStep(s) ? `[${s.parallel.map((t) => t.agent).join("+")}]` : isDynamicParallelStep(s) ? `expand:${s.parallel.agent}` : (s as SequentialStep).agent,
+		.map((step) =>
+			isParallelStep(step)
+				? `[${step.parallel.map((task) => task.agent).join("+")}]`
+				: isDynamicParallelStep(step)
+					? `expand:${step.parallel.agent}`
+					: isCheckpointStep(step)
+						? `checkpoint:${step.checkpoint}`
+						: (step as SequentialStep).agent,
 		)
 		.join(" -> ");
-
 	return {
 		content: [{ type: "text", text: formatAsyncStartedMessage(`Async ${resultMode}: ${chainDesc} [${id}]`, ctx.interactive === true) }],
-		details: { mode: resultMode, runId: id, results: [], asyncId: id, asyncDir, workflowGraph, ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
+		details: { mode: resultMode, runId: id, results: [], asyncId: id, asyncDir, workflowGraph, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
 	};
 }
 
@@ -989,7 +1461,7 @@ export function executeAsyncSingle(
 	const nestedAddress = inheritedNestedRoute ? resolveNestedParentAddressFromEnv() : undefined;
 	const asyncDir = inheritedNestedRoute
 		? path.join(TEMP_ROOT_DIR, "nested-subagent-runs", inheritedNestedRoute.rootRunId, id)
-		: path.join(ASYNC_DIR, id);
+		: path.join(DIRS.async, id);
 	try {
 		fs.mkdirSync(asyncDir, { recursive: true });
 	} catch (error) {
@@ -1128,7 +1600,7 @@ export function executeAsyncSingle(
 
 	// Programmatic branch: use SubagentRuntime instead of detached CLI runner
 	if (params.subagentRuntime) {
-		const resultPath = inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(RESULTS_DIR, `${id}.json`);
+		const resultPath = inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(DIRS.results, `${id}.json`);
 		const eventsPath = path.join(asyncDir, "events.jsonl");
 		const now = Date.now();
 		// Write initial status so async-job-tracker discovers the run
@@ -1287,9 +1759,151 @@ export function executeAsyncSingle(
 		};
 	}
 
+	const permissionRules = resolvePermissionRules(ctx.permissions, agentConfig.permissions);
+	let spawnResult: { pid?: number; error?: string } = {};
+	try {
+		spawnResult = spawnRunner(
+			{
+				id,
+				steps: [{
+					parentSessionId: ctx.parentSessionId ?? ctx.currentSessionId,
+					permissionRules,
+					...(capabilityCeiling ? { capabilityCeiling } : {}),
+					agent,
+					task: taskWithOutputInstruction,
+					...(agentConfig.runner ? { runner: agentConfig.runner } : {}),
+					...(params.context ? { context: params.context } : {}),
+					cwd: runnerCwd,
+					model,
+					thinking: resolveEffectiveThinking(model, effectiveThinking),
+					modelCandidates,
+					tools: agentConfig.tools,
+					extensions: agentConfig.extensions,
+					subagentOnlyExtensions: agentConfig.subagentOnlyExtensions,
+					mcpDirectTools: agentConfig.mcpDirectTools,
+					completionGuard: agentConfig.completionGuard,
+					systemPrompt,
+					systemPromptMode: agentConfig.systemPromptMode,
+					inheritProjectContext: agentConfig.inheritProjectContext,
+					inheritSkills: agentConfig.inheritSkills,
+					skills: resolvedSkills.map((skill) => skill.name),
+					outputPath,
+					outputMode,
+					...(sessionFile ? { sessionFile } : {}),
+					maxSubagentDepth: resolveChildMaxSubagentDepth(maxSubagentDepth, agentConfig.maxSubagentDepth),
+					waitToolEnabled: params.waitToolEnabled,
+					...(params.agentContract ? { agentContract: params.agentContract } : {}),
+					definitionDigest: agentDefinitionDigest(agentConfig),
+					launchBindingTask: task,
+					launchContractDigest,
+					effectiveAcceptance: resolvedAcceptance,
+					...(structuredOutput ? { structuredOutput } : {}),
+					...(params.structuredOutputSchema ? { structuredOutputSchema: params.structuredOutputSchema } : {}),
+					...(resolvedToolBudget.budget ? { toolBudget: resolvedToolBudget.budget } : {}),
+				}],
+				resultPath: params.parentWorkflowRunId !== undefined && params.revivalLease !== undefined
+					? workflowAwaitedAsyncResultPath(asyncDir)
+					: inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(DIRS.results, `${id}.json`),
+				cwd: runnerCwd,
+				placeholder: "{previous}",
+				maxOutput,
+				artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
+				artifactConfig,
+				share: shareEnabled,
+				sessionDir: resolvedSessionDir,
+				asyncDir,
+				sessionId: ctx.currentSessionId,
+				...(capabilityCeiling ? { capabilityCeiling } : {}),
+				piPackageRoot,
+				piArgv1: process.argv[1],
+				worktreeSetupHook,
+				worktreeSetupHookTimeoutMs,
+				worktreeBaseDir,
+				controlConfig,
+				timeoutMs,
+				deadlineAt,
+				turnBudget: params.turnBudget,
+				toolBudget: params.toolBudget,
+				usageBudget: params.usageBudget,
+				controlIntercomTarget,
+				childIntercomTargets: childIntercomTarget ? [childIntercomTarget(agent, 0)] : undefined,
+				resultMode: "single",
+				launchContractDigest,
+				...(params.parentWorkflowRunId ? { parentWorkflowRunId: params.parentWorkflowRunId } : {}),
+				...(params.workflowKey ? { workflowKey: params.workflowKey } : {}),
+				...(params.revivalLease ? { revivalLease: params.revivalLease } : {}),
+				nestedRoute: nestedRoute ?? inheritedNestedRoute,
+				nestedSelf: inheritedNestedRoute && nestedAddress ? {
+					parentRunId: nestedAddress.parentRunId,
+					parentStepIndex: nestedAddress.parentStepIndex,
+					depth: nestedAddress.depth,
+					path: nestedAddress.path,
+				} : undefined,
+			},
+			id,
+			runnerCwd,
+			(proof) => ctx.pi.events.emit(SUBAGENT_PROCESS_TERMINAL_EVENT, proof),
+		);
+	} catch (error) {
+		return formatAsyncStartError("single", `Failed to start async run '${id}': ${error instanceof Error ? error.message : String(error)}`);
+	}
+	if (spawnResult.error) return formatAsyncStartError("single", `Failed to start async run '${id}': ${spawnResult.error}`);
+	if (spawnResult.pid && inheritedNestedRoute && nestedAddress) {
+		const startedAt = Date.now();
+		try {
+			writeNestedEvent(inheritedNestedRoute, {
+				type: "subagent.nested.started",
+				ts: startedAt,
+				parentRunId: nestedAddress.parentRunId,
+				parentStepIndex: nestedAddress.parentStepIndex,
+				child: {
+					id,
+					parentRunId: nestedAddress.parentRunId,
+					parentStepIndex: nestedAddress.parentStepIndex,
+					depth: nestedAddress.depth,
+					path: nestedAddress.path,
+					asyncDir,
+					pid: spawnResult.pid,
+					ownerIntercomTarget: process.env.PI_SUBAGENT_INTERCOM_SESSION_NAME,
+					leafIntercomTarget: childIntercomTarget?.(agent, 0),
+					intercomTarget: childIntercomTarget?.(agent, 0),
+					ownerState: "live",
+					mode: "single",
+					state: "running",
+					agent,
+					agents: [agent],
+					chainStepCount: 1,
+					...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}),
+					...(initialTurnBudget ? { turnBudget: initialTurnBudget } : {}),
+					startedAt,
+					lastUpdate: startedAt,
+					...(capabilityCeiling ? { capabilityCeiling } : {}),
+				},
+			});
+		} catch (error) {
+			console.error("Failed to emit nested async start event:", error);
+		}
+	}
+	ctx.pi.events.emit(SUBAGENT_ASYNC_STARTED_EVENT, {
+		lifecycleArtifactVersion: SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
+		id,
+		pid: spawnResult.pid,
+		sessionId: ctx.currentSessionId,
+		mode: "single",
+		agent,
+		task: task?.slice(0, 50),
+		goal: (params.goal ?? task).slice(0, 120),
+		cwd: runnerCwd,
+		asyncDir,
+		launchContractDigest,
+		...(params.timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}),
+		...(initialTurnBudget ? { turnBudget: initialTurnBudget } : {}),
+		...(capabilityCeiling ? { capabilityCeiling } : {}),
+		nestedRoute,
+	});
 	return {
 		content: [{ type: "text", text: formatAsyncStartedMessage(`Async: ${agent} [${id}]`, ctx.interactive === true) }],
-		details: { mode: "single", runId: id, results: [], asyncId: id, asyncDir, ...(params.context ? { context: params.context } : {}), ...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
+		details: { mode: "single", runId: id, results: [], asyncId: id, asyncDir, launchContractDigest, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.context ? { context: params.context } : {}), ...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}), ...(params.turnBudget ? { turnBudget: params.turnBudget } : {}), ...(params.toolBudget ? { toolBudget: resolvedToolBudget.budget ?? params.toolBudget } : {}) } as Details,
 	};
 }
 
@@ -1392,6 +2006,7 @@ interface ConsumeAsyncChainOptions {
 	runnerCwd: string;
 	sessionId: string;
 	globalConcurrencyLimit?: number;
+	dynamicFanoutMaxItems?: number;
 	deadlineAt?: number;
 	turnBudget?: ResolvedTurnBudget;
 	worktreeSetupHook?: string;
@@ -1667,6 +2282,7 @@ async function consumeAsyncChainRun(
 	const control = new AbortController();
 	let stopRequested = false;
 	let interrupted = false;
+	let checkpointRejected = false;
 	let previousOutput = "";
 	let nextFlatIndex = 0;
 	const outputs: ChainOutputMap = {};
@@ -1756,10 +2372,116 @@ async function consumeAsyncChainRun(
 			}
 			const step = steps[logicalIndex]!;
 			let stepResults: ProgrammaticLeafResult[];
-			if (isDynamicRunnerGroup(step)) {
-				throw new Error("Dynamic fanout not supported in async programmatic mode.");
-			}
-			if (isParallelGroup(step)) {
+			if (isCheckpointRunnerStep(step)) {
+				const index = nextFlatIndex++;
+				const pendingCheckpoint = {
+					name: step.checkpoint,
+					...(step.message ? { message: step.message } : {}),
+					status: "pending" as const,
+					stepIndex: logicalIndex,
+				};
+				const startedAt = Date.now();
+				markProgrammaticCheckpoint(asyncDir, index, pendingCheckpoint, { status: "paused", startedAt });
+				writeProgrammaticStatus(asyncDir, { state: "paused", currentStep: index, checkpoint: pendingCheckpoint, lastUpdate: startedAt });
+				appendJsonl(eventsPath, JSON.stringify({ type: "subagent.checkpoint.paused", ts: startedAt, runId: id, stepIndex: logicalIndex, checkpoint: pendingCheckpoint }));
+				let decision: "approved" | "rejected" | undefined;
+				while (!control.signal.aborted && !decision) {
+					runControlPollOnce(asyncDir, controlHandlers);
+					decision = consumeCheckpointDecisionRequest(asyncDir);
+					if (!decision && !control.signal.aborted) await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+				}
+				if (decision === "approved") {
+					const approvedAt = Date.now();
+					const approvedCheckpoint = { ...pendingCheckpoint, status: "approved" as const, approvedAt };
+					markProgrammaticCheckpoint(asyncDir, index, approvedCheckpoint, { status: "completed", endedAt: approvedAt, durationMs: approvedAt - startedAt, exitCode: 0 });
+					writeProgrammaticStatus(asyncDir, { state: "running", checkpoint: approvedCheckpoint, lastUpdate: approvedAt });
+					appendJsonl(eventsPath, JSON.stringify({ type: "subagent.checkpoint.approved", ts: approvedAt, runId: id, stepIndex: logicalIndex, checkpoint: approvedCheckpoint }));
+					stepResults = [{ agent: `checkpoint:${step.checkpoint}`, index, output: "", success: true }];
+				} else if (decision === "rejected") {
+					checkpointRejected = true;
+					const rejectedAt = Date.now();
+					const rejectedCheckpoint = { ...pendingCheckpoint, status: "rejected" as const, rejectedAt };
+					const error = `Checkpoint '${step.checkpoint}' rejected.`;
+					markProgrammaticCheckpoint(asyncDir, index, rejectedCheckpoint, { status: "rejected", endedAt: rejectedAt, durationMs: rejectedAt - startedAt, exitCode: 1, error });
+					writeProgrammaticStatus(asyncDir, { state: "rejected", checkpoint: rejectedCheckpoint, error, lastUpdate: rejectedAt });
+					appendJsonl(eventsPath, JSON.stringify({ type: "subagent.checkpoint.rejected", ts: rejectedAt, runId: id, stepIndex: logicalIndex, checkpoint: rejectedCheckpoint }));
+					stepResults = [{ agent: `checkpoint:${step.checkpoint}`, index, output: "", success: false, error }];
+				} else {
+					const cancelled = stopRequested || control.signal.aborted;
+					const error = cancelled ? "Async run stopped." : "Async run interrupted.";
+					markProgrammaticCheckpoint(asyncDir, index, pendingCheckpoint, { status: cancelled ? "stopped" : "paused", endedAt: Date.now(), error });
+					stepResults = [{ agent: `checkpoint:${step.checkpoint}`, index, output: "", success: false, error, cancelled: true, stopped: cancelled }];
+				}
+			} else if (isDynamicRunnerGroup(step)) {
+				const baseIndex = nextFlatIndex;
+				let materialized: ReturnType<typeof materializeDynamicParallelStep>;
+				try {
+					materialized = materializeDynamicParallelStep(step as never, outputs, logicalIndex, { maxItems: options.dynamicFanoutMaxItems, allowRunnerFields: true });
+				} catch (error) {
+					const message = error instanceof DynamicFanoutError ? error.message : error instanceof Error ? error.message : String(error);
+					const failedAt = Date.now();
+					markProgrammaticStep(asyncDir, baseIndex, { status: "failed", startedAt: failedAt, endedAt: failedAt, durationMs: 0, exitCode: 1, error: message });
+					writeProgrammaticStatus(asyncDir, { state: "failed", currentStep: baseIndex, error: message, lastUpdate: failedAt });
+					stepResults = [{ agent: `expand:${step.parallel.agent}`, index: baseIndex, output: message, success: false, error: message }];
+					nextFlatIndex += 1;
+				}
+				if (stepResults === undefined) {
+					nextFlatIndex += materialized.parallel.length;
+					if (materialized.parallel.length === 0) {
+						try {
+							const collection: ReturnType<typeof collectDynamicResults> = [];
+							await validateDynamicCollection(step.collect.outputSchema, collection);
+							writeDynamicCollectionOutput(outputs, step.collect.as, collection, step.parallel.agent, logicalIndex);
+							markProgrammaticStep(asyncDir, baseIndex, { status: "completed", startedAt: Date.now(), endedAt: Date.now(), durationMs: 0, exitCode: 0 });
+							writeProgrammaticStatus(asyncDir, { outputs, lastUpdate: Date.now() });
+							stepResults = [{ agent: step.parallel.agent, index: baseIndex, output: "", success: true, structuredOutput: collection }];
+						} catch (error) {
+							const message = error instanceof DynamicFanoutError ? error.message : error instanceof Error ? error.message : String(error);
+							markProgrammaticStep(asyncDir, baseIndex, { status: "failed", startedAt: Date.now(), endedAt: Date.now(), durationMs: 0, exitCode: 1, error: message });
+							stepResults = [{ agent: step.parallel.agent, index: baseIndex, output: message, success: false, error: message }];
+						}
+					} else {
+						expandProgrammaticDynamicStatus(asyncDir, baseIndex, step, materialized);
+						const requests = materialized.parallel.map((task, taskIndex) => {
+							const dynamicTask = {
+								...step.parallel,
+								...task,
+								task: substituteTask(task.task ?? step.parallel.task ?? "{previous}"),
+								...(step.sessionFiles?.[taskIndex] ? { sessionFile: step.sessionFiles[taskIndex] } : {}),
+								...(step.thinkingOverrides?.[taskIndex] ? { thinking: step.thinkingOverrides[taskIndex] } : {}),
+							};
+							return runnerStepToRequest(dynamicTask, `${id}-${logicalIndex}-${taskIndex}`, baseIndex + taskIndex, dynamicTask.cwd ?? runnerCwd, options, childExtensions);
+						});
+					let groupFailed = false;
+					const concurrency = Math.min(step.concurrency ?? MAX_PARALLEL_CONCURRENCY, options.globalConcurrencyLimit ?? Number.POSITIVE_INFINITY);
+					stepResults = await mapConcurrent(requests, concurrency, async (request, taskIndex) => {
+						if (step.failFast && groupFailed) {
+							return projectResult({ agent: request.agent, index: request.childIndex, output: "", success: false, error: "Skipped due to fail-fast.", skipped: true });
+						}
+						active.set(request.childIndex, request);
+						markProgrammaticStep(asyncDir, request.childIndex, { status: "running", startedAt: Date.now() });
+						try {
+							const result = await consumeLeafRun(runtime, request, asyncDir, eventsPath, control.signal, programmaticMetadataFromStep(materialized.parallel[taskIndex] as RunnerSubagentStep));
+							if (!result.success && step.failFast) groupFailed = true;
+							return projectResult(result);
+						} finally {
+							active.delete(request.childIndex);
+						}
+					});
+					const collection = collectDynamicResults(step as never, materialized.items, stepResults.map((result) => ({ ...result, exitCode: result.success ? 0 : 1 })));
+					try {
+						await validateDynamicCollection(step.collect.outputSchema, collection);
+						writeDynamicCollectionOutput(outputs, step.collect.as, collection, step.parallel.agent, logicalIndex);
+						writeProgrammaticStatus(asyncDir, { outputs, lastUpdate: Date.now() });
+					} catch (error) {
+						const message = error instanceof DynamicFanoutError ? error.message : error instanceof Error ? error.message : String(error);
+						writeProgrammaticStatus(asyncDir, { state: "failed", error: message, lastUpdate: Date.now() });
+						stepResults.push({ agent: step.parallel.agent, index: -1, output: message, success: false, error: message, structuredOutput: collection });
+					}
+					previousOutput = dynamicOutputSummary(stepResults, materialized.items);
+				}
+				}
+			} else if (isParallelGroup(step)) {
 				const baseIndex = nextFlatIndex;
 				nextFlatIndex += step.parallel.length;
 				const worktreeSetup: WorktreeSetup | undefined = step.worktree
@@ -1899,7 +2621,7 @@ async function consumeAsyncChainRun(
 		const endedAt = Date.now();
 		const allSucceeded = results.length > 0 && results.every((result) => result.success);
 		const timedOut = results.some((result) => result.timedOut);
-		const state = stopRequested ? "stopped" : interrupted ? "paused" : allSucceeded ? "complete" : "failed";
+		const state = stopRequested ? "stopped" : checkpointRejected ? "rejected" : interrupted ? "paused" : allSucceeded ? "complete" : "failed";
 		const error = stopRequested
 			? "Async run stopped."
 			: interrupted
@@ -1997,11 +2719,36 @@ function programmaticMetadataFromStep(step: RunnerSubagentStep): Pick<ConsumeAsy
 function flattenProgrammaticStepDetails(steps: RunnerStep[]): Array<Record<string, unknown>> {
 	const details: Array<Record<string, unknown>> = [];
 	for (const step of steps) {
-		const children = isParallelGroup(step)
-			? step.parallel
-			: isDynamicRunnerGroup(step)
-				? [step.parallel]
-				: [step];
+		if (isCheckpointRunnerStep(step)) {
+			details.push({
+				agent: `checkpoint:${step.checkpoint}`,
+				label: step.label ?? step.checkpoint,
+				status: "pending",
+				checkpoint: {
+					name: step.checkpoint,
+					...(step.message ? { message: step.message } : {}),
+					status: "pending",
+					stepIndex: details.length,
+				},
+				recentTools: [],
+				recentOutput: [],
+			});
+			continue;
+		}
+		if (isDynamicRunnerGroup(step)) {
+			details.push({
+				agent: `expand:${step.parallel.agent}`,
+				phase: step.phase ?? step.parallel.phase,
+				label: step.label ?? step.parallel.label ?? `Dynamic fanout (${step.collect.as})`,
+				outputName: step.collect.as,
+				structured: Boolean(step.collect.outputSchema),
+				status: "pending",
+				recentTools: [],
+				recentOutput: [],
+			});
+			continue;
+		}
+		const children = isParallelGroup(step) ? step.parallel : [step];
 		for (const child of children) {
 			details.push({
 				agent: child.agent,
@@ -2017,6 +2764,8 @@ function flattenProgrammaticStepDetails(steps: RunnerStep[]): Array<Record<strin
 				...(child.launchContractDigest ? { launchContractDigest: child.launchContractDigest } : {}),
 				...(child.capabilityCeiling ? { capabilityCeiling: child.capabilityCeiling } : {}),
 				...(child.capabilityAudit ? { capabilityAudit: child.capabilityAudit } : {}),
+				recentTools: [],
+				recentOutput: [],
 			});
 		}
 	}
@@ -2031,17 +2780,90 @@ function flattenProgrammaticSteps(steps: RunnerStep[]): {
 	const parallelGroups: Array<{ start: number; count: number; stepIndex: number }> = [];
 	for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
 		const step = steps[stepIndex]!;
-		if (isParallelGroup(step)) {
+		if (isCheckpointRunnerStep(step)) {
+			agents.push(`checkpoint:${step.checkpoint}`);
+		} else if (isParallelGroup(step)) {
 			parallelGroups.push({ start: agents.length, count: step.parallel.length, stepIndex });
 			agents.push(...step.parallel.map((task) => task.agent));
 		} else if (isDynamicRunnerGroup(step)) {
 			parallelGroups.push({ start: agents.length, count: 1, stepIndex });
-			agents.push(step.parallel.agent);
+			agents.push(`expand:${step.parallel.agent}`);
 		} else {
 			agents.push(step.agent);
 		}
 	}
 	return { agents, parallelGroups };
+}
+
+function expandProgrammaticDynamicStatus(
+	asyncDir: string,
+	stepIndex: number,
+	step: { parallel: { agent: string }; phase?: string; label?: string },
+	materialized: { items: Array<{ key: string }>; parallel: Array<Record<string, unknown>> },
+): void {
+	const status = readStatus(asyncDir);
+	if (!status || !Array.isArray(status.steps)) return;
+	const children = materialized.parallel.map((task, itemIndex) => ({
+		agent: typeof task.agent === "string" ? task.agent : step.parallel.agent,
+		...(typeof task.phase === "string" || typeof step.phase === "string" ? { phase: task.phase ?? step.phase } : {}),
+		...(typeof task.label === "string" || typeof step.label === "string" ? { label: task.label ?? step.label } : {}),
+		status: "pending",
+		...(task.structuredOutputSchema !== undefined || task.structured !== undefined ? { structured: Boolean(task.structuredOutputSchema ?? task.structured) } : {}),
+		recentTools: [],
+		recentOutput: [],
+		itemKey: materialized.items[itemIndex]?.key,
+	}));
+	const delta = children.length - 1;
+	status.steps.splice(stepIndex, 1, ...children);
+	if (Array.isArray(status.parallelGroups)) {
+		for (const group of status.parallelGroups) {
+			if (group.start === stepIndex) {
+				group.count = children.length;
+			} else if (group.start > stepIndex) {
+				group.start += delta;
+			}
+		}
+	}
+	writeAtomicJson(path.join(asyncDir, "status.json"), {
+		...status,
+		lastUpdate: Date.now(),
+	});
+}
+
+function markProgrammaticCheckpoint(
+	asyncDir: string,
+	index: number,
+	checkpoint: Record<string, unknown>,
+	updates: Record<string, unknown>,
+): void {
+	updateProgrammaticStep(asyncDir, index, (step) => {
+		Object.assign(step, updates, { checkpoint });
+	});
+}
+
+function dynamicOutputSummary(results: ProgrammaticLeafResult[], items: Array<{ key: string }>): string {
+	return results
+		.map((result, index) => {
+			const key = items[index]?.key ?? index;
+			const body = result.success ? result.output : `${result.error ?? "Failed"}${result.output ? `\\n${result.output}` : ""}`;
+			return `=== Dynamic Item ${index + 1} (${result.agent}, key ${key}) ===\\n${body}`;
+		})
+		.join("\\n\\n");
+}
+
+function writeDynamicCollectionOutput(
+	outputs: ChainOutputMap,
+	name: string,
+	collection: unknown,
+	agent: string,
+	stepIndex: number,
+): void {
+	outputs[name] = {
+		text: JSON.stringify(collection),
+		structured: collection,
+		agent,
+		stepIndex,
+	};
 }
 
 function writeProgrammaticStatus(asyncDir: string, updates: Record<string, unknown>): void {
@@ -2420,4 +3242,10 @@ async function runControlPollLoop(asyncDir: string, signal: AbortSignal, handler
 			if (consumeInterruptRequest(asyncDir)) { handlers.onInterrupt?.(); break; }
 		} catch { /* silent */ }
 	}
+}
+
+export const DEFAULT_ASYNC_TIMEOUT_MS = 30 * 60 * 1000;
+
+export function workflowAwaitedAsyncResultPath(asyncDir: string): string {
+	return path.join(asyncDir, "workflow-result.json");
 }

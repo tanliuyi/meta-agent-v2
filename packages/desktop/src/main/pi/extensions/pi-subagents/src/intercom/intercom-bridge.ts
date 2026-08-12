@@ -17,6 +17,7 @@ function defaultSubagentConfigDir(agentDir = defaultAgentDir()): string {
 }
 
 const DEFAULT_INTERCOM_TARGET_PREFIX = "subagent-chat";
+export const PI_INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
 export const INTERCOM_BRIDGE_MARKER = "Intercom orchestration channel:";
 const DEFAULT_INTERCOM_BRIDGE_TEMPLATE = `The inherited thread is reference-only. Do not continue that conversation or send questions, status updates, or completion handoffs to the supervisor in normal assistant text.
 
@@ -53,14 +54,16 @@ interface ResolveIntercomBridgeInput {
 	config: ExtensionConfig["intercomBridge"];
 	context: "fresh" | "fork" | undefined;
 	orchestratorTarget?: string;
+	cwd?: string;
 	settingsDir?: string;
 	agentDir?: string;
 }
 
-export function resolveIntercomSessionTarget(sessionName: string | undefined, sessionId: string): string {
+export function resolveIntercomSessionTarget(sessionName: string | undefined, sessionId: string, intercomSessionId = process.env[PI_INTERCOM_SESSION_ID_ENV]): string {
 	const trimmedName = sessionName?.trim();
 	if (trimmedName) return trimmedName;
-	const normalizedSessionId = sessionId.startsWith("session-") ? sessionId.slice("session-".length) : sessionId;
+	const fallbackSessionId = intercomSessionId?.trim() || sessionId;
+	const normalizedSessionId = fallbackSessionId.startsWith("session-") ? fallbackSessionId.slice("session-".length) : fallbackSessionId;
 	return `${DEFAULT_INTERCOM_TARGET_PREFIX}-${normalizedSessionId.slice(0, 8)}`;
 }
 
@@ -80,12 +83,12 @@ export function resolveIntercomBridgeMode(value: unknown): IntercomBridgeMode {
 
 function resolveIntercomBridgeConfig(value: ExtensionConfig["intercomBridge"]): Required<IntercomBridgeConfig> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		return { mode: "off", instructionFile: "", resultDelivery: true };
+		return { mode: "always", instructionFile: "", resultDelivery: false };
 	}
 	return {
 		mode: resolveIntercomBridgeMode(value.mode),
 		instructionFile: typeof value.instructionFile === "string" ? value.instructionFile : "",
-		resultDelivery: value.resultDelivery !== false,
+		resultDelivery: value.resultDelivery === true,
 	};
 }
 

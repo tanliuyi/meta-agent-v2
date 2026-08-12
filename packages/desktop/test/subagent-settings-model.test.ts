@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { groupSubagentModels } from "../src/renderer/src/features/settings/subagent-model-options.ts";
+import { groupSubagentModels } from "../src/renderer/src/features/settings/subagents/subagent-model-options.ts";
 import { currentCsvToken, replaceCurrentCsvToken } from "../src/renderer/src/shared/ui/combobox.tsx";
 
 describe("subagent settings models", () => {

@@ -1,8 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { SubagentFormField } from "../src/renderer/src/features/settings/subagent-form-field.tsx";
-import { SubagentToggleField } from "../src/renderer/src/features/settings/subagent-toggle-field.tsx";
+import { SubagentFormField } from "../src/renderer/src/features/settings/subagents/subagent-form-field.tsx";
+import { SubagentToggleField } from "../src/renderer/src/features/settings/subagents/subagent-toggle-field.tsx";
 
 describe("subagent form field accessibility", () => {
   it("associates field labels with their controls", () => {

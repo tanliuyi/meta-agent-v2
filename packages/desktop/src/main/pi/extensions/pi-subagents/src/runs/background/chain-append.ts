@@ -301,3 +301,14 @@ export function appendRunnerStepsToStatus(input: {
 	input.status.lastUpdate = input.now ?? Date.now();
 	return { addedChainSteps, addedFlatSteps };
 }
+
+const MAX_STATUS_STEP_DESCRIPTION_CHARS = 160;
+
+/** Bounded one-line per-step task description persisted into status.json for fleet display. */
+export function statusStepDescription(task: string | undefined): string | undefined {
+	const description = task?.replace(/\s+/g, " ").trim();
+	if (!description) return undefined;
+	return description.length > MAX_STATUS_STEP_DESCRIPTION_CHARS
+		? `${description.slice(0, MAX_STATUS_STEP_DESCRIPTION_CHARS - 1)}…`
+		: description;
+}
