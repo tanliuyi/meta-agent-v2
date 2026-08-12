@@ -23,6 +23,7 @@ interface PluginDetailContentProps {
   mutationPending: boolean;
   /** 覆盖该市场插件的本地插件显示名；存在时市场版本被禁用。 */
   supersededByLocalPlugin?: string;
+  onSetEnabled(id: string, enabled: boolean): void;
   onSetScope(id: string, scope: MarketplacePluginScope, projectIds?: string[]): void;
 }
 
@@ -34,6 +35,7 @@ export function PluginDetailContent({
   projects,
   mutationPending,
   supersededByLocalPlugin,
+  onSetEnabled,
   onSetScope,
 }: PluginDetailContentProps) {
   if (!plugin && !installed) return null;
@@ -144,6 +146,18 @@ export function PluginDetailContent({
                     <dd>{installed.enabled ? "是" : "否"}</dd>
                   </div>
                 </dl>
+                <div className="plugin-local-detail-toggle">
+                  <div>
+                    <strong>启用此插件</strong>
+                    <span>仅影响新会话；当前会话需运行 /reload 重新加载。</span>
+                  </div>
+                  <Switch
+                    checked={installed.enabled}
+                    disabled={mutationPending || installed.state === "broken" || Boolean(supersededByLocalPlugin)}
+                    aria-label={`${installed.displayName} 启用状态`}
+                    onCheckedChange={(enabled) => onSetEnabled(installed.id, enabled)}
+                  />
+                </div>
               </section>
             ) : null}
 

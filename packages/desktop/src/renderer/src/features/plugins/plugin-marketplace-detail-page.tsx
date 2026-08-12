@@ -52,6 +52,7 @@ export function PluginMarketplaceDetailPage({
     controller.installingId !== undefined ||
     controller.updatingId !== undefined ||
     controller.uninstallingId !== undefined ||
+    controller.settingEnabledId !== undefined ||
     controller.settingScopeId !== undefined;
 
   const refreshDetail = () => {
@@ -201,6 +202,7 @@ export function PluginMarketplaceDetailPage({
                 projects={projects}
                 mutationPending={mutationPending}
                 supersededByLocalPlugin={installed ? localOverrides.get(installed.id) : undefined}
+                onSetEnabled={(id, enabled) => void controller.setEnabled(id, enabled)}
                 onSetScope={(id, scope, projectIds) => void controller.setScope(id, scope, projectIds)}
               />
             </div>

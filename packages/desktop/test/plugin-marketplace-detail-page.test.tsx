@@ -34,6 +34,7 @@ const { controller } = vi.hoisted(() => {
     installingId: undefined,
     updatingId: undefined,
     uninstallingId: undefined,
+    settingEnabledId: undefined,
     settingScopeId: undefined,
     error: undefined,
     notice: undefined,
@@ -44,6 +45,7 @@ const { controller } = vi.hoisted(() => {
     install: vi.fn(async () => undefined),
     update: vi.fn(async () => undefined),
     uninstall: vi.fn(async () => undefined),
+    setEnabled: vi.fn(async () => undefined),
     setScope: vi.fn(async () => undefined),
   };
   return { controller };

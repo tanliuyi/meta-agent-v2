@@ -12,7 +12,7 @@ import type {
   SubagentWatchdogSettings,
 } from "../../../../../shared/subagent-contracts.ts";
 import { SubagentFormField } from "./subagent-form-field.tsx";
-import { SubagentModelSelectOptions } from "./subagent-model-select-options.tsx";
+import { SubagentModelSelect } from "./subagent-model-select.tsx";
 
 const INHERIT_VALUE = "inherit";
 const ENABLED_VALUE = "enabled";
@@ -92,11 +92,14 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
         <h3 id="subagent-watchdog-heading">自动审查</h3>
         <span className="subagent-scope-badge">{scopeLabel}</span>
       </div>
+      <p className="subagent-watchdog-description">
+        自动监控子代理和当前会话的运行过程，在出现异常、卡顿或低效行为时提醒你处理。默认停用，启用后可选择审查模型与审查强度。
+      </p>
       <form className="subagent-config-form" onSubmit={submit}>
         <div className="subagent-watchdog-group">
-          <h4>全局</h4>
+          <h4>全局设置</h4>
           <div className="subagent-form-grid">
-            <SubagentFormField label="自动审查">
+            <SubagentFormField label="启用自动审查">
               {({ controlId, labelId }) => (
                 <SelectRoot value={globalEnabled} onValueChange={setGlobalEnabled}>
                   <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
@@ -104,7 +107,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={INHERIT_VALUE}>
-                      继承（{settings.inherited.enabled ? "启用" : "停用"}）
+                      跟随上层（{settings.inherited.enabled ? "启用" : "停用"}）
                     </SelectItem>
                     <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
                     <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
@@ -117,7 +120,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
         <div className="subagent-watchdog-group">
           <h4>主会话</h4>
           <div className="subagent-form-grid">
-            <SubagentFormField label="启用状态">
+            <SubagentFormField label="启用审查">
               {({ controlId, labelId }) => (
                 <SelectRoot value={mainEnabled} onValueChange={setMainEnabled}>
                   <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
@@ -125,7 +128,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={INHERIT_VALUE}>
-                      继承（{settings.inherited.main.enabled ? "启用" : "停用"}）
+                      跟随上层（{settings.inherited.main.enabled ? "启用" : "停用"}）
                     </SelectItem>
                     <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
                     <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
@@ -135,27 +138,26 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
             </SubagentFormField>
             <SubagentFormField label="审查模型">
               {({ controlId, labelId }) => (
-                <SelectRoot value={mainModel} onValueChange={setMainModel}>
-                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={INHERIT_VALUE}>
-                      继承（{settings.inherited.main.model ?? "当前会话模型"}）
-                    </SelectItem>
-                    <SubagentModelSelectOptions models={modelOptions} />
-                  </SelectContent>
-                </SelectRoot>
+                <SubagentModelSelect
+                  models={modelOptions}
+                  value={mainModel}
+                  inheritValue={INHERIT_VALUE}
+                  inheritName="跟随上层"
+                  inheritDetail={settings.inherited.main.model ?? "当前会话模型"}
+                  controlId={controlId}
+                  labelId={labelId}
+                  onValueChange={setMainModel}
+                />
               )}
             </SubagentFormField>
-            <SubagentFormField label="思考级别">
+            <SubagentFormField label="审查思考级别">
               {({ controlId, labelId }) => (
                 <SelectRoot value={mainThinking} onValueChange={setMainThinking}>
                   <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={INHERIT_VALUE}>继承（{mainThinkingLabel}）</SelectItem>
+                    <SelectItem value={INHERIT_VALUE}>跟随上层（{mainThinkingLabel}）</SelectItem>
                     {THINKING_LEVELS.map((level) => (
                       <SelectItem key={level} value={level}>
                         {level}
@@ -170,7 +172,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
         <div className="subagent-watchdog-group">
           <h4>子智能体</h4>
           <div className="subagent-form-grid">
-            <SubagentFormField label="启用状态">
+            <SubagentFormField label="启用审查">
               {({ controlId, labelId }) => (
                 <SelectRoot value={childrenEnabled} onValueChange={setChildrenEnabled}>
                   <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
@@ -178,7 +180,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={INHERIT_VALUE}>
-                      继承（{settings.inherited.children.enabled ? "启用" : "停用"}）
+                      跟随上层（{settings.inherited.children.enabled ? "启用" : "停用"}）
                     </SelectItem>
                     <SelectItem value={ENABLED_VALUE}>启用</SelectItem>
                     <SelectItem value={DISABLED_VALUE}>停用</SelectItem>
@@ -188,27 +190,26 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
             </SubagentFormField>
             <SubagentFormField label="审查模型">
               {({ controlId, labelId }) => (
-                <SelectRoot value={childrenModel} onValueChange={setChildrenModel}>
-                  <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={INHERIT_VALUE}>
-                      继承（{settings.inherited.children.model ?? "当前会话模型"}）
-                    </SelectItem>
-                    <SubagentModelSelectOptions models={modelOptions} />
-                  </SelectContent>
-                </SelectRoot>
+                <SubagentModelSelect
+                  models={modelOptions}
+                  value={childrenModel}
+                  inheritValue={INHERIT_VALUE}
+                  inheritName="跟随上层"
+                  inheritDetail={settings.inherited.children.model ?? "当前会话模型"}
+                  controlId={controlId}
+                  labelId={labelId}
+                  onValueChange={setChildrenModel}
+                />
               )}
             </SubagentFormField>
-            <SubagentFormField label="思考级别">
+            <SubagentFormField label="审查思考级别">
               {({ controlId, labelId }) => (
                 <SelectRoot value={childrenThinking} onValueChange={setChildrenThinking}>
                   <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={INHERIT_VALUE}>继承（{childrenThinkingLabel}）</SelectItem>
+                    <SelectItem value={INHERIT_VALUE}>跟随上层（{childrenThinkingLabel}）</SelectItem>
                     {THINKING_LEVELS.map((level) => (
                       <SelectItem key={level} value={level}>
                         {level}
@@ -222,7 +223,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
         </div>
         <div className="subagent-config-actions">
           <Button type="submit" disabled={saving}>
-            保存自动审查
+            保存设置
           </Button>
         </div>
       </form>

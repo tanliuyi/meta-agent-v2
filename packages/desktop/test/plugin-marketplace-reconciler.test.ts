@@ -328,6 +328,48 @@ describe("MarketplacePluginRegistry scope", () => {
     });
   });
 
+  it("switches an installed plugin between enabled and disabled", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+
+    const disabled = await harness.registry.commitEnabled(installed.snapshot.revision, harness.record.id, false);
+    expect(disabled).toMatchObject({ status: "saved" });
+    if (disabled.status !== "saved") throw new Error("Expected enabled-state commit");
+    expect(disabled.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, enabled: false });
+
+    const enabled = await harness.registry.commitEnabled(disabled.snapshot.revision, harness.record.id, true);
+    expect(enabled).toMatchObject({ status: "saved" });
+    if (enabled.status !== "saved") throw new Error("Expected enabled-state commit");
+    expect(enabled.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, enabled: true });
+  });
+
+  it("reports conflict, broken and not-installed enabled-state commits", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+
+    await expect(
+      harness.registry.commitEnabled(installed.snapshot.revision, harness.record.id, "yes" as never),
+    ).rejects.toThrow("enabled state is invalid");
+    await expect(harness.registry.commitEnabled("stale-revision", harness.record.id, false)).resolves.toEqual({
+      status: "conflict",
+      snapshot: installed.snapshot,
+    });
+    await expect(
+      harness.registry.commitEnabled(installed.snapshot.revision, "missing.plugin", false),
+    ).resolves.toMatchObject({
+      status: "not-installed",
+    });
+
+    await harness.registry.markBroken(harness.record.id, harness.record.artifactHash);
+    const broken = await harness.registry.getSnapshot();
+    await expect(harness.registry.commitEnabled(broken.revision, harness.record.id, true)).resolves.toMatchObject({
+      status: "broken",
+      snapshot: broken,
+    });
+  });
+
   it("switches an installed plugin between global and project scope", async () => {
     const harness = await createHarness();
     const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);

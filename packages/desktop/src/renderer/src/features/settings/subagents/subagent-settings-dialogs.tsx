@@ -27,13 +27,14 @@ export interface SubagentSettingsDialogsHandle {
 interface SubagentSettingsDialogsProps {
   allAgents: AgentSummary[];
   controller: SubagentSettingsController;
+  notifyMutation(mutation: SubagentSettingsMutation, successMessage: string): Promise<boolean>;
   scope: SubagentSettingsScope;
   snapshot?: SubagentSettingsSnapshot;
   systemTab: boolean;
 }
 
 export const SubagentSettingsDialogs = forwardRef<SubagentSettingsDialogsHandle, SubagentSettingsDialogsProps>(
-  ({ allAgents, controller, scope, snapshot, systemTab }, ref) => {
+  ({ allAgents, controller, notifyMutation, scope, snapshot, systemTab }, ref) => {
     const [agentEditor, setAgentEditor] = useState<AgentEditor>();
     const [chainEditor, setChainEditor] = useState<ChainSummary | null>();
     const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>();
@@ -61,29 +62,38 @@ export const SubagentSettingsDialogs = forwardRef<SubagentSettingsDialogsHandle,
 
     async function saveAgent(targetScope: SubagentSettingsScope, config: SubagentAgentConfigInput): Promise<boolean> {
       if (agentEditor?.builtin && agentEditor.agent) {
-        return controller.mutate({
-          type: "update-agent",
-          agent: agentEditor.agent.name,
-          scope: targetScope,
-          target: "builtin",
-          config,
-        });
+        return notifyMutation(
+          {
+            type: "update-agent",
+            agent: agentEditor.agent.name,
+            scope: targetScope,
+            target: "builtin",
+            config,
+          },
+          "智能体已保存",
+        );
       }
       if (agentEditor?.agent) {
-        return controller.mutate({
-          type: "update-agent",
-          agent: agentEditor.agent.name,
-          scope: targetScope,
-          target: "custom",
-          config,
-        });
+        return notifyMutation(
+          {
+            type: "update-agent",
+            agent: agentEditor.agent.name,
+            scope: targetScope,
+            target: "custom",
+            config,
+          },
+          "智能体已保存",
+        );
       }
       if (!config.name || !config.description) return false;
-      return controller.mutate({
-        type: "create-agent",
-        scope: targetScope,
-        config: { ...config, name: config.name, description: config.description },
-      });
+      return notifyMutation(
+        {
+          type: "create-agent",
+          scope: targetScope,
+          config: { ...config, name: config.name, description: config.description },
+        },
+        "智能体已创建",
+      );
     }
 
     async function saveChain(
@@ -91,14 +101,12 @@ export const SubagentSettingsDialogs = forwardRef<SubagentSettingsDialogsHandle,
       config: { name: string; description: string; steps: ChainSummary["steps"] },
     ): Promise<boolean> {
       if (chainEditor) {
-        return controller.mutate({
-          type: "update-chain",
-          chain: chainEditor.name,
-          scope: targetScope,
-          config,
-        });
+        return notifyMutation(
+          { type: "update-chain", chain: chainEditor.name, scope: targetScope, config },
+          "流程已保存",
+        );
       }
-      return controller.mutate({ type: "create-chain", scope: targetScope, config });
+      return notifyMutation({ type: "create-chain", scope: targetScope, config }, "流程已创建");
     }
 
     async function confirmDelete(): Promise<void> {
@@ -107,7 +115,9 @@ export const SubagentSettingsDialogs = forwardRef<SubagentSettingsDialogsHandle,
         deleteTarget.kind === "agent"
           ? { type: "delete-agent", agent: deleteTarget.name, scope: deleteTarget.scope }
           : { type: "delete-chain", chain: deleteTarget.name, scope: deleteTarget.scope };
-      if (await controller.mutate(mutation)) setDeleteTarget(undefined);
+      if (await notifyMutation(mutation, deleteTarget.kind === "agent" ? "智能体已删除" : "流程已删除")) {
+        setDeleteTarget(undefined);
+      }
     }
 
     return (

@@ -3,13 +3,21 @@ import X from "lucide-react/dist/esm/icons/x.mjs";
 
 export type ToastTone = "info" | "success" | "warning" | "error";
 
+export interface ToastAction {
+  label: string;
+  altText: string;
+  onClick(): void;
+}
+
+const DEFAULT_TOAST_DURATION = 5000;
+
 interface ToastProps {
   open: boolean;
   message: string;
   tone?: ToastTone;
   title?: string;
   duration?: number;
-  action?: { label: string; altText: string; onClick(): void };
+  action?: ToastAction;
   onDismiss(): void;
 }
 
@@ -19,7 +27,7 @@ export function Toast({ open, message, tone = "info", title, duration, action, o
       className="toast-root"
       data-tone={tone}
       open={open}
-      duration={duration}
+      duration={duration ?? DEFAULT_TOAST_DURATION}
       type={tone === "error" || tone === "warning" ? "foreground" : "background"}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) onDismiss();

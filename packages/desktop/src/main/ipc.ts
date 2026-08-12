@@ -79,6 +79,8 @@ import type {
   InstallMarketplacePluginInput,
   ListMarketplacePluginsInput,
   SaveMarketplaceEndpointInput,
+  SetMarketplacePluginEnabledInput,
+  SetMarketplacePluginEnabledResult,
   SetMarketplacePluginScopeInput,
   SetMarketplacePluginScopeResult,
   TestMarketplaceEndpointInput,
@@ -476,6 +478,17 @@ export function registerIpc(
         );
         return { ...result, ...application };
       });
+      ipcMain.handle(
+        CHANNELS.marketplaceSetPluginEnabled,
+        async (_event, input: SetMarketplacePluginEnabledInput): Promise<SetMarketplacePluginEnabledResult> => {
+          const result = await marketplaceRegistry.commitEnabled(input.expectedRevision, input.pluginId, input.enabled);
+          if (result.status === "conflict") return { status: "conflict", current: result.snapshot };
+          if (result.status === "not-installed") return { status: "not-installed", snapshot: result.snapshot };
+          if (result.status === "broken") return { status: "broken", snapshot: result.snapshot };
+          await sessions.extensionSettingsChanged();
+          return { status: "saved", snapshot: result.snapshot };
+        },
+      );
       ipcMain.handle(
         CHANNELS.marketplaceSetPluginScope,
         async (_event, input: SetMarketplacePluginScopeInput): Promise<SetMarketplacePluginScopeResult> => {

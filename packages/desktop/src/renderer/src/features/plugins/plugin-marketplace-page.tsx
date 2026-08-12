@@ -4,7 +4,7 @@ import { Tabs } from "@renderer/shared/ui/tabs";
 import { TabsContent } from "@renderer/shared/ui/tabs-content";
 import { TabsList } from "@renderer/shared/ui/tabs-list";
 import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
-import { Toast } from "@renderer/shared/ui/toast";
+import { useToast } from "@renderer/shared/ui/use-toast";
 import { useNavigate } from "@tanstack/react-router";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
@@ -35,12 +35,39 @@ export function PluginMarketplacePage({
   }, [initialView]);
   const controller = usePluginMarketplace(activeView === "marketplace", initialQuery);
   const localController = useLocalPlugins(returnSession?.projectId, returnSession?.threadId);
+  const toast = useToast();
+  useEffect(() => {
+    if (controller.notice) {
+      toast.notify({ title: "插件状态已更新", message: controller.notice, tone: "success" });
+      controller.clearNotice();
+    }
+  }, [controller.notice, controller.clearNotice, toast]);
+  useEffect(() => {
+    if (controller.error) {
+      toast.notify({
+        title: "插件操作失败",
+        message: controller.error,
+        tone: "error",
+        action:
+          controller.error.includes("not configured") || controller.error.includes("未配置")
+            ? { label: "打开设置", altText: "打开插件中心设置", onClick: () => setSettingsOpen(true) }
+            : undefined,
+      });
+      controller.clearError();
+    }
+  }, [controller.error, controller.clearError, toast]);
   const localOverrides = localPluginIdOverrides(
     (localController.snapshot?.entries ?? []).filter((entry) => entry.source === "development"),
   );
   const orphanedInstalled = controller.installed?.plugins.filter(
     (installed) => !controller.page?.plugins.some((plugin) => plugin.id === installed.id),
   );
+  const mutationPending =
+    controller.installingId !== undefined ||
+    controller.updatingId !== undefined ||
+    controller.uninstallingId !== undefined ||
+    controller.settingEnabledId !== undefined ||
+    controller.settingScopeId !== undefined;
 
   return (
     <>
@@ -128,33 +155,6 @@ export function PluginMarketplacePage({
                   当前显示离线缓存
                 </div>
               ) : null}
-              {controller.notice ? (
-                <Toast
-                  open
-                  message={controller.notice}
-                  tone="success"
-                  title="插件状态已更新"
-                  onDismiss={controller.clearNotice}
-                />
-              ) : null}
-              {controller.error ? (
-                <Toast
-                  open
-                  message={controller.error}
-                  tone="error"
-                  title="插件操作失败"
-                  action={
-                    controller.error.includes("not configured") || controller.error.includes("未配置")
-                      ? {
-                          label: "打开设置",
-                          altText: "打开插件中心设置",
-                          onClick: () => setSettingsOpen(true),
-                        }
-                      : undefined
-                  }
-                  onDismiss={controller.clearError}
-                />
-              ) : null}
 
               {orphanedInstalled && orphanedInstalled.length > 0 ? (
                 <section className="plugin-marketplace-section" aria-labelledby="installed-plugin-heading">
@@ -168,6 +168,8 @@ export function PluginMarketplacePage({
                         key={installed.id}
                         installed={installed}
                         supersededByLocalPlugin={localOverrides.get(installed.id)}
+                        mutationPending={mutationPending}
+                        onToggleEnabled={(enabled) => void controller.setEnabled(installed.id, enabled)}
                         onOpen={() =>
                           void navigate({
                             to: "/plugins/$pluginId",
@@ -202,6 +204,8 @@ export function PluginMarketplacePage({
                         plugin={plugin}
                         installed={controller.installed?.plugins.find((installed) => installed.id === plugin.id)}
                         supersededByLocalPlugin={localOverrides.get(plugin.id)}
+                        mutationPending={mutationPending}
+                        onToggleEnabled={(enabled) => void controller.setEnabled(plugin.id, enabled)}
                         onOpen={() =>
                           void navigate({
                             to: "/plugins/$pluginId",

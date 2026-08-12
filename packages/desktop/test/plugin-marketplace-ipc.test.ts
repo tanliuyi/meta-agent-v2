@@ -29,7 +29,7 @@ describe("plugin marketplace IPC", () => {
     getExtensionState: vi.fn(),
     applyExtensionSet: vi.fn(),
   };
-  const registry = { getSnapshot: vi.fn(), commitScope: vi.fn() };
+  const registry = { getSnapshot: vi.fn(), commitEnabled: vi.fn(), commitScope: vi.fn() };
   const installer = {
     install: vi.fn(),
     update: vi.fn(),
@@ -317,6 +317,41 @@ describe("plugin marketplace IPC", () => {
       },
     });
     expect(sessions.extensionSettingsChanged).not.toHaveBeenCalled();
+  });
+
+  it("persists an enabled-state change without applying it to a running session", async () => {
+    const input = {
+      requestId: "enabled",
+      expectedRevision: "one",
+      pluginId: "dev.meta-agent.plugin",
+      enabled: false,
+    };
+    const snapshot = { revision: "two", plugins: [] };
+    registry.commitEnabled.mockResolvedValue({ status: "saved", snapshot });
+
+    const result = await electron.handles.get(CHANNELS.marketplaceSetPluginEnabled)?.({}, input);
+
+    expect(registry.commitEnabled).toHaveBeenCalledWith("one", "dev.meta-agent.plugin", false);
+    expect(sessions.extensionSettingsChanged).toHaveBeenCalledOnce();
+    expect(sessions.applyExtensionSet).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: "saved", snapshot });
+  });
+
+  it("returns enabled-state conflicts without invalidating extensions", async () => {
+    const input = {
+      requestId: "enabled-conflict",
+      expectedRevision: "stale",
+      pluginId: "dev.meta-agent.plugin",
+      enabled: true,
+    };
+    const current = { revision: "two", plugins: [] };
+    registry.commitEnabled.mockResolvedValue({ status: "conflict", snapshot: current });
+
+    const result = await electron.handles.get(CHANNELS.marketplaceSetPluginEnabled)?.({}, input);
+
+    expect(result).toEqual({ status: "conflict", current });
+    expect(sessions.extensionSettingsChanged).not.toHaveBeenCalled();
+    expect(sessions.applyExtensionSet).not.toHaveBeenCalled();
   });
 
   it("applies a plugin scope change and invalidates extension settings", async () => {

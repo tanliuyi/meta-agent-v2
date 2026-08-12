@@ -31,6 +31,7 @@ interface PluginDetailDialogProps {
   onInstall(plugin: MarketplacePluginSummary): void;
   onUpdate(plugin: MarketplacePluginSummary): void;
   onUninstall(id: string): void;
+  onSetEnabled(id: string, enabled: boolean): void;
   onSetScope(id: string, scope: MarketplacePluginScope, projectIds?: string[]): void;
 }
 
@@ -49,6 +50,7 @@ export function PluginDetailDialog({
   onInstall,
   onUpdate,
   onUninstall,
+  onSetEnabled,
   onSetScope,
 }: PluginDetailDialogProps) {
   if (!plugin && !installed) return null;
@@ -97,6 +99,7 @@ export function PluginDetailDialog({
           marketplaceId={marketplaceId}
           projects={projects}
           mutationPending={mutationPending}
+          onSetEnabled={onSetEnabled}
           onSetScope={onSetScope}
         />
       </DialogContent>

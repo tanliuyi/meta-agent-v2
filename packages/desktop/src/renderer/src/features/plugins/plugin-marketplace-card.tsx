@@ -1,3 +1,4 @@
+import { Switch } from "@renderer/shared/ui/switch";
 import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
 import type {
   InstalledMarketplacePluginSummary,
@@ -10,15 +11,19 @@ interface MarketplacePluginCardProps {
   plugin?: MarketplacePluginSummary;
   installed?: InstalledMarketplacePluginSummary;
   /** 覆盖该市场插件的本地插件显示名；存在时市场版本被禁用。 */
+  mutationPending?: boolean;
   supersededByLocalPlugin?: string;
   onOpen(): void;
+  onToggleEnabled?(enabled: boolean): void;
 }
 
 export function MarketplacePluginCard({
   plugin,
   installed,
+  mutationPending = false,
   supersededByLocalPlugin,
   onOpen,
+  onToggleEnabled,
 }: MarketplacePluginCardProps) {
   if (!plugin && !installed) return null;
   const name = plugin?.name ?? installed!.displayName;
@@ -27,31 +32,34 @@ export function MarketplacePluginCard({
   const version = installed?.version ?? plugin?.compatibleVersion ?? plugin?.latestVersion;
   const state = cardState(plugin, installed, supersededByLocalPlugin);
 
+  const canToggle = installed?.state === "installed" && !supersededByLocalPlugin && onToggleEnabled;
+
   return (
-    <button
-      type="button"
-      className="plugin-marketplace-card"
-      data-status={plugin?.status}
-      aria-label={`查看 ${name} 详情`}
-      title={supersededByLocalPlugin ? `已由本地插件 ${supersededByLocalPlugin} 覆盖，市场版本禁用` : undefined}
-      onClick={onOpen}
-    >
-      <span className="plugin-marketplace-card-header">
-        <span className="plugin-marketplace-card-icon" aria-hidden="true">
-          <PluginIcon name={name} iconUrl={plugin?.iconUrl} className="size-10" />
-        </span>
-        <span className="plugin-marketplace-card-title">
-          <strong>{name}</strong>
-          <span>
-            {publisher}
-            {plugin?.publisher.verified ? <BadgeCheck aria-label="已验证发布者" /> : null}
+    <div className="plugin-marketplace-card" data-status={plugin?.status}>
+      <button
+        type="button"
+        className="plugin-marketplace-card-main"
+        aria-label={`查看 ${name} 详情`}
+        title={supersededByLocalPlugin ? `已由本地插件 ${supersededByLocalPlugin} 覆盖，市场版本禁用` : undefined}
+        onClick={onOpen}
+      >
+        <span className="plugin-marketplace-card-header">
+          <span className="plugin-marketplace-card-icon" aria-hidden="true">
+            <PluginIcon name={name} iconUrl={plugin?.iconUrl} className="size-10" />
+          </span>
+          <span className="plugin-marketplace-card-title">
+            <strong>{name}</strong>
+            <span>
+              {publisher}
+              {plugin?.publisher.verified ? <BadgeCheck aria-label="已验证发布者" /> : null}
+            </span>
+          </span>
+          <span className="plugin-marketplace-badge" data-tone={state.tone}>
+            {state.label}
           </span>
         </span>
-        <span className="plugin-marketplace-badge" data-tone={state.tone}>
-          {state.label}
-        </span>
-      </span>
-      <span className="plugin-marketplace-card-description">{description}</span>
+        <span className="plugin-marketplace-card-description">{description}</span>
+      </button>
       <span className="plugin-marketplace-card-footer">
         <span>{version ? `v${version}` : "无兼容版本"}</span>
         {installed ? (
@@ -75,7 +83,16 @@ export function MarketplacePluginCard({
             本地覆盖
           </span>
         ) : null}
+        {installed ? (
+          <Switch
+            checked={installed.enabled}
+            disabled={!canToggle || mutationPending}
+            aria-label={`${name} 启用状态`}
+            title={installed.state === "broken" ? "插件已损坏，无法启用" : undefined}
+            onCheckedChange={onToggleEnabled}
+          />
+        ) : null}
       </span>
-    </button>
+    </div>
   );
 }

@@ -112,6 +112,7 @@ export const CHANNELS = {
   marketplaceInstallPlugin: "desktop:marketplace:install-plugin",
   marketplaceUpdatePlugin: "desktop:marketplace:update-plugin",
   marketplaceUninstallPlugin: "desktop:marketplace:uninstall-plugin",
+  marketplaceSetPluginEnabled: "desktop:marketplace:set-plugin-enabled",
   marketplaceSetPluginScope: "desktop:marketplace:set-plugin-scope",
   subagentsGetSnapshot: "desktop:subagents:get-snapshot",
   subagentsSaveConfig: "desktop:subagents:save-config",

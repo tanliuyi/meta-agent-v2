@@ -14,6 +14,7 @@ export interface PluginMarketplaceController {
   installingId?: string;
   updatingId?: string;
   uninstallingId?: string;
+  settingEnabledId?: string;
   settingScopeId?: string;
   error?: string;
   notice?: string;
@@ -24,6 +25,7 @@ export interface PluginMarketplaceController {
   install(plugin: MarketplacePluginSummary): Promise<void>;
   update(plugin: MarketplacePluginSummary): Promise<void>;
   uninstall(pluginId: string): Promise<void>;
+  setEnabled(pluginId: string, enabled: boolean): Promise<void>;
   setScope(pluginId: string, scope: MarketplacePluginScope, projectIds?: string[]): Promise<void>;
 }
 
@@ -35,6 +37,7 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
   const [installingId, setInstallingId] = useState<string>();
   const [updatingId, setUpdatingId] = useState<string>();
   const [uninstallingId, setUninstallingId] = useState<string>();
+  const [settingEnabledId, setSettingEnabledId] = useState<string>();
   const [settingScopeId, setSettingScopeId] = useState<string>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -188,6 +191,38 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
     [installed, installingId, updatingId, uninstallingId],
   );
 
+  const setEnabled = useCallback(
+    async (pluginId: string, enabled: boolean) => {
+      if (!installed || installingId || updatingId || uninstallingId || settingEnabledId || settingScopeId) return;
+      installedSnapshotEpoch.current += 1;
+      setSettingEnabledId(pluginId);
+      setError(undefined);
+      setNotice(undefined);
+      try {
+        const result = await window.desktop.marketplace.setPluginEnabled({
+          requestId: crypto.randomUUID(),
+          expectedRevision: installed.revision,
+          pluginId,
+          enabled,
+        });
+        if (!mounted.current) return;
+        installedSnapshotEpoch.current += 1;
+        setInstalled(result.status === "conflict" ? result.current : result.snapshot);
+        if (result.status === "conflict") setError("插件安装状态已变化，请重试");
+        else if (result.status === "not-installed") setNotice("插件已不在本机，已同步最新状态");
+        else if (result.status === "broken") setError("插件已损坏，无法启用");
+        else {
+          setNotice(`插件已${enabled ? "启用" : "停用"}；新会话自动生效，当前会话需运行 /reload`);
+        }
+      } catch (reason) {
+        if (mounted.current) setError(marketplaceErrorMessage(reason));
+      } finally {
+        if (mounted.current) setSettingEnabledId(undefined);
+      }
+    },
+    [installed, installingId, settingEnabledId, settingScopeId, uninstallingId, updatingId],
+  );
+
   const setScope = useCallback(
     async (pluginId: string, scope: MarketplacePluginScope, projectIds?: string[]) => {
       if (!installed || installingId || updatingId || uninstallingId || settingScopeId) return;
@@ -229,6 +264,7 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
     installingId,
     updatingId,
     uninstallingId,
+    settingEnabledId,
     settingScopeId,
     error,
     notice,
@@ -239,6 +275,7 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
     install,
     update,
     uninstall,
+    setEnabled,
     setScope,
   };
 }

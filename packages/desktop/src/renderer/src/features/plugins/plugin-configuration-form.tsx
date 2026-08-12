@@ -3,6 +3,7 @@ import { useToast } from "@renderer/shared/ui/use-toast";
 import Braces from "lucide-react/dist/esm/icons/braces.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
 import { Fragment, useEffect, useState } from "react";
+import type { PluginConfigurationField } from "../../../../shared/plugin-configuration-contracts.ts";
 import { PluginConfigurationFieldControl } from "./plugin-configuration-field-control.tsx";
 import { PluginConfigurationJsonEditor } from "./plugin-configuration-json-editor.tsx";
 import type { PluginConfigurationSource } from "./use-plugin-configuration.ts";
@@ -52,7 +53,15 @@ export function PluginConfigurationForm({
   const sortedFields = [...controller.snapshot.schema.fields].sort(
     (a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER),
   );
-  const seenGroups = new Set<string>();
+  const segments: Array<{ group: string | undefined; fields: PluginConfigurationField[] }> = [];
+  for (const field of sortedFields) {
+    const segment = segments[segments.length - 1];
+    if (segment !== undefined && segment.group === field.group) {
+      segment.fields.push(field);
+    } else {
+      segments.push({ group: field.group, fields: [field] });
+    }
+  }
   return (
     <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-detail-configuration">
       <div className="plugin-configuration-heading">
@@ -84,14 +93,18 @@ export function PluginConfigurationForm({
         <PluginConfigurationJsonEditor controller={controller} saveRequest={jsonSaveRequest} />
       ) : (
         <div className="plugin-configuration-fields">
-          {sortedFields.map((field) => {
-            const heading = field.group !== undefined && !seenGroups.has(field.group) ? field.group : undefined;
-            if (field.group !== undefined) seenGroups.add(field.group);
-            return (
-              <Fragment key={field.key}>
-                {heading !== undefined ? <h4 className="plugin-configuration-group-heading">{heading}</h4> : null}
-                <PluginConfigurationFieldControl field={field} controller={controller} />
-              </Fragment>
+          {segments.map((segment) => {
+            const key = segment.fields[0].key;
+            const controls = segment.fields.map((field) => (
+              <PluginConfigurationFieldControl key={field.key} field={field} controller={controller} />
+            ));
+            return segment.group === undefined ? (
+              <Fragment key={key}>{controls}</Fragment>
+            ) : (
+              <div className="plugin-configuration-group" key={key}>
+                <h4 className="plugin-configuration-group-heading">{segment.group}</h4>
+                {controls}
+              </div>
             );
           })}
         </div>

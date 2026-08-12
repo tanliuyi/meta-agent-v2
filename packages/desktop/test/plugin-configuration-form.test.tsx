@@ -60,6 +60,10 @@ vi.mock("@radix-ui/react-select", () => {
   };
 });
 
+vi.mock("../src/renderer/src/shared/ui/use-toast.ts", () => ({
+  useToast: () => ({ notify: vi.fn(), update: vi.fn(), dismiss: vi.fn() }),
+}));
+
 const controllerState = vi.hoisted(() => ({
   snapshot: undefined as PluginConfigurationSnapshot | undefined,
   values: {} as Record<string, string | boolean>,
@@ -133,7 +137,7 @@ function renderForm(fields: PluginConfigurationField[]): string {
 }
 
 describe("plugin configuration form", () => {
-  it("sorts fields by order and renders group headings before their first field", () => {
+  it("sorts fields by order and wraps each group's heading and fields in a group container", () => {
     const markup = renderForm([
       { key: "apiKey", label: "API 密钥", type: "secret", group: "连接设置", order: 0 },
       { key: "host", label: "主机", type: "text", group: "连接设置", order: 1 },
@@ -150,20 +154,27 @@ describe("plugin configuration form", () => {
     ]);
 
     expect(markup.match(/<h4/g)).toHaveLength(2);
+    expect(markup.match(/<div class="plugin-configuration-group">/g)).toHaveLength(2);
     const apiKey = markup.indexOf('id="plugin-configuration-apiKey"');
     const host = markup.indexOf('id="plugin-configuration-host"');
     const name = markup.indexOf('id="plugin-configuration-name"');
     const mode = markup.indexOf('id="plugin-configuration-mode"');
     const timeout = markup.indexOf('id="plugin-configuration-timeout"');
+    const firstGroup = markup.indexOf('<div class="plugin-configuration-group">');
+    const secondGroup = markup.lastIndexOf('<div class="plugin-configuration-group">');
     expect(apiKey).toBeGreaterThan(-1);
     expect(host).toBeGreaterThan(apiKey);
     expect(name).toBeGreaterThan(host);
     expect(mode).toBeGreaterThan(name);
     expect(timeout).toBeGreaterThan(mode);
-    expect(markup.indexOf(">连接设置</h4>")).toBeGreaterThan(-1);
-    expect(markup.indexOf(">连接设置</h4>")).toBeLessThan(apiKey);
-    expect(markup.indexOf(">高级选项</h4>")).toBeGreaterThan(-1);
-    expect(markup.indexOf(">高级选项</h4>")).toBeLessThan(mode);
+    expect(firstGroup).toBeGreaterThan(-1);
+    expect(markup.indexOf(">连接设置</h4>")).toBeGreaterThan(firstGroup);
+    expect(apiKey).toBeGreaterThan(markup.indexOf(">连接设置</h4>"));
+    expect(secondGroup).toBeGreaterThan(host);
+    expect(secondGroup).toBeGreaterThan(name);
+    expect(secondGroup).toBeLessThan(mode);
+    expect(markup.indexOf(">高级选项</h4>")).toBeGreaterThan(secondGroup);
+    expect(mode).toBeGreaterThan(markup.indexOf(">高级选项</h4>"));
     expect(markup.indexOf(">连接设置</h4>")).toBe(markup.lastIndexOf(">连接设置</h4>"));
     expect(markup.indexOf(">高级选项</h4>")).toBe(markup.lastIndexOf(">高级选项</h4>"));
   });

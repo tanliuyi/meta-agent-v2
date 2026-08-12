@@ -93,6 +93,22 @@ export class MarketplacePluginRegistry {
     return operation;
   }
 
+  commitEnabled(
+    expectedRevision: string,
+    pluginId: string,
+    enabled: boolean,
+  ): Promise<{
+    status: "saved" | "conflict" | "not-installed" | "broken";
+    snapshot: InstalledMarketplacePluginsSnapshot;
+  }> {
+    const operation = this.saveTail.then(() => this.commitEnabledLocked(expectedRevision, pluginId, enabled));
+    this.saveTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   commitScope(
     expectedRevision: string,
     pluginId: string,
@@ -231,6 +247,36 @@ export class MarketplacePluginRegistry {
         ...current.data,
         version: 1,
         plugins: current.data.plugins.filter((plugin) => plugin.id !== pluginId).map(cloneRecord),
+      });
+      return { status: "saved", snapshot: await this.getSnapshot() };
+    } finally {
+      await release();
+    }
+  }
+
+  private async commitEnabledLocked(
+    expectedRevision: string,
+    pluginId: string,
+    enabled: boolean,
+  ): Promise<{
+    status: "saved" | "conflict" | "not-installed" | "broken";
+    snapshot: InstalledMarketplacePluginsSnapshot;
+  }> {
+    if (typeof enabled !== "boolean") throw new Error("Marketplace plugin enabled state is invalid");
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    const release = await this.lockRegistry();
+    try {
+      const current = await this.readCurrent();
+      if (current.revision !== expectedRevision) return { status: "conflict", snapshot: snapshot(current) };
+      const existing = current.data.plugins?.find((plugin) => plugin.id === pluginId);
+      if (!existing) return { status: "not-installed", snapshot: snapshot(current) };
+      if (existing.state === "broken") return { status: "broken", snapshot: snapshot(current) };
+      await this.atomicWrite({
+        ...current.data,
+        version: 1,
+        plugins: (current.data.plugins ?? []).map((plugin) =>
+          plugin.id === pluginId ? cloneRecord({ ...existing, enabled }) : cloneRecord(plugin),
+        ),
       });
       return { status: "saved", snapshot: await this.getSnapshot() };
     } finally {

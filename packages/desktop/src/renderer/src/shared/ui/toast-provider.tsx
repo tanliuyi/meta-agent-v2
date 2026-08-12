@@ -35,6 +35,7 @@ export function ToastProvider({ children, ...props }: ToastPrimitive.ToastProvid
             message={notification.message}
             tone={notification.tone}
             duration={notification.duration}
+            action={notification.action}
             onDismiss={() => dismiss(notification.id)}
           />
         ))}

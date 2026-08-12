@@ -118,6 +118,8 @@ import type {
   MarketplacePluginSummary,
   SaveMarketplaceEndpointInput,
   SaveMarketplaceEndpointResult,
+  SetMarketplacePluginEnabledInput,
+  SetMarketplacePluginEnabledResult,
   SetMarketplacePluginScopeInput,
   SetMarketplacePluginScopeResult,
   TestMarketplaceEndpointInput,
@@ -249,6 +251,7 @@ export interface DesktopApi {
     installPlugin(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult>;
     updatePlugin(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult>;
     uninstallPlugin(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult>;
+    setPluginEnabled(input: SetMarketplacePluginEnabledInput): Promise<SetMarketplacePluginEnabledResult>;
     setPluginScope(input: SetMarketplacePluginScopeInput): Promise<SetMarketplacePluginScopeResult>;
   };
   subagents: {

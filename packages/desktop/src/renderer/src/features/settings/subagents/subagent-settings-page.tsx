@@ -4,6 +4,7 @@ import { Tabs } from "@renderer/shared/ui/tabs";
 import { TabsContent } from "@renderer/shared/ui/tabs-content";
 import { TabsList } from "@renderer/shared/ui/tabs-list";
 import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
+import { useToast } from "@renderer/shared/ui/use-toast";
 import { selectProjects } from "@renderer/state/desktop-selectors";
 import { useDesktopStore } from "@renderer/state/desktop-store-context";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
@@ -11,7 +12,12 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
-import type { AgentSummary, ChainSummary, SubagentSettingsScope } from "../../../../../shared/subagent-contracts.ts";
+import type {
+  AgentSummary,
+  ChainSummary,
+  SubagentSettingsMutation,
+  SubagentSettingsScope,
+} from "../../../../../shared/subagent-contracts.ts";
 import { builtinSubagentDisplayName } from "../../../shared/lib/builtin-subagent-name.ts";
 import { SubagentAgentSection } from "./subagent-agent-section.tsx";
 import { SubagentChainRow } from "./subagent-chain-row.tsx";
@@ -39,6 +45,19 @@ export function SubagentSettingsPage() {
   const controller = useSubagentSettingsController(
     selectedProjectId,
     systemTab ? "system" : selectedProjectId ? "project" : "user",
+  );
+  const toast = useToast();
+  const notifyMutation = useCallback(
+    async (mutation: SubagentSettingsMutation, successMessage: string): Promise<boolean> => {
+      const failure = await controller.mutate(mutation);
+      if (failure === undefined) {
+        toast.notify({ message: successMessage, tone: "success" });
+        return true;
+      }
+      toast.notify({ message: failure, tone: "error" });
+      return false;
+    },
+    [controller, toast],
   );
   const dialogsRef = useRef<SubagentSettingsDialogsHandle>(null);
   const [query, setQuery] = useState("");
@@ -156,7 +175,9 @@ export function SubagentSettingsPage() {
                     models={snapshot.models}
                     scopeLabel={scope === "project" ? "项目" : "个人"}
                     saving={controller.mutating}
-                    onSave={(config) => controller.mutate({ type: "update-watchdog-config", scope, config })}
+                    onSave={(config) =>
+                      notifyMutation({ type: "update-watchdog-config", scope, config }, "看门狗配置已保存")
+                    }
                   />
                   <section className="settings-section subagent-section" aria-labelledby="custom-agents-heading">
                     <div className="settings-section-heading subagent-section-heading">
@@ -211,7 +232,7 @@ export function SubagentSettingsPage() {
                   key={snapshot.revision}
                   config={snapshot.extensionConfig}
                   saving={controller.mutating}
-                  onSave={(config) => controller.mutate({ type: "update-extension-config", config })}
+                  onSave={(config) => notifyMutation({ type: "update-extension-config", config }, "扩展配置已保存")}
                 />
               )}
 
@@ -234,14 +255,14 @@ export function SubagentSettingsPage() {
                 copyLabel={scope === "project" ? "复制到项目" : "复制到个人"}
                 onEdit={(agent) => dialogsRef.current?.openAgent(agent, true)}
                 onToggle={(agent, disabled) =>
-                  controller.mutate({
-                    type: "set-agent-enabled",
-                    agent: agent.name,
-                    disabled,
-                    scope,
-                  })
+                  notifyMutation(
+                    { type: "set-agent-enabled", agent: agent.name, disabled, scope },
+                    `${agent.name}${disabled ? "已禁用" : "已启用"}`,
+                  )
                 }
-                onEject={(agent) => controller.mutate({ type: "eject-agent", agent: agent.name, scope })}
+                onEject={(agent) =>
+                  notifyMutation({ type: "eject-agent", agent: agent.name, scope }, "已弹出为自定义智能体")
+                }
               />
 
               {snapshot.diagnostics.length ? (
@@ -264,6 +285,7 @@ export function SubagentSettingsPage() {
         ref={dialogsRef}
         allAgents={allAgents}
         controller={controller}
+        notifyMutation={notifyMutation}
         scope={scope}
         snapshot={snapshot}
         systemTab={systemTab}

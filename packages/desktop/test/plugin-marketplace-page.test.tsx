@@ -5,6 +5,7 @@ import { PluginConfigurationForm } from "../src/renderer/src/features/plugins/pl
 import { pluginActionConfirmation } from "../src/renderer/src/features/plugins/plugin-detail-dialog.tsx";
 import { MarketplacePluginCard } from "../src/renderer/src/features/plugins/plugin-marketplace-card.tsx";
 import { PluginScopeSettings } from "../src/renderer/src/features/plugins/plugin-scope-settings.tsx";
+import { ToastProvider } from "../src/renderer/src/shared/ui/toast-provider.tsx";
 import { GENERAL_WORKSPACE_ID, type Project } from "../src/shared/contracts.ts";
 import type {
   InstalledMarketplacePluginSummary,
@@ -50,6 +51,8 @@ vi.mock("../src/renderer/src/features/plugins/use-plugin-marketplace.ts", () => 
     install: vi.fn(async () => undefined),
     update: vi.fn(async () => undefined),
     uninstall: vi.fn(async () => undefined),
+    setEnabled: vi.fn(async () => undefined),
+    setScope: vi.fn(async () => undefined),
   }),
 }));
 
@@ -89,7 +92,11 @@ const installed: InstalledMarketplacePluginSummary = {
 
 describe("plugin detail confirmation", () => {
   it("mounts the host-rendered configuration section for configurable installed plugins", () => {
-    const markup = renderToStaticMarkup(<PluginConfigurationForm pluginId={installed.id} />);
+    const markup = renderToStaticMarkup(
+      <ToastProvider label="测试通知">
+        <PluginConfigurationForm pluginId={installed.id} />
+      </ToastProvider>,
+    );
 
     expect(markup).toContain('id="plugin-detail-configuration"');
     expect(markup).toContain("正在载入配置");
@@ -120,17 +127,30 @@ describe("plugin marketplace cards", () => {
     expect(markup).not.toContain("全部项目");
   });
 
-  it("shows update and local-only states without placing action buttons inside the card", () => {
+  it("shows update and local-only states with a separate enabled-state switch", () => {
     const updateMarkup = renderToStaticMarkup(
-      <MarketplacePluginCard plugin={plugin} installed={installed} onOpen={vi.fn()} />,
+      <MarketplacePluginCard plugin={plugin} installed={installed} onOpen={vi.fn()} onToggleEnabled={vi.fn()} />,
     );
     const localMarkup = renderToStaticMarkup(<MarketplacePluginCard installed={installed} onOpen={vi.fn()} />);
 
     expect(updateMarkup).toContain("可更新");
     expect(updateMarkup).toContain("全部项目");
-    expect(updateMarkup.match(/<button/g)).toHaveLength(1);
+    expect(updateMarkup.match(/<button/g)).toHaveLength(2);
+    expect(updateMarkup).toContain('</button><span class="plugin-marketplace-card-footer">');
+    expect(updateMarkup).toContain('role="switch"');
+    expect(updateMarkup).toContain('aria-checked="true"');
     expect(localMarkup).toContain("当前市场目录中没有对应条目");
     expect(localMarkup).toContain("已安装");
+    expect(localMarkup).toContain('disabled=""');
+  });
+
+  it("renders disabled installed plugins as switched off", () => {
+    const markup = renderToStaticMarkup(
+      <MarketplacePluginCard installed={{ ...installed, enabled: false }} onOpen={vi.fn()} onToggleEnabled={vi.fn()} />,
+    );
+
+    expect(markup).toContain('aria-label="Example Tools 启用状态"');
+    expect(markup).toContain('aria-checked="false"');
   });
 
   it("marks project-scoped installed cards with the bound project scope", () => {

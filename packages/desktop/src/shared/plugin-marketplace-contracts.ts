@@ -171,6 +171,19 @@ export type UninstallMarketplacePluginResult =
   | { status: "conflict"; current: InstalledMarketplacePluginsSnapshot }
   | { status: "not-installed"; snapshot: InstalledMarketplacePluginsSnapshot };
 
+export interface SetMarketplacePluginEnabledInput {
+  requestId: string;
+  expectedRevision: string;
+  pluginId: string;
+  enabled: boolean;
+}
+
+export type SetMarketplacePluginEnabledResult =
+  | { status: "saved"; snapshot: InstalledMarketplacePluginsSnapshot }
+  | { status: "conflict"; current: InstalledMarketplacePluginsSnapshot }
+  | { status: "not-installed"; snapshot: InstalledMarketplacePluginsSnapshot }
+  | { status: "broken"; snapshot: InstalledMarketplacePluginsSnapshot };
+
 export interface SetMarketplacePluginScopeInput {
   requestId: string;
   expectedRevision: string;

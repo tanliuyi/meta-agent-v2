@@ -11,7 +11,8 @@ export interface SubagentSettingsController {
   mutating: boolean;
   error?: string;
   reload(): Promise<void>;
-  mutate(mutation: SubagentSettingsMutation): Promise<boolean>;
+  /** 提交变更：返回 undefined 表示成功，否则为失败原因 */
+  mutate(mutation: SubagentSettingsMutation): Promise<string | undefined>;
 }
 
 type SettingsScope = "user" | "project" | "system";
@@ -68,14 +69,13 @@ export function useSubagentSettingsController(
   }, [reload]);
 
   const mutate = useCallback(
-    async (mutation: SubagentSettingsMutation): Promise<boolean> => {
-      if (!snapshot || mutating) return false;
+    async (mutation: SubagentSettingsMutation): Promise<string | undefined> => {
+      if (!snapshot || mutating) return "配置尚未就绪，请稍后重试";
       const generation = contextGeneration.current;
       const mutationTargetKey = subagentSettingsTargetKey(projectId, settingsScope);
       requestGeneration.current += 1;
       setLoadingTargetKey(undefined);
       setMutatingTargetKey(mutationTargetKey);
-      setErrorState(undefined);
       try {
         const result = await window.desktop.subagents.saveConfig({
           requestId: crypto.randomUUID(),
@@ -83,19 +83,18 @@ export function useSubagentSettingsController(
           expectedSnapshotRevision: snapshot.revision,
           mutation,
         });
-        if (!mounted.current || generation !== contextGeneration.current) return false;
+        if (!mounted.current || generation !== contextGeneration.current) return "操作已中断";
         if (result.status === "conflict") {
           setSnapshotState({ targetKey: mutationTargetKey, snapshot: result.current });
-          setErrorState({ targetKey: mutationTargetKey, message: "子智能体配置已在外部更新，请重新操作。" });
-          return false;
+          return "子智能体配置已在外部更新，请重新操作。";
         }
         setSnapshotState({ targetKey: mutationTargetKey, snapshot: result.snapshot });
-        return true;
+        return undefined;
       } catch (reason) {
         if (mounted.current && generation === contextGeneration.current) {
-          setErrorState({ targetKey: mutationTargetKey, message: errorMessage(reason) });
+          return errorMessage(reason);
         }
-        return false;
+        return "操作已中断";
       } finally {
         if (mounted.current && generation === contextGeneration.current) {
           setMutatingTargetKey((current) => (current === mutationTargetKey ? undefined : current));

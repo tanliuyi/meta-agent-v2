@@ -23,7 +23,7 @@ import type {
   SubagentSettingsScope,
   SubagentSkillOption,
 } from "../../../../../shared/subagent-contracts.ts";
-import { SubagentModelSelectOptions } from "./subagent-model-select-options.tsx";
+import { SubagentModelSelect } from "./subagent-model-select.tsx";
 import { SubagentSkillsField } from "./subagent-skills-field.tsx";
 
 interface SubagentChainDialogProps {
@@ -207,18 +207,13 @@ export function SubagentChainDialog({
                   </label>
                   <label className="subagent-field">
                     <span>模型</span>
-                    <SelectRoot
-                      defaultValue={step.model}
+                    <SubagentModelSelect
+                      models={models}
+                      value={step.model ?? ""}
+                      inheritValue=""
+                      inheritName="使用智能体模型"
                       onValueChange={(value) => updateStep(index, { model: value })}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="使用智能体模型" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">使用智能体模型</SelectItem>
-                        <SubagentModelSelectOptions models={models} />
-                      </SelectContent>
-                    </SelectRoot>
+                    />
                   </label>
                 </div>
                 <label className="subagent-field">

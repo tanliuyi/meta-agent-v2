@@ -65,6 +65,15 @@
   color: hsl(var(--foreground));
 }
 
+.toast-root[data-tone="error"] {
+  border-color: hsl(var(--destructive) / 0.45);
+  background: hsl(var(--destructive) / 0.08);
+}
+
+.toast-root[data-tone="error"] .toast-description {
+  color: hsl(var(--destructive));
+}
+
 .toast-root[data-state="open"] {
   animation: toast-enter 160ms ease-out;
 }

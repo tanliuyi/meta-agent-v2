@@ -227,11 +227,12 @@ describe("DesktopExtensionSourcePolicy", () => {
       rootPath: marketplaceRoot,
     };
     await writeMarketplaceProjection(plugin);
+    let marketplaceSnapshot = { revision: "market-1", plugins: [plugin] };
     harness.policy = new DesktopExtensionSourcePolicy({
       settings: harness.settings,
       getBuiltinDefinitions: () => harness.builtin,
       getCuratedDefinitions: () => harness.curated,
-      getMarketplaceExtensions: async () => ({ revision: "market-1", plugins: [plugin] }),
+      getMarketplaceExtensions: async () => marketplaceSnapshot,
       pluginConfigurations: {
         getRuntimeConfiguration: async () => ({
           revision: "configuration-1",
@@ -257,6 +258,11 @@ describe("DesktopExtensionSourcePolicy", () => {
     const modified = await harness.policy.resolve("project");
     expect(modified.entries.some((entry) => entry.source === "marketplace")).toBe(true);
     expect(modified.diagnostics).toEqual([]);
+
+    marketplaceSnapshot = { revision: "market-2", plugins: [{ ...plugin, enabled: false }] };
+    const disabled = await harness.policy.resolve("project");
+    expect(disabled.entries.some((entry) => entry.source === "marketplace")).toBe(false);
+    expect(disabled.generation).not.toBe(modified.generation);
   });
 
   it("does not load a marketplace registry entry outside the managed extension root", async () => {
