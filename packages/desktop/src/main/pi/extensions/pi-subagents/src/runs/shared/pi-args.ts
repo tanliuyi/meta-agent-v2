@@ -64,16 +64,25 @@ import {
 
 const TASK_ARG_LIMIT = 8000;
 const MAX_LAUNCH_RESOLVED_EXTENSION_IDS = 32;
-const PROMPT_RUNTIME_EXTENSION_PATH = path.join(
-	path.dirname(fileURLToPath(import.meta.url)),
+// Runtime extensions are loaded by the child pi process as --extension entries. Upstream
+// ships and resolves them as .ts sources; the Desktop sidecar build compiles the vendored
+// package to .js and drops the .ts sources. Resolve whichever form exists so both the npm
+// package layout and the compiled sidecar layout work.
+export function resolveRuntimeExtensionPath(
+	relativeTsPath: string,
+	baseDir = path.dirname(fileURLToPath(import.meta.url)),
+): string {
+	const tsPath = path.join(baseDir, relativeTsPath);
+	if (fs.existsSync(tsPath)) return tsPath;
+	const jsPath = tsPath.replace(/\.ts$/, ".js");
+	if (fs.existsSync(jsPath)) return jsPath;
+	return tsPath;
+}
+const PROMPT_RUNTIME_EXTENSION_PATH = resolveRuntimeExtensionPath(
 	"subagent-prompt-runtime.ts",
 );
-const FANOUT_CHILD_EXTENSION_PATH = path.join(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"..",
-	"..",
-	"extension",
-	"fanout-child.ts",
+const FANOUT_CHILD_EXTENSION_PATH = resolveRuntimeExtensionPath(
+	path.join("..", "..", "extension", "fanout-child.ts"),
 );
 export const SUBAGENT_CHILD_ENV = "PI_SUBAGENT_CHILD";
 export const SUBAGENT_ORCHESTRATOR_TARGET_ENV =
