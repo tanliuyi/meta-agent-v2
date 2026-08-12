@@ -237,6 +237,26 @@ describe("WebContentsHostController CDP integration", () => {
     await expect(host.snapshot({ withScreenshot: false })).resolves.toMatchObject({ url: "https://example.com/" });
   });
 
+  test("permanent navigation boundary blocks privileged guest redirects and direct navigation", () => {
+    const webContents = new FakeWebContents();
+    const host = new WebContentsHostController(webContents as unknown as WebContents, {
+      allowNavigation: (url) => url.startsWith("browser://"),
+    });
+    hosts.push(host);
+
+    const internalEvent = { preventDefault: vi.fn() };
+    webContents.emit("will-navigate", internalEvent, "browser://passwords");
+    expect(internalEvent.preventDefault).not.toHaveBeenCalled();
+
+    const externalEvent = { preventDefault: vi.fn() };
+    webContents.emit("will-navigate", externalEvent, "https://evil.example/");
+    expect(externalEvent.preventDefault).toHaveBeenCalledOnce();
+
+    const redirectEvent = { preventDefault: vi.fn() };
+    webContents.emit("will-redirect", redirectEvent, "https://evil.example/");
+    expect(redirectEvent.preventDefault).toHaveBeenCalledOnce();
+  });
+
   test("agent navigation guard remains active briefly after load completion", async () => {
     const webContents = new FakeWebContents();
     const host = new WebContentsHostController(webContents as unknown as WebContents, {

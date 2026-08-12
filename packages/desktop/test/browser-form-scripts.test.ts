@@ -15,7 +15,7 @@ describe("browser form scripts", () => {
     expect(BROWSER_PASSWORD_WATCHER_SCRIPT).not.toContain("console.log");
   });
 
-  test("密码自动填充脚本：按 origin 过滤，支持延迟表单与同站点多账号", () => {
+  test("密码账号选择脚本：按 origin 过滤，动态识别表单且由用户选择后填充", () => {
     const script = buildBrowserPasswordAutofillScript({
       origin: "https://example.com",
       passwords: [
@@ -30,12 +30,33 @@ describe("browser form scripts", () => {
     // other.com 的凭据在 main 侧按 origin 过滤，不进入脚本
     expect(script).not.toContain("bob");
     expect(script).toContain("location.origin !== data.origin");
-    expect(script).toContain("entry.username === enteredUsername");
-    expect(script).toContain("new MutationObserver(fill)");
-    expect(script).toContain('document.addEventListener("focusin", fill, true)');
-    // 只填充空字段
-    expect(script).toContain("!usernameField.value");
-    expect(script).toContain("!passwordField.value");
+    expect(script.indexOf("__piPasswordPickerCleanup")).toBeLessThan(script.indexOf("data.candidates.length === 0"));
+    expect(script).toContain('autocomplete === "username"');
+    expect(script).toContain('field.type === "email"');
+    expect(script).not.toContain('field.type === "tel"');
+    expect(script).not.toContain('field.type === "text"');
+    expect(script).toContain("document.querySelectorAll('input[type=\"password\"]')");
+    expect(script).toContain('host.id = "__pi-password-picker"');
+    expect(script).toContain('host.attachShadow({ mode: "closed" })');
+    expect(script).toContain('heading.textContent = "使用保存的账号"');
+    expect(script).toContain('button.setAttribute("role", "option")');
+    expect(script).toContain('document.addEventListener("focusin", onFocus, true)');
+    expect(script).toContain('document.addEventListener("input", onInput, true)');
+    expect(script).toContain('event.key === "ArrowDown"');
+    expect(script).toContain('event.key === "Enter" || event.key === " "');
+    expect(script).toContain('event.key !== "ArrowUp"');
+    expect(script).toContain('event.key === "Escape"');
+    expect(script).toContain("event.composedPath().includes(host)");
+    expect(script).toContain("event.target instanceof HTMLInputElement && fieldsFor(event.target)");
+    expect(script).toContain("suppressedFocusTarget = target");
+    expect(script).toContain("queueMicrotask");
+    expect(script).not.toContain("new MutationObserver");
+    expect(script).toContain("setValue(activeFields.usernameField, candidate.username)");
+    expect(script).toContain("setValue(passwordField, candidate.password)");
+    expect(script).toContain("focusWithoutOpening(passwordField)");
+    expect(() => new Function(script)).not.toThrow();
+    // 不在脚本安装或字段聚焦时直接填充第一个候选。
+    expect(script).not.toContain("data.candidates[0].password");
   });
 
   test("联系信息填充脚本：10 个字段的 autocomplete/name 选择器映射", () => {

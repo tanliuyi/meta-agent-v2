@@ -1,32 +1,46 @@
 import { join, normalize, relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import { net, protocol } from "electron";
+import { net, protocol, type Session } from "electron";
 import { BROWSER_INTERNAL_SCHEME, parseBrowserInternalPage } from "../../shared/browser-internal-contracts.ts";
 
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: BROWSER_INTERNAL_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      codeCache: true,
+export function registerBrowserInternalScheme(): void {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: BROWSER_INTERNAL_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        codeCache: true,
+      },
     },
-  },
-]);
+  ]);
+}
 
-export function handleBrowserInternalPageRequests(rendererDirectory: string, rendererDevUrl?: string): void {
-  protocol.handle(BROWSER_INTERNAL_SCHEME, (request) => {
+export function handleBrowserInternalPageRequests(
+  rendererDirectory: string,
+  rendererDevUrl?: string,
+  targetSession?: Session,
+): void {
+  (targetSession?.protocol ?? protocol).handle(BROWSER_INTERNAL_SCHEME, (request) => {
     const url = new URL(request.url);
     if (parseBrowserInternalPage(`${url.protocol}//${url.hostname}`) === null) {
       return new Response("Not found", { status: 404 });
     }
 
-    const requestedPath = url.pathname === "/" ? "browser-internal.html" : decodeURIComponent(url.pathname.slice(1));
+    let requestedPath: string;
+    try {
+      requestedPath = url.pathname === "/" ? "browser-internal.html" : decodeURIComponent(url.pathname.slice(1));
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
     if (rendererDevUrl) {
-      // Vite 开发入口还会请求 /src、/@vite 和依赖预构建资源；仅 browser:// 已知 host
-      // 能进入这里，因此可代理该入口产生的任意开发资源路径。
-      return net.fetch(new URL(requestedPath, `${rendererDevUrl.replace(/\/$/, "")}/`).toString());
+      // Vite 开发入口还会请求 /src、/@vite 和依赖预构建资源。通过 pathname
+      // 赋值固定在 renderer dev origin，避免编码路径被解释为跨站 URL。
+      const target = new URL(rendererDevUrl);
+      target.pathname = `/${requestedPath.replace(/^\/+/, "")}`;
+      target.search = url.search;
+      return net.fetch(target.toString());
     }
 
     if (requestedPath !== "browser-internal.html" && !requestedPath.startsWith("assets/")) {

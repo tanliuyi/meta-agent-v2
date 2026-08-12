@@ -40,6 +40,8 @@ export interface WebContentsHostControllerOptions {
   cdpTimeoutMs?: number;
   maxSnapshotNodes?: number;
   onAgentNavigation?: AgentNavigationGuard;
+  /** 特权 guest 的永久导航边界；返回 false 时无条件阻止主框架导航和重定向。 */
+  allowNavigation?: (url: string) => boolean;
   onPopup?: (url: string) => void;
   onContextMenu?: (event: Electron.Event, params: Electron.ContextMenuParams) => void;
   onRuntimeBinding?: (name: string, payload: string) => void;
@@ -224,6 +226,7 @@ export class WebContentsHostController implements BrowserHostController {
   private cdpTimeoutMs: number;
   private maxSnapshotNodes: number;
   private readonly onAgentNavigation?: AgentNavigationGuard;
+  private readonly allowNavigation?: (url: string) => boolean;
   private readonly onPopup?: (url: string) => void;
   private readonly onContextMenu?: (event: Electron.Event, params: Electron.ContextMenuParams) => void;
   private readonly onRuntimeBinding?: (name: string, payload: string) => void;
@@ -256,6 +259,7 @@ export class WebContentsHostController implements BrowserHostController {
     this.cdpTimeoutMs = options.cdpTimeoutMs ?? DEFAULT_CDP_TIMEOUT_MS;
     this.maxSnapshotNodes = options.maxSnapshotNodes ?? DEFAULT_MAX_SNAPSHOT_NODES;
     this.onAgentNavigation = options.onAgentNavigation;
+    this.allowNavigation = options.allowNavigation;
     this.onPopup = options.onPopup;
     this.onContextMenu = options.onContextMenu;
     this.onRuntimeBinding = options.onRuntimeBinding;
@@ -1636,6 +1640,10 @@ export class WebContentsHostController implements BrowserHostController {
     const wc = this.webContents;
 
     const guardNavigation = (event: Electron.Event, url: string): void => {
+      if (this.allowNavigation && !this.allowNavigation(url)) {
+        event.preventDefault();
+        return;
+      }
       const guard = this.agentNavigationGuard;
       if (!guard || !this.onAgentNavigation) return;
       if (!this.onAgentNavigation(url, this.webContents.getURL(), guard.approvedUrl)) {

@@ -28,6 +28,14 @@ export function parseBrowserInternalPage(raw: string | undefined): BrowserIntern
   }
 }
 
+export type BrowserInternalHostMessage = { type: "open-url"; url: string };
+
+export function isBrowserInternalHostMessage(value: unknown): value is BrowserInternalHostMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { type?: unknown; url?: unknown };
+  return candidate.type === "open-url" && typeof candidate.url === "string";
+}
+
 /** 只暴露给受信 browser:// WebUI 的最小主进程桥接。 */
 export interface BrowserInternalApi {
   dataGet(includePasswords?: boolean): Promise<BrowserDataSnapshot>;

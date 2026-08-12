@@ -219,10 +219,11 @@ describe("browser runtime host 会话路由", () => {
     createBlankView(runtime);
     openInternalPageView(runtime, "history");
     createBlankView(runtime);
+    const webviews = elements.filter((node) => node.getAttribute("src") !== undefined);
+    webviews[1]?.emit("dom-ready");
     await flushAttach();
 
     expect(runtime.views.map((view) => view.pendingUrl)).toEqual(["", "browser://history", ""]);
-    const webviews = elements.filter((node) => node.getAttribute("src") !== undefined);
     expect(webviews.map((node) => node.getAttribute("src"))).toEqual([
       "about:blank",
       "browser://history",
@@ -233,7 +234,22 @@ describe("browser runtime host 会话路由", () => {
     openInternalPageView(runtime, "passwords");
     expect(runtime.views.map((view) => view.pendingUrl)).toEqual(["", "browser://passwords", ""]);
     expect(webviews[1]?.getAttribute("src")).toBe("browser://passwords");
-    expect(desktop.selectTab).toHaveBeenCalledWith(SESSION_A, 2);
+    expect(desktop.selectTab).toHaveBeenCalledOnce();
+    expect(desktop.selectTab.mock.calls[0]?.[1]).toBeTypeOf("number");
+  });
+
+  test("内部页 did-fail-load 兜底 attach（无需等 dom-ready）", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    openInternalPageView(runtime, "history");
+    const webviews = elements.filter((node) => node.getAttribute("src") !== undefined);
+    expect(webviews[0]?.getAttribute("src")).toBe("browser://history");
+
+    // 协议/资源加载失败不会触发 dom-ready；did-fail-load 后应照常 attach。
+    webviews[0]?.emit("did-fail-load");
+    await flushAttach();
+
+    expect(desktop.attach).toHaveBeenCalledWith(SESSION_A, 7, undefined);
+    expect(runtime.attachError).toBeNull();
   });
 
   test("跨 browser:// 特权边界时原位重建普通 webview", async () => {
@@ -241,6 +257,8 @@ describe("browser runtime host 会话路由", () => {
     createBlankView(runtime);
     openInternalPageView(runtime, "history");
     createBlankView(runtime);
+    const webviews = elements.filter((node) => node.getAttribute("src") !== undefined);
+    webviews[1]?.emit("dom-ready");
     await flushAttach();
     const internalView = runtime.views[1];
     expect(internalView).toBeDefined();

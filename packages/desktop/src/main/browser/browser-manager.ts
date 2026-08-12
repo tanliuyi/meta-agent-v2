@@ -92,7 +92,7 @@ import {
   type WebContentsHostControllerOptions,
 } from "./browser-host-controller.ts";
 import { BrowserSettingsService } from "./browser-settings-service.ts";
-import { isBrowserWebviewUrl } from "./browser-webview-policy.ts";
+import { isBrowserInternalWebContents, isBrowserWebviewUrl } from "./browser-webview-policy.ts";
 
 export interface BrowserManagerOptions {
   /** tab 状态变化时广播（携带 sessionKey）；由 index.ts 注入跨窗口推送实现。 */
@@ -111,6 +111,8 @@ export interface BrowserManagerOptions {
   settingsPath?: string;
   /** 浏览器用户数据服务（历史/下载/联系人/密码/网站设置持久化）。 */
   data?: BrowserDataService;
+  /** 新会话 partition 创建后安装 browser:// 资源 handler。 */
+  onSessionCreated?: (browserSession: Electron.Session) => void;
   /** 密码保存请求（不含密码正文）；由 index.ts 定向推送到所属 renderer。 */
   onPasswordOffer?: (offer: BrowserPasswordOffer, ownerWebContentsId: number) => void;
 }
@@ -123,6 +125,8 @@ interface TabEntry {
   ownerWebContentsId: number;
   host: BrowserHostController;
   tab: BrowserTab;
+  /** 是否为带内部 WebUI preload 的特权 guest；其生命周期内只能加载已知 browser:// 页面。 */
+  internalPage: boolean;
   /** 移除 guest 事件监听（表单检测/填充）。 */
   disposeGuestListeners: () => void;
 }
@@ -300,6 +304,8 @@ export class BrowserManager {
     if (!isBrowserWebviewUrl(effectiveInitialUrl)) {
       return { ok: false, error: `webContents ${webContentsId} 的 URL 不符合浏览器页面要求` };
     }
+    const isInternalPageGuest =
+      parseBrowserInternalPage(effectiveInitialUrl) !== null || isBrowserInternalWebContents(webContentsId);
 
     if (requestId !== undefined && !state.pendingCreates.has(requestId)) {
       return { ok: false, error: `未知的建 tab 请求 ${requestId}` };
@@ -329,6 +335,7 @@ export class BrowserManager {
       maxSnapshotNodes: this.runtimeSettings.maxSnapshotNodes,
       onAgentNavigation: (url, currentUrl, approvedUrl) =>
         this.allowAgentNavigation(state, tabId, url, currentUrl, approvedUrl),
+      ...(isInternalPageGuest ? { allowNavigation: (url: string) => parseBrowserInternalPage(url) !== null } : {}),
       onPopup: (url) => {
         void this.openTab(state.identity, url, "popup").catch((error: unknown) => {
           this.options.log?.(`browser popup rejected: ${messageOf(error)}`);
@@ -352,6 +359,7 @@ export class BrowserManager {
       ownerWebContentsId: resolved.hostWebContents.id,
       host,
       tab,
+      internalPage: isInternalPageGuest,
       disposeGuestListeners: () => {
         if (!resolved.isDestroyed()) {
           resolved.removeListener("did-finish-load", onDidFinishLoad);
@@ -499,7 +507,7 @@ export class BrowserManager {
       this.activateAgentTab(state, tabId);
     }
     if (source === "agent") {
-      const policyError = this.blockedAgentSiteError(entry.tab.url);
+      const policyError = this.blockedAgentTabError(entry);
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
@@ -546,7 +554,7 @@ export class BrowserManager {
       if (expectedUrl !== undefined && !sameBrowserUrl(expectedUrl, entry.tab.url)) {
         return { ok: false, error: "页面已变化，元素引用已失效，请重新获取页面快照", staleRef: true };
       }
-      const policyError = this.blockedAgentSiteError(entry.tab.url);
+      const policyError = this.blockedAgentTabError(entry);
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
@@ -573,7 +581,7 @@ export class BrowserManager {
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
     this.activateAgentTab(state, tabId);
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     const node = entry.host.inspectElement(elementIndex);
     return node ? { ok: true, node } : { ok: false, error: "元素编号已失效，请重新获取页面快照", staleRef: true };
@@ -600,13 +608,13 @@ export class BrowserManager {
     if (!normalized) return { ok: false, error: "仅支持 http/https 链接" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
-    if (parseBrowserInternalPage(entry.tab.url) !== null) {
+    if (entry.internalPage || parseBrowserInternalPage(entry.tab.url) !== null) {
       return { ok: false, error: "browser:// 标签需要重建 webview 后才能导航到网站" };
     }
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
     if (source === "agent") this.activateAgentTab(state, tabId);
     if (source === "agent") {
-      const currentPolicyError = this.blockedAgentSiteError(entry.tab.url);
+      const currentPolicyError = this.blockedAgentTabError(entry);
       if (currentPolicyError !== null) return { ok: false, error: currentPolicyError };
       const targetAccess = checkSiteAccess(this.runtimeSettings, normalized);
       if (targetAccess === "blocked") {
@@ -646,6 +654,8 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
       const history = entry.host.getNavigationState();
@@ -740,7 +750,7 @@ export class BrowserManager {
       this.activateAgentTab(state, tabId);
     }
     if (_source === "agent") {
-      const policyError = this.blockedAgentSiteError(entry.tab.url);
+      const policyError = this.blockedAgentTabError(entry);
       if (policyError !== null) return { ok: false, error: policyError };
       if (targetUrl !== undefined) {
         const targetPolicyError = this.blockedAgentSiteError(targetUrl);
@@ -787,7 +797,7 @@ export class BrowserManager {
       this.activateAgentTab(state, tabId);
     }
     if (source === "agent") {
-      const policyError = this.blockedAgentSiteError(entry.tab.url);
+      const policyError = this.blockedAgentTabError(entry);
       if (policyError !== null) return { ok: false, error: policyError };
     }
     try {
@@ -813,7 +823,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -833,6 +843,8 @@ export class BrowserManager {
     if (!state) return { ok: false, error: "未知的浏览器会话" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
       return { ok: true, dialog: entry.host.getPendingDialog() };
@@ -852,6 +864,8 @@ export class BrowserManager {
     if (!state) return { ok: false, error: "未知的浏览器会话" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     try {
       await entry.host.handleDialog(action, promptText);
       return { ok: true };
@@ -871,7 +885,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -893,7 +907,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -915,6 +929,8 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
       await entry.host.waitFor(options);
@@ -936,6 +952,8 @@ export class BrowserManager {
     if (!state) return { ok: false, error: "未知的浏览器会话" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     try {
       const events = await entry.host.readCdpEvents(options);
       return { ok: true, events };
@@ -953,6 +971,8 @@ export class BrowserManager {
     if (!state) return { ok: false, error: "未知的浏览器会话" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
       const text = await entry.host.clipboardReadText();
@@ -972,6 +992,8 @@ export class BrowserManager {
     if (!state) return { ok: false, error: "未知的浏览器会话" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
       await entry.host.clipboardWriteText(text);
@@ -1012,7 +1034,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1034,7 +1056,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1056,6 +1078,8 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
       await entry.host.expectNavigation(timeoutMs);
@@ -1076,7 +1100,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1099,7 +1123,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1122,7 +1146,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1143,7 +1167,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1166,6 +1190,8 @@ export class BrowserManager {
     if (!state) return { ok: false, error: "未知的浏览器会话" };
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
+    const policyError = this.blockedAgentTabError(entry);
+    if (policyError !== null) return { ok: false, error: policyError };
     try {
       const downloads = await entry.host.downloadEvents();
       return { ok: true, downloads };
@@ -1186,7 +1212,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1209,7 +1235,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1233,7 +1259,7 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry) return { ok: false, error: `tab ${tabId} 不存在` };
     if (entry.tab.crashed) return { ok: false, error: `tab ${tabId} 已崩溃，请重建后重试` };
-    const policyError = this.blockedAgentSiteError(entry.tab.url);
+    const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
     try {
@@ -1777,6 +1803,7 @@ export class BrowserManager {
     if (existing) return existing;
     const partition = browserPartitionFor(identity);
     const browserSession = session.fromPartition(partition);
+    this.options.onSessionCreated?.(browserSession);
     // 分区权限默认 fail-closed：媒体权限按浏览器设置中的默认值和站点覆盖处理，
     // 网站设置覆盖（camera/microphone/notifications/geolocation/clipboard/fullscreen）
     // 优先于默认值，其他 Chromium 权限（地理位置、通知、剪贴板等）统一拒绝。
@@ -1949,12 +1976,16 @@ export class BrowserManager {
   private removeEntry(state: SessionState, tabId: number): void {
     const entry = state.entries.get(tabId);
     if (!entry) return;
+    const tabIds = [...state.entries.keys()];
+    const closedIndex = tabIds.indexOf(tabId);
     state.entries.delete(tabId);
     state.byWebContentsId.delete(entry.webContentsId);
     state.lastHistoryUrlByTab.delete(tabId);
     state.annotationsByTab.delete(tabId);
     if (state.activeTabId === tabId) {
-      state.activeTabId = [...state.entries.keys()][0] ?? null;
+      // Chrome 行为：关闭活跃标签后选中相邻标签，优先右侧；关闭最后一个时选中左侧。
+      const neighborIndex = closedIndex < tabIds.length - 1 ? closedIndex + 1 : closedIndex - 1;
+      state.activeTabId = neighborIndex >= 0 ? (tabIds[neighborIndex] ?? null) : null;
     }
     entry.disposeGuestListeners();
     entry.host.dispose();
@@ -1993,6 +2024,13 @@ export class BrowserManager {
   private agentSettingsError(): string | null {
     if (this.runtimeSettingsLoadFailed) return "无法读取浏览器设置，请确认浏览器服务正常后重试";
     return this.runtimeSettings.enabled ? null : "内置浏览器已在设置中关闭";
+  }
+
+  private blockedAgentTabError(entry: TabEntry): string | null {
+    if (entry.internalPage || parseBrowserInternalPage(entry.tab.url) !== null) {
+      return "browser:// 内部页面仅供用户操作";
+    }
+    return this.blockedAgentSiteError(entry.tab.url);
   }
 
   private blockedAgentSiteError(url: string): string | null {
