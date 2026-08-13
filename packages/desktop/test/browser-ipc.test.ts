@@ -47,6 +47,8 @@ describe("browser IPC", () => {
     addAnnotation: vi.fn(),
     listAnnotations: vi.fn(),
     removeAnnotation: vi.fn(),
+    removeAnnotations: vi.fn(),
+    updateAnnotation: vi.fn(),
     resolveAnnotationBounds: vi.fn(),
     browserDataGet: vi.fn(),
     browserHistoryDelete: vi.fn(),
@@ -115,6 +117,8 @@ describe("browser IPC", () => {
     expect(electron.handles.has(CHANNELS.browserAnnotationAdd)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserAnnotationList)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserAnnotationRemove)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserAnnotationRemoveMany)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserAnnotationUpdate)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserAnnotationResolve)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserDataGet)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserHistoryDelete)).toBe(true);
@@ -248,6 +252,16 @@ describe("browser IPC", () => {
     });
     browser.listAnnotations.mockResolvedValue([]);
     browser.removeAnnotation.mockResolvedValue(undefined);
+    browser.removeAnnotations.mockResolvedValue(undefined);
+    browser.updateAnnotation.mockResolvedValue({
+      id: "n1",
+      tabId: 1,
+      selector: "#a",
+      tag: "button",
+      bounds: { x: 1, y: 2, width: 3, height: 4 },
+      text: "新",
+      createdAt: 1,
+    });
     browser.resolveAnnotationBounds.mockResolvedValue({ x: 5, y: 6, width: 3, height: 4 });
 
     await expect(electron.handles.get(CHANNELS.browserHistory)?.({}, IDENTITY)).resolves.toEqual([entry]);
@@ -259,6 +273,10 @@ describe("browser IPC", () => {
     ).resolves.toMatchObject({ id: "n1" });
     await expect(electron.handles.get(CHANNELS.browserAnnotationList)?.({}, IDENTITY, 1)).resolves.toEqual([]);
     await electron.handles.get(CHANNELS.browserAnnotationRemove)?.({}, IDENTITY, 1, "n1");
+    await electron.handles.get(CHANNELS.browserAnnotationRemoveMany)?.({}, IDENTITY, ["n1", "n2"]);
+    await expect(
+      electron.handles.get(CHANNELS.browserAnnotationUpdate)?.({}, IDENTITY, 1, "n1", { text: "新" }),
+    ).resolves.toMatchObject({ id: "n1", text: "新" });
     await expect(electron.handles.get(CHANNELS.browserAnnotationResolve)?.({}, IDENTITY, 1, "n1")).resolves.toEqual({
       x: 5,
       y: 6,
@@ -271,6 +289,8 @@ describe("browser IPC", () => {
     expect(browser.addAnnotation).toHaveBeenCalledWith(IDENTITY, 1, { selector: "#a", tag: "button" });
     expect(browser.listAnnotations).toHaveBeenCalledWith(IDENTITY, 1);
     expect(browser.removeAnnotation).toHaveBeenCalledWith(IDENTITY, 1, "n1");
+    expect(browser.removeAnnotations).toHaveBeenCalledWith(IDENTITY, ["n1", "n2"]);
+    expect(browser.updateAnnotation).toHaveBeenCalledWith(IDENTITY, 1, "n1", { text: "新" });
     expect(browser.resolveAnnotationBounds).toHaveBeenCalledWith(IDENTITY, 1, "n1");
   });
 

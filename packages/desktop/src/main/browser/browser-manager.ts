@@ -34,6 +34,7 @@ import {
   type BrowserAnnotationBounds,
   type BrowserAnnotationInput,
   type BrowserAnnotationPickResult,
+  type BrowserAnnotationUpdateInput,
   type BrowserAttachResult,
   type BrowserClipboardResult,
   type BrowserCloseTabRequest,
@@ -52,6 +53,7 @@ import {
   type BrowserTab,
   browserPartitionFor,
   browserSessionKey,
+  sameBrowserUrl,
 } from "../../shared/browser-contracts.ts";
 import type {
   BrowserContactInput,
@@ -1726,6 +1728,36 @@ export class BrowserManager {
     else state.annotationsByTab.set(tabId, next);
   }
 
+  /** 按 id 批量删除标注（composer 成功发送后消费）；id 在会话内全局唯一，跨 tab 匹配。 */
+  async removeAnnotations(identity: BrowserSessionIdentity, ids: string[]): Promise<void> {
+    const state = this.requireSession(identity);
+    if (!state || ids.length === 0) return;
+    const wanted = new Set(ids);
+    for (const [tabId, list] of state.annotationsByTab) {
+      const next = list.filter((annotation) => !wanted.has(annotation.id));
+      if (next.length === 0) state.annotationsByTab.delete(tabId);
+      else if (next.length !== list.length) state.annotationsByTab.set(tabId, next);
+    }
+  }
+
+  /** 原位更新标注文本（保持 id/createdAt/selector/bounds/tag 不变）；不存在返回 null。 */
+  async updateAnnotation(
+    identity: BrowserSessionIdentity,
+    tabId: number,
+    id: string,
+    input: BrowserAnnotationUpdateInput,
+  ): Promise<BrowserAnnotation | null> {
+    const state = this.requireSession(identity);
+    if (!state) return null;
+    const list = state.annotationsByTab.get(tabId);
+    if (!list) return null;
+    const index = list.findIndex((annotation) => annotation.id === id);
+    if (index === -1) return null;
+    const updated: BrowserAnnotation = { ...list[index]!, text: input.text };
+    list[index] = updated;
+    return { ...updated };
+  }
+
   /** 按选择器重新解析标注 bounds（导航/重绘后 overlay 重定位）；元素消失返回 null。 */
   async resolveAnnotationBounds(
     identity: BrowserSessionIdentity,
@@ -1911,17 +1943,23 @@ export class BrowserManager {
     const entry = state.entries.get(tabId);
     if (!entry || this.disposed) return;
     switch (event.type) {
-      case "navigated":
+      case "navigated": {
+        // URL 真正切换后旧页面的标注不再有效：清空该 tab 的标注（同 URL 重复事件不清）。
+        const previousUrl = entry.tab.url;
         entry.tab.url = event.url;
         entry.tab.canGoBack = event.canGoBack;
         entry.tab.canGoForward = event.canGoForward;
         entry.tab.crashed = false;
         entry.tab.loadError = undefined;
+        if (!sameBrowserUrl(previousUrl, event.url)) state.annotationsByTab.delete(tabId);
         this.recordHistory(state, tabId, event.url, entry.tab.title);
         break;
-      case "navigated-in-page":
+      }
+      case "navigated-in-page": {
+        const previousUrl = entry.tab.url;
         entry.tab.url = event.url;
         entry.tab.loadError = undefined;
+        if (!sameBrowserUrl(previousUrl, event.url)) state.annotationsByTab.delete(tabId);
         try {
           const navigation = entry.host.getNavigationState();
           entry.tab.canGoBack = navigation.activeIndex > 0;
@@ -1930,6 +1968,7 @@ export class BrowserManager {
           // history API 查询失败时保留上一份按钮状态。
         }
         break;
+      }
       case "title-updated":
         entry.tab.title = event.title;
         // 同步历史中该 tab 最后一条同 URL 记录的标题（导航后标题异步到达）。
@@ -1947,20 +1986,27 @@ export class BrowserManager {
         entry.tab.loading = event.loading;
         if (event.loading) entry.tab.loadError = undefined;
         break;
-      case "load-failed":
+      case "load-failed": {
         entry.tab.loading = false;
-        entry.tab.url = event.url || entry.tab.url;
+        // 失败导航同样代表离开旧页面：URL 真正变化时清理该 tab 标注。首次失败后
+        // 重试成功时 navigated 的 previousUrl 与 event.url 相同，不会再次触发
+        // 清理，因此必须在 load-failed 阶段完成；同 URL 重复失败不误删当前页标注。
+        const previousUrl = entry.tab.url;
+        const nextUrl = event.url || entry.tab.url;
+        entry.tab.url = nextUrl;
         try {
-          entry.tab.title = new URL(entry.tab.url).hostname || entry.tab.url;
+          entry.tab.title = new URL(nextUrl).hostname || nextUrl;
         } catch {
-          entry.tab.title = entry.tab.url;
+          entry.tab.title = nextUrl;
         }
         entry.tab.loadError = {
           code: event.code,
           description: event.description,
           url: event.url,
         };
+        if (!sameBrowserUrl(previousUrl, nextUrl)) state.annotationsByTab.delete(tabId);
         break;
+      }
       case "crashed":
         entry.tab.crashed = true;
         entry.tab.loading = false;
@@ -2145,14 +2191,6 @@ export interface BrowserHistoryEntry {
   url: string;
   title: string;
   timestamp: number;
-}
-
-function sameBrowserUrl(left: string, right: string): boolean {
-  try {
-    return new URL(left).href === new URL(right).href;
-  } catch {
-    return left === right;
-  }
 }
 
 function normalizeNavigateUrl(raw: string): string | null {

@@ -5,6 +5,7 @@ import Sparkles from "lucide-react/dist/esm/icons/sparkles.mjs";
 import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { useMemo, useRef } from "react";
 import type { SlashCommand } from "../../../../../shared/contracts.ts";
+import { useSessionModalContext } from "../../session-modal-context.ts";
 import {
   searchSlashCommands,
   slashCommandDisplayDescription,
@@ -41,6 +42,7 @@ interface ComposerCommandTriggerProps {
 
 /** Slash command picker; selection is handled outside the editor so commands never become directive chips. */
 export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: ComposerCommandTriggerProps) {
+  const inModal = useSessionModalContext();
   const scrollContainer = useRef<HTMLDivElement>(null);
   const adapter = useMemo(
     () => ({
@@ -62,7 +64,7 @@ export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: Com
     <ComposerPrimitive.Unstable_TriggerPopover
       char="/"
       adapter={adapter}
-      className="composer-suggestions"
+      className={`composer-suggestions${inModal ? " session-modal-composer-overlay" : ""}`}
       aria-label="命令建议"
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Action

@@ -61,6 +61,21 @@ export function removeComposerQuote(target: ComposerQuoteTarget, index: number):
   target.setQuote(toComposerQuote(current.filter((_, itemIndex) => itemIndex !== index)));
 }
 
+/** 按 messageId 原位更新引用文本（保持位置与其余字段）；不存在时静默。 */
+export function updateComposerQuoteText(target: ComposerQuoteTarget, messageId: string, text: string): void {
+  const current = getComposerQuotes(target.getState().quote);
+  if (!current.some((item) => item.messageId === messageId)) return;
+  target.setQuote(toComposerQuote(current.map((item) => (item.messageId === messageId ? { ...item, text } : item))));
+}
+
+/** 按 messageId 移除引用（标注删除/页面切换失效）；不存在时静默。 */
+export function removeComposerQuoteByMessageId(target: ComposerQuoteTarget, messageId: string): void {
+  const current = getComposerQuotes(target.getState().quote);
+  const next = current.filter((item) => item.messageId !== messageId);
+  if (next.length === current.length) return;
+  target.setQuote(toComposerQuote(next));
+}
+
 function normalizeQuote(value: unknown): PiQuote | undefined {
   const record = asRecord(value);
   if (!record || typeof record.text !== "string" || typeof record.messageId !== "string") return undefined;

@@ -919,6 +919,12 @@
   background: hsl(var(--popover));
   box-shadow: var(--elevation-popover);
 }
+
+/* 全屏会话 modal 内：候选层需要高于 modal 面板（--stack-dialog），
+   否则被 modal 内容裁住；普通聊天保持 --stack-suggestions。 */
+.composer-suggestions.session-modal-composer-overlay {
+  z-index: var(--stack-menu);
+}
 .composer-suggestions-scroll {
   max-height: min(360px, 48vh);
   padding: 7px;

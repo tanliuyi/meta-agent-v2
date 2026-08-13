@@ -14,15 +14,15 @@ export type TooltipIconButtonProps = ComponentPropsWithRef<typeof Button> & {
 };
 
 export const TooltipIconButton = forwardRef<HTMLButtonElement, TooltipIconButtonProps>(
-  ({ children, tooltip, side = "bottom", className, ...rest }, ref) => {
+  ({ children, tooltip, side = "bottom", size = "icon", className, ...rest }, ref) => {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             variant="ghost"
-            size="icon"
+            size={size}
             {...rest}
-            className={cn("aui-button-icon size-6 p-1 active:scale-90", className)}
+            className={cn("aui-button-icon active:scale-90", size === "icon" && "size-6 p-1", className)}
             ref={ref}
           >
             <Slottable>{children}</Slottable>

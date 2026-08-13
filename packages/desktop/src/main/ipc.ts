@@ -318,6 +318,14 @@ export function registerIpc(
       (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
         browser.removeAnnotation(identity, tabId, id),
     );
+    ipcMain.handle(CHANNELS.browserAnnotationRemoveMany, (_event, identity: BrowserSessionIdentity, ids: string[]) =>
+      browser.removeAnnotations(identity, ids),
+    );
+    ipcMain.handle(
+      CHANNELS.browserAnnotationUpdate,
+      (_event, identity: BrowserSessionIdentity, tabId: number, id: string, input) =>
+        browser.updateAnnotation(identity, tabId, id, input),
+    );
     ipcMain.handle(
       CHANNELS.browserAnnotationResolve,
       (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>

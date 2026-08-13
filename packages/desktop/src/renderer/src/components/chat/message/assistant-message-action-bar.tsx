@@ -9,6 +9,7 @@ import { useDesktopActions } from "../../../state/desktop-context.tsx";
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope } from "../../session-context.tsx";
 import { hasFinalResponseText } from "../message-part-grouping.ts";
+import { formatMessageTime, formatPiUsageSummary } from "./usage-format.ts";
 
 export function AssistantMessageActionBar({
   autohide = "not-last",
@@ -39,6 +40,14 @@ export function AssistantMessageActionBar({
       ? pi.sourceEntryId
       : null;
   });
+  const createdAtText = useAuiState((state) => {
+    if (!visible) return null;
+    return formatMessageTime(state.message.createdAt.getTime());
+  });
+  const usageText = useAuiState((state) => {
+    const pi = state.message.metadata.custom.pi;
+    return pi !== null && typeof pi === "object" && "usage" in pi ? formatPiUsageSummary(pi.usage) : null;
+  });
   const { record, active, branch, commandsReady } = useSessionScope();
   const actions = useDesktopActions();
   const navigate = useNavigate();
@@ -61,12 +70,14 @@ export function AssistantMessageActionBar({
 
   if (!visible) return null;
 
+  const metadataText = [createdAtText, usageText].filter((part): part is string => part !== null).join(" · ");
+
   return (
     <div className={compact ? "flex min-h-7 items-center" : "flex min-h-7 items-center pt-1"}>
       <ActionBarPrimitive.Root
         data-slot="assistant-message-action-bar"
         autohide={autohide}
-        className="animate-in fade-in flex gap-1 text-muted-foreground duration-200"
+        className="animate-in fade-in flex items-center gap-1 text-muted-foreground duration-200"
       >
         <ActionBarPrimitive.Copy asChild>
           <TooltipIconButton tooltip="复制消息" side="top">
@@ -96,6 +107,12 @@ export function AssistantMessageActionBar({
             </TooltipIconButton>
           </ActionBarPrimitive.Reload>
         </AuiIf>
+
+        {metadataText !== "" ? (
+          <span data-slot="assistant-message-metadata" className="min-w-0 text-xs text-muted-foreground/60">
+            {metadataText}
+          </span>
+        ) : null}
       </ActionBarPrimitive.Root>
     </div>
   );

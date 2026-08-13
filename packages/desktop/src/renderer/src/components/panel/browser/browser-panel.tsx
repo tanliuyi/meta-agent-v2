@@ -1,4 +1,3 @@
-import { useAui } from "@assistant-ui/react";
 import { useNavigate } from "@tanstack/react-router";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
 import ArrowRight from "lucide-react/dist/esm/icons/arrow-right.mjs";
@@ -6,7 +5,6 @@ import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronUp from "lucide-react/dist/esm/icons/chevron-up.mjs";
 import HistoryIcon from "lucide-react/dist/esm/icons/history.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
-import MessageSquareQuote from "lucide-react/dist/esm/icons/message-square-quote.mjs";
 import Minus from "lucide-react/dist/esm/icons/minus.mjs";
 import MoreVertical from "lucide-react/dist/esm/icons/more-vertical.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
@@ -39,12 +37,24 @@ import { DropdownMenuSubContent } from "../../../shared/ui/dropdown-menu-sub-con
 import { DropdownMenuSubTrigger } from "../../../shared/ui/dropdown-menu-sub-trigger.tsx";
 import { DropdownMenuTrigger } from "../../../shared/ui/dropdown-menu-trigger.tsx";
 import { useToast } from "../../../shared/ui/use-toast.ts";
-import { emitBrowserAnnotationToComposer } from "../../../state/browser-composer-bridge.ts";
+import {
+  acknowledgeBrowserAnnotationRemoval,
+  BROWSER_ANNOTATION_QUOTE_PREFIX,
+  browserAnnotationMessageId,
+  emitBrowserAnnotationToComposer,
+  failBrowserAnnotationRemoval,
+  invalidateBrowserAnnotationQuotes,
+  removeBrowserAnnotationFromComposer,
+  subscribeBrowserAnnotationConsumed,
+  updateBrowserAnnotationInComposer,
+} from "../../../state/browser-composer-bridge.ts";
 import { workbenchPanelTabKey, workbenchTabKey } from "../../../state/workbench-tab-context.tsx";
 import type { BrowserWebviewElement, BrowserWebviewFoundInPageEvent } from "../../../webview.d.ts";
 import { TooltipIconButton } from "../../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../../session-context.tsx";
 import { BROWSER_PANEL_KIND } from "../builtin-panel-kinds.ts";
+import { BrowserAnnotationMarker } from "./browser-annotation-marker.tsx";
+import { AnnotationModeToggle } from "./browser-annotation-mode-toggle.tsx";
 import { BrowserNetworkErrorPage, failedAddressDisplay } from "./browser-network-error-page.tsx";
 import type { SessionBrowserRuntime } from "./browser-runtime-host.ts";
 import {
@@ -54,6 +64,7 @@ import {
   closeView,
   createBlankView,
   createView,
+  displayUrlOf,
   ensureBrowserRuntime,
   openInternalPageView,
   rebuildView,
@@ -118,7 +129,6 @@ function normalizeAddress(input: string): string | null {
 
 /** 浏览器面板（按会话隔离；在 workbench panel 内挂载）。 */
 export function BrowserPanel() {
-  const aui = useAui();
   const navigate = useNavigate();
   const { record, updateWorkbench } = useSessionScope();
   const workbenchTabs = useSessionWorkbenchTabs();
@@ -148,6 +158,8 @@ export function BrowserPanel() {
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotations, setAnnotations] = useState<BrowserAnnotation[]>([]);
   const [editingTarget, setEditingTarget] = useState<AnnotationTarget | null>(null);
+  // 已保存标注的原位编辑目标（点击 marker 打开；保持原 id，不重建）。
+  const [editingAnnotation, setEditingAnnotation] = useState<BrowserAnnotation | null>(null);
   const [hoverTarget, setHoverTarget] = useState<AnnotationTarget | null>(null);
   const [annotationText, setAnnotationText] = useState("");
   const [pickError, setPickError] = useState("");
@@ -163,17 +175,23 @@ export function BrowserPanel() {
   const identity = runtime.identity;
   const activeViewId = activeViewIdOf(runtime);
   const activeTab = tabs.find((tab) => tab.tabId === activeTabId) ?? null;
-  const activeUrl = activeTab?.url ?? "";
+  const activeView = views.find((view) => view.viewId === activeViewId);
+  // 显示 URL：attach/navigate 过渡期 tab.url 为 about:blank 时回退到视图目标 URL。
+  const activeUrl = displayUrlOf(activeTab?.url ?? "", activeView?.pendingUrl ?? "");
   const sessionUrlsRef = useRef<string[]>([]);
   const urlByTabId = new Map(tabs.map((tab) => [tab.tabId, tab.url]));
   sessionUrlsRef.current = views
     .map((view) => {
       const tabId = tabIdOfView(runtime, view.viewId);
       const tabUrl = (tabId === undefined ? "" : urlByTabId.get(tabId)) ?? "";
-      return tabUrl === "about:blank" && view.pendingUrl ? view.pendingUrl : tabUrl || view.pendingUrl;
+      return displayUrlOf(tabUrl, view.pendingUrl);
     })
     .filter((url) => url.length > 0);
   const annotationGeneration = useRef(0);
+  // 标注模式会话代号：进入/退出时递增，使退出前发出的异步 hover/拾取结果失效（不回写）。
+  const annotationModeGeneration = useRef(0);
+  // 标注模式 hover 拾取节流（120ms + 8px 移动阈值，避免每帧 CDP）；退出时重置。
+  const lastHoverQuery = useRef({ x: -1000, y: -1000, time: 0 });
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
 
@@ -355,13 +373,16 @@ export function BrowserPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey]);
 
-  // 地址栏跟随活跃 tab；用户编辑中不覆盖，失败页按 Chrome 隐藏协议与根路径。
+  // 地址栏跟随活跃 tab；用户编辑中不覆盖，失败页按 Chrome 隐藏协议与根路径，
+  // 过渡期（tab.url 为 about:blank）显示视图目标 URL。
   useEffect(() => {
     if (addressFocused) return;
     const active = tabs.find((tab) => tab.tabId === activeTabId);
-    const current = active?.loadError ? failedAddressDisplay(active.loadError.url) : (active?.url ?? "");
+    const current = active?.loadError
+      ? failedAddressDisplay(active.loadError.url)
+      : displayUrlOf(active?.url ?? "", activeView?.pendingUrl ?? "");
     setAddressDraft(current);
-  }, [activeTabId, addressFocused, tabs]);
+  }, [activeTabId, addressFocused, tabs, views, activeViewId]);
 
   const activeAnnotationUrl = tabs.find((tab) => tab.tabId === activeTabId)?.url ?? "";
 
@@ -376,8 +397,13 @@ export function BrowserPanel() {
     const tabId = activeTabId;
     const generation = annotationGeneration.current + 1;
     annotationGeneration.current = generation;
+    // 标注创建时登记的页面 URL 与当前 URL 逐条比较（规范化比较与 main 一致）：
+    // 已离开页面的 composer 引用同步失效。面板重挂（无 previousUrl 快照）也能
+    // 识别隐藏期间的后台导航；about:blank/空 URL 过渡由 bridge 跳过，等真实 URL。
+    if (tabId !== null) invalidateBrowserAnnotationQuotes(record.key, tabId, activeAnnotationUrl);
     setAnnotations([]);
     setEditingTarget(null);
+    setEditingAnnotation(null);
     setHoverTarget(null);
     setPickError("");
     if (tabId === null) return;
@@ -737,32 +763,52 @@ export function BrowserPanel() {
       .catch((value: unknown) => setAddressError(value instanceof Error ? value.message : String(value)));
   }, [activeTab, activeTabId, identity]);
 
-  // 标注模式：关闭时清理编辑态。
-  const toggleAnnotationMode = useCallback(() => {
-    setAnnotationMode((current) => {
-      const next = !current;
-      if (!next) {
-        setEditingTarget(null);
-        setPickError("");
-      }
-      return next;
-    });
+  // 标注模式瞬态清理（进入/退出共用）：清空编辑目标、输入文本、悬停目标与拾取
+  // 错误，并递增模式代号使未完成的异步 hover/拾取结果失效；已保存的 annotations 保留。
+  const resetAnnotationTransients = useCallback(() => {
+    annotationModeGeneration.current += 1;
+    lastHoverQuery.current = { x: -1000, y: -1000, time: 0 };
+    setEditingTarget(null);
+    setEditingAnnotation(null);
+    setAnnotationText("");
+    setHoverTarget(null);
+    setPickError("");
   }, []);
 
-  // 标注模式下的 Esc：编辑框打开时先关闭编辑框，再按一次退出标注模式。
+  /** 取消当前标注编辑：清空编辑目标与输入文本（Escape 与编辑框“取消”按钮共用）。 */
+  const cancelAnnotationEdit = useCallback(() => {
+    setEditingTarget(null);
+    setEditingAnnotation(null);
+    setAnnotationText("");
+  }, []);
+
+  /** 退出标注模式（工具栏开关与 Escape 共用同一路径）：关闭模式并统一清理。 */
+  const exitAnnotationMode = useCallback(() => {
+    resetAnnotationTransients();
+    setAnnotationMode(false);
+  }, [resetAnnotationTransients]);
+
+  // 标注模式开关：两个方向都从干净瞬态开始。
+  const toggleAnnotationMode = useCallback(() => {
+    resetAnnotationTransients();
+    setAnnotationMode((current) => !current);
+  }, [resetAnnotationTransients]);
+
+  // 标注模式下的 Esc：编辑框打开时先取消编辑（清空输入文本），再按一次退出标注
+  // 模式（退出与工具栏开关共用 exitAnnotationMode 同一路径）。
   useEffect(() => {
     if (!annotationMode) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (editingTarget !== null) {
-        setEditingTarget(null);
+      if (editingTarget !== null || editingAnnotation !== null) {
+        cancelAnnotationEdit();
         return;
       }
-      setAnnotationMode(false);
+      exitAnnotationMode();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [annotationMode, editingTarget]);
+  }, [annotationMode, editingTarget, editingAnnotation, cancelAnnotationEdit, exitAnnotationMode]);
 
   // 标注模式下定时重定位标注（页面滚动/重绘/动画后徽标跟随元素，1s 间隔）。
   useEffect(() => {
@@ -794,8 +840,6 @@ export function BrowserPanel() {
   }, [annotationMode, activeTabId, annotations.length, identity]);
 
   // 标注模式点击拾取：坐标相对 viewport 容器（与 webview 视口一致）。
-  // 标注模式 hover 拾取：节流（120ms）+ 移动距离阈值（8px），避免每帧 CDP。
-  const lastHoverQuery = useRef({ x: -1000, y: -1000, time: 0 });
   // 标注拾取坐标基准：优先 webview 元素自身（与 guest 视口严格对齐），
   // 避免 overlay 容器与 webview 内容区之间的任何偏移；回退 overlay。
   const pickOrigin = useCallback(
@@ -821,8 +865,14 @@ export function BrowserPanel() {
       if (now - last.time < 120 && Math.hypot(x - last.x, y - last.y) < 8) return;
       lastHoverQuery.current = { x, y, time: now };
       const generation = annotationGeneration.current;
+      const modeGeneration = annotationModeGeneration.current;
       void window.desktop.browser.annotationPick(identity, tabId, x, y).then((result) => {
-        if (annotationGeneration.current !== generation || activeTabIdRef.current !== tabId) return;
+        if (
+          annotationModeGeneration.current !== modeGeneration ||
+          annotationGeneration.current !== generation ||
+          activeTabIdRef.current !== tabId
+        )
+          return;
         if (!result.ok) {
           setHoverTarget(null);
           return;
@@ -844,14 +894,21 @@ export function BrowserPanel() {
       const x = Math.round(event.clientX - origin.left);
       const y = Math.round(event.clientY - origin.top);
       const generation = annotationGeneration.current;
+      const modeGeneration = annotationModeGeneration.current;
       setPickError("");
       void window.desktop.browser.annotationPick(identity, tabId, x, y).then((result) => {
-        if (annotationGeneration.current !== generation || activeTabIdRef.current !== tabId) return;
+        if (
+          annotationModeGeneration.current !== modeGeneration ||
+          annotationGeneration.current !== generation ||
+          activeTabIdRef.current !== tabId
+        )
+          return;
         if (!result.ok) {
           setPickError(result.error);
           return;
         }
         setEditingTarget({ ...result, pos: { x, y }, tabId, generation });
+        setEditingAnnotation(null);
         setAnnotationText("");
       });
     },
@@ -888,6 +945,7 @@ export function BrowserPanel() {
         }
         setAnnotations((current) => [added, ...current]);
         setEditingTarget(null);
+        setEditingAnnotation(null);
         setAnnotationText("");
         // 直接注入 composer 引用：标注作为用户 prompt 的起点（无需提交按钮）。
         // 携带元素名称与选择器，Agent 可用 browser_snapshot 对照定位（快照交互节点带 sel=）。
@@ -899,19 +957,41 @@ export function BrowserPanel() {
           messageId: `browser-annotation:${added.id}`,
           tags: ["浏览器标注", elementTag, ...(pageUrl ? [pageUrl] : [])],
         };
-        try {
-          appendComposerQuote(aui.thread().composer(), quote);
-        } catch {
-          // 浏览器面板可能被挂载在无 thread runtime 的容器中，交给桥接队列稍后消费。
-          emitBrowserAnnotationToComposer({ targetKey: record.key, ...quote });
-        }
+        // 统一经桥接分发（composer 已挂载时同步追加，未挂载时排队）：bridge 据
+        // 此登记 messageId -> (tabId, 创建时 URL)，URL 切换失效与消费清理才能定位引用。
+        emitBrowserAnnotationToComposer({ targetKey: record.key, tabId, creationPageUrl: pageUrl, ...quote });
       })
       .catch(() => {
         if (target.generation === annotationGeneration.current && activeTabIdRef.current === tabId) {
           setPickError("保存标注失败");
         }
       });
-  }, [activeTabId, annotationText, aui, editingTarget, identity, record.key, tabs]);
+  }, [activeTabId, annotationText, editingTarget, identity, record.key, tabs]);
+
+  /** 保存已存在标注的编辑：原位 update（保持 id），并同步 composer 中同 messageId 引用。 */
+  const saveAnnotationEdit = useCallback(() => {
+    const annotation = editingAnnotation;
+    const tabId = activeTabId;
+    if (tabId === null || annotation === null || annotation.tabId !== tabId) return;
+    const text = annotationText.trim();
+    if (text.length === 0) return;
+    const generation = annotationGeneration.current;
+    void window.desktop.browser
+      .annotationUpdate(identity, tabId, annotation.id, { text })
+      .then((updated) => {
+        if (!updated) return;
+        if (annotationGeneration.current !== generation || activeTabIdRef.current !== tabId) return;
+        setAnnotations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        setEditingAnnotation(null);
+        setAnnotationText("");
+        updateBrowserAnnotationInComposer(record.key, browserAnnotationMessageId(updated.id), updated.text);
+      })
+      .catch(() => {
+        if (annotationGeneration.current === generation && activeTabIdRef.current === tabId) {
+          setPickError("保存标注失败");
+        }
+      });
+  }, [activeTabId, annotationText, editingAnnotation, identity, record.key]);
 
   const removeAnnotation = useCallback(
     (id: string) => {
@@ -921,10 +1001,39 @@ export function BrowserPanel() {
       void window.desktop.browser.annotationRemove(identity, tabId, id).then(() => {
         if (annotationGeneration.current !== generation || activeTabIdRef.current !== tabId) return;
         setAnnotations((current) => current.filter((annotation) => annotation.id !== id));
+        setEditingAnnotation((current) => (current?.id === id ? null : current));
+        // 同步移除 composer 中尚未发送的同 messageId 引用，避免 quote 副本陈旧。
+        removeBrowserAnnotationFromComposer(record.key, browserAnnotationMessageId(id));
       });
     },
-    [activeTabId, identity],
+    [activeTabId, identity, record.key],
   );
+
+  // composer 成功发送后：main 批量消费本次已用的标注，并移除本 tab overlay。
+  // IPC 删除失败时保留 overlay（main 侧标注仍在），登记待下次消费事件或
+  // 面板重挂时合并重试；成功后才确认，避免未处理 rejection 与标注永久残留。
+  useEffect(() => {
+    return subscribeBrowserAnnotationConsumed(record.key, (event) => {
+      if (event.messageIds.length === 0) return;
+      const generation = annotationGeneration.current;
+      // IPC 使用剥离前缀后的裸 annotation id；fail/ack 登记必须使用完整 messageId
+      // （与 bridge 待重试队列同单位，重试事件原样交回本 handler 后再剥离前缀）。
+      const annotationIds = event.messageIds.map((messageId) =>
+        messageId.slice(BROWSER_ANNOTATION_QUOTE_PREFIX.length),
+      );
+      window.desktop.browser
+        .annotationRemoveMany(identity, annotationIds)
+        .then(() => {
+          acknowledgeBrowserAnnotationRemoval(record.key, event.messageIds);
+          if (annotationGeneration.current !== generation) return;
+          setAnnotations((current) => current.filter((annotation) => !annotationIds.includes(annotation.id)));
+        })
+        .catch(() => {
+          // 删除失败：main 侧标注保留，登记待重试（下次消费事件或面板重挂）。
+          failBrowserAnnotationRemoval(record.key, event.messageIds);
+        });
+    });
+  }, [identity, record.key]);
 
   const onToolbarBack = useCallback(() => {
     if (activeViewId === undefined) return;
@@ -975,6 +1084,15 @@ export function BrowserPanel() {
     },
     [runtime],
   );
+
+  // 标注编辑器：新建（拾取目标）与已保存标注原位编辑共用同一编辑框。
+  const annotationEditor = editingAnnotation ?? editingTarget;
+  const annotationEditorPos =
+    annotationEditor === null
+      ? { x: 0, y: 0 }
+      : "pos" in annotationEditor
+        ? annotationEditor.pos
+        : { x: annotationEditor.bounds.x, y: annotationEditor.bounds.y };
 
   return (
     <div className="browser-panel">
@@ -1055,15 +1173,7 @@ export function BrowserPanel() {
               );
             })()}
         </div>
-        <TooltipIconButton
-          tooltip={annotationMode ? "退出标注模式" : "标注模式"}
-          data-active={annotationMode || undefined}
-          aria-label={annotationMode ? "退出标注模式" : "标注模式（点击页面元素添加注释）"}
-          aria-pressed={annotationMode}
-          onClick={toggleAnnotationMode}
-        >
-          <MessageSquareQuote size={15} aria-hidden="true" />
-        </TooltipIconButton>
+        <AnnotationModeToggle active={annotationMode} onToggle={toggleAnnotationMode} />
         <DropdownMenu open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
           <DropdownMenuTrigger asChild>
             <TooltipIconButton tooltip="更多选项" aria-label="更多选项" data-active={moreMenuOpen || undefined}>
@@ -1185,7 +1295,8 @@ export function BrowserPanel() {
         <div className="browser-tab-list" role="tablist" aria-label="浏览器标签页">
           {views.map((view) => {
             const tab = tabs.find((item) => item.tabId === tabIdOfView(runtime, view.viewId));
-            const label = tab?.title || tab?.url || "新标签页";
+            const displayUrl = displayUrlOf(tab?.url ?? "", view.pendingUrl);
+            const label = tab?.title || displayUrl || "新标签页";
             const active = tab?.tabId === activeTabId && !view.crashed;
             return (
               <div
@@ -1350,52 +1461,40 @@ export function BrowserPanel() {
                     </>
                   )}
                   {annotations.map((annotation, index) => (
-                    <div
+                    <BrowserAnnotationMarker
                       key={annotation.id}
-                      className="browser-annotation-marker"
-                      style={{
-                        left: `${annotation.bounds.x}px`,
-                        top: `${annotation.bounds.y}px`,
-                        width: `${annotation.bounds.width}px`,
-                        height: `${annotation.bounds.height}px`,
+                      annotation={annotation}
+                      index={index}
+                      onEdit={() => {
+                        // 点击已保存标注本体：原位编辑（预填文本，保持原 id）。
+                        setEditingTarget(null);
+                        setEditingAnnotation(annotation);
+                        setAnnotationText(annotation.text);
                       }}
-                      title={annotation.text}
-                    >
-                      <span className="browser-annotation-badge">{index + 1}</span>
-                      <span className="browser-annotation-text">{annotation.text}</span>
-                      <span className="browser-annotation-remove-slot">
-                        <TooltipIconButton
-                          tooltip={`删除标注 ${index + 1}`}
-                          aria-label={`删除标注 ${index + 1}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            removeAnnotation(annotation.id);
-                          }}
-                        >
-                          <Trash2 size={11} aria-hidden="true" />
-                        </TooltipIconButton>
-                      </span>
-                    </div>
+                      onRemove={() => removeAnnotation(annotation.id)}
+                    />
                   ))}
                   {pickError && (
                     <div className="browser-annotation-error" role="alert">
                       {pickError}
                     </div>
                   )}
-                  {editingTarget && (
+                  {annotationEditor && (
                     <div
                       className="browser-annotation-editor"
                       style={{
-                        left: `${Math.min(editingTarget.pos.x, Math.max(0, viewportSize.width - 260))}px`,
-                        top: `${Math.min(editingTarget.pos.y + 16, Math.max(0, viewportSize.height - 160))}px`,
+                        left: `${Math.min(annotationEditorPos.x, Math.max(0, viewportSize.width - 260))}px`,
+                        top: `${Math.min(annotationEditorPos.y + 16, Math.max(0, viewportSize.height - 160))}px`,
                       }}
                       role="dialog"
-                      aria-label="添加标注"
+                      aria-label={editingAnnotation ? "编辑标注" : "添加标注"}
                     >
                       <div className="browser-annotation-editor-heading">
-                        <span className="browser-annotation-editor-tag">{editingTarget.tag}</span>
+                        <span className="browser-annotation-editor-tag">{annotationEditor.tag}</span>
                         <span className="browser-annotation-editor-name">
-                          {editingTarget.name || editingTarget.selector}
+                          {"name" in annotationEditor
+                            ? annotationEditor.name || annotationEditor.selector
+                            : annotationEditor.selector}
                         </span>
                       </div>
                       <textarea
@@ -1405,24 +1504,23 @@ export function BrowserPanel() {
                         value={annotationText}
                         onChange={(event) => setAnnotationText(event.target.value)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) saveAnnotation();
-                          if (event.key === "Escape") setEditingTarget(null);
+                          // Escape 由 window keydown 监听统一处理（第一次取消编辑，第二次退出）。
+                          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                            if (editingAnnotation) saveAnnotationEdit();
+                            else saveAnnotation();
+                          }
                         }}
                         autoFocus
                       />
                       <div className="browser-annotation-editor-actions">
-                        <button
-                          type="button"
-                          className="browser-annotation-cancel"
-                          onClick={() => setEditingTarget(null)}
-                        >
+                        <button type="button" className="browser-annotation-cancel" onClick={cancelAnnotationEdit}>
                           取消
                         </button>
                         <button
                           type="button"
                           className="browser-annotation-save"
                           disabled={annotationText.trim().length === 0}
-                          onClick={saveAnnotation}
+                          onClick={editingAnnotation ? saveAnnotationEdit : saveAnnotation}
                         >
                           保存标注
                         </button>
@@ -1467,7 +1565,7 @@ export function BrowserPanel() {
             </div>
           ) : null}
           {activeTabId !== null &&
-          activeUrl === "about:blank" &&
+          (activeUrl.length === 0 || activeUrl === "about:blank") &&
           !activeTab?.loading &&
           !activeTab?.loadError &&
           !panelError &&

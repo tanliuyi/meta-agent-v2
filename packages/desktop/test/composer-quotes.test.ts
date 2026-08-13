@@ -5,7 +5,9 @@ import {
   getComposerQuotes,
   getMessageQuotes,
   removeComposerQuote,
+  removeComposerQuoteByMessageId,
   toComposerQuote,
+  updateComposerQuoteText,
 } from "../src/renderer/src/runtime/composer-quotes.ts";
 import type { PiQuote } from "../src/shared/contracts.ts";
 
@@ -56,5 +58,40 @@ describe("composer quotes", () => {
     expect(getMessageQuotes({ quotes: [first, second] })).toEqual([first, second]);
     expect(getMessageQuotes({ quote: first })).toEqual([first]);
     expect(getMessageQuotes({ quote: { ...first, quotes: [first, second] } })).toEqual([first, second]);
+  });
+
+  it("按 messageId 原位更新引用文本（保持位置与其他字段）", () => {
+    let quote: QuoteInfo | undefined;
+    const target = {
+      getState: () => ({ quote }),
+      setQuote: (next: QuoteInfo | undefined) => {
+        quote = next;
+      },
+    };
+
+    appendComposerQuote(target, first);
+    appendComposerQuote(target, second);
+    updateComposerQuoteText(target, "assistant-2", "第二段（已改）");
+    expect(getComposerQuotes(quote)).toEqual([first, { ...second, text: "第二段（已改）" }]);
+    // 不存在的 messageId 静默。
+    updateComposerQuoteText(target, "missing", "x");
+    expect(getComposerQuotes(quote)).toEqual([first, { ...second, text: "第二段（已改）" }]);
+  });
+
+  it("按 messageId 移除引用；不存在时静默", () => {
+    let quote: QuoteInfo | undefined;
+    const target = {
+      getState: () => ({ quote }),
+      setQuote: (next: QuoteInfo | undefined) => {
+        quote = next;
+      },
+    };
+
+    appendComposerQuote(target, first);
+    appendComposerQuote(target, second);
+    removeComposerQuoteByMessageId(target, "assistant-1");
+    expect(getComposerQuotes(quote)).toEqual([second]);
+    removeComposerQuoteByMessageId(target, "missing");
+    expect(getComposerQuotes(quote)).toEqual([second]);
   });
 });

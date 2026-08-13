@@ -7,6 +7,7 @@ import { getComposerQuotes, removeComposerQuote } from "../../../runtime/compose
 import { Popover } from "../../../shared/ui/popover.tsx";
 import { PopoverContent } from "../../../shared/ui/popover-content.tsx";
 import { PopoverTrigger } from "../../../shared/ui/popover-trigger.tsx";
+import { useSessionModalContext } from "../../session-modal-context.ts";
 
 type PreviewTag = { kind: "browser-annotation" | "text"; label: string };
 
@@ -49,6 +50,7 @@ function getPreviewTags(tags: readonly string[]): PreviewTag[] {
 /** Shows a compact quote count and expands quote metadata and text on hover. */
 export function ComposerQuotes() {
   const aui = useAui();
+  const inModal = useSessionModalContext();
   const quote = useAuiState((state) => state.composer.quote);
   const quotes = getComposerQuotes(quote);
   const [open, setOpen] = useState(false);
@@ -99,7 +101,7 @@ export function ComposerQuotes() {
         <PopoverContent
           aria-label="引用预览"
           align="start"
-          className="composer-quotes-preview w-[420px] max-w-[calc(100vw-var(--space-9)-var(--space-9))] max-h-(--layout-dialog-max-height) p-(--space-4)"
+          className={`composer-quotes-preview w-[420px] max-w-[calc(100vw-var(--space-9)-var(--space-9))] max-h-(--layout-dialog-max-height) p-(--space-4)${inModal ? " z-(--stack-menu)" : ""}`}
           collisionPadding={4}
           onBlur={scheduleClose}
           onFocus={showPreview}

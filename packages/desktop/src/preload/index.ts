@@ -450,6 +450,11 @@ const desktopApi: DesktopApi = {
     /** 删除标注。 */
     annotationRemove: (identity, tabId, id) =>
       ipcRenderer.invoke(CHANNELS.browserAnnotationRemove, identity, tabId, id),
+    /** 按 id 批量删除标注（composer 成功发送后消费；id 会话内全局唯一）。 */
+    annotationRemoveMany: (identity, ids) => ipcRenderer.invoke(CHANNELS.browserAnnotationRemoveMany, identity, ids),
+    /** 原位更新标注文本（保持 id/selector/bounds 不变）。 */
+    annotationUpdate: (identity, tabId, id, input) =>
+      ipcRenderer.invoke(CHANNELS.browserAnnotationUpdate, identity, tabId, id, input),
     /** 按选择器重新解析标注 bounds；元素消失返回 null。 */
     annotationResolve: (identity, tabId, id) =>
       ipcRenderer.invoke(CHANNELS.browserAnnotationResolve, identity, tabId, id),

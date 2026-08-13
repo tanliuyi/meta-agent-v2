@@ -23,6 +23,23 @@
   border-bottom: 1px solid hsl(var(--border));
 }
 
+/* 标注模式工具栏开关：关闭态为 24x24 图标按钮（size=icon）；开启态扩展为“正在标注”
+ * 状态胶囊（浅主色底 + 主色图标/文字，不侵占网页空间）。开启态的紧凑尺寸由组件层
+ * 以 Tailwind utility（h-6 w-auto gap-1 px-1.5）与 size=sm 合并（twMerge 消除冲突），
+ * CSS 只负责 active 颜色与 max-width 防护，不覆盖任何 utility 声明的盒模型属性
+ * （components layer 无法以特异性压过 utilities layer）。 */
+.browser-annotation-toggle[data-active] {
+  max-width: 7rem;
+  background: hsl(var(--primary) / 0.14);
+  color: hsl(var(--primary));
+}
+/* 开启态文本：仅 active 时由组件渲染，保持内联不折行即可；关闭态不渲染节点，
+ * 无折叠/过渡样式。 */
+.browser-annotation-toggle-text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
 .browser-address-wrap {
   position: relative;
   flex: 1 1 auto;
@@ -160,6 +177,18 @@
 .browser-session-runtime {
   width: 100%;
   height: 100%;
+  /* 可见时容器以 fixed 定位对齐 .browser-viewport 矩形（面板内容区底部），
+     自身裁切 webview：overflow:hidden 裁剪越界像素，border-radius 与
+     .panel-content 的底部圆角（0 0 16px 16px）同步，网站内容不再越过
+     右下/左下圆角。offscreen（parking host 内）时圆角/裁切无视觉影响。 */
+  overflow: hidden;
+  border-radius: 0 0 16px 16px;
+}
+
+/* darwin：workbench panel 无圆角（layout.css 中 border-radius: 0），runtime 同步清零。
+   runtime 常驻 body 下的 parking host，不是 .app-frame 后代，经 body:has 引用平台信号。 */
+body:has(.app-frame[data-platform="darwin"]) .browser-session-runtime {
+  border-radius: 0;
 }
 
 /* 屏幕外会话容器（面板未打开/会话在后台）：content-visibility:hidden 保留布局
@@ -566,6 +595,7 @@
   box-sizing: border-box;
   border: 1px dashed hsl(var(--ring));
   pointer-events: auto;
+  cursor: pointer;
 }
 
 .browser-annotation-badge {
@@ -612,6 +642,23 @@
 }
 .browser-annotation-marker:hover .browser-annotation-remove-slot {
   display: inline-flex;
+}
+
+.browser-annotation-edit-hitbox {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.browser-annotation-edit-hitbox:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
 }
 
 .browser-annotation-editor {
@@ -701,43 +748,6 @@
   background: hsl(var(--destructive));
   color: hsl(var(--destructive-foreground));
   font-size: 12px;
-}
-
-.browser-annotation-bar {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
-  z-index: 25;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--shape-radius-md);
-  background: hsl(var(--popover));
-  box-shadow: 0 4px 12px hsl(var(--shadow) / 0.25);
-  font-size: 12px;
-  color: hsl(var(--foreground));
-}
-.browser-annotation-bar-count {
-  color: hsl(var(--muted-foreground));
-}
-
-.browser-annotation-commit {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border: 0;
-  border-radius: var(--shape-radius-md);
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  cursor: pointer;
-  font-size: 12px;
-}
-.browser-annotation-commit[disabled] {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .browser-panel-error {

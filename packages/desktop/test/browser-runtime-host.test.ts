@@ -11,9 +11,11 @@ import {
   closeView,
   configureBrowserRuntimeHost,
   createBlankView,
+  displayUrlOf,
   ensureBrowserRuntime,
   getBrowserRuntime,
   openInternalPageView,
+  remountView,
   replaceView,
   resetBrowserRuntimeHostForTest,
   retireBrowserRuntime,
@@ -197,6 +199,132 @@ async function flushAttach(): Promise<void> {
   // 轮询 1ms；等几个 tick 让 attach 完成。
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
+
+describe("displayUrlOf 显示 URL 推导", () => {
+  test("真实 URL 到达后以 tab 状态为准（不回退 pendingUrl）", () => {
+    expect(displayUrlOf("https://example.com/", "https://target.example/")).toBe("https://example.com/");
+  });
+
+  test("tab URL 为 about:blank（attach/navigate 过渡期）时回退 pendingUrl", () => {
+    expect(displayUrlOf("about:blank", "https://target.example/")).toBe("https://target.example/");
+  });
+
+  test("tab URL 为空时回退 pendingUrl（恢复标签页/attach 前）", () => {
+    expect(displayUrlOf("", "https://target.example/")).toBe("https://target.example/");
+  });
+
+  test("真正空白新标签不受影响：无 pendingUrl 时保持空白", () => {
+    expect(displayUrlOf("about:blank", "")).toBe("");
+    expect(displayUrlOf("", "")).toBe("");
+  });
+
+  test("browser:// 内部页真实 URL 不被覆盖，过渡期回退显示目标内部页", () => {
+    expect(displayUrlOf("browser://history", "browser://passwords")).toBe("browser://history");
+    expect(displayUrlOf("about:blank", "browser://history")).toBe("browser://history");
+  });
+
+  test("tab URL 为 about:blank 且 pendingUrl 也为 about:blank 时保持空白", () => {
+    expect(displayUrlOf("about:blank", "about:blank")).toBe("about:blank");
+  });
+});
+
+describe("pendingUrl 生命周期（状态广播确认真实 URL 后清除）", () => {
+  test("过渡期 about:blank 广播保留 pendingUrl；真实 URL 落地后清除；后续 about:blank 不回退旧目标", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    desktop.createHandler?.({
+      requestId: 81,
+      url: "https://target.example/",
+      sessionKey: runtime.sessionKey,
+    });
+    await flushAttach();
+    expect(runtime.views[0]?.pendingUrl).toBe("https://target.example/");
+
+    // attach 完成但导航未落地：tab.url 为 about:blank，pendingUrl 必须保留（过渡显示目标）。
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(81, "about:blank")],
+      activeTabId: 81,
+    });
+    expect(runtime.views[0]?.pendingUrl).toBe("https://target.example/");
+    expect(displayUrlOf("about:blank", runtime.views[0]!.pendingUrl)).toBe("https://target.example/");
+
+    // 真实 URL 广播确认：清除 pendingUrl（不再代表尚未落地的目标）。
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(81, "https://target.example/")],
+      activeTabId: 81,
+    });
+    expect(runtime.views[0]?.pendingUrl).toBe("");
+    expect(displayUrlOf("https://target.example/", "")).toBe("https://target.example/");
+
+    // 之后 tab 合法变为 about:blank：不再回退历史目标 URL。
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(81, "about:blank")],
+      activeTabId: 81,
+    });
+    expect(runtime.views[0]?.pendingUrl).toBe("");
+    expect(displayUrlOf("about:blank", runtime.views[0]!.pendingUrl)).toBe("");
+
+    // remountView 不再优先取过期 pendingUrl：重建后以当前 tab 状态（about:blank）为准。
+    const viewId = runtime.views[0]!.viewId;
+    remountView(runtime, viewId);
+    expect(runtime.views[0]?.viewId).not.toBe(viewId);
+    expect(runtime.views[0]?.pendingUrl).toBe("about:blank");
+  });
+
+  test("browser:// 内部页真实 URL 广播同样清除 pendingUrl，页面切换复用不受影响", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    openInternalPageView(runtime, "history");
+    const webviews = elements.filter((node) => node.getAttribute("src") !== undefined);
+    webviews[0]?.emit("dom-ready");
+    await flushAttach();
+    expect(runtime.views[0]?.pendingUrl).toBe("browser://history");
+
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(1, "browser://history")],
+      activeTabId: 1,
+    });
+    expect(runtime.views[0]?.pendingUrl).toBe("");
+
+    // 切换内部页仍复用同一视图（tab 真实 URL 仍是内部页，existing 判定不受 pendingUrl 清除影响）。
+    openInternalPageView(runtime, "passwords");
+    expect(runtime.views).toHaveLength(1);
+    expect(runtime.views[0]?.pendingUrl).toBe("browser://passwords");
+  });
+
+  test("真实 URL 广播只清除有 tab 映射的视图；崩溃占位视图保留恢复 URL", async () => {
+    const runtime = ensureBrowserRuntime(SESSION_A);
+    desktop.createHandler?.({ requestId: 83, url: "https://a.example/", sessionKey: runtime.sessionKey });
+    await flushAttach();
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(83, "about:blank")],
+      activeTabId: 83,
+    });
+    // 视图 B：空白新建后 attach（tabId = ++nextTabId = 1）。
+    createBlankView(runtime);
+    await flushAttach();
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(83, "about:blank"), makeTab(1, "https://b.example/")],
+      activeTabId: 83,
+    });
+    // B 崩溃：映射删除，pendingUrl 记录崩溃前 URL 供重建。
+    elements.at(-1)?.emit("render-process-gone");
+    expect(runtime.views[1]?.pendingUrl).toBe("https://b.example/");
+
+    // A 的真实 URL 广播：A 的 pendingUrl 被清除；B（崩溃占位、无 tab 映射）保留恢复 URL。
+    desktop.stateHandler?.({
+      sessionKey: runtime.sessionKey,
+      tabs: [makeTab(83, "https://a.example/")],
+      activeTabId: 83,
+    });
+    expect(runtime.views[0]?.pendingUrl).toBe("");
+    expect(runtime.views[1]?.pendingUrl).toBe("https://b.example/");
+  });
+});
 
 describe("browser runtime host 会话路由", () => {
   test("ensureBrowserRuntime 幂等并按身份创建独立 runtime", () => {

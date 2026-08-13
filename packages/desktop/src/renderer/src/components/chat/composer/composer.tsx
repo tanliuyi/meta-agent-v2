@@ -9,9 +9,18 @@ import Command from "lucide-react/dist/esm/icons/command.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Readiness, SessionControlState } from "../../../../../shared/contracts.ts";
-import { appendComposerQuote, type ComposerQuoteTarget } from "../../../runtime/composer-quotes.ts";
+import {
+  appendComposerQuote,
+  type ComposerQuoteTarget,
+  getComposerQuotes,
+  removeComposerQuoteByMessageId,
+  updateComposerQuoteText,
+} from "../../../runtime/composer-quotes.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
-import { subscribeBrowserAnnotationToComposer } from "../../../state/browser-composer-bridge.ts";
+import {
+  BrowserAnnotationSubmitTracker,
+  subscribeBrowserAnnotationToComposer,
+} from "../../../state/browser-composer-bridge.ts";
 import { ComposerAddAttachment } from "../../assistant-ui/attachment/composer-add-attachment.tsx";
 import { ComposerAttachments } from "../../assistant-ui/attachment/composer-attachments.tsx";
 import { useSessionScope } from "../../session-context.tsx";
@@ -102,14 +111,44 @@ export function Composer(props: ComposerProps) {
     setError(message);
   });
 
-  // 浏览器面板保存标注后：作为用户引用（quote）追加到 composer。
+  // 浏览器面板保存标注后：作为用户引用（quote）追加到 composer；面板的
+  // 编辑/删除/页面切换同步到 composer 中同 messageId 的引用（保持原 ID）。
   useEffect(() => {
-    return subscribeBrowserAnnotationToComposer(record.key, (payload) => {
+    return subscribeBrowserAnnotationToComposer(record.key, (event) => {
       const composer = aui.composer() as ComposerQuoteTarget;
       if (!composer || typeof composer.setQuote !== "function") return;
-      appendComposerQuote(composer, payload);
+      if (event.type === "add") appendComposerQuote(composer, event.payload);
+      else if (event.type === "update") updateComposerQuoteText(composer, event.messageId, event.text);
+      else removeComposerQuoteByMessageId(composer, event.messageId);
     });
   }, [aui, record.key]);
+
+  // 本次 prompt 成功发送（composer.send 事件）前已消费的浏览器标注引用：
+  // send 成功构建 outgoing message 后才同步发 send 事件（上传失败恢复 quote 且不发
+  // 事件），因此在此消费即“发送成功才清理、失败保留”的边界。每次提交入口在触发
+  // send 前快照当前 quote 中的 browser-annotation 引用（quote 在 send 内部同步清空，
+  // 事件载荷不含 quote）。
+  // ref 内记录创建时的 key：record.key 变化时重建 tracker，避免沿用旧会话的 targetKey。
+  const browserAnnotationSubmitTrackerRef = useRef<{
+    key: string;
+    tracker: BrowserAnnotationSubmitTracker;
+  } | null>(null);
+  const browserAnnotationSubmitTracker = useCallback(() => {
+    const existing = browserAnnotationSubmitTrackerRef.current;
+    if (existing && existing.key === record.key) return existing.tracker;
+    const tracker = new BrowserAnnotationSubmitTracker(record.key);
+    browserAnnotationSubmitTrackerRef.current = { key: record.key, tracker };
+    return tracker;
+  }, [record.key]);
+  const snapshotBrowserAnnotationQuotes = useCallback(() => {
+    const composer = aui.composer() as ComposerQuoteTarget;
+    if (!composer || typeof composer.getState !== "function") return;
+    browserAnnotationSubmitTracker().snapshot(getComposerQuotes(composer.getState().quote));
+  }, [aui, browserAnnotationSubmitTracker]);
+
+  useAuiEvent("composer.send", () => {
+    browserAnnotationSubmitTracker().onSend();
+  });
 
   const submitRunning = useCallback(() => {
     if (props.mode !== "session" || sending) return;
@@ -118,13 +157,14 @@ export function Composer(props: ComposerProps) {
     setSending(true);
     setError(null);
     try {
+      snapshotBrowserAnnotationQuotes();
       aui.composer().send({ steer: mode === "steer" });
     } catch (value) {
       reportError(value);
     } finally {
       setSending(false);
     }
-  }, [aui, materializeSelectedCommand, mode, props.mode, reportError, sending]);
+  }, [aui, materializeSelectedCommand, mode, props.mode, reportError, sending, snapshotBrowserAnnotationQuotes]);
 
   const submitDraft = async () => {
     if (props.mode !== "draft") return;
@@ -142,8 +182,14 @@ export function Composer(props: ComposerProps) {
     setSending(true);
     setError(null);
     try {
+      // draft 的 Enter/命令/表单提交共用本路径：readiness 校验通过后、真正发送前快照。
+      snapshotBrowserAnnotationQuotes();
       await props.onSubmit();
+      // 生产上 onSubmit 直接 materializeDraftSession（sessions.prompt），不经过
+      // assistant-ui composer.send；成功返回即发送成功，立即按快照消费标注引用。
+      browserAnnotationSubmitTracker().onSend();
     } catch (value) {
+      // 失败不消费：引用保留在 composer，重试时 snapshot 替换 pending。
       reportError(value);
     } finally {
       setSending(false);
@@ -159,6 +205,8 @@ export function Composer(props: ComposerProps) {
     }
     if (!isRunning) {
       materializeSelectedCommand();
+      // 不 preventDefault：ComposerPrimitive.Root 的内部 send 随后同步执行。
+      snapshotBrowserAnnotationQuotes();
       return;
     }
     event.preventDefault();
@@ -180,7 +228,10 @@ export function Composer(props: ComposerProps) {
     aui.composer().setText(slashCommandText(command, ""));
     if (props.mode === "draft") void submitDraft();
     else if (isRunning) submitRunning();
-    else aui.composer().send();
+    else {
+      snapshotBrowserAnnotationQuotes();
+      aui.composer().send();
+    }
   };
 
   const readiness = props.mode === "draft" ? props.config?.readiness : props.readiness;
@@ -266,6 +317,7 @@ export function Composer(props: ComposerProps) {
                     ? () => void submitDraft()
                     : () => {
                         materializeSelectedCommand();
+                        snapshotBrowserAnnotationQuotes();
                         aui.composer().send();
                       }
                 }

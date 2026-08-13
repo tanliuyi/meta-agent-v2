@@ -122,6 +122,11 @@ export interface BrowserAnnotationInput {
   text: string;
 }
 
+/** 标注更新输入：仅允许更新文本（id/createdAt/selector/bounds/tag 保持不变）。 */
+export interface BrowserAnnotationUpdateInput {
+  text: string;
+}
+
 /** 标注选取结果：pickAnnotationTarget 的返回。 */
 export type BrowserAnnotationPickResult =
   | { ok: true; selector: string; bounds: BrowserAnnotationBounds; tag: string; name: string }
@@ -261,3 +266,12 @@ export interface BrowserCloseTabRequest {
 }
 
 export type BrowserOpenTabResult = { ok: true; tab: BrowserTab } | { ok: false; error: string };
+
+/** 浏览器 URL 规范化相等：main 标注失效与 renderer composer 引用失效共用同一语义。 */
+export function sameBrowserUrl(left: string, right: string): boolean {
+  try {
+    return new URL(left).href === new URL(right).href;
+  } catch {
+    return left === right;
+  }
+}

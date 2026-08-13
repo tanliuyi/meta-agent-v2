@@ -1248,6 +1248,163 @@ describe("BrowserManager 会话隔离", () => {
     expect(hosts.get(101)?.disposed).toBe(true);
   });
 
+  test("updateAnnotation 原位更新文本并保持 id/createdAt/selector/bounds/tag", async () => {
+    const { manager } = setup();
+    await manager.attach(SESSION_A, 101);
+    const added = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#a",
+      tag: "button",
+      bounds: { x: 1, y: 2, width: 10, height: 10 },
+      text: "原文本",
+    });
+    expect(added).not.toBeNull();
+
+    const updated = await manager.updateAnnotation(SESSION_A, 1, added!.id, { text: "新文本" });
+    expect(updated).toMatchObject({
+      id: added!.id,
+      tabId: 1,
+      selector: "#a",
+      tag: "button",
+      bounds: { x: 1, y: 2, width: 10, height: 10 },
+      text: "新文本",
+      createdAt: added!.createdAt,
+    });
+    const listed = manager.listAnnotations(SESSION_A, 1);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ id: added!.id, text: "新文本" });
+
+    // 未知 id / 未知 tab 静默返回 null，不影响已有标注。
+    await expect(manager.updateAnnotation(SESSION_A, 1, "missing", { text: "x" })).resolves.toBeNull();
+    await expect(manager.updateAnnotation(SESSION_A, 42, added!.id, { text: "x" })).resolves.toBeNull();
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(1);
+  });
+
+  test("removeAnnotations 按 id 跨 tab 批量删除，未知 id 忽略", async () => {
+    const { manager } = setup();
+    await manager.attach(SESSION_A, 101);
+    await manager.attach(SESSION_A, 102);
+    const first = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#a",
+      tag: "button",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "a",
+    });
+    const second = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#b",
+      tag: "button",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "b",
+    });
+    const otherTab = await manager.addAnnotation(SESSION_A, 2, {
+      selector: "#c",
+      tag: "div",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "c",
+    });
+
+    await manager.removeAnnotations(SESSION_A, [first!.id, "missing"]);
+    expect(manager.listAnnotations(SESSION_A, 1).map((annotation) => annotation.id)).toEqual([second!.id]);
+    expect(manager.listAnnotations(SESSION_A, 2).map((annotation) => annotation.id)).toEqual([otherTab!.id]);
+
+    await manager.removeAnnotations(SESSION_A, [second!.id, otherTab!.id]);
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
+    expect(manager.listAnnotations(SESSION_A, 2)).toHaveLength(0);
+
+    // 空列表与其他会话安全。
+    await expect(manager.removeAnnotations(SESSION_A, [])).resolves.toBeUndefined();
+    await expect(manager.removeAnnotations(SESSION_B, [first!.id])).resolves.toBeUndefined();
+    expect(manager.listAnnotations(SESSION_B, 1)).toHaveLength(0);
+  });
+
+  test("URL 真正切换时清理该 tab 标注（full 与 in-page），同 URL 事件不清理", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+    const added = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#a",
+      tag: "button",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "t",
+    });
+    expect(added).not.toBeNull();
+
+    // 同 URL 重复 navigated 事件不清理。
+    host.emit({ type: "navigated", url: "about:blank", canGoBack: false, canGoForward: false });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(1);
+
+    // full navigation 到新 URL：清理。
+    host.emit({ type: "navigated", url: "https://example.com/a", canGoBack: false, canGoForward: false });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
+
+    const hashAdded = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#b",
+      tag: "div",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "h",
+    });
+    expect(hashAdded).not.toBeNull();
+    // in-page URL 变化（hash）：清理。
+    host.emit({ type: "navigated-in-page", url: "https://example.com/a#top" });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
+
+    const sameUrlAdded = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#c",
+      tag: "div",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "s",
+    });
+    expect(sameUrlAdded).not.toBeNull();
+    // 同 URL 重复 in-page 事件不清理。
+    host.emit({ type: "navigated-in-page", url: "https://example.com/a#top" });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(1);
+
+    // 其他 tab 的标注不受影响。
+    await manager.attach(SESSION_A, 102);
+    const otherTab = await manager.addAnnotation(SESSION_A, 2, {
+      selector: "#d",
+      tag: "div",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "o",
+    });
+    expect(otherTab).not.toBeNull();
+    host.emit({ type: "navigated", url: "https://example.com/b", canGoBack: true, canGoForward: false });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
+    expect(manager.listAnnotations(SESSION_A, 2)).toHaveLength(1);
+  });
+
+  test("load-failed URL 变化时清理该 tab 标注；同 URL 重复失败不误删；重试成功不残留", async () => {
+    const { manager, hosts } = setup();
+    await manager.attach(SESSION_A, 101);
+    const host = hosts.get(101)!;
+    const added = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#a",
+      tag: "button",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "old",
+    });
+    expect(added).not.toBeNull();
+
+    // 导航 B 首次失败：URL 已切换为 B，旧页面标注必须清理。
+    host.emit({ type: "load-failed", url: "https://example.com/b", code: -105, description: "ERR_NAME_NOT_RESOLVED" });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
+
+    // 重试 B 成功：navigated 的 previousUrl 与 event.url 相同，不再触发清理；
+    // 旧页面标注不会因首次失败而残留。
+    host.emit({ type: "navigated", url: "https://example.com/b", canGoBack: false, canGoForward: false });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(0);
+
+    // 同 URL 的重复 load-failed 不误删当前页标注。
+    const onB = await manager.addAnnotation(SESSION_A, 1, {
+      selector: "#b",
+      tag: "div",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      text: "on-b",
+    });
+    expect(onB).not.toBeNull();
+    host.emit({ type: "load-failed", url: "https://example.com/b", code: -102, description: "ERR_CONNECTION_REFUSED" });
+    expect(manager.listAnnotations(SESSION_A, 1)).toHaveLength(1);
+  });
+
   test("加载失败广播 loadError，导航成功与开始加载时清除", async () => {
     const { manager, hosts, states } = setup();
     await manager.attach(SESSION_A, 101);

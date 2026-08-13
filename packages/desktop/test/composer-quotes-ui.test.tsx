@@ -49,6 +49,7 @@ vi.mock("@radix-ui/react-popover", () => ({
 }));
 
 import { ComposerQuotes } from "../src/renderer/src/components/chat/composer/composer-quotes.tsx";
+import { SessionModalContext } from "../src/renderer/src/components/session-modal-context.ts";
 
 describe("ComposerQuotes UI", () => {
   it("默认显示数量，并为每条引用保留 hover 预览与删除入口", () => {
@@ -75,5 +76,24 @@ describe("ComposerQuotes UI", () => {
     expect(markup).toContain("移除全部引用");
     expect(markup).toContain("移除第 1 条引用");
     expect(markup).toContain("移除第 2 条引用");
+  });
+
+  it("普通聊天保持 popover 默认层级", () => {
+    const markup = renderToStaticMarkup(<ComposerQuotes />);
+
+    expect(markup).toContain("z-(--stack-popover)");
+    expect(markup).not.toContain("z-(--stack-menu)");
+  });
+
+  it("全屏会话 modal 内把引用预览提升到 menu 层级", () => {
+    const markup = renderToStaticMarkup(
+      <SessionModalContext.Provider value>
+        <ComposerQuotes />
+      </SessionModalContext.Provider>,
+    );
+
+    // tailwind-merge 会用后传入的 z-(--stack-menu) 覆盖默认 z-(--stack-popover)。
+    expect(markup).toContain("z-(--stack-menu)");
+    expect(markup).not.toContain("z-(--stack-popover)");
   });
 });

@@ -38,7 +38,7 @@ export interface BrowserViewRecord {
   viewId: number;
   /** guest 渲染进程崩溃，占位待重建。 */
   crashed: boolean;
-  /** 创建/重建后希望打开的 URL（空 = 保持 about:blank）。 */
+  /** 创建/重建后希望打开的 URL（空 = 保持 about:blank）；tab 确认真实 URL（非空且非 about:blank）后由状态广播清除，只代表尚未落地的目标。 */
   pendingUrl: string;
   /** main 建 tab 请求的 requestId（attach 时传给 main，由其 resolve 并自动导航）。 */
   pendingRequestId?: number;
@@ -555,6 +555,17 @@ function tabUrlOf(internals: RuntimeInternals, viewId: number): string {
   return internals.runtime.tabs.find((tab) => tab.tabId === tabId)?.url ?? "";
 }
 
+/**
+ * 视图的显示 URL：tab 当前 URL 为空或 about:blank（attach/navigate 过渡期）时
+ * 回退到 pendingUrl（目标 URL），避免 UI 闪现 about:blank；真实 URL 到达后以
+ * tab 状态为准。browser:// 内部页（真实 URL 非空）与真正空白新标签
+ * （pendingUrl 为空）不受影响。
+ */
+export function displayUrlOf(tabUrl: string, pendingUrl: string): string {
+  if (tabUrl.length > 0 && tabUrl !== "about:blank") return tabUrl;
+  return pendingUrl;
+}
+
 /** 建 tab 请求：创建带 requestId 的视图并 attach（main 侧 resolve 后自动导航）。 */
 function createViewForRequest(internals: RuntimeInternals, requestId: number): void {
   const key = createRequestKey(internals.runtime.sessionKey, requestId);
@@ -841,6 +852,18 @@ function applyStateEvent(internals: RuntimeInternals, event: BrowserStateEvent):
   }
   runtime.tabs = event.tabs.map((tab) => ({ ...tab }));
   runtime.activeTabId = event.activeTabId;
+  // 生命周期：main 广播确认某 view 对应 tab 已有真实 URL（非空且非 about:blank）时
+  // 清除其 pendingUrl——pendingUrl 只代表尚未落地的目标（create/attach 过渡显示用）；
+  // 落地后若 tab 再合法变为 about:blank，displayUrlOf 不再回退到历史目标 URL。
+  // 仅处理有 tab 映射的 live view：attach 完成前（无映射）不清除，过渡显示不受影响；
+  // crashed view 无映射，保留崩溃前 URL 供重建；stale 重建的新 view 无映射，不受影响。
+  for (const [viewId, tabId] of internals.tabIdByView) {
+    const tab = runtime.tabs.find((candidate) => candidate.tabId === tabId);
+    if (tab === undefined || tab.url.length === 0 || tab.url === "about:blank") continue;
+    runtime.views = runtime.views.map((view) =>
+      view.viewId === viewId && view.pendingUrl.length > 0 ? { ...view, pendingUrl: "" } : view,
+    );
+  }
   markChanged(internals);
 }
 

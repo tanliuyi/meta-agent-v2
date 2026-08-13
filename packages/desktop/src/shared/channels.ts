@@ -140,6 +140,8 @@ export const CHANNELS = {
   browserAnnotationAdd: "desktop:browser:annotation-add",
   browserAnnotationList: "desktop:browser:annotation-list",
   browserAnnotationRemove: "desktop:browser:annotation-remove",
+  browserAnnotationRemoveMany: "desktop:browser:annotation-remove-many",
+  browserAnnotationUpdate: "desktop:browser:annotation-update",
   browserAnnotationResolve: "desktop:browser:annotation-resolve",
   browserDataGet: "desktop:browser:data-get",
   browserHistoryDelete: "desktop:browser:history-delete",

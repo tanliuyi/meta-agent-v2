@@ -19,6 +19,7 @@ import type {
   BrowserAnnotationBounds,
   BrowserAnnotationInput,
   BrowserAnnotationPickResult,
+  BrowserAnnotationUpdateInput,
   BrowserAttachResult,
   BrowserClipboardResult,
   BrowserCloseTabRequest,
@@ -393,6 +394,15 @@ export interface DesktopApi {
     annotationList(identity: BrowserSessionIdentity, tabId: number): Promise<BrowserAnnotation[]>;
     /** 删除标注。 */
     annotationRemove(identity: BrowserSessionIdentity, tabId: number, id: string): Promise<void>;
+    /** 按 id 批量删除标注（composer 成功发送后消费；id 会话内全局唯一，跨 tab 匹配）。 */
+    annotationRemoveMany(identity: BrowserSessionIdentity, ids: string[]): Promise<void>;
+    /** 原位更新标注文本（保持 id/createdAt/selector/bounds/tag 不变）；不存在返回 null。 */
+    annotationUpdate(
+      identity: BrowserSessionIdentity,
+      tabId: number,
+      id: string,
+      input: BrowserAnnotationUpdateInput,
+    ): Promise<BrowserAnnotation | null>;
     /** 按选择器重新解析标注 bounds；元素消失返回 null。 */
     annotationResolve(
       identity: BrowserSessionIdentity,

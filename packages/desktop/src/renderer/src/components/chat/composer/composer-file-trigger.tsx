@@ -4,6 +4,7 @@ import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
 import { useCallback, useRef } from "react";
+import { useSessionModalContext } from "../../session-modal-context.ts";
 import { ComposerFileTriggerState } from "./composer-file-trigger-state.tsx";
 import { fileSuggestions, searchSessions, sessionMentionLabel, sessionPreview } from "./composer-suggestion-model.ts";
 import { ComposerSuggestionScrollSync } from "./composer-suggestion-scroll-sync.tsx";
@@ -17,6 +18,7 @@ interface ComposerFileTriggerProps {
 
 /** Official assistant-ui @ trigger backed by the project file index and session metadata. */
 export function ComposerFileTrigger({ projectId, onOpenChange }: ComposerFileTriggerProps) {
+  const inModal = useSessionModalContext();
   const scrollContainer = useRef<HTMLDivElement>(null);
   const fetchSuggestions = useCallback(
     async (query: string): Promise<readonly Unstable_TriggerItem[]> => {
@@ -53,7 +55,7 @@ export function ComposerFileTrigger({ projectId, onOpenChange }: ComposerFileTri
       char="@"
       adapter={adapter}
       isLoading={isLoading}
-      className="composer-suggestions"
+      className={`composer-suggestions${inModal ? " session-modal-composer-overlay" : ""}`}
       aria-label="文件与会话建议"
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Directive />
