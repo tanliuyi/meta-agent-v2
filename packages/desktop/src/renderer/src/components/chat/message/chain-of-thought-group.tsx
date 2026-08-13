@@ -49,7 +49,7 @@ export function ChainOfThoughtGroup({
       stateKey={stateKey}
     >
       <ReasoningTrigger label={label} active={running} />
-      <ReasoningContent className="text-foreground/90" aria-busy={running}>
+      <ReasoningContent className="text-foreground/80" aria-busy={running}>
         <ReasoningText key={stateKey}>{children}</ReasoningText>
       </ReasoningContent>
     </ReasoningRoot>
