@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SessionModalPersistedState } from "../../shared/contracts.ts";
+import type { SessionModalPersistedState } from "../../../shared/contracts.ts";
 import { ChatThread } from "./chat/chat-thread.tsx";
 import { Topbar } from "./layout/topbar.tsx";
 import { BottomTerminal } from "./panel/terminal/bottom-terminal.tsx";
