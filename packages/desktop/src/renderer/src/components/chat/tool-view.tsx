@@ -8,9 +8,9 @@ import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import { useEffect, useRef, useState } from "react";
 import { ToolFileTarget } from "./tool-file-target.tsx";
 import { MEMORY_SCOPE_LABELS } from "./tools/memory-content.tsx";
-import { firstLineSummary, parseSubagentCall, summarizeAgents } from "./tools/subagent-format.ts";
+import { firstLineSummary, parseSubagentCall, parseSubagentDetails, summarizeAgents } from "./tools/subagent-format.ts";
 import { ToolContent } from "./tools/tool-content.tsx";
-import { projectDisplayToolPath, readToolStringArgument } from "./tools/tool-format.ts";
+import { parseToolResult, projectDisplayToolPath, readToolStringArgument } from "./tools/tool-format.ts";
 
 type ToolState = "running" | "complete" | "error";
 type ToolTarget = { type: "file"; value: string } | { type: "text"; value: string };
@@ -36,7 +36,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
   const projectCwd = useDesktopSelector(
     (state) => state.projects.find((project) => project.id === state.activeProjectId)?.cwd,
   );
-  const header = toolHeader(toolName, args, projectCwd);
+  const header = toolHeader(toolName, args, projectCwd, displayedResult);
   const cursorFollowsArgs = running;
   const stateLabel = toolState === "running" ? "运行中" : toolState === "error" ? "失败" : "已完成";
 
@@ -121,7 +121,12 @@ function toolArtifact(value: unknown): { execution?: string; partialResult?: unk
   return { execution, partialResult };
 }
 
-function toolHeader(name: string, args: Readonly<Record<string, unknown>>, projectCwd?: string): ToolHeader {
+function toolHeader(
+  name: string,
+  args: Readonly<Record<string, unknown>>,
+  projectCwd?: string,
+  result?: unknown,
+): ToolHeader {
   const rawPath = readToolStringArgument(args, "path", "file_path");
   const path = projectCwd ? projectDisplayToolPath(rawPath, projectCwd) : rawPath;
   if (name === "bash") {
@@ -157,7 +162,7 @@ function toolHeader(name: string, args: Readonly<Record<string, unknown>>, proje
     };
   }
   if (name === "subagent" || name === "subagent_wait") {
-    return subagentToolHeader(name, args);
+    return subagentToolHeader(name, args, result);
   }
   if (name === "memory") {
     const actionLabel = MEMORY_ACTION_LABELS[readToolStringArgument(args, "action")];
@@ -227,8 +232,11 @@ const SKILL_ACTION_LABELS: Readonly<Record<string, string>> = {
   delete: "删除技能",
 };
 
-function subagentToolHeader(name: string, args: Readonly<Record<string, unknown>>): ToolHeader {
+function subagentToolHeader(name: string, args: Readonly<Record<string, unknown>>, result?: unknown): ToolHeader {
   const call = parseSubagentCall(name, args);
+  const details = result === undefined ? undefined : parseSubagentDetails(parseToolResult(result)?.details);
+  const liveRow = details?.rows.find((row) => row.status === "running");
+  const liveStep = details?.steps?.find((step) => step.status === "running");
   const asyncSuffix = call.async ? " · 后台" : "";
   if (call.mode === "wait") {
     return {
@@ -239,6 +247,28 @@ function subagentToolHeader(name: string, args: Readonly<Record<string, unknown>
   }
   if (call.mode === "management") {
     return { label: "subagent", target: textTarget(call.action ?? "…"), context: call.actionTarget ?? "" };
+  }
+  // 运行中：标题跟随当前活动 agent / 步骤，实时反馈进度。
+  if (call.mode === "chain" && liveStep) {
+    return {
+      label: "subagent",
+      target: textTarget(`chain ${liveStep.stepIndex}/${details?.totalSteps ?? call.taskCount}`),
+      context: `${liveStep.agents.join(" + ")}${asyncSuffix}`,
+    };
+  }
+  if (liveRow && (call.mode === "parallel" || call.mode === "chain")) {
+    return {
+      label: "subagent",
+      target: textTarget(`${call.mode} ×${call.taskCount}`),
+      context: `${liveRow.agent}${liveRow.detail ? ` · ${liveRow.detail}` : ""}`,
+    };
+  }
+  if (liveRow) {
+    return {
+      label: "subagent",
+      target: textTarget(liveRow.agent),
+      context: liveRow.detail ?? `${firstLineSummary(call.specs[0]?.task ?? "")}${asyncSuffix}`,
+    };
   }
   if (call.mode === "chain") {
     return {

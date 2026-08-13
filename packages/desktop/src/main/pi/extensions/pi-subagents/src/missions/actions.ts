@@ -95,7 +95,7 @@ function textResult(text: string, details: Details): AgentToolResult<Details> {
 }
 
 function requireMissionId(params: MissionActionParams): string {
-	return validateMissionId(params.missionId, "missionId");
+	return validateMissionId(params.missionId ?? params.id, "missionId");
 }
 
 function validateStatus(value: unknown, label: string): MissionStatus {

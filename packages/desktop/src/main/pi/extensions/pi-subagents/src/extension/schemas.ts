@@ -1,3 +1,4 @@
+// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 /**
  * TypeBox schemas for subagent tool parameters
  */
@@ -263,10 +264,10 @@ const SubagentParamProperties = {
 	})),
 	name: Type.Optional(Type.String({ description: "Human-readable name for action='schedule.create'." })),
 	id: Type.Optional(Type.String({
-		description: "Run id or prefix for status, interrupt, stop, resume, steer, append-step, approve-checkpoint, reject-checkpoint, mission.attach-run, or the decision id for mission.resolve-decision."
+		description: "Run id or prefix for status, interrupt, stop, dismiss, resume, steer, append-step, approve-checkpoint, reject-checkpoint, mission.show, mission.update, mission.close, mission.attach-run, or the decision id for mission.resolve-decision."
 	})),
 	runId: Type.Optional(Type.String({
-		description: "Target run ID for interrupt, stop, resume, steer, append-step, approve-checkpoint, reject-checkpoint, or mission.attach-run. Prefer id for new calls."
+		description: "Target run ID for interrupt, stop, dismiss, resume, steer, append-step, approve-checkpoint, reject-checkpoint, or mission.attach-run. Prefer id for new calls."
 	})),
 	dir: Type.Optional(Type.String({
 		description: "Async run directory for action='status', action='stop', action='resume', or action='steer'."
@@ -315,7 +316,7 @@ const SubagentParamProperties = {
 		],
 		description: "Agent/chain config for create/update. Object or JSON string; presence of steps creates a chain."
 	})),
-	workflowScript: Type.Optional(Type.String({ minLength: 1, description: "Trusted inline JavaScript statement body. Starts async by default; pass async:false for a small foreground run. Use explicit return for output. Use await prompts.render(ref, vars?) for task text. Keep every quoted string on one line: a raw newline inside quotes is a syntax error, so use the \\n escape for embedded newlines (e.g. [\"a\",\"b\"].join(\"\\n\")). Use await runs.run(key, {agent, task, worktree?, gate?}) or runs.run(key, {resume, task}), runs.all([...]), runs.status(id), runs.ref(s), emit(value), console, and return. Mission workflows also have async state.get(key) and state.set(key, JSONValue). Compose sequential and parallel phases dynamically. Set worktree:true at workflow or child level for a separate managed worktree; child fields override workflow defaults. gate is one host-run command and cannot be combined with acceptance. runs.run accepts one child only. No filesystem, shell, Pi tools, or host globals." })),
+	workflowScript: Type.Optional(Type.String({ minLength: 1, description: "Trusted inline JavaScript statement body. Starts async by default; pass async:false for a small foreground run. Use explicit return for output. Use await prompts.render(ref, vars?) for task text. Use await runs.run(key, {agent, task, worktree?, gate?}) or runs.run(key, {resume, task}), runs.all([...]), runs.status(id), runs.ref(s), emit(value), console, and return. Mission workflows also have async state.get(key) and state.set(key, JSONValue). Compose sequential and parallel phases dynamically. Set worktree:true at workflow or child level for a separate managed worktree; child fields override workflow defaults. gate is one host-run command and cannot be combined with acceptance. runs.run accepts one child only. No filesystem, shell, Pi tools, or host globals." })),
 	chatProgress: Type.Optional(Type.String({ enum: ["auto", "off", "live-card"], description: "WorkflowScript chat progress projection. auto shows a live in-chat card only for watched foreground workflows in the same Git repository; it is off otherwise." })),
 	worktree: Type.Optional(Type.Boolean({ description: "Managed child isolation. true gives each workflow child a separate git worktree; an individual runs.run/runs.all item can override a workflow default with worktree:false." })),
 	step: Type.Optional(Type.Unsafe({ ...ChainItem, description: "One chain step for action='append-step' only. Not an execution mode." })),
@@ -324,8 +325,8 @@ const SubagentParamProperties = {
 		description: "'fresh' or 'fork' to branch from parent session. Explicit context overrides every child in the invocation. If omitted, each requested agent uses its own defaultContext; agents without defaultContext: 'fork' run fresh.",
 	})),
 	async: Type.Optional(Type.Boolean({ description: "Run in background (default: false, or per config)" })),
-	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Run timeout. Foreground runs and async children default to 30m; async composites have no default parent deadline. Alias maxRuntimeMs." })),
-	maxRuntimeMs: Type.Optional(Type.Integer({ minimum: 1, description: "Alias timeoutMs. Foreground runs and async children default to 30m; async composites have no default parent deadline." })),
+	timeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Timeout. Foreground and single async runs use config timeoutMs, else 30m; async composites have no default parent deadline. Alias maxRuntimeMs." })),
+	maxRuntimeMs: Type.Optional(Type.Integer({ minimum: 1, description: "Alias timeoutMs. Foreground and single async runs use config timeoutMs, else 30m; async composites have no default parent deadline." })),
 	turnBudget: Type.Optional(TurnBudgetOverride),
 	toolBudget: Type.Optional(ToolBudgetOverride),
 	usageBudget: Type.Optional(UsageBudgetOverride),

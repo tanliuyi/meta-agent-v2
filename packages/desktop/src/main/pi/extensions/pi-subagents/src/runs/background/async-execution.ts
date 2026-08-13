@@ -1626,7 +1626,9 @@ export function executeAsyncSingle(
 
 	// Programmatic branch: use SubagentRuntime instead of detached CLI runner
 	if (params.subagentRuntime) {
-		const resultPath = inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(DIRS.results, `${id}.json`);
+		const resultPath = params.parentWorkflowRunId !== undefined && params.revivalLease !== undefined
+					? workflowAwaitedAsyncResultPath(asyncDir)
+					: inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : path.join(DIRS.results, `${id}.json`);
 		const eventsPath = path.join(asyncDir, "events.jsonl");
 		const now = Date.now();
 		// Write initial status so async-job-tracker discovers the run

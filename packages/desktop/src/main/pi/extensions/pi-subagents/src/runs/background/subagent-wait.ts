@@ -307,7 +307,12 @@ function summarizeTerminalRuns(runs: AsyncRunSummary[], providerFinishedCount = 
 	return parts.join(", ");
 }
 
-function result(text: string, isError = false, completions?: WaitCompletion[]): AgentToolResult<Details> {
+function result(
+	text: string,
+	isError = false,
+	completions?: WaitCompletion[],
+	waits?: WaitStatusItem[],
+): AgentToolResult<Details> {
 	return {
 		content: [{ type: "text", text }],
 		...(isError ? { isError: true } : {}),
@@ -315,12 +320,35 @@ function result(text: string, isError = false, completions?: WaitCompletion[]): 
 			mode: "management",
 			results: [],
 			...(completions && completions.length > 0 ? { completions } : {}),
+			...(waits && waits.length > 0 ? { waits } : {}),
 		},
 	};
 }
 
+/** 等待期间的结构化任务状态，供宿主 UI 渲染为状态行而非纯文本。 */
+export interface WaitStatusItem {
+	agent: string;
+	status: "pending" | "running" | "detached";
+	currentTool?: string;
+	currentPath?: string;
+}
+
+export function asyncWaitStatusItems(runs: AsyncRunSummary[]): WaitStatusItem[] {
+	return runs.flatMap((run) => {
+		const activeSteps = run.steps.filter((step) => step.status === "pending" || step.status === "running");
+		if (activeSteps.length === 0) return [{ agent: run.id, status: "running" }];
+		return activeSteps.map((step) => ({
+			agent: step.agent,
+			status: step.status === "pending" ? "pending" : "running",
+			...(step.currentTool ? { currentTool: step.currentTool } : {}),
+			...(step.currentPath ? { currentPath: step.currentPath } : {}),
+		}));
+	});
+}
+
 /** Build the live status shown while async work keeps subagent_wait blocked. */
 function asyncWaitUpdate(runs: AsyncRunSummary[], providerCount: number, elapsedMs: number): AgentToolResult<Details> {
+	const waits = asyncWaitStatusItems(runs);
 	const activity = runs.flatMap((run) => {
 		const activeSteps = run.steps.filter((step) => step.status === "pending" || step.status === "running");
 		if (activeSteps.length === 0) {
@@ -335,7 +363,7 @@ function asyncWaitUpdate(runs: AsyncRunSummary[], providerCount: number, elapsed
 		`Waiting ${formatDuration(elapsedMs)} for ${runs.length} async run(s) and ${providerCount} provider item(s).`,
 		...activity,
 	].join(" · ");
-	return result([headline, runs.length > 0 ? formatAsyncRunList(runs) : ""].filter(Boolean).join("\n"));
+	return result([headline, runs.length > 0 ? formatAsyncRunList(runs) : ""].filter(Boolean).join("\n"), false, undefined, waits);
 }
 
 const TRANSCRIPT_TAIL_BYTES = 128 * 1024;
@@ -418,6 +446,7 @@ function readTranscriptActivity(transcriptPath: string | undefined): TranscriptA
 
 function detachedForegroundWaitUpdate(run: ForegroundResumeRun, pendingIndices: Set<number>, nowMs: number, elapsedMs: number): AgentToolResult<Details> {
 	const lines = [`Waiting for detached foreground run "${run.runId}" · ${formatDuration(elapsedMs)}`];
+	const waits: WaitStatusItem[] = [];
 	for (const child of run.children) {
 		if (!pendingIndices.has(child.index) || child.status !== "detached") continue;
 		const activity = readTranscriptActivity(child.transcriptPath);
@@ -429,8 +458,14 @@ function detachedForegroundWaitUpdate(run: ForegroundResumeRun, pendingIndices: 
 		for (const preview of activity?.recent ?? []) lines.push(`  ${preview}`);
 		if (!activity && child.transcriptPath) lines.push("  live transcript has no new activity yet");
 		if (!child.transcriptPath) lines.push("  live transcript unavailable; waiting for completion event");
+		waits.push({
+			agent: child.agent,
+			status: "detached",
+			...(activity?.currentTool ? { currentTool: activity.currentTool } : {}),
+			...(child.currentPath ? { currentPath: child.currentPath } : {}),
+		});
 	}
-	return result(lines.join("\n"));
+	return result(lines.join("\n"), false, undefined, waits);
 }
 
 async function waitForDetachedForegroundRun(

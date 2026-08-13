@@ -569,7 +569,7 @@ describe("subagent 工具详情", () => {
     expect(markup).not.toContain('<pre class="tool-result"');
   });
 
-  it("subagent_wait 展示等待说明并复用结果行", () => {
+  it("subagent_wait 完成时直接复用结果行", () => {
     const markup = renderToStaticMarkup(
       <ToolContent
         name="subagent_wait"
@@ -592,9 +592,67 @@ describe("subagent 工具详情", () => {
       />,
     );
 
-    expect(markup).toContain("等待全部后台任务完成");
+    expect(markup).not.toContain("等待全部后台任务完成");
     expect(markup).toContain("bg-runner");
     expect(markup).toContain("后台完成");
+  });
+
+  it("subagent_wait 等待中渲染结构化状态行", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent_wait"
+        args={{ all: true }}
+        result={toolResult("Waiting 12s for 1 async run(s) and 0 provider item(s).", {
+          mode: "management",
+          results: [],
+          waits: [
+            { agent: "worker", status: "running", currentTool: "grep", currentPath: "src/main.ts" },
+            { agent: "planner", status: "pending" },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain(">worker</span>");
+    expect(markup).toContain("grep src/main.ts");
+    expect(markup).toContain("运行中");
+    expect(markup).toContain(">planner</span>");
+    expect(markup).toContain("等待中");
+    expect(markup).not.toContain("Waiting 12s");
+  });
+
+  it("subagent_wait 完成渲染终态行", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent_wait"
+        args={{ id: "run-123" }}
+        result={toolResult('Waited 5s for run "run-123"; done.', {
+          mode: "management",
+          results: [],
+          completions: [
+            {
+              runId: "run-123",
+              agent: "writer",
+              state: "complete",
+              success: true,
+              results: [{ agent: "writer", success: true }],
+            },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain(">writer</span>");
+    expect(markup).toContain("完成");
+    expect(markup).toContain("run-123");
+    expect(markup).toContain("1 子任务");
+    expect(markup).not.toContain("Waited 5s");
   });
 
   it("异步提交只展示后台启动提示", () => {
@@ -611,6 +669,186 @@ describe("subagent 工具详情", () => {
 
     expect(markup).toContain("已在后台启动（ID: abc123）");
     expect(markup).toContain("异步执行");
+  });
+
+  it("运行中折叠标题跟随当前 agent 与工具", () => {
+    const markup = renderToolView(
+      toolCall({
+        toolName: "subagent",
+        args: { agent: "researcher", task: "调研" },
+        result: toolResult("progress", {
+          mode: "single",
+          results: [],
+          progress: [
+            {
+              index: 0,
+              agent: "researcher",
+              status: "running",
+              task: "调研",
+              currentTool: "grep",
+              currentToolArgs: "pattern",
+              currentToolStartedAt: 100_000,
+              recentTools: [],
+              recentOutput: [],
+              toolCount: 2,
+              tokens: 800,
+              durationMs: 30_000,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(markup).toContain(">researcher</span>");
+    expect(markup).toContain("grep pattern · 30s");
+  });
+
+  it("chain 运行中折叠标题显示当前步骤", () => {
+    const markup = renderToolView(
+      toolCall({
+        toolName: "subagent",
+        args: {
+          chain: [
+            { agent: "scout", task: "a" },
+            { agent: "planner", task: "b" },
+            { agent: "writer", task: "c" },
+          ],
+        },
+        result: toolResult("progress", {
+          mode: "chain",
+          chainAgents: ["scout", "planner", "writer"],
+          totalSteps: 3,
+          currentStepIndex: 1,
+          results: [],
+          progress: [
+            {
+              index: 1,
+              agent: "planner",
+              status: "running",
+              task: "b",
+              currentTool: "read",
+              currentToolStartedAt: 100_000,
+              recentTools: [],
+              recentOutput: [],
+              toolCount: 1,
+              tokens: 300,
+              durationMs: 12_000,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(markup).toContain("chain 2/3");
+    expect(markup).toContain("planner");
+  });
+
+  it("chain 结果渲染执行链步骤列表", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{
+          chain: [
+            { agent: "scout", task: "a" },
+            { agent: "planner", task: "b" },
+          ],
+        }}
+        result={toolResult("done", {
+          mode: "chain",
+          chainAgents: ["scout", "planner"],
+          totalSteps: 2,
+          currentStepIndex: 1,
+          results: [
+            { agent: "scout", task: "a", exitCode: 0, model: "claude-sonnet-5", progressSummary: { durationMs: 8000 } },
+            {
+              agent: "planner",
+              task: "b",
+              exitCode: 0,
+              model: "claude-sonnet-5",
+              progressSummary: { durationMs: 9000 },
+            },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("执行链");
+    expect(markup).toContain(">1.</span>");
+    expect(markup).toContain("scout");
+    expect(markup).toContain(">2.</span>");
+    expect(markup).toContain("planner");
+    expect(markup).toContain("耗时 17s");
+  });
+
+  it("chain 并行组在步骤列表中标记", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{
+          chain: [
+            {
+              parallel: [
+                { agent: "a", task: "1" },
+                { agent: "b", task: "2" },
+              ],
+            },
+          ],
+        }}
+        result={toolResult("done", {
+          mode: "chain",
+          chainAgents: ["[a+b]"],
+          totalSteps: 1,
+          currentStepIndex: 0,
+          results: [
+            { agent: "a", task: "1", exitCode: 0 },
+            { agent: "b", task: "2", exitCode: 0 },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("[a + b]");
+    expect(markup).toContain("并行组 ×2");
+  });
+
+  it("需要关注的进度行展示醒目状态", () => {
+    const markup = renderToStaticMarkup(
+      <ToolContent
+        name="subagent"
+        args={{ agent: "researcher", task: "调研" }}
+        result={toolResult("progress", {
+          mode: "single",
+          results: [],
+          progress: [
+            {
+              index: 0,
+              agent: "researcher",
+              status: "running",
+              task: "调研",
+              activityState: "needs_attention",
+              currentTool: "bash",
+              recentTools: [],
+              recentOutput: [],
+              toolCount: 1,
+              tokens: 100,
+              durationMs: 5000,
+            },
+          ],
+        })}
+        error={false}
+        expanded
+        argsComplete
+      />,
+    );
+
+    expect(markup).toContain("需要关注");
+    expect(markup).toContain('data-attention="true"');
   });
 });
 
