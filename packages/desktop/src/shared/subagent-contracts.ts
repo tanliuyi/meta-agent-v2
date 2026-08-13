@@ -279,8 +279,8 @@ export interface SubagentExtensionConfig {
   };
   completionBatch?: { enabled?: boolean; debounceMs?: number; maxWaitMs?: number };
   usageBudget?: {
-    tokens?: { soft?: number; hard?: number };
-    costUsd?: { soft?: number; hard?: number };
+    tokens?: { soft?: number; hard: number };
+    costUsd?: { soft?: number; hard: number };
   };
   permissions?: { rules?: Record<string, "allow" | "ask" | "deny"> };
 }
