@@ -234,6 +234,7 @@ function formatWorkflowScriptSyntaxError(error) {
   const details = error && error.stack ? error.stack : String(error);
   return [
     "workflowScript must be valid JavaScript.",
+    "A raw newline inside a single- or double-quoted string is a syntax error. Keep every quoted array item on one line; for embedded newlines use the escape \"\\n\", e.g. [\"line 1\",\"line 2\"].join(\"\\n\").",
     "If task text contains Markdown fences or backticks, use an array joined with \"\\n\" or escaped strings instead of a raw backtick template literal.",
     "",
     "Original SyntaxError:",

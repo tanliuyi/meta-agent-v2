@@ -166,6 +166,23 @@ import {
 const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "refine", "refine.rollback", "schedule.create", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"]);
 const DESTRUCTIVE_MANAGEMENT_ACTIONS = new Set(["delete", "eject", "disable", "reset", "mission.close", "worktree.discard", "refine.rollback", "inspector.close", "project.close", "stop", "interrupt", "reject-checkpoint", "schedule.delete"]);
 
+/**
+ * Whether a foreground single run needs the CLI-only parent-detach mechanism.
+ *
+ * A blocking child supervisor request (contact_supervisor) must release the
+ * orchestrating session so it can reply. Workflow children run inside a
+ * background workflow (the session stays free to answer supervisor requests
+ * through the Desktop supervisor channel), so they stay on the programmatic
+ * runtime and keep their catalog registration; direct foreground runs keep the
+ * detached CLI fallback.
+ */
+export function requiresParentIntercomDetach(
+	agent: Pick<AgentConfig, "systemPrompt"> | undefined,
+	workflowChild: boolean,
+): boolean {
+	return !workflowChild && agent?.systemPrompt?.includes(INTERCOM_BRIDGE_MARKER) === true;
+}
+
 function editDistance(left: string, right: string): number {
 	const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
 	for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
@@ -3931,7 +3948,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			cwd: effectiveCwd,
 			signal,
 			interruptSignal: interruptController.signal,
-			allowIntercomDetach: agentConfig.systemPrompt?.includes(INTERCOM_BRIDGE_MARKER) === true,
+			allowIntercomDetach: requiresParentIntercomDetach(agentConfig, params.workflowParentRunId !== undefined),
 			intercomEvents: deps.pi.events,
 			runId,
 			sessionDir: sessionDirForIndex(0),

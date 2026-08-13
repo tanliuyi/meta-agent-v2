@@ -292,8 +292,9 @@ async function runProgrammaticSingleAttempt(
 		throw new Error("MCP direct tools have not migrated to the Desktop programmatic runtime yet");
 	}
 	if (options.allowIntercomDetach) {
-		// Desktop programmatic workers never detach; intercom is handled by the
-		// worker runtime bridge, so allowing detach is a no-op equivalent.
+		// Desktop programmatic workers never detach the orchestrating session;
+		// child intercom coordination (contact_supervisor) is handled through the
+		// worker supervisor channel, so allowing detach is a no-op equivalent.
 	}
 
 	const parsedModel = model ? splitThinkingSuffix(model) : undefined;
@@ -607,6 +608,8 @@ async function runProgrammaticSingleAttempt(
 			systemPromptMode: agent.systemPromptMode,
 			inheritProjectContext: agent.inheritProjectContext,
 			inheritSkills: agent.inheritSkills,
+			...(options.orchestratorIntercomTarget ? { orchestratorTarget: options.orchestratorIntercomTarget } : {}),
+			...(options.intercomSessionName ? { intercomSessionName: options.intercomSessionName } : {}),
 			extensionProfile: agent.tools?.includes("subagent")
 				? ["provider", "memory", "runtime", "fanout"]
 				: ["provider", "memory", "runtime"],

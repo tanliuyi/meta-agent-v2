@@ -99,6 +99,7 @@ class FakeClient implements SubagentWorkerClient {
   private readonly options: WorkerClientOptions;
   readonly acknowledgements: number[] = [];
   readonly commandTypes: string[] = [];
+  readonly runRequests: SubagentRunRequest[] = [];
   shutdownCount = 0;
   failure?: Error;
   cancelError?: Error;
@@ -122,6 +123,7 @@ class FakeClient implements SubagentWorkerClient {
   async request<T>(command: Parameters<SubagentWorkerClient["request"]>[0]): Promise<T> {
     this.commandTypes.push(command.type);
     if (command.type === "subagentRun") {
+      this.runRequests.push(command.request);
       if (this.run) return (await this.run) as T;
       this.options.onEvent?.(event(this.instanceId, 1, { type: "started", runId: command.request.runId }));
       this.options.onEvent?.(event(this.instanceId, 2, { type: "completed", runId: command.request.runId }));
@@ -446,6 +448,67 @@ describe("SubagentWorkerRegistry", () => {
     client?.emitSidecarEvent(event(client.instanceId, 3, { type: "completed", runId: "run-1" }));
     expect(summaries.at(-1)).toMatchObject({ id: "live-child", running: false });
     await expect.poll(() => persisted).toEqual([true, false]);
+    release();
+    await run;
+  });
+
+  it("projects a workflow child thread into the catalog with its supervisor metadata", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const summaries: Array<{ id: string; parentThreadId?: string; running: boolean }> = [];
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      catalogChanged: (summary) => summaries.push(summary),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        return client;
+      },
+    });
+    const run = registry.handleHostRequest(
+      {
+        type: "subagent.run",
+        request: {
+          ...runRequest(),
+          parentSessionId: "main-thread",
+          parentThreadId: "main-thread",
+          orchestratorTarget: "subagent-chat-main",
+          intercomSessionName: "subagent-worker-workflow-1",
+        },
+      },
+      () => undefined,
+    );
+    await expect.poll(() => client).toBeDefined();
+    expect(client).toBeDefined();
+    if (!client) throw new Error("worker client must be created");
+    const workerClient = client;
+
+    // The worker receives the launch contract including the supervisor metadata.
+    expect(workerClient.runRequests[0]).toMatchObject({
+      runId: "run-1",
+      parentSessionId: "main-thread",
+      parentThreadId: "main-thread",
+      orchestratorTarget: "subagent-chat-main",
+      intercomSessionName: "subagent-worker-workflow-1",
+    });
+
+    // The started thread identity lands in the catalog under the main thread.
+    workerClient.emitSidecarEvent(
+      event(workerClient.instanceId, 1, { type: "started", runId: "run-1", threadId: "workflow-child" }),
+    );
+    expect(summaries).toEqual([
+      expect.objectContaining({ id: "workflow-child", parentThreadId: "main-thread", running: true }),
+    ]);
+    expect(registry.listThreads("project")).toEqual([
+      expect.objectContaining({ id: "workflow-child", parentThreadId: "main-thread", running: true }),
+    ]);
+
+    workerClient.emitSidecarEvent(event(workerClient.instanceId, 2, { type: "completed", runId: "run-1" }));
+    expect(summaries.at(-1)).toMatchObject({ id: "workflow-child", running: false });
     release();
     await run;
   });

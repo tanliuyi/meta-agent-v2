@@ -1,11 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
+import { resolveSupervisorChannelDir } from "../src/main/pi/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts";
 import { runSync } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/execution.ts";
+import {
+  SUBAGENT_CHILD_AGENT_ENV,
+  SUBAGENT_CHILD_INDEX_ENV,
+  SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV,
+  SUBAGENT_ORCHESTRATOR_TARGET_ENV,
+  SUBAGENT_RUN_ID_ENV,
+  SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV,
+} from "../src/main/pi/extensions/pi-subagents/src/runs/shared/env-constants.ts";
 import { DesktopSubagentRuntime } from "../src/main/pi/subagents/desktop-subagent-runtime.ts";
 import type { SessionBootstrap } from "../src/shared/contracts.ts";
 import type { SidecarEventBody } from "../src/shared/sidecar-contracts.ts";
@@ -20,6 +29,13 @@ import { SubagentWorkerService } from "../src/sidecar/subagent-worker-service.ts
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  delete process.env[SUBAGENT_ORCHESTRATOR_TARGET_ENV];
+  delete process.env[SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV];
+  delete process.env[SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV];
+  delete process.env[SUBAGENT_RUN_ID_ENV];
+  delete process.env[SUBAGENT_CHILD_AGENT_ENV];
+  delete process.env[SUBAGENT_CHILD_INDEX_ENV];
+  delete process.env.PI_SUBAGENT_INTERCOM_SESSION_NAME;
 });
 
 describe("SubagentWorkerService", () => {
@@ -739,6 +755,136 @@ describe("SubagentWorkerService", () => {
         request: { ...baseRequest(), depth: 2, maxDepth: 1 },
       }),
     ).rejects.toThrow("invalid depth limits");
+  });
+
+  it("serves child contact_supervisor through the shared supervisor channel", async () => {
+    const root = join(
+      tmpdir(),
+      `desktop-subagent-supervisor-channel-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(root, { recursive: true });
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    const faux = registerFauxProvider({ models: [{ id: "supervisor-model", reasoning: false }] });
+    faux.setResponses([
+      fauxAssistantMessage(
+        fauxToolCall("contact_supervisor", { reason: "need_decision", message: "Approve direction?" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("proceeding after supervisor approval"),
+    ]);
+    cleanups.push(() => faux.unregister());
+    const model = faux.getModel();
+    const events: SidecarEventBody[] = [];
+    const providerFactory = (api: ExtensionAPI): void => {
+      api.registerProvider(model.provider, {
+        baseUrl: model.baseUrl,
+        apiKey: "faux-key",
+        api: faux.api,
+        models: faux.models.map((registeredModel) => ({
+          id: registeredModel.id,
+          name: registeredModel.name,
+          api: registeredModel.api,
+          reasoning: registeredModel.reasoning,
+          input: registeredModel.input,
+          cost: registeredModel.cost,
+          contextWindow: registeredModel.contextWindow,
+          maxTokens: registeredModel.maxTokens,
+        })),
+      });
+    };
+    const created = await SubagentWorkerService.create(
+      {
+        role: "subagent",
+        value: {
+          projectId: "project",
+          parentThreadId: "thread",
+          runId: "run-supervisor",
+          childIndex: 0,
+          agentDir: root,
+        },
+      },
+      {
+        emit: (event) => events.push(event),
+        requestHost: async () => undefined,
+        flushEvents: async () => undefined,
+      },
+      { extensionFactories: [providerFactory] },
+    );
+    cleanups.push(() => created.service.dispose());
+    const channelDir = resolveSupervisorChannelDir("run-supervisor", "worker", 0);
+    cleanups.push(() => rmSync(channelDir, { recursive: true, force: true }));
+
+    const run = created.service.command({
+      type: "subagentRun",
+      request: {
+        ...baseRequest(),
+        cwd: root,
+        runId: "run-supervisor",
+        model: `${model.provider}/${model.id}`,
+        tools: ["contact_supervisor"],
+        parentSessionId: "parent-session",
+        orchestratorTarget: "subagent-chat-parent",
+        intercomSessionName: "subagent-worker-run-supervisor",
+      },
+    });
+
+    // The child writes its blocking supervisor request into the shared channel.
+    await expect
+      .poll(() => readdirSync(join(channelDir, "requests")).find((name) => name.endsWith(".json")))
+      .toBeDefined();
+    const requestPath = join(
+      channelDir,
+      "requests",
+      readdirSync(join(channelDir, "requests")).find((name) => name.endsWith(".json"))!,
+    );
+    const request = JSON.parse(readFileSync(requestPath, "utf8")) as {
+      type: string;
+      id: string;
+      reason: string;
+      orchestratorSessionId?: string;
+      orchestratorTarget?: string;
+      runId?: string;
+      agent?: string;
+      childIndex?: number;
+      message?: string;
+    };
+    expect(request).toMatchObject({
+      type: "subagent.supervisor.request",
+      reason: "need_decision",
+      orchestratorSessionId: "parent-session",
+      orchestratorTarget: "subagent-chat-parent",
+      runId: "run-supervisor",
+      agent: "worker",
+      childIndex: 0,
+    });
+    expect(request.message).toContain("Approve direction?");
+    expect(process.env[SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV]).toBe(channelDir);
+    expect(process.env[SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV]).toBe("parent-session");
+    expect(process.env[SUBAGENT_ORCHESTRATOR_TARGET_ENV]).toBe("subagent-chat-parent");
+    expect(process.env[SUBAGENT_RUN_ID_ENV]).toBe("run-supervisor");
+    expect(process.env[SUBAGENT_CHILD_AGENT_ENV]).toBe("worker");
+    expect(process.env[SUBAGENT_CHILD_INDEX_ENV]).toBe("0");
+    expect(process.env.PI_SUBAGENT_INTERCOM_SESSION_NAME).toBe("subagent-worker-run-supervisor");
+
+    // The parent replies through the channel and the child resumes.
+    writeFileSync(
+      join(channelDir, "replies", `${request.id}.json`),
+      JSON.stringify({
+        type: "subagent.supervisor.reply",
+        requestId: request.id,
+        createdAt: Date.now(),
+        message: "Approved.",
+      }),
+    );
+    await expect(run).resolves.toMatchObject({ status: "completed" });
+    expect(
+      events.some(
+        (event) =>
+          event.type === "subagent-event" &&
+          event.event.type === "message_end" &&
+          JSON.stringify(event.event.message).includes("proceeding after supervisor approval"),
+      ),
+    ).toBe(true);
   });
 
   it("rejects request identities that do not match the worker binding", async () => {

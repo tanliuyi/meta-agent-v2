@@ -33,6 +33,10 @@ export interface SubagentRunRequest {
   sessionFile?: string;
   sessionDir?: string;
   persistSession: boolean;
+  /** Supervisor session target for child intercom coordination (contact_supervisor). */
+  orchestratorTarget?: string;
+  /** Stable child intercom session name announced to the orchestrator. */
+  intercomSessionName?: string;
   model?: string;
   preferredProvider?: string;
   thinking?: ThinkingLevel;

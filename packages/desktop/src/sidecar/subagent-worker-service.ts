@@ -30,6 +30,19 @@ import { DesktopExtensionHost } from "../main/pi/desktop-extension-host.ts";
 import { controlledResourceLoaderOptions } from "../main/pi/desktop-extension-runtime-policy.ts";
 import registerFanoutChildSubagentExtension from "../main/pi/extensions/pi-subagents/src/extension/fanout-child.ts";
 import {
+  ensureSupervisorChannelDir,
+  registerNativeSupervisorClient,
+  resolveSupervisorChannelDir,
+} from "../main/pi/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts";
+import {
+  SUBAGENT_CHILD_AGENT_ENV,
+  SUBAGENT_CHILD_INDEX_ENV,
+  SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV,
+  SUBAGENT_ORCHESTRATOR_TARGET_ENV,
+  SUBAGENT_RUN_ID_ENV,
+  SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV,
+} from "../main/pi/extensions/pi-subagents/src/runs/shared/env-constants.ts";
+import {
   createStructuredOutputToolParameters,
   validateStructuredOutputValue,
 } from "../main/pi/extensions/pi-subagents/src/runs/shared/structured-output.ts";
@@ -188,6 +201,36 @@ export class SubagentWorkerService implements SidecarService {
 
     process.env.PI_SUBAGENT_DEPTH = String(request.depth);
     process.env.PI_SUBAGENT_MAX_DEPTH = String(request.maxDepth);
+    const supervisorChannel =
+      request.parentSessionId && request.orchestratorTarget
+        ? {
+            channelDir: resolveSupervisorChannelDir(request.runId, request.agent, request.childIndex),
+            orchestratorTarget: request.orchestratorTarget,
+            orchestratorSessionId: request.parentSessionId,
+          }
+        : undefined;
+    if (supervisorChannel) {
+      ensureSupervisorChannelDir(supervisorChannel.channelDir);
+      process.env[SUBAGENT_ORCHESTRATOR_TARGET_ENV] = supervisorChannel.orchestratorTarget;
+      process.env[SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV] = supervisorChannel.orchestratorSessionId;
+      process.env[SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV] = supervisorChannel.channelDir;
+      process.env[SUBAGENT_RUN_ID_ENV] = request.runId;
+      process.env[SUBAGENT_CHILD_AGENT_ENV] = request.agent;
+      process.env[SUBAGENT_CHILD_INDEX_ENV] = String(request.childIndex);
+      if (request.intercomSessionName) {
+        process.env.PI_SUBAGENT_INTERCOM_SESSION_NAME = request.intercomSessionName;
+      }
+    } else {
+      // Keep the service self-contained: a run without supervisor metadata must
+      // not inherit channel identity from an earlier run in this process.
+      delete process.env[SUBAGENT_ORCHESTRATOR_TARGET_ENV];
+      delete process.env[SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV];
+      delete process.env[SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV];
+      delete process.env[SUBAGENT_RUN_ID_ENV];
+      delete process.env[SUBAGENT_CHILD_AGENT_ENV];
+      delete process.env[SUBAGENT_CHILD_INDEX_ENV];
+      delete process.env.PI_SUBAGENT_INTERCOM_SESSION_NAME;
+    }
     const extensionFactories = [
       ...DesktopBuiltinProviderRegistry.getSubagentExtensionFactories(request.extensionProfile),
       ...(request.extensionProfile.includes("runtime") ? [createRuntimeExtension(request)] : []),
@@ -674,6 +717,9 @@ function createRuntimeExtension(request: SubagentRunRequest): InlineExtension {
     factory: (api) => {
       registerToolBudget(api, request);
       registerStructuredOutput(api, request);
+      // Child intercom coordination through the shared supervisor channel. No-op
+      // unless the launch carried supervisor metadata (env vars above).
+      registerNativeSupervisorClient(api);
     },
   };
 }
