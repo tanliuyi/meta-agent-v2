@@ -6,7 +6,7 @@
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
 # 语言要求
-请始终用中文进行思考推理（reasoning）和回复，包括思维链部分
+请始终用中文进行回复
 
 # TanStack Router Context
 
