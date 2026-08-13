@@ -2,6 +2,13 @@
   margin-bottom: 0;
 }
 
+/* 思考(chain-of-thought)内容：markdown 文字使用斜体；工具块不在此容器内，保持非斜体 */
+.aui-reasoning-text .aui-md {
+  font-style: italic;
+  /* base.css 全局禁用 font-synthesis，中文字体无 italic 字形，需允许合成斜体 */
+  font-synthesis-style: auto;
+}
+
 .markdown-image-block {
   position: relative;
   display: block;
@@ -68,6 +75,8 @@
 }
 
 .markdown-inline-code {
+  /* 思考内容整体斜体时，行内代码保持非斜体 */
+  font-style: normal;
   padding: 0.125em 0.35em;
   border: 1px solid hsl(var(--border) / 0.7);
   border-radius: var(--shape-radius-xs);
@@ -77,6 +86,8 @@
 }
 
 .markdown-code-block {
+  /* 思考内容整体斜体时，代码块保持非斜体 */
+  font-style: normal;
   width: 100%;
   min-width: 0;
   overflow: hidden;
