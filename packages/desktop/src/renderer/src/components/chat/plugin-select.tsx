@@ -122,7 +122,7 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
         </TooltipTrigger>
         <TooltipContent side="top">选择插件</TooltipContent>
       </Tooltip>
-      <PopoverContent align="start" sideOffset={6} className="w-64 overflow-hidden rounded-lg p-0">
+      <PopoverContent align="start" sideOffset={6} className="z-(--stack-menu) w-64 overflow-hidden rounded-lg p-0">
         <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
           <span className="text-xs font-semibold text-foreground">插件</span>
           {plugins && plugins.length > 0 ? (

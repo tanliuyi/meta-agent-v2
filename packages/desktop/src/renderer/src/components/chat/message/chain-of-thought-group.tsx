@@ -5,6 +5,7 @@ import { ReasoningContent } from "../../assistant-ui/reasoning/reasoning-content
 import { ReasoningRoot } from "../../assistant-ui/reasoning/reasoning-root.tsx";
 import { ReasoningText } from "../../assistant-ui/reasoning/reasoning-text.tsx";
 import { ReasoningTrigger } from "../../assistant-ui/reasoning/reasoning-trigger.tsx";
+import { useSessionModalContext } from "../../session-modal-context.ts";
 import { summarizeChainOfThought } from "../message-part-grouping.ts";
 
 export function ChainOfThoughtGroup({
@@ -36,11 +37,14 @@ export function ChainOfThoughtGroup({
     if (running) setWasRunning(true);
   }, [running, stateKey]);
 
+  // 会话 modal 内默认不展开（autoOpen/autoExpand 均关闭）；手动展开由 stateKey 记忆，不受影响。
+  const inModal = useSessionModalContext();
+
   return (
     <ReasoningRoot
       variant="ghost"
-      autoOpen={effectiveWasRunning && !hasFollowingText}
-      autoExpand={autoExpandRunning}
+      autoOpen={inModal ? false : effectiveWasRunning && !hasFollowingText}
+      autoExpand={inModal ? false : autoExpandRunning}
       streaming={running}
       stateKey={stateKey}
     >

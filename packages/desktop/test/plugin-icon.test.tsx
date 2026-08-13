@@ -14,12 +14,22 @@ const electron = vi.hoisted(() => ({
   handlers: new Map<string, (request: Request) => Promise<Response>>(),
   schemes: [] as unknown[][],
 }));
+const popoverContent = vi.hoisted(() => ({ className: "" }));
 
 vi.mock("electron", () => ({
   protocol: {
     handle: (scheme: string, handler: (request: Request) => Promise<Response>) =>
       electron.handlers.set(scheme, handler),
     registerSchemesAsPrivileged: (schemes: unknown[]) => electron.schemes.push(schemes),
+  },
+}));
+
+// Radix Popover 关闭态在 SSR 下不渲染 Content，无法从 markup 断言层级类；
+// 用替身捕获 PopoverContent 收到的 className。
+vi.mock("../src/renderer/src/shared/ui/popover-content.tsx", () => ({
+  PopoverContent: ({ className }: { className?: string }) => {
+    popoverContent.className = className ?? "";
+    return <div data-slot="popover-content" />;
   },
 }));
 
@@ -47,6 +57,17 @@ afterEach(async () => {
 });
 
 describe("plugin icons", () => {
+  it("elevates the plugin select popover above the fullscreen session modal", () => {
+    renderToStaticMarkup(
+      <TooltipProvider>
+        <PluginSelect plugins={[]} value={null} onValueChange={() => undefined} />
+      </TooltipProvider>,
+    );
+
+    // 全屏会话 modal 为 --stack-dialog(60)，插件下拉需用 --stack-menu(80) 覆盖默认 --stack-popover(50)。
+    expect(popoverContent.className).toContain("z-(--stack-menu)");
+  });
+
   it("renders an installed marketplace icon in the composer selector", () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>

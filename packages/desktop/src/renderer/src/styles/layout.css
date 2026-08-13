@@ -683,16 +683,108 @@ body.is-resizing-column .sidebar {
 }
 
 .session-modal-content {
-  width: min(720px, calc(100vw - 32px));
-  height: min(560px, calc(100vh - 32px));
-  max-width: min(720px, calc(100vw - 32px));
-  max-height: min(560px, calc(100vh - 32px));
-  overflow: hidden;
+  /* 0x0 定位锚点：Radix 只负责把该点放到 top/end 位置，尺寸不再参与定位
+     （avoidCollisions=false 时定位不依赖内容尺寸），消除 ResizeObserver
+     异步重定位导致的一帧跳动；overflow visible 保证面板壳不被裁剪。
+     position: relative 使本锚点成为 shell 的 containing block（Radix 的
+     fixed/transform 定位在外层 wrapper，不能依赖 Content 默认定位）。 */
+  position: relative;
+  width: 0;
+  height: 0;
+  overflow: visible;
   z-index: var(--stack-dialog);
+}
+
+/* 面板壳：绝对定位于 Content 锚点（right/bottom 对齐锚点右下角），持有实际
+   默认/自定义尺寸（自定义尺寸经 inline style 覆盖下面的 CSS 默认值）。尺寸增长
+   向左上展开，与拖拽 transform 在同一元素上同帧更新，不依赖 Radix 重定位。 */
+.session-modal-shell {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: max(1px, min(720px, calc(100vw - 32px)));
+  height: max(1px, min(560px, calc(100vh - 32px)));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid hsl(var(--border));
   border-radius: 16px;
   background: hsl(var(--background));
   box-shadow: var(--elevation-workbench);
+  will-change: transform;
+}
+
+/* 顶部拖拽条：整条可抓取，拖动时改壳的 translate；不拦截消息区滚动与文本选择。 */
+.session-modal-drag-handle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  color: hsl(var(--muted-foreground));
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.session-modal-drag-handle:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted) / 0.5);
+}
+
+.session-modal-drag-handle:active {
+  cursor: grabbing;
+}
+
+.session-modal-drag-handle:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+
+.session-modal-body {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* 右下角缩放手柄：热区 24x24 无边框绘制（避免被 shell 的 border-radius +
+   overflow:hidden 裁切），圆弧由 ::after 在热区内缩 5px 处绘制，保证可见。
+   双轴缩放，面板左上角保持不动；不拦截消息区滚动与文本选择（手柄外区域）。
+   z-index 浮于 shell 内 thread 内容之上（composer 渐变层 --stack-sticky-control、
+   quotes/消息导航 --stack-popover 会盖住无层级句柄）；shell 因 transform +
+   will-change 创建局部 stacking context，此值只在该上下文内生效，不会逃逸
+   到 modal 之外的全局浮层（--stack-tooltip/--stack-menu 等）。 */
+.session-modal-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 24px;
+  height: 24px;
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+  z-index: var(--stack-dialog);
+}
+
+.session-modal-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 12px;
+  height: 12px;
+  border-right: 2px solid hsl(var(--muted-foreground) / 0.75);
+  border-bottom: 2px solid hsl(var(--muted-foreground) / 0.75);
+  border-bottom-right-radius: 10px;
+  pointer-events: none;
+}
+
+.session-modal-resize-handle:hover::after {
+  border-color: hsl(var(--foreground) / 0.85);
+}
+
+.session-modal-resize-handle:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
 }
 
 .topbar {

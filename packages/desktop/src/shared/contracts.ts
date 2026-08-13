@@ -634,6 +634,20 @@ export interface WorkbenchState {
   activeTabKey?: string | null;
   /** 终端 tab 序号计数器（单调递增，跨刷新/重启持久化，保证 terminalId 不重复）。 */
   terminalTabCounter?: number;
+  /** 全屏期间会话 modal 的 UI 状态（渲染进程写入，跨刷新/重启持久化）。 */
+  sessionModal?: SessionModalPersistedState;
+}
+
+/** 全屏会话 modal 的开关与几何状态（session 级 UI 状态，随 WorkbenchState 持久化）。 */
+export interface SessionModalPersistedState {
+  /** 工作区侧边栏是否处于全屏态。 */
+  fullscreen: boolean;
+  /** 全屏期间会话 modal 是否打开。 */
+  modalOpen: boolean;
+  /** modal 相对 Radix 初始定位的拖拽偏移（px）。 */
+  drag: { x: number; y: number };
+  /** 自定义缩放尺寸；null 表示未缩放（CSS 默认尺寸）。 */
+  size: { width: number; height: number } | null;
 }
 
 /** 单个终端视图的 tab 状态（多终端 tab 持久化）。 */

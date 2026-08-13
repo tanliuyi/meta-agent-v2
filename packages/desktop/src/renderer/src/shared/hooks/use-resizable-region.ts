@@ -116,7 +116,20 @@ export function useResizableRegion<T extends HTMLElement>(options: ResizableRegi
       const currentOptions = optionsRef.current;
       const horizontal = currentOptions.orientation === "horizontal";
       const startPoint = horizontal ? event.clientY : event.clientX;
-      const startSize = currentSizeRef.current;
+      // 以拖拽起点实际渲染的尺寸为基准：显示宽度可能被外部约束（CSS max-width、其他面板
+      // 挤压等）压缩而内部 ref 尚未同步，直接使用 ref 会在拖拽瞬间产生宽度跳变。
+      const region = regionRef.current;
+      const renderedSize = region
+        ? horizontal
+          ? region.getBoundingClientRect().height
+          : region.getBoundingClientRect().width
+        : NaN;
+      const startSize = resolveDragStartSize(
+        renderedSize,
+        currentSizeRef.current,
+        currentOptions.min,
+        currentOptions.getMaxSize(),
+      );
       const separator = event.currentTarget;
       const pointerId = event.pointerId;
       const move = (nextEvent: PointerEvent) => {
@@ -179,4 +192,12 @@ export function useResizableRegion<T extends HTMLElement>(options: ResizableRegi
 /** 将持久化或拖拽尺寸限制在当前视口允许范围内。 */
 export function limitSize(value: number, min: number, max: number): number {
   return Math.round(Math.min(Math.max(value, min), Math.max(min, max)));
+}
+
+/**
+ * 解析拖拽起点尺寸：优先使用实际渲染尺寸（展开动画进行中、被 CSS max-width 或
+ * 其他面板挤压时显示宽度可能滞后于内部 ref），无效时回退内部当前尺寸。
+ */
+export function resolveDragStartSize(renderedSize: number, fallback: number, min: number, max: number): number {
+  return Number.isFinite(renderedSize) && renderedSize > 0 ? limitSize(renderedSize, min, max) : fallback;
 }
