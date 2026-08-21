@@ -3,7 +3,6 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { StreamdownMarkdown } from "../src/renderer/src/components/assistant-ui/streamdown/streamdown-markdown.tsx";
-import { getRegisteredNotificationRenderer } from "../src/renderer/src/components/chat/notifications/builtin-notification-view.tsx";
 import { PiNoticeView } from "../src/renderer/src/components/chat/pi-notice-view.tsx";
 
 describe("PiNoticeView", () => {
@@ -58,7 +57,7 @@ describe("PiNoticeView", () => {
           kind: "notice",
           noticeType: "notification",
           notificationType,
-          title: "Pi 扩展通知",
+          title: "系统 Pi 扩展通知",
           content: { type: "text", text: "通知内容" },
         }}
       />,
@@ -72,7 +71,7 @@ describe("PiNoticeView", () => {
     expect(markup).toContain("通知内容");
   });
 
-  it("文本 custom notice 使用统一 TerminalBlock", () => {
+  it("custom notice 使用通用折叠内容，不依赖 Desktop 内置扩展", () => {
     const markup = renderToStaticMarkup(
       <PiNoticeView
         data={{
@@ -83,43 +82,18 @@ describe("PiNoticeView", () => {
           content: {
             type: "custom",
             customType: "user-extension.event",
-            content: [{ type: "text", text: "第一行\n\n第二行\r\n" }],
-          },
-        }}
-      />,
-    );
-
-    expect(markup).toContain('data-slot="terminal-block"');
-    expect(markup).toContain("用户扩展消息");
-    expect(markup).toContain("已完成");
-    expect(markup).toContain("第一行");
-    expect(markup).toContain("第二行");
-    expect(markup).toContain(" ");
-    expect(markup).not.toContain('data-slot="reasoning-root"');
-  });
-
-  it("含图片的 custom notice 回退到通用折叠内容", () => {
-    const markup = renderToStaticMarkup(
-      <PiNoticeView
-        data={{
-          id: "custom-image",
-          kind: "notice",
-          noticeType: "custom",
-          title: "图片消息",
-          content: {
-            type: "custom",
-            customType: "user-extension.image",
-            content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+            content: [{ type: "text", text: "**扩展正文**" }],
           },
         }}
       />,
     );
 
     expect(markup).toContain('data-slot="reasoning-root"');
-    expect(markup).not.toContain('data-slot="terminal-block"');
+    expect(markup).toContain("用户扩展消息");
+    expect(markup).toContain("扩展正文");
   });
 
-  it("command notice 保持原有折叠视图", () => {
+  it("command notice 展示命令、输出与退出状态", () => {
     const markup = renderToStaticMarkup(
       <PiNoticeView
         data={{
@@ -139,14 +113,12 @@ describe("PiNoticeView", () => {
       />,
     );
 
-    expect(markup).toContain('data-slot="reasoning-root"');
-    expect(markup).toContain('data-notice-type="bash"');
-    expect(markup).toContain("终端命令");
+    expect(markup).toContain("printf ok");
+    expect(markup).toContain("退出码 0");
   });
 
   it("notice 文本按 markdown 渲染", () => {
     const markup = renderToStaticMarkup(<StreamdownMarkdown>{"**重点**\n\n- 第一项\n- 第二项"}</StreamdownMarkdown>);
-
     expect(markup).toContain('data-streamdown="strong"');
     expect(markup).toContain('data-streamdown="unordered-list"');
   });
@@ -157,7 +129,6 @@ describe("PiNoticeView", () => {
         <StreamdownMarkdown>{"正文 `value`\n\n```tsx\nconst value = 1;\n```"}</StreamdownMarkdown>
       </TooltipProvider>,
     );
-
     expect(markup).toContain('data-streamdown="code-block-header"');
     expect(markup).toContain("const value = 1;");
   });
@@ -174,7 +145,6 @@ describe("PiNoticeView", () => {
         }}
       />,
     );
-
     expect(markup).toBe("");
   });
 
@@ -182,7 +152,6 @@ describe("PiNoticeView", () => {
     const markup = renderToStaticMarkup(
       <PiNoticeView data={{ kind: "notice", noticeType: "custom", content: { type: "custom", content: {} } }} />,
     );
-
     expect(markup).toBe("");
   });
 });

@@ -6,7 +6,13 @@
  * plus their credential status. Save writes to both files sequentially.
  */
 
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+interface ProviderStatusRuntime {
+  refresh(options: { allowNetwork: boolean }): Promise<unknown>;
+  getProviderAuthStatus(providerId: string): { configured: boolean; source?: "stored" | "environment" } | undefined;
+  getModels(providerId: string): readonly unknown[];
+  hasConfiguredAuth(providerId: string): boolean;
+}
+
 import type {
   AuthConfigDiagnostic,
   AuthConfigSnapshot,
@@ -36,9 +42,9 @@ import { DesktopBuiltinProviderRegistry } from "../pi/desktop-builtin-provider.t
 export class ProvidersConfigService {
   private readonly models: ModelsConfigService;
   private readonly auth: AuthConfigService;
-  private readonly modelRuntime?: ModelRuntime;
+  private readonly modelRuntime?: ProviderStatusRuntime;
 
-  constructor(models: ModelsConfigService, auth: AuthConfigService, modelRuntime?: ModelRuntime) {
+  constructor(models: ModelsConfigService, auth: AuthConfigService, modelRuntime?: ProviderStatusRuntime) {
     this.models = models;
     this.auth = auth;
     this.modelRuntime = modelRuntime;
@@ -170,7 +176,7 @@ export class ProvidersConfigService {
 function buildSnapshot(
   modelsSnapshot: ModelsConfigSnapshot,
   authSnapshot: AuthConfigSnapshot,
-  modelRuntime?: ModelRuntime,
+  modelRuntime?: ProviderStatusRuntime,
 ): ProvidersSnapshot {
   const coreMetadata = getModelsConfigMetadata() as ProvidersConfigMetadata;
   const desktopInfos = DesktopBuiltinProviderRegistry.getProviderInfos();
@@ -310,7 +316,7 @@ function makeEntry(
     defaultConfig: ProviderEntry["defaultConfig"];
   }>,
   builtInDefaultConfig?: ProviderEntry["defaultConfig"],
-  modelRuntime?: ModelRuntime,
+  modelRuntime?: ProviderStatusRuntime,
 ): ProviderEntry {
   const modelsCfg = modelsSnapshot.providers.find((p) => p.key === key);
   const authCfg = authSnapshot.providers.find((p) => p.key === key);
@@ -351,7 +357,7 @@ function computeCredentialStatus(
   authCfg: AuthProviderDraft | undefined,
   providerKey: string,
   envKeys?: string[],
-  modelRuntime?: ModelRuntime,
+  modelRuntime?: ProviderStatusRuntime,
 ): ProviderEntry["credentialStatus"] {
   const runtimeStatus = modelRuntime?.getProviderAuthStatus(providerKey);
   if (runtimeStatus?.configured && modelRuntime) {

@@ -1,7 +1,6 @@
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import { Button } from "@renderer/shared/ui/button";
 import { Link, useMatchRoute, useNavigate, useSearch } from "@tanstack/react-router";
-import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Settings from "lucide-react/dist/esm/icons/settings.mjs";
 import { type CSSProperties, memo, useCallback } from "react";
@@ -22,7 +21,7 @@ import { ProjectSection } from "./project-section.tsx";
 import { SidebarToggle } from "./sidebar-toggle.tsx";
 import { UpdateBanner } from "./update-banner.tsx";
 
-/** 侧边栏行统一样式:新建任务、插件中心、设置共用,保证字号与高亮一致。 */
+/** 侧边栏行统一样式：新建任务与设置共用，保证字号与高亮一致。 */
 const sidebarRowClass =
   "hover:bg-foreground/[0.055] active:bg-foreground/[0.09] data-active:bg-foreground/[0.085] aria-[current=page]:bg-foreground/[0.085] h-8 w-full justify-start gap-2 rounded-xl px-2.5 text-sm font-normal";
 
@@ -133,15 +132,6 @@ export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: 
               </nav>
 
               <div className="sidebar-navigation-scroll py-1">
-                <nav className="sidebar-actions sidebar-secondary-actions" aria-label="辅助操作">
-                  <Button asChild variant="ghost" className={sidebarRowClass}>
-                    <Link to="/plugins" search={settingsSearch}>
-                      <Blocks size={16} />
-                      <span className="whitespace-nowrap">插件中心</span>
-                    </Link>
-                  </Button>
-                </nav>
-
                 <PinnedConversationSection />
 
                 <ProjectSection

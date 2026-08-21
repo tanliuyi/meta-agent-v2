@@ -16,17 +16,6 @@ extraResources:
   # Windows 系统托盘图标（16x16/32x32 多尺寸 ICO）。
   - from: build/icon.ico
     to: tray-icon.ico
-  # electron-builder excludes top-level README.md and examples/ from dependencies by default.
-  - from: ../coding-agent/README.md
-    to: app.asar.unpacked/node_modules/@earendil-works/pi-coding-agent/README.md
-  - from: ../coding-agent/docs
-    to: app.asar.unpacked/node_modules/@earendil-works/pi-coding-agent/docs
-  - from: ../coding-agent/examples
-    to: app.asar.unpacked/node_modules/@earendil-works/pi-coding-agent/examples
-  - from: src/main/pi/extensions/pi-hermes-memory/LICENSE
-    to: licenses/pi-hermes-memory.LICENSE
-  - from: src/main/pi/extensions/pi-subagents/LICENSE
-    to: licenses/pi-subagents.LICENSE
 afterPack: ../../scripts/validate-desktop-package.mjs
 afterSign: ../../scripts/validate-desktop-signing.mjs
 mac:

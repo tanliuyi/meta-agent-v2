@@ -1,7 +1,7 @@
 import { basename } from "node:path";
-import { getShellConfig, SettingsManager } from "@earendil-works/pi-coding-agent";
 import * as pty from "node-pty";
 import type { TerminalEvent, TerminalSnapshot } from "../../shared/contracts.ts";
+import { getBashShellConfig, getSystemPiShellPath } from "../sidecar/system-pi-settings.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 import { prepareShellInjection } from "./shell-integration.ts";
 import { TerminalOutputBuffer } from "./terminal-output-buffer.ts";
@@ -380,7 +380,7 @@ function terminalKey(projectId: string, threadId: string, terminalId: string): s
 
 export function createTerminalShellResolver(agentDir: string, managedShellPath?: string): TerminalShellResolver {
   return (cwd) => {
-    const configuredShellPath = SettingsManager.create(cwd, agentDir).getShellPath();
+    const configuredShellPath = getSystemPiShellPath(cwd, agentDir);
     return resolveTerminalShell(configuredShellPath, managedShellPath);
   };
 }
@@ -392,7 +392,7 @@ export function resolveTerminalShell(configuredShellPath?: string, managedShellP
   ];
   for (const candidate of candidates) {
     try {
-      return interactiveShellCommand(getShellConfig(candidate).shell);
+      return interactiveShellCommand(getBashShellConfig(candidate).shell);
     } catch {
       // Continue through managed/system discovery before the terminal-only platform fallback.
     }

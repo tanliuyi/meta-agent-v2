@@ -5,24 +5,18 @@ import { settingsReturnDraftProject, settingsReturnSession } from "@renderer/sta
 import { Link, Outlet, useSearch } from "@tanstack/react-router";
 import Archive from "lucide-react/dist/esm/icons/archive.mjs";
 import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left.mjs";
-import Bot from "lucide-react/dist/esm/icons/bot.mjs";
 import Boxes from "lucide-react/dist/esm/icons/boxes.mjs";
-import Brain from "lucide-react/dist/esm/icons/brain.mjs";
 import Globe from "lucide-react/dist/esm/icons/globe.mjs";
 import Info from "lucide-react/dist/esm/icons/info.mjs";
 import Keyboard from "lucide-react/dist/esm/icons/keyboard.mjs";
 import Palette from "lucide-react/dist/esm/icons/palette.mjs";
 import Server from "lucide-react/dist/esm/icons/server.mjs";
-import Sparkles from "lucide-react/dist/esm/icons/sparkles.mjs";
 
 const SETTINGS_LINKS = [
   { to: "/settings/personalization", label: "个性化", icon: Palette },
   { to: "/settings/keyboard", label: "键盘快捷键", icon: Keyboard },
   { to: "/settings/models", label: "模型服务商", icon: Server },
-  { to: "/settings/auto-title", label: "自动标题", icon: Sparkles },
   { to: "/settings/browser", label: "浏览器", icon: Globe },
-  { to: "/settings/memory", label: "记忆", icon: Brain },
-  { to: "/settings/subagents", label: "子智能体", icon: Bot },
   { to: "/settings/archives", label: "归档", icon: Archive },
   { to: "/settings/dependencies", label: "依赖项", icon: Boxes },
   { to: "/settings/about", label: "关于", icon: Info },

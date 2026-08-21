@@ -10,7 +10,6 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopRoot = join(repoRoot, "packages", "desktop");
 const defaultOutputRoot = join(desktopRoot, "out", "sidecar");
 const defaultPackagedRoot = join(desktopRoot, "output", "pi-sidecar");
-const codingAgentPackage = JSON.parse(readFileSync(join(repoRoot, "packages", "coding-agent", "package.json"), "utf8"));
 const electronPath = require("electron");
 
 export function generateDesktopSidecarManifests(
@@ -34,7 +33,6 @@ function sidecarEntries(prefix) {
   return {
     thread: `${prefix}/thread-worker-main.js`,
     metadata: `${prefix}/metadata-worker-main.js`,
-    subagent: `${prefix}/subagent-worker-main.js`,
   };
 }
 
@@ -71,10 +69,9 @@ function runtimeCompatibility(executable) {
       },
     ),
   );
-  const base = { ...versions, piVersion: codingAgentPackage.version };
   return {
-    ...base,
-    runtimeCompatibilityId: createHash("sha256").update(JSON.stringify(base)).digest("hex"),
+    ...versions,
+    runtimeCompatibilityId: createHash("sha256").update(JSON.stringify(versions)).digest("hex"),
   };
 }
 

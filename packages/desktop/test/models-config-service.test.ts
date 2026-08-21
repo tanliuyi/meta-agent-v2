@@ -1,8 +1,6 @@
 import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryCredentialStore, InMemoryModelsStore } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { validateModelsConfigValue } from "../src/main/models/models-config-schema.ts";
 import { MISSING_MODELS_CONFIG_REVISION, ModelsConfigService } from "../src/main/models/models-config-service.ts";
@@ -208,7 +206,7 @@ describe("ModelsConfigService", () => {
     ).toEqual(expect.objectContaining({ ok: true }));
   });
 
-  test("serializes accepted no-op built-ins and overrides into a ModelRuntime-compatible file", async () => {
+  test("serializes accepted no-op built-ins and overrides into the system Pi models format", async () => {
     const result = await service.saveConfig({
       expectedRevision: MISSING_MODELS_CONFIG_REVISION,
       providers: [
@@ -233,16 +231,11 @@ describe("ModelsConfigService", () => {
     expect(serialized.providers.anthropic).toBeUndefined();
     expect(serialized.providers.openai).toBeDefined();
 
-    const runtime = await ModelRuntime.create({
-      credentials: new InMemoryCredentialStore(),
-      modelsPath: configPath,
-      modelsStore: new InMemoryModelsStore(),
-      allowModelNetwork: false,
+    expect(serialized.providers.openai).toEqual({
+      modelOverrides: {
+        "gpt-5.5": { name: "Saved Desktop Override", maxTokens: 4096 },
+      },
     });
-    expect(runtime.getError()).toBeUndefined();
-    expect(runtime.getModel("openai", "gpt-5.5")).toEqual(
-      expect.objectContaining({ name: "Saved Desktop Override", maxTokens: 4096 }),
-    );
   });
 
   test("reports every Desktop models semantic constraint", () => {

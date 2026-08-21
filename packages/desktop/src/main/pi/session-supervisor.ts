@@ -1,34 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type {
-  ClearedQueue,
   DraftSessionConfig,
   HostResponse,
   SessionAttachInput,
   SessionAttachment,
   SessionBootstrap,
-  SessionBranchInput,
-  SessionBranchResult,
   SessionCommandResult,
   SessionControlState,
   SessionCreateInput,
-  SessionEditInput,
-  SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPush,
   SessionPushPayload,
-  SessionReloadInput,
   SessionRemovePolicy,
   SessionRemoveResult,
-  SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
-import type {
-  SessionCheckpointDiffInput,
-  SessionCheckpointDiffResult,
-  SessionCheckpointRestoreInput,
-  SessionCheckpointRestoreResult,
-} from "../../shared/pi-rewind-contracts.ts";
 import type { ThreadWorkerRegistry } from "../sidecar/thread-worker-registry.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 
@@ -40,6 +27,7 @@ interface RendererSubscription {
   pendingEvents: number;
   pendingBytes: number;
   resyncing: boolean;
+  workerInstanceId?: string;
 }
 
 interface PendingRendererAttachment {
@@ -99,14 +87,6 @@ export class SessionSupervisor {
     return this.workers.getDraftConfig(projectId, cwd);
   }
 
-  getExtensionState(projectId: string, threadId: string) {
-    return this.workers.getExtensionState(projectId, threadId);
-  }
-
-  extensionSettingsChanged(): Promise<void> {
-    return this.workers.extensionSettingsChanged();
-  }
-
   prewarm(projectId: string, threadId: string): Promise<void> {
     return this.workers.prewarm(projectId, threadId);
   }
@@ -155,10 +135,11 @@ export class SessionSupervisor {
     };
     pending.set(requestId, { projectId, threadId });
     this.subscriptionsFor(ownerId).set(attachmentId, subscription);
-    let workerAttached = false;
+    let attachedWorkerInstanceId: string | undefined;
     try {
-      const bootstrap = await this.workers.attach(projectId, threadId);
-      workerAttached = true;
+      const { bootstrap, workerInstanceId } = await this.workers.attach(projectId, threadId);
+      attachedWorkerInstanceId = workerInstanceId;
+      subscription.workerInstanceId = workerInstanceId;
       const currentPending = this.pendingAttachments.get(ownerId)?.get(requestId);
       if (!currentPending || currentPending.projectId !== projectId || currentPending.threadId !== threadId) {
         throw new DOMException("Session attach superseded", "AbortError");
@@ -182,7 +163,7 @@ export class SessionSupervisor {
         if (subscriptions.size === 0) this.subscriptions.delete(ownerId);
         this.releaseAttachmentAcks(ownerId, attachmentId);
       }
-      if (workerAttached) this.workers.detach(projectId, threadId);
+      if (attachedWorkerInstanceId) this.workers.detach(projectId, threadId, attachedWorkerInstanceId);
       throw error;
     }
   }
@@ -191,36 +172,8 @@ export class SessionSupervisor {
     return this.workers.prompt(input);
   }
 
-  edit(input: SessionEditInput): Promise<SessionCommandResult> {
-    return this.workers.edit(input);
-  }
-
-  reload(input: SessionReloadInput): Promise<SessionCommandResult> {
-    return this.workers.reload(input);
-  }
-
-  reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult> {
-    return this.workers.reloadResources(input);
-  }
-
-  getCheckpointDiff(input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult> {
-    return this.workers.getCheckpointDiff(input);
-  }
-
-  restoreCheckpoint(input: SessionCheckpointRestoreInput): Promise<SessionCheckpointRestoreResult> {
-    return this.workers.restoreCheckpoint(input);
-  }
-
-  branch(input: SessionBranchInput): Promise<SessionBranchResult> {
-    return this.workers.branch(input);
-  }
-
-  cancel(projectId: string, threadId: string): Promise<ClearedQueue> {
+  cancel(projectId: string, threadId: string): Promise<void> {
     return this.workers.cancel(projectId, threadId);
-  }
-
-  clearQueue(projectId: string, threadId: string): Promise<ClearedQueue> {
-    return this.workers.clearQueue(projectId, threadId);
   }
 
   compact(projectId: string, threadId: string): Promise<void> {
@@ -237,23 +190,6 @@ export class SessionSupervisor {
 
   setThinking(projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]): Promise<void> {
     return this.workers.setThinking(projectId, threadId, level);
-  }
-
-  applyExtensionSet(projectId: string, threadId: string, expectedDesiredGeneration: string, abortRunning = false) {
-    return this.workers.applyExtensionSet(projectId, threadId, expectedDesiredGeneration, abortRunning);
-  }
-
-  getSessionPluginOptions(projectId: string, threadId: string) {
-    return this.workers.getSessionPluginOptions(projectId, threadId);
-  }
-
-  applySessionPluginSelection(
-    projectId: string,
-    threadId: string,
-    enabledPluginIds: string[] | null,
-    abortRunning = false,
-  ) {
-    return this.workers.applySessionPluginSelection(projectId, threadId, enabledPluginIds, abortRunning);
   }
 
   rename(projectId: string, threadId: string, title: string): Promise<void> {
@@ -477,7 +413,9 @@ export class SessionSupervisor {
     if (!subscription) return;
     leases?.delete(attachmentId);
     if (leases?.size === 0) this.subscriptions.delete(ownerId);
-    this.workers.detach(subscription.projectId, subscription.threadId);
+    if (subscription.workerInstanceId) {
+      this.workers.detach(subscription.projectId, subscription.threadId, subscription.workerInstanceId);
+    }
     this.releaseAttachmentAcks(ownerId, attachmentId);
   }
 

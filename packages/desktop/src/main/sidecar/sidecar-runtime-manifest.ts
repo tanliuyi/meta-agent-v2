@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import type { RuntimeCompatibility, SidecarRole } from "../../shared/sidecar-contracts.ts";
 import { currentRuntimeCompatibility } from "../../shared/sidecar-wire.ts";
 
-const SIDECAR_ROLES = ["thread", "metadata", "subagent"] as const satisfies readonly SidecarRole[];
+const SIDECAR_ROLES = ["thread", "metadata"] as const satisfies readonly SidecarRole[];
 
 export interface SidecarRuntimeManifest {
   entries: Record<SidecarRole, string>;
@@ -92,7 +92,7 @@ function parseManifest(manifestPath: string): SidecarRuntimeManifest {
 }
 
 function assertCurrentRuntimeCompatibility(expected: RuntimeCompatibility): void {
-  const actual = currentRuntimeCompatibility(expected.piVersion, expected.runtimeCompatibilityId);
+  const actual = currentRuntimeCompatibility(expected.runtimeCompatibilityId);
   for (const field of [
     "nodeVersion",
     "modulesAbi",

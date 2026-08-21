@@ -48,16 +48,15 @@ describe("sidecar event backpressure", () => {
 });
 
 function manifest(): SidecarRuntimeManifest {
-  const compatibility = currentRuntimeCompatibility("test", "test");
+  const compatibility = currentRuntimeCompatibility("test");
   return {
     entries: {
       thread: "",
       metadata: resolve(import.meta.dirname, "fixtures/overflow-sidecar.mjs"),
-      subagent: "",
     },
     compatibility,
     integrity: {
-      entries: { thread: "", metadata: "", subagent: "" },
+      entries: { thread: "", metadata: "" },
       files: {},
     },
   };

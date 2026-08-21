@@ -22,7 +22,6 @@ export default async function validateDesktopPackage(context) {
 
   assertTargetRuntime(context, manifest);
   assertEmbeddedRuntimeManifest(resources, manifest);
-  assertBundledPiDocumentation(resources);
   if (!existsSync(executable) || !statSync(executable).isFile()) {
     throw new Error(`Packaged Electron executable is missing: ${executable}`);
   }
@@ -31,7 +30,6 @@ export default async function validateDesktopPackage(context) {
     requireHelper: isMac,
   });
   if (isMac) assertHiddenMacSidecarHelper(sidecarExecutable);
-  validateHermesMemorySqliteRuntime(sidecarExecutable);
 
   if (isMac) {
     const spawnHelper = join(
@@ -91,7 +89,6 @@ export default async function validateDesktopPackage(context) {
   const agentDir = await mkdtemp(join(tmpdir(), "desktop-package-agent-"));
   const userDataDir = await mkdtemp(join(tmpdir(), "desktop-package-user-data-"));
   try {
-    await smokeSubagentWorker(sidecarExecutable, entries.subagent, manifest.compatibility, agentDir);
     await smokeMetadataWorker(sidecarExecutable, entries.metadata, manifest.compatibility, agentDir, userDataDir);
   } finally {
     await Promise.all([
@@ -106,7 +103,7 @@ export function assertHiddenMacSidecarHelper(executable) {
   if (!existsSync(executable) || !statSync(executable).isFile()) {
     throw new Error(`Packaged macOS Electron sidecar Helper is missing: ${executable}`);
   }
-  if ((statSync(executable).mode & 0o111) === 0) {
+  if (process.platform !== "win32" && (statSync(executable).mode & 0o111) === 0) {
     throw new Error(`Packaged macOS Electron sidecar Helper is not executable: ${executable}`);
   }
   const infoPlist = join(dirname(dirname(executable)), "Info.plist");
@@ -174,117 +171,12 @@ export function assertTargetRuntime(context, manifest) {
   }
 }
 
-export function assertBundledPiDocumentation(resources) {
-  const packageRoot = join(
-    resources,
-    "app.asar.unpacked",
-    "node_modules",
-    "@earendil-works",
-    "pi-coding-agent",
-  );
-  for (const relativePath of [
-    "README.md",
-    "docs/extensions.md",
-    "docs/sdk.md",
-    "examples/extensions/README.md",
-    "examples/sdk/01-minimal.ts",
-  ]) {
-    const path = join(packageRoot, relativePath);
-    if (!existsSync(path) || !statSync(path).isFile()) {
-      throw new Error(`Bundled Pi documentation is missing from package: ${path}`);
-    }
-  }
-}
-
-function validateHermesMemorySqliteRuntime(executable) {
-  execFileSync(
-    executable,
-    [
-      "-e",
-      "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(':memory:');db.exec('SELECT 1');db.close();",
-    ],
-    { stdio: "inherit", env: createDesktopSidecarSmokeEnvironment(process.env, executable) },
-  );
-}
-
 
 function assertHash(path, expectedHash, description) {
   if (!expectedHash) return;
   const actualHash = createHash("sha256").update(readFileSync(path)).digest("hex");
   if (actualHash !== expectedHash) {
     throw new Error(`${description} integrity mismatch: expected ${expectedHash}, got ${actualHash}`);
-  }
-}
-
-async function smokeSubagentWorker(executable, entry, compatibility, agentDir) {
-  const worker = fork(entry, [], {
-    execPath: executable,
-    env: createDesktopSidecarSmokeEnvironment(process.env, executable, {
-      PI_DESKTOP_RUNTIME_COMPATIBILITY_ID: compatibility.runtimeCompatibilityId,
-    }),
-    stdio: ["ignore", "ignore", "pipe", "ipc"],
-    serialization: "json",
-  });
-  let stderr = "";
-  worker.stderr?.on("data", (chunk) => {
-    stderr = `${stderr}${chunk}`.slice(-8192);
-  });
-  const workerInstanceId = `package-subagent-smoke-${process.pid}`;
-  const requestId = `ping-${process.pid}`;
-  const result = new Promise((resolveResult, rejectResult) => {
-    const timer = setTimeout(
-      () => rejectResult(new Error(`Packaged subagent sidecar smoke timed out${stderr ? `\n${stderr}` : ""}`)),
-      15_000,
-    );
-    worker.on("message", (message) => {
-      if (message?.workerInstanceId !== workerInstanceId) return;
-      if (message.kind === "ready") {
-        worker.send({
-          kind: "request",
-          protocolVersion: 3,
-          workerInstanceId,
-          requestId,
-          command: { type: "ping" },
-        });
-        return;
-      }
-      if (message.kind !== "response" || message.requestId !== requestId) return;
-      clearTimeout(timer);
-      if (!message.ok || message.result?.pong !== true) {
-        rejectResult(new Error(`Packaged subagent sidecar ping failed${stderr ? `\n${stderr}` : ""}`));
-        return;
-      }
-      resolveResult();
-    });
-    worker.once("error", rejectResult);
-    worker.once("exit", (code, signal) =>
-      rejectResult(new Error(`Packaged subagent sidecar exited (${code ?? signal ?? "unknown"})${stderr ? `\n${stderr}` : ""}`)),
-    );
-  });
-  worker.once("spawn", () => {
-    worker.send({
-      kind: "initialize",
-      protocolVersion: 3,
-      workerInstanceId,
-      expectedRuntime: compatibility,
-      binding: {
-        role: "subagent",
-        value: {
-          projectId: "package-smoke-project",
-          parentThreadId: "package-smoke-thread",
-          runId: "package-smoke-run",
-          childIndex: 0,
-          agentDir,
-        },
-      },
-    });
-  });
-  try {
-    await result;
-    worker.send({ kind: "shutdown", protocolVersion: 3, workerInstanceId });
-    await waitForExit(worker, 10_000);
-  } finally {
-    if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");
   }
 }
 
@@ -324,7 +216,6 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
         "osRelease",
         "libc",
         "toolchain",
-        "piVersion",
         "runtimeCompatibilityId",
       ]) {
         if (String(message.runtime?.[field]) !== String(compatibility[field])) {
@@ -342,7 +233,7 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
   worker.once("spawn", () => {
     worker.send({
       kind: "initialize",
-      protocolVersion: 3,
+      protocolVersion: 4,
       workerInstanceId,
       expectedRuntime: compatibility,
       binding: { role: "metadata", value: { agentDir, userDataDir } },
@@ -350,7 +241,7 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
   });
   try {
     await ready;
-    worker.send({ kind: "shutdown", protocolVersion: 3, workerInstanceId });
+    worker.send({ kind: "shutdown", protocolVersion: 4, workerInstanceId });
     await waitForExit(worker, 10_000);
   } finally {
     if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");

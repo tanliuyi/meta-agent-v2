@@ -17,7 +17,7 @@ interface HostRequestDialogProps {
 
 /** 渲染扩展发出的阻塞式请求，并维护该请求独立的输入值。 */
 export function HostRequestDialog({ request, projectId, threadId }: HostRequestDialogProps) {
-  const [value, setValue] = useState(() => (request.type === "editor" ? (request.message ?? "") : ""));
+  const [value, setValue] = useState(() => request.initialValue ?? "");
 
   return (
     <Dialog open>

@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  assertBundledPiDocumentation,
   assertEmbeddedRuntimeManifest,
   assertHiddenMacSidecarHelper,
   assertTargetRuntime,
@@ -71,36 +70,6 @@ describe("packaged Desktop target validation", () => {
       );
     } finally {
       rmSync(resources, { recursive: true, force: true });
-    }
-  });
-
-  it("requires the Pi documentation paths advertised to the Desktop agent", () => {
-    const config = readFileSync(resolve(import.meta.dirname, "../electron-builder.yml"), "utf8");
-    expect(config).toContain("from: ../coding-agent/README.md");
-    expect(config).toContain("from: ../coding-agent/docs");
-    expect(config).toContain("from: ../coding-agent/examples");
-
-    const root = mkdtempSync(join(tmpdir(), "desktop-pi-docs-"));
-    const packageRoot = join(root, "app.asar.unpacked", "node_modules", "@earendil-works", "pi-coding-agent");
-    const required = [
-      "README.md",
-      "docs/extensions.md",
-      "docs/sdk.md",
-      "examples/extensions/README.md",
-      "examples/sdk/01-minimal.ts",
-    ];
-    try {
-      for (const relativePath of required) {
-        const path = join(packageRoot, relativePath);
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, relativePath);
-      }
-
-      expect(() => assertBundledPiDocumentation(root)).not.toThrow();
-      rmSync(join(packageRoot, "README.md"));
-      expect(() => assertBundledPiDocumentation(root)).toThrow("Bundled Pi documentation is missing");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
     }
   });
 

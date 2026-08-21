@@ -94,7 +94,7 @@ describe("ProvidersConfigService", () => {
     );
   });
 
-  test("uses refreshed ModelRuntime auth status instead of treating env variable names as available credentials", async () => {
+  test("uses refreshed provider auth status instead of treating env variable names as available credentials", async () => {
     const runtime = {
       getProviderAuthStatus: vi.fn((providerId: string) =>
         providerId === "anthropic" ? { configured: false } : { configured: true, source: "environment" },

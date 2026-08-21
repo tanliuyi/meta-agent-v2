@@ -7,12 +7,6 @@ import type {
   SaveAuthConfigResult,
 } from "./auth-config-contracts.ts";
 import type {
-  AutoTitleModelOption,
-  AutoTitleSettingsSnapshot,
-  SaveAutoTitleSettingsInput,
-  SaveAutoTitleSettingsResult,
-} from "./auto-title-contracts.ts";
-import type {
   BrowserAction,
   BrowserActionResult,
   BrowserAnnotation,
@@ -47,7 +41,6 @@ import type {
   SaveBrowserSettingsResult,
 } from "./browser-settings-contracts.ts";
 import type {
-  ClearedQueue,
   DraftSessionConfig,
   FileChangeSet,
   FileImage,
@@ -61,79 +54,23 @@ import type {
   SessionAttachInput,
   SessionAttachment,
   SessionBootstrap,
-  SessionBranchInput,
-  SessionBranchResult,
   SessionCommandResult,
   SessionControlState,
   SessionCreateInput,
-  SessionEditInput,
   SessionFlushResult,
   SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
-  SessionReloadInput,
   SessionRemovePolicy,
   SessionRemoveResult,
-  SessionResourceReloadInput,
   TerminalEvent,
   TerminalSnapshot,
   TextFile,
   Thread,
   WorkbenchState,
 } from "./contracts.ts";
-import type {
-  ApplyDesktopExtensionSetInput,
-  ApplyDesktopExtensionSetResult,
-  ApplySessionPluginSelectionInput,
-  ApproveDevelopmentExtensionInput,
-  DesktopExtensionSettingsSnapshot,
-  SaveDesktopExtensionSettingsInput,
-  SaveDesktopExtensionSettingsResult,
-  SessionPluginOptions,
-} from "./desktop-extension-contracts.ts";
-import type {
-  MemoryMaintenanceResult,
-  MemoryMutationResult,
-  MemorySettingsSnapshot,
-  MutateMemoryEntryInput,
-  RunMemoryMaintenanceInput,
-  SaveMemorySettingsInput,
-  SaveMemorySettingsResult,
-} from "./memory-settings-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
-import type {
-  SessionCheckpointDiffInput,
-  SessionCheckpointDiffResult,
-  SessionCheckpointRestoreInput,
-  SessionCheckpointRestoreResult,
-} from "./pi-rewind-contracts.ts";
-import type {
-  PluginConfigurationSnapshot,
-  SavePluginConfigurationInput,
-  SavePluginConfigurationResult,
-} from "./plugin-configuration-contracts.ts";
-import type {
-  InstalledMarketplacePluginsSnapshot,
-  InstallMarketplacePluginInput,
-  InstallMarketplacePluginResult,
-  ListMarketplacePluginsInput,
-  MarketplaceEndpointSettingsSnapshot,
-  MarketplacePluginPage,
-  MarketplacePluginSummary,
-  SaveMarketplaceEndpointInput,
-  SaveMarketplaceEndpointResult,
-  SetMarketplacePluginEnabledInput,
-  SetMarketplacePluginEnabledResult,
-  SetMarketplacePluginScopeInput,
-  SetMarketplacePluginScopeResult,
-  TestMarketplaceEndpointInput,
-  TestMarketplaceEndpointResult,
-  UninstallMarketplacePluginInput,
-  UninstallMarketplacePluginResult,
-  UpdateMarketplacePluginInput,
-  UpdateMarketplacePluginResult,
-} from "./plugin-marketplace-contracts.ts";
 import type { PreferencesSnapshot, SavePreferencesInput, SavePreferencesResult } from "./preferences-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
 import type {
@@ -141,12 +78,6 @@ import type {
   SaveSettingsConfigResult,
   SettingsConfigSnapshot,
 } from "./settings-config-contracts.ts";
-import type {
-  GetSubagentSettingsInput,
-  SaveSubagentSettingsInput,
-  SaveSubagentSettingsResult,
-  SubagentSettingsSnapshot,
-} from "./subagent-contracts.ts";
 import type { UpdaterApi } from "./updater-contracts.ts";
 
 export type DesktopPlatform = "win32" | "darwin" | "linux";
@@ -220,49 +151,6 @@ export interface DesktopApi {
     getInitial(): PreferencesSnapshot;
     save(input: SavePreferencesInput): Promise<SavePreferencesResult>;
   };
-  memorySettings: {
-    getSnapshot(): Promise<MemorySettingsSnapshot>;
-    saveConfig(input: SaveMemorySettingsInput): Promise<SaveMemorySettingsResult>;
-    mutateEntry(input: MutateMemoryEntryInput): Promise<MemoryMutationResult>;
-    runMaintenance(input: RunMemoryMaintenanceInput): Promise<MemoryMaintenanceResult>;
-    setEditorDirty(dirty: boolean): boolean;
-  };
-  autoTitle: {
-    getSnapshot(): Promise<AutoTitleSettingsSnapshot>;
-    saveConfig(input: SaveAutoTitleSettingsInput): Promise<SaveAutoTitleSettingsResult>;
-    getModelOptions(): Promise<AutoTitleModelOption[]>;
-    setEditorDirty(dirty: boolean): boolean;
-  };
-  extensions: {
-    getConfig(projectId?: string, threadId?: string): Promise<DesktopExtensionSettingsSnapshot>;
-    saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult>;
-    chooseDevelopmentEntry(input: ApproveDevelopmentExtensionInput): Promise<SaveDesktopExtensionSettingsResult>;
-    apply(input: ApplyDesktopExtensionSetInput): Promise<ApplyDesktopExtensionSetResult>;
-    getSessionPlugins(projectId: string, threadId: string): Promise<SessionPluginOptions>;
-    applySessionPlugins(input: ApplySessionPluginSelectionInput): Promise<ApplyDesktopExtensionSetResult>;
-    getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
-    savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
-  };
-  marketplace: {
-    getEndpointSettings(): Promise<MarketplaceEndpointSettingsSnapshot>;
-    testEndpoint(input: TestMarketplaceEndpointInput): Promise<TestMarketplaceEndpointResult>;
-    saveEndpoint(input: SaveMarketplaceEndpointInput): Promise<SaveMarketplaceEndpointResult>;
-    listPlugins(input?: ListMarketplacePluginsInput): Promise<MarketplacePluginPage>;
-    /** 按 pluginId 直达详情；市场目录中不存在时返回 null。 */
-    getPlugin(pluginId: string): Promise<MarketplacePluginSummary | null>;
-    getInstalled(): Promise<InstalledMarketplacePluginsSnapshot>;
-    getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
-    savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
-    installPlugin(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult>;
-    updatePlugin(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult>;
-    uninstallPlugin(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult>;
-    setPluginEnabled(input: SetMarketplacePluginEnabledInput): Promise<SetMarketplacePluginEnabledResult>;
-    setPluginScope(input: SetMarketplacePluginScopeInput): Promise<SetMarketplacePluginScopeResult>;
-  };
-  subagents: {
-    getSnapshot(input?: GetSubagentSettingsInput): Promise<SubagentSettingsSnapshot>;
-    saveConfig(input: SaveSubagentSettingsInput): Promise<SaveSubagentSettingsResult>;
-  };
   updater: UpdaterApi;
   windowControls: {
     minimize(): void;
@@ -298,14 +186,7 @@ export interface DesktopApi {
     remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult>;
     promote(projectId: string, threadId: string): Promise<SessionRemoveResult>;
     prompt(input: SessionPromptInput): Promise<SessionCommandResult>;
-    edit(input: SessionEditInput): Promise<SessionCommandResult>;
-    reload(input: SessionReloadInput): Promise<SessionCommandResult>;
-    reloadResources(input: SessionResourceReloadInput): Promise<SessionCommandResult>;
-    getCheckpointDiff(input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult>;
-    restoreCheckpoint(input: SessionCheckpointRestoreInput): Promise<SessionCheckpointRestoreResult>;
-    branch(input: SessionBranchInput): Promise<SessionBranchResult>;
-    cancel(projectId: string, threadId: string): Promise<ClearedQueue>;
-    clearQueue(projectId: string, threadId: string): Promise<ClearedQueue>;
+    cancel(projectId: string, threadId: string): Promise<void>;
     compact(projectId: string, threadId: string): Promise<void>;
     refreshModels(projectId: string, threadId: string): Promise<void>;
     setModel(projectId: string, threadId: string, provider: string, modelId: string): Promise<void>;

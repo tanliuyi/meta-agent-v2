@@ -1,16 +1,23 @@
-import type {
-  DesktopExtensionDiagnostic,
-  DesktopExtensionHostState,
-  DraftExtensionContext,
-  StaleDraftExtensionSetErrorDetails,
-} from "./desktop-extension-contracts.ts";
-
-export type { DesktopExtensionHostState } from "./desktop-extension-contracts.ts";
+export interface RpcExtensionHostState {
+  statuses: Record<string, string>;
+  windowTitle?: string;
+  composerCommand?: {
+    hostId: string;
+    revision: number;
+    mode: "replace" | "append";
+    text: string;
+  };
+  widgets: Array<{ key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" }>;
+  working?: {
+    message?: string;
+    visible?: boolean;
+  };
+}
 
 /** Desktop 与 renderer 之间使用的协议版本。 */
 export const PROTOCOL_VERSION = 9;
 
-/** Desktop 内部通用对话工作区的稳定 ID。不出现在主界面项目列表，但参与设置页（子智能体/记忆）的项目作用域。 */
+/** Desktop 内部通用对话工作区的稳定 ID。 */
 export const GENERAL_WORKSPACE_ID = "__general__";
 
 /** 判断 Project 是否为内部通用工作区。 */
@@ -67,8 +74,6 @@ export interface Thread {
   origin?: "branch" | "subagent";
   /** Configured agent identity for subagent sessions; independent from the user-editable title. */
   agentName?: string;
-  /** 会话级激活的插件子集（sidecar 索引持久化）；缺失表示继承项目级（全部激活）。 */
-  enabledPluginIds?: string[];
 }
 
 /** Thread 加 session.jsonl 绝对路径，用于 @ 提及会话引用。 */
@@ -118,7 +123,6 @@ export interface DraftSessionConfig {
   thinkingLevel: ThinkingLevel;
   thinkingLevels: ThinkingLevel[];
   readiness: Readiness;
-  extensions: DraftExtensionContext;
 }
 
 /** 首次 prompt materialize session 时原子应用的配置。 */
@@ -127,13 +131,8 @@ export interface SessionCreateInput {
   /** 经主进程校验、属于该 Project Git 仓库的 worktree 目录。 */
   worktreePath?: string;
   createRequestId: string;
-  extensionSetGeneration: string;
   model: { provider: string; id: string };
   thinkingLevel: ThinkingLevel;
-  /** 创建为该会话的子会话（侧边栏草稿等场景），写入 session header 的 parentSession。 */
-  parentThreadId?: string;
-  /** 会话级激活的插件子集；缺省表示继承项目级（全部激活）。 */
-  enabledPluginIds?: string[];
 }
 
 /** Composer 可补全的 Pi slash command。 */
@@ -172,6 +171,8 @@ export interface HostRequest {
   title: string;
   message?: string;
   placeholder?: string;
+  /** editor 请求的初始文本。 */
+  initialValue?: string;
   options?: string[];
   toolCallId?: string;
   workerInstanceId?: string;
@@ -404,12 +405,7 @@ export interface SessionControlState {
   readiness: Readiness;
   lastError?: string;
   hostRequests: HostRequest[];
-  extensionSet: {
-    generation: string;
-    diagnostics: DesktopExtensionDiagnostic[];
-    reloadRequired: boolean;
-  };
-  extensionHost: DesktopExtensionHostState;
+  extensionHost: RpcExtensionHostState;
 }
 
 /** renderer attach 所需的权威 Pi timeline 与低频控制基线。 */
@@ -422,16 +418,7 @@ export interface SessionBootstrap {
 }
 
 /** main 原子建立窗口订阅后返回的 session 基线。 */
-export type SessionCreateIpcResult =
-  | { ok: true; bootstrap: SessionBootstrap }
-  | {
-      ok: false;
-      error: {
-        code: "STALE_DRAFT_EXTENSION_SET";
-        message: string;
-        details: StaleDraftExtensionSetErrorDetails;
-      };
-    };
+export type SessionCreateIpcResult = SessionBootstrap;
 
 export interface SessionAttachment {
   protocolVersion: typeof PROTOCOL_VERSION;
@@ -495,48 +482,12 @@ export interface SessionPromptInput {
   desiredMode?: "steer" | "followUp";
 }
 
-export interface SessionEditInput extends SessionPromptInput {
-  sourceId: string;
-}
-
-export interface SessionReloadInput {
-  requestId: string;
-  projectId: string;
-  threadId: string;
-  parentId: string | null;
-}
-
-export interface SessionResourceReloadInput {
-  requestId: string;
-  projectId: string;
-  threadId: string;
-}
-
-/** 在指定 entry 处 fork 当前 session 为新 session 文件。position 默认 "at"。 */
-export interface SessionBranchInput {
-  requestId: string;
-  projectId: string;
-  threadId: string;
-  sourceEntryId: string;
-  position?: "at" | "before";
-}
-
-export interface SessionBranchResult {
-  branchThreadId: string;
-  branchSessionFile: string;
-}
-
 export interface SessionCommandResult {
   /** Pi preflight 已接受输入；后续 provider/tool error 不得触发 renderer 重发。 */
   accepted: boolean;
   /** Desktop 在 command 返回时是否观察到该 request 仍位于 Pi queue。 */
   queued: boolean;
   error?: string;
-}
-
-export interface ClearedQueue {
-  steering: string[];
-  followUp: string[];
 }
 
 /** Project 下的文件树节点。 */

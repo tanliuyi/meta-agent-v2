@@ -1,7 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo } from "react";
 import type {
   PiThreadSnapshot,
-  SessionBranchResult,
   SessionControlState,
   ThinkingLevel,
   WorkbenchSessionTab,
@@ -20,8 +19,6 @@ export interface SessionScope {
   active: boolean;
   commandsReady: boolean;
   modelsRefreshing: boolean;
-  clearQueue(): Promise<void>;
-  branch(sourceEntryId: string): Promise<SessionBranchResult>;
   refreshModels(): Promise<void>;
   setModel(provider: string, modelId: string): Promise<void>;
   setThinking(level: ThinkingLevel): Promise<void>;

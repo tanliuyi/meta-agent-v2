@@ -411,7 +411,6 @@ function createBootstrap(): SessionBootstrap {
       thinkingLevels: ["off"],
       readiness: { state: "ready" },
       hostRequests: [],
-      extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
       extensionHost: { statuses: {}, widgets: [] },
     },
   };

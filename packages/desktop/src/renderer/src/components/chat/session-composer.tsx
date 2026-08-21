@@ -1,18 +1,15 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { SessionControlState } from "../../../../shared/contracts.ts";
 import { ConfirmDialog } from "../../shared/ui/confirm-dialog.tsx";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionControlSelector, useSessionScope, useSessionTimelineSelector } from "../session-context.tsx";
 import { Composer } from "./composer/composer.tsx";
 import { ReadOnlySessionStatus } from "./session-read-only-status.tsx";
-import { useSessionPlugins } from "./use-session-plugins.ts";
 
 /** Reads Composer control data from the owning cached session record. */
 export function SessionComposer() {
-  const { record, clearQueue, commandsReady, modelsRefreshing, refreshModels, setModel, setThinking } =
-    useSessionScope();
+  const { record, commandsReady, modelsRefreshing, refreshModels, setModel, setThinking } = useSessionScope();
   const actions = useDesktopActions();
-  const plugins = useSessionPlugins(record.identity.projectId, record.identity.threadId);
   const [pendingStop, setPendingStop] = useState(false);
   const [stopping, setStopping] = useState(false);
   const hasControl = useSessionControlSelector((control) => control !== null);
@@ -24,7 +21,14 @@ export function SessionComposer() {
   const thinkingLevel = useSessionControlSelector((control) => control?.thinkingLevel ?? "off");
   const thinkingLevels = useSessionControlSelector((control) => control?.thinkingLevels ?? EMPTY_THINKING_LEVELS);
   const readiness = useSessionControlSelector((control) => control?.readiness);
-  const widgets = useSessionControlSelector((control) => control?.extensionHost.widgets ?? EMPTY_WIDGETS);
+  const extensionWidgets = useSessionControlSelector((control) => control?.extensionHost.widgets ?? EMPTY_WIDGETS);
+  const extensionStatuses = useSessionControlSelector((control) => control?.extensionHost.statuses ?? EMPTY_STATUSES);
+  const widgets = useMemo(() => {
+    const statusLines = Object.values(extensionStatuses);
+    return statusLines.length > 0
+      ? [{ key: "system-pi-status", lines: statusLines, placement: "aboveEditor" as const }, ...extensionWidgets]
+      : extensionWidgets;
+  }, [extensionStatuses, extensionWidgets]);
   const composerCommand = useSessionControlSelector((control) => control?.extensionHost.composerCommand);
   const working = useSessionControlSelector((control) => control?.extensionHost.working);
   const phase = useSessionTimelineSelector((timeline) => timeline.phase);
@@ -79,28 +83,9 @@ export function SessionComposer() {
         working={working}
         commandsReady={commandsReady}
         modelsLoading={modelsRefreshing}
-        onClearQueue={clearQueue}
         onRefreshModels={refreshModels}
         onSetModel={setModel}
         onSetThinking={setThinking}
-        plugins={plugins.plugins}
-        enabledPluginIds={plugins.enabledPluginIds}
-        pluginsLoading={plugins.loading}
-        pluginsDisabled={plugins.applying}
-        onPluginsChange={(enabledPluginIds) => {
-          plugins.clearError();
-          void plugins.apply(enabledPluginIds);
-        }}
-      />
-      <ConfirmDialog
-        open={plugins.pendingAbortSelection !== null}
-        title="切换会话插件"
-        description="当前会话正在运行，更改插件会中止运行中的任务。已经生成的内容会保留。"
-        confirmLabel="中止并切换"
-        onOpenChange={(open) => {
-          if (!open) plugins.clearPendingAbort();
-        }}
-        onConfirm={() => void plugins.applyConfirmedAbort()}
       />
     </>
   );
@@ -110,3 +95,4 @@ const EMPTY_MODELS: SessionControlState["models"] = [];
 const EMPTY_COMMANDS: SessionControlState["commands"] = [];
 const EMPTY_THINKING_LEVELS: SessionControlState["thinkingLevels"] = [];
 const EMPTY_WIDGETS: SessionControlState["extensionHost"]["widgets"] = [];
+const EMPTY_STATUSES: SessionControlState["extensionHost"]["statuses"] = {};

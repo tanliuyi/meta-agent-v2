@@ -59,11 +59,6 @@ interface DraftMaterializationInput {
   worktreePath?: string;
   model: SessionCreateInput["model"];
   thinkingLevel: SessionCreateInput["thinkingLevel"];
-  extensionSetGeneration: string;
-  /** 会话级激活的插件子集；缺省表示继承项目级（全部激活）。 */
-  enabledPluginIds?: string[];
-  /** 创建为该会话的子会话（侧边栏草稿等场景）。 */
-  parentThreadId?: string;
   text: string;
   images: ImageInput[];
 }
@@ -90,11 +85,8 @@ export async function materializeDraftSession(
     projectId: input.projectId,
     ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
     createRequestId,
-    extensionSetGeneration: input.extensionSetGeneration,
     model: input.model,
     thinkingLevel: input.thinkingLevel,
-    ...(input.enabledPluginIds ? { enabledPluginIds: input.enabledPluginIds } : {}),
-    ...(input.parentThreadId ? { parentThreadId: input.parentThreadId } : {}),
   });
   dependencies.requestIds.delete(createRequestKey);
 
@@ -136,12 +128,4 @@ async function cleanupMaterializedSession(
     dependencies.cache.retire(recordKey),
     dependencies.sessions.remove(target.projectId, target.threadId, "subtree"),
   ]);
-}
-
-/** 草稿提交因扩展集过期被拒时的判定。 */
-export function isStaleExtensionSetError(reason: unknown): boolean {
-  return (
-    (reason instanceof Error && reason.message.includes("Draft extension set changed")) ||
-    (typeof reason === "object" && reason !== null && "code" in reason && reason.code === "STALE_DRAFT_EXTENSION_SET")
-  );
 }

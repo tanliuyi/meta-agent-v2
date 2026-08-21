@@ -31,7 +31,7 @@ describe("session route running state", () => {
     renderToStaticMarkup(createElement(ToastProvider, null, createElement(RuntimeProbe)));
 
     expect(runtime?.thread.getState().isRunning).toBe(true);
-    expect(runtime?.thread.getState().capabilities.edit).toBe(true);
+    expect(runtime?.thread.getState().capabilities.edit).toBe(false);
   });
 
   it("cached control 通过窄 summary action 更新 catalog running", () => {
@@ -87,7 +87,6 @@ function control(running: boolean): SessionControlState {
     thinkingLevels: [],
     readiness: { state: "ready" },
     hostRequests: [],
-    extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
     extensionHost: { statuses: {}, widgets: [] },
   };
 }

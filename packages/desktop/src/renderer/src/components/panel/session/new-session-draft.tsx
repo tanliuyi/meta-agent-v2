@@ -7,13 +7,7 @@ import { sessionRecordKey } from "../../../runtime/pi-session-store.ts";
 import { useDesktopActions } from "../../../state/desktop-context.tsx";
 import { selectProjects } from "../../../state/desktop-selectors.ts";
 import { useDesktopStore } from "../../../state/desktop-store-context.tsx";
-import {
-  draftCreateRequestKey,
-  isStaleExtensionSetError,
-  materializeDraftSession,
-  selectDraftModel,
-  selectDraftThinkingLevel,
-} from "../../../state/draft-creation.ts";
+import { materializeDraftSession, selectDraftModel, selectDraftThinkingLevel } from "../../../state/draft-creation.ts";
 import {
   applyStoredDraftSelection,
   persistDraftSelection,
@@ -28,7 +22,7 @@ import { NEW_SESSION_PANEL_KIND } from "../builtin-panel-kinds.ts";
 
 /**
  * workbench-panel 中的新会话草稿：项目固定为当前主 session 所在项目，
- * 提交后创建主 session 的子会话，并作为侧边栏 tab 打开（不导航主工作区）。
+ * 提交后创建独立会话，并作为侧边栏 tab 打开（不导航主工作区）。
  * 草稿状态按主 session 隔离（见 SessionDraftProvider），切换主 session 不串台。
  */
 export function NewSessionDraft() {
@@ -87,11 +81,6 @@ export function NewSessionDraft() {
     draft.setConfig(next);
   };
 
-  const selectPlugins = (enabledPluginIds: string[] | null): void => {
-    if (!draft.config) return;
-    draft.setConfig({ ...draft.config, extensions: { ...draft.config.extensions, enabledPluginIds } });
-  };
-
   const submit = async (): Promise<void> => {
     if (draft.submitInFlight || !parentCwd) return;
     if (!draft.config?.model || draft.config.readiness.state !== "ready") return;
@@ -106,29 +95,22 @@ export function NewSessionDraft() {
       const materialized = await materializeDraftSession(
         {
           projectId: draft.parent.projectId,
-          ...(worktreePath ? { worktreePath } : {}),
-          parentThreadId: draft.parent.threadId,
           model: { provider: draft.config.model.provider, id: draft.config.model.id },
           thinkingLevel: draft.config.thinkingLevel,
-          extensionSetGeneration: draft.config.extensions.extensionSetGeneration,
-          ...(draft.config.extensions.enabledPluginIds
-            ? { enabledPluginIds: draft.config.extensions.enabledPluginIds }
-            : {}),
-          text: attachments.text,
-          images: attachments.images,
+          text: state.text,
+          images,
         },
         {
           requestIds: draft.createRequestIds,
           sessions: window.desktop.sessions,
           cache: sessionCache,
           onMaterialized() {
-            // 子会话的父级关系由 metadata 索引从 session header 推导，主动刷新目录。
             actions.refreshProjectThreads(draft.parent.projectId);
           },
         },
       );
       const target = materialized.target;
-      // 作为侧边栏 tab 打开子会话，主工作区保持在主 session；草稿 tab 随之关闭。
+      // 作为侧边栏 tab 打开新会话，主工作区保持不变；草稿 tab 随之关闭。
       workbenchTabs.openSessionTab({
         kind: "session",
         key: sessionRecordKey(target.projectId, target.threadId),
@@ -141,10 +123,6 @@ export function NewSessionDraft() {
       draft.clear();
     } catch (reason) {
       draft.setPhase("editing");
-      if (isStaleExtensionSetError(reason)) {
-        draft.createRequestIds.delete(draftCreateRequestKey(draft.parent.projectId, worktreePath));
-        draft.setConfig(null);
-      }
       throw reason;
     } finally {
       draft.setSubmitInFlight(false);
@@ -162,13 +140,11 @@ export function NewSessionDraft() {
           configLoading={draft.config === null}
           phase={draft.phase === "materializing" ? "materializing" : "editing"}
           error={draft.loadError}
-          diagnostics={draft.config?.extensions.diagnostics}
           fixedProject
           compact
           onProjectChange={async () => undefined}
           onModelChange={selectModel}
           onThinkingChange={selectThinking}
-          onPluginsChange={selectPlugins}
           onSubmit={submit}
         />
       </div>

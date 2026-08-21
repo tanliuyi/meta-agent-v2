@@ -1,7 +1,7 @@
 import { type ChildProcess, fork, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { posix } from "node:path";
 import type { JsonValue } from "../../shared/contracts.ts";
 import {
   type ParentToSidecarMessage,
@@ -22,10 +22,7 @@ import {
   MAX_SIDECAR_MESSAGE_BYTES,
   SidecarChunkAssembler,
   SidecarEventAckTracker,
-  serializeSidecarError,
-  toJsonValue,
 } from "../../shared/sidecar-wire.ts";
-import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 
 interface PendingRequest {
@@ -54,7 +51,6 @@ export interface WorkerClientOptions {
   onEvent?(event: SidecarEvent): void;
   onFailure?(error: Error): void;
   onStderr?(text: string): void;
-  onHostRequest?(request: SubagentHostRequest, emit: (event: SubagentRunEvent) => void): Promise<unknown>;
   /** 当前 thread worker 的浏览器 capability；不与其他 worker 共享。 */
   browserSessionToken?: string;
   startupTimeoutMs?: number;
@@ -71,7 +67,6 @@ export class SidecarWorkerClient {
   private queuedSendBytes = 0;
   private sendInFlight = false;
   private readonly onFailure?: (error: Error) => void;
-  private readonly onHostRequest?: WorkerClientOptions["onHostRequest"];
   private readonly readyPromise: Promise<SidecarReady>;
   private resolveReady!: (ready: SidecarReady) => void;
   private rejectReady!: (error: Error) => void;
@@ -93,7 +88,6 @@ export class SidecarWorkerClient {
     this.onEvent = options.onEvent;
     this.expectedRuntime = options.manifest.compatibility;
     this.onFailure = options.onFailure;
-    this.onHostRequest = options.onHostRequest;
     const entry = options.manifest.entries[options.binding.role];
     this.readyPromise = new Promise<SidecarReady>((resolve, reject) => {
       this.resolveReady = resolve;
@@ -270,10 +264,6 @@ export class SidecarWorkerClient {
         this.handleResponse(message);
         return;
       }
-      if (message.kind === "host-call") {
-        this.handleHostCall(message.requestId, message.request, this.onHostRequest);
-        return;
-      }
       if (message.event.type === "resync-required" && message.sequence >= this.expectedEventSequence) {
         this.eventAcks.resetThrough(message.sequence - 1);
         this.expectedEventSequence = message.sequence;
@@ -294,58 +284,6 @@ export class SidecarWorkerClient {
     } catch (error) {
       this.terminate(error instanceof Error ? error : new Error(String(error)));
     }
-  }
-
-  private handleHostCall(
-    requestId: string,
-    request: SubagentHostRequest,
-    handler: WorkerClientOptions["onHostRequest"],
-  ): void {
-    if (!handler) {
-      this.send({
-        kind: "host-response",
-        protocolVersion: SIDECAR_PROTOCOL_VERSION,
-        workerInstanceId: this.workerInstanceId,
-        requestId,
-        ok: false,
-        error: serializeSidecarError(new Error(`Unsupported sidecar host request: ${request.type}`)),
-      });
-      return;
-    }
-    const emit = (event: SubagentRunEvent): void => {
-      this.send({
-        kind: "host-event",
-        protocolVersion: SIDECAR_PROTOCOL_VERSION,
-        workerInstanceId: this.workerInstanceId,
-        requestId,
-        event,
-      });
-    };
-    void handler(request, emit)
-      .then(
-        (result) =>
-          this.send({
-            kind: "host-response",
-            protocolVersion: SIDECAR_PROTOCOL_VERSION,
-            workerInstanceId: this.workerInstanceId,
-            requestId,
-            ok: true,
-            result: result === undefined ? undefined : toJsonValue(result),
-          }),
-        (error: unknown) =>
-          this.send({
-            kind: "host-response",
-            protocolVersion: SIDECAR_PROTOCOL_VERSION,
-            workerInstanceId: this.workerInstanceId,
-            requestId,
-            ok: false,
-            error: serializeSidecarError(error),
-          }),
-      )
-      .catch((error: unknown) => {
-        if (this.closed || this.terminating) return;
-        this.terminate(error instanceof Error ? error : new Error(String(error)));
-      });
   }
 
   private handleResponse(message: SidecarResponse): void {
@@ -463,10 +401,7 @@ export function isMutationCommand(commandType: SidecarCommand["type"]): boolean 
   return ![
     "ping",
     "bootstrap",
-    "subagentBootstrap",
-    "getImageResource",
     "getSummary",
-    "getCheckpointDiff",
     "listSessions",
     "listSessionsWithPaths",
     "resolveSession",
@@ -510,10 +445,10 @@ export function resolveSidecarExecutable(
   fileExists: (path: string) => boolean = existsSync,
 ): string {
   if (platform !== "darwin") return executable;
-  const executableName = basename(executable);
+  const executableName = posix.basename(executable);
   const helperName = `${executableName} Helper`;
-  const helperExecutable = join(
-    dirname(dirname(executable)),
+  const helperExecutable = posix.join(
+    posix.dirname(posix.dirname(executable)),
     "Frameworks",
     `${helperName}.app`,
     "Contents",
@@ -530,9 +465,10 @@ export function createSidecarEnvironment(
   extraEnvironment?: Record<string, string>,
 ): NodeJS.ProcessEnv {
   const allowed = Object.fromEntries(
-    Object.entries(sourceEnvironment).filter(
-      ([name]) => isAllowedSidecarEnvironmentVariable(name) && !isReservedDesktopRuntimeVariable(name),
-    ),
+    Object.entries(sourceEnvironment).flatMap(([name, value]) => {
+      if (!isAllowedSidecarEnvironmentVariable(name) || isReservedDesktopRuntimeVariable(name)) return [];
+      return [[name.toLowerCase() === "path" ? "PATH" : name, value]];
+    }),
   );
   return {
     ...allowed,
@@ -546,7 +482,7 @@ export function createSidecarEnvironment(
 /**
  * 从 ThreadWorkerBinding 派生浏览器会话身份，注入 thread sidecar 的
  * PI_BROWSER_SESSION_* 环境变量（create 模式用新会话 sessionId，open 模式用 threadId）。
- * 非 thread worker（metadata/subagent）不注入：subagent 不直接使用浏览器工具。
+ * 非 thread worker（metadata）不注入。
  */
 export function threadBrowserSessionEnvironment(
   binding: SidecarBinding,
@@ -572,14 +508,15 @@ function isReservedDesktopRuntimeVariable(name: string): boolean {
 }
 
 function isAllowedSidecarEnvironmentVariable(name: string): boolean {
+  const normalized = name.toUpperCase();
   if (
     [
       "HOME",
       "USERPROFILE",
       "PATH",
-      "ProgramFiles",
-      "ProgramFiles(x86)",
-      "SystemRoot",
+      "PROGRAMFILES",
+      "PROGRAMFILES(X86)",
+      "SYSTEMROOT",
       "TMPDIR",
       "TMP",
       "TEMP",
@@ -591,19 +528,19 @@ function isAllowedSidecarEnvironmentVariable(name: string): boolean {
       "SSL_CERT_FILE",
       "SSL_CERT_DIR",
       "NODE_EXTRA_CA_CERTS",
-    ].includes(name)
+    ].includes(normalized)
   ) {
     return true;
   }
-  if (name.startsWith("LC_") || name.startsWith("PI_")) return true;
+  if (normalized.startsWith("LC_") || normalized.startsWith("PI_")) return true;
   return (
-    name.endsWith("_API_KEY") ||
-    name.endsWith("_ACCESS_TOKEN") ||
-    name.startsWith("AWS_") ||
-    name.startsWith("AZURE_") ||
-    name.startsWith("GOOGLE_") ||
-    name.startsWith("ANTHROPIC_") ||
-    name.startsWith("OPENAI_")
+    normalized.endsWith("_API_KEY") ||
+    normalized.endsWith("_ACCESS_TOKEN") ||
+    normalized.startsWith("AWS_") ||
+    normalized.startsWith("AZURE_") ||
+    normalized.startsWith("GOOGLE_") ||
+    normalized.startsWith("ANTHROPIC_") ||
+    normalized.startsWith("OPENAI_")
   );
 }
 

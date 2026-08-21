@@ -6,14 +6,12 @@ import type {
   SessionRemoveResult,
   Thread,
 } from "../../shared/contracts.ts";
-import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
 import type {
   ColdOperationLease,
   CreationReservation,
   CreationReservationRecovery,
   MetadataSidecarCommand,
 } from "../../shared/sidecar-contracts.ts";
-import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 import { SidecarWorkerClient } from "./worker-client.ts";
 
@@ -22,10 +20,8 @@ export class MetadataWorkerClient {
   private readonly agentDir: string;
   private readonly userDataDir: string;
   private readonly log?: (scope: string, text: string) => void;
-  private readonly generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
   private client?: SidecarWorkerClient;
   private operationTail: Promise<void> = Promise.resolve();
-  private draftExtensionGeneration?: string;
   private closing = false;
   private disposed = false;
   private disposePromise?: Promise<void>;
@@ -35,13 +31,11 @@ export class MetadataWorkerClient {
     agentDir: string,
     userDataDir: string,
     log?: (scope: string, text: string) => void,
-    generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">,
   ) {
     this.manifest = manifest;
     this.agentDir = agentDir;
     this.userDataDir = userDataDir;
     this.log = log;
-    this.generationReferences = generationReferences;
     this.client = undefined;
   }
 
@@ -56,28 +50,8 @@ export class MetadataWorkerClient {
     );
   }
 
-  getDraftConfig(
-    projectId: string,
-    cwd: string,
-    extensionSet: ResolvedExtensionSet,
-    allEntries: ResolvedExtensionEntry[],
-  ): Promise<DraftSessionConfig> {
-    return this.enqueue(async () => {
-      if (this.draftExtensionGeneration !== undefined && this.draftExtensionGeneration !== extensionSet.generation) {
-        const previous = this.client;
-        this.client = undefined;
-        await previous?.shutdown();
-      }
-      this.draftExtensionGeneration = extensionSet.generation;
-      this.generationReferences?.retain("metadata:draft", extensionSet);
-      return this.safeRequest<DraftSessionConfig>({
-        type: "getDraftConfig",
-        projectId,
-        cwd,
-        extensionSet,
-        allEntries,
-      });
-    });
+  getDraftConfig(projectId: string, cwd: string): Promise<DraftSessionConfig> {
+    return this.enqueue(() => this.safeRequest<DraftSessionConfig>({ type: "getDraftConfig", projectId, cwd }));
   }
 
   get pid(): number | undefined {
@@ -153,7 +127,6 @@ export class MetadataWorkerClient {
     const current = this.client;
     this.client = undefined;
     await current?.shutdown();
-    this.generationReferences?.release("metadata:draft");
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {

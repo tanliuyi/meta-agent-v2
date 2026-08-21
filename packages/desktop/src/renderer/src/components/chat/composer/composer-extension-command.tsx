@@ -1,11 +1,13 @@
 import { useAui } from "@assistant-ui/react";
 import { useEffect } from "react";
-import type { DesktopExtensionHostState } from "../../../../../shared/contracts.ts";
-import type { SessionExtensionCommandStore } from "../../../runtime/pi-session-store.ts";
+import type { RpcExtensionHostState } from "../../../../../shared/contracts.ts";
+
+const appliedRevisions = new Map<string, number>();
 
 interface ComposerExtensionCommandProps {
-  store: SessionExtensionCommandStore;
-  command: DesktopExtensionHostState["composerCommand"];
+  projectId: string;
+  threadId: string;
+  command: RpcExtensionHostState["composerCommand"];
 }
 
 /** Applies one-way extension composer commands without mirroring renderer keystrokes to the sidecar. */

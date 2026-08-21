@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getShellConfig, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createModels } from "@earendil-works/pi-ai";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { app, BrowserWindow, Menu, safeStorage } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
@@ -15,9 +16,6 @@ import {
 } from "./browser/browser-internal-page-protocol.ts";
 import { BrowserManager } from "./browser/browser-manager.ts";
 import { installBrowserWebviewSecurity } from "./browser/browser-webview-policy.ts";
-import { DesktopControlledExtensionRegistry } from "./extensions/desktop-extension-registry.ts";
-import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
-import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
 import { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
@@ -33,24 +31,9 @@ import {
 } from "./ipc.ts";
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
-import { DesktopBuiltinProviderRegistry } from "./pi/desktop-builtin-provider.ts";
-import { deleteSessionCheckpoints } from "./pi/extensions/pi-rewind/src/core.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
-import { DEFAULT_PLUGIN_MARKETPLACE } from "./plugins/default-plugin-marketplace.ts";
-import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
-import { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
-import { resolveMarketplaceExtensionRoot } from "./plugins/marketplace-extension-root.ts";
-import { MarketplaceGenerationReferenceTracker } from "./plugins/marketplace-generation-reference-tracker.ts";
-import { MarketplacePluginGarbageCollector } from "./plugins/marketplace-plugin-garbage-collector.ts";
-import { handleMarketplacePluginIconRequests } from "./plugins/marketplace-plugin-icon-protocol.ts";
-import { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
-import { MarketplacePluginReconciler } from "./plugins/marketplace-plugin-reconciler.ts";
-import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
-import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
-import { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
-import { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { handleLocalImageRequests, registerLocalImageSchemes } from "./settings/user-avatar-protocol.ts";
 import { locateGitForWindowsBash, locateManagedBash } from "./sidecar/managed-shell-locator.ts";
@@ -65,11 +48,9 @@ import { saveShellRuntimePath } from "./sidecar/shell-runtime-settings.ts";
 import { validateBashRuntime } from "./sidecar/shell-runtime-validator.ts";
 import { SidecarLog } from "./sidecar/sidecar-log.ts";
 import { loadSidecarRuntimeManifest } from "./sidecar/sidecar-runtime-manifest.ts";
-import { SubagentWorkerRegistry } from "./sidecar/subagent-worker-registry.ts";
+import { getBashShellConfig, getSystemPiShellPath } from "./sidecar/system-pi-settings.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
-import { resolveWorkspaceMutationKey } from "./sidecar/workspace-mutation-key.ts";
 import { ProjectStore } from "./store/project-store.ts";
-import { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
 import { createTerminalShellResolver, TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
 import { TrayController } from "./tray.ts";
 import { AutoUpdateService, scheduleAutoUpdateChecks } from "./updater.ts";
@@ -78,12 +59,10 @@ import { WindowDirtyGuard } from "./window-dirty-guard.ts";
 let sessions: SessionSupervisor | undefined;
 let metadata: MetadataWorkerClient | undefined;
 let sidecarLog: SidecarLog | undefined;
-let subagents: SubagentWorkerRegistry | undefined;
 let terminals: TerminalSupervisor | undefined;
 let browserManager: BrowserManager | undefined;
 let browserHostServer: BrowserHostServer | undefined;
 let stopAutoUpdateChecks: (() => void) | undefined;
-let stopMarketplaceGarbageCollection: (() => void) | undefined;
 let quitGuardPending = false;
 const dirtyGuard = new WindowDirtyGuard({
   beforeReload: (window) => sessions?.detachAll(window.webContents.id),
@@ -202,28 +181,6 @@ function createWindow(): void {
   else void window.loadFile(join(appDir, "../renderer/index.html"));
 }
 
-function scheduleMarketplaceGarbageCollection(
-  collector: MarketplacePluginGarbageCollector,
-  log: (text: string) => void,
-): () => void {
-  const collect = async () => {
-    try {
-      const result = await collector.run();
-      if (result.removedVersions.length > 0 || result.removedRoots.length > 0) {
-        log(`Plugin GC removed ${result.removedVersions.length} version(s) and ${result.removedRoots.length} root(s)`);
-      }
-    } catch (error) {
-      log(`Plugin GC failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-  const initial = setTimeout(() => void collect(), 30_000);
-  const interval = setInterval(() => void collect(), 60 * 60_000);
-  return () => {
-    clearTimeout(initial);
-    clearInterval(interval);
-  };
-}
-
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   handleLocalImageRequests();
@@ -259,73 +216,20 @@ app.whenReady().then(async () => {
   const files = new FileService(projects);
   handlePdfPreviewRequests(projects);
   const projectsLoad = projects.load();
-  const getWorkspaceKey = (projectId: string): Promise<string> =>
-    resolveWorkspaceMutationKey(projects.getCwd(projectId));
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
   const models = new ModelsConfigService(agentDir, {
     log: (text) => sidecarLog?.write("models", text),
   });
   const credentialStore = new FileCredentialStore(join(agentDir, "auth.json"));
-  const authModelRuntimeCreation = ModelRuntime.create({
-    credentials: credentialStore,
-    modelsPath: join(agentDir, "models.json"),
-    allowModelNetwork: false,
-  });
+  const authModels = createModels({ credentials: credentialStore });
+  for (const provider of builtinProviders()) authModels.setProvider(provider);
   const settings = new SettingsConfigService(userDataDir);
   const preferences = new PreferencesConfigService(userDataDir);
-  const memorySettings = new MemorySettingsService(agentDir, {
-    listProjects: () => projects.list(),
-    getProjectCwd: (projectId) => projects.getCwd(projectId),
-  });
-  const builtinExtensions = DesktopControlledExtensionRegistry.getBuiltinDefinitions();
-  const curatedExtensions = DesktopControlledExtensionRegistry.getCuratedDefinitions();
-  const extensionSettings = new DesktopExtensionSettingsService(userDataDir, {
-    builtinDefinitions: builtinExtensions,
-    curatedDefinitions: curatedExtensions,
-  });
-  const marketplaceEndpoints = new MarketplaceEndpointSettingsService(userDataDir, {
-    defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
-  });
-  const marketplaceRegistry = new MarketplacePluginRegistry(userDataDir);
-  const marketplaceRoot = resolveMarketplaceExtensionRoot(userDataDir);
-  handleMarketplacePluginIconRequests(marketplaceRegistry);
-  const marketplaceLockDirectory = join(userDataDir, "plugins", "locks");
-  const pluginConfigurations = new PluginConfigurationService(userDataDir, marketplaceRegistry, {
-    isAvailable: () => safeStorage.isEncryptionAvailable(),
-    encrypt: (value) => safeStorage.encryptString(value).toString("base64"),
-    decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
-  });
-  const marketplaceGenerationReferences = new MarketplaceGenerationReferenceTracker();
-  const marketplaceReconciler = new MarketplacePluginReconciler(marketplaceRegistry, marketplaceRoot, userDataDir, {
-    legacyRoot: join(agentDir, "extensions"),
-    log: (text) => sidecarLog?.write("marketplace", text),
-  });
-  const marketplaceGarbageCollector = new MarketplacePluginGarbageCollector(
-    marketplaceRegistry,
-    marketplaceGenerationReferences,
-    marketplaceRoot,
-    marketplaceLockDirectory,
-  );
-  const marketplaceReconciliation = marketplaceReconciler.reconcile();
-  const [authModelRuntime] = await Promise.all([
-    authModelRuntimeCreation,
-    projectsLoad,
-    marketplaceReconciliation,
-    reactDevToolsInstall,
-  ]);
+  await Promise.all([projectsLoad, reactDevToolsInstall]);
   const auth = new AuthConfigService(agentDir, {
     log: (text) => sidecarLog?.write("auth", text),
-    modelRuntime: authModelRuntime,
-  });
-  const extensionSourcePolicy = new DesktopExtensionSourcePolicy({
-    settings: extensionSettings,
-    getBuiltinDefinitions: () => builtinExtensions,
-    getCuratedDefinitions: () => curatedExtensions,
-    getMarketplaceExtensions: () => marketplaceRegistry.getInternalSnapshot(),
-    pluginConfigurations,
-    marketplaceRoot,
-    curatedRoot: app.isPackaged ? join(process.resourcesPath, "extensions") : join(appDir, "../extensions"),
+    models: authModels,
   });
   const updater = new AutoUpdateService({ app });
   const runtimeManifest = loadSidecarRuntimeManifest({
@@ -333,53 +237,12 @@ app.whenReady().then(async () => {
     resourcesPath: process.resourcesPath,
     appDir,
   });
-  const marketplaceCatalog = new MarketplaceCatalogService(marketplaceEndpoints, {
-    desktopVersion: app.getVersion(),
-    runtimeCompatibility: runtimeManifest.compatibility,
-  });
-  const marketplacePluginInstaller = new MarketplacePluginInstaller(
-    marketplaceEndpoints,
-    marketplaceRegistry,
-    marketplaceLockDirectory,
-    marketplaceRoot,
-    app.getVersion(),
-    runtimeManifest.compatibility,
-    {
-      reservedExtensionIds: new Set([
-        ...builtinExtensions.map((extension) => extension.id),
-        ...curatedExtensions.map((extension) => extension.id),
-      ]),
-    },
-  );
-  metadata = new MetadataWorkerClient(
-    runtimeManifest,
-    agentDir,
-    userDataDir,
-    (scope, text) => sidecarLog?.write(scope, text),
-    marketplaceGenerationReferences,
+  metadata = new MetadataWorkerClient(runtimeManifest, agentDir, userDataDir, (scope, text) =>
+    sidecarLog?.write(scope, text),
   );
   const metadataClient = metadata;
-  // supervisor 在两个 registry 之后才能构造（循环依赖）；回调必须容忍赋值前被触发，避免 TDZ 崩溃或 ack 饿死。
+  // supervisor 在 registry 之后才能构造；回调必须容忍赋值前被触发，避免 ack 饿死。
   let supervisor: SessionSupervisor | undefined;
-  let subagentRegistry: SubagentWorkerRegistry | undefined;
-  subagentRegistry = new SubagentWorkerRegistry({
-    manifest: runtimeManifest,
-    agentDir,
-    ...(desktopBashPath ? { shellPath: desktopBashPath } : {}),
-    getWorkspaceKey,
-    log: (scope, text) => sidecarLog?.write(scope, text),
-    catalogChanged: broadcastThreadCatalogUpdate,
-    persistSession: (projectId, sessionFile, thread) =>
-      metadataClient.registerExternal(projectId, projects.getCwd(projectId), sessionFile, thread),
-    push: (payload, workerInstanceId, sidecarSequence) => {
-      if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
-      else subagentRegistry?.acknowledge(workerInstanceId, sidecarSequence);
-    },
-    resync: (projectId, threadId, reason) => supervisor?.resyncRequired(projectId, threadId, reason),
-  });
-  const activeSubagents = subagentRegistry;
-  subagents = activeSubagents;
-  // 浏览器管理器在 registry 之后创建（回调容忍赋值前触发）。
   let browserManagerInstance: BrowserManager | undefined;
   const workers = new ThreadWorkerRegistry({
     manifest: runtimeManifest,
@@ -387,11 +250,7 @@ app.whenReady().then(async () => {
     userDataDir,
     agentDir,
     ...(desktopBashPath ? { shellPath: desktopBashPath } : {}),
-    extensionSourcePolicy,
-    generationReferences: marketplaceGenerationReferences,
     getCwd: (projectId) => projects.getCwd(projectId),
-    resolveSessionCwd: (projectId, cwd) => projects.resolveSessionCwd(projectId, cwd),
-    getWorkspaceKey,
     push: (payload, workerInstanceId, sidecarSequence) => {
       if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
       else workers.acknowledge(workerInstanceId, sidecarSequence);
@@ -403,40 +262,6 @@ app.whenReady().then(async () => {
     resync: (projectId, threadId, reason) => supervisor?.resyncRequired(projectId, threadId, reason),
     catalogChanged: broadcastThreadCatalogUpdate,
     log: (scope, text) => sidecarLog?.write(scope, text),
-    handleHostRequest: (request, emit) => activeSubagents.handleHostRequest(request, emit),
-    hostWorkerFailed: (projectId, threadId) => activeSubagents.cancelThread(projectId, threadId),
-    listSubagentThreads: (projectId) => activeSubagents.listThreads(projectId),
-    isActiveSubagentThread: (projectId, threadId) => activeSubagents.isActiveThread(projectId, threadId),
-    attachSubagent: (projectId, threadId) => activeSubagents.attach(projectId, threadId),
-    readSubagentImageResource: (projectId, threadId, resourceId) =>
-      activeSubagents.readImageResource(projectId, threadId, resourceId),
-    cancelSubagent: (projectId, threadId) => activeSubagents.cancelActiveThread(projectId, threadId),
-    acknowledgeSubagent: (workerInstanceId, sidecarSequence) =>
-      activeSubagents.acknowledge(workerInstanceId, sidecarSequence),
-    beginSubagentWorkspaceMutation: (workspaceKey) => activeSubagents.beginWorkspaceMutation(workspaceKey),
-    endSubagentWorkspaceMutation: (workspaceKey) => activeSubagents.endWorkspaceMutation(workspaceKey),
-    beginTerminalWorkspaceMutation: async (workspaceKey) => {
-      const projectKeys = await Promise.all(
-        (await projects.list())
-          .filter((project) => project.available)
-          .map(async (project) => ({
-            projectId: project.id,
-            workspaceKey: await getWorkspaceKey(project.id),
-          })),
-      );
-      const projectIds = projectKeys
-        .filter((project) => project.workspaceKey === workspaceKey)
-        .map((project) => project.projectId);
-      return terminals?.beginWorkspaceRestore(projectIds) ?? (() => undefined);
-    },
-    cleanupSessionCheckpoints: (projectId, threadIds) =>
-      deleteSessionCheckpoints(projects.getCwd(projectId), threadIds),
-    beginSubagentProjectMutation: (projectId) => activeSubagents.beginProjectMutation(projectId),
-    endSubagentProjectMutation: (projectId) => activeSubagents.endProjectMutation(projectId),
-    beginSubagentTreeMutation: (projectId, parentThreadId) =>
-      activeSubagents.beginThreadMutation(projectId, parentThreadId),
-    endSubagentTreeMutation: (projectId, parentThreadId) =>
-      activeSubagents.endThreadMutation(projectId, parentThreadId),
     registerBrowserSession: (identity) => browserManagerInstance?.registerSession(identity),
     revokeBrowserSession: (_identity, token) => browserManagerInstance?.revokeSessionCapability(token),
   });
@@ -451,19 +276,7 @@ app.whenReady().then(async () => {
     createTerminalShellResolver(agentDir, desktopBashPath),
     (projectId, threadId) => workers.getSessionCwd(projectId, threadId),
   );
-  const providers = new ProvidersConfigService(models, auth, authModelRuntime);
-  const desktopProviderEnvKeys = new Map(
-    DesktopBuiltinProviderRegistry.getKnownProviderInfos().map((provider) => [provider.id, provider.envKeys]),
-  );
-  const isDesktopProviderAvailable = async (providerId: string): Promise<boolean> => {
-    const credential = await credentialStore.read(providerId);
-    if (credential?.type === "oauth" || (credential?.type === "api_key" && Boolean(credential.key))) return true;
-    return desktopProviderEnvKeys.get(providerId)?.some((envKey) => Boolean(process.env[envKey])) ?? false;
-  };
-  const autoTitleSettings = new AutoTitleSettingsService(agentDir, {
-    modelRuntime: authModelRuntime,
-    isDesktopProviderAvailable,
-  });
+  const providers = new ProvidersConfigService(models, auth);
   const browserDataService = new BrowserDataService(userDataDir, {
     crypto: {
       isAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -494,21 +307,6 @@ app.whenReady().then(async () => {
     process.env.PI_BROWSER_TOKEN = browserEndpoint.token;
   }
   let modelConfigurationGeneration = 0;
-  const subagentSettings = new SubagentSettingsConfigService({
-    agentDir,
-    builtinAgentsDir: join(
-      dirname(runtimeManifest.entries.subagent),
-      "..",
-      "main",
-      "pi",
-      "extensions",
-      "pi-subagents",
-      "agents",
-    ),
-    modelRuntime: authModelRuntime,
-    isDesktopProviderAvailable,
-    getProjectCwd: (projectId) => projects.getCwd(projectId),
-  });
   registerIpc(
     projects,
     sessions,
@@ -545,24 +343,13 @@ app.whenReady().then(async () => {
       refreshActiveModelRuntimes: async () => {
         modelConfigurationGeneration += 1;
         const revision = { generation: modelConfigurationGeneration };
-        const results = await Promise.allSettled([
-          workers.refreshAllModels(revision),
-          activeSubagents.refreshAllModels(revision),
-        ]);
-        const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
-        if (failures.length > 0) {
-          throw new AggregateError(failures, "Failed to refresh one or more active model runtimes");
-        }
-      },
-      refreshMemoryConfiguration: async () => {
-        extensionSourcePolicy.invalidate();
-        await startedSupervisor.extensionSettingsChanged();
+        await workers.refreshAllModels(revision);
       },
       shell: {
         getStatus: async () => {
           const activeProject = await projects.getActive();
           const cwd = activeProject?.cwd ?? process.cwd();
-          const configuredShellPath = SettingsManager.create(cwd, agentDir).getShellPath();
+          const configuredShellPath = getSystemPiShellPath(cwd, agentDir);
           const shellPath = configuredShellPath ?? desktopBashPath;
           if (!shellPath) {
             return {
@@ -572,7 +359,7 @@ app.whenReady().then(async () => {
             };
           }
           try {
-            const shell = getShellConfig(shellPath).shell;
+            const shell = getBashShellConfig(shellPath).shell;
             const runtime = await validateBashRuntime(shell);
             return {
               state: "ready" as const,
@@ -615,23 +402,11 @@ app.whenReady().then(async () => {
       },
     },
     updater,
-    extensionSettings,
-    subagentSettings,
-    marketplaceEndpoints,
-    marketplaceCatalog,
-    marketplaceRegistry,
-    marketplacePluginInstaller,
-    pluginConfigurations,
-    memorySettings,
-    autoTitleSettings,
     preferences,
     browserManagerInstance,
   );
   createWindow();
   stopAutoUpdateChecks = scheduleAutoUpdateChecks(updater);
-  stopMarketplaceGarbageCollection = scheduleMarketplaceGarbageCollection(marketplaceGarbageCollector, (text) =>
-    sidecarLog?.write("marketplace", text),
-  );
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -657,21 +432,17 @@ app.on("before-quit", (event) => {
   }
   stopAutoUpdateChecks?.();
   stopAutoUpdateChecks = undefined;
-  stopMarketplaceGarbageCollection?.();
-  stopMarketplaceGarbageCollection = undefined;
   trayController.dispose();
-  if (!sessions && !metadata && !sidecarLog && !subagents && !terminals) return;
+  if (!sessions && !metadata && !sidecarLog && !terminals) return;
   sidecarLog?.write("main", "Desktop shutdown started");
   event.preventDefault();
   const currentSessions = sessions;
   const currentMetadata = metadata;
   const currentSidecarLog = sidecarLog;
-  const currentSubagents = subagents;
   const currentTerminals = terminals;
   sessions = undefined;
   metadata = undefined;
   sidecarLog = undefined;
-  subagents = undefined;
   terminals = undefined;
   browserManager?.dispose();
   browserManager = undefined;
@@ -682,9 +453,6 @@ app.on("before-quit", (event) => {
     await currentSessions
       ?.dispose()
       .catch((error: unknown) => console.error("Failed to stop Pi thread workers:", error));
-    await currentSubagents
-      ?.dispose()
-      .catch((error: unknown) => console.error("Failed to stop Pi subagent workers:", error));
     await currentMetadata
       ?.dispose()
       .catch((error: unknown) => console.error("Failed to stop Pi metadata worker:", error));

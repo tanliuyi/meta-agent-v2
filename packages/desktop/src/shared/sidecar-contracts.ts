@@ -1,35 +1,20 @@
 import type {
-  ClearedQueue,
   DraftSessionConfig,
   HostResponse,
   JsonValue,
   SessionBootstrap,
-  SessionBranchInput,
   SessionCommandResult,
   SessionControlState,
   SessionCreateInput,
-  SessionEditInput,
-  SessionImageResource,
   SessionPromptInput,
   SessionPushPayload,
-  SessionReloadInput,
   SessionRemovePolicy,
   SessionRemoveResult,
-  SessionResourceReloadInput,
   Thread,
 } from "./contracts.ts";
-import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
-import type { SessionCheckpointDiffResult, SessionCheckpointRestoreResult } from "./pi-rewind-contracts.ts";
-import type {
-  SubagentHostRequest,
-  SubagentRunEvent,
-  SubagentWorkerBinding,
-  SubagentWorkerCommand,
-} from "./subagent-contracts.ts";
+export const SIDECAR_PROTOCOL_VERSION = 4;
 
-export const SIDECAR_PROTOCOL_VERSION = 3;
-
-export type SidecarRole = "thread" | "metadata" | "subagent";
+export type SidecarRole = "thread" | "metadata";
 
 export interface RuntimeCompatibility {
   nodeVersion: string;
@@ -40,7 +25,6 @@ export interface RuntimeCompatibility {
   osRelease: string;
   libc: string;
   toolchain: string;
-  piVersion: string;
   runtimeCompatibilityId: string;
 }
 
@@ -54,9 +38,6 @@ export type ThreadWorkerBinding =
       shellPath?: string;
       sessionId: string;
       createInput: SessionCreateInput;
-      /** 父会话的 session 文件路径，用于在 header 中记录 parentSession。 */
-      parentSessionFile?: string;
-      extensionSet: ResolvedExtensionSet;
     }
   | {
       mode: "open";
@@ -69,9 +50,6 @@ export type ThreadWorkerBinding =
       /** 主进程校验前读取的原始 header cwd；worker 启动时用于检测文件被替换。 */
       sessionHeaderCwd: string;
       initialUpdatedAt?: number;
-      /** 会话级激活的插件子集（来自索引）；缺失表示继承项目级（全部激活）。 */
-      enabledPluginIds?: string[];
-      extensionSet: ResolvedExtensionSet;
     };
 
 export interface MetadataWorkerBinding {
@@ -81,8 +59,7 @@ export interface MetadataWorkerBinding {
 
 export type SidecarBinding =
   | { role: "thread"; value: ThreadWorkerBinding }
-  | { role: "metadata"; value: MetadataWorkerBinding }
-  | { role: "subagent"; value: SubagentWorkerBinding };
+  | { role: "metadata"; value: MetadataWorkerBinding };
 
 export interface SidecarInitialize {
   kind: "initialize";
@@ -172,49 +149,13 @@ export interface SidecarShutdown {
   workerInstanceId: string;
 }
 
-export interface SidecarHostCall {
-  kind: "host-call";
-  protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
-  workerInstanceId: string;
-  requestId: string;
-  request: SubagentHostRequest;
-}
-
-export type SidecarHostCallResponse =
-  | {
-      kind: "host-response";
-      protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
-      workerInstanceId: string;
-      requestId: string;
-      ok: true;
-      result?: JsonValue;
-    }
-  | {
-      kind: "host-response";
-      protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
-      workerInstanceId: string;
-      requestId: string;
-      ok: false;
-      error: SerializedSidecarError;
-    };
-
-export interface SidecarHostCallEvent {
-  kind: "host-event";
-  protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
-  workerInstanceId: string;
-  requestId: string;
-  event: SubagentRunEvent;
-}
-
 export type ParentToSidecarMessage =
   | SidecarInitialize
   | SidecarRequest
   | SidecarEventAck
   | SidecarShutdown
-  | SidecarHostCallResponse
-  | SidecarHostCallEvent
   | SidecarChunk;
-export type SidecarToParentMessage = SidecarReady | SidecarResponse | SidecarEvent | SidecarHostCall | SidecarChunk;
+export type SidecarToParentMessage = SidecarReady | SidecarResponse | SidecarEvent | SidecarChunk;
 
 export type SidecarEventBody =
   | { type: "session-push"; payload: SessionPushPayload }
@@ -226,7 +167,6 @@ export type SidecarEventBody =
       sessionFile: string;
     }
   | { type: "runtime-state"; state: "idle" | "busy" | "draining" }
-  | { type: "subagent-event"; event: SubagentRunEvent }
   | { type: "resync-required"; reason: string; lastSafeSequence: number };
 
 export interface ModelConfigurationRevision {
@@ -236,23 +176,13 @@ export interface ModelConfigurationRevision {
 export type ThreadSidecarCommand =
   | { type: "bootstrap" }
   | { type: "prompt"; input: SessionPromptInput }
-  | { type: "edit"; input: SessionEditInput }
-  | { type: "reload"; input: SessionReloadInput }
-  | { type: "reloadResources"; input: SessionResourceReloadInput }
-  | { type: "getCheckpointDiff"; fromCheckpointId: string; toCheckpointId: string; path: string }
-  | { type: "restoreCheckpoint"; checkpointId: string; expectedCheckpointId: string }
   | { type: "cancel" }
-  | { type: "clearQueue" }
   | { type: "compact" }
-  | { type: "refreshModels" }
-  | { type: "refreshModelConfiguration"; revision: ModelConfigurationRevision }
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinking"; level: SessionControlState["thinkingLevel"] }
   | { type: "rename"; title: string }
   | { type: "respondHostUi"; response: HostResponse }
   | { type: "getSummary"; archived: boolean }
-  | { type: "branch"; input: SessionBranchInput }
-  | { type: "getImageResource"; resourceId: string }
   | { type: "ping" };
 
 export interface CreationReservation {
@@ -286,9 +216,6 @@ export type MetadataSidecarCommand =
       type: "getDraftConfig";
       projectId: string;
       cwd: string;
-      extensionSet: ResolvedExtensionSet;
-      /** 全部可构建的插件中心条目（含项目作用域外），供会话级插件选择。 */
-      allEntries: ResolvedExtensionEntry[];
     }
   | { type: "resolveSession"; projectId: string; cwd: string; threadId: string }
   | { type: "upsertSession"; projectId: string; cwd: string; sessionFile: string; thread: Thread }
@@ -320,19 +247,15 @@ export type MetadataSidecarCommand =
   | { type: "invalidateProject"; projectId: string }
   | { type: "ping" };
 
-export type SidecarCommand = ThreadSidecarCommand | MetadataSidecarCommand | SubagentWorkerCommand;
+export type SidecarCommand = ThreadSidecarCommand | MetadataSidecarCommand;
 
 export type SidecarCommandResult =
   | SessionBootstrap
   | SessionCommandResult
-  | ClearedQueue
   | DraftSessionConfig
   | Thread
   | Thread[]
   | SessionRemoveResult
-  | SessionCheckpointDiffResult
-  | SessionCheckpointRestoreResult
-  | SessionImageResource
   | { path: string; id: string }
   | { pong: true }
   | null;

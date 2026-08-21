@@ -64,7 +64,6 @@ function control(): SessionControlState {
         createdAt: 1,
       },
     ],
-    extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
     extensionHost: {
       statuses: { extension: "ready" },
       composerCommand: { hostId: "host", revision: 1, mode: "replace", text: "draft" },

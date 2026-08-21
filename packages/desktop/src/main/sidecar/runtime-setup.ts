@@ -1,10 +1,10 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { ShellRuntimeProgress } from "../../shared/desktop-api.ts";
 import { ShellRuntimeInstaller } from "./shell-runtime-installer.ts";
 import { saveShellRuntimePath } from "./shell-runtime-settings.ts";
 import { type BashRuntimeDetails, validateBashRuntime } from "./shell-runtime-validator.ts";
+import { getSystemPiShellPath } from "./system-pi-settings.ts";
 
 export type RuntimeSetupComponent = "shell";
 
@@ -52,7 +52,7 @@ export async function findConfiguredShellRuntime(
   agentDir: string,
   validate: (path: string) => Promise<BashRuntimeDetails> = validateBashRuntime,
 ): Promise<BashRuntimeDetails | undefined> {
-  const configuredPath = SettingsManager.create(cwd, agentDir).getShellPath();
+  const configuredPath = getSystemPiShellPath(cwd, agentDir);
   if (!configuredPath) return undefined;
   try {
     return await validate(configuredPath);

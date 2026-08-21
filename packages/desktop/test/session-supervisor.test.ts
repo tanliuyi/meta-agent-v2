@@ -70,10 +70,10 @@ describe("SessionSupervisor attachment leases", () => {
   });
 
   it("registers the lease before bootstrap so concurrent worker events are not lost", async () => {
-    let resolveBootstrap!: (value: SessionBootstrap) => void;
+    let resolveBootstrap!: (value: { bootstrap: SessionBootstrap; workerInstanceId: string }) => void;
     workers.attach.mockImplementation(
       (_projectId: string, threadId: string) =>
-        new Promise<SessionBootstrap>((resolve) => {
+        new Promise<{ bootstrap: SessionBootstrap; workerInstanceId: string }>((resolve) => {
           resolveBootstrap = resolve;
           expect(threadId).toBe("thread");
         }),
@@ -88,7 +88,7 @@ describe("SessionSupervisor attachment leases", () => {
       expect.objectContaining({ threadId: "thread", workerInstanceId: "subagent-worker", sidecarSequence: 4 }),
     );
 
-    resolveBootstrap(bootstrap("thread"));
+    resolveBootstrap({ bootstrap: bootstrap("thread"), workerInstanceId: "worker-bootstrap" });
     const attachment = await attaching;
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: attachment.attachmentId }));
     supervisor.acknowledge(1, attachment.attachmentId, "subagent-worker", 4);
@@ -115,7 +115,7 @@ describe("SessionSupervisor attachment leases", () => {
 
     expect(firstPush).not.toHaveBeenCalled();
     expect(secondPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: second.attachmentId }));
-    expect(workers.detach).toHaveBeenCalledWith("project", "thread");
+    expect(workers.detach).toHaveBeenCalledWith("project", "thread", "worker-1");
     await supervisor.dispose();
   });
 
@@ -205,7 +205,11 @@ function input(threadId: string, requestId: string, replaceAttachmentId?: string
 }
 
 function registryMock(): RegistryMock {
-  const attach = vi.fn(async (_projectId: string, threadId: string) => bootstrap(threadId));
+  let generation = 0;
+  const attach = vi.fn(async (_projectId: string, threadId: string) => {
+    generation += 1;
+    return { bootstrap: bootstrap(threadId), workerInstanceId: `worker-${generation}` };
+  });
   const detach = vi.fn();
   const acknowledge = vi.fn();
   const create = vi.fn(async () => bootstrap("created"));
@@ -277,7 +281,6 @@ function bootstrap(threadId: string): SessionBootstrap {
       thinkingLevels: ["off"],
       readiness: { state: "ready" },
       hostRequests: [],
-      extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
       extensionHost: { statuses: {}, widgets: [] },
     },
   };
