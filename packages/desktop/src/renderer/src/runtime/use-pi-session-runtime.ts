@@ -7,12 +7,11 @@ import {
   type ThreadMessage,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { PiQueueItem, SessionControlState } from "../../../shared/contracts.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
-import { useToast } from "../shared/ui/use-toast.ts";
 import { imageAttachmentAdapter, restoreComposerAttachments } from "./image-attachments.ts";
-import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
+import { PiCommandCoordinator } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
 import type { CachedSessionRecord } from "./pi-session-store.ts";
 import type { SessionTransportManager } from "./session-transport-manager.ts";
@@ -25,13 +24,11 @@ interface PiSessionRuntimeOptions {
 
 export interface PiSessionRuntimeBinding {
   runtime: AssistantRuntime;
-  clearQueue(): Promise<void>;
 }
 
 /** Creates the one assistant-ui runtime owned by a cached session activity. */
 export function usePiSessionRuntime({ record, active, transport }: PiSessionRuntimeOptions): PiSessionRuntimeBinding {
   const stores = record.stores;
-  const { notify, update } = useToast();
   const snapshot = useSyncExternalStore(
     stores.timeline.subscribe,
     stores.timeline.getSnapshot,
@@ -66,12 +63,9 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
         },
         getComposer: () => runtimeRef.current?.thread.composer ?? null,
         getPhase: () => snapshotRef.current.phase,
-        resolveReloadTarget: (parentId) => resolveReloadUserEntry(snapshotRef.current, parentId),
-        notify,
-        updateNotification: update,
         report: (error) => console.error("Pi command failed", error),
       }),
-    [notify, record, stores.connection, transport, update],
+    [record, stores.connection, transport],
   );
 
   useEffect(() => coordinator.observeQueue(snapshot.queue), [coordinator, snapshot.queue]);
@@ -104,27 +98,11 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
       isSendDisabled,
       onNew: coordinator.rejectUnexpectedOnNew,
       queue,
-      onEdit:
-        active && (snapshot.phase === "idle" || snapshot.phase === "running") && !isSendDisabled
-          ? (message) => coordinator.edit(message, snapshotRef.current.queue, isAgentRunning)
-          : undefined,
-      onReload: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.reload : undefined,
-      onCancel: hasCommandTarget && isCancelable ? () => coordinator.cancel(snapshotRef.current.queue) : undefined,
+      onCancel: hasCommandTarget && isCancelable ? coordinator.cancel : undefined,
       adapters: { attachments: !isSendDisabled ? imageAttachmentAdapter : undefined },
       unstable_enableToolInvocations: false,
     }),
-    [
-      active,
-      coordinator,
-      hasCommandTarget,
-      isAgentRunning,
-      isCancelable,
-      isLoading,
-      isSendDisabled,
-      queue,
-      repository,
-      snapshot.phase,
-    ],
+    [coordinator, hasCommandTarget, isAgentRunning, isCancelable, isLoading, isSendDisabled, queue, repository],
   );
   const runtime = useExternalStoreRuntime<ThreadMessage>(runtimeAdapter);
   const composer = runtime.thread.composer;
@@ -190,8 +168,7 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
     };
   }, [composer, isSendDisabled, stores.composerDraft]);
 
-  const clearQueue = useCallback(() => coordinator.clearQueue(snapshotRef.current.queue), [coordinator]);
-  return useMemo(() => ({ runtime, clearQueue }), [clearQueue, runtime]);
+  return useMemo(() => ({ runtime }), [runtime]);
 }
 
 function toQueueItemState({ id, prompt }: PiQueueItem): QueueItemState {

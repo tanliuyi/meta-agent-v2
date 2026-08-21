@@ -4,7 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import lockfile from "proper-lockfile";
 import { cleanDesktopSidecarOutput, synchronizeDesktopSidecarOutput } from "./clean-desktop-sidecar-output.mjs";
-import { copyDesktopSidecarAssets } from "./copy-desktop-sidecar-assets.mjs";
 import { generateDesktopSidecarManifests } from "./generate-desktop-sidecar-manifest.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -33,7 +32,6 @@ try {
     cwd: desktopRoot,
     stdio: "inherit",
   });
-  copyDesktopSidecarAssets(stagedRoot);
   generateDesktopSidecarManifests(stagedRoot, stagedPackagedRoot);
   synchronizeDesktopSidecarOutput(stagedPackagedRoot, packagedRoot);
   synchronizeDesktopSidecarOutput(stagedRoot, outputRoot);

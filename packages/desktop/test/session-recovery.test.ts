@@ -21,7 +21,6 @@ const EMPTY_CONTROL: SessionControlState = {
   thinkingLevels: ["off"],
   readiness: { state: "ready" },
   hostRequests: [],
-  extensionSet: { generation: "g", diagnostics: [], reloadRequired: false },
   extensionHost: {
     statuses: {},
     widgets: [],

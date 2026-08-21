@@ -1,7 +1,7 @@
 import type {
-  DesktopExtensionHostState,
   HostRequest,
   ModelOption,
+  RpcExtensionHostState,
   SessionControlState,
   SlashCommand,
 } from "../../../shared/contracts.ts";
@@ -27,20 +27,11 @@ export function mergeSessionControl(
     ...(equalOptionalRecord(previous.context, incoming.context) ? { context: previous.context } : {}),
     readiness: equalRecord(previous.readiness, incoming.readiness) ? previous.readiness : incoming.readiness,
     hostRequests: reuseArray(previous.hostRequests, incoming.hostRequests, equalHostRequest),
-    extensionSet:
-      previous.extensionSet.generation === incoming.extensionSet.generation &&
-      previous.extensionSet.reloadRequired === incoming.extensionSet.reloadRequired &&
-      equalArray(previous.extensionSet.diagnostics, incoming.extensionSet.diagnostics, equalRecord)
-        ? previous.extensionSet
-        : incoming.extensionSet,
     extensionHost: mergeExtensionHost(previous.extensionHost, incoming.extensionHost),
   };
 }
 
-function mergeExtensionHost(
-  previous: DesktopExtensionHostState,
-  incoming: DesktopExtensionHostState,
-): DesktopExtensionHostState {
+function mergeExtensionHost(previous: RpcExtensionHostState, incoming: RpcExtensionHostState): RpcExtensionHostState {
   const statuses = equalRecord(previous.statuses, incoming.statuses) ? previous.statuses : incoming.statuses;
   const widgets = reuseArray(
     previous.widgets,
@@ -85,6 +76,7 @@ function equalHostRequest(left: HostRequest, right: HostRequest): boolean {
     left.title === right.title &&
     left.message === right.message &&
     left.placeholder === right.placeholder &&
+    left.initialValue === right.initialValue &&
     equalOptionalArray(left.options, right.options, Object.is) &&
     left.toolCallId === right.toolCallId &&
     left.workerInstanceId === right.workerInstanceId &&

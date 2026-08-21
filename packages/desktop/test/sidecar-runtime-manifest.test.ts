@@ -110,7 +110,7 @@ describe("Desktop sidecar runtime manifest", () => {
     writeFileSync(assetPath, "asset");
     const manifest: SidecarRuntimeManifest = {
       entries,
-      compatibility: currentRuntimeCompatibility("test", "test"),
+      compatibility: currentRuntimeCompatibility("test"),
       integrity: {
         entries: Object.fromEntries(roles.map((role) => [role, hash(role)])) as Record<(typeof roles)[number], string>,
         files: { [relative(manifestRoot, assetPath)]: hash("asset") },

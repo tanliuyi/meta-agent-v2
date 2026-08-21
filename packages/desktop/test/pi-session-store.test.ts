@@ -63,7 +63,6 @@ function controlState(revision: number): SessionControlState {
     context: { tokens: 10, contextWindow: 128_000, percent: 0.1 },
     readiness: { state: "ready" },
     hostRequests: [],
-    extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
     extensionHost: {
       statuses: {},
       widgets: [],

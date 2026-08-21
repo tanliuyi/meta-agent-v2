@@ -12,7 +12,7 @@ export interface AuthApiKeyCredential {
   env?: Record<string, string>;
 }
 
-// Mirror of @earendil-works/pi-coding-agent's OAuthCredential
+// Wire-compatible subset of the system Pi OAuth credential.
 export interface AuthOAuthCredential {
   type: "oauth";
   access: string;

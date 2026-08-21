@@ -3,14 +3,11 @@ import { ReasoningRoot } from "@renderer/components/assistant-ui/reasoning/reaso
 import { ReasoningText } from "@renderer/components/assistant-ui/reasoning/reasoning-text";
 import { ReasoningTrigger } from "@renderer/components/assistant-ui/reasoning/reasoning-trigger";
 import { getHostNotificationSemantics } from "./host-notification-model.ts";
-import { BuiltinNotificationView, hasBuiltinNotificationRenderer } from "./notifications/builtin-notification-view.tsx";
 import { isPiNotice, noticeTitle } from "./pi-notice.ts";
 import { PiNoticeContentView } from "./pi-notice-content-view.tsx";
 
 export function PiNoticeView({ data }: { data: unknown }) {
   if (!isPiNotice(data)) return null;
-
-  if (hasBuiltinNotificationRenderer(data)) return <BuiltinNotificationView notice={data} />;
 
   if (data.noticeType === "compaction") {
     return (

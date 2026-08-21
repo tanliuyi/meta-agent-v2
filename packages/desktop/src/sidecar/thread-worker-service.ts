@@ -1,25 +1,19 @@
 import { createReadStream, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
-import { SessionRuntime } from "../main/pi/session-runtime.ts";
-import { getRegisteredSubagentChildExtensions } from "../main/pi/subagents/child-extension-registry.ts";
-import { DesktopSubagentRuntime } from "../main/pi/subagents/desktop-subagent-runtime.ts";
 import type {
   SidecarBinding,
   SidecarCommand,
   ThreadSidecarCommand,
   ThreadWorkerBinding,
 } from "../shared/sidecar-contracts.ts";
-import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
+import { PiRpcSessionRuntime } from "./pi-rpc-session-runtime.ts";
 import type { SidecarService, SidecarServiceContext } from "./sidecar-host.ts";
 
 export class ThreadWorkerService implements SidecarService {
-  private readonly runtime: SessionRuntime;
-  private modelConfigurationGeneration = 0;
+  private readonly runtime: PiRpcSessionRuntime;
 
-  private constructor(runtime: SessionRuntime) {
+  private constructor(runtime: PiRpcSessionRuntime) {
     this.runtime = runtime;
   }
 
@@ -29,56 +23,18 @@ export class ThreadWorkerService implements SidecarService {
   ): Promise<{ service: ThreadWorkerService; readyResult: unknown }> {
     if (binding.role !== "thread") throw new Error(`Thread worker received ${binding.role} binding`);
     const input = binding.value;
-    const extensionSet = await validateResolvedExtensionSet(input.projectId, input.extensionSet);
-    const createSessionId = input.mode === "create" ? input.sessionId : undefined;
-    let sessionManager: SessionManager | undefined;
-    const sessionDir = resolveDesktopSessionDirectory(input.projectId, input.agentDir);
-    if (input.mode === "create") {
-      sessionManager = SessionManager.create(input.cwd, sessionDir, {
-        id: createSessionId,
-        ...(input.parentSessionFile ? { parentSession: input.parentSessionFile } : {}),
-      });
-    } else {
-      const sessionFile = await resolveCanonicalSessionFile(input);
-      sessionManager = SessionManager.open(sessionFile, sessionDir, input.cwd);
-    }
-    const parentThreadId = input.mode === "create" ? input.sessionId : input.threadId;
-    const approvedChildExtensionPaths = new Set(
-      extensionSet.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
-    );
-    const subagentRuntime = new DesktopSubagentRuntime({
-      projectId: input.projectId,
-      parentThreadId,
-      getChildExtensions: () =>
-        getRegisteredSubagentChildExtensions().filter((extension) => approvedChildExtensionPaths.has(extension.path)),
-      requestHost: context.requestHost,
+    const runtimeBinding: ThreadWorkerBinding =
+      input.mode === "open" ? { ...input, sessionFile: await resolveCanonicalSessionFile(input) } : input;
+    const runtime = await PiRpcSessionRuntime.create({
+      binding: runtimeBinding,
+      push: (payload) => context.emit({ type: "session-push", payload }),
+      onSummaryChanged: (current) => context.emit({ type: "summary-changed", summary: current.threadSummary(false) }),
     });
-    let runtime: SessionRuntime;
-    try {
-      runtime = await SessionRuntime.create({
-        projectId: input.projectId,
-        cwd: input.cwd,
-        agentDir: input.agentDir,
-        ...(input.shellPath ? { shellPath: input.shellPath } : {}),
-        sessionManager,
-        ...(input.mode === "open" && input.initialUpdatedAt !== undefined
-          ? { initialUpdatedAt: input.initialUpdatedAt }
-          : {}),
-        createInput: input.mode === "create" ? input.createInput : undefined,
-        extensionSet,
-        subagentRuntime,
-        push: (payload) => context.emit({ type: "session-push", payload }),
-        onSummaryChanged: (current) => context.emit({ type: "summary-changed", summary: current.threadSummary(false) }),
-      });
-    } catch (error) {
-      await subagentRuntime.dispose();
-      throw error;
-    }
     if (input.mode === "create") {
-      const sessionFile = sessionManager?.getSessionFile();
+      const sessionFile = runtime.sessionFile;
       if (!sessionFile) {
         await runtime.dispose();
-        throw new Error("Created session did not materialize a session file");
+        throw new Error("Created system Pi session did not materialize a session file");
       }
       context.emit({
         type: "session-materialized",
@@ -86,10 +42,6 @@ export class ThreadWorkerService implements SidecarService {
         sessionId: input.sessionId,
         sessionFile,
       });
-    }
-    if (input.mode === "open" && runtime.id !== input.threadId) {
-      await runtime.dispose();
-      throw new Error(`Opened session ID mismatch: expected ${input.threadId}, got ${runtime.id}`);
     }
     return {
       service: new ThreadWorkerService(runtime),
@@ -111,44 +63,22 @@ export class ThreadWorkerService implements SidecarService {
         return this.runtime.bootstrap();
       case "prompt":
         return this.runtime.prompt(command.input);
-      case "edit":
-        return this.runtime.edit(command.input);
-      case "reload":
-        return this.runtime.reload(command.input);
-      case "reloadResources":
-        return this.runtime.reloadResources();
-      case "getCheckpointDiff":
-        return this.runtime.getCheckpointDiff(command.fromCheckpointId, command.toCheckpointId, command.path);
-      case "restoreCheckpoint":
-        return this.runtime.restoreCheckpoint(command.checkpointId, command.expectedCheckpointId);
-      case "branch":
-        return this.runtime.branch(command.input);
       case "cancel":
         return this.runtime.cancel();
-      case "clearQueue":
-        return this.runtime.clearQueue();
       case "compact":
         await this.runtime.compact();
-        return null;
-      case "refreshModels":
-        await this.runtime.refreshModels();
-        return null;
-      case "refreshModelConfiguration":
-        if (command.revision.generation <= this.modelConfigurationGeneration) return null;
-        await this.runtime.refreshModels();
-        this.modelConfigurationGeneration = command.revision.generation;
         return null;
       case "setModel":
         await this.runtime.setModel(command.provider, command.modelId);
         return null;
       case "setThinking":
-        this.runtime.setThinking(command.level);
+        await this.runtime.setThinking(command.level);
         return null;
       case "rename":
-        this.runtime.rename(command.title);
+        await this.runtime.rename(command.title);
         return null;
       case "respondHostUi":
-        this.runtime.respond(command.response);
+        await this.runtime.respond(command.response);
         return null;
       case "getSummary":
         return this.runtime.threadSummary(command.archived);
@@ -159,7 +89,11 @@ export class ThreadWorkerService implements SidecarService {
 }
 
 async function resolveCanonicalSessionFile(input: Extract<ThreadWorkerBinding, { mode: "open" }>): Promise<string> {
-  const requestedPath = resolve(input.sessionFile);
+  return validateCanonicalSessionFile(input.sessionFile, input.projectId, input.threadId);
+}
+
+async function validateCanonicalSessionFile(sessionFile: string, projectId: string, threadId: string): Promise<string> {
+  const requestedPath = resolve(sessionFile);
   let stats: ReturnType<typeof lstatSync>;
   try {
     stats = lstatSync(requestedPath);
@@ -180,8 +114,8 @@ async function resolveCanonicalSessionFile(input: Extract<ThreadWorkerBinding, {
     break;
   }
   lines.close();
-  if (!isSessionHeader(header) || header.id !== input.threadId) {
-    throw new Error(`Session identity does not match ${input.projectId}/${input.threadId}: ${requestedPath}`);
+  if (!isSessionHeader(header) || header.id !== threadId) {
+    throw new Error(`Session identity does not match ${projectId}/${threadId}: ${requestedPath}`);
   }
   return requestedPath;
 }

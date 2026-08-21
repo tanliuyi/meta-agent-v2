@@ -178,6 +178,5 @@ function draftConfig(): DraftSessionConfig {
     thinkingLevel: "medium",
     thinkingLevels: ["off", "low", "medium", "high", "max"],
     readiness: { state: "ready" },
-    extensions: { extensionSetGeneration: "generation", diagnostics: [] },
   };
 }

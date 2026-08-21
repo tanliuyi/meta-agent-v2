@@ -12,7 +12,6 @@ import type {
   FileChangeSet,
   SessionAttachInput,
   SessionAttachment,
-  SessionCreateIpcResult,
   SessionFlushResult,
   SessionPush,
   SessionPushPayload,
@@ -202,49 +201,6 @@ const desktopApi: DesktopApi = {
     getInitial: () => ipcRenderer.sendSync(CHANNELS.preferencesGetInitial),
     save: (input) => ipcRenderer.invoke(CHANNELS.preferencesSave, input),
   },
-  memorySettings: {
-    getSnapshot: () => ipcRenderer.invoke(CHANNELS.memorySettingsGetSnapshot),
-    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsSaveConfig, input),
-    mutateEntry: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsMutateEntry, input),
-    runMaintenance: (input) => ipcRenderer.invoke(CHANNELS.memorySettingsRunMaintenance, input),
-    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.memorySettingsSetEditorDirty, dirty) === true,
-  },
-  autoTitle: {
-    getSnapshot: () => ipcRenderer.invoke(CHANNELS.autoTitleGetSnapshot),
-    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.autoTitleSaveConfig, input),
-    getModelOptions: () => ipcRenderer.invoke(CHANNELS.autoTitleGetModelOptions),
-    setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.autoTitleSetEditorDirty, dirty) === true,
-  },
-  extensions: {
-    getConfig: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.extensionsGetConfig, projectId, threadId),
-    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.extensionsSaveConfig, input),
-    chooseDevelopmentEntry: (input) => ipcRenderer.invoke(CHANNELS.extensionsChooseDevelopmentEntry, input),
-    apply: (input) => ipcRenderer.invoke(CHANNELS.extensionsApply, input),
-    getSessionPlugins: (projectId, threadId) =>
-      ipcRenderer.invoke(CHANNELS.extensionsGetSessionPlugins, projectId, threadId),
-    applySessionPlugins: (input) => ipcRenderer.invoke(CHANNELS.extensionsApplySessionPlugins, input),
-    getPluginConfiguration: (pluginId) => ipcRenderer.invoke(CHANNELS.extensionsGetPluginConfiguration, pluginId),
-    savePluginConfiguration: (input) => ipcRenderer.invoke(CHANNELS.extensionsSavePluginConfiguration, input),
-  },
-  marketplace: {
-    getEndpointSettings: () => ipcRenderer.invoke(CHANNELS.marketplaceGetEndpointSettings),
-    testEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceTestEndpoint, input),
-    saveEndpoint: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSaveEndpoint, input),
-    listPlugins: (input = {}) => ipcRenderer.invoke(CHANNELS.marketplaceListPlugins, input),
-    getPlugin: (pluginId) => ipcRenderer.invoke(CHANNELS.marketplaceGetPlugin, pluginId),
-    getInstalled: () => ipcRenderer.invoke(CHANNELS.marketplaceGetInstalled),
-    getPluginConfiguration: (pluginId) => ipcRenderer.invoke(CHANNELS.marketplaceGetPluginConfiguration, pluginId),
-    savePluginConfiguration: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSavePluginConfiguration, input),
-    installPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceInstallPlugin, input),
-    updatePlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUpdatePlugin, input),
-    uninstallPlugin: (input) => ipcRenderer.invoke(CHANNELS.marketplaceUninstallPlugin, input),
-    setPluginEnabled: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSetPluginEnabled, input),
-    setPluginScope: (input) => ipcRenderer.invoke(CHANNELS.marketplaceSetPluginScope, input),
-  },
-  subagents: {
-    getSnapshot: (input) => ipcRenderer.invoke(CHANNELS.subagentsGetSnapshot, input),
-    saveConfig: (input) => ipcRenderer.invoke(CHANNELS.subagentsSaveConfig, input),
-  },
   updater: {
     getState: () => ipcRenderer.invoke(CHANNELS.updaterGetState),
     check: () => ipcRenderer.invoke(CHANNELS.updaterCheck),
@@ -297,14 +253,7 @@ const desktopApi: DesktopApi = {
       return () => ipcRenderer.removeListener(CHANNELS.sessionsCatalogChanged, handler);
     },
     getDraftConfig: (projectId) => ipcRenderer.invoke(CHANNELS.sessionsDraftConfig, projectId),
-    create: async (input) => {
-      const result = (await ipcRenderer.invoke(CHANNELS.sessionsCreate, input)) as SessionCreateIpcResult;
-      if (result.ok) return result.bootstrap;
-      throw Object.assign(new Error(result.error.message), {
-        code: result.error.code,
-        details: result.error.details,
-      });
-    },
+    create: (input) => ipcRenderer.invoke(CHANNELS.sessionsCreate, input),
     async attach(input: SessionAttachInput, listener): Promise<SessionAttachment> {
       const attachment = (await ipcRenderer.invoke(CHANNELS.sessionsAttach, input)) as SessionAttachment;
       const active: ActiveSessionAttachment = {
@@ -349,14 +298,7 @@ const desktopApi: DesktopApi = {
     remove: (projectId, threadId, policy) => ipcRenderer.invoke(CHANNELS.sessionsRemove, projectId, threadId, policy),
     promote: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsPromote, projectId, threadId),
     prompt: (input) => ipcRenderer.invoke(CHANNELS.sessionsPrompt, input),
-    edit: (input) => ipcRenderer.invoke(CHANNELS.sessionsEdit, input),
-    reload: (input) => ipcRenderer.invoke(CHANNELS.sessionsReload, input),
-    reloadResources: (input) => ipcRenderer.invoke(CHANNELS.sessionsReloadResources, input),
-    getCheckpointDiff: (input) => ipcRenderer.invoke(CHANNELS.sessionsGetCheckpointDiff, input),
-    restoreCheckpoint: (input) => ipcRenderer.invoke(CHANNELS.sessionsRestoreCheckpoint, input),
-    branch: (input) => ipcRenderer.invoke(CHANNELS.sessionsBranch, input),
     cancel: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsCancel, projectId, threadId),
-    clearQueue: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsClearQueue, projectId, threadId),
     compact: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsCompact, projectId, threadId),
     refreshModels: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsRefreshModels, projectId, threadId),
     setModel: (projectId, threadId, provider, modelId) =>

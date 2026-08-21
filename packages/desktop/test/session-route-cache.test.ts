@@ -34,7 +34,6 @@ const EMPTY_CONTROL: SessionControlState = {
   readiness: { state: "ready" },
   lastError: undefined,
   hostRequests: [],
-  extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
   extensionHost: { statuses: {}, widgets: [] },
 };
 

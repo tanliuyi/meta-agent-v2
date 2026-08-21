@@ -25,7 +25,6 @@ import { ComposerAddAttachment } from "../../assistant-ui/attachment/composer-ad
 import { ComposerAttachments } from "../../assistant-ui/attachment/composer-attachments.tsx";
 import { useSessionScope } from "../../session-context.tsx";
 import { ModelSelect } from "../model-select.tsx";
-import { PluginSelect } from "../plugin-select.tsx";
 import { ProjectSelect } from "../project-select.tsx";
 import { ThinkingSelect } from "../thinking-select.tsx";
 import { slashCommandAcceptsArguments, slashCommandText } from "./composer-command-trigger.tsx";
@@ -263,13 +262,6 @@ export function Composer(props: ComposerProps) {
             }}
           />
         ) : null}
-        <PluginSelect
-          plugins={props.config?.extensions.plugins ?? null}
-          value={props.config?.extensions.enabledPluginIds ?? null}
-          disabled={disabled || configLoading}
-          loading={configLoading}
-          onValueChange={props.onPluginsChange}
-        />
       </>
     ) : null;
 
@@ -282,14 +274,7 @@ export function Composer(props: ComposerProps) {
           command={props.composerCommand}
         />
       ) : null}
-      {props.mode === "session" ? (
-        <ComposerQueue
-          items={props.queue}
-          disabled={!props.commandsReady}
-          onClear={props.onClearQueue}
-          onError={reportError}
-        />
-      ) : null}
+      {props.mode === "session" ? <ComposerQueue items={props.queue} /> : null}
 
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
@@ -327,15 +312,6 @@ export function Composer(props: ComposerProps) {
               <div className="composer-toolbar flex min-h-8 items-center justify-between gap-2">
                 <div className="composer-toolbar-start flex min-w-0 items-center gap-2">
                   <ComposerAddAttachment disabled={attachmentsDisabled} />
-                  {props.mode === "session" && !isRunning ? (
-                    <PluginSelect
-                      plugins={props.plugins}
-                      value={props.enabledPluginIds}
-                      disabled={props.pluginsDisabled}
-                      loading={props.pluginsLoading}
-                      onValueChange={props.onPluginsChange}
-                    />
-                  ) : null}
                   {selectedCommand ? (
                     <div className="min-w-0 border-l border-border/70 pl-1">
                       <div className="group flex h-6 min-w-0 items-center gap-1 rounded-xl px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-within:bg-accent focus-within:text-accent-foreground">

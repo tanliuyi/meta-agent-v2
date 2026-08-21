@@ -14,7 +14,7 @@ describe("sidecar runtime compatibility", () => {
       .filter((value) => value !== undefined)
       .join(":");
 
-    expect(currentRuntimeCompatibility("test", "test").toolchain).toBe(expected);
+    expect(currentRuntimeCompatibility("test").toolchain).toBe(expected);
   });
 });
 

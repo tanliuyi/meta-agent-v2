@@ -3,9 +3,8 @@ import type { Stats } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import type { AuthInteraction } from "@earendil-works/pi-ai";
+import type { AuthInteraction, Models } from "@earendil-works/pi-ai";
 import { findEnvKeys } from "@earendil-works/pi-ai/compat";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { applyEdits, type FormattingOptions, modify, type ParseError, parse } from "jsonc-parser";
 import lockfile from "proper-lockfile";
 import type {
@@ -51,8 +50,8 @@ interface AuthConfigServiceOptions {
   log?(message: string): void;
   now?(): number;
   createId?(): string;
-  /** ModelRuntime for OAuth login. When absent, loginOauth throws. */
-  modelRuntime?: ModelRuntime;
+  /** pi-ai provider registry for OAuth login. When absent, loginOauth throws. */
+  models?: Models;
 }
 
 /** Owns all reads and atomic writes for one agent directory's auth.json. */
@@ -62,19 +61,18 @@ export class AuthConfigService {
   private saveTail: Promise<void> = Promise.resolve();
   private readonly log?: (message: string) => void;
   private readonly createId: () => string;
-  private readonly modelRuntime?: ModelRuntime;
+  private readonly models?: Models;
 
   constructor(agentDir: string, options: AuthConfigServiceOptions = {}) {
     this.agentDir = agentDir;
     this.path = join(agentDir, "auth.json");
     this.log = options.log;
     this.createId = options.createId ?? randomUUID;
-    this.modelRuntime = options.modelRuntime;
+    this.models = options.models;
   }
 
   async getConfig(): Promise<AuthConfigSnapshot> {
-    await this.refreshModelRuntime();
-    return snapshotFromCurrent(this.path, await this.readCurrent(), this.modelRuntime);
+    return snapshotFromCurrent(this.path, await this.readCurrent(), this.models);
   }
 
   async getConfigRevision(): Promise<string> {
@@ -95,20 +93,15 @@ export class AuthConfigService {
   }
 
   async loginOauth(providerId: string, interaction: AuthInteraction): Promise<AuthConfigSnapshot> {
-    if (!this.modelRuntime) {
-      throw new Error("ModelRuntime is required for OAuth login");
+    if (!this.models) {
+      throw new Error("A pi-ai model registry is required for OAuth login");
     }
-    await this.refreshModelRuntime();
     const current = await this.readCurrent();
     if (current.sourceState === "invalid") {
       throw new Error("Cannot update OAuth credentials while auth.json is invalid");
     }
-    await this.modelRuntime.login(providerId, "oauth", interaction);
+    await this.models.login(providerId, "oauth", interaction);
     return this.getConfig();
-  }
-
-  private async refreshModelRuntime(): Promise<void> {
-    await this.modelRuntime?.refresh({ allowNetwork: false });
   }
 
   private async saveConfigLocked(input: SaveAuthConfigInput): Promise<SaveAuthConfigResult> {
@@ -124,7 +117,7 @@ export class AuthConfigService {
       const current = await this.readCurrent();
       if (current.revision !== input.expectedRevision) {
         this.writeLog("conflict", current, input.providers);
-        return { status: "conflict", current: snapshotFromCurrent(this.path, current, this.modelRuntime) };
+        return { status: "conflict", current: snapshotFromCurrent(this.path, current, this.models) };
       }
       if (current.sourceState === "invalid") {
         return { status: "invalid", diagnostics: current.diagnostics };
@@ -168,7 +161,7 @@ export class AuthConfigService {
       await this.atomicWrite(candidate);
       const saved = await this.readCurrent();
       this.writeLog("saved", saved, input.providers);
-      return { status: "saved", snapshot: snapshotFromCurrent(this.path, saved, this.modelRuntime) };
+      return { status: "saved", snapshot: snapshotFromCurrent(this.path, saved, this.models) };
     } finally {
       await release();
     }
@@ -491,7 +484,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-function knownProviders(modelRuntime?: ModelRuntime): AuthProviderInfo[] {
+function knownProviders(models?: Models): AuthProviderInfo[] {
   try {
     const metadata = getModelsConfigMetadata();
     const builtinProviderIds = new Set(metadata.builtInProviders.map((p) => p.id));
@@ -504,9 +497,9 @@ function knownProviders(modelRuntime?: ModelRuntime): AuthProviderInfo[] {
       };
     });
 
-    // Use ModelRuntime to discover OAuth capabilities
-    if (modelRuntime) {
-      for (const provider of modelRuntime.getProviders()) {
+    // Use the pi-ai registry to discover OAuth capabilities.
+    if (models) {
+      for (const provider of models.getProviders()) {
         if (provider.auth?.oauth) {
           const existing = providers.find((p) => p.id === provider.id);
           if (existing) {
@@ -532,7 +525,7 @@ function knownProviders(modelRuntime?: ModelRuntime): AuthProviderInfo[] {
   }
 }
 
-function snapshotFromCurrent(path: string, current: CurrentSource, modelRuntime?: ModelRuntime): AuthConfigSnapshot {
+function snapshotFromCurrent(path: string, current: CurrentSource, models?: Models): AuthConfigSnapshot {
   const data = current.data ?? {};
   const providers = current.sourceState === "valid" ? configToDraft(data) : [];
   return {
@@ -542,7 +535,7 @@ function snapshotFromCurrent(path: string, current: CurrentSource, modelRuntime?
     sourceState: current.sourceState,
     providers,
     diagnostics: current.diagnostics,
-    knownProviders: knownProviders(modelRuntime),
+    knownProviders: knownProviders(models),
   };
 }
 

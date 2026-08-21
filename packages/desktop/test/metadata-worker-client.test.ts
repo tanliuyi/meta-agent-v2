@@ -1,7 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { VERSION } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MetadataWorkerClient } from "../src/main/sidecar/metadata-worker-client.ts";
 import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
@@ -58,11 +57,10 @@ function loadManifest(): SidecarRuntimeManifest {
     entries: {
       thread: "",
       metadata: resolve(import.meta.dirname, "../out/sidecar/sidecar/metadata-worker-main.js"),
-      subagent: "",
     },
-    compatibility: currentRuntimeCompatibility(VERSION, "test"),
+    compatibility: currentRuntimeCompatibility("test"),
     integrity: {
-      entries: { thread: "", metadata: "", subagent: "" },
+      entries: { thread: "", metadata: "" },
       files: {},
     },
   };

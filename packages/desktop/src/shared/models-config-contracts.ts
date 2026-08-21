@@ -3,7 +3,7 @@
  *
  * All types are owned by Desktop. The actual schema validation lives in
  * src/main/models/models-config-schema.ts and is tested against the
- * official ModelRuntime.
+ * system Pi model loader.
  */
 
 export type ModelsChatTemplateKwargScalar = string | number | boolean | null;

@@ -174,7 +174,7 @@ export class SidecarEventAckTracker {
   }
 }
 
-export function currentRuntimeCompatibility(piVersion: string, runtimeCompatibilityId: string): RuntimeCompatibility {
+export function currentRuntimeCompatibility(runtimeCompatibilityId: string): RuntimeCompatibility {
   return {
     nodeVersion: process.version,
     modulesAbi: process.versions.modules,
@@ -184,7 +184,6 @@ export function currentRuntimeCompatibility(piVersion: string, runtimeCompatibil
     osRelease: runtimeOsBaseline(),
     libc: runtimeLibcBaseline(),
     toolchain: runtimeToolchain(),
-    piVersion,
     runtimeCompatibilityId,
   };
 }
@@ -199,7 +198,6 @@ export function assertRuntimeCompatibility(expected: RuntimeCompatibility, actua
     "osRelease",
     "libc",
     "toolchain",
-    "piVersion",
     "runtimeCompatibilityId",
   ] as const;
   const mismatches = fields

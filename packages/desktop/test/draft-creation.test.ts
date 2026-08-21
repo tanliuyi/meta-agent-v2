@@ -66,7 +66,6 @@ function input() {
     projectId: "project",
     model: { provider: "provider", id: "model" },
     thinkingLevel: "off" as const,
-    extensionSetGeneration: "extensions-generation",
     text: "hello",
     images: [],
   };
@@ -136,7 +135,6 @@ function bootstrap(): SessionBootstrap {
       thinkingLevels: ["off"],
       readiness: { state: "ready" },
       hostRequests: [],
-      extensionSet: { generation: "extensions-generation", diagnostics: [], reloadRequired: false },
       extensionHost: { statuses: {}, widgets: [] },
     },
   };

@@ -80,10 +80,6 @@ export function DraftSessionScopeProvider({ children }: { children: ReactNode })
       active: true,
       commandsReady: false,
       modelsRefreshing: false,
-      clearQueue: async () => undefined,
-      branch: async () => {
-        throw new Error("新会话草稿不支持分支");
-      },
       refreshModels: async () => undefined,
       setModel: async () => undefined,
       setThinking: async () => undefined,

@@ -84,15 +84,6 @@ describe("browser IPC", () => {
       {},
       undefined,
       undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       browser as never,
     );
   });

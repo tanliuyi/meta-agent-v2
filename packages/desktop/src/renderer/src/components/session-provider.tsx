@@ -36,7 +36,7 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
   const modelsRefreshRequested = useRef(false);
   const modelsRefreshRequest = useRef<Promise<void> | null>(null);
   const [modelsRefreshing, setModelsRefreshing] = useState(false);
-  const { runtime, clearQueue: clearRuntimeQueue } = usePiSessionRuntime({ record, active, transport });
+  const { runtime } = usePiSessionRuntime({ record, active, transport });
   const requireCommandsReady = useCallback(() => {
     if (
       !active ||
@@ -47,23 +47,6 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
       throw new Error("Session is not ready for commands");
     }
   }, [active, record, transport]);
-  const clearQueue = useCallback(async () => {
-    requireCommandsReady();
-    await clearRuntimeQueue();
-  }, [clearRuntimeQueue, requireCommandsReady]);
-  const branch = useCallback(
-    async (sourceEntryId: string) => {
-      requireCommandsReady();
-      return window.desktop.sessions.branch({
-        requestId: crypto.randomUUID(),
-        projectId: record.identity.projectId,
-        threadId: record.identity.threadId,
-        sourceEntryId,
-        position: "at",
-      });
-    },
-    [record, requireCommandsReady],
-  );
   const refreshModels = useCallback(async () => {
     requireCommandsReady();
     const existing = modelsRefreshRequest.current;
@@ -120,25 +103,12 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
       active,
       commandsReady,
       modelsRefreshing,
-      clearQueue,
-      branch,
       refreshModels,
       setModel,
       setThinking,
       updateWorkbench,
     }),
-    [
-      active,
-      branch,
-      clearQueue,
-      commandsReady,
-      modelsRefreshing,
-      record,
-      refreshModels,
-      setModel,
-      setThinking,
-      updateWorkbench,
-    ],
+    [active, commandsReady, modelsRefreshing, record, refreshModels, setModel, setThinking, updateWorkbench],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>

@@ -10,8 +10,8 @@ import { execSync, spawnSync } from "node:child_process";
 import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
-import { getShellConfig } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
+import { getBashShellConfig } from "../sidecar/system-pi-settings.ts";
 
 type AuthFileData = Record<string, Credential>;
 
@@ -172,7 +172,7 @@ function executeCommand(config: string): string | undefined {
   let result: string | undefined;
   if (process.platform === "win32") {
     try {
-      const { shell, args, commandTransport } = getShellConfig();
+      const { shell, args, commandTransport } = getBashShellConfig();
       const stdin = commandTransport === "stdin";
       const execution = spawnSync(shell, stdin ? args : [...args, command], {
         encoding: "utf8",

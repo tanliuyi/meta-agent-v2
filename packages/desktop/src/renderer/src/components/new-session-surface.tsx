@@ -6,12 +6,7 @@ import { toPiImageInputs } from "../runtime/image-attachments.ts";
 import { selectProjects } from "../state/desktop-selectors.ts";
 import { dispatchDesktop } from "../state/desktop-store.ts";
 import { useDesktopStore } from "../state/desktop-store-context.tsx";
-import {
-  isStaleExtensionSetError,
-  materializeDraftSession,
-  selectDraftModel,
-  selectDraftThinkingLevel,
-} from "../state/draft-creation.ts";
+import { materializeDraftSession, selectDraftModel, selectDraftThinkingLevel } from "../state/draft-creation.ts";
 import {
   applyStoredDraftSelection,
   persistDraftSelection,
@@ -145,11 +140,6 @@ export function NewSessionSurface() {
     setConfig(next);
   }
 
-  function selectPlugins(enabledPluginIds: string[] | null) {
-    if (!config) return;
-    setConfig({ ...config, extensions: { ...config.extensions, enabledPluginIds } });
-  }
-
   async function submit() {
     if (submitInFlight.current) return;
     if (!projectId || !config?.model || config.readiness.state !== "ready") return;
@@ -166,8 +156,6 @@ export function NewSessionSurface() {
           projectId,
           model: { provider: config.model.provider, id: config.model.id },
           thinkingLevel: config.thinkingLevel,
-          extensionSetGeneration: config.extensions.extensionSetGeneration,
-          ...(config.extensions.enabledPluginIds ? { enabledPluginIds: config.extensions.enabledPluginIds } : {}),
           text: state.text,
           images,
         },
@@ -187,11 +175,6 @@ export function NewSessionSurface() {
       await draft.clear(nextProjectId, target);
     } catch (reason) {
       setPhase("editing");
-      if (isStaleExtensionSetError(reason)) {
-        createRequestIds.delete(projectId);
-        setConfig(null);
-        setConfigProjectId(null);
-      }
       throw reason;
     } finally {
       submitInFlight.current = false;
@@ -219,11 +202,9 @@ export function NewSessionSurface() {
         configLoading={config === null}
         phase={phase === "materializing" ? "materializing" : "editing"}
         error={loadError}
-        diagnostics={config?.extensions.diagnostics}
         onProjectChange={selectProject}
         onModelChange={selectModel}
         onThinkingChange={selectThinking}
-        onPluginsChange={selectPlugins}
         onSubmit={submit}
       />
     </NewSessionShell>

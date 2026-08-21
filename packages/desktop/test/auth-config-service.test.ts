@@ -86,8 +86,8 @@ describe("AuthConfigService", () => {
     const anthropic = snapshot.knownProviders.find((kp) => kp.id === "anthropic");
     expect(anthropic).toBeDefined();
     expect(anthropic!.displayName).toBeTruthy();
-    // OAuth name is only available when ModelRuntime is injected;
-    // this tests metadata-only discovery (env keys, display name).
+    // OAuth metadata is available when a pi-ai model registry is injected;
+    // this service also supports metadata-only discovery from provider definitions.
     if (anthropic!.oauth) {
       expect(anthropic!.oauth?.name).toBeTruthy();
     } else {
@@ -96,12 +96,9 @@ describe("AuthConfigService", () => {
     }
   });
 
-  test("refreshes ModelRuntime before provider discovery and OAuth login", async () => {
+  test("uses the pi-ai registry for provider discovery and OAuth login", async () => {
     const calls: string[] = [];
-    const modelRuntime = {
-      refresh: async () => {
-        calls.push("refresh");
-      },
+    const models = {
       getProviders: () => {
         calls.push("providers");
         return [];
@@ -110,17 +107,17 @@ describe("AuthConfigService", () => {
         calls.push("login");
       },
     };
-    service = new AuthConfigService(directory, { modelRuntime: modelRuntime as never });
+    service = new AuthConfigService(directory, { models: models as never });
 
     await service.getConfig();
-    expect(calls).toEqual(["refresh", "providers"]);
+    expect(calls).toEqual(["providers"]);
 
     calls.length = 0;
     await service.loginOauth("anthropic", {
       prompt: async () => "",
       notify: () => undefined,
     });
-    expect(calls).toEqual(["refresh", "login", "refresh", "providers"]);
+    expect(calls).toEqual(["login", "providers"]);
   });
 
   test("saves API key credentials and returns new snapshot", async () => {

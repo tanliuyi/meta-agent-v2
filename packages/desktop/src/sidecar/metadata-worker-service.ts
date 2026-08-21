@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
-import { loadDraftSessionConfig } from "../main/pi/session-configuration.ts";
 import type {
   ColdOperationLease,
   MetadataSidecarCommand,
@@ -12,6 +9,7 @@ import type {
 } from "../shared/sidecar-contracts.ts";
 import { SessionMetadataIndex, type SessionRemovalPlan } from "./session-metadata-index.ts";
 import type { SidecarService } from "./sidecar-host.ts";
+import { loadSystemPiDraftConfig } from "./system-pi-draft-config.ts";
 
 const CREATION_RESERVATION_GRACE_MS = 30_000;
 
@@ -46,10 +44,8 @@ export class MetadataWorkerService implements SidecarService {
         return this.index.list(command.projectId, command.cwd);
       case "listSessionsWithPaths":
         return this.index.listWithPaths(command.projectId, command.cwd);
-      case "getDraftConfig": {
-        const extensionSet = await validateResolvedExtensionSet(command.projectId, command.extensionSet);
-        return loadDraftSessionConfig(command.cwd, undefined, this.agentDir, extensionSet, command.allEntries);
-      }
+      case "getDraftConfig":
+        return loadSystemPiDraftConfig(command.cwd, this.agentDir);
       case "resolveSession":
         return this.index.resolve(command.projectId, command.cwd, command.threadId);
       case "upsertSession":
@@ -62,7 +58,7 @@ export class MetadataWorkerService implements SidecarService {
         assertColdLease(command.projectId, command.threadId, "rename", command.lease, this.consumedColdLeaseNonces);
         const session = await this.index.resolve(command.projectId, command.cwd, command.threadId);
         const title = command.title.trim();
-        SessionManager.open(session.path, undefined, command.cwd).appendSessionInfo(title);
+        await appendSessionInfo(session.path, title);
         this.index.rename(command.projectId, command.cwd, command.threadId, title);
         return null;
       }
@@ -275,6 +271,32 @@ async function stageParentRewrite(
   if (promoteToRoot) header.promotedRoot = true;
   const remainder = newline === -1 ? "" : content.slice(newline);
   await writeFile(rewrite.temporaryPath, `${JSON.stringify(header)}${remainder}`, { flag: "wx" });
+}
+
+async function appendSessionInfo(sessionFile: string, name: string): Promise<void> {
+  const content = await readFile(sessionFile, "utf8");
+  let parentId: string | null = null;
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (isRecord(value) && value.type !== "session" && typeof value.id === "string") parentId = value.id;
+  }
+  await appendFile(
+    sessionFile,
+    `${JSON.stringify({
+      type: "session_info",
+      id: randomUUID().slice(0, 8),
+      parentId,
+      timestamp: new Date().toISOString(),
+      name,
+    })}\n`,
+    "utf8",
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

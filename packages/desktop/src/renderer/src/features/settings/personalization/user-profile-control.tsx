@@ -2,15 +2,13 @@ import { userAvatarInitial } from "@renderer/shared/lib/user-avatar-initial";
 import { Button } from "@renderer/shared/ui/button";
 import { Input } from "@renderer/shared/ui/input";
 import { useThinkingVisibility } from "@renderer/state/thinking-visibility";
-import Database from "lucide-react/dist/esm/icons/database.mjs";
 import ImagePlus from "lucide-react/dist/esm/icons/image-plus.mjs";
 import Save from "lucide-react/dist/esm/icons/save.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useEffect, useState } from "react";
 import { USER_NAME_MAX_LENGTH, userAvatarPathToUrl } from "../../../../../shared/settings-config-contracts.ts";
-import { createUserNameMemoryMutation } from "./user-profile-memory.ts";
 
-type ProfileStatus = "idle" | "saving" | "saved" | "syncing" | "synced" | "error";
+type ProfileStatus = "idle" | "saving" | "saved" | "error";
 
 const USER_NAME_LABEL_ID = "user-name-label";
 
@@ -27,7 +25,7 @@ export function UserProfileControl() {
 
   const normalizedName = draftName.trim();
   const validName = normalizedName.length > 0 && normalizedName.length <= USER_NAME_MAX_LENGTH;
-  const busy = status === "saving" || status === "syncing";
+  const busy = status === "saving";
 
   const saveProfile = async (avatarPath = userAvatarPath): Promise<boolean> => {
     if (!validName) {
@@ -43,20 +41,6 @@ export function UserProfileControl() {
   const chooseAvatar = async () => {
     const path = await window.desktop.settings.chooseUserAvatar();
     if (path) await saveProfile(path);
-  };
-
-  const syncUserName = async () => {
-    if (!(await saveProfile())) return;
-    setStatus("syncing");
-    try {
-      const snapshot = await window.desktop.memorySettings.getSnapshot();
-      const result = await window.desktop.memorySettings.mutateEntry(
-        createUserNameMemoryMutation(snapshot, normalizedName),
-      );
-      setStatus(result.success ? "synced" : "error");
-    } catch {
-      setStatus("error");
-    }
   };
 
   return (
@@ -131,20 +115,6 @@ export function UserProfileControl() {
           </Button>
         </div>
       </div>
-      <div className="settings-row">
-        <div className="settings-row-text">
-          <span>长期记忆</span>
-          <p className="settings-row-description">将用户名同步到用户资料，供后续对话使用</p>
-        </div>
-        <Button
-          size="sm"
-          disabled={!canUpdateMessageSettings || !validName || busy}
-          onClick={() => void syncUserName()}
-        >
-          <Database />
-          {syncButtonText(status)}
-        </Button>
-      </div>
       <p className="user-profile-status" aria-live="polite" data-status={status}>
         {statusText(status)}
       </p>
@@ -155,14 +125,6 @@ export function UserProfileControl() {
 function statusText(status: ProfileStatus): string {
   if (status === "saving") return "正在保存";
   if (status === "saved") return "已保存";
-  if (status === "syncing") return "正在同步";
-  if (status === "synced") return "已同步到用户资料";
   if (status === "error") return "操作失败，请检查用户名或稍后重试";
   return "";
-}
-
-function syncButtonText(status: ProfileStatus): string {
-  if (status === "syncing") return "正在同步";
-  if (status === "synced") return "已同步";
-  return "同步到用户资料";
 }

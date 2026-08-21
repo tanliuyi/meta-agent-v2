@@ -1,8 +1,6 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { InMemoryModelsStore } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileCredentialStore } from "../src/main/models/credential-store.ts";
 
@@ -13,25 +11,16 @@ afterEach(async () => {
 });
 
 describe("FileCredentialStore", () => {
-  it("makes an external auth.json write visible to an existing ModelRuntime after refresh", async () => {
+  it("observes external auth.json writes without an in-process runtime cache", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "desktop-credentials-"));
     tempDirs.push(agentDir);
     const authPath = join(agentDir, "auth.json");
     const credentials = new FileCredentialStore(authPath);
-    const runtime = await ModelRuntime.create({
-      credentials,
-      modelsPath: null,
-      modelsStore: new InMemoryModelsStore(),
-      allowModelNetwork: false,
-    });
 
-    expect(await runtime.getAvailable("anthropic")).toEqual([]);
+    await expect(credentials.read("anthropic")).resolves.toBeUndefined();
     await writeFile(authPath, `${JSON.stringify({ anthropic: { type: "api_key", key: "external-key" } }, null, 2)}\n`);
 
-    await runtime.refresh({ allowNetwork: false });
-
-    expect((await runtime.getAvailable("anthropic")).length).toBeGreaterThan(0);
-    expect(runtime.hasConfiguredAuth("anthropic")).toBe(true);
+    await expect(credentials.read("anthropic")).resolves.toEqual({ type: "api_key", key: "external-key" });
   });
 
   it("resolves environment templates, interpolation, and escapes like Pi auth storage", async () => {

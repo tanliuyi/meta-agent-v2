@@ -1,118 +1,21 @@
-/**
- * Desktop built-in provider registry.
- *
- * Allows the desktop to register providers without modifying packages/ai.
- * Registration happens at module load via top-level side effects.
- *
- * Data flow:
- *   1. DesktopBuiltinProviderRegistry.register() stores provider configs
- *   2. getExtensionFactories() → InlineExtension[] for ResourceLoader
- *   3. getKnownProviderInfos() → AuthProviderInfo[] for settings UI
- *   4. Extension factories call api.registerProvider() → ModelRegistry
- */
+/** Desktop-owned provider metadata used to edit the system Pi configuration files. */
 
-import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { AuthProviderInfo } from "../../shared/auth-config-contracts.ts";
-import {
-  DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-  type DesktopExtensionDefinition,
-} from "../../shared/desktop-extension-contracts.ts";
 import type {
   ProviderBuiltInModelMetadata,
   ProviderConnectionDefaults,
 } from "../../shared/providers-config-contracts.ts";
 import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
 import type { ModelsModelDefinition } from "../models/models-config-schema.ts";
-import piAutoTitleExtension from "./extensions/pi-auto-title/index.ts";
-import piBrowserExtension from "./extensions/pi-browser/index.ts";
-import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
-import piRewindExtension from "./extensions/pi-rewind/src/index.ts";
-import subagentsExtension from "./extensions/pi-subagents/index.ts";
-import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 
 interface DesktopProviderDefinition {
   displayName: string;
   envKeys: string[];
   defaultConfig: ProviderConnectionDefaults;
   models: ModelsModelDefinition[];
-  extensionFactory: InlineExtension;
 }
 
 const providers = new Map<string, DesktopProviderDefinition>();
-const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory: InlineExtension }> = [
-  {
-    definition: {
-      id: "pi-hermes-memory",
-      displayName: "Hermes Memory",
-      source: "builtin",
-      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      capabilities: [
-        "events.subscribe",
-        "tools.register",
-        "commands.register",
-        "messages.enqueue",
-        "session.read",
-        "session.compact",
-        "ui.notify",
-        "ui.dialog",
-      ],
-    },
-    factory: { name: "desktop:pi-hermes-memory", factory: hermesMemoryExtension },
-  },
-  {
-    definition: {
-      id: "pi-rewind",
-      displayName: "Checkpoint History",
-      source: "builtin",
-      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      capabilities: ["events.subscribe", "messages.custom", "session.read", "ui.notify"],
-    },
-    factory: { name: "desktop:pi-rewind", factory: piRewindExtension },
-  },
-  {
-    definition: {
-      id: "pi-subagents",
-      displayName: "Subagents",
-      source: "builtin",
-      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      capabilities: [
-        "events.subscribe",
-        "tools.register",
-        "commands.register",
-        "messages.enqueue",
-        "messages.custom",
-        "session.read",
-        "session.abort",
-        "session.compact",
-        "session.reload",
-        "ui.notify",
-        "ui.dialog",
-        "ui.status",
-      ],
-    },
-    factory: { name: "desktop:pi-subagents", factory: subagentsExtension },
-  },
-  {
-    definition: {
-      id: "pi-auto-title",
-      displayName: "自动标题",
-      source: "builtin",
-      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      capabilities: ["events.subscribe", "session.read"],
-    },
-    factory: { name: "desktop:pi-auto-title", factory: piAutoTitleExtension },
-  },
-  {
-    definition: {
-      id: "pi-browser",
-      displayName: "内置浏览器",
-      source: "builtin",
-      hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      capabilities: ["tools.register", "events.subscribe", "session.read", "ui.notify"],
-    },
-    factory: { name: "desktop:pi-browser", factory: piBrowserExtension },
-  },
-];
 const coreProviderIds = new Set(getModelsConfigMetadata().builtInProviders.map((provider) => provider.id));
 
 export const DesktopBuiltinProviderRegistry = {
@@ -120,54 +23,6 @@ export const DesktopBuiltinProviderRegistry = {
   register(id: string, def: DesktopProviderDefinition): void {
     if (coreProviderIds.has(id) || providers.has(id)) return;
     providers.set(id, def);
-  },
-
-  /** Generate inline extension factories for a Desktop thread runtime. */
-  getExtensionFactories(options: { subagentRuntime?: SubagentRuntime } = {}): InlineExtension[] {
-    return [
-      ...[...providers.values()].map((provider) => provider.extensionFactory),
-      ...builtinExtensions.map(({ definition, factory }) =>
-        definition.id === "pi-subagents" && options.subagentRuntime
-          ? {
-              name: typeof factory === "function" ? `desktop:${definition.id}` : factory.name,
-              factory: (api: ExtensionAPI) => subagentsExtension(api, options.subagentRuntime),
-            }
-          : factory,
-      ),
-    ];
-  },
-
-  /** Generate the controlled built-ins allowed inside a programmatic subagent worker. */
-  getSubagentExtensionFactories(profile: readonly string[]): InlineExtension[] {
-    const enabled = new Set(profile);
-    return [
-      ...(enabled.has("provider") ? [...providers.values()].map((provider) => provider.extensionFactory) : []),
-      ...(enabled.has("memory")
-        ? [
-            {
-              name: "desktop:pi-hermes-memory",
-              factory: (api: ExtensionAPI) => hermesMemoryExtension(api, { programmaticSubagent: true }),
-            },
-          ]
-        : []),
-    ];
-  },
-
-  /** Generate stable built-in extension metadata without exposing executable factories across IPC. */
-  getExtensionDefinitions(): DesktopExtensionDefinition[] {
-    return [
-      ...[...providers].map(([id, provider]) => ({
-        id: `desktop-provider:${id}`,
-        displayName: provider.displayName,
-        source: "builtin" as const,
-        hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-        capabilities: ["providers.register" as const],
-      })),
-      ...builtinExtensions.map(({ definition }) => ({
-        ...definition,
-        capabilities: [...definition.capabilities],
-      })),
-    ];
   },
 
   /** Generate known provider info for the auth settings UI. */
@@ -305,20 +160,4 @@ DesktopBuiltinProviderRegistry.register(META_AGENT_ID, {
     authHeader: true,
   },
   models: META_AGENT_MODELS,
-  extensionFactory: {
-    name: `desktop:${META_AGENT_ID}`,
-    factory: (api) => {
-      api.registerProvider(META_AGENT_ID, {
-        name: META_AGENT_DISPLAY_NAME,
-        api: "openai-responses",
-        baseUrl: META_AGENT_BASE_URL,
-        // validateProviderConfig requires apiKey or oauth when models are present.
-        // The actual key comes from auth.json (Settings UI); this env var reference
-        // satisfies validation without requiring the env var itself.
-        apiKey: `$${META_AGENT_ENV_KEYS[0]}`,
-        authHeader: true,
-        models: META_AGENT_MODELS,
-      });
-    },
-  },
 });

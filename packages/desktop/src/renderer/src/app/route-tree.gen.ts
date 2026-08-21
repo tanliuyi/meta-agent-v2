@@ -13,23 +13,15 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
-import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsAboutRouteImport } from './routes/settings.about'
 import { Route as SettingsArchivesRouteImport } from './routes/settings.archives'
 import { Route as SettingsAuthRouteImport } from './routes/settings.auth'
-import { Route as SettingsAutoTitleRouteImport } from './routes/settings.auto-title'
 import { Route as SettingsBrowserRouteImport } from './routes/settings.browser'
 import { Route as SettingsDependenciesRouteImport } from './routes/settings.dependencies'
-import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsKeyboardRouteImport } from './routes/settings.keyboard'
-import { Route as SettingsMemoryRouteImport } from './routes/settings.memory'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsPersonalizationRouteImport } from './routes/settings.personalization'
-import { Route as SettingsSubagentsRouteImport } from './routes/settings.subagents'
-import { Route as ChatPluginsIndexRouteImport } from './routes/_chat.plugins.index'
-import { Route as ChatPluginsPluginIdRouteImport } from './routes/_chat.plugins.$pluginId'
-import { Route as ChatPluginsLocalPluginIdRouteImport } from './routes/_chat.plugins.local.$pluginId'
 import { Route as ChatProjectsProjectIdSessionThreadIdRouteImport } from './routes/_chat.projects.$projectId.session.$threadId'
 
 const ChatRoute = ChatRouteImport.update({
@@ -49,11 +41,6 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
 const ChatNewRoute = ChatNewRouteImport.update({
   id: '/new',
   path: '/new',
-  getParentRoute: () => ChatRoute,
-} as any)
-const ChatPluginsRoute = ChatPluginsRouteImport.update({
-  id: '/plugins',
-  path: '/plugins',
   getParentRoute: () => ChatRoute,
 } as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
@@ -76,11 +63,6 @@ const SettingsAuthRoute = SettingsAuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => SettingsRoute,
 } as any)
-const SettingsAutoTitleRoute = SettingsAutoTitleRouteImport.update({
-  id: '/auto-title',
-  path: '/auto-title',
-  getParentRoute: () => SettingsRoute,
-} as any)
 const SettingsBrowserRoute = SettingsBrowserRouteImport.update({
   id: '/browser',
   path: '/browser',
@@ -91,19 +73,9 @@ const SettingsDependenciesRoute = SettingsDependenciesRouteImport.update({
   path: '/dependencies',
   getParentRoute: () => SettingsRoute,
 } as any)
-const SettingsExtensionsRoute = SettingsExtensionsRouteImport.update({
-  id: '/extensions',
-  path: '/extensions',
-  getParentRoute: () => SettingsRoute,
-} as any)
 const SettingsKeyboardRoute = SettingsKeyboardRouteImport.update({
   id: '/keyboard',
   path: '/keyboard',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsMemoryRoute = SettingsMemoryRouteImport.update({
-  id: '/memory',
-  path: '/memory',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsModelsRoute = SettingsModelsRouteImport.update({
@@ -116,27 +88,6 @@ const SettingsPersonalizationRoute = SettingsPersonalizationRouteImport.update({
   path: '/personalization',
   getParentRoute: () => SettingsRoute,
 } as any)
-const SettingsSubagentsRoute = SettingsSubagentsRouteImport.update({
-  id: '/subagents',
-  path: '/subagents',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const ChatPluginsIndexRoute = ChatPluginsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ChatPluginsRoute,
-} as any)
-const ChatPluginsPluginIdRoute = ChatPluginsPluginIdRouteImport.update({
-  id: '/$pluginId',
-  path: '/$pluginId',
-  getParentRoute: () => ChatPluginsRoute,
-} as any)
-const ChatPluginsLocalPluginIdRoute =
-  ChatPluginsLocalPluginIdRouteImport.update({
-    id: '/local/$pluginId',
-    path: '/local/$pluginId',
-    getParentRoute: () => ChatPluginsRoute,
-  } as any)
 const ChatProjectsProjectIdSessionThreadIdRoute =
   ChatProjectsProjectIdSessionThreadIdRouteImport.update({
     id: '/projects/$projectId/session/$threadId',
@@ -148,23 +99,15 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsRouteWithChildren
   '/new': typeof ChatNewRoute
-  '/plugins': typeof ChatPluginsRouteWithChildren
   '/settings/about': typeof SettingsAboutRoute
   '/settings/archives': typeof SettingsArchivesRoute
   '/settings/auth': typeof SettingsAuthRoute
-  '/settings/auto-title': typeof SettingsAutoTitleRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
-  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/keyboard': typeof SettingsKeyboardRoute
-  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
-  '/settings/subagents': typeof SettingsSubagentsRoute
   '/settings/': typeof SettingsIndexRoute
-  '/plugins/$pluginId': typeof ChatPluginsPluginIdRoute
-  '/plugins/': typeof ChatPluginsIndexRoute
-  '/plugins/local/$pluginId': typeof ChatPluginsLocalPluginIdRoute
   '/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRoutesByTo {
@@ -172,20 +115,13 @@ export interface FileRoutesByTo {
   '/settings/about': typeof SettingsAboutRoute
   '/settings/archives': typeof SettingsArchivesRoute
   '/settings/auth': typeof SettingsAuthRoute
-  '/settings/auto-title': typeof SettingsAutoTitleRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
-  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/keyboard': typeof SettingsKeyboardRoute
-  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
-  '/settings/subagents': typeof SettingsSubagentsRoute
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsIndexRoute
-  '/plugins/$pluginId': typeof ChatPluginsPluginIdRoute
-  '/plugins': typeof ChatPluginsIndexRoute
-  '/plugins/local/$pluginId': typeof ChatPluginsLocalPluginIdRoute
   '/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRoutesById {
@@ -193,24 +129,16 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/new': typeof ChatNewRoute
-  '/_chat/plugins': typeof ChatPluginsRouteWithChildren
   '/settings/about': typeof SettingsAboutRoute
   '/settings/archives': typeof SettingsArchivesRoute
   '/settings/auth': typeof SettingsAuthRoute
-  '/settings/auto-title': typeof SettingsAutoTitleRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/dependencies': typeof SettingsDependenciesRoute
-  '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/keyboard': typeof SettingsKeyboardRoute
-  '/settings/memory': typeof SettingsMemoryRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/personalization': typeof SettingsPersonalizationRoute
-  '/settings/subagents': typeof SettingsSubagentsRoute
   '/_chat/': typeof ChatIndexRoute
   '/settings/': typeof SettingsIndexRoute
-  '/_chat/plugins/$pluginId': typeof ChatPluginsPluginIdRoute
-  '/_chat/plugins/': typeof ChatPluginsIndexRoute
-  '/_chat/plugins/local/$pluginId': typeof ChatPluginsLocalPluginIdRoute
   '/_chat/projects/$projectId/session/$threadId': typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 export interface FileRouteTypes {
@@ -219,23 +147,15 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/new'
-    | '/plugins'
     | '/settings/about'
     | '/settings/archives'
     | '/settings/auth'
-    | '/settings/auto-title'
     | '/settings/browser'
     | '/settings/dependencies'
-    | '/settings/extensions'
     | '/settings/keyboard'
-    | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
-    | '/settings/subagents'
     | '/settings/'
-    | '/plugins/$pluginId'
-    | '/plugins/'
-    | '/plugins/local/$pluginId'
     | '/projects/$projectId/session/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -243,44 +163,29 @@ export interface FileRouteTypes {
     | '/settings/about'
     | '/settings/archives'
     | '/settings/auth'
-    | '/settings/auto-title'
     | '/settings/browser'
     | '/settings/dependencies'
-    | '/settings/extensions'
     | '/settings/keyboard'
-    | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
-    | '/settings/subagents'
     | '/'
     | '/settings'
-    | '/plugins/$pluginId'
-    | '/plugins'
-    | '/plugins/local/$pluginId'
     | '/projects/$projectId/session/$threadId'
   id:
     | '__root__'
     | '/_chat'
     | '/settings'
     | '/_chat/new'
-    | '/_chat/plugins'
     | '/settings/about'
     | '/settings/archives'
     | '/settings/auth'
-    | '/settings/auto-title'
     | '/settings/browser'
     | '/settings/dependencies'
-    | '/settings/extensions'
     | '/settings/keyboard'
-    | '/settings/memory'
     | '/settings/models'
     | '/settings/personalization'
-    | '/settings/subagents'
     | '/_chat/'
     | '/settings/'
-    | '/_chat/plugins/$pluginId'
-    | '/_chat/plugins/'
-    | '/_chat/plugins/local/$pluginId'
     | '/_chat/projects/$projectId/session/$threadId'
   fileRoutesById: FileRoutesById
 }
@@ -319,13 +224,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatNewRouteImport
       parentRoute: typeof ChatRoute
     }
-    '/_chat/plugins': {
-      id: '/_chat/plugins'
-      path: '/plugins'
-      fullPath: '/plugins'
-      preLoaderRoute: typeof ChatPluginsRouteImport
-      parentRoute: typeof ChatRoute
-    }
     '/settings/': {
       id: '/settings/'
       path: '/'
@@ -354,13 +252,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsAuthRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/settings/auto-title': {
-      id: '/settings/auto-title'
-      path: '/auto-title'
-      fullPath: '/settings/auto-title'
-      preLoaderRoute: typeof SettingsAutoTitleRouteImport
-      parentRoute: typeof SettingsRoute
-    }
     '/settings/browser': {
       id: '/settings/browser'
       path: '/browser'
@@ -375,25 +266,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDependenciesRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/settings/extensions': {
-      id: '/settings/extensions'
-      path: '/extensions'
-      fullPath: '/settings/extensions'
-      preLoaderRoute: typeof SettingsExtensionsRouteImport
-      parentRoute: typeof SettingsRoute
-    }
     '/settings/keyboard': {
       id: '/settings/keyboard'
       path: '/keyboard'
       fullPath: '/settings/keyboard'
       preLoaderRoute: typeof SettingsKeyboardRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/memory': {
-      id: '/settings/memory'
-      path: '/memory'
-      fullPath: '/settings/memory'
-      preLoaderRoute: typeof SettingsMemoryRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/models': {
@@ -410,34 +287,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsPersonalizationRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/settings/subagents': {
-      id: '/settings/subagents'
-      path: '/subagents'
-      fullPath: '/settings/subagents'
-      preLoaderRoute: typeof SettingsSubagentsRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/_chat/plugins/': {
-      id: '/_chat/plugins/'
-      path: '/'
-      fullPath: '/plugins/'
-      preLoaderRoute: typeof ChatPluginsIndexRouteImport
-      parentRoute: typeof ChatPluginsRoute
-    }
-    '/_chat/plugins/$pluginId': {
-      id: '/_chat/plugins/$pluginId'
-      path: '/$pluginId'
-      fullPath: '/plugins/$pluginId'
-      preLoaderRoute: typeof ChatPluginsPluginIdRouteImport
-      parentRoute: typeof ChatPluginsRoute
-    }
-    '/_chat/plugins/local/$pluginId': {
-      id: '/_chat/plugins/local/$pluginId'
-      path: '/local/$pluginId'
-      fullPath: '/plugins/local/$pluginId'
-      preLoaderRoute: typeof ChatPluginsLocalPluginIdRouteImport
-      parentRoute: typeof ChatPluginsRoute
-    }
     '/_chat/projects/$projectId/session/$threadId': {
       id: '/_chat/projects/$projectId/session/$threadId'
       path: '/projects/$projectId/session/$threadId'
@@ -448,32 +297,14 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface ChatPluginsRouteChildren {
-  ChatPluginsPluginIdRoute: typeof ChatPluginsPluginIdRoute
-  ChatPluginsIndexRoute: typeof ChatPluginsIndexRoute
-  ChatPluginsLocalPluginIdRoute: typeof ChatPluginsLocalPluginIdRoute
-}
-
-const ChatPluginsRouteChildren: ChatPluginsRouteChildren = {
-  ChatPluginsPluginIdRoute: ChatPluginsPluginIdRoute,
-  ChatPluginsIndexRoute: ChatPluginsIndexRoute,
-  ChatPluginsLocalPluginIdRoute: ChatPluginsLocalPluginIdRoute,
-}
-
-const ChatPluginsRouteWithChildren = ChatPluginsRoute._addFileChildren(
-  ChatPluginsRouteChildren,
-)
-
 interface ChatRouteChildren {
   ChatNewRoute: typeof ChatNewRoute
-  ChatPluginsRoute: typeof ChatPluginsRouteWithChildren
   ChatIndexRoute: typeof ChatIndexRoute
   ChatProjectsProjectIdSessionThreadIdRoute: typeof ChatProjectsProjectIdSessionThreadIdRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatNewRoute: ChatNewRoute,
-  ChatPluginsRoute: ChatPluginsRouteWithChildren,
   ChatIndexRoute: ChatIndexRoute,
   ChatProjectsProjectIdSessionThreadIdRoute:
     ChatProjectsProjectIdSessionThreadIdRoute,
@@ -485,15 +316,11 @@ interface SettingsRouteChildren {
   SettingsAboutRoute: typeof SettingsAboutRoute
   SettingsArchivesRoute: typeof SettingsArchivesRoute
   SettingsAuthRoute: typeof SettingsAuthRoute
-  SettingsAutoTitleRoute: typeof SettingsAutoTitleRoute
   SettingsBrowserRoute: typeof SettingsBrowserRoute
   SettingsDependenciesRoute: typeof SettingsDependenciesRoute
-  SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsKeyboardRoute: typeof SettingsKeyboardRoute
-  SettingsMemoryRoute: typeof SettingsMemoryRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsPersonalizationRoute: typeof SettingsPersonalizationRoute
-  SettingsSubagentsRoute: typeof SettingsSubagentsRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
 
@@ -501,15 +328,11 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAboutRoute: SettingsAboutRoute,
   SettingsArchivesRoute: SettingsArchivesRoute,
   SettingsAuthRoute: SettingsAuthRoute,
-  SettingsAutoTitleRoute: SettingsAutoTitleRoute,
   SettingsBrowserRoute: SettingsBrowserRoute,
   SettingsDependenciesRoute: SettingsDependenciesRoute,
-  SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsKeyboardRoute: SettingsKeyboardRoute,
-  SettingsMemoryRoute: SettingsMemoryRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsPersonalizationRoute: SettingsPersonalizationRoute,
-  SettingsSubagentsRoute: SettingsSubagentsRoute,
   SettingsIndexRoute: SettingsIndexRoute,
 }
 
