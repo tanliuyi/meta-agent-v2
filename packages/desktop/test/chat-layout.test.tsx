@@ -1,7 +1,7 @@
 import { Outlet } from "@tanstack/react-router";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
-import { ChatLayout } from "../src/renderer/src/app/routes/_chat.tsx";
+import { ChatLayout } from "../src/renderer/src/app/chat-layout.tsx";
 
 describe("ChatLayout", () => {
   it("在 leaf route outlet 外保留唯一 workspace 容器", () => {

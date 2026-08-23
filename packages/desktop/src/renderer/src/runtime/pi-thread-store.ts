@@ -1,4 +1,4 @@
-import { parseStreamingJson } from "@earendil-works/pi-ai";
+import { parse as parsePartialJson } from "partial-json";
 import {
   type JsonValue,
   type PiAssistantMessage,
@@ -110,6 +110,18 @@ export class PiThreadStoreError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PiThreadStoreError";
+  }
+}
+
+function parseStreamingJson(partialJson: string): unknown {
+  try {
+    return JSON.parse(partialJson);
+  } catch {
+    try {
+      return parsePartialJson(partialJson) ?? {};
+    } catch {
+      return {};
+    }
   }
 }
 

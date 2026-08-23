@@ -27,7 +27,7 @@ import {
   resolveDesktopSessionDirectory,
 } from "./desktop-session-directory.ts";
 
-const INDEX_VERSION = 9;
+const INDEX_VERSION = 10;
 const INDEX_FILE_NAME = "session-metadata-index.json";
 /** 会话文件尾部读取块大小与上限（避免全量读取只为最后一条消息）。 */
 const LAST_MESSAGE_PREVIEW_TAIL_BYTES = 256 * 1024;
@@ -837,11 +837,20 @@ async function listSessionInfos(
   return {
     sessions: valid
       .map(({ session }) => session)
+      .filter((session) => isDiscoverableSession(snapshot.directory, session))
       .filter((session) => !filterCwd || normalizePath(session.cwd) === resolvedCwd)
       .sort((left, right) => right.modified.getTime() - left.modified.getTime()),
     sources: valid.map(({ source }) => source),
     unchangedPaths,
   };
+}
+
+function isDiscoverableSession(directory: string, session: SessionInfo): boolean {
+  return (
+    dirname(resolve(session.path)) === resolve(directory) ||
+    session.parentSessionPath !== undefined ||
+    session.promotedRoot
+  );
 }
 
 function indexedSessionSource(info: SessionInfo, fingerprint: string): IndexedSessionSource {

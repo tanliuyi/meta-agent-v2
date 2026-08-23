@@ -51,23 +51,31 @@ describe("SessionMetadataIndex", () => {
     ]);
   });
 
-  it("groups sessions using the public parentSession header", async () => {
+  it("groups declared children and hides undeclared nested sessions", async () => {
     const directory = projectSessionDirectory(agentDir, cwd);
+    const nestedDirectory = join(directory, "workers", "run-0");
     const parentSession = writeSession(directory, {
       id: "parent",
       cwd,
       messages: [{ role: "user", text: "Parent prompt", timestamp: 2 }],
     });
-    writeSession(directory, {
+    writeSession(nestedDirectory, {
       id: "child",
       cwd,
       parentSession,
       messages: [{ role: "user", text: "Child prompt", timestamp: 3 }],
     });
+    writeSession(nestedDirectory, {
+      id: "internal",
+      cwd,
+      messages: [{ role: "user", text: "Internal prompt", timestamp: 4 }],
+    });
 
-    await expect(new SessionMetadataIndex(userDataDir, agentDir).list("project", cwd)).resolves.toContainEqual(
+    const threads = await new SessionMetadataIndex(userDataDir, agentDir).list("project", cwd);
+    expect(threads).toContainEqual(
       expect.objectContaining({ id: "child", parentThreadId: "parent", origin: "branch" }),
     );
+    expect(threads).not.toContainEqual(expect.objectContaining({ id: "internal" }));
   });
 
   it("uses the fixed general-workspace directory and filters sessions by cwd", async () => {

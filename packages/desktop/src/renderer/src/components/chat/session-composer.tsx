@@ -4,6 +4,7 @@ import { ConfirmDialog } from "../../shared/ui/confirm-dialog.tsx";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionControlSelector, useSessionScope, useSessionTimelineSelector } from "../session-context.tsx";
 import { Composer } from "./composer/composer.tsx";
+import { resolveComposerContextUsage, selectLiveContextTokens } from "./composer/composer-context-model.ts";
 import { ReadOnlySessionStatus } from "./session-read-only-status.tsx";
 
 /** Reads Composer control data from the owning cached session record. */
@@ -17,7 +18,9 @@ export function SessionComposer() {
   const model = useSessionControlSelector((control) => control?.model);
   const models = useSessionControlSelector((control) => control?.models ?? EMPTY_MODELS);
   const commands = useSessionControlSelector((control) => control?.commands ?? EMPTY_COMMANDS);
-  const context = useSessionControlSelector((control) => control?.context);
+  const authoritativeContext = useSessionControlSelector((control) => control?.context);
+  const liveContextTokens = useSessionTimelineSelector(selectLiveContextTokens);
+  const context = resolveComposerContextUsage(authoritativeContext, liveContextTokens);
   const thinkingLevel = useSessionControlSelector((control) => control?.thinkingLevel ?? "off");
   const thinkingLevels = useSessionControlSelector((control) => control?.thinkingLevels ?? EMPTY_THINKING_LEVELS);
   const readiness = useSessionControlSelector((control) => control?.readiness);
