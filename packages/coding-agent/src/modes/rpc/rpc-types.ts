@@ -84,8 +84,6 @@ export interface RpcSlashCommand {
 	description?: string;
 	/** What kind of command this is */
 	source: "extension" | "prompt" | "skill";
-	/** Whether the command accepts trailing argument text. */
-	acceptsArguments?: boolean;
 	/** Source metadata for the owning resource */
 	sourceInfo: SourceInfo;
 }

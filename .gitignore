@@ -47,7 +47,6 @@ plans/
 .pi/hf-sessions-backup/
 collect.sh
 
-
 .pi-subagents/
 .pi/subagents/
 nul

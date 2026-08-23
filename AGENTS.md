@@ -5,6 +5,19 @@
 - Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason. Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+# Project Scope And Upstream Boundary
+
+- This repository is a fork of Pi, but this project develops the Pi desktop application only. The primary and ongoing product goal is complete integration with the latest supported Pi RPC protocol.
+- Treat all upstream Pi packages as read-only. Never modify files under `packages/agent`, `packages/ai`, `packages/coding-agent`, `packages/tui`, or any other upstream Pi package, including their source, tests, examples, generated files, package metadata, changelogs, shrinkwraps, and install locks.
+- Use the upstream Pi packages as primary read-only implementation context. Read and search their source, public and internal types, tests, examples, documentation, changelogs, and generated artifacts whenever needed to understand actual Pi behavior and RPC semantics. Reading or referencing them never authorizes editing, staging, or committing them.
+- Product code changes are limited to `packages/desktop/**`. `AGENTS.md` may be updated for repository instructions. The root `package-lock.json` may change only when required by an intentional `packages/desktop/package.json` dependency change.
+- Do not stage or commit pre-existing or concurrent changes outside the allowed Desktop scope. If such changes are present, leave them untouched.
+- Integrate Pi through its published public APIs, public types, documented RPC wire protocol, and the installed system Pi executable. Upstream internals may be inspected as read-only context, but Desktop must not depend on private internal import paths or patch the forked upstream implementation.
+- Pin Desktop's Pi dependencies to the exact supported version, enforce the same minimum system Pi version at runtime, and update Desktop when the latest Pi RPC contract changes. Do not add backward-compatibility adapters for obsolete Pi RPC versions.
+- Pi RPC atomic events are the sole live session event protocol. Desktop may keep stable projected snapshots for bootstrap and resync, but must not introduce a second custom timeline event protocol.
+- Before running repository-wide commands that can write files, inspect the worktree. Do not run them while out-of-scope files have concurrent modifications that the command could rewrite.
+- If a task appears to require an upstream Pi package change, stop and ask for explicit user confirmation instead of modifying it.
+
 # 语言要求
 请始终用中文进行回复
 
@@ -39,20 +52,17 @@
 - Check node_modules for external API types; don't guess.
 - **No inline imports** (`await import()`, `import("pkg").Type`, dynamic type imports). Top-level imports only.
 - Never remove or downgrade code to fix type errors from outdated deps; upgrade the dep instead.
-- Use only erasable TypeScript syntax (Node strip-only mode) in code checked by the root config (`packages/*/src`, `packages/*/test`, `packages/coding-agent/examples`): no parameter properties, `enum`, `namespace`/`module`, `import =`, `export =`, or other constructs needing JS emit. Use explicit fields with constructor assignments.
+- Use only erasable TypeScript syntax in Desktop code checked by the root config (`packages/desktop/src`, `packages/desktop/test`): no parameter properties, `enum`, `namespace`/`module`, `import =`, `export =`, or other constructs needing JS emit. Use explicit fields with constructor assignments.
 - Always ask before removing functionality or code that appears intentional.
 - Do not preserve backward compatibility unless the user asks for it.
 - Never hardcode key checks (e.g. `matchesKey(keyData, "ctrl+x")`). Add defaults to `DEFAULT_EDITOR_KEYBINDINGS` or `DEFAULT_APP_KEYBINDINGS` so they stay configurable.
-- Never modify `packages/ai/src/models.generated.ts` directly; update `packages/ai/scripts/generate-models.ts` instead, then regenerate. Including the resulting `models.generated.ts` diff is always OK, even if regeneration includes unrelated upstream model metadata changes.
+- Upstream Pi packages are read-only; never edit generated files or dependency versions under them to resolve Desktop type errors. Upgrade the exact Desktop dependency and adapt `packages/desktop` to the public API instead.
 
 ## Commands
 
-- After code changes (not docs): `npm run check` (full output, no tail). Fix all errors, warnings, and infos before committing. Does not run tests.
-- Never run `npm run build` or `npm test` unless requested by the user.
-- Never run the full vitest suite directly: it includes e2e tests that activate when endpoint/auth env vars are present. For all non-e2e tests, run `./test.sh` from the repo root. Otherwise run specific tests from the package root: `node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`.
+- After code changes (not docs), run `npm --prefix packages/desktop run typecheck` and the relevant Desktop tests. Run the repository `npm run check` only when out-of-scope files are clean, because it formats the entire repository with write access.
+- Never run `npm run build`, `npm test`, the root `./test.sh`, or the full Vitest suite unless requested by the user. Run focused Desktop tests from `packages/desktop`: `node ../../node_modules/vitest/dist/cli.js --run test/specific.test.ts`.
 - If you create or modify a test file, run it and iterate on test or implementation until it passes.
-- For `packages/coding-agent/test/suite/`, use `test/suite/harness.ts` + the faux provider. No real provider APIs, keys, or paid tokens.
-- Put issue-specific regressions under `packages/coding-agent/test/suite/regressions/` named `<issue-number>-<short-slug>.test.ts`.
 - For ad-hoc scripts, `write` them to a temp file (e.g. `/tmp`), run, edit if needed, remove when done. Don't embed multi-line scripts in `bash` commands.
 - Never commit unless the user asks.
 
@@ -61,7 +71,6 @@
 - Treat npm dep and lockfile changes as reviewed code. Direct external deps stay pinned to exact versions.
 - Hydrate/update locally with `npm install --ignore-scripts`; clean/CI-style with `npm ci --ignore-scripts`. Don't run lifecycle scripts unless the user asks.
 - If dep metadata changes, refresh `package-lock.json` with `npm install --package-lock-only --ignore-scripts`.
-- If `packages/coding-agent/npm-shrinkwrap.json` needs regen, run `node scripts/generate-coding-agent-shrinkwrap.mjs` (verify with `--check` or `npm run check`). New deps with lifecycle scripts require review and an explicit allowlist entry in that script; never add one silently.
 - Pre-commit blocks lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1`. Don't bypass unless the user wants the lockfile change committed.
 
 ## Git
@@ -73,8 +82,7 @@ Committing:
 - Only commit files YOU changed in THIS session.
 - Stage explicit paths (`git add <path1> <path2>`); never `git add -A` / `git add .`.
 - Before committing, run `git status` and verify you are only staging your files.
-- `packages/ai/src/models.generated.ts` may always be included alongside your files.
-- Message format: `{feat,fix,docs}[(ai,tui,agent,coding-agent)]: <commit message> (optionally multiple lines)`. Message is informative and concise.
+- Message format: `{feat,fix,docs}: <commit message>`. The Desktop scope is implicit; keep the message informative and concise.
 
 Never run (destroys other agents' work or bypasses checks):
 
@@ -96,10 +104,6 @@ When reviewing PRs:
 - Use `gh pr view`, `gh pr diff`, `gh api`, and local `git show`/`git diff` against fetched refs to inspect PR metadata, commits, and patches without changing branches.
 - If you need PR file contents, fetch/read them into temporary files or use `git show <ref>:<path>` without switching branches.
 
-When creating issues:
-
-- Add `pkg:*` labels for affected packages (`pkg:agent`, `pkg:ai`, `pkg:coding-agent`, `pkg:tui`); use all that apply.
-
 When posting issue/PR comments:
 
 - Write the comment to a temp file and post with `gh issue/pr comment --body-file` (never multi-line markdown via `--body`).
@@ -109,75 +113,6 @@ When posting issue/PR comments:
 When closing issues via commit:
 
 - Include `fixes #<number>` or `closes #<number>` in the message so merging auto-closes the issue. For multiple issues, repeat the keyword per issue (`closes #1, closes #2`); a shared keyword (`closes #1, #2`) only closes the first.
-
-## Testing pi Interactive Mode with tmux
-
-Run the TUI in a controlled terminal (from the repo root):
-
-```bash
-tmux new-session -d -s pi-test -x 80 -y 24
-tmux send-keys -t pi-test "./pi-test.sh" Enter
-sleep 3 && tmux capture-pane -t pi-test -p     # capture after startup
-tmux send-keys -t pi-test "your prompt here" Enter
-tmux send-keys -t pi-test Escape               # special keys (also C-o for ctrl+o, etc.)
-tmux kill-session -t pi-test
-```
-
-## Changelog
-
-Location: `packages/*/CHANGELOG.md` (one per package).
-
-Sections under `## [Unreleased]`: `### Breaking Changes` (API changes requiring migration), `### Added`, `### Changed`, `### Fixed`, `### Removed`.
-
-Rules:
-
-- All new entries go under `## [Unreleased]`. Read the full section first and append to existing subsections; never duplicate them.
-- Released version sections (e.g. `## [0.12.2]`) are immutable; never modify them.
-
-Attribution:
-
-- Internal (from issues): `Fixed foo bar ([#123](https://github.com/earendil-works/pi-mono/issues/123))`
-- External contributions: `Added feature X ([#456](https://github.com/earendil-works/pi-mono/pull/456) by [@username](https://github.com/username))`
-
-## Releasing
-
-**Lockstep versioning**: all packages share one version; every release updates all together. `patch` = fixes + additions, `minor` = breaking changes. No major releases.
-
-1. **Update CHANGELOGs**: ask the user whether they ran the `/cl` prompt on the latest commit on `main`. If not, they must run `/cl` first to audit and update each package's `[Unreleased]` section before releasing.
-
-2. **Local smoke test**: build an unpublished release and smoke test from outside the repo (so it can't resolve workspace files):
-   ```bash
-   npm run release:local -- --out /tmp/pi-local-release --force
-   cd /tmp
-
-   # Node package install smoke tests
-   /tmp/pi-local-release/node/pi --help
-   /tmp/pi-local-release/node/pi --version
-   /tmp/pi-local-release/node/pi --list-models
-   /tmp/pi-local-release/node/pi -p "Say exactly: ok"
-   /tmp/pi-local-release/node/pi
-
-   # Bun binary smoke tests
-   /tmp/pi-local-release/bun/pi --help
-   /tmp/pi-local-release/bun/pi --version
-   /tmp/pi-local-release/bun/pi --list-models
-   /tmp/pi-local-release/bun/pi -p "Say exactly: ok"
-   /tmp/pi-local-release/bun/pi
-   ```
-   Verify both Node and Bun startup, model/account listing, interactive startup, and at least one real prompt with the intended default provider. The bare commands `/tmp/pi-local-release/node/pi` and `/tmp/pi-local-release/bun/pi` start interactive mode; run each in tmux, submit a prompt, and wait for the model reply before considering the interactive smoke test passed. Failures are release blockers unless the user explicitly accepts the risk.
-
-3. **Run the release script**:
-   ```bash
-   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:patch    # fixes + additions
-   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:minor    # breaking changes
-   ```
-   Use `npm_config_min_release_age=0` only for the release command. The repo's normal npm age gate can otherwise block the release lockfile refresh when the current workspace package version was published recently. Review any lockfile or shrinkwrap diffs the release creates before push.
-
-   The release script bumps all package versions, updates changelogs, regenerates release artifacts, runs `npm run check`, commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` changelog sections, commits `Add [Unreleased] section for next cycle`, then pushes `main` and the tag. Do not rerun the release script after a tag was pushed.
-
-4. **CI publishes npm packages**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`. The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required.
-
-5. **If CI publish fails**: inspect the failed `publish-npm` job. The publish helper is idempotent and skips package versions already present on npm, so rerun the tag workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
 ## User Override
 

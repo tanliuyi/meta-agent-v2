@@ -30,7 +30,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["packages/desktop/**", "packages/plugin-marketplace-web/**"],
+			"includes": ["packages/desktop/**"],
 			"formatter": {
 				"indentStyle": "space",
 				"indentWidth": 2
@@ -47,16 +47,13 @@
 		"includes": [
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
-			"packages/plugin-marketplace-web/**/*.tsx",
-			"packages/plugin-marketplace-web/**/*.css",
-			"packages/plugin-marketplace-web/**/*.json",
+			"packages/session-backends/*/src/**/*.ts",
+			"packages/session-backends/*/test/**/*.ts",
+			"packages/coding-agent/examples/**/*.ts",
 			"packages/desktop/*.ts",
 			"packages/desktop/**/*.tsx",
 			"packages/desktop/**/*.css",
 			"packages/desktop/**/*.json",
-			"packages/storage/*/src/**/*.ts",
-			"packages/storage/*/test/**/*.ts",
-			"packages/coding-agent/examples/**/*.ts",
 			"!packages/desktop/out/**/*",
 			"!packages/desktop/src/main/pi/extensions/pi-subagents/**/*",
 			"!packages/desktop/src/renderer/src/app/route-tree.gen.ts",

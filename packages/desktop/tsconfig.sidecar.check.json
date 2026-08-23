@@ -3,11 +3,6 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "..",
-    "baseUrl": ".",
-    "paths": {
-      "@earendil-works/pi-ai": ["../ai/src/index.ts"],
-      "@earendil-works/pi-ai/compat": ["../ai/src/compat.ts"],
-      "@earendil-works/pi-ai/*": ["../ai/src/*.ts"]
-    }
+    "baseUrl": "."
   }
 }

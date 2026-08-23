@@ -29,23 +29,24 @@ import { resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
+import { readPiManifest } from "../pi-manifest.ts";
 import { createSyntheticSourceInfo } from "../source-info.ts";
 import { time } from "../timings.ts";
 import type {
 	EntryRenderer,
 	Extension,
 	ExtensionAPI,
-	ExtensionConfiguration,
 	ExtensionFactory,
 	ExtensionRuntime,
 	LoadExtensionsResult,
+	MarkdownTransformer,
 	MessageRenderer,
 	ProviderConfig,
 	RegisteredCommand,
 	ToolDefinition,
 } from "./types.ts";
 
-/** Modules available to extensions via virtualModules (for compiled Bun binary) */
+/** Modules available to extensions via virtualModules (for compiled binaries) */
 const VIRTUAL_MODULES: Record<string, unknown> = {
 	typebox: _bundledTypebox,
 	"typebox/compile": _bundledTypeboxCompile,
@@ -74,9 +75,16 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 
 const require = createRequire(import.meta.url);
 
+const isNodeSeaBinary =
+	("sea" in process.features && process.features.sea === true) ||
+	process.getBuiltinModule("node:sea")?.isSea() === true;
+declare const PI_BUNDLED_NODE: boolean;
+const isBundledNode = typeof PI_BUNDLED_NODE !== "undefined" && PI_BUNDLED_NODE;
+const isTypeScriptSourceRuntime = !isBunBinary && path.extname(fileURLToPath(import.meta.url)) === ".ts";
+
 /**
- * Get aliases for jiti (used in Node.js/development mode).
- * In Bun binary mode, virtualModules is used instead.
+ * Get aliases for jiti (used in built Node.js mode).
+ * In compiled binary mode, virtualModules is used instead.
  */
 let _aliases: Record<string, string> | null = null;
 
@@ -173,6 +181,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		throw new Error("Extension runtime not initialized. Action methods cannot be called during extension loading.");
 	};
 	const state: { staleMessage?: string } = {};
+	const eventBusUnsubscribers = new Set<() => void>();
 	const assertActive = () => {
 		if (state.staleMessage) {
 			throw new Error(state.staleMessage);
@@ -200,9 +209,23 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		pendingNativeProviderRegistrations: [],
 		assertActive,
 		invalidate: (message) => {
-			state.staleMessage ??=
+			if (state.staleMessage) return;
+			state.staleMessage =
 				message ??
 				"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
+			for (const unsubscribe of eventBusUnsubscribers) unsubscribe();
+			eventBusUnsubscribers.clear();
+		},
+		trackEventBusSubscription: (unsubscribe) => {
+			let active = true;
+			const trackedUnsubscribe = () => {
+				if (!active) return;
+				active = false;
+				eventBusUnsubscribers.delete(trackedUnsubscribe);
+				unsubscribe();
+			};
+			eventBusUnsubscribers.add(trackedUnsubscribe);
+			return trackedUnsubscribe;
 		},
 		// Pre-bind: queue registrations so bindCore() can flush them once the
 		// model registry is available. bindCore() replaces both with direct calls.
@@ -233,15 +256,8 @@ function createExtensionAPI(
 	runtime: ExtensionRuntime,
 	cwd: string,
 	eventBus: EventBus,
-	configuration: ExtensionConfiguration = Object.freeze({}),
 ): ExtensionAPI {
-	const frozenConfiguration = Object.freeze({ ...configuration });
 	const api = {
-		getConfig<T = ExtensionConfiguration>(): Readonly<T> {
-			runtime.assertActive();
-			return frozenConfiguration as Readonly<T>;
-		},
-
 		// Registration methods - write to extension
 		on(event: string, handler: HandlerFn): void {
 			runtime.assertActive();
@@ -284,6 +300,11 @@ function createExtensionAPI(
 			options: { description?: string; type: "boolean" | "string"; default?: boolean | string },
 		): void {
 			runtime.assertActive();
+			if (options.default !== undefined && typeof options.default !== options.type) {
+				throw new Error(
+					`Invalid default for flag "${name}": expected ${options.type}, got ${typeof options.default}`,
+				);
+			}
 			extension.flags.set(name, { name, extensionPath: extension.path, ...options });
 			if (options.default !== undefined && !runtime.flagValues.has(name)) {
 				runtime.flagValues.set(name, options.default);
@@ -293,6 +314,11 @@ function createExtensionAPI(
 		registerMessageRenderer<T>(customType: string, renderer: MessageRenderer<T>): void {
 			runtime.assertActive();
 			extension.messageRenderers.set(customType, renderer as MessageRenderer);
+		},
+
+		registerMarkdownTransformer(transformer: MarkdownTransformer): void {
+			runtime.assertActive();
+			extension.markdownTransformer = transformer;
 		},
 
 		registerEntryRenderer<T>(customType: string, renderer: EntryRenderer<T>): void {
@@ -394,7 +420,16 @@ function createExtensionAPI(
 			runtime.unregisterProvider(name, extension.path);
 		},
 
-		events: eventBus,
+		events: {
+			emit(channel, data) {
+				runtime.assertActive();
+				eventBus.emit(channel, data);
+			},
+			on(channel, handler) {
+				runtime.assertActive();
+				return runtime.trackEventBusSubscription(eventBus.on(channel, handler));
+			},
+		},
 	} as ExtensionAPI;
 
 	return api;
@@ -418,10 +453,14 @@ async function loadExtensionModule(extensionPath: string, cacheToken?: Extension
 
 	const jiti = createJiti(import.meta.url, {
 		moduleCache: false,
-		// In Bun binary: use virtualModules for bundled packages (no filesystem resolution)
-		// Also disable tryNative so jiti handles ALL imports (not just the entry point)
-		// In Node.js/dev: use aliases to resolve to node_modules paths
-		...(isBunBinary ? { virtualModules: VIRTUAL_MODULES, tryNative: false } : { alias: getAliases() }),
+		// Compiled binaries and the bundled Node distribution use embedded modules.
+		// Source TypeScript reuses host modules and root tsconfig paths. Unbundled
+		// Node builds use dist aliases.
+		...(isBunBinary || isNodeSeaBinary || isBundledNode
+			? { virtualModules: VIRTUAL_MODULES, tryNative: false }
+			: isTypeScriptSourceRuntime
+				? { virtualModules: VIRTUAL_MODULES, tsconfigPaths: true }
+				: { alias: getAliases() }),
 	});
 
 	const module = await jiti.import(extensionPath, { default: true });
@@ -465,7 +504,6 @@ async function loadExtension(
 	eventBus: EventBus,
 	runtime: ExtensionRuntime,
 	cacheToken?: ExtensionCacheToken,
-	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<{ extension: Extension | null; error: string | null }> {
 	const resolvedPath = resolvePath(extensionPath, cwd, { normalizeUnicodeSpaces: true });
 
@@ -477,7 +515,7 @@ async function loadExtension(
 		}
 
 		const extension = createExtension(extensionPath, resolvedPath);
-		const api = createExtensionAPI(extension, runtime, cwd, eventBus, extensionConfigurations?.[resolvedPath]);
+		const api = createExtensionAPI(extension, runtime, cwd, eventBus);
 		await factory(api);
 		time(`${extensionPath} factory`, "extensions");
 
@@ -497,11 +535,10 @@ export async function loadExtensionFromFactory(
 	eventBus: EventBus,
 	runtime: ExtensionRuntime,
 	extensionPath = "<inline>",
-	configuration?: ExtensionConfiguration,
 ): Promise<Extension> {
 	const extension = createExtension(extensionPath, extensionPath);
 	const resolvedCwd = resolvePath(cwd);
-	const api = createExtensionAPI(extension, runtime, resolvedCwd, eventBus, configuration);
+	const api = createExtensionAPI(extension, runtime, resolvedCwd, eventBus);
 	await factory(api);
 	time(`${extensionPath} factory`, "extensions");
 	return extension;
@@ -516,7 +553,6 @@ async function loadExtensionsInternal(
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
 	useCache = false,
-	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
 	const errors: Array<{ path: string; error: string }> = [];
@@ -532,7 +568,6 @@ async function loadExtensionsInternal(
 			resolvedEventBus,
 			resolvedRuntime,
 			cacheToken,
-			extensionConfigurations,
 		);
 
 		if (error) {
@@ -557,9 +592,8 @@ export async function loadExtensions(
 	cwd: string,
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
-	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<LoadExtensionsResult> {
-	return loadExtensionsInternal(paths, cwd, eventBus, runtime, false, extensionConfigurations);
+	return loadExtensionsInternal(paths, cwd, eventBus, runtime);
 }
 
 export async function loadExtensionsCached(
@@ -567,29 +601,8 @@ export async function loadExtensionsCached(
 	cwd: string,
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
-	extensionConfigurations?: Readonly<Record<string, ExtensionConfiguration>>,
 ): Promise<LoadExtensionsResult> {
-	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true, extensionConfigurations);
-}
-
-interface PiManifest {
-	extensions?: string[];
-	themes?: string[];
-	skills?: string[];
-	prompts?: string[];
-}
-
-function readPiManifest(packageJsonPath: string): PiManifest | null {
-	try {
-		const content = fs.readFileSync(packageJsonPath, "utf-8");
-		const pkg = JSON.parse(content);
-		if (pkg.pi && typeof pkg.pi === "object") {
-			return pkg.pi as PiManifest;
-		}
-		return null;
-	} catch {
-		return null;
-	}
+	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true);
 }
 
 function isExtensionFile(name: string): boolean {

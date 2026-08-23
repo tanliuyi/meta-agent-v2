@@ -399,7 +399,7 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
 
 	sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
+		options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
 	): Promise<void>;
 }
 
@@ -601,7 +601,7 @@ export interface SessionBeforeCompactEvent {
 	signal: AbortSignal;
 }
 
-/** Fired after context compaction */
+/** Fired after context compaction succeeds */
 export interface SessionCompactEvent {
 	type: "session_compact";
 	compactionEntry: CompactionEntry;
@@ -610,6 +610,21 @@ export interface SessionCompactEvent {
 	reason: "manual" | "threshold" | "overflow";
 	/** True when the aborted turn is retried after this compaction (overflow recovery) */
 	willRetry: boolean;
+}
+
+/** Fired after context compaction fails or is aborted */
+export interface SessionCompactFailedEvent {
+	type: "session_compact_failed";
+	/** What triggered the compaction: manual /compact, the context threshold, or context overflow recovery */
+	reason: "manual" | "threshold" | "overflow";
+	/** Error text when compaction failed for a non-abort reason. */
+	errorMessage?: string;
+	/** True when compaction was cancelled or aborted. */
+	aborted: boolean;
+	/** True when the aborted turn would have been retried after this compaction (overflow recovery) */
+	willRetry: boolean;
+	/** True when the failing compaction content came from a session_before_compact handler. */
+	fromExtension: boolean;
 }
 
 /** Fired before an extension runtime is torn down due to quit, reload, or session replacement. */
@@ -658,6 +673,7 @@ export type SessionEvent =
 	| SessionBeforeForkEvent
 	| SessionBeforeCompactEvent
 	| SessionCompactEvent
+	| SessionCompactFailedEvent
 	| SessionShutdownEvent
 	| SessionBeforeTreeEvent
 	| SessionTreeEvent;
@@ -1072,6 +1088,11 @@ export interface ToolCallEventResult {
 	/** Block tool execution. To modify arguments, mutate `event.input` in place instead. */
 	block?: boolean;
 	reason?: string;
+	/**
+	 * Hint that the agent should stop after the current tool batch when this call is blocked.
+	 * Early termination only happens when every finalized tool result in the batch sets this to true.
+	 */
+	terminate?: boolean;
 }
 
 /** Result from user_bash event handler */
@@ -1139,6 +1160,14 @@ export interface MessageRenderOptions {
 	outputPad: number;
 }
 
+export interface MarkdownTransformContext {
+	messageType: "user" | "assistant" | "assistant-thinking";
+	isStreaming: boolean;
+	availableWidth: number;
+}
+
+export type MarkdownTransformer = (markdown: string, context: MarkdownTransformContext) => string;
+
 export interface EntryRenderOptions {
 	expanded: boolean;
 }
@@ -1163,8 +1192,6 @@ export interface RegisteredCommand {
 	name: string;
 	sourceInfo: SourceInfo;
 	description?: string;
-	/** Set to false when selecting the command should execute it immediately without argument input. */
-	acceptsArguments?: boolean;
 	getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
 }
@@ -1181,19 +1208,10 @@ export interface ResolvedCommand extends RegisteredCommand {
 // biome-ignore lint/suspicious/noConfusingVoidType: void allows bare return statements
 export type ExtensionHandler<E, R = undefined> = (event: E, ctx: ExtensionContext) => Promise<R | void> | R | void;
 
-/** Scalar configuration value supplied by an extension host. */
-export type ExtensionConfigValue = string | number | boolean;
-
-/** Host-supplied configuration scoped to one extension instance. */
-export type ExtensionConfiguration = Readonly<Record<string, ExtensionConfigValue>>;
-
 /**
  * ExtensionAPI passed to extension factory functions.
  */
 export interface ExtensionAPI {
-	/** Read the immutable host configuration scoped to this extension. */
-	getConfig<T = ExtensionConfiguration>(): Readonly<T>;
-
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================
@@ -1212,6 +1230,7 @@ export interface ExtensionAPI {
 		handler: ExtensionHandler<SessionBeforeCompactEvent, SessionBeforeCompactResult>,
 	): void;
 	on(event: "session_compact", handler: ExtensionHandler<SessionCompactEvent>): void;
+	on(event: "session_compact_failed", handler: ExtensionHandler<SessionCompactFailedEvent>): void;
 	on(event: "session_shutdown", handler: ExtensionHandler<SessionShutdownEvent>): void;
 	on(event: "session_before_tree", handler: ExtensionHandler<SessionBeforeTreeEvent, SessionBeforeTreeResult>): void;
 	on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): void;
@@ -1269,11 +1288,17 @@ export interface ExtensionAPI {
 	/** Register a CLI flag. */
 	registerFlag(
 		name: string,
-		options: {
-			description?: string;
-			type: "boolean" | "string";
-			default?: boolean | string;
-		},
+		options:
+			| {
+					description?: string;
+					type: "boolean";
+					default?: boolean;
+			  }
+			| {
+					description?: string;
+					type: "string";
+					default?: string;
+			  },
 	): void;
 
 	/** Get the value of a registered CLI flag. */
@@ -1285,6 +1310,9 @@ export interface ExtensionAPI {
 
 	/** Register a custom renderer for CustomMessageEntry. */
 	registerMessageRenderer<T = unknown>(customType: string, renderer: MessageRenderer<T>): void;
+
+	/** Register a transformer for user and assistant Markdown before Pi renders it in the interactive transcript. */
+	registerMarkdownTransformer(transformer: MarkdownTransformer): void;
 
 	/** Register a custom renderer for CustomEntry. Custom entries do not participate in LLM context. */
 	registerEntryRenderer<T = unknown>(customType: string, renderer: EntryRenderer<T>): void;
@@ -1302,10 +1330,11 @@ export interface ExtensionAPI {
 	/**
 	 * Send a user message to the agent. Always triggers a turn.
 	 * When the agent is streaming, use deliverAs to specify how to queue the message.
+	 * Set expandPromptTemplates to dispatch extension commands and expand skill commands and prompt templates.
 	 */
 	sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" },
+		options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
 	): void;
 
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
@@ -1444,7 +1473,12 @@ export interface ProviderConfig {
 	apiKey?: string;
 	/** API type. Required at provider or model level when defining models. */
 	api?: Api;
-	/** Optional streamSimple handler for custom APIs. */
+	/**
+	 * Optional streamSimple handler for custom APIs.
+	 * Implementations must invoke `options.onPayload` before sending the provider request and use any
+	 * returned replacement payload. They must invoke `options.onResponse` after receiving the response
+	 * and before consuming its body, matching built-in providers.
+	 */
 	streamSimple?: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 	/** Custom headers to include in requests. */
 	headers?: Record<string, string>;
@@ -1454,19 +1488,21 @@ export interface ProviderConfig {
 	models?: ProviderModelConfig[];
 	/**
 	 * Refresh this provider's model list. The returned list replaces extension-provided models.
-	 * Use context.store explicitly when the catalog should persist across sessions.
+	 * Use context.publish({ persist: entry }) when the catalog should persist across sessions.
 	 */
 	refreshModels?(context: RefreshModelsContext): Promise<ProviderModelConfig[]>;
 	/** OAuth provider for /login support. The `id` is set automatically from the provider name. */
 	oauth?: {
 		/** Display name for the provider in login UI. */
 		name: string;
+		/** Whether access through this auth method is backed by a provider subscription. */
+		isSubscription?: boolean;
 		/** @deprecated Retained for source compatibility; canonical auth flows ignore it. */
 		usesCallbackServer?: boolean;
 		/** Run the login flow, return credentials to persist. */
 		login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials>;
 		/** Refresh expired credentials, return updated credentials to persist. */
-		refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials>;
+		refreshToken(credentials: OAuthCredentials, signal: AbortSignal): Promise<OAuthCredentials>;
 		/** Convert credentials to API key string for the provider. */
 		getApiKey(credentials: OAuthCredentials): string;
 		/** Legacy synchronous credential-dependent model projection. */
@@ -1548,7 +1584,7 @@ export type SendMessageHandler = <T = unknown>(
 
 export type SendUserMessageHandler = (
 	content: string | (TextContent | ImageContent)[],
-	options?: { deliverAs?: "steer" | "followUp" },
+	options?: { deliverAs?: "steer" | "followUp"; expandPromptTemplates?: boolean },
 ) => void;
 
 export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
@@ -1594,6 +1630,8 @@ export interface ExtensionRuntimeState {
 	assertActive: () => void;
 	/** Marks this extension instance as stale after runtime replacement or reload. */
 	invalidate: (message?: string) => void;
+	/** Retain an event-bus subscription until this runtime is invalidated. */
+	trackEventBusSubscription: (unsubscribe: () => void) => () => void;
 	/**
 	 * Register or unregister a provider.
 	 *
@@ -1686,6 +1724,7 @@ export interface Extension {
 	handlers: Map<string, HandlerFn[]>;
 	tools: Map<string, RegisteredTool>;
 	messageRenderers: Map<string, MessageRenderer>;
+	markdownTransformer?: MarkdownTransformer;
 	entryRenderers?: Map<string, EntryRenderer>;
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;

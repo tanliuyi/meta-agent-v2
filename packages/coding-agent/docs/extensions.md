@@ -330,7 +330,8 @@ user sends another prompt ◄─────────────────
 
 /compact or auto-compaction
   ├─► session_before_compact (can cancel or customize)
-  └─► session_compact
+  ├─► session_compact (success)
+  └─► session_compact_failed (failure or abort)
 
 /tree navigation
   ├─► session_before_tree (can cancel or customize)
@@ -448,7 +449,7 @@ pi.on("session_before_fork", async (event, ctx) => {
 After a successful fork or clone, pi emits `session_shutdown` for the old extension instance, reloads and rebinds extensions for the new session, then emits `session_start` with `reason: "fork"` and `previousSessionFile`.
 Do cleanup work in `session_shutdown`, then reestablish any in-memory state in `session_start`.
 
-#### session_before_compact / session_compact
+#### session_before_compact / session_compact / session_compact_failed
 
 Fired on compaction. See [compaction.md](compaction.md) for details.
 
@@ -478,6 +479,14 @@ pi.on("session_compact", async (event, ctx) => {
   // event.fromExtension - whether extension provided it
   // event.reason - "manual" (/compact), "threshold", or "overflow"
   // event.willRetry - whether the aborted turn is retried after compaction (overflow recovery)
+});
+
+pi.on("session_compact_failed", async (event, ctx) => {
+  // event.reason - "manual" (/compact), "threshold", or "overflow"
+  // event.errorMessage - present for non-abort failures
+  // event.aborted - true for cancelled/aborted compactions
+  // event.willRetry - whether the aborted turn would have retried after compaction
+  // event.fromExtension - whether extension-provided compaction content was being used
 });
 ```
 
@@ -762,7 +771,8 @@ Behavior guarantees:
 - Mutations to `event.input` affect the actual tool execution
 - Later `tool_call` handlers see mutations made by earlier handlers
 - No re-validation is performed after your mutation
-- Return values from `tool_call` only control blocking via `{ block: true, reason?: string }`
+- Return values from `tool_call` control blocking via `{ block: true, reason?: string, terminate?: boolean }`
+- `terminate` only applies to a blocked call; the agent stops early only when every finalized result in the batch is terminating
 
 ```typescript
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
@@ -778,7 +788,7 @@ pi.on("tool_call", async (event, ctx) => {
     event.input.command = `source ~/.profile\n${event.input.command}`;
 
     if (event.input.command.includes("rm -rf")) {
-      return { block: true, reason: "Dangerous command" };
+      return { block: true, reason: "Dangerous command", terminate: true };
     }
   }
 
@@ -1330,25 +1340,6 @@ export default function (pi: ExtensionAPI) {
 
 ## ExtensionAPI Methods
 
-### pi.getConfig<T>()
-
-Read immutable scalar configuration supplied by the current host for this extension. Hosts that do not provide configuration return an empty object. The configuration is available during the extension factory, so it can be used to register providers and tools.
-
-```typescript
-interface MyPluginConfig {
-  endpoint?: string;
-  retries?: number;
-  enabled?: boolean;
-}
-
-export default function (pi: ExtensionAPI) {
-  const config = pi.getConfig<MyPluginConfig>();
-  // config is read-only and scoped to this extension instance.
-}
-```
-
-Do not mutate the returned object or persist secret values into session entries, logs, tool results, or messages. Host configuration is not extension session state; use normal extension state patterns for branch-sensitive data.
-
 ### pi.on(event, handler)
 
 Subscribe to events. See [Events](#events) for event types and return values.
@@ -1444,12 +1435,16 @@ pi.sendUserMessage([
 // During streaming - must specify delivery mode
 pi.sendUserMessage("Focus on error handling", { deliverAs: "steer" });
 pi.sendUserMessage("And then summarize", { deliverAs: "followUp" });
+
+// Opt in to extension command dispatch and skill/prompt template expansion
+pi.sendUserMessage("/review src/index.ts", { expandPromptTemplates: true });
 ```
 
 **Options:**
 - `deliverAs` - Required when agent is streaming:
   - `"steer"` - Queues the message for delivery after the current assistant turn finishes executing its tool calls
   - `"followUp"` - Waits for agent to finish all tools
+- `expandPromptTemplates` - Dispatch extension commands and expand skill commands and prompt templates. Defaults to `false`.
 
 When not streaming, the message is sent immediately and triggers a new turn. When streaming without `deliverAs`, throws an error.
 
@@ -1581,6 +1576,27 @@ mode and would not execute if sent via `prompt`.
 
 Register a custom TUI renderer for custom messages with your `customType`. Custom messages are created with `pi.sendMessage()` and participate in LLM context. See [Custom UI](#custom-ui).
 
+### pi.registerMarkdownTransformer(transformer)
+
+Register a transformer for the Markdown in normal user text, assistant text, and thinking blocks. Transformers run in extension load order, and each transformer receives the Markdown returned by the previous transformer. After the chain finishes, Pi renders the transformed content with its built-in renderer.
+
+The transformer receives the Markdown string and a context with:
+
+- `messageType` — `"user"`, `"assistant"`, or `"assistant-thinking"`
+- `isStreaming` — `true` for partial assistant updates; `false` for user, finalized assistant, and restored messages
+- `availableWidth` — exact terminal columns available for the transformed Markdown content
+
+Return the transformed Markdown:
+
+```typescript
+pi.registerMarkdownTransformer((markdown, { messageType, isStreaming }) => {
+  if (isStreaming || messageType === "assistant-thinking") return markdown;
+  return markdown.replaceAll("-->", "→");
+});
+```
+
+If a transformer throws, Pi keeps the Markdown produced so far and continues with the next transformer. The hook is display-only: the original message remains unchanged in the session and model context. It runs for new user messages, assistant streaming updates, restored session messages, and terminal width changes, so transformers should remain synchronous and inexpensive.
+
 ### pi.registerEntryRenderer(customType, renderer)
 
 Register a custom TUI renderer for custom entries with your `customType`. Custom entries are created with `pi.appendEntry()` and do not participate in LLM context.
@@ -1705,7 +1721,9 @@ Register or override a model provider dynamically. Useful for proxies, custom en
 
 Calls made during the extension factory function are queued and applied once the runner initialises. Calls made after that — for example from a command handler following a user setup flow — take effect immediately without requiring a `/reload`.
 
-Dynamic providers can implement `refreshModels`. Pi calls it during model refresh, publishes the returned list synchronously through the provider, and passes the canonical credential/store/network/signal context. The extension decides whether to persist the catalog through `context.store`; live servers such as llama.cpp can ignore it.
+Dynamic providers can implement `refreshModels`. Pi calls it during model refresh, publishes the returned list synchronously through the provider, and passes the canonical credential/stored-catalog/network/signal context. The extension decides whether to persist catalog metadata through generation-checked `context.publish({ persist: entry })`; live servers such as llama.cpp can return models without persisting them.
+
+`context.signal` is always a concrete signal and provider callbacks must pass it to blocking I/O. Public `ModelRuntime.refresh()` and `ModelRegistry.refresh()` calls accept an optional signal and are unbounded when it is omitted; extensions and applications choose their own deadlines. Cancellation stops the caller waiting even if a provider ignores the signal, but cooperation is still required to stop the underlying work.
 
 Extensions that need native provider auth, filtering, refresh, or stream behavior can register a complete `Provider` from `@earendil-works/pi-ai`. The provider becomes the composition base and `models.json` overrides still apply above it.
 
@@ -1795,7 +1813,8 @@ pi.registerProvider("corporate-ai", {
       const code = await callbacks.onPrompt({ message: "Enter code:" });
       return { refresh: code, access: code, expires: Date.now() + 3600000 };
     },
-    async refreshToken(credentials) {
+    async refreshToken(credentials, signal) {
+      signal.throwIfAborted();
       // Refresh logic
       return credentials;
     },
@@ -1816,7 +1835,7 @@ The object form accepts a complete pi-ai `Provider`, including native `auth`, `g
 - `headers` - Custom headers to include in requests.
 - `authHeader` - If true, adds `Authorization: Bearer` header automatically.
 - `models` - Array of model definitions. If provided, replaces all existing models for this provider. Model definitions can set `baseUrl` to override the provider endpoint for that model.
-- `refreshModels` - Async dynamic discovery callback. Its returned models replace extension-provided models. Use the scoped `context.store` only when results should persist.
+- `refreshModels` - Async dynamic discovery callback. Its returned models replace extension-provided models. `context.stored` contains the persisted provider snapshot; use generation-checked `context.publish({ persist: entry })` only when updated catalog data should persist. Use `persist: null` to delete that snapshot.
 - `oauth` - OAuth provider config for `/login` support. When provided, the provider appears in the login menu.
 - `streamSimple` - Custom streaming implementation for non-standard APIs.
 

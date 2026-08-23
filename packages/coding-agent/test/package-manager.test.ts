@@ -440,13 +440,19 @@ Content`,
 			expect(result.skills.some((r) => r.path === middleSkill && r.enabled)).toBe(true);
 		});
 
-		it("should ignore root markdown files in .agents/skills", async () => {
+		it("should ignore root markdown files in .agents/skills but discover nested markdown skills", async () => {
 			const agentsSkillsDir = join(tempDir, ".agents", "skills");
 			mkdirSync(join(agentsSkillsDir, "nested-skill"), { recursive: true });
+			mkdirSync(join(agentsSkillsDir, "third-party"), { recursive: true });
+			mkdirSync(join(agentsSkillsDir, "third-party", "vendor", "pack"), { recursive: true });
 			const rootSkill = join(agentsSkillsDir, "root-file.md");
 			const nestedSkill = join(agentsSkillsDir, "nested-skill", "SKILL.md");
+			const nestedMarkdownSkill = join(agentsSkillsDir, "third-party", "child-skill.md");
+			const deeplyNestedMarkdownSkill = join(agentsSkillsDir, "third-party", "vendor", "pack", "deep-skill.md");
 			writeFileSync(rootSkill, "---\nname: root-file\ndescription: Root markdown file\n---\n");
 			writeFileSync(nestedSkill, "---\nname: nested-skill\ndescription: Nested skill\n---\n");
+			writeFileSync(nestedMarkdownSkill, "---\nname: child-skill\ndescription: Nested markdown skill\n---\n");
+			writeFileSync(deeplyNestedMarkdownSkill, "---\nname: deep-skill\ndescription: Deep markdown skill\n---\n");
 
 			const pm = new DefaultPackageManager({
 				cwd: join(tempDir, "work"),
@@ -458,6 +464,8 @@ Content`,
 			const result = await pm.resolve();
 			expect(result.skills.some((r) => r.path === rootSkill)).toBe(false);
 			expect(result.skills.some((r) => r.path === nestedSkill && r.enabled)).toBe(true);
+			expect(result.skills.some((r) => r.path === nestedMarkdownSkill && r.enabled)).toBe(true);
+			expect(result.skills.some((r) => r.path === deeplyNestedMarkdownSkill && r.enabled)).toBe(true);
 		});
 
 		it("should keep ~/.agents/skills user-scoped when cwd is under home in a non-git directory", async () => {
@@ -920,6 +928,63 @@ Content`,
 			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
 
 			await packageManager.update(source);
+
+			expect(runCommandSpy).toHaveBeenCalledWith("npm", ["install", "--omit=dev"], { cwd: targetDir });
+		});
+
+		it("should repair missing git package dependencies when the checkout is already current", async () => {
+			const source = "git:github.com/user/repo";
+			const targetDir = join(agentDir, "git", "github.com", "user", "repo");
+			const fetchArgs = ["fetch", "--prune", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"];
+			mkdirSync(targetDir, { recursive: true });
+			writeFileSync(
+				join(targetDir, "package.json"),
+				JSON.stringify({ name: "repo", version: "1.0.0", dependencies: { dependency: "1.0.0" } }),
+			);
+			settingsManager.setPackages([source]);
+
+			const managerWithInternals = packageManager as unknown as PackageManagerInternals;
+			vi.spyOn(managerWithInternals, "getLocalGitUpdateTarget").mockResolvedValue({
+				ref: "@{upstream}",
+				head: "current-head",
+				fetchArgs,
+			});
+			vi.spyOn(managerWithInternals, "runCommandCapture").mockResolvedValue("current-head");
+			const runCommandSpy = vi.spyOn(managerWithInternals, "runCommand").mockResolvedValue(undefined);
+
+			await packageManager.update(source);
+
+			expect(runCommandSpy).toHaveBeenCalledWith("npm", ["install", "--omit=dev"], { cwd: targetDir });
+			expect(runCommandSpy).not.toHaveBeenCalledWith("git", ["clean", "-fdx"], { cwd: targetDir });
+		});
+
+		it("should repair deleted git package dependencies when cleaning fails", async () => {
+			const source = "git:github.com/user/repo";
+			const targetDir = join(agentDir, "git", "github.com", "user", "repo");
+			const fetchArgs = ["fetch", "--prune", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"];
+			mkdirSync(targetDir, { recursive: true });
+			writeFileSync(
+				join(targetDir, "package.json"),
+				JSON.stringify({ name: "repo", version: "1.0.0", dependencies: { dependency: "1.0.0" } }),
+			);
+			settingsManager.setPackages([source]);
+
+			const managerWithInternals = packageManager as unknown as PackageManagerInternals;
+			vi.spyOn(managerWithInternals, "getLocalGitUpdateTarget").mockResolvedValue({
+				ref: "@{upstream}",
+				head: "new-head",
+				fetchArgs,
+			});
+			vi.spyOn(managerWithInternals, "runCommandCapture").mockImplementation(async (_command, args) =>
+				args[1] === "HEAD" ? "old-head" : "new-head",
+			);
+			const runCommandSpy = vi
+				.spyOn(managerWithInternals, "runCommand")
+				.mockImplementation(async (_command, args) => {
+					if (args[0] === "clean") throw new Error("simulated clean failure");
+				});
+
+			await expect(packageManager.update(source)).rejects.toThrow("simulated clean failure");
 
 			expect(runCommandSpy).toHaveBeenCalledWith("npm", ["install", "--omit=dev"], { cwd: targetDir });
 		});
@@ -1746,11 +1811,7 @@ Content`,
 			writeFileSync(join(pkgDir, "extensions", "bar.ts"), "export default function() {}");
 			writeFileSync(join(pkgDir, "skills", "foo", "SKILL.md"), "# Foo\n");
 			settingsManager.setProjectPackages([
-				{
-					source: relative(join(tempDir, ".pi"), pkgDir),
-					autoload: false,
-					extensions: ["+extensions/foo.ts"],
-				},
+				{ source: relative(join(tempDir, ".pi"), pkgDir), autoload: false, extensions: ["+extensions/foo.ts"] },
 			]);
 
 			const result = await packageManager.resolve();
@@ -2191,6 +2252,25 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 			expect(runCommandSpy).not.toHaveBeenCalled();
 		});
 
+		it("should skip npm updates when the installed version is newer than the registry version", async () => {
+			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			mkdirSync(installedPath, { recursive: true });
+			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "2.0.0" }));
+			settingsManager.setProjectPackages(["npm:example"]);
+
+			const runCommandCaptureSpy = vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.9.0"');
+			const runCommandSpy = vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
+
+			await packageManager.update("npm:example");
+
+			expect(runCommandCaptureSpy).toHaveBeenCalledWith(
+				"npm",
+				["view", "example", "version", "--json"],
+				expect.objectContaining({ cwd: tempDir, timeoutMs: expect.any(Number) }),
+			);
+			expect(runCommandSpy).not.toHaveBeenCalled();
+		});
+
 		it("should migrate legacy user npm installs into the managed npm root during update", async () => {
 			const legacyRoot = join(tempDir, "legacy-global", "node_modules");
 			const legacyPath = join(legacyRoot, "legacy-pkg");
@@ -2449,6 +2529,18 @@ export default function(api) { api.registerTool({ name: "test", description: "te
 					scope: "project",
 				},
 			]);
+		});
+
+		it("should not report npm updates when the installed version is newer than the registry version", async () => {
+			const installedPath = join(tempDir, ".pi", "npm", "node_modules", "example");
+			mkdirSync(installedPath, { recursive: true });
+			writeFileSync(join(installedPath, "package.json"), JSON.stringify({ name: "example", version: "2.0.0" }));
+			settingsManager.setProjectPackages(["npm:example"]);
+
+			vi.spyOn(packageManager as any, "runCommandCapture").mockResolvedValue('"1.9.0"');
+
+			const updates = await packageManager.checkForAvailableUpdates();
+			expect(updates).toEqual([]);
 		});
 
 		it("should skip pinned packages when checking for updates", async () => {

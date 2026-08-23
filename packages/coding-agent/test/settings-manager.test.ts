@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS } from "../src/core/http-dispatcher.ts";
-import { FileSettingsStorage, SettingsManager } from "../src/core/settings-manager.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
 
 describe("SettingsManager", () => {
 	const testDir = join(process.cwd(), "test-settings-tmp");
@@ -26,25 +26,6 @@ describe("SettingsManager", () => {
 	});
 
 	describe("preserves externally added settings", () => {
-		it("should re-read a settings file created before the first-write lock is acquired", () => {
-			const settingsPath = join(agentDir, "settings.json");
-			const storage = new FileSettingsStorage(projectDir, agentDir);
-			let callbackCalls = 0;
-
-			storage.withLock("global", (current) => {
-				callbackCalls += 1;
-				const settings = current ? JSON.parse(current) : {};
-				if (callbackCalls === 1) writeFileSync(settingsPath, JSON.stringify({ theme: "external" }));
-				return JSON.stringify({ ...settings, defaultModel: "local" });
-			});
-
-			expect(callbackCalls).toBe(2);
-			expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).toEqual({
-				theme: "external",
-				defaultModel: "local",
-			});
-		});
-
 		it("should preserve enabledModels when changing thinking level", async () => {
 			// Create initial settings file
 			const settingsPath = join(agentDir, "settings.json");
@@ -204,31 +185,7 @@ describe("SettingsManager", () => {
 			expect(manager.getDefaultModel()).toBe("claude-sonnet");
 		});
 
-		it("should keep runtime defaults across reloads without overriding persisted settings", async () => {
-			const settingsPath = join(agentDir, "settings.json");
-			const managedShell = join(testDir, "managed", "bash");
-			const userShell = join(testDir, "user", "bash");
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			manager.applyDefaults({ shellPath: managedShell });
-			expect(manager.getShellPath()).toBe(managedShell);
-
-			writeFileSync(settingsPath, JSON.stringify({ theme: "light", shellPath: userShell }));
-			await manager.reload();
-			expect(manager.getShellPath()).toBe(userShell);
-
-			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
-			await manager.reload();
-			expect(manager.getShellPath()).toBe(managedShell);
-
-			manager.setTheme("light");
-			await manager.flush();
-			expect(manager.getShellPath()).toBe(managedShell);
-			expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).not.toHaveProperty("shellPath");
-		});
-
-		it("should keep previous settings when file is invalid", async () => {
+		it("should keep previous settings and report the file path when the file is invalid", async () => {
 			const settingsPath = join(agentDir, "settings.json");
 			writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
 
@@ -238,6 +195,7 @@ describe("SettingsManager", () => {
 			await manager.reload();
 
 			expect(manager.getTheme()).toBe("dark");
+			expect(manager.drainErrors()).toMatchObject([{ scope: "global", path: settingsPath }]);
 		});
 	});
 
@@ -270,7 +228,10 @@ describe("SettingsManager", () => {
 			const errors = manager.drainErrors();
 
 			expect(errors).toHaveLength(2);
-			expect(errors.map((e) => e.scope).sort()).toEqual(["global", "project"]);
+			expect(errors).toMatchObject([
+				{ scope: "global", path: globalSettingsPath },
+				{ scope: "project", path: projectSettingsPath },
+			]);
 			expect(manager.drainErrors()).toEqual([]);
 		});
 	});
@@ -440,6 +401,58 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("TUI mode", () => {
+		it("defaults to regular and persists fullscreen mode", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getTuiMode()).toBe("regular");
+
+			manager.setTuiMode("fullscreen");
+			await manager.flush();
+
+			expect(manager.getTuiMode()).toBe("fullscreen");
+			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+			expect(savedSettings.tuiMode).toBe("fullscreen");
+		});
+
+		it("falls back to regular for unsupported values", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ tuiMode: "other" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getTuiMode()).toBe("regular");
+		});
+
+		it("does not recognize the old uiMode setting", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ uiMode: "fullscreen" }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getTuiMode()).toBe("regular");
+		});
+	});
+
+	it("validates and persists fullscreen settings", async () => {
+		const manager = SettingsManager.create(projectDir, agentDir);
+		expect(manager.getFullscreenExitOutput()).toBe("transcript");
+		expect(manager.getFullscreenScrollbar()).toBe("auto");
+
+		manager.setFullscreenExitOutput("resume-hint");
+		manager.setFullscreenScrollbar("hidden");
+		await manager.flush();
+		const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+		expect(savedSettings.fullscreenExitOutput).toBe("resume-hint");
+		expect(savedSettings.fullscreenScrollbar).toBe("hidden");
+
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ fullscreenExitOutput: "nothing", fullscreenScrollbar: "sometimes" }),
+		);
+		const reloadedManager = SettingsManager.create(projectDir, agentDir);
+		expect(reloadedManager.getFullscreenExitOutput()).toBe("transcript");
+		expect(reloadedManager.getFullscreenScrollbar()).toBe("auto");
+	});
+
 	describe("outputPad", () => {
 		it("should default to 1 and persist binary values", async () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
@@ -460,6 +473,27 @@ describe("SettingsManager", () => {
 			const manager = SettingsManager.create(projectDir, agentDir);
 
 			expect(manager.getOutputPad()).toBe(1);
+		});
+	});
+
+	describe("markdown.mermaid", () => {
+		it("defaults to streaming and persists rendering modes", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getMermaidRenderingMode()).toBe("streaming");
+
+			manager.setMermaidRenderingMode("final");
+			await manager.flush();
+
+			expect(manager.getMermaidRenderingMode()).toBe("final");
+			const savedSettings = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+			expect(savedSettings.markdown.mermaid).toBe("final");
+		});
+
+		it("falls back to streaming for unsupported values", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ markdown: { mermaid: "sometimes" } }));
+
+			expect(SettingsManager.create(projectDir, agentDir).getMermaidRenderingMode()).toBe("streaming");
 		});
 	});
 
@@ -493,6 +527,23 @@ describe("SettingsManager", () => {
 			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
 			expect(savedSettings.shellCommandPrefix).toBe("shopt -s expand_aliases");
 			expect(savedSettings.theme).toBe("light");
+		});
+	});
+
+	describe("defaultTools", () => {
+		it("loads global defaults and lets project settings replace them", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["read", "bash"] }));
+
+			expect(SettingsManager.create(projectDir, agentDir).getDefaultTools()).toEqual(["read", "bash"]);
+
+			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ defaultTools: ["grep"] }));
+
+			expect(SettingsManager.create(projectDir, agentDir).getDefaultTools()).toEqual(["grep"]);
+		});
+
+		it("preserves an empty tool list", () => {
+			expect(SettingsManager.inMemory({ defaultTools: [] }).getDefaultTools()).toEqual([]);
+			expect(SettingsManager.inMemory().getDefaultTools()).toBeUndefined();
 		});
 	});
 
@@ -534,24 +585,6 @@ describe("SettingsManager", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: "/bin/zsh" }));
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getShellPath()).toBe("/bin/zsh");
-		});
-
-		it("should persist a project shellPath without replacing the global shellPath", async () => {
-			const globalPath = "/global/bin/bash";
-			const projectPath = "/project/bin/bash";
-			const replacementPath = "/replacement/bin/bash";
-			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ shellPath: globalPath }));
-			writeFileSync(join(projectDir, ".pi", "settings.json"), JSON.stringify({ shellPath: projectPath }));
-			const manager = SettingsManager.create(projectDir, agentDir);
-
-			manager.setProjectShellPath(replacementPath);
-			await manager.flush();
-
-			expect(manager.getShellPath()).toBe(replacementPath);
-			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).shellPath).toBe(globalPath);
-			expect(JSON.parse(readFileSync(join(projectDir, ".pi", "settings.json"), "utf-8")).shellPath).toBe(
-				replacementPath,
-			);
 		});
 
 		it("should expand ~ in shellPath", () => {

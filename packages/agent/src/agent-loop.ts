@@ -634,9 +634,13 @@ async function prepareToolCall(
 				};
 			}
 			if (beforeResult?.block) {
+				const result = createErrorToolResult(beforeResult.reason || "Tool execution was blocked");
+				if (beforeResult.terminate === true) {
+					result.terminate = true;
+				}
 				return {
 					kind: "immediate",
-					result: createErrorToolResult(beforeResult.reason || "Tool execution was blocked"),
+					result,
 					isError: true,
 				};
 			}
@@ -693,7 +697,7 @@ async function executePreparedToolCall(
 		);
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
-		return { result, isError: result.isError === true };
+		return { result, isError: false };
 	} catch (error) {
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);

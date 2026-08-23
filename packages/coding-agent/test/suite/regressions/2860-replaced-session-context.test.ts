@@ -240,34 +240,6 @@ describe("regression #2860: replaced session callbacks", () => {
 		]);
 	});
 
-	it("invalidates captured pi and command contexts after reload", async () => {
-		let staleCtxThrows = false;
-		let stalePiThrows = false;
-		const { runtime } = await createRuntimeForTest((pi) => {
-			pi.registerCommand("reload-it", {
-				description: "reload-it",
-				handler: async (_args, ctx) => {
-					await ctx.reload();
-					try {
-						ctx.sessionManager.getSessionFile();
-					} catch {
-						staleCtxThrows = true;
-					}
-					try {
-						pi.sendUserMessage("stale message");
-					} catch {
-						stalePiThrows = true;
-					}
-				},
-			});
-		}, []);
-
-		await runtime.session.prompt("/reload-it");
-
-		expect(staleCtxThrows).toBe(true);
-		expect(stalePiThrows).toBe(true);
-	});
-
 	it("supports withSession for switchSession", async () => {
 		let targetSessionPath = "";
 		const { runtime } = await createRuntimeForTest(

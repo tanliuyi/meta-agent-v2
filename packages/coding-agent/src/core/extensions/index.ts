@@ -63,8 +63,6 @@ export type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 	ExtensionCommandContextActions,
-	ExtensionConfiguration,
-	ExtensionConfigValue,
 	ExtensionContext,
 	ExtensionContextActions,
 	// Errors
@@ -97,6 +95,8 @@ export type {
 	LoadExtensionsResult,
 	LsToolCallEvent,
 	LsToolResultEvent,
+	MarkdownTransformContext,
+	MarkdownTransformer,
 	// Events - Message
 	MessageEndEvent,
 	MessageRenderer,
@@ -134,6 +134,7 @@ export type {
 	SessionBeforeTreeEvent,
 	SessionBeforeTreeResult,
 	SessionCompactEvent,
+	SessionCompactFailedEvent,
 	SessionEvent,
 	SessionInfoChangedEvent,
 	SessionShutdownEvent,
