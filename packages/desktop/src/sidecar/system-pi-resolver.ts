@@ -2,9 +2,19 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import { gte, valid } from "semver";
+
 const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const VERSION_TIMEOUT_MS = 5_000;
 const MAX_VERSION_OUTPUT_BYTES = 64 * 1024;
+export const MINIMUM_SYSTEM_PI_VERSION = "0.84.2";
+
+export function assertSupportedSystemPiVersion(version: string): void {
+  if (!valid(version)) throw new Error(`System Pi returned an unsupported version: ${version}`);
+  if (!gte(version, MINIMUM_SYSTEM_PI_VERSION)) {
+    throw new Error(`System Pi ${version} is unsupported; install ${MINIMUM_SYSTEM_PI_VERSION} or newer`);
+  }
+}
 
 export interface SystemPiInvocation {
   command: string;

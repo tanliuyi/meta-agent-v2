@@ -1,6 +1,8 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
+import type { RpcCommand, RpcResponse, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { PiRpcEvent } from "../shared/contracts.ts";
 import type { ProbedSystemPi } from "./system-pi-resolver.ts";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -9,23 +11,16 @@ const MAX_JSONL_FRAME_BYTES = 64 * 1024 * 1024;
 const MAX_PENDING_STDIN_BYTES = 16 * 1024 * 1024;
 const MAX_STDERR_BYTES = 256 * 1024;
 
-export interface PiRpcCommand {
-  type: string;
-  [key: string]: unknown;
-}
-
-export interface PiRpcResponse {
-  id?: string;
-  type: "response";
-  command: string;
-  success: boolean;
-  data?: unknown;
-  error?: string;
-}
+export type PiRpcCommand = RpcCommand;
+export type PiRpcResponse = RpcResponse;
+type PiRpcSuccessResponse<Command extends PiRpcCommand["type"]> = Extract<
+  PiRpcResponse,
+  { command: Command; success: true }
+>;
 
 export interface PiRpcHandshake {
   state: Record<string, unknown>;
-  entries: { entries: unknown[]; leafId: string | null };
+  entries: { entries: SessionEntry[]; leafId: string | null };
   commands: unknown[];
   models: unknown[];
 }
@@ -37,7 +32,7 @@ export interface PiRpcClientOptions {
   environment: NodeJS.ProcessEnv;
   requestTimeoutMs?: number;
   startupTimeoutMs?: number;
-  onEvent?(event: Record<string, unknown>): void;
+  onEvent?(event: PiRpcEvent): void;
   onStderr?(text: string): void;
 }
 
@@ -56,6 +51,7 @@ function asRecord(value: unknown, label: string): Record<string, unknown> {
 }
 
 function responseData(response: PiRpcResponse): Record<string, unknown> {
+  if (!("data" in response)) throw new Error(`${response.command} response is missing data`);
   return asRecord(response.data, `${response.command} response data`);
 }
 
@@ -77,7 +73,7 @@ export class PiRpcClient {
   private readonly decoder = new StringDecoder("utf8");
   private readonly pending = new Map<string, PendingRequest>();
   private readonly expiredRequestIds = new Set<string>();
-  private readonly onEvent?: (event: Record<string, unknown>) => void;
+  private readonly onEvent?: (event: PiRpcEvent) => void;
   private readonly onStderr?: (text: string) => void;
   private readonly requestTimeoutMs: number;
   private readonly piVersion: string;
@@ -156,7 +152,10 @@ export class PiRpcClient {
     return this.stderrTail;
   }
 
-  async request(command: PiRpcCommand, timeoutMs: number | null = this.requestTimeoutMs): Promise<PiRpcResponse> {
+  async request<const Command extends PiRpcCommand>(
+    command: Command,
+    timeoutMs: number | null = this.requestTimeoutMs,
+  ): Promise<PiRpcSuccessResponse<Command["type"]>> {
     if (this.terminalError) throw this.terminalError;
     if (this.closing) throw new Error("System Pi RPC client is closing");
     const id = randomUUID();
@@ -185,7 +184,7 @@ export class PiRpcClient {
       }
       throw error;
     }
-    return responsePromise;
+    return responsePromise as Promise<PiRpcSuccessResponse<Command["type"]>>;
   }
 
   async send(message: Record<string, unknown>): Promise<void> {
@@ -242,7 +241,7 @@ export class PiRpcClient {
     }
 
     const entriesData = responseData(entriesResponse);
-    const entries = assertArray(entriesData.entries, "get_entries.data.entries");
+    const entries = assertArray(entriesData.entries, "get_entries.data.entries") as SessionEntry[];
     const leafId = entriesData.leafId;
     if (leafId !== null && typeof leafId !== "string") {
       throw new Error("get_entries.data.leafId must be a string or null");
@@ -330,7 +329,7 @@ export class PiRpcClient {
     const message = parsed;
     if (message.type !== "response") {
       try {
-        this.onEvent?.(message);
+        this.onEvent?.(message as PiRpcEvent);
       } catch (error) {
         this.fail(
           new Error(`System Pi event handler failed: ${error instanceof Error ? error.message : String(error)}`),
@@ -362,14 +361,7 @@ export class PiRpcClient {
     this.pending.delete(message.id);
     if (pending.timeout) clearTimeout(pending.timeout);
 
-    const response: PiRpcResponse = {
-      id: message.id,
-      type: "response",
-      command: message.command,
-      success: message.success,
-      data: message.data,
-      error: typeof message.error === "string" ? message.error : undefined,
-    };
+    const response = message as PiRpcResponse;
     if (!response.success) {
       pending.reject(new Error(response.error ?? `System Pi RPC command '${response.command}' failed`));
       return;

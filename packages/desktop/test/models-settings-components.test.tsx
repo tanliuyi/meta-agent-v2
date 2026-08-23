@@ -157,10 +157,12 @@ describe("models settings components", () => {
             supportsTemperature: false,
             supportsOpenAIGrammarTools: true,
             supportsStrictTools: true,
+            thinkingFormat: "baseten",
             openRouterRouting: {},
             vercelGatewayRouting: {},
           },
           chatTemplateKwargs: [{ key: "enable_thinking", value: { $var: "thinking.enabled" } }],
+          chatTemplateArgs: [{ key: "reasoning_effort", value: { $var: "thinking.effort" } }],
         }}
         onChange={vi.fn()}
       />,
@@ -170,11 +172,16 @@ describe("models settings components", () => {
       "支持 temperature 参数",
       "支持 OpenAI grammar 工具",
       "支持严格工具定义",
+      "流式返回结束原因",
+      "支持思考 token 预算",
+      "支持附加工具",
+      "支持显式提示词缓存模式",
       "支持工具搜索",
       "最大 token 字段名",
       "思考参数格式",
       "会话亲和头格式",
       "chatTemplateKwargs",
+      "chatTemplateArgs",
       "OpenRouter routing",
       "Vercel AI Gateway routing",
       "preferred_min_throughput",
@@ -185,5 +192,6 @@ describe("models settings components", () => {
     expect(markup).not.toContain("textarea");
     expect(markup).toContain('role="combobox"');
     expect(markup).toContain('role="checkbox"');
+    expect(markup).toContain("baseten");
   });
 });

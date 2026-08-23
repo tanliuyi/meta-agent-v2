@@ -36,6 +36,7 @@ function attachmentFor(record: ReturnType<typeof createSessionRecord>, attachmen
       projectId: record.identity.projectId,
       threadId: record.identity.threadId,
       timeline: record.stores.timeline.getSnapshot(),
+      events: [],
       control: EMPTY_CONTROL,
     },
   };

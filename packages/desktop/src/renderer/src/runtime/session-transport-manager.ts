@@ -345,6 +345,7 @@ export class SessionTransportManager {
         projectId: record.identity.projectId,
         threadId: record.identity.threadId,
         timeline: record.stores.timeline.getSnapshot(),
+        events: [],
         control: control ?? throwMissingControl(record.identity),
       },
     };
@@ -359,12 +360,14 @@ export class SessionTransportManager {
       throw new Error("Session bootstrap identity does not match cache record");
     }
     record.stores.timeline.replace(bootstrap.timeline);
-    record.stores.runActivity.sync(bootstrap.timeline);
+    for (const { sequence, event } of bootstrap.events) record.stores.timeline.apply(sequence, event);
+    const timeline = record.stores.timeline.getSnapshot();
+    record.stores.runActivity.sync(timeline);
     record.stores.control.replace(bootstrap.control);
     record.stores.workbench.replace(workbench);
     record.stores.summary.set({
-      running: bootstrap.timeline.phase === "running" || bootstrap.timeline.phase === "retrying",
-      loading: bootstrap.timeline.phase === "compacting" || bootstrap.timeline.phase === "tree-navigation",
+      running: timeline.phase === "running" || timeline.phase === "retrying",
+      loading: timeline.phase === "compacting" || timeline.phase === "tree-navigation",
     });
   }
 
@@ -405,7 +408,7 @@ export class SessionTransportManager {
       return;
     }
     try {
-      record.stores.timeline.apply(update.batch);
+      record.stores.timeline.apply(update.sequence, update.event);
       const snapshot = record.stores.timeline.getSnapshot();
       record.stores.runActivity.sync(snapshot);
       record.stores.summary.set({

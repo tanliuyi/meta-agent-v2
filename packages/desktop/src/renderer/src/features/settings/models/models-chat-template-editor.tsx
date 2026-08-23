@@ -8,14 +8,15 @@ import type { ModelsChatTemplateKwarg, ModelsCompatDraft } from "../../../../../
 import { ModelsOptionSelect } from "./models-option-select.tsx";
 
 interface ModelsChatTemplateEditorProps {
+  name: "chatTemplateKwargs" | "chatTemplateArgs";
   entries: NonNullable<ModelsCompatDraft["chatTemplateKwargs"]>;
   onChange(entries: NonNullable<ModelsCompatDraft["chatTemplateKwargs"]>): void;
 }
 
 type ChatTemplateEntries = NonNullable<ModelsCompatDraft["chatTemplateKwargs"]>;
 
-/** Structured scalar/variable editor for chat_template_kwargs. */
-export function ModelsChatTemplateEditor({ entries, onChange }: ModelsChatTemplateEditorProps) {
+/** Structured scalar/variable editor for chat template parameters. */
+export function ModelsChatTemplateEditor({ name, entries, onChange }: ModelsChatTemplateEditorProps) {
   const entriesRef = useRef<ChatTemplateEntries>(structuredClone(entries));
   const rowIdsRef = useRef(entries.map(() => crypto.randomUUID()));
   const [rows, setRows] = useState(entriesRef.current);
@@ -34,14 +35,14 @@ export function ModelsChatTemplateEditor({ entries, onChange }: ModelsChatTempla
 
   return (
     <fieldset className="models-fieldset models-nested-fieldset">
-      <legend>chatTemplateKwargs</legend>
+      <legend>{name}</legend>
       {rows.map((entry, index) => {
         const kind = chatKwargKind(entry.value);
         return (
           <div className="models-chat-kwarg-row" key={rowIdsRef.current[index]}>
             <Input
               defaultValue={entry.key}
-              aria-label={`chatTemplateKwargs key ${index + 1}`}
+              aria-label={`${name} key ${index + 1}`}
               onChange={(event) => {
                 const next = structuredClone(entriesRef.current);
                 next[index]!.key = event.target.value;
@@ -88,7 +89,7 @@ export function ModelsChatTemplateEditor({ entries, onChange }: ModelsChatTempla
               <Input
                 type={kind === "number" ? "number" : "text"}
                 defaultValue={String(entry.value)}
-                aria-label={`chatTemplateKwargs value ${index + 1}`}
+                aria-label={`${name} value ${index + 1}`}
                 onChange={(event) =>
                   updateValue(index, kind === "number" ? Number(event.target.value) : event.target.value)
                 }

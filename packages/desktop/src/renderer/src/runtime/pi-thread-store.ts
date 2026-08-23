@@ -1,20 +1,28 @@
 import {
+  type JsonValue,
   type PiAssistantMessage,
   type PiAssistantPart,
-  type PiThreadEvent,
-  type PiThreadEventBatch,
+  type PiNoticeMessage,
+  type PiQueueItem,
+  type PiRpcEvent,
+  type PiRpcMessageUpdateEvent,
   type PiThreadSnapshot,
   type PiTimelineNode,
+  type PiToolCallPart,
   PROTOCOL_VERSION,
 } from "../../../shared/contracts.ts";
+import {
+  applyPiToolResult,
+  createPiMessageNodeId,
+  type PiAssistant,
+  type PiMessage,
+  type PiToolResult,
+  projectPiAssistant,
+  projectPiMessage,
+  toJson,
+} from "../../../shared/pi-message-projector.ts";
 
 type Listener = () => void;
-
-interface SnapshotIndexes {
-  nodeIndexes: Map<string, number>;
-  partIndexes: Map<string, Map<string, number>>;
-}
-
 interface PiThreadNodesChange {
   previousNodes: readonly PiTimelineNode[];
   dirtyFrom: number;
@@ -23,26 +31,19 @@ interface PiThreadNodesChange {
 
 const nodeChanges = new WeakMap<readonly PiTimelineNode[], PiThreadNodesChange>();
 
-/**
- * 返回由 PiThreadStore 记录的结构共享边界，供线性 projection 只重建变化后缀。
- * 非本 store 生成的 snapshot 没有提示，调用方必须退回完整一致性检查。
- */
+/** 返回 snapshot 节点的结构共享边界，供线性 projection 只重建变化后缀。 */
 export function getPiThreadNodesChange(nodes: readonly PiTimelineNode[]): PiThreadNodesChange | undefined {
   return nodeChanges.get(nodes);
 }
 
-/** 保持 Pi timeline identity，并以事务方式应用一个 event batch。 */
+/** 直接把 Pi RPC 原子事件归约为 renderer 使用的 timeline snapshot。 */
 export class PiThreadStore {
   private state: PiThreadSnapshot | string;
-  private nodeIndexes: Map<string, number>;
-  private partIndexes: Map<string, Map<string, number>>;
   private readonly listeners = new Set<Listener>();
 
   constructor(initial: PiThreadSnapshot = detachedSnapshot()) {
-    const indexes = indexSnapshot(initial);
+    validateSnapshot(initial);
     this.state = initial;
-    this.nodeIndexes = indexes.nodeIndexes;
-    this.partIndexes = indexes.partIndexes;
   }
 
   getSnapshot = (): PiThreadSnapshot => this.hydrate();
@@ -51,8 +52,6 @@ export class PiThreadStore {
     if (typeof this.state === "string") return true;
     if (this.listeners.size > 0) return false;
     this.state = JSON.stringify(this.state);
-    this.nodeIndexes = new Map();
-    this.partIndexes = new Map();
     return true;
   }
 
@@ -63,8 +62,6 @@ export class PiThreadStore {
   evictHibernated(): boolean {
     if (typeof this.state !== "string" || this.listeners.size > 0) return false;
     this.state = detachedSnapshot();
-    this.nodeIndexes = new Map();
-    this.partIndexes = new Map();
     return true;
   }
 
@@ -74,51 +71,32 @@ export class PiThreadStore {
   };
 
   replace(snapshot: PiThreadSnapshot): void {
-    const indexes = indexSnapshot(snapshot);
+    validateSnapshot(snapshot);
     const previousNodes = typeof this.state === "string" ? undefined : this.state.nodes;
     this.state = snapshot;
-    this.nodeIndexes = indexes.nodeIndexes;
-    this.partIndexes = indexes.partIndexes;
-    if (previousNodes) recordNodeChange(previousNodes, snapshot.nodes, 0, new Map());
+    if (previousNodes) recordNodeChange(previousNodes, snapshot.nodes);
     this.notify();
   }
 
-  apply(batch: PiThreadEventBatch): void {
-    const state = this.hydrate();
-    validateBatch(batch, state);
-    if (batch.toSequence <= state.cursor) return;
-
-    let firstNewEvent = 0;
-    while (
-      batch.events[firstNewEvent]?.sequence !== undefined &&
-      batch.events[firstNewEvent]!.sequence <= state.cursor
-    ) {
-      firstNewEvent += 1;
+  apply(sequence: number, event: PiRpcEvent): void {
+    const current = this.hydrate();
+    if (sequence <= current.cursor) return;
+    if (sequence !== current.cursor + 1) {
+      throw new PiThreadStoreError(`timeline sequence gap: ${current.cursor} -> ${sequence}`);
     }
-    const firstSequence = batch.events[firstNewEvent]?.sequence;
-    if (firstSequence !== state.cursor + 1)
-      throw new PiThreadStoreError(`timeline sequence gap: ${state.cursor} -> ${String(firstSequence)}`);
 
-    const mutation = new PiThreadBatchMutation(state, this.nodeIndexes, this.partIndexes);
-    for (let index = firstNewEvent; index < batch.events.length; index += 1) {
-      const envelope = batch.events[index];
-      if (envelope) mutation.apply(envelope.event, envelope.sequence);
-    }
-    const result = mutation.finish();
-    recordNodeChange(state.nodes, result.snapshot.nodes, result.dirtyFrom, result.rekeyedFrom);
-    this.state = result.snapshot;
-    this.nodeIndexes = result.nodeIndexes;
-    this.partIndexes = result.partIndexes;
+    const next = reducePiRpcEvent(current, sequence, event);
+    validateSnapshot(next);
+    recordNodeChange(current.nodes, next.nodes);
+    this.state = next;
     this.notify();
   }
 
   private hydrate(): PiThreadSnapshot {
     if (typeof this.state !== "string") return this.state;
     const snapshot = JSON.parse(this.state) as PiThreadSnapshot;
-    const indexes = indexSnapshot(snapshot);
+    validateSnapshot(snapshot);
     this.state = snapshot;
-    this.nodeIndexes = indexes.nodeIndexes;
-    this.partIndexes = indexes.partIndexes;
     return snapshot;
   }
 
@@ -134,368 +112,428 @@ export class PiThreadStoreError extends Error {
   }
 }
 
-/**
- * batch 内部可以原地修改自己新建的数组；提交前不会暴露这些引用。
- * node/part 索引采用 copy-on-write，任一 event 失败时原 store 与索引均保持不变。
- */
-class PiThreadBatchMutation {
-  private protocolVersion: PiThreadSnapshot["protocolVersion"];
-  private projectId: string;
-  private threadId: string;
-  private cursor: number;
-  private headId: string | null;
-  private nodes: readonly PiTimelineNode[];
-  private queue: PiThreadSnapshot["queue"];
-  private phase: PiThreadSnapshot["phase"];
-  private activeTurnId: string | undefined;
-  private nodesOwned = false;
-  private nodeIndexesOwned = false;
-  private partIndexesOwned = false;
-  private nodeIndexes: Map<string, number>;
-  private partIndexes: Map<string, Map<string, number>>;
-  private mutableAssistantIndexes = new Set<number>();
-  private mutablePartIndexes = new Set<string>();
-  private rekeyedFrom = new Map<number, string>();
-  private trackRekeys = true;
-  private dirtyFrom = Number.POSITIVE_INFINITY;
-
-  constructor(
-    snapshot: PiThreadSnapshot,
-    nodeIndexes: Map<string, number>,
-    partIndexes: Map<string, Map<string, number>>,
-  ) {
-    this.protocolVersion = snapshot.protocolVersion;
-    this.projectId = snapshot.projectId;
-    this.threadId = snapshot.threadId;
-    this.cursor = snapshot.cursor;
-    this.headId = snapshot.headId;
-    this.nodes = snapshot.nodes;
-    this.queue = snapshot.queue;
-    this.phase = snapshot.phase;
-    this.activeTurnId = snapshot.activeTurnId;
-    this.nodeIndexes = nodeIndexes;
-    this.partIndexes = partIndexes;
-  }
-
-  apply(event: PiThreadEvent, sequence: number): void {
-    this.cursor = sequence;
-    switch (event.type) {
-      case "phase-changed":
-        this.phase = event.phase;
-        this.activeTurnId = event.activeTurnId;
-        return;
-      case "node-added":
-        this.addNode(event.node);
-        return;
-      case "node-rekeyed":
-        this.rekeyNode(event.previousId, event.node);
-        return;
-      case "node-replaced":
-        this.replaceNode(event.node);
-        return;
-      case "part-added":
-        this.addPart(event.messageId, event.part);
-        return;
-      case "text-delta":
-      case "reasoning-delta":
-        this.appendPartText(event.messageId, event.partId, event.delta, event.type);
-        return;
-      case "tool-call-replaced":
-        this.replaceToolPart(event.messageId, event.part);
-        return;
-      case "message-finished":
-        this.replaceNode(event.message);
-        return;
-      case "queue-replaced":
-        this.queue = event.items;
-        return;
-      case "branch-replaced":
-        this.replaceBranch(event.snapshot, sequence);
-        return;
-      default:
-        assertNever(event);
-    }
-  }
-
-  finish(): {
-    snapshot: PiThreadSnapshot;
-    nodeIndexes: Map<string, number>;
-    partIndexes: Map<string, Map<string, number>>;
-    dirtyFrom: number;
-    rekeyedFrom: ReadonlyMap<number, string>;
-  } {
-    return {
-      snapshot: {
-        protocolVersion: this.protocolVersion,
-        projectId: this.projectId,
-        threadId: this.threadId,
-        cursor: this.cursor,
-        headId: this.headId,
-        nodes: this.nodes,
-        queue: this.queue,
-        phase: this.phase,
-        ...(this.activeTurnId !== undefined ? { activeTurnId: this.activeTurnId } : {}),
-      },
-      nodeIndexes: this.nodeIndexes,
-      partIndexes: this.partIndexes,
-      dirtyFrom: this.dirtyFrom,
-      rekeyedFrom: this.rekeyedFrom,
-    };
-  }
-
-  private addNode(node: PiTimelineNode): void {
-    if (this.nodeIndexes.has(node.id)) throw new PiThreadStoreError(`重复 timeline node: ${node.id}`);
-    this.assertParent(node.parentId);
-    const nodes = this.ensureNodes();
-    const index = nodes.length;
-    nodes.push(node);
-    this.ensureNodeIndexes().set(node.id, index);
-    this.replacePartIndex(node);
-    this.headId = node.id;
-    this.markDirty(index);
-  }
-
-  private replaceNode(node: PiTimelineNode): void {
-    const index = this.requireNodeIndex(node.id);
-    this.assertParent(node.parentId);
-    this.ensureNodes()[index] = node;
-    this.mutableAssistantIndexes.delete(index);
-    this.replacePartIndex(node);
-    this.markDirty(index);
-  }
-
-  private rekeyNode(previousId: string, node: PiTimelineNode): void {
-    const index = this.requireNodeIndex(previousId);
-    if (previousId !== node.id && this.nodeIndexes.has(node.id))
-      throw new PiThreadStoreError(`rekey 目标已存在: ${node.id}`);
-    this.assertParent(node.parentId);
-    if (this.trackRekeys && previousId !== node.id && !this.rekeyedFrom.has(index)) {
-      this.rekeyedFrom.set(index, previousId);
-    }
-
-    const nodes = this.ensureNodes();
-    for (let currentIndex = 0; currentIndex < nodes.length; currentIndex += 1) {
-      const current = nodes[currentIndex];
-      if (!current) continue;
-      if (currentIndex === index) {
-        nodes[currentIndex] = node;
-        this.mutableAssistantIndexes.delete(currentIndex);
-        this.markDirty(currentIndex);
-      } else if (current.parentId === previousId) {
-        nodes[currentIndex] = { ...current, parentId: node.id };
-        this.markDirty(currentIndex);
-      }
-    }
-
-    const nodeIndexes = this.ensureNodeIndexes();
-    nodeIndexes.delete(previousId);
-    nodeIndexes.set(node.id, index);
-    const partIndexes = this.ensurePartIndexes();
-    partIndexes.delete(previousId);
-    this.mutablePartIndexes.delete(previousId);
-    if (node.kind === "assistant") {
-      partIndexes.set(node.id, indexAssistantParts(node));
-      this.mutablePartIndexes.add(node.id);
-    }
-    if (this.headId === previousId) this.headId = node.id;
-  }
-
-  private addPart(messageId: string, part: PiAssistantPart): void {
-    const currentPartIndexes = this.partIndexes.get(messageId);
-    if (currentPartIndexes?.has(part.id)) throw new PiThreadStoreError(`重复 assistant part: ${part.id}`);
-    const message = this.ensureMutableAssistant(messageId);
-    message.content.push(part);
-    this.ensureMutablePartIndex(messageId).set(part.id, message.content.length - 1);
-  }
-
-  private appendPartText(
-    messageId: string,
-    partId: string,
-    delta: string,
-    eventType: "text-delta" | "reasoning-delta",
-  ): void {
-    const partIndex = this.requirePartIndex(messageId, partId);
-    const message = this.ensureMutableAssistant(messageId);
-    const part = message.content[partIndex];
-    if (!part) throw new PiThreadStoreError(`delta part 不存在: ${partId}`);
-    if (eventType === "text-delta") {
-      if (part.type !== "text") throw new PiThreadStoreError(`text delta part 类型错误: ${partId}`);
-    } else if (part.type !== "reasoning") {
-      throw new PiThreadStoreError(`reasoning delta part 类型错误: ${partId}`);
-    }
-    message.content[partIndex] = { ...part, text: part.text + delta };
-  }
-
-  private replaceToolPart(messageId: string, part: Extract<PiAssistantPart, { type: "tool-call" }>): void {
-    const partIndex = this.requirePartIndex(messageId, part.id);
-    const message = this.ensureMutableAssistant(messageId);
-    if (message.content[partIndex]?.type !== "tool-call")
-      throw new PiThreadStoreError(`tool part 类型错误: ${part.id}`);
-    message.content[partIndex] = part;
-  }
-
-  private replaceBranch(snapshot: PiThreadSnapshot, sequence: number): void {
-    const indexes = indexSnapshot(snapshot);
-    if (snapshot.projectId !== this.projectId || snapshot.threadId !== this.threadId)
-      throw new PiThreadStoreError("branch snapshot session 不匹配");
-    if (snapshot.cursor !== sequence) throw new PiThreadStoreError("branch snapshot cursor 不匹配");
-    this.protocolVersion = snapshot.protocolVersion;
-    this.cursor = snapshot.cursor;
-    this.headId = snapshot.headId;
-    this.nodes = snapshot.nodes;
-    this.queue = snapshot.queue;
-    this.phase = snapshot.phase;
-    this.activeTurnId = snapshot.activeTurnId;
-    this.nodesOwned = false;
-    this.nodeIndexes = indexes.nodeIndexes;
-    this.nodeIndexesOwned = true;
-    this.partIndexes = indexes.partIndexes;
-    this.partIndexesOwned = true;
-    this.mutableAssistantIndexes = new Set();
-    this.mutablePartIndexes = new Set(indexes.partIndexes.keys());
-    this.rekeyedFrom = new Map();
-    this.trackRekeys = false;
-    this.markDirty(0);
-  }
-
-  private ensureMutableAssistant(messageId: string): PiAssistantMessage {
-    const index = this.requireNodeIndex(messageId);
-    const current = this.nodes[index];
-    if (!current || current.kind !== "assistant") throw new PiThreadStoreError(`assistant node 不存在: ${messageId}`);
-    if (this.mutableAssistantIndexes.has(index)) return current;
-    const message = { ...current, content: [...current.content] };
-    this.ensureNodes()[index] = message;
-    this.mutableAssistantIndexes.add(index);
-    this.markDirty(index);
-    return message;
-  }
-
-  private ensureMutablePartIndex(messageId: string): Map<string, number> {
-    const current = this.partIndexes.get(messageId);
-    if (!current) throw new PiThreadStoreError(`assistant node 不存在: ${messageId}`);
-    if (this.mutablePartIndexes.has(messageId)) return current;
-    const next = new Map(current);
-    this.ensurePartIndexes().set(messageId, next);
-    this.mutablePartIndexes.add(messageId);
-    return next;
-  }
-
-  private replacePartIndex(node: PiTimelineNode): void {
-    const partIndexes = this.ensurePartIndexes();
-    this.mutablePartIndexes.delete(node.id);
-    if (node.kind === "assistant") {
-      partIndexes.set(node.id, indexAssistantParts(node));
-      this.mutablePartIndexes.add(node.id);
-    } else {
-      partIndexes.delete(node.id);
-    }
-  }
-
-  private requireNodeIndex(nodeId: string): number {
-    const index = this.nodeIndexes.get(nodeId);
-    if (index === undefined) throw new PiThreadStoreError(`timeline node 不存在: ${nodeId}`);
-    return index;
-  }
-
-  private requirePartIndex(messageId: string, partId: string): number {
-    if (!this.nodeIndexes.has(messageId)) throw new PiThreadStoreError(`assistant node 不存在: ${messageId}`);
-    const index = this.partIndexes.get(messageId)?.get(partId);
-    if (index === undefined) throw new PiThreadStoreError(`delta part 不存在: ${partId}`);
-    return index;
-  }
-
-  private assertParent(parentId: string | null): void {
-    if (parentId !== null && !this.nodeIndexes.has(parentId))
-      throw new PiThreadStoreError(`timeline parent 不存在: ${parentId}`);
-  }
-
-  private ensureNodes(): PiTimelineNode[] {
-    if (!this.nodesOwned) {
-      this.nodes = [...this.nodes];
-      this.nodesOwned = true;
-    }
-    return this.nodes as PiTimelineNode[];
-  }
-
-  private ensureNodeIndexes(): Map<string, number> {
-    if (!this.nodeIndexesOwned) {
-      this.nodeIndexes = new Map(this.nodeIndexes);
-      this.nodeIndexesOwned = true;
-    }
-    return this.nodeIndexes;
-  }
-
-  private ensurePartIndexes(): Map<string, Map<string, number>> {
-    if (!this.partIndexesOwned) {
-      this.partIndexes = new Map(this.partIndexes);
-      this.partIndexesOwned = true;
-    }
-    return this.partIndexes;
-  }
-
-  private markDirty(index: number): void {
-    this.dirtyFrom = Math.min(this.dirtyFrom, index);
+function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, event: PiRpcEvent): PiThreadSnapshot {
+  const next = { ...snapshot, cursor: sequence };
+  switch (event.type) {
+    case "agent_start":
+      return { ...next, phase: "running" };
+    case "agent_settled":
+      return { ...next, phase: "idle", activeTurnId: undefined };
+    case "turn_start":
+      return { ...next, phase: "running", activeTurnId: `rpc-turn:${sequence}` };
+    case "turn_end":
+      return { ...next, activeTurnId: undefined };
+    case "message_start":
+      return startMessage(next, event.message);
+    case "message_update":
+      return updateAssistant(next, event);
+    case "message_end":
+      return finishMessage(next, event.message);
+    case "tool_execution_start":
+      return updateTool(next, event.toolCallId, (part) => ({ ...part, execution: "running" }));
+    case "tool_execution_update":
+      return updateTool(next, event.toolCallId, (part) => ({
+        ...part,
+        execution: "running",
+        partialResult: toJson(event.partialResult),
+      }));
+    case "tool_execution_end":
+      return updateTool(next, event.toolCallId, (part) => ({
+        ...part,
+        execution: event.isError ? "error" : "complete",
+        result: toJson(event.result),
+        isError: event.isError,
+      }));
+    case "queue_update":
+      return { ...next, queue: queueItems(sequence, event.steering, event.followUp) };
+    case "compaction_start":
+      return { ...next, phase: "compacting" };
+    case "compaction_end":
+      return { ...next, phase: event.reason === "manual" ? "idle" : "running" };
+    case "auto_retry_start":
+      return { ...next, phase: "retrying" };
+    case "auto_retry_end":
+      return { ...next, phase: snapshot.phase === "retrying" ? "running" : snapshot.phase };
+    case "summarization_retry_scheduled":
+      return { ...next, phase: "retrying" };
+    case "summarization_retry_attempt_start":
+      return { ...next, phase: event.source === "compaction" ? "compacting" : "tree-navigation" };
+    case "summarization_retry_finished":
+      return { ...next, phase: "idle" };
+    case "extension_ui_request":
+      return event.method === "notify" ? appendNotification(next, sequence, event.message, event.notifyType) : next;
+    case "extension_error":
+      return appendExtensionError(next, sequence, event);
+    case "bash_execution_update":
+      return applyBashDelta(next, sequence, event.id, event.delta);
+    case "agent_end":
+    case "entry_appended":
+    case "session_info_changed":
+    case "thinking_level_changed":
+      return next;
+    default:
+      return assertNever(event);
   }
 }
 
-function indexSnapshot(snapshot: PiThreadSnapshot): SnapshotIndexes {
-  if (snapshot.protocolVersion !== PROTOCOL_VERSION)
-    throw new PiThreadStoreError(`不支持的 timeline protocol: ${snapshot.protocolVersion}`);
-  const nodeIndexes = new Map<string, number>();
-  const partIndexes = new Map<string, Map<string, number>>();
-  for (let index = 0; index < snapshot.nodes.length; index += 1) {
-    const node = snapshot.nodes[index];
-    if (!node) continue;
-    if (nodeIndexes.has(node.id)) throw new PiThreadStoreError(`重复 snapshot node: ${node.id}`);
-    if (node.parentId !== null && !nodeIndexes.has(node.parentId))
-      throw new PiThreadStoreError(`snapshot parent 顺序无效: ${node.parentId}`);
-    nodeIndexes.set(node.id, index);
-    if (node.kind === "assistant") partIndexes.set(node.id, indexAssistantParts(node));
+function applyBashDelta(
+  snapshot: PiThreadSnapshot,
+  sequence: number,
+  executionId: string | undefined,
+  delta: string,
+): PiThreadSnapshot {
+  const id = executionId ? `rpc-bash:${executionId}` : undefined;
+  const index = findLastNodeIndex(snapshot.nodes, (node) => {
+    if (node.kind !== "notice" || node.noticeType !== "bash") return false;
+    return id ? node.id === id : node.id.startsWith("rpc-bash:anonymous:");
+  });
+  if (index >= 0) {
+    const current = snapshot.nodes[index];
+    if (!current || current.kind !== "notice" || current.noticeType !== "bash" || current.content.type !== "command") {
+      throw new PiThreadStoreError("active Pi bash output is invalid");
+    }
+    return replaceNode(snapshot, index, {
+      ...current,
+      content: { ...current.content, output: current.content.output + delta },
+    });
   }
-  if (snapshot.headId !== null && !nodeIndexes.has(snapshot.headId))
-    throw new PiThreadStoreError(`snapshot head 不存在: ${snapshot.headId}`);
-  return { nodeIndexes, partIndexes };
-}
-
-function indexAssistantParts(message: PiAssistantMessage): Map<string, number> {
-  const indexes = new Map<string, number>();
-  for (let index = 0; index < message.content.length; index += 1) {
-    const part = message.content[index];
-    if (!part) continue;
-    if (indexes.has(part.id)) throw new PiThreadStoreError(`重复 assistant part: ${part.id}`);
-    indexes.set(part.id, index);
-  }
-  return indexes;
-}
-
-function recordNodeChange(
-  previousNodes: readonly PiTimelineNode[],
-  nextNodes: readonly PiTimelineNode[],
-  dirtyFrom: number,
-  rekeyedFrom: ReadonlyMap<number, string>,
-): void {
-  if (previousNodes === nextNodes) return;
-  nodeChanges.set(nextNodes, {
-    previousNodes,
-    dirtyFrom: Number.isFinite(dirtyFrom) ? dirtyFrom : 0,
-    rekeyedFrom,
+  return appendNode(snapshot, {
+    id: id ?? `rpc-bash:anonymous:${sequence}`,
+    parentId: snapshot.headId,
+    createdAt: Date.now(),
+    kind: "notice",
+    noticeType: "bash",
+    title: "Bash 输出",
+    content: {
+      type: "command",
+      command: "",
+      output: delta,
+      cancelled: false,
+      truncated: false,
+    },
   });
 }
 
-function validateBatch(batch: PiThreadEventBatch, state: PiThreadSnapshot): void {
-  if (batch.protocolVersion !== PROTOCOL_VERSION) throw new PiThreadStoreError("timeline batch protocol 不匹配");
-  if (batch.projectId !== state.projectId || batch.threadId !== state.threadId)
-    throw new PiThreadStoreError("timeline batch session 不匹配");
-  let expected = batch.fromSequence;
-  for (const envelope of batch.events) {
-    if (envelope.protocolVersion !== PROTOCOL_VERSION)
-      throw new PiThreadStoreError("timeline envelope protocol 不匹配");
-    if (envelope.projectId !== batch.projectId || envelope.threadId !== batch.threadId)
-      throw new PiThreadStoreError("timeline envelope session 不匹配");
-    if (envelope.sequence !== expected) throw new PiThreadStoreError(`batch sequence 不连续: ${expected}`);
-    expected += 1;
+function startMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThreadSnapshot {
+  if (message.role === "toolResult") return snapshot;
+  const id = createPiMessageNodeId(message, snapshot.nodes);
+  const node = projectPiMessage({ id, parentId: snapshot.headId, message, finished: false });
+  return node ? appendNode(snapshot, node) : snapshot;
+}
+
+function updateAssistant(snapshot: PiThreadSnapshot, event: PiRpcMessageUpdateEvent): PiThreadSnapshot {
+  const index = findLastNodeIndex(
+    snapshot.nodes,
+    (node) => node.kind === "assistant" && node.status.type === "running",
+  );
+  if (index < 0) throw new PiThreadStoreError("Pi message_update has no active assistant message");
+  const current = snapshot.nodes[index];
+  if (!current || current.kind !== "assistant") throw new PiThreadStoreError("active assistant message is missing");
+
+  const update = event.assistantMessageEvent;
+  if (update.type === "done") return replaceStreamingAssistant(snapshot, index, current, update.message);
+  if (update.type === "error") return replaceStreamingAssistant(snapshot, index, current, update.error);
+
+  const content = [...current.content];
+  switch (update.type) {
+    case "start":
+      break;
+    case "text_start":
+      setStreamingPart(content, update.contentIndex, {
+        id: `${current.id}:text:${update.contentIndex}`,
+        type: "text",
+        text: "",
+      });
+      break;
+    case "text_delta": {
+      const part = requireStreamingPart(content, update.contentIndex, "text");
+      setStreamingPart(content, update.contentIndex, { ...part, text: part.text + update.delta });
+      break;
+    }
+    case "text_end": {
+      const part = requireStreamingPart(content, update.contentIndex, "text");
+      setStreamingPart(content, update.contentIndex, { ...part, text: update.content });
+      break;
+    }
+    case "thinking_start":
+      setStreamingPart(content, update.contentIndex, {
+        id: `${current.id}:reasoning:${update.contentIndex}`,
+        type: "reasoning",
+        text: "",
+      });
+      break;
+    case "thinking_delta": {
+      const part = requireStreamingPart(content, update.contentIndex, "reasoning");
+      setStreamingPart(content, update.contentIndex, { ...part, text: part.text + update.delta });
+      break;
+    }
+    case "thinking_end": {
+      const part = requireStreamingPart(content, update.contentIndex, "reasoning");
+      setStreamingPart(content, update.contentIndex, { ...part, text: update.content });
+      break;
+    }
+    case "toolcall_start":
+      setStreamingPart(content, update.contentIndex, {
+        id: `${current.id}:tool:${update.contentIndex}`,
+        type: "tool-call",
+        toolCallId: `pending:${current.id}:${update.contentIndex}`,
+        toolName: "",
+        args: {},
+        argsText: "",
+        execution: "streaming-args",
+      });
+      break;
+    case "toolcall_delta": {
+      const part = requireStreamingPart(content, update.contentIndex, "tool-call");
+      setStreamingPart(content, update.contentIndex, {
+        ...part,
+        argsText: part.argsText + update.delta,
+        execution: "streaming-args",
+      });
+      break;
+    }
+    case "toolcall_end": {
+      const part = requireStreamingPart(content, update.contentIndex, "tool-call");
+      const args = toJson(update.toolCall.arguments);
+      setStreamingPart(content, update.contentIndex, {
+        ...part,
+        toolCallId: update.toolCall.id,
+        toolName: update.toolCall.name,
+        args: isJsonObject(args) ? args : {},
+        argsText: JSON.stringify(args),
+        execution: "waiting",
+      });
+      break;
+    }
+    default:
+      return assertNever(update);
   }
-  if (expected - 1 !== batch.toSequence) throw new PiThreadStoreError("batch toSequence 与 events 不匹配");
+
+  return replaceNode(snapshot, index, {
+    ...current,
+    content,
+    usage: { ...event.usage, cost: { ...event.usage.cost } },
+  });
+}
+
+function replaceStreamingAssistant(
+  snapshot: PiThreadSnapshot,
+  index: number,
+  current: PiAssistantMessage,
+  message: PiAssistant,
+): PiThreadSnapshot {
+  const projected = projectPiAssistant({
+    id: current.id,
+    parentId: current.parentId,
+    message,
+    finished: false,
+    thinkingLevel: current.provenance.thinkingLevel,
+  });
+  return replaceNode(snapshot, index, {
+    ...projected,
+    content: projected.content.map((part) => mergeToolExecution(current, part)),
+  });
+}
+
+function setStreamingPart(content: PiAssistantPart[], contentIndex: number, part: PiAssistantPart): void {
+  const existing = content.findIndex((candidate) => partIndex(candidate.id) === contentIndex);
+  if (existing >= 0) {
+    content[existing] = part;
+    return;
+  }
+  if (contentIndex !== content.length) {
+    throw new PiThreadStoreError(`Pi message_update content index gap: ${content.length} -> ${contentIndex}`);
+  }
+  content.push(part);
+}
+
+function requireStreamingPart<Type extends PiAssistantPart["type"]>(
+  content: PiAssistantPart[],
+  contentIndex: number,
+  type: Type,
+): Extract<PiAssistantPart, { type: Type }> {
+  const part = content.find((candidate) => partIndex(candidate.id) === contentIndex);
+  if (!part || part.type !== type) {
+    throw new PiThreadStoreError(`Pi message_update ${type} part missing at content index ${contentIndex}`);
+  }
+  return part as Extract<PiAssistantPart, { type: Type }>;
+}
+
+function finishMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThreadSnapshot {
+  if (message.role === "toolResult") return applyToolResult(snapshot, message);
+  const index = findLastNodeIndex(snapshot.nodes, (node) => {
+    if (message.role === "assistant") return node.kind === "assistant" && node.status.type === "running";
+    if (message.role === "user") return node.kind === "user" && node.delivery.state === "live";
+    return node.kind === "notice" && node.sourceEntryId === undefined;
+  });
+  if (index < 0) return snapshot;
+  const current = snapshot.nodes[index];
+  if (!current) return snapshot;
+  const projected = projectPiMessage({
+    id: current.id,
+    parentId: current.parentId,
+    message,
+    finished: true,
+    completedAt: Date.now(),
+  });
+  return projected ? replaceNode(snapshot, index, projected) : snapshot;
+}
+
+function mergeToolExecution(current: PiAssistantMessage, projected: PiAssistantPart): PiAssistantPart {
+  if (projected.type !== "tool-call") return projected;
+  const previous = current.content.find(
+    (part): part is PiToolCallPart => part.type === "tool-call" && part.toolCallId === projected.toolCallId,
+  );
+  return previous?.execution === "running" || previous?.execution === "complete" || previous?.execution === "error"
+    ? { ...projected, ...toolExecutionFields(previous) }
+    : projected;
+}
+
+function toolExecutionFields(
+  part: PiToolCallPart,
+): Pick<PiToolCallPart, "execution" | "partialResult" | "result" | "isError"> {
+  return {
+    execution: part.execution,
+    ...(part.partialResult !== undefined ? { partialResult: part.partialResult } : {}),
+    ...(part.result !== undefined ? { result: part.result } : {}),
+    ...(part.isError !== undefined ? { isError: part.isError } : {}),
+  };
+}
+
+function updateTool(
+  snapshot: PiThreadSnapshot,
+  toolCallId: string,
+  update: (part: PiToolCallPart) => PiToolCallPart,
+): PiThreadSnapshot {
+  for (let nodeIndex = snapshot.nodes.length - 1; nodeIndex >= 0; nodeIndex -= 1) {
+    const node = snapshot.nodes[nodeIndex];
+    if (!node || node.kind !== "assistant") continue;
+    const partIndex = node.content.findIndex((part) => part.type === "tool-call" && part.toolCallId === toolCallId);
+    if (partIndex < 0) continue;
+    const part = node.content[partIndex];
+    if (!part || part.type !== "tool-call") continue;
+    const content = [...node.content];
+    content[partIndex] = update(part);
+    return replaceNode(snapshot, nodeIndex, { ...node, content });
+  }
+  throw new PiThreadStoreError(`Pi tool event references unknown tool call: ${toolCallId}`);
+}
+
+function applyToolResult(snapshot: PiThreadSnapshot, message: PiToolResult): PiThreadSnapshot {
+  return updateTool(snapshot, message.toolCallId, (part) => applyPiToolResult(part, message));
+}
+
+function appendNotification(
+  snapshot: PiThreadSnapshot,
+  sequence: number,
+  message: string,
+  notifyType: "info" | "warning" | "error" | undefined,
+): PiThreadSnapshot {
+  const node: PiNoticeMessage = {
+    id: `rpc-notify:${sequence}`,
+    parentId: snapshot.headId,
+    createdAt: Date.now(),
+    kind: "notice",
+    noticeType: "notification",
+    notificationType: notifyType ?? "info",
+    title: "Pi 扩展通知",
+    content: { type: "text", text: message },
+  };
+  return appendNode(snapshot, node);
+}
+
+function appendExtensionError(
+  snapshot: PiThreadSnapshot,
+  sequence: number,
+  event: Extract<PiRpcEvent, { type: "extension_error" }>,
+): PiThreadSnapshot {
+  return appendNode(snapshot, {
+    id: `rpc-extension-error:${sequence}`,
+    parentId: snapshot.headId,
+    createdAt: Date.now(),
+    kind: "notice",
+    noticeType: "notification",
+    notificationType: "error",
+    extensionNotification: {
+      customType: "pi.extension_error",
+      details: { extensionPath: event.extensionPath, event: event.event, error: event.error },
+    },
+    title: "Pi 扩展错误",
+    content: { type: "text", text: event.error },
+  });
+}
+
+function isJsonObject(value: JsonValue): value is { [key: string]: JsonValue } {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function queueItems(sequence: number, steering: readonly string[], followUp: readonly string[]): PiQueueItem[] {
+  return [
+    ...steering.map(
+      (prompt, index): PiQueueItem => ({
+        id: `rpc-queue:${sequence}:steer:${index}`,
+        mode: "steer",
+        prompt,
+        source: "pi-observed",
+      }),
+    ),
+    ...followUp.map(
+      (prompt, index): PiQueueItem => ({
+        id: `rpc-queue:${sequence}:followUp:${index}`,
+        mode: "followUp",
+        prompt,
+        source: "pi-observed",
+      }),
+    ),
+  ];
+}
+
+function appendNode(snapshot: PiThreadSnapshot, node: PiTimelineNode): PiThreadSnapshot {
+  return { ...snapshot, headId: node.id, nodes: [...snapshot.nodes, node] };
+}
+
+function replaceNode(snapshot: PiThreadSnapshot, index: number, node: PiTimelineNode): PiThreadSnapshot {
+  const nodes = [...snapshot.nodes];
+  nodes[index] = node;
+  return { ...snapshot, headId: snapshot.headId === snapshot.nodes[index]?.id ? node.id : snapshot.headId, nodes };
+}
+
+function findLastNodeIndex(nodes: readonly PiTimelineNode[], predicate: (node: PiTimelineNode) => boolean): number {
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const node = nodes[index];
+    if (node && predicate(node)) return index;
+  }
+  return -1;
+}
+
+function partIndex(id: string): number {
+  const value = Number(id.slice(id.lastIndexOf(":") + 1));
+  return Number.isInteger(value) ? value : -1;
+}
+
+function validateSnapshot(snapshot: PiThreadSnapshot): void {
+  if (snapshot.protocolVersion !== PROTOCOL_VERSION) {
+    throw new PiThreadStoreError(`不支持的 timeline protocol: ${snapshot.protocolVersion}`);
+  }
+  const ids = new Set<string>();
+  for (const node of snapshot.nodes) {
+    if (ids.has(node.id)) throw new PiThreadStoreError(`重复 snapshot node: ${node.id}`);
+    if (node.parentId !== null && !ids.has(node.parentId)) {
+      throw new PiThreadStoreError(`snapshot parent 顺序无效: ${node.parentId}`);
+    }
+    ids.add(node.id);
+  }
+  if (snapshot.headId !== null && !ids.has(snapshot.headId)) {
+    throw new PiThreadStoreError(`snapshot head 不存在: ${snapshot.headId}`);
+  }
+}
+
+function recordNodeChange(previousNodes: readonly PiTimelineNode[], nextNodes: readonly PiTimelineNode[]): void {
+  if (previousNodes === nextNodes) return;
+  let dirtyFrom = 0;
+  const sharedLength = Math.min(previousNodes.length, nextNodes.length);
+  while (dirtyFrom < sharedLength && previousNodes[dirtyFrom] === nextNodes[dirtyFrom]) dirtyFrom += 1;
+  nodeChanges.set(nextNodes, { previousNodes, dirtyFrom, rekeyedFrom: new Map() });
 }
 
 export function detachedSnapshot(): PiThreadSnapshot {
@@ -512,5 +550,5 @@ export function detachedSnapshot(): PiThreadSnapshot {
 }
 
 function assertNever(value: never): never {
-  throw new PiThreadStoreError(`未知 timeline event: ${String(value)}`);
+  throw new PiThreadStoreError(`未知 Pi RPC event: ${String(value)}`);
 }

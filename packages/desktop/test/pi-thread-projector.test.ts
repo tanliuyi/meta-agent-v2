@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ProjectionError, projectPersistedBranch } from "../src/main/pi/pi-thread-projector.ts";
+import { projectPersistedBranch } from "../src/main/pi/pi-thread-projector.ts";
+import { QUOTE_ATTACHMENT_CUSTOM_TYPE, withQuoteContext } from "../src/main/pi/quote-context.ts";
 
 describe("projectPersistedBranch", () => {
   it("projects an RPC branch and folds tool results into the owning assistant", () => {
@@ -11,11 +12,12 @@ describe("projectPersistedBranch", () => {
 
     const projection = projectPersistedBranch(entries, "r");
 
-    expect(projection.headId).toBe("a");
+    expect(projection.headId).toBe("pi-message:assistant:2");
     expect(projection.nodes).toMatchObject([
-      { id: "u", kind: "user" },
+      { id: "pi-message:user:1", sourceEntryId: "u", kind: "user" },
       {
-        id: "a",
+        id: "pi-message:assistant:2",
+        sourceEntryId: "a",
         kind: "assistant",
         content: [{ type: "tool-call", execution: "complete", result: { content: [{ text: "result" }] } }],
       },
@@ -35,13 +37,6 @@ describe("projectPersistedBranch", () => {
         "a",
       ),
     ).toThrow("RPC session branch contains a cycle at a");
-  });
-
-  it("rejects malformed entries and unknown entry types", () => {
-    expect(() => projectPersistedBranch([{ type: "message" }], null)).toThrow(ProjectionError);
-    expect(() =>
-      projectPersistedBranch([{ type: "future", id: "future", parentId: null, timestamp: iso(1) }], "future"),
-    ).toThrow("Unsupported RPC session entry: future");
   });
 
   it("keeps provider run time, completion time, status and thinking provenance", () => {
@@ -78,8 +73,36 @@ describe("projectPersistedBranch", () => {
 
     expect(projection.nodes[0]).toMatchObject({
       kind: "assistant",
-      content: [{ id: "assistant:text:1", type: "text", text: "visible" }],
+      content: [{ id: "pi-message:assistant:10:text:1", type: "text", text: "visible" }],
     });
+  });
+
+  it("keeps Desktop quote attachments and labels around Pi messages", () => {
+    const quote = { text: "引用内容", messageId: "assistant-source" };
+    const entries = [
+      messageEntry("u", null, userMessage(withQuoteContext("实际问题", [quote]), 1)),
+      {
+        type: "custom",
+        id: "quote-entry",
+        parentId: "u",
+        timestamp: iso(2),
+        customType: QUOTE_ATTACHMENT_CUSTOM_TYPE,
+        data: { userEntryId: "u", requestId: "request-1", quotes: [quote] },
+      },
+      { type: "label", id: "label-entry", parentId: "quote-entry", timestamp: iso(3), targetId: "u", label: "重点" },
+    ];
+
+    const projection = projectPersistedBranch(entries, "label-entry");
+
+    expect(projection.nodes).toMatchObject([
+      {
+        kind: "user",
+        sourceEntryId: "u",
+        content: [{ type: "text", text: "实际问题" }],
+        quote,
+        label: "重点",
+      },
+    ]);
   });
 
   it("projects visible custom messages and ignores hidden ones", () => {

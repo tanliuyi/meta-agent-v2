@@ -261,6 +261,7 @@ describe("SessionTransportManager", () => {
           projectId: "p1",
           threadId: "t1",
           timeline: record.stores.timeline.getSnapshot(),
+          events: [],
           control: EMPTY_CONTROL,
         },
       });
@@ -502,6 +503,7 @@ function attachmentFor(record: ReturnType<typeof createSessionRecord>, attachmen
       projectId: record.identity.projectId,
       threadId: record.identity.threadId,
       timeline: record.stores.timeline.getSnapshot(),
+      events: [],
       control: EMPTY_CONTROL,
     },
   };

@@ -81,6 +81,7 @@ const OpenAICompletionsCompatSchema = Type.Object({
   supportsDeveloperRole: Type.Optional(Type.Boolean()),
   supportsReasoningEffort: Type.Optional(Type.Boolean()),
   supportsUsageInStreaming: Type.Optional(Type.Boolean()),
+  supportsFinishReason: Type.Optional(Type.Boolean()),
   maxTokensField: Type.Optional(Type.Union([Type.Literal("max_completion_tokens"), Type.Literal("max_tokens")])),
   requiresToolResultName: Type.Optional(Type.Boolean()),
   requiresAssistantAfterToolResult: Type.Optional(Type.Boolean()),
@@ -91,6 +92,7 @@ const OpenAICompletionsCompatSchema = Type.Object({
       Type.Literal("openai"),
       Type.Literal("openrouter"),
       Type.Literal("together"),
+      Type.Literal("baseten"),
       Type.Literal("deepseek"),
       Type.Literal("zai"),
       Type.Literal("qwen"),
@@ -101,9 +103,12 @@ const OpenAICompletionsCompatSchema = Type.Object({
     ]),
   ),
   chatTemplateKwargs: Type.Optional(Type.Record(Type.String(), ChatTemplateKwargSchema)),
+  chatTemplateArgs: Type.Optional(Type.Record(Type.String(), ChatTemplateKwargSchema)),
   cacheControlFormat: Type.Optional(Type.Literal("anthropic")),
   openRouterRouting: Type.Optional(OpenRouterRoutingSchema),
   vercelGatewayRouting: Type.Optional(VercelGatewayRoutingSchema),
+  zaiToolStream: Type.Optional(Type.Boolean()),
+  supportsThinkingTokenBudget: Type.Optional(Type.Boolean()),
   supportsOpenAIGrammarTools: Type.Optional(Type.Boolean()),
   supportsStrictMode: Type.Optional(Type.Boolean()),
   sendSessionAffinityHeaders: Type.Optional(Type.Boolean()),
@@ -122,7 +127,9 @@ const OpenAIResponsesCompatSchema = Type.Object({
   supportsLongCacheRetention: Type.Optional(Type.Boolean()),
   supportsStrictMode: Type.Optional(Type.Boolean()),
   supportsOpenAIGrammarTools: Type.Optional(Type.Boolean()),
+  supportsAdditionalTools: Type.Optional(Type.Boolean()),
   supportsToolSearch: Type.Optional(Type.Boolean()),
+  supportsExplicitPromptCacheMode: Type.Optional(Type.Boolean()),
 });
 
 const AnthropicMessagesCompatSchema = Type.Object({
@@ -216,7 +223,7 @@ export type ModelsChatTemplateKwarg = Static<typeof ChatTemplateKwargSchema>;
 export type ModelsCompat = Static<typeof OpenAICompletionsCompatSchema> &
   Static<typeof OpenAIResponsesCompatSchema> &
   Static<typeof AnthropicMessagesCompatSchema>;
-export type ModelsCompatWithoutFreeMaps = Omit<ModelsCompat, "chatTemplateKwargs">;
+export type ModelsCompatWithoutFreeMaps = Omit<ModelsCompat, "chatTemplateKwargs" | "chatTemplateArgs">;
 export type ModelsModelDefinition = Static<typeof ModelDefinitionSchema>;
 export type ModelsModelOverride = Static<typeof ModelOverrideSchema>;
 export type ModelsProviderConfig = Static<typeof ProviderConfigSchema>;

@@ -53,6 +53,7 @@ const COMPAT_KEYS = [
   "supportsDeveloperRole",
   "supportsReasoningEffort",
   "supportsUsageInStreaming",
+  "supportsFinishReason",
   "maxTokensField",
   "requiresToolResultName",
   "requiresAssistantAfterToolResult",
@@ -62,13 +63,17 @@ const COMPAT_KEYS = [
   "cacheControlFormat",
   "openRouterRouting",
   "vercelGatewayRouting",
+  "zaiToolStream",
+  "supportsThinkingTokenBudget",
   "supportsOpenAIGrammarTools",
   "supportsStrictMode",
   "deferredToolsMode",
   "sendSessionAffinityHeaders",
   "sessionAffinityFormat",
   "supportsLongCacheRetention",
+  "supportsAdditionalTools",
   "supportsToolSearch",
+  "supportsExplicitPromptCacheMode",
   "supportsEagerToolInputStreaming",
   "supportsCacheControlOnTools",
   "supportsTemperature",
@@ -80,7 +85,7 @@ const COMPAT_KEYS = [
 const PROVIDER_ALL_KEYS = new Set<string>([...PROVIDER_KEYS, "headers", "compat", "models", "modelOverrides"]);
 const MODEL_ALL_KEYS = new Set<string>([...MODEL_KEYS, "headers", "compat"]);
 const OVERRIDE_ALL_KEYS = new Set<string>([...OVERRIDE_KEYS, "headers", "compat"]);
-const COMPAT_ALL_KEYS = new Set<string>([...COMPAT_KEYS, "chatTemplateKwargs"]);
+const COMPAT_ALL_KEYS = new Set<string>([...COMPAT_KEYS, "chatTemplateKwargs", "chatTemplateArgs"]);
 const COST_KEYS = new Set(["input", "output", "cacheRead", "cacheWrite", "tiers"]);
 const COST_TIER_KEYS = new Set(["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"]);
 const THINKING_KEYS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -615,18 +620,49 @@ function projectCompat(
 ): ModelsCompat | undefined {
   if (!draft) return undefined;
   const compat = mergeKnown(current, draft.config, COMPAT_ALL_KEYS) as ModelsCompat;
-  const currentKwargs = current?.chatTemplateKwargs;
-  const kwargs = projectMap<ModelsChatTemplateKwarg>(
-    (draft.chatTemplateKwargs ?? []) as ModelsMapEntryDraft<ModelsChatTemplateKwarg>[],
-    currentKwargs,
-    originPath ? [...originPath, "chatTemplateKwargs"] : undefined,
-    [...nextPath, "chatTemplateKwargs"],
+  projectCompatMap(
+    compat,
+    "chatTemplateKwargs",
+    draft.chatTemplateKwargs,
+    current?.chatTemplateKwargs,
+    originPath,
+    nextPath,
     diagnostics,
     renames,
   );
-  if (kwargs && Object.keys(kwargs).length > 0) compat.chatTemplateKwargs = kwargs;
-  else delete compat.chatTemplateKwargs;
+  projectCompatMap(
+    compat,
+    "chatTemplateArgs",
+    draft.chatTemplateArgs,
+    current?.chatTemplateArgs,
+    originPath,
+    nextPath,
+    diagnostics,
+    renames,
+  );
   return compat;
+}
+
+function projectCompatMap(
+  compat: ModelsCompat,
+  key: "chatTemplateKwargs" | "chatTemplateArgs",
+  draft: ModelsMapEntryDraft<ModelsChatTemplateKwarg>[] | undefined,
+  current: Record<string, ModelsChatTemplateKwarg> | undefined,
+  originPath: ModelsConfigPath | undefined,
+  nextPath: ModelsConfigPath,
+  diagnostics: ModelsConfigDiagnostic[],
+  renames: KeyRename[],
+): void {
+  const projected = projectMap(
+    draft ?? [],
+    current,
+    originPath ? [...originPath, key] : undefined,
+    [...nextPath, key],
+    diagnostics,
+    renames,
+  );
+  if (projected) compat[key] = projected;
+  else delete compat[key];
 }
 
 function projectMap<T>(
@@ -721,6 +757,7 @@ function compatToDraft(compat: ModelsCompat | undefined, path: ModelsConfigPath)
   return {
     config: pickKnown(compat, COMPAT_KEYS),
     chatTemplateKwargs: mapToDraft(compat.chatTemplateKwargs, [...path, "chatTemplateKwargs"]),
+    chatTemplateArgs: mapToDraft(compat.chatTemplateArgs, [...path, "chatTemplateArgs"]),
   };
 }
 
@@ -975,9 +1012,10 @@ function assertMapEntries(entries: unknown[]): void {
 function assertCompatDraft(value: unknown): void {
   if (value === undefined) return;
   if (!isPlainObject(value) || !isPlainObject(value.config)) throw new TypeError("Invalid compat draft");
-  if (value.chatTemplateKwargs !== undefined) {
-    if (!Array.isArray(value.chatTemplateKwargs)) throw new TypeError("Invalid chatTemplateKwargs draft");
-    assertMapEntries(value.chatTemplateKwargs);
+  for (const key of ["chatTemplateKwargs", "chatTemplateArgs"] as const) {
+    if (value[key] === undefined) continue;
+    if (!Array.isArray(value[key])) throw new TypeError(`Invalid ${key} draft`);
+    assertMapEntries(value[key]);
   }
 }
 

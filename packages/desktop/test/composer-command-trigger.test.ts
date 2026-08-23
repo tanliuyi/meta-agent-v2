@@ -6,19 +6,19 @@ import {
 import type { SlashCommand } from "../src/shared/contracts.ts";
 
 describe("slash command trigger", () => {
-  it("only shows the argument command marker for non-skill commands that accept arguments", () => {
+  it("uses latest RPC source metadata while preserving Desktop no-argument commands", () => {
     const commands: SlashCommand[] = [
       { name: "reload", source: "builtin", acceptsArguments: false },
-      { name: "review", source: "extension", acceptsArguments: true },
-      { name: "legacy", source: "extension" },
-      { name: "skill:frontend", source: "skill", acceptsArguments: true },
+      { name: "review", source: "extension" },
+      { name: "template", source: "prompt" },
+      { name: "skill:frontend", source: "skill" },
     ];
 
     expect(commands.map(slashCommandAcceptsArguments)).toEqual([false, true, true, false]);
   });
 
   it("combines the hidden command with trimmed argument text for Pi", () => {
-    const command: SlashCommand = { name: "review", source: "extension", acceptsArguments: true };
+    const command: SlashCommand = { name: "review", source: "extension" };
 
     expect(slashCommandText(command, "  inspect composer  ")).toBe("/review inspect composer");
     expect(slashCommandText(command, "   ")).toBe("/review");

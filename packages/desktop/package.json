@@ -30,7 +30,7 @@
     "smoke:gui": "node ../../scripts/smoke-desktop-gui.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.83.0",
+    "@earendil-works/pi-ai": "0.84.2",
     "@floating-ui/react": "0.27.20",
     "@rc-component/image": "1.10.0",
     "@tanstack/react-virtual": "3.14.9",
@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@assistant-ui/react": "0.15.12",
+    "@earendil-works/pi-coding-agent": "0.84.2",
     "@assistant-ui/react-devtools": "1.2.13",
     "@assistant-ui/react-lexical": "0.2.9",
     "@assistant-ui/react-streamdown": "0.3.10",

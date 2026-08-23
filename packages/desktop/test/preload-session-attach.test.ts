@@ -210,6 +210,7 @@ function bootstrap(threadId: string): SessionBootstrap {
       queue: [],
       phase: "idle",
     },
+    events: [],
     control: {
       protocolVersion: PROTOCOL_VERSION,
       revision: 0,

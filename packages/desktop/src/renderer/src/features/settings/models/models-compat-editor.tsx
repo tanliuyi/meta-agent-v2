@@ -34,6 +34,11 @@ const BOOLEAN_FIELDS = [
     hint: "流式响应中通过 stream_options 返回 token 用量统计",
   },
   {
+    key: "supportsFinishReason",
+    label: "流式返回结束原因",
+    hint: "流式响应是否返回 finish_reason；关闭时由 Pi 推断结束原因",
+  },
+  {
     key: "requiresToolResultName",
     label: "工具结果需 name 字段",
     hint: "工具结果消息必须携带 name 字段",
@@ -64,6 +69,16 @@ const BOOLEAN_FIELDS = [
     hint: "工具定义是否支持 strict 字段",
   },
   {
+    key: "zaiToolStream",
+    label: "支持 ZAI 工具流",
+    hint: "是否发送 ZAI 的顶层 tool_stream 参数",
+  },
+  {
+    key: "supportsThinkingTokenBudget",
+    label: "支持思考 token 预算",
+    hint: "是否支持顶层 thinking_token_budget 参数",
+  },
+  {
     key: "sendSessionAffinityHeaders",
     label: "发送会话亲和请求头",
     hint: "把请求路由到同一副本以提升提示词缓存命中率",
@@ -74,9 +89,19 @@ const BOOLEAN_FIELDS = [
     hint: "支持 24 小时 / 1 小时的长时效提示词缓存",
   },
   {
+    key: "supportsAdditionalTools",
+    label: "支持附加工具",
+    hint: "模型是否支持消息锚定的 additional_tools 输入项",
+  },
+  {
     key: "supportsToolSearch",
     label: "支持工具搜索",
     hint: "模型支持对延迟加载工具做客户端工具搜索",
+  },
+  {
+    key: "supportsExplicitPromptCacheMode",
+    label: "支持显式提示词缓存模式",
+    hint: "模型是否接受 prompt_cache_options 参数",
   },
   {
     key: "supportsEagerToolInputStreaming",
@@ -194,6 +219,7 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
                 "openai",
                 "openrouter",
                 "together",
+                "baseten",
                 "deepseek",
                 "zai",
                 "qwen",
@@ -250,8 +276,14 @@ export function ModelsCompatEditor({ value, onChange }: ModelsCompatEditorProps)
         </label>
       </div>
       <ModelsChatTemplateEditor
+        name="chatTemplateKwargs"
         entries={draft.chatTemplateKwargs ?? []}
         onChange={(chatTemplateKwargs) => emit({ ...valueRef.current!, chatTemplateKwargs }, false)}
+      />
+      <ModelsChatTemplateEditor
+        name="chatTemplateArgs"
+        entries={draft.chatTemplateArgs ?? []}
+        onChange={(chatTemplateArgs) => emit({ ...valueRef.current!, chatTemplateArgs }, false)}
       />
       <div className="models-compat-routing">
         <ModelsOpenRouterEditor

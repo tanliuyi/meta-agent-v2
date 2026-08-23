@@ -1,4 +1,5 @@
 import { delimiter, dirname } from "node:path";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { projectPersistedBranch } from "../main/pi/pi-thread-projector.ts";
 import { withQuoteContext } from "../main/pi/quote-context.ts";
 import type {
@@ -7,8 +8,7 @@ import type {
   ModelOption,
   PiNoticeMessage,
   PiQueueItem,
-  PiThreadEvent,
-  PiThreadEventBatch,
+  PiRpcEvent,
   PiThreadPhase,
   PiThreadSnapshot,
   PiTimelineNode,
@@ -31,7 +31,7 @@ import {
 import type { ThreadWorkerBinding } from "../shared/sidecar-contracts.ts";
 import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
 import { PiRpcClient, type PiRpcHandshake, type PiRpcResponse } from "./pi-rpc-client.ts";
-import { type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
+import { assertSupportedSystemPiVersion, type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
 
 interface PiRpcSessionRuntimeOptions {
   binding: ThreadWorkerBinding;
@@ -54,7 +54,6 @@ interface RpcState {
 
 const EMPTY_EXTENSION_HOST: SessionControlState["extensionHost"] = { statuses: {}, widgets: [] };
 const MAX_EARLY_RPC_EVENTS = 1_024;
-const MINIMUM_SYSTEM_PI_VERSION = "0.83.0";
 
 export class PiRpcSessionRuntime {
   readonly id: string;
@@ -71,6 +70,7 @@ export class PiRpcSessionRuntime {
   private summary: Omit<Thread, "projectId" | "archived" | "running">;
   private revision = 0;
   private sequence = 0;
+  private events: Array<{ sequence: number; event: PiRpcEvent }> = [];
   private lastError?: string;
   private retry?: SessionControlState["retry"];
   private queue: PiQueueItem[] = [];
@@ -114,13 +114,13 @@ export class PiRpcSessionRuntime {
     const environment: NodeJS.ProcessEnv = { ...process.env, PI_CODING_AGENT_DIR: binding.agentDir };
     if (binding.shellPath) prependEnvironmentPath(environment, dirname(binding.shellPath));
     const pi = await (options.resolvePi ?? resolveAndProbeSystemPi)(environment);
-    assertMinimumPiVersion(pi.version);
+    assertSupportedSystemPiVersion(pi.version);
     const sessionDirectory = resolveDesktopSessionDirectory(binding.projectId, binding.agentDir);
     const piArgs = [
       ...(binding.mode === "create" ? ["--session-id", binding.sessionId] : ["--session", binding.sessionFile]),
       ...(sessionDirectory ? ["--session-dir", sessionDirectory] : []),
     ];
-    const earlyEvents: Record<string, unknown>[] = [];
+    const earlyEvents: PiRpcEvent[] = [];
     let runtime: PiRpcSessionRuntime | undefined;
     const { client, handshake } = await PiRpcClient.launch({
       pi,
@@ -178,6 +178,7 @@ export class PiRpcSessionRuntime {
       projectId: this.projectId,
       threadId: this.id,
       timeline: this.timeline,
+      events: [...this.events],
       control: this.control(),
     };
   }
@@ -206,6 +207,9 @@ export class PiRpcSessionRuntime {
         images: input.images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType })),
         ...(wasStreaming ? { streamingBehavior: input.desiredMode ?? "followUp" } : {}),
       });
+      this.state = await requestState(this.client);
+      this.setPhase(this.state.isCompacting ? "compacting" : this.state.isStreaming ? "running" : "idle");
+      this.publishControl();
       return { accepted: true, queued: wasStreaming };
     } catch (error) {
       this.lastError = errorMessage(error);
@@ -231,7 +235,7 @@ export class PiRpcSessionRuntime {
 
   async setThinking(level: ThinkingLevel): Promise<void> {
     await this.client.request({ type: "set_thinking_level", level });
-    this.state = { ...this.state, thinkingLevel: level };
+    this.state = await requestState(this.client);
     this.publishControl();
   }
 
@@ -270,8 +274,9 @@ export class PiRpcSessionRuntime {
     await this.client.close();
   }
 
-  private handleEvent(event: Record<string, unknown>): void {
+  private handleEvent(event: PiRpcEvent): void {
     if (this.disposed) return;
+    this.emitRpcEvent(event);
     switch (event.type) {
       case "agent_start":
         this.state = { ...this.state, isStreaming: true };
@@ -284,9 +289,14 @@ export class PiRpcSessionRuntime {
         this.scheduleRefresh();
         return;
       case "message_end":
+        return;
       case "entry_appended":
       case "session_info_changed":
         this.scheduleRefresh();
+        return;
+      case "thinking_level_changed":
+        this.state = { ...this.state, thinkingLevel: parseThinkingLevel(event.level) };
+        this.publishControl();
         return;
       case "compaction_start":
         this.state = { ...this.state, isCompacting: true };
@@ -314,11 +324,32 @@ export class PiRpcSessionRuntime {
         this.lastError = typeof event.finalError === "string" ? event.finalError : undefined;
         this.publishControl();
         return;
+      case "summarization_retry_scheduled":
+        this.retry = {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          message: event.errorMessage,
+        };
+        this.setPhase("retrying");
+        this.publishControl();
+        return;
+      case "summarization_retry_attempt_start":
+        this.setPhase(event.source === "compaction" ? "compacting" : "tree-navigation");
+        this.publishControl();
+        return;
+      case "summarization_retry_finished":
+        this.retry = undefined;
+        this.setPhase(this.state.isStreaming ? "running" : "idle");
+        this.scheduleRefresh();
+        return;
       case "queue_update":
         this.replaceQueue(event);
         return;
       case "extension_ui_request":
         this.handleExtensionUi(event);
+        return;
+      case "extension_error":
+        this.handleExtensionError(event);
         return;
       default:
         return;
@@ -333,6 +364,7 @@ export class PiRpcSessionRuntime {
       .then(async () => {
         while (this.refreshRequested && !this.disposed) {
           this.refreshRequested = false;
+          const refreshSequence = this.sequence;
           const [entriesResponse, state] = await Promise.all([
             this.client.request({ type: "get_entries" }),
             requestState(this.client),
@@ -343,8 +375,9 @@ export class PiRpcSessionRuntime {
           if (!entries || (leafId !== null && typeof leafId !== "string")) {
             throw new Error("get_entries response is malformed");
           }
+          if (this.sequence !== refreshSequence || state.isStreaming) continue;
           this.state = state;
-          this.replaceTimeline(entries, leafId);
+          this.replaceTimeline(entries, leafId, refreshSequence);
           this.lastError = undefined;
           this.publishControl();
         }
@@ -360,24 +393,23 @@ export class PiRpcSessionRuntime {
       });
   }
 
-  private replaceTimeline(entries: readonly unknown[], leafId: string | null): void {
+  private replaceTimeline(entries: readonly SessionEntry[], leafId: string | null, cursor: number): void {
     const phase = this.timeline.phase;
     const projection = projectPersistedBranch(entries, leafId);
     const withNotices = this.appendExtensionNotices(projection.nodes, projection.headId);
-    const eventSequence = this.sequence + 1;
     const snapshot: PiThreadSnapshot = {
       protocolVersion: PROTOCOL_VERSION,
       projectId: this.projectId,
       threadId: this.id,
-      cursor: eventSequence,
+      cursor,
       headId: withNotices.headId,
       nodes: withNotices.nodes,
       queue: this.queue,
       phase,
     };
     this.timeline = snapshot;
+    this.events = this.events.filter(({ sequence }) => sequence > cursor);
     this.summary = summarize(this.id, this.state.sessionName, snapshot, undefined);
-    this.emitTimeline({ type: "branch-replaced", snapshot });
     this.onSummaryChanged(this);
   }
 
@@ -394,7 +426,7 @@ export class PiRpcSessionRuntime {
     return { nodes: [...nodes, ...this.extensionNotices], headId: parentId };
   }
 
-  private createSnapshot(entries: readonly unknown[], leafId: string | null): PiThreadSnapshot {
+  private createSnapshot(entries: readonly SessionEntry[], leafId: string | null): PiThreadSnapshot {
     const projection = projectPersistedBranch(entries, leafId);
     return {
       protocolVersion: PROTOCOL_VERSION,
@@ -411,7 +443,6 @@ export class PiRpcSessionRuntime {
   private setPhase(phase: PiThreadPhase): void {
     if (this.timeline.phase === phase) return;
     this.timeline = { ...this.timeline, phase };
-    this.emitTimeline({ type: "phase-changed", phase });
   }
 
   private replaceQueue(event: Record<string, unknown>): void {
@@ -436,7 +467,6 @@ export class PiRpcSessionRuntime {
       ),
     ];
     this.timeline = { ...this.timeline, queue: this.queue };
-    this.emitTimeline({ type: "queue-replaced", items: this.queue });
   }
 
   private handleExtensionUi(event: Record<string, unknown>): void {
@@ -504,7 +534,7 @@ export class PiRpcSessionRuntime {
       const notificationType =
         event.notifyType === "warning" || event.notifyType === "error" ? event.notifyType : "info";
       const notice: PiNoticeMessage = {
-        id: `rpc-notify:${event.id}:${Date.now()}`,
+        id: `rpc-notify:${this.sequence}`,
         parentId: this.timeline.headId,
         createdAt: Date.now(),
         kind: "notice",
@@ -514,8 +544,6 @@ export class PiRpcSessionRuntime {
         content: { type: "text", text: event.message },
       };
       this.extensionNotices = [...this.extensionNotices.slice(-99), notice];
-      this.timeline = { ...this.timeline, headId: notice.id, nodes: [...this.timeline.nodes, notice] };
-      this.emitTimeline({ type: "node-added", node: notice });
       return;
     } else {
       return;
@@ -523,26 +551,35 @@ export class PiRpcSessionRuntime {
     this.publishControl();
   }
 
-  private emitTimeline(event: PiThreadEvent): void {
+  private handleExtensionError(event: Extract<PiRpcEvent, { type: "extension_error" }>): void {
+    const notice: PiNoticeMessage = {
+      id: `rpc-extension-error:${this.sequence}`,
+      parentId: this.timeline.headId,
+      createdAt: Date.now(),
+      kind: "notice",
+      noticeType: "notification",
+      notificationType: "error",
+      extensionNotification: {
+        customType: "pi.extension_error",
+        details: { extensionPath: event.extensionPath, event: event.event, error: event.error },
+      },
+      title: "Pi 扩展错误",
+      content: { type: "text", text: event.error },
+    };
+    this.extensionNotices = [...this.extensionNotices.slice(-99), notice];
+  }
+
+  private emitRpcEvent(event: PiRpcEvent): void {
     this.sequence += 1;
-    const batch: PiThreadEventBatch = {
-      protocolVersion: PROTOCOL_VERSION,
+    const sequenced = { sequence: this.sequence, event };
+    this.events.push(sequenced);
+    this.push({
+      type: "timeline",
       projectId: this.projectId,
       threadId: this.id,
-      fromSequence: this.sequence,
-      toSequence: this.sequence,
-      events: [
-        {
-          protocolVersion: PROTOCOL_VERSION,
-          projectId: this.projectId,
-          threadId: this.id,
-          sequence: this.sequence,
-          event,
-        },
-      ],
-    };
-    this.timeline = { ...this.timeline, cursor: this.sequence };
-    this.push({ type: "timeline", projectId: this.projectId, threadId: this.id, batch });
+      sequence: this.sequence,
+      event,
+    });
   }
 
   private publishControl(): void {
@@ -591,21 +628,6 @@ function prependEnvironmentPath(environment: NodeJS.ProcessEnv, directory: strin
   const current = pathKey ? environment[pathKey] : undefined;
   if (pathKey && pathKey !== "PATH") delete environment[pathKey];
   environment.PATH = current ? `${directory}${delimiter}${current}` : directory;
-}
-
-function assertMinimumPiVersion(version: string): void {
-  const actual = version.split("-", 1)[0]?.split(".").map(Number);
-  const minimum = MINIMUM_SYSTEM_PI_VERSION.split(".").map(Number);
-  if (!actual || actual.length !== 3 || actual.some((part) => !Number.isInteger(part))) {
-    throw new Error(`System Pi returned an unsupported version: ${version}`);
-  }
-  for (let index = 0; index < minimum.length; index += 1) {
-    const difference = (actual[index] ?? 0) - (minimum[index] ?? 0);
-    if (difference > 0) return;
-    if (difference < 0) {
-      throw new Error(`System Pi ${version} is unsupported; install ${MINIMUM_SYSTEM_PI_VERSION} or newer`);
-    }
-  }
 }
 
 function parseState(value: unknown): RpcState {
@@ -688,7 +710,6 @@ function parseCommands(values: readonly unknown[]): SlashCommand[] {
         name: value.name,
         ...(typeof value.description === "string" ? { description: value.description } : {}),
         source: value.source,
-        ...(typeof value.acceptsArguments === "boolean" ? { acceptsArguments: value.acceptsArguments } : {}),
       },
     ];
   });
@@ -737,6 +758,7 @@ function responseArray(response: PiRpcResponse, field: string): unknown[] {
 }
 
 function responseRecord(response: PiRpcResponse): Record<string, unknown> {
+  if (!("data" in response)) throw new Error(`${response.command} response is missing data`);
   return record(response.data, `${response.command} response data`);
 }
 

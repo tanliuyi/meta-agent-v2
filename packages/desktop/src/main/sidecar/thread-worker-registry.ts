@@ -69,6 +69,8 @@ interface WorkerRecord {
   browserSessionToken?: string;
   shutdownPromise?: Promise<void>;
   failureReported?: boolean;
+  pendingModelRefreshReason?: string;
+  modelRefreshScheduled?: boolean;
 }
 
 export interface ThreadWorkerRegistryOptions {
@@ -102,6 +104,7 @@ export class ThreadWorkerRegistry {
   private readonly drainingProjects = new Set<string>();
   private readonly idleTimer: NodeJS.Timeout;
   private capacityTail = Promise.resolve();
+  private modelRefreshTail = Promise.resolve();
   private reservedWorkerSlots = 0;
   private evictionRunning = false;
   private disposing = false;
@@ -225,6 +228,7 @@ export class ThreadWorkerRegistry {
     }
     this.records.set(key, record);
     record.inFlight -= 1;
+    this.requestDeferredModelRefresh(record);
     return bootstrap;
   }
 
@@ -256,9 +260,19 @@ export class ThreadWorkerRegistry {
   }
 
   async prompt(input: SessionPromptInput): Promise<SessionCommandResult> {
-    return this.use(input.projectId, input.threadId, (record) =>
-      record.client.request({ type: "prompt", input }, null),
-    );
+    return this.use(input.projectId, input.threadId, async (record) => {
+      const result = await record.client.request<SessionCommandResult & { running: boolean }>(
+        { type: "prompt", input },
+        null,
+      );
+      if (typeof result.running !== "boolean") throw new Error("Thread worker prompt result is missing running state");
+      if (record.summary) record.summary = { ...record.summary, running: result.running };
+      return {
+        accepted: result.accepted,
+        queued: result.queued,
+        ...(result.error !== undefined ? { error: result.error } : {}),
+      };
+    });
   }
 
   async cancel(projectId: string, threadId: string): Promise<void> {
@@ -269,23 +283,31 @@ export class ThreadWorkerRegistry {
     await this.use(projectId, threadId, (record) => record.client.request({ type: "compact" }, null));
   }
 
-  async refreshModels(projectId: string, threadId: string): Promise<void> {
-    const key = workerKey(projectId, threadId);
-    await this.withThreadLock(key, async () => {
-      const record = this.records.get(key);
-      if (!record || record.retired || record.client.available === false) {
-        throw new Error(`Thread worker is unavailable: ${projectId}/${threadId}`);
-      }
-      await this.restartForModelConfiguration(record, "System Pi restarted to refresh models");
+  refreshModels(projectId: string, threadId: string): Promise<void> {
+    return this.enqueueModelRefresh(async () => {
+      const key = workerKey(projectId, threadId);
+      await this.withThreadLock(key, async () => {
+        this.assertProjectAvailable(projectId);
+        const record = this.records.get(key);
+        if (!record || record.retired || record.client.available === false) {
+          throw new Error(`Thread worker is unavailable: ${projectId}/${threadId}`);
+        }
+        await this.restartForModelConfiguration(record, "System Pi restarted to refresh models");
+      });
     });
   }
 
-  async refreshAllModels(revision: ModelConfigurationRevision): Promise<void> {
+  refreshAllModels(revision: ModelConfigurationRevision): Promise<void> {
+    return this.enqueueModelRefresh(() => this.refreshAllModelsOnce(revision));
+  }
+
+  private async refreshAllModelsOnce(revision: ModelConfigurationRevision): Promise<void> {
     const records = [...this.records.values()].filter((record) => !record.retired && record.client.available !== false);
     const results = await Promise.allSettled(
       records.map((record) =>
         this.withThreadLock(workerKey(record.projectId, record.threadId), async () => {
           const key = workerKey(record.projectId, record.threadId);
+          if (this.drainingProjects.has(record.projectId)) return;
           if (this.records.get(key) !== record || record.retired) return;
           await this.restartForModelConfiguration(
             record,
@@ -338,6 +360,7 @@ export class ThreadWorkerRegistry {
     } finally {
       await this.withThreadLock(key, async () => {
         record.inFlight -= 1;
+        this.requestDeferredModelRefresh(record);
       });
       this.requestRetireRequestedCloseIfIdle(key);
     }
@@ -477,6 +500,7 @@ export class ThreadWorkerRegistry {
     this.disposing = true;
     clearInterval(this.idleTimer);
     await Promise.allSettled([...this.pending.values(), ...this.pendingCreations.values()]);
+    await this.modelRefreshTail;
     await this.capacityTail;
     const records = [...this.records.values()];
     for (const record of records) record.retired = true;
@@ -507,6 +531,7 @@ export class ThreadWorkerRegistry {
       await this.withThreadLock(key, async () => {
         record.inFlight -= 1;
         record.lastActivityAt = Date.now();
+        this.requestDeferredModelRefresh(record);
       });
       this.requestRetireRequestedCloseIfIdle(key);
     }
@@ -622,24 +647,33 @@ export class ThreadWorkerRegistry {
 
   private async restartForModelConfiguration(record: WorkerRecord, reason: string): Promise<void> {
     const key = workerKey(record.projectId, record.threadId);
-    if (record.summary?.running) {
-      throw new Error(`Thread is running and was not restarted: ${record.projectId}/${record.threadId}`);
+    if (this.drainingProjects.has(record.projectId)) {
+      record.pendingModelRefreshReason = undefined;
+      return;
     }
-    if (!record.sessionFile) {
-      throw new Error(
-        `Thread session is not materialized and cannot be restarted: ${record.projectId}/${record.threadId}`,
-      );
+    if (record.inFlight > 0 || record.summary?.running || !record.sessionFile) {
+      record.pendingModelRefreshReason = reason;
+      return;
     }
+    record.pendingModelRefreshReason = undefined;
+    record.modelRefreshScheduled = false;
     record.retired = true;
     this.records.delete(key);
-    await this.awaitRecordShutdown(record);
     try {
+      await this.awaitRecordShutdown(record);
       const replacement = await this.open(record.projectId, record.threadId);
       replacement.initialBootstrap = undefined;
       replacement.inFlight -= 1;
       this.options.resync(record.projectId, record.threadId, reason);
     } catch (error) {
-      this.options.failed(record.projectId, record.threadId, error instanceof Error ? error : new Error(String(error)));
+      if (!record.failureReported) {
+        record.failureReported = true;
+        this.options.failed(
+          record.projectId,
+          record.threadId,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
       throw error;
     }
   }
@@ -754,7 +788,7 @@ export class ThreadWorkerRegistry {
       if (record.attachments === 0) this.options.catalogChanged?.({ ...record.summary });
       if (!record.summary.running) {
         this.requestCapacityTrim();
-        this.requestRetireRequestedCloseIfIdle(workerKey(record.projectId, record.threadId));
+        this.requestDeferredModelRefresh(record);
       }
       if (!record.sessionFile) {
         record.client.acknowledge(event.sequence);
@@ -779,6 +813,7 @@ export class ThreadWorkerRegistry {
         event.event.sessionFile,
         event.workerInstanceId,
       );
+      this.requestDeferredModelRefresh(record);
       record.client.acknowledge(event.sequence);
     } else {
       record.client.acknowledge(event.sequence);
@@ -929,7 +964,11 @@ export class ThreadWorkerRegistry {
       }
       if (reservation.projectId !== projectId || reservation.createRequestId !== createRequestId) continue;
       const current = this.records.get(workerKey(projectId, reservation.sessionId));
-      if (current) return current.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
+      if (current) {
+        return this.use(projectId, reservation.sessionId, (record) =>
+          record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000),
+        );
+      }
       let recovery = await this.options.metadata.recoverCreationReservation(reservation);
       while (recovery.status === "active") {
         await delay(Math.max(1, recovery.retryAfterMs));
@@ -1004,6 +1043,48 @@ export class ThreadWorkerRegistry {
   private clearCreationReservation(sessionId: string): void {
     const path = join(this.options.userDataDir, "creation-reservations", `${sessionId}.json`);
     if (existsSync(path)) rmSync(path);
+  }
+
+  private requestDeferredModelRefresh(record: WorkerRecord): void {
+    if (
+      this.disposing ||
+      this.drainingProjects.has(record.projectId) ||
+      record.retired ||
+      record.modelRefreshScheduled ||
+      !record.pendingModelRefreshReason ||
+      record.inFlight > 0 ||
+      record.summary?.running ||
+      !record.sessionFile
+    ) {
+      return;
+    }
+    record.modelRefreshScheduled = true;
+    void this.enqueueModelRefresh(async () => {
+      const key = workerKey(record.projectId, record.threadId);
+      await this.withThreadLock(key, async () => {
+        record.modelRefreshScheduled = false;
+        if (this.drainingProjects.has(record.projectId) || this.records.get(key) !== record || record.retired) {
+          record.pendingModelRefreshReason = undefined;
+          return;
+        }
+        const reason = record.pendingModelRefreshReason;
+        if (!reason) return;
+        await this.restartForModelConfiguration(record, reason);
+      });
+    }).catch((error: unknown) => {
+      record.modelRefreshScheduled = false;
+      this.options.log?.(`model-refresh:${record.projectId}`, error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  private enqueueModelRefresh<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.disposing) return Promise.reject(new Error("Desktop thread worker registry is shutting down"));
+    const result = this.modelRefreshTail.then(operation);
+    this.modelRefreshTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private async withCapacityLock<T>(operation: () => Promise<T>): Promise<T> {

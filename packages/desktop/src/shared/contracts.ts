@@ -1,3 +1,5 @@
+import type { JsonAgentSessionEvent, RpcExtensionUIRequest } from "@earendil-works/pi-coding-agent";
+
 export interface RpcExtensionHostState {
   statuses: Record<string, string>;
   windowTitle?: string;
@@ -140,7 +142,7 @@ export interface SlashCommand {
   name: string;
   description?: string;
   source: "builtin" | "extension" | "prompt" | "skill";
-  /** false 表示选择后无需填写参数，可直接执行。 */
+  /** Desktop 自有命令可声明无需参数；Pi 0.84 RPC 命令不会提供该字段。 */
   acceptsArguments?: boolean;
 }
 
@@ -351,35 +353,16 @@ export interface PiThreadSnapshot {
   activeTurnId?: string;
 }
 
-export type PiThreadEvent =
-  | { type: "phase-changed"; phase: PiThreadPhase; activeTurnId?: string }
-  | { type: "node-added"; node: PiTimelineNode }
-  | { type: "node-rekeyed"; previousId: string; node: PiTimelineNode }
-  | { type: "node-replaced"; node: PiTimelineNode }
-  | { type: "part-added"; messageId: string; part: PiAssistantPart }
-  | { type: "text-delta"; messageId: string; partId: string; delta: string }
-  | { type: "reasoning-delta"; messageId: string; partId: string; delta: string }
-  | { type: "tool-call-replaced"; messageId: string; part: PiToolCallPart }
-  | { type: "message-finished"; message: PiAssistantMessage }
-  | { type: "queue-replaced"; items: readonly PiQueueItem[] }
-  | { type: "branch-replaced"; snapshot: PiThreadSnapshot };
-
-export interface PiThreadEventEnvelope {
-  protocolVersion: typeof PROTOCOL_VERSION;
-  projectId: string;
-  threadId: string;
-  sequence: number;
-  event: PiThreadEvent;
+export interface PiRpcExtensionError {
+  type: "extension_error";
+  extensionPath: string;
+  event: string;
+  error: string;
 }
 
-export interface PiThreadEventBatch {
-  protocolVersion: typeof PROTOCOL_VERSION;
-  projectId: string;
-  threadId: string;
-  fromSequence: number;
-  toSequence: number;
-  events: readonly PiThreadEventEnvelope[];
-}
+/** Pi RPC stdout 的公共原子事件集合。Desktop 不维护第二套 timeline event 协议。 */
+export type PiRpcEvent = JsonAgentSessionEvent | RpcExtensionUIRequest | PiRpcExtensionError;
+export type PiRpcMessageUpdateEvent = Extract<PiRpcEvent, { type: "message_update" }>;
 
 /** 低频更新的 Pi 会话控制面，不携带消息历史。 */
 export interface SessionControlState {
@@ -414,6 +397,8 @@ export interface SessionBootstrap {
   projectId: string;
   threadId: string;
   timeline: PiThreadSnapshot;
+  /** 基线 snapshot 之后尚未稳定持久化的原始 Pi RPC 事件。 */
+  events: readonly { sequence: number; event: PiRpcEvent }[];
   control: SessionControlState;
 }
 
@@ -453,7 +438,7 @@ export interface SessionRuntimeAvailability {
 /** main 定向推送给当前 session renderer 的数据。 */
 export type SessionPushPayload =
   | { type: "control"; projectId: string; threadId: string; control: SessionControlState }
-  | { type: "timeline"; projectId: string; threadId: string; batch: PiThreadEventBatch }
+  | { type: "timeline"; projectId: string; threadId: string; sequence: number; event: PiRpcEvent }
   | {
       type: "runtime-availability";
       projectId: string;

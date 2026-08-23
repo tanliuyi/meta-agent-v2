@@ -80,6 +80,49 @@ describe("ThreadWorkerService", () => {
     expect(result.readyResult).toBe(bootstrap);
   });
 
+  it("returns authoritative running state with prompt acceptance", async () => {
+    const cwd = join(root, "project");
+    const agentDir = join(root, "agent");
+    const sessionId = "thread";
+    const prompt = vi.fn(async () => ({ accepted: true, queued: false }));
+    mocks.runtimeCreate.mockResolvedValue({
+      id: sessionId,
+      sessionFile: join(agentDir, "sessions", `${sessionId}.jsonl`),
+      bootstrap: vi.fn().mockReturnValue({ threadId: sessionId }),
+      prompt,
+      threadSummary: vi.fn().mockReturnValue({ running: true }),
+      dispose: vi.fn(),
+    });
+    const binding: ThreadWorkerBinding = {
+      mode: "create",
+      projectId: "project",
+      cwd,
+      agentDir,
+      sessionId,
+      createInput: {
+        projectId: "project",
+        createRequestId: "request",
+        model: { provider: "provider", id: "model" },
+        thinkingLevel: "off",
+      },
+    };
+    const { service } = await ThreadWorkerService.create({ role: "thread", value: binding }, serviceContext);
+    const input = {
+      requestId: "prompt",
+      projectId: "project",
+      threadId: sessionId,
+      text: "hello",
+      images: [],
+    };
+
+    await expect(service.command({ type: "prompt", input })).resolves.toEqual({
+      accepted: true,
+      queued: false,
+      running: true,
+    });
+    expect(prompt).toHaveBeenCalledWith(input);
+  });
+
   it("opens a canonical session path with the original cwd", async () => {
     const cwd = join(root, "workspaces", "general");
     const agentDir = join(root, "agent");

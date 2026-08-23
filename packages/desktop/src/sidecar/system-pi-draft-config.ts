@@ -1,3 +1,4 @@
+import { type Api, getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import type {
   DraftModelOption,
   DraftSessionConfig,
@@ -7,7 +8,7 @@ import type {
   ThinkingLevel,
 } from "../shared/contracts.ts";
 import { PiRpcClient } from "./pi-rpc-client.ts";
-import { type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
+import { assertSupportedSystemPiVersion, type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
 
 export async function loadSystemPiDraftConfig(
   cwd: string,
@@ -16,6 +17,7 @@ export async function loadSystemPiDraftConfig(
 ): Promise<DraftSessionConfig> {
   const environment = { ...process.env, PI_CODING_AGENT_DIR: agentDir };
   const pi = await resolvePi(environment);
+  assertSupportedSystemPiVersion(pi.version);
   const { client, handshake } = await PiRpcClient.launch({
     pi,
     cwd,
@@ -23,12 +25,11 @@ export async function loadSystemPiDraftConfig(
     piArgs: ["--no-session"],
   });
   try {
-    const thinkingResponse = await client.request({ type: "get_available_thinking_levels" });
-    const thinkingLevels = parseThinkingLevels(responseArray(thinkingResponse.data, "levels"));
-    const models = parseModels(handshake.models, thinkingLevels);
+    const models = parseModels(handshake.models);
     const active = parseModel(handshake.state.model);
     const selected =
       (active && models.find((model) => model.provider === active.provider && model.id === active.id)) ?? models[0];
+    const thinkingLevels = selected?.thinkingLevels ?? ["off"];
     const thinkingLevel = parseThinkingLevel(handshake.state.thinkingLevel, thinkingLevels);
     return {
       models,
@@ -43,10 +44,16 @@ export async function loadSystemPiDraftConfig(
   }
 }
 
-function parseModels(values: readonly unknown[], thinkingLevels: ThinkingLevel[]): DraftModelOption[] {
+function parseModels(values: readonly unknown[]): DraftModelOption[] {
   return values.flatMap((value) => {
     const model = parseModel(value);
-    return model ? [{ ...model, thinkingLevels: model.thinking ? thinkingLevels : ["off"] }] : [];
+    if (!model) return [];
+    return [
+      {
+        ...model,
+        thinkingLevels: parseThinkingLevels(getSupportedThinkingLevels(value as Model<Api>)),
+      },
+    ];
   });
 }
 
@@ -78,7 +85,6 @@ function parseCommands(values: readonly unknown[]): SlashCommand[] {
         name: value.name,
         ...(typeof value.description === "string" ? { description: value.description } : {}),
         source: value.source,
-        ...(typeof value.acceptsArguments === "boolean" ? { acceptsArguments: value.acceptsArguments } : {}),
       },
     ];
   });
@@ -98,11 +104,6 @@ function readiness(model: DraftModelOption | undefined, availableCount: number):
   if (availableCount === 0)
     return { state: "missing-credentials", message: "System Pi has no available authenticated models" };
   return { state: "unavailable-model", message: "System Pi has no active model" };
-}
-
-function responseArray(value: unknown, key: string): unknown[] {
-  if (!isRecord(value) || !Array.isArray(value[key])) throw new Error(`System Pi response is missing ${key}`);
-  return value[key];
 }
 
 function isThinkingLevel(value: unknown): value is ThinkingLevel {

@@ -395,6 +395,7 @@ function createBootstrap(): SessionBootstrap {
       queue: [],
       phase: "idle",
     },
+    events: [],
     control: {
       protocolVersion: PROTOCOL_VERSION,
       revision: 0,

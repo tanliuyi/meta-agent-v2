@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { describe, expect, it, vi } from "vitest";
 import { PiMessageRepositoryConverter } from "../src/renderer/src/runtime/pi-message-repository.ts";
 import {
   detachedSnapshot as detachedThreadSnapshot,
@@ -8,174 +9,320 @@ import {
 import {
   type PiAssistantMessage,
   type PiNoticeMessage,
-  type PiThreadEventBatch,
+  type PiRpcEvent,
   type PiThreadSnapshot,
   type PiUserMessage,
   PROTOCOL_VERSION,
 } from "../src/shared/contracts.ts";
 
 describe("PiThreadStore", () => {
-  it("delta 只替换目标 node/part，并保持其他 identity", () => {
-    const user = userNode("u", null);
-    const assistant = assistantNode("a", "u");
-    const store = new PiThreadStore(snapshot([user, assistant], "a"));
+  it("逐个归约 Pi message 原子事件并立即发布流式文本", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const listener = vi.fn();
+    store.subscribe(listener);
+    const started = assistantMessage([], "pending");
 
-    store.apply(batch(1, { type: "text-delta", messageId: "a", partId: "a:text:0", delta: "!" }));
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+    });
+    applyRpc(store, 3, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "你" },
+    });
 
-    const nodes = store.getSnapshot().nodes;
-    expect(nodes[0]).toBe(user);
-    expect(nodes[1]).not.toBe(assistant);
-    expect(nodes[1]).toMatchObject({ content: [{ type: "text", text: "hello!" }] });
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(store.getSnapshot()).toMatchObject({
+      cursor: 3,
+      headId: "pi-message:assistant:2",
+      nodes: [{ kind: "assistant", status: { type: "running" }, content: [{ type: "text", text: "你" }] }],
+    });
+
+    applyRpc(store, 4, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "好" },
+    });
+    expect(listener).toHaveBeenCalledTimes(4);
+    expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ text: "你好" }] });
   });
 
-  it("休眠后按需恢复 snapshot 与索引，并继续应用增量", () => {
-    const initial = snapshot([userNode("u", null), assistantNode("a", "u")], "a");
+  it("归约 Pi message_update 的 start、done 与 error wire 事件", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const started = assistantMessage([], "pending");
+    const completed = assistantMessage([{ type: "text", text: "完成" }], "stop");
+
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: { ...started.usage, output: 2, totalTokens: 3 },
+      assistantMessageEvent: { type: "start" },
+    });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({ usage: { output: 2, totalTokens: 3 }, content: [] });
+
+    applyRpc(store, 3, {
+      type: "message_update",
+      usage: completed.usage,
+      assistantMessageEvent: { type: "done", reason: "stop", message: completed },
+    });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ type: "text", text: "完成" }] });
+
+    const errored = { ...completed, stopReason: "error" as const, errorMessage: "provider failed" };
+    applyRpc(store, 4, {
+      type: "message_update",
+      usage: errored.usage,
+      assistantMessageEvent: { type: "error", reason: "error", error: errored },
+    });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ type: "text", text: "完成" }] });
+  });
+
+  it("将 RPC extension_error 投影为结构化错误通知", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    applyRpc(store, 1, {
+      type: "extension_error",
+      extensionPath: "/extensions/broken.ts",
+      event: "tool_call",
+      error: "extension failed",
+    });
+
+    expect(store.getSnapshot().nodes).toEqual([
+      expect.objectContaining({
+        kind: "notice",
+        noticeType: "notification",
+        notificationType: "error",
+        extensionNotification: {
+          customType: "pi.extension_error",
+          details: {
+            extensionPath: "/extensions/broken.ts",
+            event: "tool_call",
+            error: "extension failed",
+          },
+        },
+        content: { type: "text", text: "extension failed" },
+      }),
+    ]);
+  });
+
+  it("按 Pi thinking、toolcall 与 tool execution 事件更新同一消息", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const started = assistantMessage([], "pending");
+
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+    });
+    applyRpc(store, 3, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "分析" },
+    });
+    applyRpc(store, 4, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "分析" },
+    });
+    applyRpc(store, 5, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "toolcall_start", contentIndex: 1 },
+    });
+    applyRpc(store, 6, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: {
+        type: "toolcall_delta",
+        contentIndex: 1,
+        delta: '{"path":"README.md"}',
+      },
+    });
+    applyRpc(store, 7, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: {
+        type: "toolcall_end",
+        contentIndex: 1,
+        toolCall: { type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
+      },
+    });
+    applyRpc(store, 8, {
+      type: "tool_execution_start",
+      toolCallId: "tool-1",
+      toolName: "read",
+      args: { path: "README.md" },
+    });
+    applyRpc(store, 9, {
+      type: "tool_execution_update",
+      toolCallId: "tool-1",
+      toolName: "read",
+      args: { path: "README.md" },
+      partialResult: { content: [{ type: "text", text: "partial" }] },
+    });
+    applyRpc(store, 10, {
+      type: "tool_execution_end",
+      toolCallId: "tool-1",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "done" }] },
+      isError: false,
+    });
+
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      content: [
+        { type: "reasoning", text: "分析" },
+        {
+          type: "tool-call",
+          toolCallId: "tool-1",
+          args: { path: "README.md" },
+          argsText: '{"path":"README.md"}',
+          execution: "complete",
+          partialResult: { content: [{ text: "partial" }] },
+          result: { content: [{ text: "done" }] },
+        },
+      ],
+    });
+  });
+
+  it("message_end 结束 live user 与 assistant，不依赖 get_entries 快照", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const user = { role: "user" as const, content: "问题", timestamp: 1 };
+    const assistant = assistantMessage([{ type: "text", text: "回答" }], "stop");
+
+    applyRpc(store, 1, { type: "message_start", message: user });
+    applyRpc(store, 2, { type: "message_end", message: user });
+    applyRpc(store, 3, { type: "message_start", message: assistantMessage([], "pending") });
+    applyRpc(store, 4, { type: "message_end", message: assistant });
+
+    expect(store.getSnapshot().nodes).toMatchObject([
+      { kind: "user", delivery: { state: "persisted" }, content: [{ text: "问题" }] },
+      { kind: "assistant", status: { type: "complete", reason: "stop" }, content: [{ text: "回答" }] },
+    ]);
+  });
+
+  it("将 Pi 0.84 deferred stop reason 映射为完成状态", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const started = assistantMessage([], "pending");
+    const deferred = assistantMessage([{ type: "text", text: "稍后继续" }], "deferred");
+
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, { type: "message_end", message: deferred });
+
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      kind: "assistant",
+      status: { type: "complete", reason: "unknown" },
+      content: [{ type: "text", text: "稍后继续" }],
+    });
+  });
+
+  it("逐个追加 Pi bash_execution_update 输出", () => {
+    const store = new PiThreadStore(snapshot([], null));
+
+    applyRpc(store, 1, { type: "bash_execution_update", id: "bash-1", delta: "第一段" });
+    applyRpc(store, 2, { type: "bash_execution_update", id: "bash-1", delta: "\n第二段" });
+
+    expect(store.getSnapshot()).toMatchObject({
+      cursor: 2,
+      nodes: [
+        {
+          id: "rpc-bash:bash-1",
+          kind: "notice",
+          noticeType: "bash",
+          content: { type: "command", command: "", output: "第一段\n第二段" },
+        },
+      ],
+    });
+  });
+
+  it("直接按 Pi lifecycle 与 queue_update 维护控制投影", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    applyRpc(store, 1, { type: "agent_start" });
+    applyRpc(store, 2, { type: "turn_start" });
+    applyRpc(store, 3, { type: "queue_update", steering: ["修正"], followUp: ["继续"] });
+    expect(store.getSnapshot()).toMatchObject({
+      phase: "running",
+      activeTurnId: "rpc-turn:2",
+      queue: [
+        { mode: "steer", prompt: "修正", source: "pi-observed" },
+        { mode: "followUp", prompt: "继续", source: "pi-observed" },
+      ],
+    });
+
+    applyRpc(store, 4, { type: "turn_end", message: assistantMessage([], "stop"), toolResults: [] });
+    applyRpc(store, 5, { type: "agent_settled" });
+    expect(store.getSnapshot()).toMatchObject({ phase: "idle", activeTurnId: undefined });
+  });
+
+  it("投影 Pi compaction 与 branch-summary summarization retry 生命周期", () => {
+    const store = new PiThreadStore(snapshot([], null));
+
+    applyRpc(store, 1, {
+      type: "summarization_retry_scheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      errorMessage: "overloaded",
+    });
+    expect(store.getSnapshot().phase).toBe("retrying");
+
+    applyRpc(store, 2, {
+      type: "summarization_retry_attempt_start",
+      source: "compaction",
+      reason: "threshold",
+    });
+    expect(store.getSnapshot().phase).toBe("compacting");
+
+    applyRpc(store, 3, { type: "summarization_retry_finished" });
+    expect(store.getSnapshot().phase).toBe("idle");
+
+    applyRpc(store, 4, {
+      type: "summarization_retry_attempt_start",
+      source: "branchSummary",
+    });
+    expect(store.getSnapshot().phase).toBe("tree-navigation");
+
+    applyRpc(store, 5, { type: "summarization_retry_finished" });
+    applyRpc(store, 6, { type: "turn_start" });
+    expect(store.getSnapshot()).toMatchObject({ phase: "running", activeTurnId: "rpc-turn:6" });
+  });
+
+  it("sequence gap 失败，重复 event 幂等丢弃", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    expect(() => applyRpc(store, 2, { type: "agent_start" })).toThrow(PiThreadStoreError);
+    applyRpc(store, 1, { type: "agent_start" });
+    applyRpc(store, 1, { type: "agent_settled" });
+    expect(store.getSnapshot()).toMatchObject({ cursor: 1, phase: "running" });
+  });
+
+  it("休眠后恢复并继续归约 Pi 事件", () => {
+    const initial = snapshot([userNode("u", null)], "u");
     const store = new PiThreadStore(initial);
-
     expect(store.hibernate()).toBe(true);
-    expect(store.hibernate()).toBe(true);
-    const restored = store.getSnapshot();
-
-    expect(restored).toEqual(initial);
-    expect(restored).not.toBe(initial);
-    store.apply(batch(1, { type: "text-delta", messageId: "a", partId: "a:text:0", delta: "!" }));
-    expect(store.getSnapshot().nodes[1]).toMatchObject({ content: [{ text: "hello!" }] });
+    expect(store.getSnapshot()).toEqual(initial);
+    applyRpc(store, 1, { type: "agent_start" });
+    expect(store.getSnapshot()).toMatchObject({ cursor: 1, phase: "running" });
   });
 
-  it("休眠状态可由新 bootstrap 直接替换，无需恢复旧 snapshot", () => {
-    const store = new PiThreadStore(snapshot([assistantNode("old", null)], "old"));
-    const replacement = snapshot([userNode("new", null)], "new", 2);
-
-    store.hibernate();
-    store.replace(replacement);
-
-    expect(store.getSnapshot()).toBe(replacement);
-  });
-
-  it("有订阅者时拒绝休眠，并可在释放订阅后按预算驱逐", () => {
+  it("有订阅者时拒绝休眠，释放后可驱逐", () => {
     const initial = snapshot([assistantNode("a", null)], "a");
     const store = new PiThreadStore(initial);
     const unsubscribe = store.subscribe(() => undefined);
-
     expect(store.hibernate()).toBe(false);
-    expect(store.getSnapshot()).toBe(initial);
-    expect(store.getHibernatedBytes()).toBe(0);
-
     unsubscribe();
     expect(store.hibernate()).toBe(true);
     expect(store.getHibernatedBytes()).toBeGreaterThan(0);
     expect(store.evictHibernated()).toBe(true);
-    expect(store.getHibernatedBytes()).toBe(0);
     expect(store.getSnapshot()).toEqual(detachedThreadSnapshot());
   });
 
-  it("同一 batch 多个 delta 只发布最终快照，且不修改旧 snapshot", () => {
-    const user = userNode("u", null);
-    const assistant = assistantNode("a", "u");
-    const initial = snapshot([user, assistant], "a");
-    const store = new PiThreadStore(initial);
-
-    store.apply(
-      eventBatch(1, [
-        { type: "text-delta", messageId: "a", partId: "a:text:0", delta: " first" },
-        { type: "text-delta", messageId: "a", partId: "a:text:0", delta: " second" },
-      ]),
-    );
-
-    expect(initial.nodes[1]).toBe(assistant);
-    expect(assistant.content[0]).toMatchObject({ text: "hello" });
-    expect(store.getSnapshot().nodes[0]).toBe(user);
-    expect(store.getSnapshot().nodes[1]).toMatchObject({ content: [{ text: "hello first second" }] });
-  });
-
-  it("batch 内新增 part 后可立即通过增量索引写入 delta", () => {
-    const assistant = assistantNode("a", null);
-    const store = new PiThreadStore(snapshot([assistant], "a"));
-
-    store.apply(
-      eventBatch(1, [
-        { type: "part-added", messageId: "a", part: { id: "a:text:1", type: "text", text: "next" } },
-        { type: "text-delta", messageId: "a", partId: "a:text:1", delta: "!" },
-      ]),
-    );
-
-    expect(store.getSnapshot().nodes[0]).toMatchObject({
-      content: [expect.objectContaining({ text: "hello" }), expect.objectContaining({ text: "next!" })],
-    });
-  });
-
-  it("失败 batch 不提交局部 node 或索引变更", () => {
-    const assistant = assistantNode("a", null);
-    const store = new PiThreadStore(snapshot([assistant], "a"));
-    const before = store.getSnapshot();
-
-    expect(() =>
-      store.apply(
-        eventBatch(1, [
-          { type: "part-added", messageId: "a", part: { id: "a:text:1", type: "text", text: "next" } },
-          { type: "text-delta", messageId: "a", partId: "missing", delta: "!" },
-        ]),
-      ),
-    ).toThrow("delta part 不存在");
-    expect(store.getSnapshot()).toBe(before);
-
-    store.apply(batch(1, { type: "text-delta", messageId: "a", partId: "a:text:0", delta: "!" }));
-    expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ text: "hello!" }] });
-  });
-
-  it("rekey 原子更新 node、children parent 与 head", () => {
-    const live = userNode("live:u", null);
-    const assistant = assistantNode("live:a", "live:u");
-    const store = new PiThreadStore(snapshot([live, assistant], "live:a"));
-    const canonical = { ...assistant, id: "a", sourceEntryId: "a" };
-
-    store.apply(batch(1, { type: "node-rekeyed", previousId: "live:a", node: canonical }));
-
-    expect(store.getSnapshot()).toMatchObject({ headId: "a", nodes: [{ id: "live:u" }, { id: "a" }] });
-  });
-
-  it("gap 与 unknown reference fail fast", () => {
-    const store = new PiThreadStore(snapshot([], null));
-    expect(() => store.apply(batch(2, { type: "queue-replaced", items: [] }))).toThrow(PiThreadStoreError);
-    expect(() => store.apply(batch(1, { type: "text-delta", messageId: "missing", partId: "x", delta: "x" }))).toThrow(
-      "assistant node 不存在",
-    );
-  });
-
-  it("丢弃部分重复 envelope，并继续应用连续的新 sequence", () => {
-    const store = new PiThreadStore(snapshot([], null));
-    const first = batch(1, { type: "queue-replaced", items: [] });
-    store.apply(first);
-    store.apply({
-      ...first,
-      fromSequence: 1,
-      toSequence: 2,
-      events: [
-        first.events[0]!,
-        {
-          protocolVersion: PROTOCOL_VERSION,
-          projectId: "project",
-          threadId: "thread",
-          sequence: 2,
-          event: { type: "phase-changed", phase: "running" },
-        },
-      ],
-    });
-
-    expect(store.getSnapshot()).toMatchObject({ cursor: 2, phase: "running" });
-  });
-
-  it("逐 envelope 校验协议/session，并拒绝跨 session branch snapshot", () => {
-    const store = new PiThreadStore(snapshot([], null));
-    const wrongEnvelope = batch(1, { type: "queue-replaced", items: [] });
-    expect(() =>
-      store.apply({ ...wrongEnvelope, events: [{ ...wrongEnvelope.events[0]!, threadId: "other" }] }),
-    ).toThrow("envelope session 不匹配");
-
-    const branchSnapshot = { ...snapshot([], null, 1), threadId: "other" };
-    expect(() => store.apply(batch(1, { type: "branch-replaced", snapshot: branchSnapshot }))).toThrow(
-      "branch snapshot session 不匹配",
-    );
+  it("休眠状态可由 bootstrap snapshot 直接替换", () => {
+    const store = new PiThreadStore(snapshot([assistantNode("old", null)], "old"));
+    const replacement = snapshot([userNode("new", null)], "new", 2);
+    store.hibernate();
+    store.replace(replacement);
+    expect(store.getSnapshot()).toBe(replacement);
   });
 });
 
@@ -280,77 +427,6 @@ describe("PiMessageRepositoryConverter", () => {
     expect(repository.messages[0]?.message.metadata.custom).toMatchObject({
       pi: { status: { type: "running" }, completedAt: 12_000 },
     });
-  });
-
-  it("canonical rekey 后保留 assistant-ui message id", () => {
-    const user = userNode("user", null);
-    const live = {
-      ...assistantNode("live:assistant", "user"),
-      content: [{ id: "live:assistant:reasoning:0", type: "reasoning" as const, text: "thinking" }],
-      status: { type: "running" as const },
-    };
-    const store = new PiThreadStore(snapshot([user, live], live.id));
-    const converter = new PiMessageRepositoryConverter();
-    const running = converter.build(store.getSnapshot());
-    const canonical = {
-      ...live,
-      id: "canonical-assistant",
-      sourceEntryId: "canonical-assistant",
-      content: [{ id: "canonical-assistant:reasoning:0", type: "reasoning" as const, text: "thinking" }],
-    };
-
-    store.apply(batch(1, { type: "node-rekeyed", previousId: live.id, node: canonical }));
-    const rekeyed = converter.build(store.getSnapshot());
-    store.apply(
-      batch(2, {
-        type: "reasoning-delta",
-        messageId: canonical.id,
-        partId: canonical.content[0].id,
-        delta: " more",
-      }),
-    );
-    const updated = converter.build(store.getSnapshot());
-
-    expect(running.messages[1]?.message.id).toBe(live.id);
-    expect(rekeyed.messages[1]?.message.id).toBe(live.id);
-    expect(rekeyed.headId).toBe(live.id);
-    expect(rekeyed.messages[1]?.message.metadata.custom).toMatchObject({
-      pi: { sourceEntryId: canonical.id },
-    });
-    expect(updated.messages[1]?.message).toMatchObject({
-      id: live.id,
-      content: [{ type: "reasoning", text: "thinking more" }],
-    });
-  });
-
-  it("branch replacement 插入同 kind 节点时不复用无关的 display id", () => {
-    const user = userNode("u", null);
-    const assistant = assistantNode("a", "u");
-    const stableUser = userNode("u-stable", "a");
-    const stableAssistant = assistantNode("a-stable", "u-stable");
-    const store = new PiThreadStore(snapshot([user, assistant, stableUser, stableAssistant], "a-stable"));
-    const converter = new PiMessageRepositoryConverter();
-    converter.build(store.getSnapshot());
-
-    const insertedUser = userNode("u-inserted", "a");
-    const insertedAssistant = assistantNode("a-inserted", "u-inserted");
-    const replacement = snapshot(
-      [user, assistant, insertedUser, insertedAssistant, { ...stableUser, parentId: "a-inserted" }, stableAssistant],
-      "a-stable",
-      1,
-    );
-    store.apply(batch(1, { type: "branch-replaced", snapshot: replacement }));
-
-    const repository = converter.build(store.getSnapshot());
-    expect(repository.messages.map(({ message, parentId }) => [message.id, parentId])).toEqual([
-      ["u", null],
-      ["a", "u"],
-      ["u-inserted", "a"],
-      ["a-inserted", "u-inserted"],
-      ["u-stable", "a-inserted"],
-      ["a-stable", "u-stable"],
-    ]);
-    expect(new Set(repository.messages.map(({ message }) => message.id)).size).toBe(repository.messages.length);
   });
 
   it("将同一轮连续 assistant 节点合并，使两个 text 之间的 reasoning/tool 保持相邻", () => {
@@ -619,21 +695,25 @@ describe("PiMessageRepositoryConverter", () => {
     expect(secondMessage.content[0].artifact).toBe(firstMessage.content[0].artifact);
   });
 
-  it("tool replacement 将参数与 partialResult 增量投影为新的 repository part", () => {
-    const tool = toolPart("a:tool:0", "write-1", "write");
+  it("Pi tool_execution_update 将 partialResult 投影为新的 repository part", () => {
+    const tool = {
+      ...toolPart("a:tool:0", "write-1", "write"),
+      args: { path: "src/main.ts", content: "const value" },
+      argsText: '{"path":"src/main.ts","content":"const value"}',
+      execution: "waiting" as const,
+    };
     const assistant = { ...assistantNode("a", null), content: [tool] };
     const store = new PiThreadStore(snapshot([assistant], "a"));
     const converter = new PiMessageRepositoryConverter();
     const first = converter.build(store.getSnapshot());
-    const replacement = {
-      ...tool,
-      args: { path: "src/main.ts", content: "const value" },
-      argsText: '{"path":"src/main.ts","content":"const value',
-      execution: "running" as const,
-      partialResult: { content: [{ type: "text", text: "written 8 bytes" }] },
-    };
 
-    store.apply(batch(1, { type: "tool-call-replaced", messageId: "a", part: replacement }));
+    applyRpc(store, 1, {
+      type: "tool_execution_update",
+      toolCallId: "write-1",
+      toolName: "write",
+      args: tool.args,
+      partialResult: { content: [{ type: "text", text: "written 8 bytes" }] },
+    });
     const second = converter.build(store.getSnapshot());
     const firstMessage = first.messages[0]?.message;
     const secondMessage = second.messages[0]?.message;
@@ -646,7 +726,7 @@ describe("PiMessageRepositoryConverter", () => {
     expect(secondPart).toMatchObject({
       type: "tool-call",
       args: { path: "src/main.ts", content: "const value" },
-      argsText: '{"path":"src/main.ts","content":"const value',
+      argsText: '{"path":"src/main.ts","content":"const value"}',
       artifact: {
         execution: "running",
         partialResult: { content: [{ type: "text", text: "written 8 bytes" }] },
@@ -658,14 +738,21 @@ describe("PiMessageRepositoryConverter", () => {
     const users = Array.from({ length: 999 }, (_, index) =>
       userNode(`u-${index}`, index === 0 ? null : `u-${index - 1}`),
     );
-    const assistant = assistantNode("a", "u-998");
+    const assistant = {
+      ...assistantNode("a", "u-998"),
+      status: { type: "running" as const },
+    };
     const store = new PiThreadStore(snapshot([...users, assistant], "a"));
     const converter = new PiMessageRepositoryConverter();
     const first = converter.build(store.getSnapshot());
     let latest = first;
 
     for (let sequence = 1; sequence <= 1_000; sequence += 1) {
-      store.apply(batch(sequence, { type: "text-delta", messageId: "a", partId: "a:text:0", delta: "x" }));
+      applyRpc(store, sequence, {
+        type: "message_update",
+        usage: assistant.usage,
+        assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x" },
+      });
       latest = converter.build(store.getSnapshot());
     }
 
@@ -705,34 +792,30 @@ function snapshot(nodes: PiThreadSnapshot["nodes"], headId: string | null, curso
   };
 }
 
-function batch(sequence: number, event: PiThreadEventBatch["events"][number]["event"]): PiThreadEventBatch {
-  return {
-    protocolVersion: PROTOCOL_VERSION,
-    projectId: "project",
-    threadId: "thread",
-    fromSequence: sequence,
-    toSequence: sequence,
-    events: [{ protocolVersion: PROTOCOL_VERSION, projectId: "project", threadId: "thread", sequence, event }],
-  };
+function applyRpc(store: PiThreadStore, sequence: number, event: PiRpcEvent): void {
+  store.apply(sequence, event);
 }
 
-function eventBatch(
-  firstSequence: number,
-  events: readonly PiThreadEventBatch["events"][number]["event"][],
-): PiThreadEventBatch {
+function assistantMessage(
+  content: AssistantMessage["content"],
+  stopReason: AssistantMessage["stopReason"],
+): AssistantMessage {
   return {
-    protocolVersion: PROTOCOL_VERSION,
-    projectId: "project",
-    threadId: "thread",
-    fromSequence: firstSequence,
-    toSequence: firstSequence + events.length - 1,
-    events: events.map((event, index) => ({
-      protocolVersion: PROTOCOL_VERSION,
-      projectId: "project",
-      threadId: "thread",
-      sequence: firstSequence + index,
-      event,
-    })),
+    role: "assistant",
+    content,
+    api: "test",
+    provider: "test",
+    model: "faux",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason,
+    timestamp: 2,
   };
 }
 

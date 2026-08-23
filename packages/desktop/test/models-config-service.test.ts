@@ -194,6 +194,51 @@ describe("ModelsConfigService", () => {
     expect(saved).not.toContain('"sort"');
   });
 
+  test("round-trips pi-ai 0.84 compat fields", async () => {
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        providers: {
+          baseten: {
+            compat: {
+              supportsFinishReason: false,
+              thinkingFormat: "baseten",
+              chatTemplateArgs: { enable_thinking: { $var: "thinking.enabled" } },
+              zaiToolStream: false,
+              supportsThinkingTokenBudget: true,
+              supportsAdditionalTools: true,
+              supportsExplicitPromptCacheMode: true,
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const snapshot = await service.getConfig();
+    expect(snapshot.sourceState).toBe("valid");
+    expect(snapshot.providers[0]?.compat).toEqual(
+      expect.objectContaining({
+        config: expect.objectContaining({ thinkingFormat: "baseten", supportsThinkingTokenBudget: true }),
+        chatTemplateArgs: [expect.objectContaining({ key: "enable_thinking" })],
+      }),
+    );
+
+    const result = await service.saveConfig({ expectedRevision: snapshot.revision, providers: snapshot.providers });
+    expect(result.status).toBe("saved");
+    const saved = JSON.parse(await readFile(configPath, "utf8")) as {
+      providers: { baseten: { compat: Record<string, unknown> } };
+    };
+    expect(saved.providers.baseten.compat).toEqual(
+      expect.objectContaining({
+        thinkingFormat: "baseten",
+        chatTemplateArgs: { enable_thinking: { $var: "thinking.enabled" } },
+        supportsExplicitPromptCacheMode: true,
+      }),
+    );
+  });
+
   test("accepts empty built-in providers and modelOverrides-only providers", () => {
     expect(
       validateModelsConfigValue({

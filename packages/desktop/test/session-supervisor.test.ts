@@ -265,6 +265,7 @@ function bootstrap(threadId: string): SessionBootstrap {
       queue: [],
       phase: "idle",
     },
+    events: [],
     control: {
       protocolVersion: PROTOCOL_VERSION,
       revision: 0,
@@ -295,21 +296,7 @@ function timelinePush(threadId: string) {
     type: "timeline" as const,
     projectId: "project",
     threadId,
-    batch: {
-      protocolVersion: PROTOCOL_VERSION,
-      projectId: "project",
-      threadId,
-      fromSequence: 1,
-      toSequence: 1,
-      events: [
-        {
-          protocolVersion: PROTOCOL_VERSION,
-          projectId: "project",
-          threadId,
-          sequence: 1,
-          event: { type: "queue-replaced" as const, items: [] },
-        },
-      ],
-    },
+    sequence: 1,
+    event: { type: "agent_start" as const },
   };
 }

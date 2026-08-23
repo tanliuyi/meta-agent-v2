@@ -75,6 +75,7 @@ export interface ModelsCompatConfig {
   supportsDeveloperRole?: boolean;
   supportsReasoningEffort?: boolean;
   supportsUsageInStreaming?: boolean;
+  supportsFinishReason?: boolean;
   maxTokensField?: "max_completion_tokens" | "max_tokens";
   requiresToolResultName?: boolean;
   requiresAssistantAfterToolResult?: boolean;
@@ -84,6 +85,7 @@ export interface ModelsCompatConfig {
     | "openai"
     | "openrouter"
     | "together"
+    | "baseten"
     | "deepseek"
     | "zai"
     | "qwen"
@@ -96,11 +98,15 @@ export interface ModelsCompatConfig {
   vercelGatewayRouting?: ModelsVercelGatewayRouting;
   supportsOpenAIGrammarTools?: boolean;
   supportsStrictMode?: boolean;
+  zaiToolStream?: boolean;
+  supportsThinkingTokenBudget?: boolean;
   sendSessionAffinityHeaders?: boolean;
   deferredToolsMode?: "kimi";
   sessionAffinityFormat?: "openai" | "openai-nosession" | "openrouter";
   supportsLongCacheRetention?: boolean;
+  supportsAdditionalTools?: boolean;
   supportsToolSearch?: boolean;
+  supportsExplicitPromptCacheMode?: boolean;
   supportsEagerToolInputStreaming?: boolean;
   supportsCacheControlOnTools?: boolean;
   supportsTemperature?: boolean;
@@ -152,6 +158,7 @@ export interface ModelsMapEntryDraft<T> {
 export interface ModelsCompatDraft {
   config: ModelsCompatConfig;
   chatTemplateKwargs?: ModelsMapEntryDraft<ModelsChatTemplateKwarg>[];
+  chatTemplateArgs?: ModelsMapEntryDraft<ModelsChatTemplateKwarg>[];
 }
 
 export interface ModelsProviderDraft {

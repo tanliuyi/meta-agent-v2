@@ -48,11 +48,7 @@ export function validateModelsDraft(providers: ModelsProviderDraft[]): ModelsCon
     else if (providerKeys.has(provider.key)) diagnostics.push(diagnostic(providerPath, "Provider ID 必须唯一。"));
     providerKeys.add(provider.key);
     validateMap(provider.headers, [...providerPath, "headers"], diagnostics);
-    validateCompatMap(
-      provider.compat?.chatTemplateKwargs,
-      [...providerPath, "compat", "chatTemplateKwargs"],
-      diagnostics,
-    );
+    validateCompatMaps(provider.compat, [...providerPath, "compat"], diagnostics);
 
     const modelIds = new Set<string>();
     for (let modelIndex = 0; modelIndex < provider.models.length; modelIndex += 1) {
@@ -65,7 +61,7 @@ export function validateModelsDraft(providers: ModelsProviderDraft[]): ModelsCon
       validatePositive(model.config.maxTokens, [...modelPath, "maxTokens"], diagnostics);
       validateCost(model.config.cost, [...modelPath, "cost"], diagnostics);
       validateMap(model.headers, [...modelPath, "headers"], diagnostics);
-      validateCompatMap(model.compat?.chatTemplateKwargs, [...modelPath, "compat", "chatTemplateKwargs"], diagnostics);
+      validateCompatMaps(model.compat, [...modelPath, "compat"], diagnostics);
     }
 
     const overrideIds = new Set<string>();
@@ -79,11 +75,7 @@ export function validateModelsDraft(providers: ModelsProviderDraft[]): ModelsCon
       validatePositive(override.config.maxTokens, [...overridePath, "maxTokens"], diagnostics);
       validateCost(override.config.cost, [...overridePath, "cost"], diagnostics);
       validateMap(override.headers, [...overridePath, "headers"], diagnostics);
-      validateCompatMap(
-        override.compat?.chatTemplateKwargs,
-        [...overridePath, "compat", "chatTemplateKwargs"],
-        diagnostics,
-      );
+      validateCompatMaps(override.compat, [...overridePath, "compat"], diagnostics);
     }
   }
   return diagnostics;
@@ -102,12 +94,15 @@ function validateMap(
   }
 }
 
-function validateCompatMap(
-  entries: Array<{ key: string }> | undefined,
+function validateCompatMaps(
+  compat: { chatTemplateKwargs?: Array<{ key: string }>; chatTemplateArgs?: Array<{ key: string }> } | undefined,
   path: readonly (string | number)[],
   diagnostics: ModelsConfigDiagnostic[],
 ): void {
-  if (entries) validateMap(entries, path, diagnostics);
+  if (!compat) return;
+  for (const key of ["chatTemplateKwargs", "chatTemplateArgs"] as const) {
+    if (compat[key]) validateMap(compat[key], [...path, key], diagnostics);
+  }
 }
 
 function validatePositive(
