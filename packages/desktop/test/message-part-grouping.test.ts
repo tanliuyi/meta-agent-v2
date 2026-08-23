@@ -67,7 +67,7 @@ describe("message part grouping", () => {
 
     const groupPart = createRunGroupPart(parts);
 
-    expect(Reflect.get(groupPart, Symbol.for("@assistant-ui/groupBy.memoKey"))).toBe("pi-run-activity:v1");
+    expect(Reflect.get(groupPart, Symbol.for("@assistant-ui/groupBy.memoKey"))).toBe("pi-run-activity:v2");
     expect(parts.map((part) => groupPart(part, {}))).toEqual([["group-runActivity", "group-chainOfThought"], []]);
   });
 
@@ -104,7 +104,7 @@ describe("message part grouping", () => {
     ]);
   });
 
-  it("所有 pi-notice 都属于 assistant run activity，压缩事件不会打断折叠", () => {
+  it("所有 pi-notice 保持在单一 activity 分组，notification 由分组组件控制折叠可见性", () => {
     const parts = [
       { type: "reasoning", text: "分析", status: COMPLETE },
       { type: "data", name: "pi-notice", data: { noticeType: "custom" }, status: COMPLETE },
@@ -122,6 +122,15 @@ describe("message part grouping", () => {
       [],
       [],
     ]);
+  });
+
+  it("没有最终回复时 notification 仍保持在同一 activity 分组", () => {
+    const parts = [
+      { type: "reasoning", text: "分析", status: COMPLETE },
+      { type: "data", name: "pi-notice", data: { noticeType: "notification" }, status: COMPLETE },
+    ] satisfies PartState[];
+
+    expect(runGroupPaths(parts)).toEqual([["group-runActivity", "group-chainOfThought"], ["group-runActivity"]]);
   });
 
   it("notification 保持在最终回复之前，不改变 final text 判断", () => {

@@ -51,9 +51,32 @@ describe("SessionMetadataIndex", () => {
     ]);
   });
 
+  it("groups sessions using the public parentSession header", async () => {
+    const directory = projectSessionDirectory(agentDir, cwd);
+    const parentSession = writeSession(directory, {
+      id: "parent",
+      cwd,
+      messages: [{ role: "user", text: "Parent prompt", timestamp: 2 }],
+    });
+    writeSession(directory, {
+      id: "child",
+      cwd,
+      parentSession,
+      messages: [{ role: "user", text: "Child prompt", timestamp: 3 }],
+    });
+
+    await expect(new SessionMetadataIndex(userDataDir, agentDir).list("project", cwd)).resolves.toContainEqual(
+      expect.objectContaining({ id: "child", parentThreadId: "parent", origin: "branch" }),
+    );
+  });
+
   it("uses the fixed general-workspace directory and filters sessions by cwd", async () => {
     const directory = join(agentDir, "sessions", "--general--");
-    writeSession(directory, { id: "matching", cwd, messages: [{ role: "user", text: "Keep", timestamp: 2 }] });
+    writeSession(directory, {
+      id: "matching",
+      cwd,
+      messages: [{ role: "user", text: "Keep", timestamp: 2 }],
+    });
     writeSession(directory, {
       id: "other",
       cwd: join(userDataDir, "other"),
@@ -93,6 +116,7 @@ describe("SessionMetadataIndex", () => {
     });
     const index = new SessionMetadataIndex(userDataDir, agentDir);
     await expect(index.list("project", cwd)).resolves.toEqual([expect.objectContaining({ id: "initial" })]);
+    const restarted = new SessionMetadataIndex(userDataDir, agentDir);
 
     writeSession(directory, {
       id: "added",
@@ -100,7 +124,7 @@ describe("SessionMetadataIndex", () => {
       name: "Added",
       messages: [{ role: "user", text: "Added prompt", timestamp: 4 }],
     });
-    await expect(index.list("project", cwd)).resolves.toEqual([
+    await expect(restarted.list("project", cwd)).resolves.toEqual([
       expect.objectContaining({ id: "added" }),
       expect.objectContaining({ id: "initial" }),
     ]);
@@ -111,12 +135,12 @@ describe("SessionMetadataIndex", () => {
       name: "Renamed externally",
       messages: [{ role: "user", text: "Initial prompt", timestamp: 5 }],
     });
-    await expect(index.list("project", cwd)).resolves.toContainEqual(
+    await expect(restarted.list("project", cwd)).resolves.toContainEqual(
       expect.objectContaining({ id: "initial", title: "Renamed externally" }),
     );
 
     rmSync(join(directory, "added.jsonl"));
-    await expect(index.list("project", cwd)).resolves.toEqual([
+    await expect(restarted.list("project", cwd)).resolves.toEqual([
       expect.objectContaining({ id: "initial", title: "Renamed externally" }),
     ]);
     expect(existsSync(initial)).toBe(true);
@@ -135,6 +159,7 @@ describe("SessionMetadataIndex", () => {
       {
         id: "recovered",
         path: join(directory, "recovered.jsonl"),
+        updatedAt: 2,
       },
     );
   });
@@ -162,7 +187,10 @@ describe("SessionMetadataIndex", () => {
     });
 
     await expect(new SessionMetadataIndex(userDataDir, agentDir).list("project", cwd)).resolves.toEqual([
-      expect.objectContaining({ id: "large", lastAssistantPreview: text.slice(0, 480) }),
+      expect.objectContaining({
+        id: "large",
+        lastAssistantPreview: text.slice(0, 480),
+      }),
     ]);
   });
 
@@ -178,6 +206,7 @@ describe("SessionMetadataIndex", () => {
     await expect(new SessionMetadataIndex(userDataDir, agentDir).resolve("project", cwd, "external")).resolves.toEqual({
       id: "external",
       path: sessionFile,
+      updatedAt: 2,
     });
   });
 
@@ -224,13 +253,25 @@ function writeSession(
     cwd: string;
     fileName?: string;
     name?: string;
-    messages?: Array<{ role: "user" | "assistant"; text: string; timestamp: number }>;
+    parentSession?: string;
+    messages?: Array<{
+      role: "user" | "assistant";
+      text: string;
+      timestamp: number;
+    }>;
   },
 ): string {
   mkdirSync(directory, { recursive: true });
   const sessionFile = join(directory, options.fileName ?? `${options.id}.jsonl`);
   const entries: unknown[] = [
-    { type: "session", version: 3, id: options.id, timestamp: "2026-01-01T00:00:00.000Z", cwd: options.cwd },
+    {
+      type: "session",
+      version: 3,
+      id: options.id,
+      timestamp: "2026-01-01T00:00:00.000Z",
+      cwd: options.cwd,
+      ...(options.parentSession ? { parentSession: options.parentSession } : {}),
+    },
   ];
   if (options.name) {
     entries.push({
@@ -247,7 +288,11 @@ function writeSession(
       id: `message-${index}`,
       parentId: index === 0 ? null : `message-${index - 1}`,
       timestamp: new Date(message.timestamp).toISOString(),
-      message: { role: message.role, content: [{ type: "text", text: message.text }], timestamp: message.timestamp },
+      message: {
+        role: message.role,
+        content: [{ type: "text", text: message.text }],
+        timestamp: message.timestamp,
+      },
     });
   }
   writeFileSync(sessionFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);

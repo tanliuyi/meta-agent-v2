@@ -1,3 +1,4 @@
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 
@@ -46,10 +47,16 @@ const models = [
   },
 ];
 let model = models[0];
+let lastTimestamp = Date.now();
+
+function timestampNow() {
+  lastTimestamp = Math.max(Date.now(), lastTimestamp + 1);
+  return lastTimestamp;
+}
 
 function modelThinkingLevels(provider, modelId) {
-  if (provider === "custom-provider" && modelId === "custom-reasoning-model") return ["off", "high", "max"];
-  return ["off", "low", "high"];
+  const selected = models.find((candidate) => candidate.provider === provider && candidate.id === modelId);
+  return getSupportedThinkingLevels(selected ?? model);
 }
 
 function write(value) {
@@ -76,6 +83,36 @@ function state() {
     pendingMessageCount: 0,
     userData,
   };
+}
+
+function sessionStats() {
+  const lastAssistant = entries.findLast(
+    (entry) => entry.type === "message" && entry.message.role === "assistant",
+  );
+  const tokens = lastAssistant?.message.usage.totalTokens ?? 0;
+  return {
+    sessionFile,
+    sessionId,
+    userMessages: entries.filter((entry) => entry.type === "message" && entry.message.role === "user").length,
+    assistantMessages: entries.filter((entry) => entry.type === "message" && entry.message.role === "assistant").length,
+    toolCalls: 0,
+    toolResults: 0,
+    totalMessages: entries.filter((entry) => entry.type === "message").length,
+    tokens: { input: tokens > 0 ? 1 : 0, output: tokens > 0 ? 1 : 0, cacheRead: 0, cacheWrite: 0, total: tokens },
+    cost: 0,
+    contextUsage: { tokens, contextWindow: model.contextWindow, percent: (tokens / model.contextWindow) * 100 },
+  };
+}
+
+function appendStateEntry(entry) {
+  const persisted = {
+    ...entry,
+    id: `entry-${entries.length + 1}`,
+    parentId: leafId,
+    timestamp: new Date(timestampNow()).toISOString(),
+  };
+  entries.push(persisted);
+  leafId = persisted.id;
 }
 
 function appendMessage(message) {
@@ -128,6 +165,9 @@ input.on("line", (line) => {
     case "get_entries":
       response(request, { entries, leafId });
       break;
+    case "get_session_stats":
+      response(request, sessionStats());
+      break;
     case "get_commands":
       response(request, {
         commands: [{ name: "extension-command", description: "Extension command", source: "extension", sourceInfo: {} }],
@@ -139,15 +179,34 @@ input.on("line", (line) => {
     case "get_available_thinking_levels":
       response(request, { levels: modelThinkingLevels(model.provider, model.id) });
       break;
-    case "set_model":
-      model = { ...model, provider: request.provider, id: request.modelId, name: `${request.provider}/${request.modelId}` };
+    case "set_model": {
+      const previousThinkingLevel = thinkingLevel;
+      model =
+        models.find((candidate) => candidate.provider === request.provider && candidate.id === request.modelId) ?? {
+          ...model,
+          provider: request.provider,
+          id: request.modelId,
+          name: `${request.provider}/${request.modelId}`,
+        };
+      thinkingLevel = clampThinkingLevel(model, thinkingLevel);
+      appendStateEntry({ type: "model_change", provider: model.provider, modelId: model.id });
+      if (thinkingLevel !== previousThinkingLevel) {
+        appendStateEntry({ type: "thinking_level_change", thinkingLevel });
+        write({ type: "thinking_level_changed", level: thinkingLevel });
+      }
       response(request, model);
       break;
-    case "set_thinking_level":
-      thinkingLevel = request.level === "max" ? "high" : request.level;
-      write({ type: "thinking_level_changed", level: thinkingLevel });
+    }
+    case "set_thinking_level": {
+      const previousThinkingLevel = thinkingLevel;
+      thinkingLevel = clampThinkingLevel(model, request.level);
+      if (thinkingLevel !== previousThinkingLevel) {
+        appendStateEntry({ type: "thinking_level_change", thinkingLevel });
+        write({ type: "thinking_level_changed", level: thinkingLevel });
+      }
       response(request);
       break;
+    }
     case "set_session_name":
       sessionName = request.name;
       response(request);
@@ -201,7 +260,7 @@ input.on("line", (line) => {
       isStreaming = true;
       const runAgent = async () => {
         write({ type: "agent_start" });
-        const user = { role: "user", content: request.message, timestamp: Date.now() };
+        const user = { role: "user", content: request.message, timestamp: timestampNow() };
         write({ type: "message_start", message: user });
         appendMessage(user);
         write({ type: "message_end", message: user });
@@ -218,7 +277,7 @@ input.on("line", (line) => {
             totalTokens: 2,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
           },
-          timestamp: Date.now() + 1,
+          timestamp: timestampNow(),
         };
         const started = { ...assistantBase, content: [], stopReason: "pending" };
         const assistant = { ...assistantBase, content: [{ type: "text", text: `reply:${request.message}` }], stopReason: "stop" };

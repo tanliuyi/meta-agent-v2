@@ -771,7 +771,8 @@
 }
 /* 窄容器（如侧边栏面板中的草稿 composer）下收紧内边距，并缩短可变宽度控件。 */
 @container composer (max-width: 560px) {
-  .composer-surface {
+  .composer-surface,
+  .composer-widgets[data-layout="external"] {
     --composer-padding: var(--space-3);
   }
   .draft-composer-drawer {
@@ -1172,23 +1173,6 @@
   .composer-suggestions-loading svg {
     animation: none;
   }
-}
-.composer-widgets {
-  display: grid;
-  gap: 1px;
-  padding: 7px 10px;
-  border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.25);
-}
-.composer-widgets pre {
-  max-height: 96px;
-  margin: 0;
-  overflow: auto;
-  white-space: pre-wrap;
-  color: hsl(var(--muted-foreground));
-  font-family: var(--font-family-mono);
-  font-size: var(--type-size-caption);
-  line-height: 1.5;
 }
 .mode-control {
   display: flex;

@@ -1,4 +1,10 @@
-import { ComposerPrimitive, unstable_useTriggerPopoverAriaProps, useAui, useAuiState } from "@assistant-ui/react";
+import {
+  ComposerPrimitive,
+  unstable_useTriggerPopoverAriaProps,
+  unstable_useTriggerPopoverTriggers,
+  useAui,
+  useAuiState,
+} from "@assistant-ui/react";
 import { LexicalComposerInput } from "@assistant-ui/react-lexical";
 import {
   type ClipboardEvent,
@@ -19,16 +25,36 @@ import type { ComposerTriggerStateSnapshot } from "./composer-trigger-state.tsx"
 
 const ESCAPE_CANCEL_WINDOW_MS = 1_000;
 
-export function shouldDeferComposerKeyToTrigger(key: string, triggerOpen: boolean): boolean {
-  return (
-    triggerOpen &&
-    (key === "ArrowDown" ||
-      key === "ArrowUp" ||
-      key === "Enter" ||
-      key === "Tab" ||
-      key === "Escape" ||
-      key === "Backspace")
-  );
+interface CommandTriggerKeyboardResource {
+  handleKeyDown(event: { readonly key: string; readonly shiftKey: boolean; preventDefault(): void }): boolean;
+}
+
+export function acceptHighlightedCommandOnSpace(
+  event: Pick<
+    KeyboardEvent<HTMLDivElement>,
+    "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey" | "preventDefault" | "stopPropagation"
+  >,
+  commandTriggerOpen: boolean,
+  resource: CommandTriggerKeyboardResource | undefined,
+): boolean {
+  if (
+    !commandTriggerOpen ||
+    event.key !== " " ||
+    event.shiftKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    !resource
+  ) {
+    return false;
+  }
+  const consumed = resource.handleKeyDown({
+    key: "Enter",
+    shiftKey: false,
+    preventDefault: () => event.preventDefault(),
+  });
+  if (consumed) event.stopPropagation();
+  return consumed;
 }
 
 interface FocusedComposerInputState {
@@ -96,22 +122,11 @@ export function ComposerInput({
   );
   const composerText = useAuiState((state) => state.composer.text);
   const triggerAria = unstable_useTriggerPopoverAriaProps();
+  const triggers = unstable_useTriggerPopoverTriggers();
+  const commandTriggerResource = triggers.get("/")?.resource;
   const [fileTriggerOpen, setFileTriggerOpen] = useState(false);
-  const [commandTriggerState, setCommandTriggerState] = useState<ComposerTriggerStateSnapshot>({
-    open: false,
-    hasItems: false,
-  });
+  const [commandTriggerOpen, setCommandTriggerOpen] = useState(false);
   const [dismissedCommandText, setDismissedCommandText] = useState<string | null>(null);
-  const commandTriggerScope = selectedCommand === null ? composerCommandTriggerScope(composerText) : null;
-  const commandTriggerEnabled = commandTriggerScope !== null;
-  const commandTriggerOpen = commandTriggerEnabled && commandTriggerState.open;
-  const commandTriggerCommands = useMemo(
-    () =>
-      commandTriggerScope === "prompt-resource"
-        ? commands.filter(({ source }) => source === "prompt" || source === "skill")
-        : commands,
-    [commandTriggerScope, commands],
-  );
 
   const clearEscapeCancelTimer = useCallback(() => {
     if (escapeCancelTimer.current !== undefined) window.clearTimeout(escapeCancelTimer.current);
@@ -138,7 +153,7 @@ export function ComposerInput({
     if (selectedCommand) {
       const text = slashCommandText(selectedCommand, aui.composer().getState().text);
       setDismissedCommandText(text);
-      setCommandTriggerState({ open: false, hasItems: false });
+      setCommandTriggerOpen(false);
       aui.composer().setText(text);
     }
     onCommandClear();
@@ -166,6 +181,8 @@ export function ComposerInput({
     if (shouldDeferComposerKeyToTrigger(event.key, fileTriggerOpen || commandTriggerOpen)) return;
 
     if (event.nativeEvent.isComposing) return;
+
+    if (acceptHighlightedCommandOnSpace(event, commandTriggerOpen, commandTriggerResource)) return;
 
     const exitsEmptyCommand =
       selectedCommand &&
@@ -232,13 +249,9 @@ export function ComposerInput({
       {projectId && !materializing ? (
         <ComposerFileTrigger projectId={projectId} onOpenChange={setFileTriggerOpen} />
       ) : null}
-      {commandTriggerEnabled && dismissedCommandText !== composerText ? (
-        <ComposerCommandTrigger
-          commands={commandTriggerCommands}
-          onSelect={onCommandSelect}
-          onStateChange={setCommandTriggerState}
-        />
-      ) : null}
+      {dismissedCommandText === composerText ? null : (
+        <ComposerCommandTrigger commands={commands} onSelect={onCommandSelect} onOpenChange={setCommandTriggerOpen} />
+      )}
       <div className="composer-input-row">
         {selectedCommand ? (
           <button

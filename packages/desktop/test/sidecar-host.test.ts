@@ -58,6 +58,127 @@ describe("sidecar command scheduling", () => {
     expect(calls).toEqual(["prompt-start", "steer", "set-thinking", "prompt-end"]);
   });
 
+  it("模型与 thinking 变更可穿过 prompt，并按用户操作顺序串行", async () => {
+    const schedule = createSidecarCommandScheduler();
+    let releasePrompt!: () => void;
+    let releaseModel!: () => void;
+    const promptBlocked = new Promise<void>((resolve) => {
+      releasePrompt = resolve;
+    });
+    const modelBlocked = new Promise<void>((resolve) => {
+      releaseModel = resolve;
+    });
+    const calls: string[] = [];
+
+    const prompt = schedule("prompt", async () => {
+      calls.push("prompt-start");
+      await promptBlocked;
+      calls.push("prompt-end");
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["prompt-start"]));
+
+    const setModel = schedule("setModel", async () => {
+      calls.push("model-start");
+      await modelBlocked;
+      calls.push("model-end");
+    });
+    const setThinking = schedule("setThinking", async () => {
+      calls.push("thinking");
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["prompt-start", "model-start"]));
+    expect(calls).not.toContain("thinking");
+
+    releaseModel();
+    await Promise.all([setModel, setThinking]);
+    expect(calls).toEqual(["prompt-start", "model-start", "model-end", "thinking"]);
+
+    releasePrompt();
+    await prompt;
+    expect(calls).toEqual(["prompt-start", "model-start", "model-end", "thinking", "prompt-end"]);
+  });
+
+  it("先发起的模型变更完成后才启动后续 prompt", async () => {
+    const schedule = createSidecarCommandScheduler();
+    let releaseModel!: () => void;
+    const modelBlocked = new Promise<void>((resolve) => {
+      releaseModel = resolve;
+    });
+    const calls: string[] = [];
+
+    const setModel = schedule("setModel", async () => {
+      calls.push("model-start");
+      await modelBlocked;
+      calls.push("model-end");
+    });
+    const prompt = schedule("prompt", async () => {
+      calls.push("prompt");
+    });
+
+    await vi.waitFor(() => expect(calls).toEqual(["model-start"]));
+    expect(calls).not.toContain("prompt");
+
+    releaseModel();
+    await Promise.all([setModel, prompt]);
+    expect(calls).toEqual(["model-start", "model-end", "prompt"]);
+  });
+
+  it("等待模型 barrier 时原 prompt 结束后重新进入串行命令链", async () => {
+    const schedule = createSidecarCommandScheduler();
+    let releaseFirstPrompt!: () => void;
+    let releaseModel!: () => void;
+    let releaseCompact!: () => void;
+    const firstPromptBlocked = new Promise<void>((resolve) => {
+      releaseFirstPrompt = resolve;
+    });
+    const modelBlocked = new Promise<void>((resolve) => {
+      releaseModel = resolve;
+    });
+    const compactBlocked = new Promise<void>((resolve) => {
+      releaseCompact = resolve;
+    });
+    const calls: string[] = [];
+
+    const firstPrompt = schedule("prompt", async () => {
+      calls.push("first-prompt-start");
+      await firstPromptBlocked;
+      calls.push("first-prompt-end");
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["first-prompt-start"]));
+
+    const setModel = schedule("setModel", async () => {
+      calls.push("model-start");
+      await modelBlocked;
+      calls.push("model-end");
+    });
+    const secondPrompt = schedule("prompt", async () => {
+      calls.push("second-prompt");
+    });
+    const compact = schedule("compact", async () => {
+      calls.push("compact-start");
+      await compactBlocked;
+      calls.push("compact-end");
+    });
+
+    releaseFirstPrompt();
+    await firstPrompt;
+    await vi.waitFor(() => expect(calls).toContain("compact-start"));
+    releaseModel();
+    await setModel;
+    expect(calls).not.toContain("second-prompt");
+
+    releaseCompact();
+    await Promise.all([compact, secondPrompt]);
+    expect(calls).toEqual([
+      "first-prompt-start",
+      "model-start",
+      "first-prompt-end",
+      "compact-start",
+      "model-end",
+      "compact-end",
+      "second-prompt",
+    ]);
+  });
+
   it("prompt 运行期间 rename 立即执行，不等待 prompt 结束", async () => {
     const schedule = createSidecarCommandScheduler();
     let releasePrompt!: () => void;

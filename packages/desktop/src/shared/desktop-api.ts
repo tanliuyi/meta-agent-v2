@@ -188,6 +188,7 @@ export interface DesktopApi {
     prompt(input: SessionPromptInput): Promise<SessionCommandResult>;
     cancel(projectId: string, threadId: string): Promise<void>;
     compact(projectId: string, threadId: string): Promise<void>;
+    reload(projectId: string, threadId: string): Promise<void>;
     refreshModels(projectId: string, threadId: string): Promise<void>;
     setModel(projectId: string, threadId: string, provider: string, modelId: string): Promise<void>;
     setThinking(projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]): Promise<void>;

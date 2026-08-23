@@ -8,6 +8,10 @@ import {
 } from "../src/shared/sidecar-wire.ts";
 
 describe("sidecar runtime compatibility", () => {
+  it("uses protocol version 5 for session resolution timestamps", () => {
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(5);
+  });
+
   it("uses architecture without compiler build flags for the toolchain identity", () => {
     const variables = process.config.variables as Record<string, string | number | boolean | undefined>;
     const expected = [variables.host_arch, variables.target_arch, variables.v8_target_arch]

@@ -223,6 +223,9 @@ export function NewSessionSurface() {
           onMaterialized(bootstrap) {
             dispatchDesktop(desktopStore, { type: "thread-catalog-added", bootstrap });
           },
+          onDiscarded(target) {
+            dispatchDesktop(desktopStore, { type: "thread-removed", ...target });
+          },
         },
       );
       const target = materialized.target;

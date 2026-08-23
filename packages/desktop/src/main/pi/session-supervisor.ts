@@ -180,6 +180,10 @@ export class SessionSupervisor {
     return this.workers.compact(projectId, threadId);
   }
 
+  reload(projectId: string, threadId: string): Promise<void> {
+    return this.workers.reload(projectId, threadId);
+  }
+
   refreshModels(projectId: string, threadId: string): Promise<void> {
     return this.workers.refreshModels(projectId, threadId);
   }

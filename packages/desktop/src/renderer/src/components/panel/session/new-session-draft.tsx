@@ -4,8 +4,8 @@ import { useStore } from "zustand";
 import type { ThinkingLevel } from "../../../../../shared/contracts.ts";
 import { toPiPromptAttachments } from "../../../runtime/attachments.ts";
 import { sessionRecordKey } from "../../../runtime/pi-session-store.ts";
-import { useDesktopActions } from "../../../state/desktop-context.tsx";
 import { selectProjects } from "../../../state/desktop-selectors.ts";
+import { dispatchDesktop } from "../../../state/desktop-store.ts";
 import { useDesktopStore } from "../../../state/desktop-store-context.tsx";
 import { materializeDraftSession, selectDraftModel, selectDraftThinkingLevel } from "../../../state/draft-creation.ts";
 import {
@@ -27,7 +27,6 @@ import { NEW_SESSION_PANEL_KIND } from "../builtin-panel-kinds.ts";
  */
 export function NewSessionDraft() {
   const { record } = useSessionScope();
-  const actions = useDesktopActions();
   const sessionCache = useSessionCache();
   const desktopStore = useDesktopStore();
   const workbenchTabs = useSessionWorkbenchTabs();
@@ -104,8 +103,11 @@ export function NewSessionDraft() {
           requestIds: draft.createRequestIds,
           sessions: window.desktop.sessions,
           cache: sessionCache,
-          onMaterialized() {
-            actions.refreshProjectThreads(draft.parent.projectId);
+          onMaterialized(bootstrap) {
+            dispatchDesktop(desktopStore, { type: "thread-catalog-added", bootstrap });
+          },
+          onDiscarded(target) {
+            dispatchDesktop(desktopStore, { type: "thread-removed", ...target });
           },
         },
       );

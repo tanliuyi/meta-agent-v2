@@ -68,6 +68,7 @@ interface DraftMaterializationDependencies {
   sessions: Pick<DesktopApi["sessions"], "create" | "prompt" | "remove">;
   cache: Pick<SessionCacheController, "ensureAttached" | "retire">;
   onMaterialized(bootstrap: SessionBootstrap): void;
+  onDiscarded(target: SessionIdentity): void;
 }
 
 export interface DraftMaterializationResult {
@@ -99,6 +100,7 @@ export async function materializeDraftSession(
     throw error;
   }
 
+  dependencies.onMaterialized(bootstrap);
   let result: Awaited<ReturnType<DesktopApi["sessions"]["prompt"]>>;
   try {
     result = await dependencies.sessions.prompt({
@@ -108,14 +110,13 @@ export async function materializeDraftSession(
       images: input.images,
     });
   } catch {
-    dependencies.onMaterialized(bootstrap);
     return { target, outcome: "unknown" };
   }
   if (!result.accepted) {
     await cleanupMaterializedSession(dependencies, target, recordKey);
+    dependencies.onDiscarded(target);
     throw new Error(result.error ?? "Pi 未接受此输入");
   }
-  dependencies.onMaterialized(bootstrap);
   return { target, outcome: "accepted" };
 }
 

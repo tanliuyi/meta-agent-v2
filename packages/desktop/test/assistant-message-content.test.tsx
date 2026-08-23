@@ -280,7 +280,7 @@ describe("AssistantMessageContent thinking visibility", () => {
   it("尾部 notification 在 activity 收起后仍渲染", () => {
     viewState.parts = [
       { type: "reasoning" },
-      { type: "data", name: "pi-notice", data: { noticeType: "notification", content: "status" } },
+      { type: "data", name: "pi-notice", data: { noticeType: "notification" } },
     ];
 
     const markup = renderToStaticMarkup(
@@ -290,7 +290,6 @@ describe("AssistantMessageContent thinking visibility", () => {
     expect(markup).toContain('data-testid="run-activity"');
     expect(markup).toContain('data-has-content="false"');
     expect(markup).toContain('data-testid="pi-notice"');
-    expect(markup).toContain("status");
   });
 
   it("notification 不拆分同一次 run activity", () => {
@@ -310,7 +309,7 @@ describe("AssistantMessageContent thinking visibility", () => {
     expect(markup).toContain("status");
   });
 
-  it("连续 info notification 仅显示最后一条状态", () => {
+  it("连续 info notification 参考 Pi TUI 仅显示最后一条状态", () => {
     viewState.parts = [
       {
         type: "data",

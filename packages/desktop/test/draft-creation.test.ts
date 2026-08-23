@@ -25,8 +25,9 @@ describe("draft creation request", () => {
       outcome: "accepted",
     });
 
-    expect(harness.order).toEqual(["create", "attach", "prompt", "catalog"]);
+    expect(harness.order).toEqual(["create", "attach", "catalog", "prompt"]);
     expect(harness.onMaterialized).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread" }));
+    expect(harness.onDiscarded).not.toHaveBeenCalled();
   });
 
   it("将选中的 worktree 加入创建请求", async () => {
@@ -50,6 +51,7 @@ describe("draft creation request", () => {
     expect(harness.remove).toHaveBeenCalledWith("project", "thread", "subtree");
     expect(harness.prompt).not.toHaveBeenCalled();
     expect(harness.onMaterialized).not.toHaveBeenCalled();
+    expect(harness.onDiscarded).not.toHaveBeenCalled();
   });
 
   it("preflight 失败时清理 session，未知结果时保留 session", async () => {
@@ -58,7 +60,8 @@ describe("draft creation request", () => {
     await expect(materializeDraftSession(input(), rejected.dependencies)).rejects.toThrow("rejected");
     expect(rejected.retire).toHaveBeenCalledOnce();
     expect(rejected.remove).toHaveBeenCalledOnce();
-    expect(rejected.onMaterialized).not.toHaveBeenCalled();
+    expect(rejected.onMaterialized).toHaveBeenCalledOnce();
+    expect(rejected.onDiscarded).toHaveBeenCalledWith({ projectId: "project", threadId: "thread" });
 
     const unknown = createHarness();
     unknown.prompt.mockRejectedValueOnce(new Error("unknown outcome"));
@@ -69,6 +72,7 @@ describe("draft creation request", () => {
     expect(unknown.retire).not.toHaveBeenCalled();
     expect(unknown.remove).not.toHaveBeenCalled();
     expect(unknown.onMaterialized).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread" }));
+    expect(unknown.onDiscarded).not.toHaveBeenCalled();
   });
 });
 
@@ -99,6 +103,7 @@ function createHarness(promptResult: SessionCommandResult = { accepted: true, qu
   const remove = vi.fn(async () => undefined);
   const retire = vi.fn(async () => undefined);
   const onMaterialized = vi.fn(() => order.push("catalog"));
+  const onDiscarded = vi.fn(() => order.push("discard"));
   return {
     order,
     create,
@@ -107,11 +112,13 @@ function createHarness(promptResult: SessionCommandResult = { accepted: true, qu
     remove,
     retire,
     onMaterialized,
+    onDiscarded,
     dependencies: {
       requestIds: new Map<string, string>(),
       sessions: { create, prompt, remove },
       cache: { ensureAttached, retire },
       onMaterialized,
+      onDiscarded,
     },
   };
 }
@@ -130,6 +137,7 @@ function bootstrap(): SessionBootstrap {
       nodes: [],
       queue: [],
       phase: "idle",
+      thinkingLevel: "off",
     },
     events: [],
     control: {

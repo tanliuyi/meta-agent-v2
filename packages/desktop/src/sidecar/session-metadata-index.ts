@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  type BigIntStats,
   createReadStream,
   type Dirent,
   existsSync,
@@ -18,6 +19,7 @@ import {
   THREAD_ASSISTANT_PREVIEW_MAX_CHARS,
   THREAD_USER_PREVIEW_MAX_CHARS,
 } from "../shared/contracts.ts";
+import type { SessionResolution } from "../shared/sidecar-contracts.ts";
 import { collectThreadDescendantIds } from "../shared/thread-tree.ts";
 import {
   migrateLegacyGeneralSessionDirectory,
@@ -25,7 +27,7 @@ import {
   resolveDesktopSessionDirectory,
 } from "./desktop-session-directory.ts";
 
-const INDEX_VERSION = 6;
+const INDEX_VERSION = 9;
 const INDEX_FILE_NAME = "session-metadata-index.json";
 /** 会话文件尾部读取块大小与上限（避免全量读取只为最后一条消息）。 */
 const LAST_MESSAGE_PREVIEW_TAIL_BYTES = 256 * 1024;
@@ -39,6 +41,7 @@ interface SessionInfo {
   cwd: string;
   name?: string;
   parentSessionPath?: string;
+  promotedRoot: boolean;
   created: Date;
   modified: Date;
   messageCount: number;
@@ -47,6 +50,22 @@ interface SessionInfo {
 
 interface IndexedSession extends Thread {
   path: string;
+}
+
+interface IndexedSessionSource {
+  fingerprint: string;
+  info: {
+    path: string;
+    id: string;
+    cwd: string;
+    name?: string;
+    parentSessionPath?: string;
+    promotedRoot: boolean;
+    createdAt: number;
+    modifiedAt: number;
+    messageCount: number;
+    firstMessage: string;
+  };
 }
 
 interface ExplicitIndexedSession {
@@ -72,6 +91,7 @@ interface IndexedProject {
   sessionDirectory: string | null;
   directoryFingerprint: string | null;
   backfillComplete: boolean;
+  sessionSources: IndexedSessionSource[];
   explicitSessions: ExplicitIndexedSession[];
   sessions: IndexedSession[];
 }
@@ -93,7 +113,10 @@ export class SessionMetadataIndex {
 
   async list(projectId: string, cwd: string): Promise<Thread[]> {
     const project = await this.requireProject(projectId, cwd);
-    return project.sessions.map(({ path: _path, ...thread }) => ({ ...thread, running: false }));
+    return project.sessions.map(({ path: _path, ...thread }) => ({
+      ...thread,
+      running: false,
+    }));
   }
 
   /** 同 list，但保留 session.jsonl 绝对路径（@ 提及会话引用用）。 */
@@ -102,17 +125,18 @@ export class SessionMetadataIndex {
     return project.sessions.map((session) => ({ ...session, running: false }));
   }
 
-  async resolve(projectId: string, cwd: string, threadId: string): Promise<{ id: string; path: string }> {
+  async resolve(projectId: string, cwd: string, threadId: string): Promise<SessionResolution> {
     const cached = this.load().projects[projectId];
-    const cacheWasFresh = this.isProjectFresh(projectId, cached, cwd);
-    let project = cacheWasFresh ? cached : await this.rebuild(projectId, cwd);
+    const directorySnapshot = cached ? snapshotSessionDirectory(cached.sessionDirectory) : undefined;
+    const cacheWasFresh = this.isProjectFresh(projectId, cached, cwd, directorySnapshot?.fingerprint ?? null);
+    let project = cacheWasFresh ? cached : await this.rebuild(projectId, cwd, directorySnapshot ?? undefined);
     let session = project.sessions.find(({ id }) => id === threadId);
     if (!session && cacheWasFresh) {
       project = await this.rebuild(projectId, cwd);
       session = project.sessions.find(({ id }) => id === threadId);
     }
     if (!session) throw new Error(`Pi session does not exist: ${threadId}`);
-    return { id: session.id, path: session.path };
+    return { id: session.id, path: session.path, updatedAt: session.updatedAt };
   }
 
   upsert(projectId: string, cwd: string, sessionFile: string, thread: Thread): void {
@@ -143,6 +167,7 @@ export class SessionMetadataIndex {
       sessionDirectory: currentProject?.sessionDirectory ?? (explicitIndex === -1 ? dirname(sessionFile) : null),
       directoryFingerprint: explicitIndex === -1 ? null : (currentProject?.directoryFingerprint ?? null),
       backfillComplete: currentProject?.backfillComplete ?? false,
+      sessionSources: currentProject?.sessionSources ?? [],
       explicitSessions,
       sessions,
     };
@@ -172,6 +197,7 @@ export class SessionMetadataIndex {
       sessionDirectory: currentProject?.sessionDirectory ?? null,
       directoryFingerprint: currentProject?.directoryFingerprint ?? null,
       backfillComplete: currentProject?.backfillComplete ?? false,
+      sessionSources: currentProject?.sessionSources ?? [],
       explicitSessions,
       sessions,
     };
@@ -310,7 +336,9 @@ export class SessionMetadataIndex {
       .map((session) => reparentedById.get(session.id) ?? session);
     project.explicitSessions = project.explicitSessions
       .filter(({ session }) => !removedIds.has(session.id))
-      .map((explicit) => ({ session: reparentedById.get(explicit.session.id) ?? explicit.session }));
+      .map((explicit) => ({
+        session: reparentedById.get(explicit.session.id) ?? explicit.session,
+      }));
     project.directoryFingerprint = null;
     try {
       this.persist();
@@ -330,7 +358,12 @@ export class SessionMetadataIndex {
     this.persist();
   }
 
-  async rebuild(projectId: string, cwd: string): Promise<IndexedProject> {
+  async rebuild(
+    projectId: string,
+    cwd: string,
+    existingSnapshot?: SessionDirectorySnapshot,
+    retries = 1,
+  ): Promise<IndexedProject> {
     const data = this.load();
     const currentProject = data.projects[projectId]?.cwd === cwd ? data.projects[projectId] : undefined;
     if (this.agentDir) migrateLegacyGeneralSessionDirectory(projectId, cwd, this.agentDir);
@@ -351,10 +384,21 @@ export class SessionMetadataIndex {
     const knownDirectory =
       configuredDirectory ??
       (this.agentDir ? defaultSessionDirectory(cwd, this.agentDir) : (currentProject?.sessionDirectory ?? null));
-    const fingerprintBeforeScan = fingerprintSessionDirectory(knownDirectory);
-    const rootSessions = knownDirectory
-      ? await listSessionInfos(knownDirectory, cwd, configuredDirectory !== undefined)
-      : [];
+    const directorySnapshot =
+      existingSnapshot?.directory === knownDirectory ? existingSnapshot : snapshotSessionDirectory(knownDirectory);
+    if (knownDirectory !== null && directorySnapshot === null) {
+      throw new Error(`Cannot scan Pi session directory: ${knownDirectory}`);
+    }
+    const fingerprintBeforeScan = directorySnapshot?.fingerprint ?? null;
+    const scanned = directorySnapshot
+      ? await listSessionInfos(
+          directorySnapshot,
+          cwd,
+          configuredDirectory !== undefined,
+          currentProject?.sessionSources ?? [],
+        )
+      : { sessions: [], sources: [], unchangedPaths: new Set<string>() };
+    const rootSessions = scanned.sessions;
     const sessionDirectory = knownDirectory;
     const validExplicitSessions = currentExplicitSessions.filter(({ session }) => existsSync(session.path));
     const candidates: Array<{ session: SessionInfo }> = rootSessions.map((session) => ({ session }));
@@ -370,20 +414,21 @@ export class SessionMetadataIndex {
       candidates,
       MAX_CONCURRENT_SESSION_FILE_READS,
       async ({ session }): Promise<IndexedSession | undefined> => {
-        const parentThreadId = session.parentSessionPath
-          ? threadIdByPath.get(resolve(session.parentSessionPath))
-          : undefined;
-        let fork: ForkDescriptor | undefined;
-        let lastMessagePreview: Awaited<ReturnType<typeof readLastMessagePreview>>;
-        try {
-          [fork, lastMessagePreview] = await Promise.all([
-            parentThreadId ? readForkDescriptor(session) : Promise.resolve(undefined),
-            readLastMessagePreview(session.path),
-          ]);
-        } catch (error) {
-          if (isSessionFileUnavailable(error)) return undefined;
-          throw error;
+        const parentSessionPath = session.parentSessionPath;
+        const parentThreadId = parentSessionPath ? threadIdByPath.get(resolve(parentSessionPath)) : undefined;
+        const knownSession = knownSessionsById.get(session.id);
+        if (
+          scanned.unchangedPaths.has(resolve(session.path)) &&
+          knownSession &&
+          resolve(knownSession.path) === resolve(session.path) &&
+          knownSession.parentThreadId === parentThreadId
+        ) {
+          return knownSession;
         }
+        const [fork, lastMessagePreview] = await Promise.all([
+          parentThreadId ? readForkDescriptor(session) : Promise.resolve(undefined),
+          readLastMessagePreview(session.path),
+        ]);
         return {
           id: session.id,
           projectId,
@@ -412,11 +457,19 @@ export class SessionMetadataIndex {
     const sessionsById = new Map(rebuiltRootSessions.map((session): [string, IndexedSession] => [session.id, session]));
     for (const { session } of explicitSessions) sessionsById.set(session.id, session);
     const sessions = [...sessionsById.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+    const fingerprintAfterScan = fingerprintSessionDirectory(sessionDirectory);
+    if (sessionDirectory !== null && fingerprintAfterScan === null) {
+      throw new Error(`Cannot verify Pi session directory: ${sessionDirectory}`);
+    }
+    if (fingerprintAfterScan !== fingerprintBeforeScan && retries > 0) {
+      return this.rebuild(projectId, cwd, undefined, retries - 1);
+    }
     const project = {
       cwd,
       sessionDirectory,
-      directoryFingerprint: fingerprintBeforeScan,
+      directoryFingerprint: fingerprintAfterScan === fingerprintBeforeScan ? fingerprintBeforeScan : null,
       backfillComplete: true,
+      sessionSources: scanned.sources,
       explicitSessions,
       sessions,
     };
@@ -427,14 +480,16 @@ export class SessionMetadataIndex {
 
   private async requireProject(projectId: string, cwd: string): Promise<IndexedProject> {
     const project = this.load().projects[projectId];
-    if (this.isProjectFresh(projectId, project, cwd)) return project;
-    return this.rebuild(projectId, cwd);
+    const directorySnapshot = project ? snapshotSessionDirectory(project.sessionDirectory) : undefined;
+    if (this.isProjectFresh(projectId, project, cwd, directorySnapshot?.fingerprint ?? null)) return project;
+    return this.rebuild(projectId, cwd, directorySnapshot ?? undefined);
   }
 
   private isProjectFresh(
     projectId: string,
     project: IndexedProject | undefined,
     cwd: string,
+    directoryFingerprint: string | null,
   ): project is IndexedProject {
     const configuredDirectory = this.agentDir ? resolveDesktopSessionDirectory(projectId, this.agentDir) : undefined;
     const previewsUpgraded =
@@ -445,7 +500,7 @@ export class SessionMetadataIndex {
       project.backfillComplete &&
       previewsUpgraded &&
       project.directoryFingerprint !== null &&
-      fingerprintSessionDirectory(project.sessionDirectory) === project.directoryFingerprint &&
+      directoryFingerprint === project.directoryFingerprint &&
       project.explicitSessions.every(({ session }) => existsSync(session.path))
     );
   }
@@ -469,7 +524,9 @@ export class SessionMetadataIndex {
     const data = this.load();
     mkdirSync(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(data, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(temporary, `${JSON.stringify(data, null, 2)}\n`, {
+      flag: "wx",
+    });
     renameSync(temporary, this.path);
   }
 }
@@ -483,6 +540,8 @@ function isStoredIndex(value: unknown): value is StoredIndex {
       (typeof project.sessionDirectory === "string" || project.sessionDirectory === null) &&
       (typeof project.directoryFingerprint === "string" || project.directoryFingerprint === null) &&
       typeof project.backfillComplete === "boolean" &&
+      Array.isArray(project.sessionSources) &&
+      project.sessionSources.every(isIndexedSessionSource) &&
       Array.isArray(project.explicitSessions) &&
       project.explicitSessions.every(isExplicitIndexedSession) &&
       Array.isArray(project.sessions) &&
@@ -508,6 +567,23 @@ function isIndexedSession(value: unknown): value is IndexedSession {
     (value.origin === undefined || value.origin === "branch" || value.origin === "subagent") &&
     (value.agentName === undefined || typeof value.agentName === "string") &&
     typeof value.path === "string"
+  );
+}
+
+function isIndexedSessionSource(value: unknown): value is IndexedSessionSource {
+  if (!isRecord(value) || typeof value.fingerprint !== "string" || !isRecord(value.info)) return false;
+  const info = value.info;
+  return (
+    typeof info.path === "string" &&
+    typeof info.id === "string" &&
+    typeof info.cwd === "string" &&
+    (info.name === undefined || typeof info.name === "string") &&
+    (info.parentSessionPath === undefined || typeof info.parentSessionPath === "string") &&
+    typeof info.promotedRoot === "boolean" &&
+    typeof info.createdAt === "number" &&
+    typeof info.modifiedAt === "number" &&
+    typeof info.messageCount === "number" &&
+    typeof info.firstMessage === "string"
   );
 }
 
@@ -615,7 +691,10 @@ async function readLastMessagePreview(
   let tailStart = Math.max(0, fileSize - LAST_MESSAGE_PREVIEW_TAIL_BYTES);
   for (;;) {
     const lines = createInterface({
-      input: createReadStream(sessionFile, { encoding: "utf8", start: tailStart }),
+      input: createReadStream(sessionFile, {
+        encoding: "utf8",
+        start: tailStart,
+      }),
       crlfDelay: Infinity,
     });
     for await (const line of lines) {
@@ -647,22 +726,20 @@ async function readLastMessagePreview(
   }
   const lastAssistantPreview =
     lastRole === "assistant" && lastText ? previewFirstLines(lastText, THREAD_ASSISTANT_PREVIEW_MAX_CHARS) : "";
-  return { ...(lastUserPreview !== undefined ? { lastUserPreview } : {}), lastAssistantPreview };
-}
-
-function isSessionFileUnavailable(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    (error.code === "ENOENT" || error.code === "EACCES" || error.code === "EPERM")
-  );
+  return {
+    ...(lastUserPreview !== undefined ? { lastUserPreview } : {}),
+    lastAssistantPreview,
+  };
 }
 
 async function readForkActivity(
   sessionFile: string,
   createdAt: number,
 ): Promise<{ prompt?: string; name?: string | null }> {
-  const lines = createInterface({ input: createReadStream(sessionFile, { encoding: "utf8" }), crlfDelay: Infinity });
+  const lines = createInterface({
+    input: createReadStream(sessionFile, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
   let prompt: string | undefined;
   let name: string | null | undefined;
   for await (const line of lines) {
@@ -685,7 +762,10 @@ async function readForkActivity(
     const text = messageText(value.message.content).trim();
     if (text) prompt = text;
   }
-  return { ...(prompt ? { prompt } : {}), ...(name !== undefined ? { name } : {}) };
+  return {
+    ...(prompt ? { prompt } : {}),
+    ...(name !== undefined ? { name } : {}),
+  };
 }
 
 function messageText(content: unknown): string {
@@ -723,74 +803,137 @@ function defaultSessionDirectory(cwd: string, agentDir: string): string {
   return join(resolve(agentDir), "sessions", safePath);
 }
 
-async function listSessionInfos(directory: string, cwd: string, filterCwd: boolean): Promise<SessionInfo[]> {
-  const files = listSessionFiles(directory);
-  const sessions = (await mapWithConcurrency(files, MAX_CONCURRENT_SESSION_FILE_READS, readSessionInfo)).filter(
-    (session): session is SessionInfo => session !== undefined,
+interface SessionDirectorySnapshot {
+  directory: string;
+  fingerprint: string;
+  files: Array<{ path: string; fingerprint: string }>;
+}
+
+async function listSessionInfos(
+  snapshot: SessionDirectorySnapshot,
+  cwd: string,
+  filterCwd: boolean,
+  previousSources: readonly IndexedSessionSource[],
+): Promise<{
+  sessions: SessionInfo[];
+  sources: IndexedSessionSource[];
+  unchangedPaths: Set<string>;
+}> {
+  const previousByPath = new Map(previousSources.map((source) => [resolve(source.info.path), source]));
+  const unchangedPaths = new Set<string>();
+  const scanned = await mapWithConcurrency(snapshot.files, MAX_CONCURRENT_SESSION_FILE_READS, async (file) => {
+    const previous = previousByPath.get(resolve(file.path));
+    if (previous?.fingerprint === file.fingerprint) {
+      unchangedPaths.add(resolve(file.path));
+      return { session: restoreSessionInfo(previous.info), source: previous };
+    }
+    const session = await readSessionInfo(file.path);
+    return session ? { session, source: indexedSessionSource(session, file.fingerprint) } : undefined;
+  });
+  const valid = scanned.filter(
+    (entry): entry is { session: SessionInfo; source: IndexedSessionSource } => entry !== undefined,
   );
   const resolvedCwd = normalizePath(cwd);
-  return sessions
-    .filter((session) => !filterCwd || normalizePath(session.cwd) === resolvedCwd)
-    .sort((left, right) => right.modified.getTime() - left.modified.getTime());
+  return {
+    sessions: valid
+      .map(({ session }) => session)
+      .filter((session) => !filterCwd || normalizePath(session.cwd) === resolvedCwd)
+      .sort((left, right) => right.modified.getTime() - left.modified.getTime()),
+    sources: valid.map(({ source }) => source),
+    unchangedPaths,
+  };
+}
+
+function indexedSessionSource(info: SessionInfo, fingerprint: string): IndexedSessionSource {
+  return {
+    fingerprint,
+    info: {
+      path: info.path,
+      id: info.id,
+      cwd: info.cwd,
+      ...(info.name ? { name: info.name } : {}),
+      ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
+      promotedRoot: info.promotedRoot,
+      createdAt: info.created.getTime(),
+      modifiedAt: info.modified.getTime(),
+      messageCount: info.messageCount,
+      firstMessage: previewFirstLines(info.firstMessage, THREAD_USER_PREVIEW_MAX_CHARS),
+    },
+  };
+}
+
+function restoreSessionInfo(info: IndexedSessionSource["info"]): SessionInfo {
+  return {
+    path: info.path,
+    id: info.id,
+    cwd: info.cwd,
+    ...(info.name ? { name: info.name } : {}),
+    ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
+    promotedRoot: info.promotedRoot,
+    created: new Date(info.createdAt),
+    modified: new Date(info.modifiedAt),
+    messageCount: info.messageCount,
+    firstMessage: info.firstMessage,
+  };
 }
 
 async function readSessionInfo(sessionFile: string): Promise<SessionInfo | undefined> {
-  try {
-    const stats = statSync(sessionFile);
-    const lines = createInterface({ input: createReadStream(sessionFile, { encoding: "utf8" }), crlfDelay: Infinity });
-    let header: Record<string, unknown> | undefined;
-    let name: string | undefined;
-    let messageCount = 0;
-    let firstMessage = "";
-    let lastActivity = 0;
-    for await (const line of lines) {
-      let value: unknown;
-      try {
-        value = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (!isRecord(value)) continue;
-      if (!header) {
-        if (value.type !== "session" || typeof value.id !== "string" || typeof value.timestamp !== "string") {
-          return undefined;
-        }
-        header = value;
-        continue;
-      }
-      if (value.type === "session_info") {
-        name = typeof value.name === "string" ? value.name.trim() || undefined : undefined;
-        continue;
-      }
-      if (value.type !== "message" || !isRecord(value.message)) continue;
-      messageCount += 1;
-      const role = value.message.role;
-      if (role !== "user" && role !== "assistant") continue;
-      const text = messageText(value.message.content).trim();
-      if (!firstMessage && role === "user" && text) firstMessage = text;
-      const entryTime = typeof value.timestamp === "string" ? new Date(value.timestamp).getTime() : 0;
-      const messageTime = typeof value.message.timestamp === "number" ? value.message.timestamp : entryTime;
-      if (Number.isFinite(messageTime)) lastActivity = Math.max(lastActivity, messageTime);
+  const stats = statSync(sessionFile);
+  const lines = createInterface({
+    input: createReadStream(sessionFile, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  let header: Record<string, unknown> | undefined;
+  let name: string | undefined;
+  let messageCount = 0;
+  let firstMessage = "";
+  let lastActivity = 0;
+  for await (const line of lines) {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
     }
-    if (!header) return undefined;
-    const timestamp = header.timestamp;
-    if (typeof timestamp !== "string") return undefined;
-    const created = new Date(timestamp);
-    if (!Number.isFinite(created.getTime())) return undefined;
-    return {
-      path: sessionFile,
-      id: String(header.id),
-      cwd: typeof header.cwd === "string" ? header.cwd : "",
-      ...(name ? { name } : {}),
-      ...(typeof header.parentSession === "string" ? { parentSessionPath: header.parentSession } : {}),
-      created,
-      modified: lastActivity > 0 ? new Date(lastActivity) : stats.mtime,
-      messageCount,
-      firstMessage: firstMessage || "(no messages)",
-    };
-  } catch {
-    return undefined;
+    if (!isRecord(value)) continue;
+    if (!header) {
+      if (value.type !== "session" || typeof value.id !== "string" || typeof value.timestamp !== "string") {
+        return undefined;
+      }
+      header = value;
+      continue;
+    }
+    if (value.type === "session_info") {
+      name = typeof value.name === "string" ? value.name.trim() || undefined : undefined;
+      continue;
+    }
+    if (value.type !== "message" || !isRecord(value.message)) continue;
+    messageCount += 1;
+    const role = value.message.role;
+    if (role !== "user" && role !== "assistant") continue;
+    const text = messageText(value.message.content).trim();
+    if (!firstMessage && role === "user" && text) firstMessage = text;
+    const entryTime = typeof value.timestamp === "string" ? new Date(value.timestamp).getTime() : 0;
+    const messageTime = typeof value.message.timestamp === "number" ? value.message.timestamp : entryTime;
+    if (Number.isFinite(messageTime)) lastActivity = Math.max(lastActivity, messageTime);
   }
+  if (!header) return undefined;
+  const timestamp = header.timestamp;
+  if (typeof timestamp !== "string") return undefined;
+  const created = new Date(timestamp);
+  if (!Number.isFinite(created.getTime())) return undefined;
+  return {
+    path: sessionFile,
+    id: String(header.id),
+    cwd: typeof header.cwd === "string" ? header.cwd : "",
+    ...(name ? { name } : {}),
+    ...(typeof header.parentSession === "string" ? { parentSessionPath: header.parentSession } : {}),
+    promotedRoot: header.promotedRoot === true,
+    created,
+    modified: lastActivity > 0 ? new Date(lastActivity) : stats.mtime,
+    messageCount,
+    firstMessage: firstMessage || "(no messages)",
+  };
 }
 
 function normalizePath(path: string): string {
@@ -820,28 +963,31 @@ function listSessionFiles(directory: string): string[] {
 }
 
 function fingerprintSessionDirectory(directory: string | null): string | null {
+  return snapshotSessionDirectory(directory)?.fingerprint ?? null;
+}
+
+function snapshotSessionDirectory(directory: string | null): SessionDirectorySnapshot | null {
   if (directory === null) return null;
   try {
     const files = listSessionFiles(directory);
     const hash = createHash("sha256");
+    const snapshotFiles: SessionDirectorySnapshot["files"] = [];
     for (const path of files) {
       const name = relative(directory, path);
       const stats = statSync(path, { bigint: true });
+      const fingerprint = sessionFileFingerprint(stats);
       hash.update(name);
       hash.update("\0");
-      hash.update(stats.dev.toString());
+      hash.update(fingerprint);
       hash.update("\0");
-      hash.update(stats.ino.toString());
-      hash.update("\0");
-      hash.update(stats.size.toString());
-      hash.update("\0");
-      hash.update(stats.mtimeNs.toString());
-      hash.update("\0");
-      hash.update(stats.ctimeNs.toString());
-      hash.update("\0");
+      snapshotFiles.push({ path, fingerprint });
     }
-    return hash.digest("hex");
+    return { directory, fingerprint: hash.digest("hex"), files: snapshotFiles };
   } catch {
     return null;
   }
+}
+
+function sessionFileFingerprint(stats: BigIntStats): string {
+  return [stats.dev, stats.ino, stats.size, stats.mtimeNs, stats.ctimeNs].join(":");
 }

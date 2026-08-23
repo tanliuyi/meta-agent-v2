@@ -41,20 +41,41 @@ describe("projectPersistedBranch", () => {
 
   it("keeps provider run time, completion time, status and thinking provenance", () => {
     const entries = [
-      { type: "thinking_level_change", id: "level", parentId: null, timestamp: iso(1), thinkingLevel: "high" },
+      { type: "thinking_level_change", id: "level", parentId: null, timestamp: iso(1), thinkingLevel: "max" },
       messageEntry("assistant", "level", assistantMessage("stop", 1_000, [{ type: "text", text: "answer" }]), 13_000),
     ];
 
     const projection = projectPersistedBranch(entries, "assistant");
 
-    expect(projection.thinkingLevel).toBe("high");
+    expect(projection.thinkingLevel).toBe("max");
     expect(projection.nodes[0]).toMatchObject({
       kind: "assistant",
       createdAt: 1_000,
       completedAt: 13_000,
       status: { type: "complete", reason: "stop" },
-      provenance: { provider: "test", model: "faux", thinkingLevel: "high" },
+      provenance: { provider: "test", model: "faux", thinkingLevel: "max" },
     });
+  });
+
+  it("freezes thinking provenance at each model-call boundary", () => {
+    const entries = [
+      { type: "thinking_level_change", id: "low", parentId: null, timestamp: iso(1), thinkingLevel: "low" },
+      messageEntry("user", "low", userMessage("问题", 2)),
+      { type: "thinking_level_change", id: "max", parentId: "user", timestamp: iso(3), thinkingLevel: "max" },
+      messageEntry("first", "max", assistantMessage("toolUse", 2, [toolCall("call-1")]), 4),
+      messageEntry("result", "first", toolResult("call-1", false, 5)),
+      { type: "thinking_level_change", id: "high", parentId: "result", timestamp: iso(5.5), thinkingLevel: "high" },
+      messageEntry("second", "high", assistantMessage("stop", 6, [{ type: "text", text: "完成" }])),
+    ];
+
+    const projection = projectPersistedBranch(entries, "second");
+
+    expect(projection.thinkingLevel).toBe("high");
+    expect(projection.nodes).toMatchObject([
+      { kind: "user" },
+      { kind: "assistant", provenance: { thinkingLevel: "low" } },
+      { kind: "assistant", provenance: { thinkingLevel: "high" } },
+    ]);
   });
 
   it("omits provider-redacted reasoning while preserving visible content", () => {

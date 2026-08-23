@@ -12,7 +12,7 @@ import type {
   SessionRemoveResult,
   Thread,
 } from "./contracts.ts";
-export const SIDECAR_PROTOCOL_VERSION = 4;
+export const SIDECAR_PROTOCOL_VERSION = 5;
 
 export type SidecarRole = "thread" | "metadata";
 
@@ -55,6 +55,12 @@ export type ThreadWorkerBinding =
 export interface MetadataWorkerBinding {
   agentDir: string;
   userDataDir: string;
+}
+
+export interface SessionResolution {
+  id: string;
+  path: string;
+  updatedAt: number;
 }
 
 export type SidecarBinding =
@@ -256,6 +262,6 @@ export type SidecarCommandResult =
   | Thread
   | Thread[]
   | SessionRemoveResult
-  | { path: string; id: string }
+  | SessionResolution
   | { pong: true }
   | null;

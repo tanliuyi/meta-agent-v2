@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PiThreadStore } from "../src/renderer/src/runtime/pi-thread-store.ts";
 import type { SessionBootstrap, SessionPushPayload } from "../src/shared/contracts.ts";
 import { PiRpcClient } from "../src/sidecar/pi-rpc-client.ts";
-import { PiRpcSessionRuntime } from "../src/sidecar/pi-rpc-session-runtime.ts";
+import { PiRpcSessionRuntime, summarize } from "../src/sidecar/pi-rpc-session-runtime.ts";
 import { loadSystemPiDraftConfig } from "../src/sidecar/system-pi-draft-config.ts";
 import { type ProbedSystemPi, resolveSystemPi } from "../src/sidecar/system-pi-resolver.ts";
 
@@ -158,6 +158,20 @@ describe("PiRpcSessionRuntime", () => {
         control: {
           model: { provider: "configured-provider", id: "configured-model" },
           thinkingLevel: "low",
+          context: { tokens: 0, contextWindow: 100000, percent: 0 },
+          commands: [
+            {
+              name: "reload",
+              description: "Reload System Pi extensions, skills, prompts, and context files",
+              source: "builtin",
+              acceptsArguments: false,
+            },
+            {
+              name: "extension-command",
+              description: "Extension command",
+              source: "extension",
+            },
+          ],
         },
       });
 
@@ -179,6 +193,7 @@ describe("PiRpcSessionRuntime", () => {
         { kind: "user", content: [{ type: "text", text: "hello" }] },
         { kind: "assistant", content: [{ type: "text", text: "reply:hello" }] },
       ]);
+      expect(runtime.bootstrap().control.context).toEqual({ tokens: 2, contextWindow: 100000, percent: 0.002 });
       const timelinePushes = pushes.filter(
         (payload): payload is Extract<SessionPushPayload, { type: "timeline" }> => payload.type === "timeline",
       );
@@ -208,6 +223,11 @@ describe("PiRpcSessionRuntime", () => {
         ),
       ).toEqual(["reply:", "hello"]);
       expect(runtime.threadSummary(false)).toMatchObject({ title: "hello", messageCount: 2, running: false });
+      const timeline = runtime.bootstrap().timeline;
+      const lastCreatedAt = timeline.nodes.at(-1)?.createdAt;
+      if (lastCreatedAt === undefined) throw new Error("Expected a projected assistant message");
+      expect(summarize("session-1", undefined, timeline, lastCreatedAt - 1).updatedAt).toBe(lastCreatedAt);
+      expect(summarize("session-1", undefined, timeline, lastCreatedAt + 1).updatedAt).toBe(lastCreatedAt + 1);
 
       await runtime.compact();
       await vi.waitFor(() => expect(runtime.bootstrap().timeline.phase).toBe("idle"));
@@ -242,6 +262,68 @@ describe("PiRpcSessionRuntime", () => {
       expect(runtime.bootstrap().events).toContainEqual({
         sequence: expect.any(Number),
         event: { type: "thinking_level_changed", level: "high" },
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("switches model and thinking during streaming without changing the in-flight response", async () => {
+    const runtime = await PiRpcSessionRuntime.create({
+      binding: {
+        mode: "create",
+        projectId: "project-1",
+        cwd: temporaryDirectory("desktop-pi-cwd-"),
+        agentDir: temporaryDirectory("desktop-pi-user-data-"),
+        sessionId: "session-runtime-model-switch",
+        createInput: {
+          projectId: "project-1",
+          createRequestId: "create-runtime-model-switch",
+          model: { provider: "fake-provider", id: "fake-model" },
+          thinkingLevel: "low",
+        },
+      },
+      push: () => undefined,
+      onSummaryChanged: () => undefined,
+      resolvePi: async () => fakePi(),
+    });
+
+    try {
+      await runtime.prompt({
+        requestId: "runtime-model-switch",
+        projectId: "project-1",
+        threadId: "session-runtime-model-switch",
+        text: "__stream_pause__",
+        images: [],
+      });
+      await vi.waitFor(() => expect(runtime.bootstrap().timeline.phase).toBe("running"));
+
+      await runtime.setModel("custom-provider", "custom-reasoning-model");
+      await runtime.setThinking("max");
+      expect(runtime.bootstrap().control).toMatchObject({
+        model: { provider: "custom-provider", id: "custom-reasoning-model" },
+        thinkingLevel: "max",
+        thinkingLevels: ["off", "high", "max"],
+        context: { tokens: 0, contextWindow: 200000, percent: 0 },
+      });
+
+      await vi.waitFor(() => expect(runtime.bootstrap().timeline.phase).toBe("idle"));
+      expect(runtime.bootstrap().timeline.nodes.at(-1)).toMatchObject({
+        kind: "assistant",
+        provenance: { provider: "fake-provider", model: "fake-model", thinkingLevel: "low" },
+      });
+
+      await runtime.prompt({
+        requestId: "after-runtime-model-switch",
+        projectId: "project-1",
+        threadId: "session-runtime-model-switch",
+        text: "after switch",
+        images: [],
+      });
+      await vi.waitFor(() => expect(runtime.bootstrap().timeline.nodes).toHaveLength(4));
+      expect(runtime.bootstrap().timeline.nodes.at(-1)).toMatchObject({
+        kind: "assistant",
+        provenance: { provider: "custom-provider", model: "custom-reasoning-model", thinkingLevel: "max" },
       });
     } finally {
       await runtime.dispose();

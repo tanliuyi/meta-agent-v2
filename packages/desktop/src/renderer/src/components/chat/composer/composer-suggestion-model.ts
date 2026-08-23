@@ -40,22 +40,6 @@ const COMMAND_SOURCE_SEARCH_TERMS: Record<SlashCommand["source"], string> = {
   skill: "skill 技能",
 };
 
-const BUILTIN_COMMAND_LOCALIZATIONS: Readonly<Record<string, { name: string; description: string }>> = {
-  reload: { name: "重新加载", description: "重新加载扩展、技能、提示词和上下文文件" },
-};
-
-const BUILTIN_EXTENSION_COMMAND_LOCALIZATIONS: Readonly<Record<string, { name: string; description: string }>> = {
-  "memory-interview": { name: "记忆访谈", description: "回答问题并预先填写用户资料，以便跨会话记住你" },
-  "learn-memory-tool": { name: "了解记忆工具", description: "在对话中查看记忆工具使用指南" },
-  "memory-consolidate": { name: "整理记忆", description: "使用当前模型合并重复或过期记忆" },
-};
-
-function commandLocalization(command: SlashCommand) {
-  if (command.source === "builtin") return BUILTIN_COMMAND_LOCALIZATIONS[command.name];
-  if (command.source === "extension") return BUILTIN_EXTENSION_COMMAND_LOCALIZATIONS[command.name];
-  return undefined;
-}
-
 function normalizedSearchTerms(value: string): string[] {
   return value
     .trim()
@@ -69,11 +53,8 @@ function commandSearchScore(command: SlashCommand, terms: readonly string[]): nu
   if (terms.length === 0) return 0;
   const name = command.name.toLocaleLowerCase();
   const normalizedName = normalizedSearchTerms(name).join(" ");
-  const localization = commandLocalization(command);
-  const displayName = localization?.name.toLocaleLowerCase() ?? "";
   const description = command.description?.toLocaleLowerCase() ?? "";
-  const displayDescription = localization?.description.toLocaleLowerCase() ?? "";
-  const searchable = `${normalizedName} ${displayName} ${description} ${displayDescription} ${COMMAND_SOURCE_SEARCH_TERMS[command.source]}`;
+  const searchable = `${normalizedName} ${description} ${COMMAND_SOURCE_SEARCH_TERMS[command.source]}`;
   if (!terms.every((term) => searchable.includes(term))) return null;
 
   const query = terms.join(" ");
@@ -90,16 +71,9 @@ function commandSearchScore(command: SlashCommand, terms: readonly string[]): nu
   return 100 + terms.reduce((score, term) => score + searchable.indexOf(term), 0);
 }
 
-/** 本地化 Desktop 内置命令和内置扩展命令，其他资源仅移除技能协议前缀。 */
+/** 技能名称移除协议前缀，其他命令保留 Pi 提供的原始名称。 */
 export function slashCommandDisplayName(command: SlashCommand): string {
-  return (
-    commandLocalization(command)?.name ??
-    (command.source === "skill" ? command.name.replace(/^skill:/, "") : command.name)
-  );
-}
-
-export function slashCommandDisplayDescription(command: SlashCommand): string | undefined {
-  return commandLocalization(command)?.description ?? command.description;
+  return command.source === "skill" ? command.name.replace(/^skill:/, "") : command.name;
 }
 
 /** 规范化命令名、来源和说明并按名称相关度排序。 */
@@ -121,7 +95,7 @@ export function commandSuggestions(commands: readonly SlashCommand[], query: str
       label: skill
         ? slashCommandDisplayName(command)
         : `/${command.source === "extension" ? slashCommandDisplayName(command) : command.name}`,
-      detail: slashCommandDisplayDescription(command),
+      detail: command.description,
       type: "command",
       text: skill
         ? `${unstable_defaultDirectiveFormatter.serialize({

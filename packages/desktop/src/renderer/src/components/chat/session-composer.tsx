@@ -8,7 +8,7 @@ import { ReadOnlySessionStatus } from "./session-read-only-status.tsx";
 
 /** Reads Composer control data from the owning cached session record. */
 export function SessionComposer() {
-  const { record, commandsReady, modelsRefreshing, refreshModels, setModel, setThinking } = useSessionScope();
+  const { record, commandsReady, modelsRefreshing, setModel, setThinking } = useSessionScope();
   const actions = useDesktopActions();
   const [pendingStop, setPendingStop] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -83,7 +83,6 @@ export function SessionComposer() {
         working={working}
         commandsReady={commandsReady}
         modelsLoading={modelsRefreshing}
-        onRefreshModels={refreshModels}
         onSetModel={setModel}
         onSetThinking={setThinking}
       />

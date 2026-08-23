@@ -32,6 +32,21 @@ import {
 const chatCss = readFileSync(new URL("../src/renderer/src/styles/chat.css", import.meta.url), "utf8");
 
 describe("ToolView TUI parity", () => {
+  it("工具名尚未随 RPC 到达时安全展示流式参数", () => {
+    const markup = renderToolView(
+      toolCall({
+        toolName: "",
+        args: { path: "READ" },
+        status: { type: "running" },
+        artifact: { execution: "streaming-args" },
+      }),
+    );
+
+    expect(markup).toContain('data-tool-name=""');
+    expect(markup).toContain(">READ<");
+    expect(markup).toContain("tool-running-cursor");
+  });
+
   it("用 TUI 标题与 pending 底色展示流式 write 参数", () => {
     const markup = renderToolView(
       toolCall({
@@ -49,19 +64,20 @@ describe("ToolView TUI parity", () => {
     expect(markup).toContain('data-state="closed"');
   });
 
-  it("bash content 默认完全折叠，标题只展示 description", () => {
+  it("bash content 默认完全折叠，标题展示 command 与 timeout 参数", () => {
     const partialResult = toolResult(Array.from({ length: 7 }, (_, index) => `line-${index + 1}`).join("\n"));
     const markup = renderToolView(
       toolCall({
         toolName: "bash",
-        args: { command: "generate output", description: "生成测试输出" },
+        args: { command: "generate output", timeout: 20 },
         status: { type: "running" },
         artifact: { execution: "running", partialResult },
       }),
     );
 
-    expect(markup).toContain("生成测试输出");
-    expect(markup).not.toContain("generate output");
+    expect(markup).toContain("generate output");
+    expect(markup).toContain("timeout 20s");
+    expect(markup).not.toContain("$ …");
     expect(markup).toContain("tool-running-cursor");
     expect(markup).not.toContain("tool-running-cursor-end");
     expect(markup).not.toContain("data-cursor-position");

@@ -82,6 +82,44 @@ describe("RunActivityGroup", () => {
     expect(markup).not.toContain("step content");
   });
 
+  it("历史 activity 收起时在折叠区外保留 notification", () => {
+    const markup = renderToStaticMarkup(
+      <RunActivityGroup
+        running={false}
+        startedAt={Date.now()}
+        completedAt={Date.now()}
+        hasContent
+        stateKey="run"
+        persistentContent={<span>TPS status</span>}
+      >
+        <span>step content</span>
+      </RunActivityGroup>,
+    );
+
+    expect(markup).toContain('data-state="closed"');
+    expect(markup).not.toContain("step content");
+    expect(markup).toContain("TPS status");
+  });
+
+  it("activity 展开时只显示原位 notification，不渲染持久副本", () => {
+    const markup = renderToStaticMarkup(
+      <RunActivityGroup
+        running={false}
+        startedAt={Date.now()}
+        completedAt={Date.now()}
+        hasContent
+        defaultOpenWhenComplete
+        stateKey="run"
+        persistentContent={<span>persistent TPS</span>}
+      >
+        <span>inline TPS</span>
+      </RunActivityGroup>,
+    );
+
+    expect(markup).toContain("inline TPS");
+    expect(markup).not.toContain("persistent TPS");
+  });
+
   it("完成后配置为默认展开时保留折叠入口", () => {
     const markup = renderToStaticMarkup(
       <RunActivityGroup running={false} startedAt={Date.now()} hasContent defaultOpenWhenComplete stateKey="run">

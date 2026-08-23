@@ -62,9 +62,14 @@ export class MetadataWorkerClient {
     return this.client?.instanceId;
   }
 
-  resolve(projectId: string, cwd: string, threadId: string): Promise<{ id: string; path: string }> {
+  resolve(projectId: string, cwd: string, threadId: string): Promise<{ id: string; path: string; updatedAt: number }> {
     return this.enqueue(() =>
-      this.safeRequest<{ id: string; path: string }>({ type: "resolveSession", projectId, cwd, threadId }),
+      this.safeRequest<{ id: string; path: string; updatedAt: number }>({
+        type: "resolveSession",
+        projectId,
+        cwd,
+        threadId,
+      }),
     );
   }
 

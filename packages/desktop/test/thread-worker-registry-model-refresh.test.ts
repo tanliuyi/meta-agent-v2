@@ -34,10 +34,37 @@ describe("ThreadWorkerRegistry model refresh", () => {
     rmSync(userDataDir, { recursive: true, force: true });
   });
 
+  it("publishes catalog changes while any tool is running", async () => {
+    const harness = createHarness(userDataDir);
+    const child: Thread = {
+      ...thread(),
+      id: "child",
+      title: "Review RPC projection",
+      updatedAt: 2,
+      parentThreadId: "thread",
+      origin: "branch",
+    };
+    harness.metadataList.mockResolvedValueOnce([thread()]).mockResolvedValue([thread(), child]);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    await registry.list("project");
+
+    harness.clients[0]?.emitToolEvent("tool_execution_start", "plugin-defined-tool");
+
+    await vi.waitFor(() => expect(harness.catalogChanged).toHaveBeenCalledWith(child));
+    expect(harness.options.push).toHaveBeenCalled();
+    await registry.dispose();
+  });
+
   it("restarts an idle materialized worker and requests renderer resync", async () => {
     const harness = createHarness(userDataDir);
     const registry = new ThreadWorkerRegistry(harness.options);
     const attachment = await registry.attach("project", "thread");
+
+    expect(harness.clients[0]?.binding).toMatchObject({
+      role: "thread",
+      value: { mode: "open", initialUpdatedAt: 1 },
+    });
 
     await registry.refreshAllModels({ generation: 7 });
 
@@ -49,6 +76,53 @@ describe("ThreadWorkerRegistry model refresh", () => {
       "thread",
       "System Pi restarted for model configuration generation 7",
     );
+    await registry.dispose();
+  });
+
+  it("reloads an idle materialized worker and requests renderer resync", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    await registry.reload("project", "thread");
+
+    expect(harness.clients).toHaveLength(2);
+    expect(harness.clients[0]?.shutdownCount).toBe(1);
+    expect(harness.resync).toHaveBeenCalledWith(
+      "project",
+      "thread",
+      "System Pi reloaded extensions, skills, prompts, and context files",
+    );
+    await registry.dispose();
+  });
+
+  it("rejects reload when the worker reports busy even if the cached summary is idle", async () => {
+    const harness = createHarness(userDataDir, { promptRunning: true });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    await expect(registry.reload("project", "thread")).rejects.toThrow(
+      "Wait for the current response to finish before reloading.",
+    );
+    expect(harness.clients).toHaveLength(1);
+    expect(harness.clients[0]?.shutdownCount).toBe(0);
+    await registry.dispose();
+  });
+
+  it("coalesces concurrent reload requests for the same thread", async () => {
+    const replacementReady = deferred<void>();
+    const harness = createHarness(userDataDir, { replacementReady });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    const first = registry.reload("project", "thread");
+    const second = registry.reload("project", "thread");
+    expect(second).toBe(first);
+    replacementReady.resolve();
+    await Promise.all([first, second]);
+
+    expect(harness.clients).toHaveLength(2);
+    expect(harness.resync).toHaveBeenCalledOnce();
     await registry.dispose();
   });
 
@@ -214,15 +288,19 @@ interface Harness {
   clients: FakeWorkerClient[];
   failed: ReturnType<typeof vi.fn>;
   resync: ReturnType<typeof vi.fn>;
+  catalogChanged: ReturnType<typeof vi.fn>;
+  metadataList: ReturnType<typeof vi.fn>;
 }
 
 function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {}): Harness {
   const clients: FakeWorkerClient[] = [];
   const failed = vi.fn();
   const resync = vi.fn();
+  const catalogChanged = vi.fn();
+  const metadataList = vi.fn(async () => [thread()]);
   const metadata = {
-    list: vi.fn(async (): Promise<Thread[]> => [thread()]),
-    resolve: vi.fn(async () => ({ id: "thread", path: join(userDataDir, "thread.jsonl") })),
+    list: metadataList,
+    resolve: vi.fn(async () => ({ id: "thread", path: join(userDataDir, "thread.jsonl"), updatedAt: 1 })),
     upsert: vi.fn(async () => undefined),
     invalidateProject: vi.fn(async () => undefined),
   } as unknown as MetadataWorkerClient;
@@ -235,6 +313,7 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
     push: vi.fn<(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number) => void>(),
     failed,
     resync,
+    catalogChanged,
     createWorkerClient: (clientOptions) => {
       const readyGate = clients.length > 0 ? harnessOptions.replacementReady : undefined;
       const client = new FakeWorkerClient(
@@ -250,13 +329,14 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
       return client;
     },
   };
-  return { options, clients, failed, resync };
+  return { options, clients, failed, resync, catalogChanged, metadataList };
 }
 
 class FakeWorkerClient implements ThreadWorkerClient {
   readonly instanceId: string;
   readonly available = true;
   readonly requests: SidecarCommand["type"][] = [];
+  readonly binding: WorkerClientOptions["binding"];
   bootstrapRequestCount = 0;
   shutdownCount = 0;
   private readonly options: WorkerClientOptions;
@@ -264,7 +344,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   private readonly readyGate?: ReturnType<typeof deferred<void>>;
   private readonly bootstrapGate?: ReturnType<typeof deferred<void>>;
   private readonly hostResponseGate?: ReturnType<typeof deferred<void>>;
-  private readonly promptRunning: boolean;
+  private running: boolean;
   private readonly shutdownError?: Error;
 
   constructor(
@@ -277,11 +357,12 @@ class FakeWorkerClient implements ThreadWorkerClient {
     shutdownError?: Error,
   ) {
     this.options = options;
+    this.binding = options.binding;
     this.promptGate = promptGate;
     this.readyGate = readyGate;
     this.bootstrapGate = bootstrapGate;
     this.hostResponseGate = hostResponseGate;
-    this.promptRunning = promptRunning;
+    this.running = promptRunning;
     this.shutdownError = shutdownError;
     this.instanceId = `worker-${nextWorkerId++}`;
   }
@@ -312,8 +393,9 @@ class FakeWorkerClient implements ThreadWorkerClient {
     }
     if (command.type === "prompt") {
       await this.promptGate?.promise;
-      return { accepted: true, queued: false, running: this.promptRunning } as T;
+      return { accepted: true, queued: false, running: this.running } as T;
     }
+    if (command.type === "getSummary") return { ...thread(), running: this.running } as T;
     if (command.type === "respondHostUi") await this.hostResponseGate?.promise;
     return null as T;
   }
@@ -321,6 +403,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   acknowledge(): void {}
 
   emitRunning(running: boolean): void {
+    this.running = running;
     this.options.onEvent({
       kind: "event",
       protocolVersion: SIDECAR_PROTOCOL_VERSION,
@@ -328,6 +411,27 @@ class FakeWorkerClient implements ThreadWorkerClient {
       sequence: 1,
       creditCost: 1,
       event: { type: "summary-changed", summary: { ...thread(), running } },
+    });
+  }
+
+  emitToolEvent(type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end", toolName: string): void {
+    const base = { toolCallId: "tool-call", toolName, args: {} };
+    const event =
+      type === "tool_execution_update"
+        ? { ...base, type, partialResult: { content: [] } }
+        : type === "tool_execution_end"
+          ? { ...base, type, result: { content: [] }, isError: false }
+          : { ...base, type };
+    this.options.onEvent({
+      kind: "event",
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
+      workerInstanceId: this.instanceId,
+      sequence: 2,
+      creditCost: 1,
+      event: {
+        type: "session-push",
+        payload: { type: "timeline", projectId: "project", threadId: "thread", sequence: 1, event },
+      },
     });
   }
 
@@ -396,6 +500,7 @@ function bootstrap(threadId: string): SessionBootstrap {
       nodes: [],
       queue: [],
       phase: "idle",
+      thinkingLevel: "off",
     },
     events: [],
     control: {

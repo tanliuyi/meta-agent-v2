@@ -17,7 +17,7 @@ export interface RpcExtensionHostState {
 }
 
 /** Desktop 与 renderer 之间使用的协议版本。 */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /** Desktop 内部通用对话工作区的稳定 ID。 */
 export const GENERAL_WORKSPACE_ID = "__general__";
@@ -350,7 +350,11 @@ export interface PiThreadSnapshot {
   nodes: readonly PiTimelineNode[];
   queue: readonly PiQueueItem[];
   phase: PiThreadPhase;
+  /** 下一条 assistant 消息使用的思考等级；消息开始后固化到 provenance。 */
+  thinkingLevel: ThinkingLevel;
   activeTurnId?: string;
+  /** `turn_start` 时固化，避免运行中设置污染当前 provider 请求的 provenance。 */
+  activeTurnThinkingLevel?: ThinkingLevel;
 }
 
 export interface PiRpcExtensionError {
@@ -360,9 +364,27 @@ export interface PiRpcExtensionError {
   error: string;
 }
 
+/** System Pi 0.84.2 RPC strips cumulative `partial`; tool metadata first appears on `toolcall_end`. */
+type PiRpcAssistantMessageEvent =
+  | Exclude<
+      Extract<JsonAgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"],
+      { type: "toolcall_start" }
+    >
+  | { type: "toolcall_start"; contentIndex: number };
+
+export type PiRpcMessageUpdateEvent = Omit<
+  Extract<JsonAgentSessionEvent, { type: "message_update" }>,
+  "assistantMessageEvent"
+> & {
+  assistantMessageEvent: PiRpcAssistantMessageEvent;
+};
+
 /** Pi RPC stdout 的公共原子事件集合。Desktop 不维护第二套 timeline event 协议。 */
-export type PiRpcEvent = JsonAgentSessionEvent | RpcExtensionUIRequest | PiRpcExtensionError;
-export type PiRpcMessageUpdateEvent = Extract<PiRpcEvent, { type: "message_update" }>;
+export type PiRpcEvent =
+  | Exclude<JsonAgentSessionEvent, { type: "message_update" }>
+  | PiRpcMessageUpdateEvent
+  | RpcExtensionUIRequest
+  | PiRpcExtensionError;
 
 /** 低频更新的 Pi 会话控制面，不携带消息历史。 */
 export interface SessionControlState {

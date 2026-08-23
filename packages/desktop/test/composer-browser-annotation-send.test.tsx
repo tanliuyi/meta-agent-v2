@@ -19,6 +19,20 @@ const captured = vi.hoisted(() => ({
   },
   running: false,
   events: new Map<string, () => void>(),
+  threadRunning: false,
+  modelControl: undefined as
+    | {
+        disabled?: boolean;
+        onOpen?(): void;
+        onValueChange(provider: string, modelId: string): void;
+      }
+    | undefined,
+  thinkingControl: undefined as
+    | {
+        disabled?: boolean;
+        onValueChange(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"): void;
+      }
+    | undefined,
   inputOnSubmit: undefined as (() => void) | undefined,
   commandOnSelect: undefined as ((command: SlashCommand) => void) | undefined,
   formOnSubmit: undefined as ((event: { preventDefault: () => void }) => void) | undefined,
@@ -56,7 +70,8 @@ vi.mock("@assistant-ui/react", () => ({
   useAuiEvent: (name: string, handler: () => void) => {
     captured.events.set(name, handler);
   },
-  useAuiState: () => ({ thread: { isRunning: captured.running } }),
+  useAuiState: (selector: (state: { thread: { isRunning: boolean } }) => unknown) =>
+    selector({ thread: { isRunning: captured.threadRunning } }),
 }));
 
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
@@ -106,10 +121,20 @@ vi.mock("../src/renderer/src/components/assistant-ui/attachment/composer-add-att
 vi.mock("../src/renderer/src/components/assistant-ui/attachment/composer-attachments.tsx", () => ({
   ComposerAttachments: () => null,
 }));
-vi.mock("../src/renderer/src/components/chat/model-select.tsx", () => ({ ModelSelect: () => null }));
+vi.mock("../src/renderer/src/components/chat/model-select.tsx", () => ({
+  ModelSelect: (props: NonNullable<typeof captured.modelControl>) => {
+    captured.modelControl = props;
+    return null;
+  },
+}));
 vi.mock("../src/renderer/src/components/chat/plugin-select.tsx", () => ({ PluginSelect: () => null }));
 vi.mock("../src/renderer/src/components/chat/project-select.tsx", () => ({ ProjectSelect: () => null }));
-vi.mock("../src/renderer/src/components/chat/thinking-select.tsx", () => ({ ThinkingSelect: () => null }));
+vi.mock("../src/renderer/src/components/chat/thinking-select.tsx", () => ({
+  ThinkingSelect: (props: NonNullable<typeof captured.thinkingControl>) => {
+    captured.thinkingControl = props;
+    return null;
+  },
+}));
 
 import { Composer } from "../src/renderer/src/components/chat/composer/composer.tsx";
 
@@ -138,36 +163,44 @@ function draftProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
   } as ComposerProps;
 }
 
-function sessionProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
+function sessionProps(overrides: Partial<Extract<ComposerProps, { mode: "session" }>> = {}): ComposerProps {
   return {
     mode: "session",
     projectId: "project",
     threadId: "thread",
-    model: undefined,
-    models: [],
+    model: { provider: "fake-provider", id: "fake-model", name: "Fake Model" },
+    models: [
+      {
+        provider: "fake-provider",
+        id: "fake-model",
+        name: "Fake Model",
+        contextWindow: 100_000,
+        thinking: true,
+      },
+      {
+        provider: "custom-provider",
+        id: "custom-reasoning-model",
+        name: "Custom Reasoning Model",
+        contextWindow: 200_000,
+        thinking: true,
+      },
+    ],
     commands: [],
-    plugins: [],
-    enabledPluginIds: [],
-    pluginsDisabled: false,
-    pluginsLoading: false,
-    thinkingLevel: "off",
-    thinkingLevels: [],
+    context: undefined,
+    thinkingLevel: "low",
+    thinkingLevels: ["off", "low", "high"],
     readiness: { state: "ready" },
-    phase: "running",
+    phase: "idle",
     queue: [],
     widgets: [],
-    working: undefined,
-    context: undefined,
     composerCommand: undefined,
+    working: undefined,
     commandsReady: true,
     modelsLoading: false,
-    onClearQueue: async () => undefined,
-    onRefreshModels: async () => undefined,
-    onSetModel: async () => undefined,
-    onSetThinking: async () => undefined,
-    onPluginsChange: async () => undefined,
+    onSetModel: vi.fn(),
+    onSetThinking: vi.fn(),
     ...overrides,
-  } as ComposerProps;
+  };
 }
 
 async function flush(): Promise<void> {
@@ -222,6 +255,9 @@ describe("Composer draft 提交快照", () => {
     captured.composerState.quote = undefined;
     captured.composerState.isEmpty = true;
     captured.composerState.setText.mockClear();
+    captured.threadRunning = false;
+    captured.modelControl = undefined;
+    captured.thinkingControl = undefined;
     captured.events.clear();
     captured.inputOnSubmit = undefined;
     captured.commandOnSelect = undefined;
@@ -364,35 +400,34 @@ describe("Composer draft 提交快照", () => {
   });
 });
 
-describe("Composer running 阶段提交", () => {
+describe("Composer 运行中模型控制", () => {
   afterEach(() => {
-    captured.running = false;
-    captured.composerState.attachments = [];
-    captured.composerState.send.mockClear();
-    captured.formOnSubmit = undefined;
+    captured.threadRunning = false;
+    captured.modelControl = undefined;
+    captured.thinkingControl = undefined;
   });
 
-  it("空文本但带附件时允许提交", () => {
-    captured.running = true;
-    captured.composerState.text = "";
-    captured.composerState.attachments = [{ id: "file-1", type: "file" }];
-    renderToStaticMarkup(<Composer {...sessionProps({ phase: "running" })} />);
-    const formSubmit = captured.formOnSubmit;
-    if (!formSubmit) throw new Error("表单 onSubmit 未挂载");
-    formSubmit({ preventDefault: vi.fn() });
+  it("运行中允许切换模型和思考等级", () => {
+    const onSetModel = vi.fn().mockResolvedValue(undefined);
+    const onSetThinking = vi.fn().mockResolvedValue(undefined);
+    captured.threadRunning = true;
 
-    expect(captured.composerState.send).toHaveBeenCalledWith({ steer: true });
-  });
+    renderToStaticMarkup(
+      <Composer
+        {...sessionProps({
+          phase: "running",
+          onSetModel,
+          onSetThinking,
+        })}
+      />,
+    );
 
-  it("空文本且无附件时拦截提交", () => {
-    captured.running = true;
-    captured.composerState.text = "";
-    captured.composerState.attachments = [];
-    renderToStaticMarkup(<Composer {...sessionProps({ phase: "running" })} />);
-    const formSubmit = captured.formOnSubmit;
-    if (!formSubmit) throw new Error("表单 onSubmit 未挂载");
-    formSubmit({ preventDefault: vi.fn() });
+    expect(captured.modelControl?.disabled).toBe(false);
+    expect(captured.thinkingControl?.disabled).toBe(false);
 
-    expect(captured.composerState.send).not.toHaveBeenCalled();
+    captured.modelControl?.onValueChange("custom-provider", "custom-reasoning-model");
+    captured.thinkingControl?.onValueChange("high");
+    expect(onSetModel).toHaveBeenCalledWith("custom-provider", "custom-reasoning-model");
+    expect(onSetThinking).toHaveBeenCalledWith("high");
   });
 });

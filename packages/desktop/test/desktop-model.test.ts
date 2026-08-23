@@ -394,6 +394,7 @@ function createBootstrap(): SessionBootstrap {
       nodes: [],
       queue: [],
       phase: "idle",
+      thinkingLevel: "off",
     },
     events: [],
     control: {

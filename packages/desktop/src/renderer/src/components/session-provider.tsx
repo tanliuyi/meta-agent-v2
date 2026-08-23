@@ -33,7 +33,6 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
     });
     return () => loop.dispose();
   }, [active, record, transport]);
-  const modelsRefreshRequested = useRef(false);
   const modelsRefreshRequest = useRef<Promise<void> | null>(null);
   const [modelsRefreshing, setModelsRefreshing] = useState(false);
   const { runtime } = usePiSessionRuntime({ record, active, transport });
@@ -49,6 +48,9 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
   }, [active, record, transport]);
   const refreshModels = useCallback(async () => {
     requireCommandsReady();
+    if (record.stores.timeline.getSnapshot().phase !== "idle") {
+      throw new Error("Wait for the current response to finish before refreshing models.");
+    }
     const existing = modelsRefreshRequest.current;
     if (existing) return existing;
     setModelsRefreshing(true);
@@ -63,14 +65,6 @@ export function SessionProvider({ record, active, children }: SessionProviderPro
     modelsRefreshRequest.current = tracked;
     return tracked;
   }, [record, requireCommandsReady]);
-  useEffect(() => {
-    if (!commandsReady || modelsRefreshRequested.current) return;
-    modelsRefreshRequested.current = true;
-    void refreshModels().catch((error: unknown) => {
-      modelsRefreshRequested.current = false;
-      console.error("Session model refresh failed", error);
-    });
-  }, [commandsReady, refreshModels]);
   const setModel = useCallback(
     async (provider: string, modelId: string) => {
       requireCommandsReady();

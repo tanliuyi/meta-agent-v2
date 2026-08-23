@@ -46,24 +46,35 @@ const REENTRANT_CONTROL_COMMANDS = new Set<SidecarCommand["type"]>([
   "getSummary",
   "getImageResource",
   "cancel",
-  "setThinking",
   "respondHostUi",
 ]);
+const MODEL_MUTATION_COMMANDS = new Set<SidecarCommand["type"]>(["setModel", "setThinking"]);
 
 export function createSidecarCommandScheduler(): (
   commandType: SidecarCommand["type"],
   execute: () => Promise<void>,
 ) => Promise<void> {
   let commandTail = Promise.resolve();
+  let modelMutationTail = Promise.resolve();
   let runningPrompts = 0;
   return async (commandType, execute) => {
+    if (MODEL_MUTATION_COMMANDS.has(commandType)) {
+      const scheduled = modelMutationTail.then(execute);
+      modelMutationTail = scheduled.catch(() => undefined);
+      await scheduled;
+      return;
+    }
     if (REENTRANT_CONTROL_COMMANDS.has(commandType)) {
       await execute();
       return;
     }
-    if (commandType === "prompt" && runningPrompts > 0) {
-      await execute();
-      return;
+    const precedingModelMutations = modelMutationTail;
+    if (commandType === "prompt") {
+      await precedingModelMutations;
+      if (runningPrompts > 0) {
+        await execute();
+        return;
+      }
     }
     const scheduled = commandTail.then(async () => {
       if (commandType === "prompt") runningPrompts += 1;

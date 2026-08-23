@@ -209,6 +209,7 @@ function bootstrap(threadId: string): SessionBootstrap {
       nodes: [],
       queue: [],
       phase: "idle",
+      thinkingLevel: "off",
     },
     events: [],
     control: {

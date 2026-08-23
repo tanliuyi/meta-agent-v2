@@ -1,7 +1,7 @@
 import { type GroupByContext, groupPartByType, type MessageState, type PartState } from "@assistant-ui/react";
 
 const GROUP_BY_MEMO_KEY = Symbol.for("@assistant-ui/groupBy.memoKey");
-const RUN_GROUP_MEMO_KEY = "pi-run-activity:v1";
+const RUN_GROUP_MEMO_KEY = "pi-run-activity:v2";
 
 export const groupMessagePart = groupPartByType({
   reasoning: ["group-chainOfThought"],
@@ -31,7 +31,9 @@ function isRunActivityPart(part: PartState): boolean {
   return part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || isPiNoticePart(part);
 }
 
-function isPiNoticePart(part: PartState): boolean {
+function isPiNoticePart(
+  part: PartState,
+): part is PartState & { readonly type: "data"; readonly name: "pi-notice"; readonly data: unknown } {
   return part.type === "data" && part.name === "pi-notice";
 }
 

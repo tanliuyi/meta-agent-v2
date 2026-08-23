@@ -271,6 +271,7 @@ export function Composer(props: ComposerProps) {
         <ComposerExtensionCommand store={record.stores.extensionCommands} command={props.composerCommand} />
       ) : null}
       {props.mode === "session" ? <ComposerQueue items={props.queue} /> : null}
+      <ComposerWidgets widgets={aboveWidgets} layout="external" />
 
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
@@ -283,7 +284,6 @@ export function Composer(props: ComposerProps) {
                   <span className="min-w-0 truncate">{extensionWorking.message}</span>
                 </div>
               ) : null}
-              <ComposerWidgets widgets={aboveWidgets} />
               <ComposerAttachments disabled={attachmentsDisabled} />
               <ComposerInput
                 projectId={suggestionProjectId}
@@ -310,27 +310,6 @@ export function Composer(props: ComposerProps) {
               <div className="composer-toolbar flex min-h-8 items-center justify-between gap-2">
                 <div className="composer-toolbar-start flex min-w-0 items-center gap-2">
                   <ComposerAddAttachment disabled={attachmentsDisabled} />
-                  {selectedCommand ? (
-                    <div className="min-w-0 border-l border-border/70 pl-1">
-                      <div className="group flex h-6 min-w-0 items-center gap-1 rounded-xl px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-within:bg-accent focus-within:text-accent-foreground">
-                        <button
-                          type="button"
-                          aria-label={`移除命令 ${slashCommandDisplayName(selectedCommand)}`}
-                          className="relative flex flex-row items-center justify-center size-3.5 shrink-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          onClick={() => selectCommand(null)}
-                        >
-                          <Command
-                            aria-hidden="true"
-                            className="absolute inset-0 size-3.5 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
-                          />
-                          <span className="absolute inset-0 flex size-3.5 items-center justify-center rounded-full bg-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                            <X aria-hidden="true" className="size-3 text-background" />
-                          </span>
-                        </button>
-                        <span className="max-w-40 truncate">{slashCommandDisplayName(selectedCommand)}</span>
-                      </div>
-                    </div>
-                  ) : null}
                   {!draftOptionsInDrawer ? draftSelectionControls : null}
                   {isRunning ? (
                     <div className="mode-control shrink-0" role="group" aria-label="运行中消息模式">
@@ -375,12 +354,8 @@ export function Composer(props: ComposerProps) {
                       <ModelSelect
                         availableModels={props.models}
                         model={props.model}
-                        disabled={disabled || props.phase !== "idle"}
+                        disabled={disabled || props.modelsLoading}
                         loading={props.modelsLoading}
-                        onOpen={() => {
-                          setError(null);
-                          void props.onRefreshModels().catch(reportError);
-                        }}
                         onValueChange={(provider, modelId) => {
                           setError(null);
                           void props.onSetModel(provider, modelId).catch(reportError);
@@ -389,7 +364,7 @@ export function Composer(props: ComposerProps) {
                       <ThinkingSelect
                         value={props.thinkingLevel}
                         levels={props.thinkingLevels}
-                        disabled={disabled || props.phase !== "idle"}
+                        disabled={disabled || props.modelsLoading}
                         onValueChange={(level) => {
                           setError(null);
                           void props.onSetThinking(level).catch(reportError);

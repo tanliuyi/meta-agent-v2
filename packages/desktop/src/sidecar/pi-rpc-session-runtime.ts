@@ -3,6 +3,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { projectPersistedBranch } from "../main/pi/pi-thread-projector.ts";
 import { withQuoteContext } from "../main/pi/quote-context.ts";
 import type {
+  ContextUsage,
   HostRequest,
   HostResponse,
   ModelOption,
@@ -29,6 +30,7 @@ import {
   THREAD_USER_PREVIEW_MAX_CHARS,
 } from "../shared/contracts.ts";
 import type { ThreadWorkerBinding } from "../shared/sidecar-contracts.ts";
+import { isThinkingLevel } from "../shared/thinking-levels.ts";
 import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
 import { PiRpcClient, type PiRpcHandshake, type PiRpcResponse } from "./pi-rpc-client.ts";
 import { assertSupportedSystemPiVersion, type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
@@ -53,6 +55,14 @@ interface RpcState {
 }
 
 const EMPTY_EXTENSION_HOST: SessionControlState["extensionHost"] = { statuses: {}, widgets: [] };
+const BUILTIN_COMMANDS: readonly SlashCommand[] = [
+  {
+    name: "reload",
+    description: "Reload System Pi extensions, skills, prompts, and context files",
+    source: "builtin",
+    acceptsArguments: false,
+  },
+];
 const MAX_EARLY_RPC_EVENTS = 1_024;
 
 export class PiRpcSessionRuntime {
@@ -63,6 +73,7 @@ export class PiRpcSessionRuntime {
   private readonly push: (payload: SessionPushPayload) => void;
   private readonly onSummaryChanged: (current: PiRpcSessionRuntime) => void;
   private state: RpcState;
+  private context: ContextUsage | undefined;
   private models: ModelOption[];
   private commands: SlashCommand[];
   private thinkingLevels: ThinkingLevel[];
@@ -88,6 +99,7 @@ export class PiRpcSessionRuntime {
     client: PiRpcClient,
     handshake: PiRpcHandshake,
     state: RpcState,
+    context: ContextUsage | undefined,
     thinkingLevels: ThinkingLevel[],
   ) {
     this.projectId = options.binding.projectId;
@@ -97,8 +109,12 @@ export class PiRpcSessionRuntime {
     this.push = options.push;
     this.onSummaryChanged = options.onSummaryChanged;
     this.state = state;
+    this.context = context;
     this.models = parseModels(handshake.models);
-    this.commands = parseCommands(handshake.commands);
+    this.commands = [
+      ...BUILTIN_COMMANDS,
+      ...parseCommands(handshake.commands).filter((command) => command.name !== "reload"),
+    ];
     this.thinkingLevels = thinkingLevels;
     this.timeline = this.createSnapshot(handshake.entries.entries, handshake.entries.leafId);
     this.summary = summarize(
@@ -157,8 +173,8 @@ export class PiRpcSessionRuntime {
         throw new Error(`Opened system Pi session ID mismatch: expected ${binding.threadId}, got ${state.sessionId}`);
       }
 
-      const thinkingLevels = await requestThinkingLevels(client);
-      runtime = new PiRpcSessionRuntime(options, client, handshake, state, thinkingLevels);
+      const [context, thinkingLevels] = await Promise.all([requestContextUsage(client), requestThinkingLevels(client)]);
+      runtime = new PiRpcSessionRuntime(options, client, handshake, state, context, thinkingLevels);
       for (const event of earlyEvents) runtime.handleEvent(event);
       earlyEvents.length = 0;
       return runtime;
@@ -228,8 +244,14 @@ export class PiRpcSessionRuntime {
 
   async setModel(provider: string, modelId: string): Promise<void> {
     await this.client.request({ type: "set_model", provider, modelId });
-    this.state = await requestState(this.client);
-    this.thinkingLevels = await requestThinkingLevels(this.client);
+    const [state, context, thinkingLevels] = await Promise.all([
+      requestState(this.client),
+      requestContextUsage(this.client),
+      requestThinkingLevels(this.client),
+    ]);
+    this.state = state;
+    this.context = context;
+    this.thinkingLevels = thinkingLevels;
     this.publishControl();
   }
 
@@ -365,9 +387,10 @@ export class PiRpcSessionRuntime {
         while (this.refreshRequested && !this.disposed) {
           this.refreshRequested = false;
           const refreshSequence = this.sequence;
-          const [entriesResponse, state] = await Promise.all([
+          const [entriesResponse, state, context] = await Promise.all([
             this.client.request({ type: "get_entries" }),
             requestState(this.client),
+            requestContextUsage(this.client),
           ]);
           const data = responseRecord(entriesResponse);
           const entries = Array.isArray(data.entries) ? data.entries : undefined;
@@ -377,6 +400,7 @@ export class PiRpcSessionRuntime {
           }
           if (this.sequence !== refreshSequence || state.isStreaming) continue;
           this.state = state;
+          this.context = context;
           this.replaceTimeline(entries, leafId, refreshSequence);
           this.lastError = undefined;
           this.publishControl();
@@ -406,6 +430,7 @@ export class PiRpcSessionRuntime {
       nodes: withNotices.nodes,
       queue: this.queue,
       phase,
+      thinkingLevel: this.state.thinkingLevel,
     };
     this.timeline = snapshot;
     this.events = this.events.filter(({ sequence }) => sequence > cursor);
@@ -437,6 +462,7 @@ export class PiRpcSessionRuntime {
       nodes: projection.nodes,
       queue: this.queue,
       phase: this.state.isCompacting ? "compacting" : this.state.isStreaming ? "running" : "idle",
+      thinkingLevel: this.state.thinkingLevel,
     };
   }
 
@@ -610,6 +636,7 @@ export class PiRpcSessionRuntime {
       commands: this.commands,
       thinkingLevel: this.state.thinkingLevel,
       thinkingLevels: this.thinkingLevels,
+      context: this.context,
       readiness,
       lastError: this.lastError,
       hostRequests: this.hostRequests,
@@ -660,6 +687,25 @@ async function requestState(client: PiRpcClient): Promise<RpcState> {
   return parseState(response.data);
 }
 
+async function requestContextUsage(client: PiRpcClient): Promise<ContextUsage | undefined> {
+  const response = await client.request({ type: "get_session_stats" });
+  const data = responseRecord(response);
+  if (data.contextUsage === undefined) return undefined;
+  const context = record(data.contextUsage, "get_session_stats contextUsage");
+  if (
+    (typeof context.tokens !== "number" && context.tokens !== null) ||
+    typeof context.contextWindow !== "number" ||
+    (typeof context.percent !== "number" && context.percent !== null)
+  ) {
+    throw new Error("get_session_stats response has malformed contextUsage");
+  }
+  return {
+    tokens: context.tokens,
+    contextWindow: context.contextWindow,
+    percent: context.percent,
+  };
+}
+
 async function requestThinkingLevels(client: PiRpcClient): Promise<ThinkingLevel[]> {
   const response = await client.request({ type: "get_available_thinking_levels" });
   return responseArray(response, "levels").map((level) => {
@@ -669,9 +715,7 @@ async function requestThinkingLevels(client: PiRpcClient): Promise<ThinkingLevel
 }
 
 function parseThinkingLevel(value: string): ThinkingLevel {
-  if (["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value)) {
-    return value as ThinkingLevel;
-  }
+  if (isThinkingLevel(value)) return value;
   throw new Error(`Unsupported system Pi thinking level: ${value}`);
 }
 
@@ -715,7 +759,7 @@ function parseCommands(values: readonly unknown[]): SlashCommand[] {
   });
 }
 
-function summarize(
+export function summarize(
   id: string,
   sessionName: string | undefined,
   timeline: PiThreadSnapshot,
@@ -730,7 +774,10 @@ function summarize(
     id,
     title: sessionName?.trim() || preview.slice(0, 48) || "新会话",
     createdAt: visible[0]?.createdAt ?? Date.now(),
-    updatedAt: initialUpdatedAt ?? last?.createdAt ?? Date.now(),
+    updatedAt:
+      initialUpdatedAt === undefined && last === undefined
+        ? Date.now()
+        : Math.max(initialUpdatedAt ?? 0, last?.createdAt ?? 0),
     messageCount: visible.length,
     preview,
     ...(lastUser?.kind === "user"

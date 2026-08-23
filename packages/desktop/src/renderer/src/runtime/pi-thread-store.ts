@@ -1,3 +1,4 @@
+import { parseStreamingJson } from "@earendil-works/pi-ai";
 import {
   type JsonValue,
   type PiAssistantMessage,
@@ -118,11 +119,16 @@ function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, event: P
     case "agent_start":
       return { ...next, phase: "running" };
     case "agent_settled":
-      return { ...next, phase: "idle", activeTurnId: undefined };
+      return { ...next, phase: "idle", activeTurnId: undefined, activeTurnThinkingLevel: undefined };
     case "turn_start":
-      return { ...next, phase: "running", activeTurnId: `rpc-turn:${sequence}` };
+      return {
+        ...next,
+        phase: "running",
+        activeTurnId: `rpc-turn:${sequence}`,
+        activeTurnThinkingLevel: snapshot.thinkingLevel,
+      };
     case "turn_end":
-      return { ...next, activeTurnId: undefined };
+      return { ...next, activeTurnId: undefined, activeTurnThinkingLevel: undefined };
     case "message_start":
       return startMessage(next, event.message);
     case "message_update":
@@ -169,8 +175,9 @@ function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, event: P
     case "agent_end":
     case "entry_appended":
     case "session_info_changed":
-    case "thinking_level_changed":
       return next;
+    case "thinking_level_changed":
+      return { ...next, thinkingLevel: event.level };
     default:
       return assertNever(event);
   }
@@ -217,7 +224,17 @@ function applyBashDelta(
 function startMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThreadSnapshot {
   if (message.role === "toolResult") return snapshot;
   const id = createPiMessageNodeId(message, snapshot.nodes);
-  const node = projectPiMessage({ id, parentId: snapshot.headId, message, finished: false });
+  const thinkingLevel =
+    message.role === "assistant"
+      ? (snapshot.activeTurnThinkingLevel ?? snapshot.thinkingLevel)
+      : snapshot.thinkingLevel;
+  const node = projectPiMessage({
+    id,
+    parentId: snapshot.headId,
+    message,
+    finished: false,
+    thinkingLevel,
+  });
   return node ? appendNode(snapshot, node) : snapshot;
 }
 
@@ -285,9 +302,12 @@ function updateAssistant(snapshot: PiThreadSnapshot, event: PiRpcMessageUpdateEv
       break;
     case "toolcall_delta": {
       const part = requireStreamingPart(content, update.contentIndex, "tool-call");
+      const argsText = part.argsText + update.delta;
+      const args = toJson(parseStreamingJson(argsText));
       setStreamingPart(content, update.contentIndex, {
         ...part,
-        argsText: part.argsText + update.delta,
+        args: isJsonObject(args) ? args : {},
+        argsText,
         execution: "streaming-args",
       });
       break;
@@ -375,6 +395,7 @@ function finishMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThread
     message,
     finished: true,
     completedAt: Date.now(),
+    ...(current.kind === "assistant" ? { thinkingLevel: current.provenance.thinkingLevel } : {}),
   });
   return projected ? replaceNode(snapshot, index, projected) : snapshot;
 }
@@ -546,6 +567,7 @@ export function detachedSnapshot(): PiThreadSnapshot {
     nodes: [],
     queue: [],
     phase: "idle",
+    thinkingLevel: "off",
   };
 }
 

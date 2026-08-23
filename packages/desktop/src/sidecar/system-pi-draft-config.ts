@@ -7,6 +7,7 @@ import type {
   SlashCommand,
   ThinkingLevel,
 } from "../shared/contracts.ts";
+import { isThinkingLevel } from "../shared/thinking-levels.ts";
 import { PiRpcClient } from "./pi-rpc-client.ts";
 import { assertSupportedSystemPiVersion, type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
 
@@ -104,18 +105,6 @@ function readiness(model: DraftModelOption | undefined, availableCount: number):
   if (availableCount === 0)
     return { state: "missing-credentials", message: "System Pi has no available authenticated models" };
   return { state: "unavailable-model", message: "System Pi has no active model" };
-}
-
-function isThinkingLevel(value: unknown): value is ThinkingLevel {
-  return (
-    value === "off" ||
-    value === "minimal" ||
-    value === "low" ||
-    value === "medium" ||
-    value === "high" ||
-    value === "xhigh" ||
-    value === "max"
-  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

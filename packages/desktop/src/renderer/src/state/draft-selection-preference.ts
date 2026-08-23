@@ -1,4 +1,5 @@
 import type { DraftSessionConfig, ThinkingLevel } from "../../../shared/contracts.ts";
+import { isThinkingLevel } from "../../../shared/thinking-levels.ts";
 import { selectDraftModel, selectDraftThinkingLevel } from "./draft-creation.ts";
 import { preferencesStorage } from "./preferences-store.ts";
 
@@ -7,8 +8,6 @@ const DRAFT_SELECTION_STORAGE_VERSION = 1;
 
 /** 新会话最近使用的项目。 */
 export const DRAFT_PROJECT_STORAGE_KEY = "pi-desktop:draft-project";
-
-const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /** 新会话草稿最近一次选择的模型与思考等级（按项目记忆）。 */
 export interface StoredDraftSelection {
@@ -137,8 +136,7 @@ function isStoredDraftSelection(value: unknown): value is StoredDraftSelection {
     isRecord(value) &&
     typeof value.provider === "string" &&
     typeof value.modelId === "string" &&
-    typeof value.thinkingLevel === "string" &&
-    THINKING_LEVELS.includes(value.thinkingLevel as ThinkingLevel)
+    isThinkingLevel(value.thinkingLevel)
   );
 }
 

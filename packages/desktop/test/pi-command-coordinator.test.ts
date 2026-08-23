@@ -8,6 +8,7 @@ const target = { projectId: "project", threadId: "thread", generation: 1 };
 describe("PiCommandCoordinator", () => {
   const prompt = vi.fn();
   const cancel = vi.fn();
+  const reload = vi.fn();
   const setText = vi.fn();
   const setQuote = vi.fn();
   const addAttachment = vi.fn();
@@ -19,10 +20,11 @@ describe("PiCommandCoordinator", () => {
     vi.clearAllMocks();
     prompt.mockResolvedValue({ accepted: true, queued: false });
     cancel.mockResolvedValue(undefined);
+    reload.mockResolvedValue(undefined);
     addAttachment.mockResolvedValue(undefined);
     getState.mockReturnValue({ text: "current draft" });
     phase = "idle";
-    vi.stubGlobal("window", { desktop: { sessions: { prompt, cancel } } });
+    vi.stubGlobal("window", { desktop: { sessions: { prompt, cancel, reload } } });
   });
 
   it("idle 与 running enqueue 都统一调用 sessions.prompt，并保留 desiredMode", async () => {
@@ -38,6 +40,42 @@ describe("PiCommandCoordinator", () => {
       expect.objectContaining({ projectId: "project", threadId: "thread", text: "first", desiredMode: "followUp" }),
     );
     expect(prompt).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "second", desiredMode: "steer" }));
+  });
+
+  it("将 /reload 作为 Desktop 内置命令执行，不发送 Pi prompt", async () => {
+    const coordinator = createCoordinator();
+
+    coordinator.enqueue(userMessage("/reload"));
+
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledWith("project", "thread"));
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("running 阶段拒绝 /reload 并恢复 Composer", async () => {
+    phase = "running";
+    const coordinator = createCoordinator();
+
+    coordinator.enqueue(userMessage("/reload"));
+
+    await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
+    expect(reload).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+    expect(setText).toHaveBeenCalledWith("/reload");
+  });
+
+  it("带引用的 /reload 被拒绝并恢复 Composer", async () => {
+    const coordinator = createCoordinator();
+    const quote = { text: "保留这段引用", messageId: "assistant-1" };
+
+    coordinator.enqueue({
+      ...userMessage("/reload"),
+      metadata: { custom: { quote } },
+    });
+
+    await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
+    expect(reload).not.toHaveBeenCalled();
+    expect(setText).toHaveBeenCalledWith("/reload");
+    expect(setQuote).toHaveBeenCalledWith(expect.objectContaining(quote));
   });
 
   it("将 assistant-ui quote metadata 作为结构化 IPC 字段发送", async () => {

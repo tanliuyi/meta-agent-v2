@@ -105,6 +105,14 @@ export class PiCommandCoordinator {
     requestId: string,
   ): Promise<SessionCommandResult> {
     const phase = this.getPhase();
+    const text = messageText(message).trim();
+    if (text === "/reload") {
+      if (phase !== "idle") throw new Error("Wait for the current response to finish before reloading.");
+      if ((message.attachments?.length ?? 0) > 0) throw new Error("/reload does not accept attachments");
+      if (quotes(message).length > 0) throw new Error("/reload does not accept quotes");
+      await window.desktop.sessions.reload(target.projectId, target.threadId);
+      return { accepted: true, queued: false };
+    }
     if (phase !== "idle" && phase !== "running") throw new Error(`Pi ${phase} 阶段不接受 Composer submit`);
     const input = await promptInput(message, target, desiredMode, requestId);
     const result = await window.desktop.sessions.prompt(input);

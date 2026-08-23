@@ -48,10 +48,7 @@ vi.mock("@assistant-ui/react-lexical", () => ({
 }));
 
 vi.mock("../src/renderer/src/components/chat/composer/composer-command-trigger.tsx", () => ({
-  ComposerCommandTrigger: ({ commands }: { commands: readonly { source: string }[] }) => {
-    captured.commandSources = commands.map(({ source }) => source);
-    return "command-trigger";
-  },
+  ComposerCommandTrigger: () => null,
   slashCommandText: (command: { name: string }, args: string) =>
     `/${command.name}${args.trim() ? ` ${args.trim()}` : ""}`,
 }));
@@ -61,6 +58,7 @@ vi.mock("../src/renderer/src/components/chat/composer/composer-file-trigger.tsx"
 }));
 
 import {
+  acceptHighlightedCommandOnSpace,
   ComposerInput,
   shouldDeferComposerKeyToTrigger,
   syncFocusedComposerInput,
@@ -158,6 +156,35 @@ describe("ComposerInput", () => {
     expect(attributes.get("aria-expanded")).toBe("false");
     expect(attributes.has("aria-controls")).toBe(false);
     expect(attributes.has("aria-activedescendant")).toBe(false);
+  });
+
+  it("命令面板打开时以普通空格接受当前高亮命令", () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handleKeyDown = vi.fn().mockReturnValue(true);
+    const event = {
+      key: " ",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefault,
+      stopPropagation,
+    };
+
+    expect(acceptHighlightedCommandOnSpace(event, true, { handleKeyDown })).toBe(true);
+    expect(handleKeyDown).toHaveBeenCalledWith({
+      key: "Enter",
+      shiftKey: false,
+      preventDefault: expect.any(Function),
+    });
+    const forwarded = handleKeyDown.mock.calls[0]?.[0] as { preventDefault(): void };
+    forwarded.preventDefault();
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(stopPropagation).toHaveBeenCalledOnce();
+
+    expect(acceptHighlightedCommandOnSpace({ ...event, ctrlKey: true }, true, { handleKeyDown })).toBe(false);
+    expect(acceptHighlightedCommandOnSpace(event, false, { handleKeyDown })).toBe(false);
   });
 
   it("提交普通 Enter 时消费原生事件，避免 Lexical 插入换行", () => {

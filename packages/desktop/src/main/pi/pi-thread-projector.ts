@@ -13,6 +13,7 @@ import {
   projectPiMessage,
   toJson,
 } from "../../shared/pi-message-projector.ts";
+import { isThinkingLevel } from "../../shared/thinking-levels.ts";
 import { parseQuoteAttachmentData, QUOTE_ATTACHMENT_CUSTOM_TYPE, stripQuotePrefix } from "./quote-context.ts";
 
 export class ProjectionError extends Error {
@@ -47,11 +48,13 @@ export function projectPersistedBranch(
   const nodes: PiTimelineNode[] = [];
   let headId: string | null = null;
   let thinkingLevel: ThinkingLevel = "off";
+  const thinkingHistory: Array<{ level: ThinkingLevel; timestamp: number }> = [];
 
   for (const entry of branch) {
     switch (entry.type) {
       case "thinking_level_change":
         thinkingLevel = normalizeThinkingLevel(entry.thinkingLevel);
+        thinkingHistory.push({ level: thinkingLevel, timestamp: timestampMs(entry.timestamp) });
         break;
       case "model_change":
       case "session_info":
@@ -74,6 +77,8 @@ export function projectPersistedBranch(
           break;
         }
 
+        const messageThinkingLevel =
+          message.role === "assistant" ? thinkingLevelAt(message.timestamp, thinkingHistory) : thinkingLevel;
         const id = createPiMessageNodeId(message, nodes);
         const projected = projectPiMessage({
           id,
@@ -82,7 +87,7 @@ export function projectPersistedBranch(
           message,
           finished: true,
           completedAt: timestampMs(entry.timestamp),
-          thinkingLevel,
+          thinkingLevel: messageThinkingLevel,
         });
         if (!projected) break;
         const quotes = message.role === "user" ? quoteAttachments.get(entry.id) : undefined;
@@ -181,6 +186,7 @@ export function snapshotFromProjection(
     ...options,
     headId: projection.headId,
     nodes: projection.nodes,
+    thinkingLevel: projection.thinkingLevel,
   };
 }
 
@@ -244,17 +250,18 @@ function timestampMs(value: string): number {
 }
 
 function normalizeThinkingLevel(value: string): ThinkingLevel {
-  switch (value) {
-    case "off":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return value;
-    default:
-      return "off";
+  return isThinkingLevel(value) ? value : "off";
+}
+
+function thinkingLevelAt(
+  timestamp: number,
+  history: readonly { level: ThinkingLevel; timestamp: number }[],
+): ThinkingLevel {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const change = history[index];
+    if (change && change.timestamp <= timestamp) return change.level;
   }
+  return "off";
 }
 
 function assertNever(value: never): never {

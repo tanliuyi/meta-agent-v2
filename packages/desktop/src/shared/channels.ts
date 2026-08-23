@@ -36,6 +36,7 @@ export const CHANNELS = {
   sessionsAck: "desktop:sessions:ack",
   sessionsCancel: "desktop:sessions:cancel",
   sessionsCompact: "desktop:sessions:compact",
+  sessionsReload: "desktop:sessions:reload",
   sessionsRefreshModels: "desktop:sessions:refresh-models",
   sessionsSetModel: "desktop:sessions:set-model",
   sessionsSetThinking: "desktop:sessions:set-thinking",

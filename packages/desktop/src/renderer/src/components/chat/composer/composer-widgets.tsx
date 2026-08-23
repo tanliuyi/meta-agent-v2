@@ -1,17 +1,28 @@
 import type { SessionControlState } from "../../../../../shared/contracts.ts";
+import "./composer-widgets.css";
+import { StructuredWidget } from "./structured-widget.tsx";
+import { decodeStructuredWidget } from "./structured-widget-decoders.ts";
 
 interface ComposerWidgetsProps {
   widgets: SessionControlState["extensionHost"]["widgets"];
+  layout?: "embedded" | "external";
 }
 
-/** 渲染扩展注入到 Composer 上下方的只读文本 widget。 */
-export function ComposerWidgets({ widgets }: ComposerWidgetsProps) {
-  if (widgets?.length === 0) return null;
+/** 按 Pi RPC setWidget 的通用字符串行协议渲染插件 widget。 */
+export function ComposerWidgets({ widgets, layout = "embedded" }: ComposerWidgetsProps) {
+  if (!widgets?.length) return null;
   return (
-    <div className="composer-widgets">
-      {widgets.map((widget) => (
-        <pre key={widget.key}>{widget.lines.join("\n")}</pre>
-      ))}
+    <div className="composer-widgets" data-layout={layout}>
+      {widgets.map((widget) => {
+        const source = decodeStructuredWidget(widget.lines);
+        return source ? (
+          <StructuredWidget key={widget.key} source={source} />
+        ) : (
+          <pre className="composer-widget-content" data-widget-key={widget.key} key={widget.key}>
+            {widget.lines.join("\n")}
+          </pre>
+        );
+      })}
     </div>
   );
 }

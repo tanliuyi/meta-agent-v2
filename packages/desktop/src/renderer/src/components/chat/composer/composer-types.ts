@@ -44,7 +44,6 @@ export type ComposerProps =
       working?: SessionControlState["extensionHost"]["working"];
       commandsReady: boolean;
       modelsLoading: boolean;
-      onRefreshModels(): Promise<void>;
       onSetModel(provider: string, modelId: string): Promise<void>;
       onSetThinking(level: SessionControlState["thinkingLevel"]): Promise<void>;
     };

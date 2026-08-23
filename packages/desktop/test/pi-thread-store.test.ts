@@ -50,6 +50,30 @@ describe("PiThreadStore", () => {
     expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ text: "你好" }] });
   });
 
+  it("将 turn_start 时的 thinking level 固化到流式 assistant provenance", () => {
+    const store = new PiThreadStore({ ...snapshot([], null), thinkingLevel: "medium" });
+    const started = assistantMessage([], "pending");
+    const completed = assistantMessage([{ type: "text", text: "完成" }], "stop");
+
+    applyRpc(store, 1, { type: "turn_start" });
+    applyRpc(store, 2, { type: "thinking_level_changed", level: "high" });
+    applyRpc(store, 3, { type: "message_start", message: started });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      kind: "assistant",
+      status: { type: "running" },
+      provenance: { thinkingLevel: "medium" },
+    });
+
+    applyRpc(store, 4, { type: "message_end", message: completed });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      kind: "assistant",
+      status: { type: "complete" },
+      provenance: { thinkingLevel: "medium" },
+    });
+
+    expect(store.getSnapshot().thinkingLevel).toBe("high");
+  });
+
   it("归约 Pi message_update 的 start、done 与 error wire 事件", () => {
     const store = new PiThreadStore(snapshot([], null));
     const started = assistantMessage([], "pending");
@@ -131,16 +155,62 @@ describe("PiThreadStore", () => {
       usage: started.usage,
       assistantMessageEvent: { type: "toolcall_start", contentIndex: 1 },
     });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      content: [
+        { type: "reasoning", text: "分析" },
+        {
+          type: "tool-call",
+          toolCallId: "pending:pi-message:assistant:2:1",
+          toolName: "",
+          args: {},
+          argsText: "",
+        },
+      ],
+    });
+
     applyRpc(store, 6, {
       type: "message_update",
       usage: started.usage,
       assistantMessageEvent: {
         type: "toolcall_delta",
         contentIndex: 1,
-        delta: '{"path":"README.md"}',
+        delta: '{"path":"READ',
       },
     });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      content: [
+        { type: "reasoning", text: "分析" },
+        { type: "tool-call", args: { path: "READ" }, argsText: '{"path":"READ' },
+      ],
+    });
+    const streamingRepository = new PiMessageRepositoryConverter().build(store.getSnapshot());
+    const streamingMessage = streamingRepository.messages[0]?.message;
+    if (streamingMessage?.role !== "assistant") throw new Error("streaming assistant message missing");
+    expect(streamingMessage.content[1]).toMatchObject({
+      type: "tool-call",
+      toolName: "",
+      args: { path: "READ" },
+      argsText: '{"path":"READ',
+      artifact: { execution: "streaming-args" },
+    });
+
     applyRpc(store, 7, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: {
+        type: "toolcall_delta",
+        contentIndex: 1,
+        delta: 'ME.md"}',
+      },
+    });
+    expect(store.getSnapshot().nodes[0]).toMatchObject({
+      content: [
+        { type: "reasoning", text: "分析" },
+        { type: "tool-call", args: { path: "README.md" }, argsText: '{"path":"README.md"}' },
+      ],
+    });
+
+    applyRpc(store, 8, {
       type: "message_update",
       usage: started.usage,
       assistantMessageEvent: {
@@ -149,20 +219,20 @@ describe("PiThreadStore", () => {
         toolCall: { type: "toolCall", id: "tool-1", name: "read", arguments: { path: "README.md" } },
       },
     });
-    applyRpc(store, 8, {
+    applyRpc(store, 9, {
       type: "tool_execution_start",
       toolCallId: "tool-1",
       toolName: "read",
       args: { path: "README.md" },
     });
-    applyRpc(store, 9, {
+    applyRpc(store, 10, {
       type: "tool_execution_update",
       toolCallId: "tool-1",
       toolName: "read",
       args: { path: "README.md" },
       partialResult: { content: [{ type: "text", text: "partial" }] },
     });
-    applyRpc(store, 10, {
+    applyRpc(store, 11, {
       type: "tool_execution_end",
       toolCallId: "tool-1",
       toolName: "read",
@@ -789,6 +859,7 @@ function snapshot(nodes: PiThreadSnapshot["nodes"], headId: string | null, curso
     nodes,
     queue: [],
     phase: "idle",
+    thinkingLevel: "off",
   };
 }
 

@@ -34,6 +34,8 @@ import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } fr
 
 const DEFAULT_IDLE_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX_LIVE_WORKERS = 4;
+const CATALOG_INITIAL_REFRESH_MS = 100;
+const CATALOG_ACTIVE_TOOL_REFRESH_MS = 500;
 
 export interface ThreadWorkerClient {
   readonly instanceId: string;
@@ -71,6 +73,8 @@ interface WorkerRecord {
   failureReported?: boolean;
   pendingModelRefreshReason?: string;
   modelRefreshScheduled?: boolean;
+  activeToolCalls: Set<string>;
+  catalogRefreshTimer?: NodeJS.Timeout;
 }
 
 export interface ThreadWorkerRegistryOptions {
@@ -100,7 +104,9 @@ export class ThreadWorkerRegistry {
   private readonly liveClients = new Map<string, ThreadWorkerClient>();
   private readonly pending = new Map<string, Promise<WorkerRecord>>();
   private readonly pendingCreations = new Map<string, Promise<SessionBootstrap>>();
+  private readonly pendingReloads = new Map<string, Promise<void>>();
   private readonly operationTails = new Map<string, Promise<void>>();
+  private readonly projectCatalogs = new Map<string, Map<string, Thread>>();
   private readonly drainingProjects = new Set<string>();
   private readonly idleTimer: NodeJS.Timeout;
   private capacityTail = Promise.resolve();
@@ -131,7 +137,9 @@ export class ThreadWorkerRegistry {
       });
     }
     await this.reconcileCreationReservations(projectId);
-    return [...catalog.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+    const threads = [...catalog.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+    this.projectCatalogs.set(projectId, new Map(threads.map((thread) => [thread.id, thread])));
+    return threads;
   }
 
   /** 同 list，但保留 session.jsonl 绝对路径（@ 提及会话引用用）。 */
@@ -283,6 +291,31 @@ export class ThreadWorkerRegistry {
     await this.use(projectId, threadId, (record) => record.client.request({ type: "compact" }, null));
   }
 
+  reload(projectId: string, threadId: string): Promise<void> {
+    const key = workerKey(projectId, threadId);
+    const current = this.pendingReloads.get(key);
+    if (current) return current;
+
+    let pending!: Promise<void>;
+    pending = this.withThreadLock(key, async () => {
+      this.assertProjectAvailable(projectId);
+      const record = this.records.get(key);
+      if (!record || record.retired || record.client.available === false) {
+        throw new Error(`Thread worker is unavailable: ${projectId}/${threadId}`);
+      }
+      if (record.inFlight > 0) throw new Error("Wait for the current response to finish before reloading.");
+      const summary = await record.client.request<Thread>({ type: "getSummary", archived: false });
+      record.summary = summary;
+      if (summary.running) throw new Error("Wait for the current response to finish before reloading.");
+      if (!record.sessionFile) throw new Error("System Pi session has not materialized yet");
+      await this.restartRuntime(record, "System Pi reloaded extensions, skills, prompts, and context files");
+    }).finally(() => {
+      if (this.pendingReloads.get(key) === pending) this.pendingReloads.delete(key);
+    });
+    this.pendingReloads.set(key, pending);
+    return pending;
+  }
+
   refreshModels(projectId: string, threadId: string): Promise<void> {
     return this.enqueueModelRefresh(async () => {
       const key = workerKey(projectId, threadId);
@@ -292,7 +325,7 @@ export class ThreadWorkerRegistry {
         if (!record || record.retired || record.client.available === false) {
           throw new Error(`Thread worker is unavailable: ${projectId}/${threadId}`);
         }
-        await this.restartForModelConfiguration(record, "System Pi restarted to refresh models");
+        await this.restartRuntime(record, "System Pi restarted to refresh models");
       });
     });
   }
@@ -309,7 +342,7 @@ export class ThreadWorkerRegistry {
           const key = workerKey(record.projectId, record.threadId);
           if (this.drainingProjects.has(record.projectId)) return;
           if (this.records.get(key) !== record || record.retired) return;
-          await this.restartForModelConfiguration(
+          await this.restartRuntime(
             record,
             `System Pi restarted for model configuration generation ${revision.generation}`,
           );
@@ -494,20 +527,29 @@ export class ThreadWorkerRegistry {
       if (this.records.get(key) === record) this.records.delete(key);
     }
     await this.options.metadata.invalidateProject(projectId);
+    this.projectCatalogs.delete(projectId);
   }
 
   async dispose(): Promise<void> {
     this.disposing = true;
     clearInterval(this.idleTimer);
-    await Promise.allSettled([...this.pending.values(), ...this.pendingCreations.values()]);
+    await Promise.allSettled([
+      ...this.pending.values(),
+      ...this.pendingCreations.values(),
+      ...this.pendingReloads.values(),
+    ]);
     await this.modelRefreshTail;
     await this.capacityTail;
     const records = [...this.records.values()];
-    for (const record of records) record.retired = true;
+    for (const record of records) {
+      record.retired = true;
+      if (record.catalogRefreshTimer) clearTimeout(record.catalogRefreshTimer);
+    }
     const shutdowns = await Promise.allSettled(records.map((record) => this.awaitRecordShutdown(record)));
     const failure = shutdowns.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") throw failure.reason;
     this.records.clear();
+    this.projectCatalogs.clear();
   }
 
   private async use<T>(
@@ -580,11 +622,7 @@ export class ThreadWorkerRegistry {
 
   private async open(projectId: string, threadId: string): Promise<WorkerRecord> {
     const cwd = this.options.getCwd(projectId);
-    const [threads, session] = await Promise.all([
-      this.options.metadata.list(projectId, cwd),
-      this.options.metadata.resolve(projectId, cwd, threadId),
-    ]);
-    const initialUpdatedAt = threads.find(({ id }) => id === threadId)?.updatedAt;
+    const session = await this.options.metadata.resolve(projectId, cwd, threadId);
     return this.spawn({
       mode: "open",
       projectId,
@@ -593,7 +631,7 @@ export class ThreadWorkerRegistry {
       ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
       threadId,
       sessionFile: session.path,
-      ...(initialUpdatedAt !== undefined ? { initialUpdatedAt } : {}),
+      initialUpdatedAt: session.updatedAt,
     });
   }
 
@@ -645,7 +683,7 @@ export class ThreadWorkerRegistry {
     }
   }
 
-  private async restartForModelConfiguration(record: WorkerRecord, reason: string): Promise<void> {
+  private async restartRuntime(record: WorkerRecord, reason: string): Promise<void> {
     const key = workerKey(record.projectId, record.threadId);
     if (this.drainingProjects.has(record.projectId)) {
       record.pendingModelRefreshReason = undefined;
@@ -661,6 +699,7 @@ export class ThreadWorkerRegistry {
     this.records.delete(key);
     try {
       await this.awaitRecordShutdown(record);
+      this.assertProjectAvailable(record.projectId);
       const replacement = await this.open(record.projectId, record.threadId);
       replacement.initialBootstrap = undefined;
       replacement.inFlight -= 1;
@@ -715,7 +754,7 @@ export class ThreadWorkerRegistry {
       browserSessionIdentity: browserSessionIdentityOf(binding),
       ...(browserSessionToken !== undefined ? { browserSessionToken } : {}),
       retired: false,
-      closeRequested: false,
+      activeToolCalls: new Set(),
     };
     try {
       const ready = await client.ready();
@@ -761,6 +800,11 @@ export class ThreadWorkerRegistry {
   }
 
   private beginRecordShutdown(record: WorkerRecord): Promise<void> {
+    if (record.catalogRefreshTimer) {
+      clearTimeout(record.catalogRefreshTimer);
+      record.catalogRefreshTimer = undefined;
+    }
+    record.activeToolCalls.clear();
     record.shutdownPromise ??= Promise.resolve()
       .then(() => {
         const token = record.browserSessionToken;
@@ -780,6 +824,7 @@ export class ThreadWorkerRegistry {
     if (record.retired) return;
     record.lastActivityAt = Date.now();
     if (event.event.type === "session-push") {
+      this.trackCatalogActivity(record, event.event.payload);
       this.options.push(event.event.payload, event.workerInstanceId, event.sequence);
     } else if (event.event.type === "summary-changed") {
       record.summary = record.parentThreadId
@@ -817,6 +862,55 @@ export class ThreadWorkerRegistry {
       record.client.acknowledge(event.sequence);
     } else {
       record.client.acknowledge(event.sequence);
+    }
+  }
+
+  private trackCatalogActivity(record: WorkerRecord, payload: SessionPushPayload): void {
+    if (payload.type !== "timeline") return;
+    const event = payload.event;
+    if (
+      event.type !== "tool_execution_start" &&
+      event.type !== "tool_execution_update" &&
+      event.type !== "tool_execution_end"
+    ) {
+      return;
+    }
+    if (event.type === "tool_execution_end") {
+      record.activeToolCalls.delete(event.toolCallId);
+      if (record.catalogRefreshTimer) {
+        clearTimeout(record.catalogRefreshTimer);
+        record.catalogRefreshTimer = undefined;
+      }
+    } else {
+      record.activeToolCalls.add(event.toolCallId);
+    }
+    this.scheduleCatalogRefresh(record, event.type === "tool_execution_end" ? 0 : CATALOG_INITIAL_REFRESH_MS);
+  }
+
+  private scheduleCatalogRefresh(record: WorkerRecord, delayMs: number): void {
+    if (record.retired || record.catalogRefreshTimer || this.disposing) return;
+    record.catalogRefreshTimer = setTimeout(() => {
+      record.catalogRefreshTimer = undefined;
+      void this.refreshCatalog(record)
+        .catch((error: unknown) =>
+          this.options.log?.(`catalog:${record.projectId}`, error instanceof Error ? error.message : String(error)),
+        )
+        .finally(() => {
+          if (!record.retired && record.activeToolCalls.size > 0) {
+            this.scheduleCatalogRefresh(record, CATALOG_ACTIVE_TOOL_REFRESH_MS);
+          }
+        });
+    }, delayMs);
+    record.catalogRefreshTimer.unref();
+  }
+
+  private async refreshCatalog(record: WorkerRecord): Promise<void> {
+    if (record.retired || this.records.get(workerKey(record.projectId, record.threadId)) !== record) return;
+    const previous = this.projectCatalogs.get(record.projectId) ?? new Map<string, Thread>();
+    const catalog = await this.list(record.projectId);
+    for (const thread of catalog) {
+      if (sameCatalogThread(previous.get(thread.id), thread)) continue;
+      this.options.catalogChanged?.({ ...thread });
     }
   }
 
@@ -1069,7 +1163,7 @@ export class ThreadWorkerRegistry {
         }
         const reason = record.pendingModelRefreshReason;
         if (!reason) return;
-        await this.restartForModelConfiguration(record, reason);
+        await this.restartRuntime(record, reason);
       });
     }).catch((error: unknown) => {
       record.modelRefreshScheduled = false;
@@ -1125,6 +1219,26 @@ export function browserSessionIdentityOf(binding: ThreadWorkerBinding): BrowserS
     projectId: binding.projectId,
     threadId: binding.mode === "create" ? binding.sessionId : binding.threadId,
   };
+}
+
+function sameCatalogThread(left: Thread | undefined, right: Thread): boolean {
+  return (
+    left !== undefined &&
+    left.id === right.id &&
+    left.projectId === right.projectId &&
+    left.title === right.title &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt &&
+    left.messageCount === right.messageCount &&
+    left.preview === right.preview &&
+    left.lastUserPreview === right.lastUserPreview &&
+    left.lastAssistantPreview === right.lastAssistantPreview &&
+    left.archived === right.archived &&
+    left.running === right.running &&
+    left.parentThreadId === right.parentThreadId &&
+    left.origin === right.origin &&
+    left.agentName === right.agentName
+  );
 }
 
 function workerKey(projectId: string, threadId: string): string {
