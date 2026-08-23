@@ -8,17 +8,17 @@ import type {
   ThinkingLevel,
 } from "../shared/contracts.ts";
 import { isThinkingLevel } from "../shared/thinking-levels.ts";
+import { assertSupportedPiVersion, type ProbedPi, resolveAndProbePi } from "./pi-resolver.ts";
 import { PiRpcClient } from "./pi-rpc-client.ts";
-import { assertSupportedSystemPiVersion, type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
 
-export async function loadSystemPiDraftConfig(
+export async function loadPiDraftConfig(
   cwd: string,
   agentDir: string,
-  resolvePi: (environment: NodeJS.ProcessEnv) => Promise<ProbedSystemPi> = resolveAndProbeSystemPi,
+  resolvePi: (environment: NodeJS.ProcessEnv) => Promise<ProbedPi> = resolveAndProbePi,
 ): Promise<DraftSessionConfig> {
   const environment = { ...process.env, PI_CODING_AGENT_DIR: agentDir };
   const pi = await resolvePi(environment);
-  assertSupportedSystemPiVersion(pi.version);
+  assertSupportedPiVersion(pi.version);
   const { client, handshake } = await PiRpcClient.launch({
     pi,
     cwd,
@@ -103,8 +103,8 @@ function parseThinkingLevel(value: unknown, available: readonly ThinkingLevel[])
 function readiness(model: DraftModelOption | undefined, availableCount: number): Readiness {
   if (model) return { state: "ready" };
   if (availableCount === 0)
-    return { state: "missing-credentials", message: "System Pi has no available authenticated models" };
-  return { state: "unavailable-model", message: "System Pi has no active model" };
+    return { state: "missing-credentials", message: "Pi has no available authenticated models" };
+  return { state: "unavailable-model", message: "Pi has no active model" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

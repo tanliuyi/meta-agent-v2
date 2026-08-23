@@ -5,7 +5,7 @@
  * adds save-time semantic checks for invalid custom model definitions and
  * numeric limits, while allowing no-op built-in overlays and override-only
  * providers. Disk contract tests verify accepted serialized configs against
- * the system Pi model loader.
+ * the Pi model loader.
  */
 
 import { getProviders } from "@earendil-works/pi-ai/compat";

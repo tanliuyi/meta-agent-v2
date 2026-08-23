@@ -11,7 +11,7 @@ import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import lockfile from "proper-lockfile";
-import { getBashShellConfig } from "../sidecar/system-pi-settings.ts";
+import { getBashShellConfig } from "../sidecar/pi-settings.ts";
 
 type AuthFileData = Record<string, Credential>;
 

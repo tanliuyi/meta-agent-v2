@@ -364,7 +364,7 @@ export interface PiRpcExtensionError {
   error: string;
 }
 
-/** System Pi 0.84.2 RPC strips cumulative `partial`; tool metadata first appears on `toolcall_end`. */
+/** Pi 0.84.2 RPC strips cumulative `partial`; tool metadata first appears on `toolcall_end`. */
 type PiRpcAssistantMessageEvent =
   | Exclude<
       Extract<JsonAgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"],

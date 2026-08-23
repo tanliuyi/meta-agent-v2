@@ -307,8 +307,8 @@ export class ThreadWorkerRegistry {
       const summary = await record.client.request<Thread>({ type: "getSummary", archived: false });
       record.summary = summary;
       if (summary.running) throw new Error("Wait for the current response to finish before reloading.");
-      if (!record.sessionFile) throw new Error("System Pi session has not materialized yet");
-      await this.restartRuntime(record, "System Pi reloaded extensions, skills, prompts, and context files");
+      if (!record.sessionFile) throw new Error("Pi session has not materialized yet");
+      await this.restartRuntime(record, "Pi reloaded extensions, skills, prompts, and context files");
     }).finally(() => {
       if (this.pendingReloads.get(key) === pending) this.pendingReloads.delete(key);
     });
@@ -325,7 +325,7 @@ export class ThreadWorkerRegistry {
         if (!record || record.retired || record.client.available === false) {
           throw new Error(`Thread worker is unavailable: ${projectId}/${threadId}`);
         }
-        await this.restartRuntime(record, "System Pi restarted to refresh models");
+        await this.restartRuntime(record, "Pi restarted to refresh models");
       });
     });
   }
@@ -342,10 +342,7 @@ export class ThreadWorkerRegistry {
           const key = workerKey(record.projectId, record.threadId);
           if (this.drainingProjects.has(record.projectId)) return;
           if (this.records.get(key) !== record || record.retired) return;
-          await this.restartRuntime(
-            record,
-            `System Pi restarted for model configuration generation ${revision.generation}`,
-          );
+          await this.restartRuntime(record, `Pi restarted for model configuration generation ${revision.generation}`);
         }),
       ),
     );

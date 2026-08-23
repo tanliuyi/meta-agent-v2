@@ -38,6 +38,7 @@ import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { handleLocalImageRequests, registerLocalImageSchemes } from "./settings/user-avatar-protocol.ts";
 import { locateGitForWindowsBash, locateManagedBash } from "./sidecar/managed-shell-locator.ts";
 import { MetadataWorkerClient } from "./sidecar/metadata-worker-client.ts";
+import { getBashShellConfig, getPiShellPath } from "./sidecar/pi-settings.ts";
 import { parseRuntimeSetupSelection, runRuntimeSetup } from "./sidecar/runtime-setup.ts";
 import {
   SHELL_RUNTIME_VERSION,
@@ -48,7 +49,6 @@ import { saveShellRuntimePath } from "./sidecar/shell-runtime-settings.ts";
 import { validateBashRuntime } from "./sidecar/shell-runtime-validator.ts";
 import { SidecarLog } from "./sidecar/sidecar-log.ts";
 import { loadSidecarRuntimeManifest } from "./sidecar/sidecar-runtime-manifest.ts";
-import { getBashShellConfig, getSystemPiShellPath } from "./sidecar/system-pi-settings.ts";
 import { ThreadWorkerRegistry } from "./sidecar/thread-worker-registry.ts";
 import { ProjectStore } from "./store/project-store.ts";
 import { createTerminalShellResolver, TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
@@ -349,7 +349,7 @@ app.whenReady().then(async () => {
         getStatus: async () => {
           const activeProject = await projects.getActive();
           const cwd = activeProject?.cwd ?? process.cwd();
-          const configuredShellPath = getSystemPiShellPath(cwd, agentDir);
+          const configuredShellPath = getPiShellPath(cwd, agentDir);
           const shellPath = configuredShellPath ?? desktopBashPath;
           if (!shellPath) {
             return {

@@ -12,7 +12,7 @@ export interface AuthApiKeyCredential {
   env?: Record<string, string>;
 }
 
-// Wire-compatible subset of the system Pi OAuth credential.
+// Wire-compatible subset of the Pi OAuth credential.
 export interface AuthOAuthCredential {
   type: "oauth";
   access: string;

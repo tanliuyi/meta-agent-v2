@@ -144,7 +144,7 @@ describe("projectPersistedBranch", () => {
         timestamp: iso(2),
         customType: "user-extension.notice",
         content: [{ type: "text", text: "visible" }],
-        details: { source: "system-pi" },
+        details: { source: "pi" },
         display: true,
       },
     ];
@@ -156,7 +156,7 @@ describe("projectPersistedBranch", () => {
         id: "visible",
         parentId: null,
         kind: "notice",
-        content: { type: "custom", customType: "user-extension.notice", details: { source: "system-pi" } },
+        content: { type: "custom", customType: "user-extension.notice", details: { source: "pi" } },
       },
     ]);
   });

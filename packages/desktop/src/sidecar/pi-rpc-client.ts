@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { RpcCommand, RpcResponse, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { PiRpcEvent } from "../shared/contracts.ts";
-import type { ProbedSystemPi } from "./system-pi-resolver.ts";
+import type { ProbedPi } from "./pi-resolver.ts";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
@@ -26,7 +26,7 @@ export interface PiRpcHandshake {
 }
 
 export interface PiRpcClientOptions {
-  pi: ProbedSystemPi;
+  pi: ProbedPi;
   cwd: string;
   piArgs?: string[];
   environment: NodeJS.ProcessEnv;
@@ -93,27 +93,27 @@ export class PiRpcClient {
 
     child.stdout.on("data", (chunk: Buffer) => this.handleStdout(chunk));
     child.stdin.on("error", (error) => {
-      if (!this.closing) this.fail(new Error(`System Pi stdin error: ${error.message}`));
+      if (!this.closing) this.fail(new Error(`Pi stdin error: ${error.message}`));
     });
     child.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       this.stderrTail = appendStderr(this.stderrTail, text);
       this.onStderr?.(text);
     });
-    child.on("error", (error) => this.fail(new Error(`System Pi process error: ${error.message}`)));
+    child.on("error", (error) => this.fail(new Error(`Pi process error: ${error.message}`)));
     child.on("close", (code, signal) => {
       const remainder = this.lineBuffer + this.decoder.end();
       if (remainder.length > 0 && !this.terminalError) {
-        this.fail(new Error("System Pi stdout ended with an incomplete JSONL frame"));
+        this.fail(new Error("Pi stdout ended with an incomplete JSONL frame"));
       }
       if (!this.terminalError && !this.closing) {
         this.fail(
           new Error(
-            `System Pi exited unexpectedly (code=${code ?? "null"}, signal=${signal ?? "none"})${this.stderrTail.trim() ? `: ${this.stderrTail.trim()}` : ""}`,
+            `Pi exited unexpectedly (code=${code ?? "null"}, signal=${signal ?? "none"})${this.stderrTail.trim() ? `: ${this.stderrTail.trim()}` : ""}`,
           ),
         );
       }
-      this.rejectPending(this.terminalError ?? new Error("System Pi RPC client closed"));
+      this.rejectPending(this.terminalError ?? new Error("Pi RPC client closed"));
     });
   }
 
@@ -131,7 +131,7 @@ export class PiRpcClient {
       const handshake = await withTimeout(
         client.handshake(),
         startupTimeoutMs,
-        `System Pi RPC handshake timed out after ${startupTimeoutMs}ms`,
+        `Pi RPC handshake timed out after ${startupTimeoutMs}ms`,
       );
       return { client, handshake };
     } catch (error) {
@@ -157,7 +157,7 @@ export class PiRpcClient {
     timeoutMs: number | null = this.requestTimeoutMs,
   ): Promise<PiRpcSuccessResponse<Command["type"]>> {
     if (this.terminalError) throw this.terminalError;
-    if (this.closing) throw new Error("System Pi RPC client is closing");
+    if (this.closing) throw new Error("Pi RPC client is closing");
     const id = randomUUID();
     const responsePromise = new Promise<PiRpcResponse>((resolve, reject) => {
       const pending: PendingRequest = { command: command.type, resolve, reject };
@@ -165,7 +165,7 @@ export class PiRpcClient {
         pending.timeout = setTimeout(() => {
           this.pending.delete(id);
           this.rememberExpiredRequest(id);
-          reject(new Error(`System Pi RPC request '${command.type}' timed out after ${timeoutMs}ms`));
+          reject(new Error(`Pi RPC request '${command.type}' timed out after ${timeoutMs}ms`));
         }, timeoutMs);
         pending.timeout.unref();
       }
@@ -189,14 +189,14 @@ export class PiRpcClient {
 
   async send(message: Record<string, unknown>): Promise<void> {
     if (this.terminalError) throw this.terminalError;
-    if (this.closing) throw new Error("System Pi RPC client is closing");
+    if (this.closing) throw new Error("Pi RPC client is closing");
     await this.write(message);
   }
 
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    this.rejectPending(new Error("System Pi RPC client closed"));
+    this.rejectPending(new Error("Pi RPC client closed"));
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
 
     const exited = new Promise<void>((resolve) => this.child.once("close", () => resolve()));
@@ -288,7 +288,7 @@ export class PiRpcClient {
     if (this.terminalError) return;
     this.lineBuffer += this.decoder.write(chunk);
     if (Buffer.byteLength(this.lineBuffer) > MAX_JSONL_FRAME_BYTES && !this.lineBuffer.includes("\n")) {
-      this.fail(new Error(`System Pi JSONL frame exceeds ${MAX_JSONL_FRAME_BYTES} bytes`));
+      this.fail(new Error(`Pi JSONL frame exceeds ${MAX_JSONL_FRAME_BYTES} bytes`));
       this.killProcessTree();
       return;
     }
@@ -306,7 +306,7 @@ export class PiRpcClient {
 
   private handleLine(line: string): void {
     if (Buffer.byteLength(line) > MAX_JSONL_FRAME_BYTES) {
-      this.fail(new Error(`System Pi JSONL frame exceeds ${MAX_JSONL_FRAME_BYTES} bytes`));
+      this.fail(new Error(`Pi JSONL frame exceeds ${MAX_JSONL_FRAME_BYTES} bytes`));
       this.killProcessTree();
       return;
     }
@@ -315,14 +315,12 @@ export class PiRpcClient {
     try {
       parsed = JSON.parse(line);
     } catch (error) {
-      this.fail(
-        new Error(`System Pi emitted invalid JSONL: ${error instanceof Error ? error.message : String(error)}`),
-      );
+      this.fail(new Error(`Pi emitted invalid JSONL: ${error instanceof Error ? error.message : String(error)}`));
       this.killProcessTree();
       return;
     }
     if (!isRecord(parsed)) {
-      this.fail(new Error("System Pi emitted a non-object JSONL message"));
+      this.fail(new Error("Pi emitted a non-object JSONL message"));
       this.killProcessTree();
       return;
     }
@@ -331,15 +329,13 @@ export class PiRpcClient {
       try {
         this.onEvent?.(message as PiRpcEvent);
       } catch (error) {
-        this.fail(
-          new Error(`System Pi event handler failed: ${error instanceof Error ? error.message : String(error)}`),
-        );
+        this.fail(new Error(`Pi event handler failed: ${error instanceof Error ? error.message : String(error)}`));
         this.killProcessTree();
       }
       return;
     }
     if (typeof message.id !== "string" || typeof message.command !== "string" || typeof message.success !== "boolean") {
-      this.fail(new Error("System Pi emitted a malformed RPC response"));
+      this.fail(new Error("Pi emitted a malformed RPC response"));
       this.killProcessTree();
       return;
     }
@@ -347,13 +343,13 @@ export class PiRpcClient {
     const pending = this.pending.get(message.id);
     if (!pending) {
       if (this.expiredRequestIds.delete(message.id)) return;
-      this.fail(new Error(`System Pi emitted an unknown or duplicate response id '${message.id}'`));
+      this.fail(new Error(`Pi emitted an unknown or duplicate response id '${message.id}'`));
       this.killProcessTree();
       return;
     }
     if (pending.command !== message.command) {
       this.fail(
-        new Error(`System Pi response command mismatch: expected '${pending.command}', received '${message.command}'`),
+        new Error(`Pi response command mismatch: expected '${pending.command}', received '${message.command}'`),
       );
       this.killProcessTree();
       return;
@@ -363,7 +359,7 @@ export class PiRpcClient {
 
     const response = message as PiRpcResponse;
     if (!response.success) {
-      pending.reject(new Error(response.error ?? `System Pi RPC command '${response.command}' failed`));
+      pending.reject(new Error(response.error ?? `Pi RPC command '${response.command}' failed`));
       return;
     }
     pending.resolve(response);

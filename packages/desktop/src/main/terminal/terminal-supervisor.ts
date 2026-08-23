@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import * as pty from "node-pty";
 import type { TerminalEvent, TerminalSnapshot } from "../../shared/contracts.ts";
-import { getBashShellConfig, getSystemPiShellPath } from "../sidecar/system-pi-settings.ts";
+import { getBashShellConfig, getPiShellPath } from "../sidecar/pi-settings.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 import { prepareShellInjection } from "./shell-integration.ts";
 import { TerminalOutputBuffer } from "./terminal-output-buffer.ts";
@@ -380,7 +380,7 @@ function terminalKey(projectId: string, threadId: string, terminalId: string): s
 
 export function createTerminalShellResolver(agentDir: string, managedShellPath?: string): TerminalShellResolver {
   return (cwd) => {
-    const configuredShellPath = getSystemPiShellPath(cwd, agentDir);
+    const configuredShellPath = getPiShellPath(cwd, agentDir);
     return resolveTerminalShell(configuredShellPath, managedShellPath);
   };
 }

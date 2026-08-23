@@ -21,7 +21,7 @@ describe("SessionMetadataIndex", () => {
     rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  it("scans system Pi JSONL sessions and keeps paths out of the public thread list", async () => {
+  it("scans Pi JSONL sessions and keeps paths out of the public thread list", async () => {
     const directory = projectSessionDirectory(agentDir, cwd);
     const sessionFile = writeSession(directory, {
       id: "alpha",
@@ -106,7 +106,7 @@ describe("SessionMetadataIndex", () => {
     expect(existsSync(targetFile)).toBe(true);
   });
 
-  it("refreshes additions, metadata changes, and deletions from system Pi files", async () => {
+  it("refreshes additions, metadata changes, and deletions from Pi files", async () => {
     const directory = projectSessionDirectory(agentDir, cwd);
     const initial = writeSession(directory, {
       id: "initial",

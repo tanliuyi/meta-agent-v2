@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DesktopBuiltinProviderRegistry } from "../src/main/pi/desktop-builtin-provider.ts";
 
 describe("DesktopBuiltinProviderRegistry", () => {
-  it("exposes Meta Agent connection defaults to the system Pi settings editor", () => {
+  it("exposes Meta Agent connection defaults to the Pi settings editor", () => {
     expect(DesktopBuiltinProviderRegistry.getProviderInfos()).toContainEqual({
       id: "meta-agent",
       displayName: "Meta Agent Provider",

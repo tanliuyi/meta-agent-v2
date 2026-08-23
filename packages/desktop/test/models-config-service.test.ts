@@ -251,7 +251,7 @@ describe("ModelsConfigService", () => {
     ).toEqual(expect.objectContaining({ ok: true }));
   });
 
-  test("serializes accepted no-op built-ins and overrides into the system Pi models format", async () => {
+  test("serializes accepted no-op built-ins and overrides into the Pi models format", async () => {
     const result = await service.saveConfig({
       expectedRevision: MISSING_MODELS_CONFIG_REVISION,
       providers: [

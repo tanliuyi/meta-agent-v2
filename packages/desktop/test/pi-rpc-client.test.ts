@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PiThreadStore } from "../src/renderer/src/runtime/pi-thread-store.ts";
 import type { SessionBootstrap, SessionPushPayload } from "../src/shared/contracts.ts";
+import { loadPiDraftConfig } from "../src/sidecar/pi-draft-config.ts";
+import { type ProbedPi, resolvePi } from "../src/sidecar/pi-resolver.ts";
 import { PiRpcClient } from "../src/sidecar/pi-rpc-client.ts";
 import { PiRpcSessionRuntime, summarize } from "../src/sidecar/pi-rpc-session-runtime.ts";
-import { loadSystemPiDraftConfig } from "../src/sidecar/system-pi-draft-config.ts";
-import { type ProbedSystemPi, resolveSystemPi } from "../src/sidecar/system-pi-resolver.ts";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-pi-rpc.mjs", import.meta.url));
 const temporaryDirectories: string[] = [];
@@ -19,7 +19,7 @@ function temporaryDirectory(prefix: string): string {
   return directory;
 }
 
-function fakePi(): ProbedSystemPi {
+function fakePi(): ProbedPi {
   return {
     command: process.execPath,
     argsPrefix: [fixturePath],
@@ -34,7 +34,7 @@ afterEach(() => {
   }
 });
 
-describe("resolveSystemPi", () => {
+describe("resolvePi", () => {
   it("resolves a POSIX executable from an absolute PATH entry", () => {
     const root = temporaryDirectory("desktop-pi-posix-");
     const executable = join(root, "pi");
@@ -42,7 +42,7 @@ describe("resolveSystemPi", () => {
     chmodSync(executable, 0o755);
 
     const canonicalExecutable = realpathSync(executable);
-    expect(resolveSystemPi({ PATH: `${delimiter}${root}` }, "linux")).toEqual({
+    expect(resolvePi({ PATH: `${delimiter}${root}` }, "linux")).toEqual({
       command: canonicalExecutable,
       argsPrefix: [],
       executablePath: canonicalExecutable,
@@ -63,7 +63,7 @@ describe("resolveSystemPi", () => {
     );
 
     const canonicalRoot = realpathSync(root);
-    expect(resolveSystemPi({ Path: root }, "win32")).toEqual({
+    expect(resolvePi({ Path: root }, "win32")).toEqual({
       command: join(canonicalRoot, "node.exe"),
       argsPrefix: [join(canonicalRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js")],
       executablePath: join(canonicalRoot, "pi.cmd"),
@@ -87,7 +87,7 @@ describe("resolveSystemPi", () => {
 
     const canonicalRoot = realpathSync(root);
     const canonicalNodeRoot = realpathSync(nodeRoot);
-    expect(resolveSystemPi({ PATH: `${root}${delimiter}${nodeRoot}` }, "win32")).toMatchObject({
+    expect(resolvePi({ PATH: `${root}${delimiter}${nodeRoot}` }, "win32")).toMatchObject({
       command: join(canonicalNodeRoot, "node.exe"),
       argsPrefix: [join(canonicalRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js")],
       executablePath: join(canonicalRoot, "pi.cmd"),
@@ -96,14 +96,12 @@ describe("resolveSystemPi", () => {
   });
 
   it("does not resolve relative or empty PATH entries", () => {
-    expect(() => resolveSystemPi({ PATH: `${delimiter}.` }, "linux")).toThrow(
-      "Unable to find a runnable system Pi CLI in PATH",
-    );
+    expect(() => resolvePi({ PATH: `${delimiter}.` }, "linux")).toThrow("Unable to find a runnable Pi CLI in PATH");
   });
 });
 
 describe("PiRpcSessionRuntime", () => {
-  it("rejects system Pi versions older than the 0.84.2 wire protocol", async () => {
+  it("rejects Pi versions older than the 0.84.2 wire protocol", async () => {
     await expect(
       PiRpcSessionRuntime.create({
         binding: {
@@ -126,7 +124,7 @@ describe("PiRpcSessionRuntime", () => {
     ).rejects.toThrow("install 0.84.2 or newer");
   });
 
-  it("creates a system Pi session and projects a completed prompt", async () => {
+  it("creates a Pi session and projects a completed prompt", async () => {
     const userData = temporaryDirectory("desktop-pi-user-data-");
     const cwd = temporaryDirectory("desktop-pi-cwd-");
     const pushes: SessionPushPayload[] = [];
@@ -162,7 +160,7 @@ describe("PiRpcSessionRuntime", () => {
           commands: [
             {
               name: "reload",
-              description: "Reload System Pi extensions, skills, prompts, and context files",
+              description: "Reload Pi extensions, skills, prompts, and context files",
               source: "builtin",
               acceptsArguments: false,
             },
@@ -475,7 +473,7 @@ describe("PiRpcSessionRuntime", () => {
     }
   });
 
-  it("projects generic system Pi extension UI without Desktop extension code", async () => {
+  it("projects generic Pi extension UI without Desktop extension code", async () => {
     const userData = temporaryDirectory("desktop-pi-user-data-");
     const runtime = await PiRpcSessionRuntime.create({
       binding: {
@@ -583,10 +581,10 @@ describe("PiRpcSessionRuntime", () => {
   });
 });
 
-describe("loadSystemPiDraftConfig", () => {
+describe("loadPiDraftConfig", () => {
   it("rejects outdated Pi before launching the draft RPC worker", async () => {
     await expect(
-      loadSystemPiDraftConfig(
+      loadPiDraftConfig(
         temporaryDirectory("desktop-pi-cwd-"),
         temporaryDirectory("desktop-pi-user-data-"),
         async () => ({ ...fakePi(), version: "0.84.2-beta.1" }),
@@ -595,7 +593,7 @@ describe("loadSystemPiDraftConfig", () => {
   });
 
   it("uses Pi 0.84 command metadata without the removed acceptsArguments field", async () => {
-    const config = await loadSystemPiDraftConfig(
+    const config = await loadPiDraftConfig(
       temporaryDirectory("desktop-pi-cwd-"),
       temporaryDirectory("desktop-pi-user-data-"),
       async () => fakePi(),
@@ -608,7 +606,7 @@ describe("loadSystemPiDraftConfig", () => {
   });
 
   it("loads thinking levels independently for every model", async () => {
-    const config = await loadSystemPiDraftConfig(
+    const config = await loadPiDraftConfig(
       temporaryDirectory("desktop-pi-cwd-"),
       temporaryDirectory("desktop-pi-user-data-"),
       async () => fakePi(),
@@ -684,7 +682,7 @@ describe("PiRpcClient", () => {
         cwd: temporaryDirectory("desktop-pi-cwd-"),
         environment: { ...process.env, PI_CODING_AGENT_DIR: userData, FAKE_PI_PRIMITIVE: "1" },
       }),
-    ).rejects.toThrow("System Pi emitted a non-object JSONL message");
+    ).rejects.toThrow("Pi emitted a non-object JSONL message");
   });
 
   it("rejects protocol pollution during startup", async () => {
@@ -695,7 +693,7 @@ describe("PiRpcClient", () => {
         cwd: temporaryDirectory("desktop-pi-cwd-"),
         environment: { ...process.env, PI_CODING_AGENT_DIR: userData, FAKE_PI_MALFORMED: "1" },
       }),
-    ).rejects.toThrow("System Pi emitted invalid JSONL");
+    ).rejects.toThrow("Pi emitted invalid JSONL");
   });
 });
 

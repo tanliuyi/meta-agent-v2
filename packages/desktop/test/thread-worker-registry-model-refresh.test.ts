@@ -74,7 +74,7 @@ describe("ThreadWorkerRegistry model refresh", () => {
     expect(harness.resync).toHaveBeenCalledWith(
       "project",
       "thread",
-      "System Pi restarted for model configuration generation 7",
+      "Pi restarted for model configuration generation 7",
     );
     await registry.dispose();
   });
@@ -91,7 +91,7 @@ describe("ThreadWorkerRegistry model refresh", () => {
     expect(harness.resync).toHaveBeenCalledWith(
       "project",
       "thread",
-      "System Pi reloaded extensions, skills, prompts, and context files",
+      "Pi reloaded extensions, skills, prompts, and context files",
     );
     await registry.dispose();
   });
@@ -145,13 +145,13 @@ describe("ThreadWorkerRegistry model refresh", () => {
       1,
       "project",
       "thread",
-      "System Pi restarted for model configuration generation 7",
+      "Pi restarted for model configuration generation 7",
     );
     expect(harness.resync).toHaveBeenNthCalledWith(
       2,
       "project",
       "thread",
-      "System Pi restarted for model configuration generation 8",
+      "Pi restarted for model configuration generation 8",
     );
     await registry.dispose();
   });
@@ -192,7 +192,7 @@ describe("ThreadWorkerRegistry model refresh", () => {
     expect(harness.resync).toHaveBeenCalledWith(
       "project",
       "thread",
-      "System Pi restarted for model configuration generation 10",
+      "Pi restarted for model configuration generation 10",
     );
     await registry.dispose();
   });

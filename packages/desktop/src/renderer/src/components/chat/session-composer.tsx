@@ -26,7 +26,7 @@ export function SessionComposer() {
   const widgets = useMemo(() => {
     const statusLines = Object.values(extensionStatuses);
     return statusLines.length > 0
-      ? [{ key: "system-pi-status", lines: statusLines, placement: "aboveEditor" as const }, ...extensionWidgets]
+      ? [{ key: "pi-status", lines: statusLines, placement: "aboveEditor" as const }, ...extensionWidgets]
       : extensionWidgets;
   }, [extensionStatuses, extensionWidgets]);
   const composerCommand = useSessionControlSelector((control) => control?.extensionHost.composerCommand);

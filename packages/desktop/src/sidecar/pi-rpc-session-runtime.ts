@@ -32,14 +32,14 @@ import {
 import type { ThreadWorkerBinding } from "../shared/sidecar-contracts.ts";
 import { isThinkingLevel } from "../shared/thinking-levels.ts";
 import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
+import { assertSupportedPiVersion, type ProbedPi, resolveAndProbePi } from "./pi-resolver.ts";
 import { PiRpcClient, type PiRpcHandshake, type PiRpcResponse } from "./pi-rpc-client.ts";
-import { assertSupportedSystemPiVersion, type ProbedSystemPi, resolveAndProbeSystemPi } from "./system-pi-resolver.ts";
 
 interface PiRpcSessionRuntimeOptions {
   binding: ThreadWorkerBinding;
   push(payload: SessionPushPayload): void;
   onSummaryChanged(current: PiRpcSessionRuntime): void;
-  resolvePi?(environment: NodeJS.ProcessEnv): Promise<ProbedSystemPi>;
+  resolvePi?(environment: NodeJS.ProcessEnv): Promise<ProbedPi>;
 }
 
 interface RpcState {
@@ -58,7 +58,7 @@ const EMPTY_EXTENSION_HOST: SessionControlState["extensionHost"] = { statuses: {
 const BUILTIN_COMMANDS: readonly SlashCommand[] = [
   {
     name: "reload",
-    description: "Reload System Pi extensions, skills, prompts, and context files",
+    description: "Reload Pi extensions, skills, prompts, and context files",
     source: "builtin",
     acceptsArguments: false,
   },
@@ -129,8 +129,8 @@ export class PiRpcSessionRuntime {
     const binding = options.binding;
     const environment: NodeJS.ProcessEnv = { ...process.env, PI_CODING_AGENT_DIR: binding.agentDir };
     if (binding.shellPath) prependEnvironmentPath(environment, dirname(binding.shellPath));
-    const pi = await (options.resolvePi ?? resolveAndProbeSystemPi)(environment);
-    assertSupportedSystemPiVersion(pi.version);
+    const pi = await (options.resolvePi ?? resolveAndProbePi)(environment);
+    assertSupportedPiVersion(pi.version);
     const sessionDirectory = resolveDesktopSessionDirectory(binding.projectId, binding.agentDir);
     const piArgs = [
       ...(binding.mode === "create" ? ["--session-id", binding.sessionId] : ["--session", binding.sessionFile]),
@@ -147,7 +147,7 @@ export class PiRpcSessionRuntime {
         if (runtime) runtime.handleEvent(event);
         else {
           if (earlyEvents.length >= MAX_EARLY_RPC_EVENTS) {
-            throw new Error(`System Pi emitted more than ${MAX_EARLY_RPC_EVENTS} events during startup`);
+            throw new Error(`Pi emitted more than ${MAX_EARLY_RPC_EVENTS} events during startup`);
           }
           earlyEvents.push(event);
         }
@@ -158,9 +158,7 @@ export class PiRpcSessionRuntime {
       let state = parseState(handshake.state);
       if (binding.mode === "create") {
         if (state.sessionId !== binding.sessionId) {
-          throw new Error(
-            `Created system Pi session ID mismatch: expected ${binding.sessionId}, got ${state.sessionId}`,
-          );
+          throw new Error(`Created Pi session ID mismatch: expected ${binding.sessionId}, got ${state.sessionId}`);
         }
         await client.request({
           type: "set_model",
@@ -170,7 +168,7 @@ export class PiRpcSessionRuntime {
         await client.request({ type: "set_thinking_level", level: binding.createInput.thinkingLevel });
         state = await requestState(client);
       } else if (state.sessionId !== binding.threadId) {
-        throw new Error(`Opened system Pi session ID mismatch: expected ${binding.threadId}, got ${state.sessionId}`);
+        throw new Error(`Opened Pi session ID mismatch: expected ${binding.threadId}, got ${state.sessionId}`);
       }
 
       const [context, thinkingLevels] = await Promise.all([requestContextUsage(client), requestThinkingLevels(client)]);
@@ -272,7 +270,7 @@ export class PiRpcSessionRuntime {
 
   async respond(response: HostResponse): Promise<void> {
     const request = this.hostRequests.find((item) => item.id === response.requestId);
-    if (!request) throw new Error(`System Pi extension UI request not found: ${response.requestId}`);
+    if (!request) throw new Error(`Pi extension UI request not found: ${response.requestId}`);
     this.hostRequests = this.hostRequests.filter((item) => item !== request);
     const timer = this.hostRequestTimers.get(response.requestId);
     if (timer) clearTimeout(timer);
@@ -618,8 +616,8 @@ export class PiRpcSessionRuntime {
     const readiness: Readiness = model
       ? { state: "ready" }
       : this.models.length > 0
-        ? { state: "missing-model", message: "System Pi has no active model" }
-        : { state: "missing-credentials", message: "System Pi has no available authenticated models" };
+        ? { state: "missing-model", message: "Pi has no active model" }
+        : { state: "missing-credentials", message: "Pi has no available authenticated models" };
     return {
       protocolVersion: PROTOCOL_VERSION,
       revision: this.revision,
@@ -645,8 +643,7 @@ export class PiRpcSessionRuntime {
   }
 
   private assertIdentity(projectId: string, threadId: string): void {
-    if (projectId !== this.projectId || threadId !== this.id)
-      throw new Error("System Pi RPC session identity mismatch");
+    if (projectId !== this.projectId || threadId !== this.id) throw new Error("Pi RPC session identity mismatch");
   }
 }
 
@@ -716,7 +713,7 @@ async function requestThinkingLevels(client: PiRpcClient): Promise<ThinkingLevel
 
 function parseThinkingLevel(value: string): ThinkingLevel {
   if (isThinkingLevel(value)) return value;
-  throw new Error(`Unsupported system Pi thinking level: ${value}`);
+  throw new Error(`Unsupported Pi thinking level: ${value}`);
 }
 
 function parseModels(values: readonly unknown[]): ModelOption[] {

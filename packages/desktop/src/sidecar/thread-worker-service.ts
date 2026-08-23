@@ -34,7 +34,7 @@ export class ThreadWorkerService implements SidecarService {
       const sessionFile = runtime.sessionFile;
       if (!sessionFile) {
         await runtime.dispose();
-        throw new Error("Created system Pi session did not materialize a session file");
+        throw new Error("Created Pi session did not materialize a session file");
       }
       context.emit({
         type: "session-materialized",

@@ -1,4 +1,4 @@
-/** Desktop-owned provider metadata used to edit the system Pi configuration files. */
+/** Desktop-owned provider metadata used to edit the Pi configuration files. */
 
 import type { AuthProviderInfo } from "../../shared/auth-config-contracts.ts";
 import type {

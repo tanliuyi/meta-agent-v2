@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getPiShellPath } from "../src/main/sidecar/pi-settings.ts";
 import { saveShellRuntimePath } from "../src/main/sidecar/shell-runtime-settings.ts";
-import { getSystemPiShellPath } from "../src/main/sidecar/system-pi-settings.ts";
 
 describe("shell runtime settings", () => {
   let root: string;
@@ -29,7 +29,7 @@ describe("shell runtime settings", () => {
     await saveShellRuntimePath(cwd, agentDir, shellPath);
 
     expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"))).toMatchObject({ shellPath });
-    expect(getSystemPiShellPath(cwd, agentDir)).toBe(shellPath);
+    expect(getPiShellPath(cwd, agentDir)).toBe(shellPath);
   });
 
   it("updates a project shell override in its effective scope", async () => {
@@ -47,10 +47,10 @@ describe("shell runtime settings", () => {
     expect(JSON.parse(readFileSync(join(projectSettingsDir, "settings.json"), "utf8")).shellPath).toBe(
       replacementShellPath,
     );
-    expect(getSystemPiShellPath(cwd, agentDir)).toBe(replacementShellPath);
+    expect(getPiShellPath(cwd, agentDir)).toBe(replacementShellPath);
   });
 
-  it("re-reads settings after acquiring the system Pi lock", async () => {
+  it("re-reads settings after acquiring the Pi lock", async () => {
     const settingsPath = join(agentDir, "settings.json");
     writeFileSync(settingsPath, JSON.stringify({ theme: "dark" }));
     const release = await lockfile.lock(settingsPath, { realpath: false });
@@ -71,9 +71,7 @@ describe("shell runtime settings", () => {
     const settingsPath = join(agentDir, "settings.json");
     writeFileSync(settingsPath, "{ invalid json");
 
-    await expect(saveShellRuntimePath(cwd, agentDir, join(root, "bash.exe"))).rejects.toThrow(
-      "Invalid system Pi settings",
-    );
+    await expect(saveShellRuntimePath(cwd, agentDir, join(root, "bash.exe"))).rejects.toThrow("Invalid Pi settings");
     expect(readFileSync(settingsPath, "utf8")).toBe("{ invalid json");
   });
 });

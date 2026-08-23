@@ -11,7 +11,7 @@ export interface BashShellConfig {
   commandTransport?: "argv" | "stdin";
 }
 
-export function getSystemPiShellPath(cwd: string, agentDir: string): string | undefined {
+export function getPiShellPath(cwd: string, agentDir: string): string | undefined {
   const projectPath = join(resolve(cwd), ".pi", "settings.json");
   const project = readSettings(projectPath);
   if (typeof project.shellPath === "string" && project.shellPath.trim()) return project.shellPath;
@@ -19,7 +19,7 @@ export function getSystemPiShellPath(cwd: string, agentDir: string): string | un
   return typeof global.shellPath === "string" && global.shellPath.trim() ? global.shellPath : undefined;
 }
 
-export async function saveSystemPiShellPath(cwd: string, agentDir: string, shellPath: string): Promise<void> {
+export async function savePiShellPath(cwd: string, agentDir: string, shellPath: string): Promise<void> {
   if (!isAbsolute(shellPath)) throw new Error(`Shell path must be absolute: ${shellPath}`);
   const projectPath = join(resolve(cwd), ".pi", "settings.json");
   const projectSettings = readSettings(projectPath, true);
@@ -67,7 +67,7 @@ function readSettings(path: string, strict = false): Record<string, unknown> {
   try {
     const errors: ParseError[] = [];
     const value: unknown = parse(readFileSync(path, "utf8"), errors);
-    if (strict && errors.length > 0) throw new Error(`Invalid system Pi settings: ${path}`);
+    if (strict && errors.length > 0) throw new Error(`Invalid Pi settings: ${path}`);
     return typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};

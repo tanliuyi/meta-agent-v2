@@ -203,7 +203,7 @@ describe("PiCommandCoordinator", () => {
     expect(report).not.toHaveBeenCalled();
   });
 
-  it("cancel 中止系统 Pi 并清除本地 pending queue bookkeeping", async () => {
+  it("cancel 中止Pi 并清除本地 pending queue bookkeeping", async () => {
     const coordinator = createCoordinator();
     prompt.mockResolvedValueOnce({ accepted: true, queued: true });
     coordinator.enqueue(userMessage("queued"));

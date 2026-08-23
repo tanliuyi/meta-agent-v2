@@ -7,9 +7,9 @@ import type {
   SidecarBinding,
   SidecarCommand,
 } from "../shared/sidecar-contracts.ts";
+import { loadPiDraftConfig } from "./pi-draft-config.ts";
 import { SessionMetadataIndex, type SessionRemovalPlan } from "./session-metadata-index.ts";
 import type { SidecarService } from "./sidecar-host.ts";
-import { loadSystemPiDraftConfig } from "./system-pi-draft-config.ts";
 
 const CREATION_RESERVATION_GRACE_MS = 30_000;
 
@@ -45,7 +45,7 @@ export class MetadataWorkerService implements SidecarService {
       case "listSessionsWithPaths":
         return this.index.listWithPaths(command.projectId, command.cwd);
       case "getDraftConfig":
-        return loadSystemPiDraftConfig(command.cwd, this.agentDir);
+        return loadPiDraftConfig(command.cwd, this.agentDir);
       case "resolveSession":
         return this.index.resolve(command.projectId, command.cwd, command.threadId);
       case "upsertSession":

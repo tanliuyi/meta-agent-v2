@@ -57,7 +57,7 @@ describe("PiNoticeView", () => {
           kind: "notice",
           noticeType: "notification",
           notificationType,
-          title: "系统 Pi 扩展通知",
+          title: "Pi 扩展通知",
           content: { type: "text", text: "通知内容" },
         }}
       />,

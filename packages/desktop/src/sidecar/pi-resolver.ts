@@ -7,23 +7,23 @@ import { gte, valid } from "semver";
 const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const VERSION_TIMEOUT_MS = 5_000;
 const MAX_VERSION_OUTPUT_BYTES = 64 * 1024;
-export const MINIMUM_SYSTEM_PI_VERSION = "0.84.2";
+export const MINIMUM_PI_VERSION = "0.84.2";
 
-export function assertSupportedSystemPiVersion(version: string): void {
-  if (!valid(version)) throw new Error(`System Pi returned an unsupported version: ${version}`);
-  if (!gte(version, MINIMUM_SYSTEM_PI_VERSION)) {
-    throw new Error(`System Pi ${version} is unsupported; install ${MINIMUM_SYSTEM_PI_VERSION} or newer`);
+export function assertSupportedPiVersion(version: string): void {
+  if (!valid(version)) throw new Error(`Pi returned an unsupported version: ${version}`);
+  if (!gte(version, MINIMUM_PI_VERSION)) {
+    throw new Error(`Pi ${version} is unsupported; install ${MINIMUM_PI_VERSION} or newer`);
   }
 }
 
-export interface SystemPiInvocation {
+export interface PiInvocation {
   command: string;
   argsPrefix: string[];
   executablePath: string;
   packageRoot?: string;
 }
 
-export interface ProbedSystemPi extends SystemPiInvocation {
+export interface ProbedPi extends PiInvocation {
   version: string;
 }
 
@@ -97,7 +97,7 @@ function readPiPackage(packageRoot: string): { cliPath: string; version: string 
   }
 }
 
-function resolveWindowsShim(shimPath: string, entries: readonly string[]): SystemPiInvocation | undefined {
+function resolveWindowsShim(shimPath: string, entries: readonly string[]): PiInvocation | undefined {
   const shimDirectory = realpathSync(dirname(shimPath));
   const siblingNodePath = join(shimDirectory, "node.exe");
   const nodePath = isFile(siblingNodePath)
@@ -116,10 +116,10 @@ function resolveWindowsShim(shimPath: string, entries: readonly string[]): Syste
   };
 }
 
-export function resolveSystemPi(
+export function resolvePi(
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
-): SystemPiInvocation {
+): PiInvocation {
   const entries = pathEntries(environment);
   if (platform === "win32") {
     for (const directory of entries) {
@@ -143,20 +143,20 @@ export function resolveSystemPi(
     }
   }
 
-  throw new Error("Unable to find a runnable system Pi CLI in PATH");
+  throw new Error("Unable to find a runnable Pi CLI in PATH");
 }
 
 function appendBounded(current: string, chunk: Buffer, label: string): string {
   if (Buffer.byteLength(current) + chunk.byteLength > MAX_VERSION_OUTPUT_BYTES) {
-    throw new Error(`System Pi ${label} exceeded ${MAX_VERSION_OUTPUT_BYTES} bytes`);
+    throw new Error(`Pi ${label} exceeded ${MAX_VERSION_OUTPUT_BYTES} bytes`);
   }
   return current + chunk.toString("utf8");
 }
 
-export async function probeSystemPi(
-  invocation: SystemPiInvocation,
+export async function probePi(
+  invocation: PiInvocation,
   environment: NodeJS.ProcessEnv = process.env,
-): Promise<ProbedSystemPi> {
+): Promise<ProbedPi> {
   return new Promise((resolveProbe, rejectProbe) => {
     const child = spawn(invocation.command, [...invocation.argsPrefix, "--version"], {
       env: environment,
@@ -176,7 +176,7 @@ export async function probeSystemPi(
       else {
         const version = stdout.trim();
         if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
-          rejectProbe(new Error(`System Pi returned an invalid version: ${JSON.stringify(version)}`));
+          rejectProbe(new Error(`Pi returned an invalid version: ${JSON.stringify(version)}`));
           return;
         }
         resolveProbe({ ...invocation, version });
@@ -185,11 +185,11 @@ export async function probeSystemPi(
 
     const timeout = setTimeout(() => {
       child.kill("SIGKILL");
-      finish(new Error(`System Pi version probe timed out after ${VERSION_TIMEOUT_MS}ms`));
+      finish(new Error(`Pi version probe timed out after ${VERSION_TIMEOUT_MS}ms`));
     }, VERSION_TIMEOUT_MS);
     timeout.unref();
 
-    child.on("error", (error) => finish(new Error(`Unable to start system Pi: ${error.message}`)));
+    child.on("error", (error) => finish(new Error(`Unable to start Pi: ${error.message}`)));
     child.stdout.on("data", (chunk: Buffer) => {
       try {
         stdout = appendBounded(stdout, chunk, "version output");
@@ -209,9 +209,7 @@ export async function probeSystemPi(
     child.on("close", (code, signal) => {
       if (code !== 0) {
         finish(
-          new Error(
-            `System Pi version probe failed (code=${code ?? "null"}, signal=${signal ?? "none"}): ${stderr.trim()}`,
-          ),
+          new Error(`Pi version probe failed (code=${code ?? "null"}, signal=${signal ?? "none"}): ${stderr.trim()}`),
         );
         return;
       }
@@ -220,9 +218,9 @@ export async function probeSystemPi(
   });
 }
 
-export async function resolveAndProbeSystemPi(
+export async function resolveAndProbePi(
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
-): Promise<ProbedSystemPi> {
-  return probeSystemPi(resolveSystemPi(environment, platform), environment);
+): Promise<ProbedPi> {
+  return probePi(resolvePi(environment, platform), environment);
 }
