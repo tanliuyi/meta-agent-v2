@@ -1,8 +1,6 @@
 import { autoUpdate, FloatingPortal, flip, offset, shift, useFloating } from "@floating-ui/react";
 import { memo, useMemo } from "react";
-import { DirectiveTextContent } from "../assistant-ui/directive-text-content.tsx";
-import { StreamdownMarkdown } from "../assistant-ui/streamdown/streamdown-markdown.tsx";
-import type { MessageNavigationSummary } from "./message-navigation.tsx";
+import { MessageNavigationSummaryContent } from "./message-navigation-summary-content.tsx";
 
 interface MessageNavigationItemProps {
   index: number;
@@ -10,7 +8,7 @@ interface MessageNavigationItemProps {
   current: boolean;
   hovered: boolean;
   hoverDistance: number | null;
-  summary: readonly MessageNavigationSummary[];
+  messageIds: readonly string[];
   workspace: HTMLElement | null;
   onSelect(index: number): void;
 }
@@ -21,7 +19,7 @@ export const MessageNavigationItem = memo(function MessageNavigationItem({
   current,
   hovered,
   hoverDistance,
-  summary,
+  messageIds,
   workspace,
   onSelect,
 }: MessageNavigationItemProps) {
@@ -58,17 +56,7 @@ export const MessageNavigationItem = memo(function MessageNavigationItem({
       {hovered && workspace ? (
         <FloatingPortal root={workspace} preserveTabOrder={false}>
           <div ref={refs.setFloating} className="message-navigation-summary" style={floatingStyles} role="tooltip">
-            {summary.map((item, summaryIndex) =>
-              item.markdown ? (
-                <div key={summaryIndex} className="message-navigation-summary-markdown">
-                  <StreamdownMarkdown>{item.text}</StreamdownMarkdown>
-                </div>
-              ) : (
-                <span key={summaryIndex}>
-                  <DirectiveTextContent text={item.text} />
-                </span>
-              ),
-            )}
+            <MessageNavigationSummaryContent messageIds={messageIds} />
           </div>
         </FloatingPortal>
       ) : null}

@@ -383,6 +383,66 @@ describe("ThreadWorkerRegistry model refresh", () => {
     await registry.dispose();
   });
 
+  it("serializes concurrent source commands behind fork replacement", async () => {
+    const forkGate = deferred<void>();
+    const harness = createHarness(userDataDir, { forkGate });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    const forking = registry.fork({ projectId: "project", threadId: "thread", entryId: "entry" });
+    await vi.waitFor(() => expect(harness.clients[0]?.requests).toContain("fork"));
+    const prompting = registry.prompt(promptInput());
+    expect(harness.clients[0]?.requests).not.toContain("prompt");
+
+    forkGate.resolve();
+    await forking;
+    await prompting;
+
+    expect(harness.clients).toHaveLength(2);
+    expect(harness.clients[0]?.requests).not.toContain("prompt");
+    expect(harness.clients[1]?.requests).toContain("prompt");
+    await registry.dispose();
+  });
+
+  it("retires and resyncs the source worker when fork outcome parsing fails", async () => {
+    const harness = createHarness(userDataDir, { forkError: new Error("fork state unavailable") });
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    await expect(registry.fork({ projectId: "project", threadId: "thread", entryId: "entry" })).rejects.toThrow(
+      "fork state unavailable",
+    );
+
+    expect(harness.clients[0]?.shutdownCount).toBe(1);
+    expect(harness.resync).toHaveBeenCalledWith("project", "thread", "Pi source session reopened after fork");
+    await registry.dispose();
+  });
+
+  it("registers a forked session and retires the source worker", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+
+    const result = await registry.fork({ projectId: "project", threadId: "thread", entryId: "entry" });
+
+    expect(result).toMatchObject({
+      projectId: "project",
+      threadId: "branch",
+      text: "original prompt",
+      thread: { parentThreadId: "thread", origin: "branch" },
+    });
+    expect(harness.metadataUpsert).toHaveBeenCalledWith(
+      "project",
+      "/workspace",
+      join(userDataDir, "agent", "branch.jsonl"),
+      result.thread,
+    );
+    expect(harness.catalogChanged).toHaveBeenCalledWith(result.thread);
+    expect(harness.clients[0]?.shutdownCount).toBe(1);
+    expect(harness.resync).toHaveBeenCalledWith("project", "thread", "Pi source session reopened after fork");
+    await registry.dispose();
+  });
+
   it("accounts for creation recovery bootstrap requests before refreshing", async () => {
     const bootstrapGate = deferred<void>();
     const harness = createHarness(userDataDir, { bootstrapGate });
@@ -409,6 +469,8 @@ interface HarnessOptions {
   bootstrapGate?: ReturnType<typeof deferred<void>>;
   hostResponseGate?: ReturnType<typeof deferred<void>>;
   promptRunning?: boolean;
+  forkGate?: ReturnType<typeof deferred<void>>;
+  forkError?: Error;
   shutdownError?: Error;
   shutdownGates?: Array<ReturnType<typeof deferred<void>>>;
 }
@@ -420,6 +482,7 @@ interface Harness {
   resync: ReturnType<typeof vi.fn>;
   catalogChanged: ReturnType<typeof vi.fn>;
   metadataList: ReturnType<typeof vi.fn>;
+  metadataUpsert: ReturnType<typeof vi.fn>;
 }
 
 function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {}): Harness {
@@ -428,10 +491,11 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
   const resync = vi.fn();
   const catalogChanged = vi.fn();
   const metadataList = vi.fn(async () => [thread()]);
+  const metadataUpsert = vi.fn(async () => undefined);
   const metadata = {
     list: metadataList,
     resolve: vi.fn(async () => ({ id: "thread", path: join(userDataDir, "thread.jsonl"), updatedAt: 1 })),
-    upsert: vi.fn(async () => undefined),
+    upsert: metadataUpsert,
     invalidateProject: vi.fn(async () => undefined),
   } as unknown as MetadataWorkerClient;
   const options: ThreadWorkerRegistryOptions = {
@@ -453,6 +517,8 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
         harnessOptions.bootstrapGate,
         harnessOptions.hostResponseGate,
         harnessOptions.promptRunning ?? false,
+        harnessOptions.forkGate,
+        harnessOptions.forkError,
         harnessOptions.shutdownGates?.[clients.length],
         harnessOptions.shutdownError,
       );
@@ -460,7 +526,7 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
       return client;
     },
   };
-  return { options, clients, failed, resync, catalogChanged, metadataList };
+  return { options, clients, failed, resync, catalogChanged, metadataList, metadataUpsert };
 }
 
 class FakeWorkerClient implements ThreadWorkerClient {
@@ -476,6 +542,8 @@ class FakeWorkerClient implements ThreadWorkerClient {
   private readonly bootstrapGate?: ReturnType<typeof deferred<void>>;
   private readonly hostResponseGate?: ReturnType<typeof deferred<void>>;
   private running: boolean;
+  private readonly forkGate?: ReturnType<typeof deferred<void>>;
+  private readonly forkError?: Error;
   private readonly shutdownGate?: ReturnType<typeof deferred<void>>;
   private readonly shutdownError?: Error;
 
@@ -486,6 +554,8 @@ class FakeWorkerClient implements ThreadWorkerClient {
     bootstrapGate?: ReturnType<typeof deferred<void>>,
     hostResponseGate?: ReturnType<typeof deferred<void>>,
     promptRunning = false,
+    forkGate?: ReturnType<typeof deferred<void>>,
+    forkError?: Error,
     shutdownGate?: ReturnType<typeof deferred<void>>,
     shutdownError?: Error,
   ) {
@@ -496,6 +566,8 @@ class FakeWorkerClient implements ThreadWorkerClient {
     this.bootstrapGate = bootstrapGate;
     this.hostResponseGate = hostResponseGate;
     this.running = promptRunning;
+    this.forkGate = forkGate;
+    this.forkError = forkError;
     this.shutdownGate = shutdownGate;
     this.shutdownError = shutdownError;
     this.instanceId = `worker-${nextWorkerId++}`;
@@ -528,6 +600,24 @@ class FakeWorkerClient implements ThreadWorkerClient {
     if (command.type === "prompt") {
       await this.promptGate?.promise;
       return { accepted: true, queued: false, running: this.running } as T;
+    }
+    if (command.type === "fork") {
+      await this.forkGate?.promise;
+      if (this.forkError) throw this.forkError;
+      if (this.binding.role !== "thread") throw new Error("Expected a thread worker binding");
+      const branch: Thread = {
+        ...thread(),
+        id: "branch",
+        parentThreadId: "thread",
+        origin: "branch",
+      };
+      return {
+        projectId: "project",
+        threadId: "branch",
+        sessionFile: join(this.binding.value.agentDir, "branch.jsonl"),
+        text: "original prompt",
+        thread: branch,
+      } as T;
     }
     if (command.type === "getSummary") return { ...thread(), running: this.running } as T;
     if (command.type === "respondHostUi") await this.hostResponseGate?.promise;

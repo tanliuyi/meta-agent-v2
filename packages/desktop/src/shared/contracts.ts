@@ -498,6 +498,19 @@ export interface SessionCommandResult {
   error?: string;
 }
 
+export interface SessionForkInput {
+  projectId: string;
+  threadId: string;
+  entryId: string;
+}
+
+export interface SessionForkResult {
+  projectId: string;
+  threadId: string;
+  text: string;
+  thread: Thread;
+}
+
 /** Project 下的文件树节点。 */
 export interface FileNode {
   name: string;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRunGroupPart,
   groupMessagePart,
+  hasFinalResponseInRun,
   hasFinalResponseText,
   hasTextAfterGroup,
   hasUserMessageAfter,
@@ -167,20 +168,25 @@ describe("message part grouping", () => {
     expect(runGroupPaths(parts, context)).toEqual([["group-runActivity", "group-chainOfThought"], []]);
   });
 
-  it("hasUserMessageAfter 判断消息之后是否已出现新的用户 prompt", () => {
+  it("跨消息派生从已知索引开始，仅扫描当前 run", () => {
     const messages = [
       { id: "u1", role: "user", content: [] },
-      { id: "a1", role: "assistant", content: [] },
-      { id: "a2", role: "assistant", content: [] },
+      { id: "a1", role: "assistant", content: [{ type: "reasoning", text: "分析" }] },
+      { id: "a2", role: "assistant", content: [{ type: "text", text: "最终回复" }] },
       { id: "u2", role: "user", content: [] },
       { id: "a3", role: "assistant", content: [] },
     ] as unknown as MessageState[];
+    Object.defineProperty(messages, "findIndex", {
+      value: () => {
+        throw new Error("已知 message index 时不应再扫描完整 thread");
+      },
+    });
 
-    expect(hasUserMessageAfter(messages, "a1")).toBe(true);
-    expect(hasUserMessageAfter(messages, "a2")).toBe(true);
-    expect(hasUserMessageAfter(messages, "a3")).toBe(false);
-    expect(hasUserMessageAfter(messages, "u2")).toBe(false);
-    expect(hasUserMessageAfter(messages, "missing")).toBe(false);
+    expect(hasFinalResponseInRun(messages, 1)).toBe(true);
+    expect(hasFinalResponseInRun(messages, 2)).toBe(true);
+    expect(hasFinalResponseInRun(messages, 4)).toBe(false);
+    expect(hasUserMessageAfter(messages, 1)).toBe(true);
+    expect(hasUserMessageAfter(messages, 4)).toBe(false);
   });
 
   it("仅在组后出现 text 时结束自动展开", () => {

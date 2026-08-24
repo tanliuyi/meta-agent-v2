@@ -27,8 +27,8 @@ export function AssistantMessageContent({
   const toolUIs = useAuiState((state) => state.tools.toolUIs);
   const runStartedAt = useAuiState((state) => state.message.createdAt.getTime());
   const runCompletedAt = useAuiState((state) => piCompletedAt(state.message.metadata.custom));
-  const runHasFinalResponse = useAuiState((state) => hasFinalResponseInRun(state.thread.messages, state.message.id));
-  const hasNewUserPrompt = useAuiState((state) => hasUserMessageAfter(state.thread.messages, state.message.id));
+  const runHasFinalResponse = useAuiState((state) => hasFinalResponseInRun(state.thread.messages, state.message.index));
+  const hasNewUserPrompt = useAuiState((state) => hasUserMessageAfter(state.thread.messages, state.message.index));
   const groupMessagePart = useMemo(() => createRunGroupPart(messageParts), [messageParts]);
   const supersededInfoNotificationData = useMemo(
     () => findSupersededInfoNotificationData(messageParts),

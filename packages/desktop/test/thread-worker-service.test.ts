@@ -169,6 +169,39 @@ describe("ThreadWorkerService", () => {
     expect(prompt).toHaveBeenCalledWith(input);
   });
 
+  it("delegates fork commands to the RPC runtime", async () => {
+    const sessionId = "thread";
+    const input = { projectId: "project", threadId: sessionId, entryId: "entry" };
+    const forkResult = {
+      projectId: "project",
+      threadId: "branch",
+      sessionFile: join(root, "branch.jsonl"),
+      text: "original prompt",
+      thread: { id: "branch" },
+    };
+    const fork = vi.fn(async () => forkResult);
+    mocks.runtimeCreate.mockResolvedValue({
+      id: sessionId,
+      sessionFile: join(root, `${sessionId}.jsonl`),
+      bootstrap: vi.fn().mockReturnValue({ threadId: sessionId }),
+      fork,
+      dispose: vi.fn(),
+    });
+    const binding: ThreadWorkerBinding = {
+      mode: "open",
+      projectId: "project",
+      cwd: root,
+      agentDir: join(root, "agent"),
+      threadId: sessionId,
+      sessionFile: join(root, `${sessionId}.jsonl`),
+    };
+    writeFileSync(binding.sessionFile, `${JSON.stringify({ type: "session", id: sessionId })}\n`);
+    const { service } = await ThreadWorkerService.create({ role: "thread", value: binding }, serviceContext);
+
+    await expect(service.command({ type: "fork", input })).resolves.toBe(forkResult);
+    expect(fork).toHaveBeenCalledWith(input);
+  });
+
   it("opens a canonical session path with the original cwd", async () => {
     const cwd = join(root, "workspaces", "general");
     const agentDir = join(root, "agent");

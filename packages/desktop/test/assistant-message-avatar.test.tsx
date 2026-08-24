@@ -34,6 +34,7 @@ vi.mock("@assistant-ui/react", () => ({
       thread: { isRunning: false, messages: viewState.messages },
       message: {
         id: viewState.messageId,
+        index: viewState.messages.findIndex(({ id }) => id === viewState.messageId),
         isLast: true,
         status: { type: "complete" },
         metadata: { custom: { pi: viewState.pi } },

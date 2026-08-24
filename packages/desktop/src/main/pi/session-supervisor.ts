@@ -8,6 +8,8 @@ import type {
   SessionCommandResult,
   SessionControlState,
   SessionCreateInput,
+  SessionForkInput,
+  SessionForkResult,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPush,
@@ -176,6 +178,10 @@ export class SessionSupervisor {
 
   prompt(input: SessionPromptInput): Promise<SessionCommandResult> {
     return this.workers.prompt(input);
+  }
+
+  fork(input: SessionForkInput): Promise<SessionForkResult> {
+    return this.workers.fork(input);
   }
 
   cancel(projectId: string, threadId: string): Promise<void> {

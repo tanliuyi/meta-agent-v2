@@ -6,6 +6,8 @@ import type {
   SessionCommandResult,
   SessionControlState,
   SessionCreateInput,
+  SessionForkInput,
+  SessionForkResult,
   SessionPromptInput,
   SessionPushPayload,
   SessionRemovePolicy,
@@ -196,9 +198,14 @@ export interface ModelConfigurationRevision {
   generation: number;
 }
 
+export interface ThreadWorkerForkResult extends SessionForkResult {
+  sessionFile: string;
+}
+
 export type ThreadSidecarCommand =
   | { type: "bootstrap" }
   | { type: "prompt"; input: SessionPromptInput }
+  | { type: "fork"; input: SessionForkInput }
   | { type: "cancel" }
   | { type: "compact" }
   | { type: "setModel"; provider: string; modelId: string }
@@ -275,6 +282,7 @@ export type SidecarCommand = ThreadSidecarCommand | MetadataSidecarCommand;
 export type SidecarCommandResult =
   | SessionBootstrap
   | SessionCommandResult
+  | SessionForkResult
   | DraftSessionConfig
   | Thread
   | Thread[]

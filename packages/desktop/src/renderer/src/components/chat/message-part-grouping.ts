@@ -46,25 +46,21 @@ export function hasFinalResponseText(parts: readonly FinalResponsePart[]): boole
   return findFinalResponseTextIndex(parts) >= 0;
 }
 
-export function hasFinalResponseInRun(messages: readonly MessageState[], messageId: string): boolean {
-  const messageIndex = messages.findIndex((message) => message.id === messageId);
-  if (messageIndex < 0) return false;
-
+export function hasFinalResponseInRun(messages: readonly MessageState[], messageIndex: number): boolean {
+  if (messageIndex < 0 || messageIndex >= messages.length) return false;
   let startIndex = messageIndex;
   while (startIndex > 0 && messages[startIndex - 1]?.role !== "user") startIndex -= 1;
-
   let endIndex = messageIndex + 1;
   while (endIndex < messages.length && messages[endIndex]?.role !== "user") endIndex += 1;
-
-  return messages
-    .slice(startIndex, endIndex)
-    .some((message) => message.role === "assistant" && hasFinalResponseText(message.content));
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const message = messages[index];
+    if (message?.role === "assistant" && hasFinalResponseText(message.content)) return true;
+  }
+  return false;
 }
 
-/** 判断消息之后（含后续所有消息）是否已出现新的用户 prompt。 */
-export function hasUserMessageAfter(messages: readonly MessageState[], messageId: string): boolean {
-  const messageIndex = messages.findIndex((message) => message.id === messageId);
-  if (messageIndex < 0) return false;
+export function hasUserMessageAfter(messages: readonly MessageState[], messageIndex: number): boolean {
+  if (messageIndex < 0 || messageIndex >= messages.length) return false;
   for (let index = messageIndex + 1; index < messages.length; index += 1) {
     if (messages[index]?.role === "user") return true;
   }

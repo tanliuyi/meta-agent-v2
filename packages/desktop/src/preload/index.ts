@@ -302,6 +302,7 @@ const desktopApi: DesktopApi = {
     remove: (projectId, threadId, policy) => ipcRenderer.invoke(CHANNELS.sessionsRemove, projectId, threadId, policy),
     promote: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsPromote, projectId, threadId),
     prompt: (input) => ipcRenderer.invoke(CHANNELS.sessionsPrompt, input),
+    fork: (input) => ipcRenderer.invoke(CHANNELS.sessionsFork, input),
     cancel: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsCancel, projectId, threadId),
     compact: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsCompact, projectId, threadId),
     reload: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsReload, projectId, threadId),

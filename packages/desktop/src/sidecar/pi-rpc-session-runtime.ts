@@ -17,6 +17,7 @@ import type {
   SessionBootstrap,
   SessionCommandResult,
   SessionControlState,
+  SessionForkInput,
   SessionPromptInput,
   SessionPushPayload,
   SlashCommand,
@@ -30,7 +31,7 @@ import {
   THREAD_USER_PREVIEW_MAX_CHARS,
 } from "../shared/contracts.ts";
 import { PiThreadStore } from "../shared/pi-thread-store.ts";
-import type { ThreadWorkerBinding } from "../shared/sidecar-contracts.ts";
+import type { ThreadWorkerBinding, ThreadWorkerForkResult } from "../shared/sidecar-contracts.ts";
 import { isThinkingLevel } from "../shared/thinking-levels.ts";
 import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
 import { assertSupportedPiVersion, type ProbedPi, resolveAndProbePi } from "./pi-resolver.ts";
@@ -78,6 +79,7 @@ export class PiRpcSessionRuntime {
   private models: ModelOption[];
   private commands: SlashCommand[];
   private thinkingLevels: ThinkingLevel[];
+  private persistedEntries: SessionEntry[];
   private timeline: PiThreadSnapshot;
   private readonly timelineStore: PiThreadStore;
   private summary: Omit<Thread, "projectId" | "archived" | "running">;
@@ -95,6 +97,7 @@ export class PiRpcSessionRuntime {
   private refreshActive = false;
   private refreshRequested = false;
   private timelineResyncRequested = false;
+  private forking = false;
   private disposed = false;
 
   private constructor(
@@ -119,7 +122,8 @@ export class PiRpcSessionRuntime {
       ...parseCommands(handshake.commands).filter((command) => command.name !== "reload"),
     ];
     this.thinkingLevels = thinkingLevels;
-    this.timeline = this.createSnapshot(handshake.entries.entries, handshake.entries.leafId);
+    this.persistedEntries = [...handshake.entries.entries];
+    this.timeline = this.createSnapshot(this.persistedEntries, handshake.entries.leafId);
     this.timelineStore = new PiThreadStore(this.timeline);
     this.summary = summarize(
       this.id,
@@ -249,6 +253,57 @@ export class PiRpcSessionRuntime {
     }
   }
 
+  async fork(input: SessionForkInput): Promise<ThreadWorkerForkResult> {
+    this.assertIdentity(input.projectId, input.threadId);
+    if (this.timeline.phase !== "idle")
+      throw new Error("Wait for the current response to finish before creating a branch.");
+    this.forking = true;
+    const response = await this.client.request({ type: "fork", entryId: input.entryId });
+    const fork = responseRecord(response);
+    if (fork.cancelled === true) throw new Error("Pi branch creation was cancelled");
+    if (typeof fork.text !== "string") throw new Error("Pi fork response is missing the source message text");
+
+    const [state, entriesResponse] = await Promise.all([
+      requestState(this.client),
+      this.client.request({ type: "get_entries" }),
+    ]);
+    if (state.sessionId === this.id) throw new Error("Pi fork did not create a new session");
+    if (!state.sessionFile) throw new Error("Pi fork did not return a persisted session file");
+    const entriesData = responseRecord(entriesResponse);
+    const entries = entriesData.entries;
+    const leafId = entriesData.leafId;
+    if (!Array.isArray(entries) || (leafId !== null && typeof leafId !== "string")) {
+      throw new Error("Pi fork entries response is malformed");
+    }
+    const projection = projectPersistedBranch(entries as SessionEntry[], leafId);
+    const timeline: PiThreadSnapshot = {
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: this.projectId,
+      threadId: state.sessionId,
+      cursor: 0,
+      headId: projection.headId,
+      nodes: projection.nodes,
+      queue: [],
+      phase: "idle",
+      thinkingLevel: state.thinkingLevel,
+    };
+    const summary = summarize(state.sessionId, state.sessionName, timeline, undefined);
+    return {
+      projectId: this.projectId,
+      threadId: state.sessionId,
+      sessionFile: state.sessionFile,
+      text: fork.text,
+      thread: {
+        ...summary,
+        projectId: this.projectId,
+        archived: false,
+        running: false,
+        parentThreadId: this.id,
+        origin: "branch",
+      },
+    };
+  }
+
   async cancel(): Promise<void> {
     await this.client.request({ type: "abort" });
   }
@@ -312,7 +367,7 @@ export class PiRpcSessionRuntime {
   }
 
   private handleEvent(event: PiRpcEvent): void {
-    if (this.disposed) return;
+    if (this.disposed || this.forking) return;
     this.emitRpcEvent(event);
     switch (event.type) {
       case "agent_start":
@@ -323,7 +378,7 @@ export class PiRpcSessionRuntime {
       case "agent_settled":
         this.state = { ...this.state, isStreaming: false, isCompacting: false };
         this.setPhase("idle");
-        this.scheduleRefresh();
+        this.scheduleRefresh(true);
         return;
       case "message_end":
         return;
@@ -407,8 +462,11 @@ export class PiRpcSessionRuntime {
           const refreshSequence = this.sequence;
           const resyncTimeline = this.timelineResyncRequested;
           this.timelineResyncRequested = false;
+          const entryCursor = this.persistedEntries.at(-1)?.id;
           const [entriesResponse, state, context] = await Promise.all([
-            resyncTimeline ? this.client.request({ type: "get_entries" }) : Promise.resolve(undefined),
+            resyncTimeline
+              ? this.client.request({ type: "get_entries", ...(entryCursor ? { since: entryCursor } : {}) })
+              : Promise.resolve(undefined),
             requestState(this.client),
             requestContextUsage(this.client),
           ]);
@@ -439,7 +497,12 @@ export class PiRpcSessionRuntime {
             if (!entries || (leafId !== null && typeof leafId !== "string")) {
               throw new Error("get_entries response is malformed");
             }
-            this.replaceTimeline(entries, leafId, refreshSequence);
+            this.persistedEntries = appendPersistedEntries(
+              this.persistedEntries,
+              entries as SessionEntry[],
+              entryCursor,
+            );
+            this.replaceTimeline(this.persistedEntries, leafId, refreshSequence);
           } else {
             this.events = this.events.filter(({ sequence }) => sequence > this.timeline.cursor);
             this.summary = summarize(this.id, this.state.sessionName, this.timeline, undefined);
@@ -788,6 +851,21 @@ function parseCommands(values: readonly unknown[]): SlashCommand[] {
       },
     ];
   });
+}
+
+export function appendPersistedEntries(
+  current: readonly SessionEntry[],
+  incoming: readonly SessionEntry[],
+  cursor: string | undefined,
+): SessionEntry[] {
+  if (!cursor) return [...incoming];
+  const currentIds = new Set(current.map((entry) => entry.id));
+  for (const entry of incoming) {
+    if (currentIds.has(entry.id))
+      throw new Error(`get_entries returned duplicate entry after cursor ${cursor}: ${entry.id}`);
+    currentIds.add(entry.id);
+  }
+  return [...current, ...incoming];
 }
 
 export function summarize(

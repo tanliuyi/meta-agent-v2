@@ -1,4 +1,4 @@
-import { type ThreadMessage, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
+import { ThreadPrimitive, useAuiState } from "@assistant-ui/react";
 import { defaultRangeExtractor, elementScroll, type Range, useVirtualizer } from "@tanstack/react-virtual";
 import ArrowDown from "lucide-react/dist/esm/icons/arrow-down.mjs";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -7,7 +7,7 @@ import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionControlSelector, useSessionScope, useSessionTimelineSelector } from "../session-context.tsx";
 import { AssistantMessage } from "./message/assistant-message.tsx";
 import { UserMessage } from "./message/user-message.tsx";
-import { MessageNavigation, type MessageNavigationSummary } from "./message-navigation.tsx";
+import { MessageNavigation } from "./message-navigation.tsx";
 import { SessionThreadActivity } from "./session-thread-activity.tsx";
 import { isThreadActivityVisible } from "./thread-activity-indicator.tsx";
 import {
@@ -36,7 +36,7 @@ interface MessageSelectionRange {
 export function Messages() {
   const messageRows = useThreadMessageRows();
   const turns = useThreadTurns(messageRows);
-  const getTurnSummary = useThreadTurnSummaryResolver(turns);
+  const getTurnMessageIds = useCallback((index: number) => turns[index]?.messageIds ?? [], [turns]);
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const sessionRecord = useSessionScope().record;
   const sessionKey = sessionRecord.key;
@@ -239,7 +239,7 @@ export function Messages() {
           scrollerRef={scrollerRef}
           turnCount={turns.length}
           virtualItems={items}
-          getSummary={getTurnSummary}
+          getMessageIds={getTurnMessageIds}
           onSelect={jumpToTurn}
         />
         <div data-slot="session-message-layout">
@@ -336,67 +336,4 @@ function useThreadTurns(messageRows: readonly ThreadMessageRow[]): readonly Thre
     previousTurnsRef.current = turns;
   }, [turns]);
   return turns;
-}
-
-const MESSAGE_NAVIGATION_SUMMARY_MAX_ITEMS = 2;
-const MESSAGE_NAVIGATION_USER_PREVIEW_MAX_CHARS = 240;
-const MESSAGE_NAVIGATION_ASSISTANT_PREVIEW_MAX_CHARS = 480;
-
-function useThreadTurnSummaryResolver(
-  turns: readonly ThreadTurn[],
-): (index: number) => readonly MessageNavigationSummary[] {
-  const messages = useAuiState((state) => state.thread.messages);
-  const messagesById = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
-  return useCallback(
-    (index: number) => {
-      const turn = turns[index];
-      if (!turn) return [{ markdown: false, text: `第 ${index + 1} 组消息` }];
-      const summary = turn.messageIds
-        .flatMap((messageId) => messageSummary(messagesById.get(messageId)))
-        .slice(0, MESSAGE_NAVIGATION_SUMMARY_MAX_ITEMS);
-      return summary.length > 0 ? summary : [{ markdown: false, text: `第 ${index + 1} 组消息` }];
-    },
-    [messagesById, turns],
-  );
-}
-
-function messageSummary(message: ThreadMessage | undefined): MessageNavigationSummary[] {
-  if (!message) return [];
-  const text =
-    message.role === "assistant"
-      ? assistantFinalResponseText(message)
-      : messageText(message.content).replace(/\s+/g, " ");
-  if (!text) return [];
-  const markdown = message.role === "assistant";
-  return [
-    {
-      markdown,
-      text: truncateMessageNavigationPreview(
-        text,
-        markdown ? MESSAGE_NAVIGATION_ASSISTANT_PREVIEW_MAX_CHARS : MESSAGE_NAVIGATION_USER_PREVIEW_MAX_CHARS,
-      ),
-    },
-  ];
-}
-
-function assistantFinalResponseText(message: ThreadMessage): string {
-  const lastRunPartIndex = message.content.findLastIndex(
-    (part) => part.type === "reasoning" || part.type === "tool-call",
-  );
-  return messageText(message.content.slice(lastRunPartIndex + 1));
-}
-
-function messageText(parts: readonly unknown[]): string {
-  const textParts: string[] = [];
-  for (const part of parts) {
-    if (typeof part === "object" && part !== null && "text" in part && typeof part.text === "string") {
-      textParts.push(part.text);
-    }
-  }
-  return textParts.join("\n\n").trim();
-}
-
-function truncateMessageNavigationPreview(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength).trimEnd()}...`;
 }

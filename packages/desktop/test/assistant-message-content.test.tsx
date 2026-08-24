@@ -87,23 +87,24 @@ vi.mock("@assistant-ui/react", () => ({
       );
     },
   },
-  useAuiState: (selector: (state: unknown) => unknown) =>
-    selector({
+  useAuiState: (selector: (state: unknown) => unknown) => {
+    const messages =
+      viewState.runMessages.length > 0
+        ? viewState.runMessages
+        : [{ id: viewState.messageId, role: "assistant", content: viewState.parts }];
+    return selector({
       message: {
         id: viewState.messageId,
+        index: messages.findIndex(({ id }) => id === viewState.messageId),
         parts: viewState.parts,
         createdAt: new Date(0),
         status: { type: "complete" },
         metadata: { custom: { pi: { completedAt: viewState.completedAt } } },
       },
-      thread: {
-        messages:
-          viewState.runMessages.length > 0
-            ? viewState.runMessages
-            : [{ id: viewState.messageId, role: "assistant", content: viewState.parts }],
-      },
+      thread: { messages },
       tools: { toolUIs: viewState.toolUIs },
-    }),
+    });
+  },
 }));
 
 vi.mock("../src/renderer/src/state/thinking-visibility.tsx", () => ({

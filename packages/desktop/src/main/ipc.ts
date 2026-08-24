@@ -37,6 +37,7 @@ import type {
   SessionAttachInput,
   SessionControlState,
   SessionCreateInput,
+  SessionForkInput,
   SessionPromptInput,
   SessionRemovePolicy,
   TerminalEvent,
@@ -483,6 +484,7 @@ export function registerIpc(
     sessions.promote(projectId, threadId),
   );
   ipcMain.handle(CHANNELS.sessionsPrompt, (_event, input: SessionPromptInput) => sessions.prompt(input));
+  ipcMain.handle(CHANNELS.sessionsFork, (_event, input: SessionForkInput) => sessions.fork(input));
   ipcMain.handle(CHANNELS.sessionsCancel, (_event, projectId: string, threadId: string) =>
     sessions.cancel(projectId, threadId),
   );

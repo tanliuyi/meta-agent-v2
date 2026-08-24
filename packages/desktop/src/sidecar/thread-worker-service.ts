@@ -65,6 +65,8 @@ export class ThreadWorkerService implements SidecarService {
         const result = await this.runtime.prompt(command.input);
         return { ...result, running: this.runtime.threadSummary(false).running };
       }
+      case "fork":
+        return this.runtime.fork(command.input);
       case "cancel":
         return this.runtime.cancel();
       case "compact":

@@ -58,7 +58,8 @@ import type {
   SessionControlState,
   SessionCreateInput,
   SessionFlushResult,
-  SessionImageResource,
+  SessionForkInput,
+  SessionForkResult,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
@@ -186,6 +187,7 @@ export interface DesktopApi {
     remove(projectId: string, threadId: string, policy: SessionRemovePolicy): Promise<SessionRemoveResult>;
     promote(projectId: string, threadId: string): Promise<SessionRemoveResult>;
     prompt(input: SessionPromptInput): Promise<SessionCommandResult>;
+    fork(input: SessionForkInput): Promise<SessionForkResult>;
     cancel(projectId: string, threadId: string): Promise<void>;
     compact(projectId: string, threadId: string): Promise<void>;
     reload(projectId: string, threadId: string): Promise<void>;

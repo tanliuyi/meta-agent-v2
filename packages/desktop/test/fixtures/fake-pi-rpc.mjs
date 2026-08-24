@@ -22,7 +22,8 @@ function argument(name) {
 const userData = process.env.PI_CODING_AGENT_DIR ?? null;
 const requestedSession = argument("--session");
 const sessionId = argument("--session-id") ?? "fake-session";
-const sessionFile = requestedSession ?? join(userData ?? process.cwd(), `${sessionId}.jsonl`);
+let activeSessionId = sessionId;
+let sessionFile = requestedSession ?? join(userData ?? process.cwd(), `${sessionId}.jsonl`);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 if (process.env.FAKE_PI_ENV_LOG) {
   writeFileSync(
@@ -81,7 +82,7 @@ function response(request, data) {
 
 function state() {
   return {
-    sessionId: identityChanged ? `${sessionId}-changed` : sessionId,
+    sessionId: identityChanged ? `${sessionId}-changed` : activeSessionId,
     sessionFile,
     sessionName,
     model,
@@ -175,9 +176,11 @@ input.on("line", (line) => {
     case "get_state":
       response(request, state());
       break;
-    case "get_entries":
-      response(request, { entries, leafId });
+    case "get_entries": {
+      const cursorIndex = request.since ? entries.findIndex((entry) => entry.id === request.since) : -1;
+      response(request, { entries: request.since ? entries.slice(cursorIndex + 1) : entries, leafId });
       break;
+    }
     case "get_session_stats":
       response(request, sessionStats());
       break;
@@ -225,6 +228,22 @@ input.on("line", (line) => {
       response(request);
       write({ type: "session_info_changed", name: sessionName });
       break;
+    case "fork": {
+      const index = entries.findIndex((entry) => entry.id === request.entryId);
+      const selected = entries[index];
+      if (index === -1 || selected?.type !== "message" || selected.message.role !== "user") {
+        write({ id: request.id, type: "response", command: request.type, success: false, error: "Invalid entry ID" });
+        break;
+      }
+      const text = typeof selected.message.content === "string" ? selected.message.content : "";
+      entries.splice(index);
+      leafId = entries.at(-1)?.id ?? null;
+      activeSessionId = `${sessionId}-fork`;
+      sessionFile = join(userData ?? process.cwd(), `${activeSessionId}.jsonl`);
+      writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: activeSessionId, cwd: process.cwd() })}\n`);
+      response(request, { text, cancelled: false });
+      break;
+    }
     case "abort":
       response(request);
       break;

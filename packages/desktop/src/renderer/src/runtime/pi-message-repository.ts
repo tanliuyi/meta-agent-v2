@@ -32,7 +32,7 @@ interface ProjectionEntry {
 interface ProjectionCache {
   nodes: readonly PiTimelineNode[];
   entries: readonly ProjectionEntry[];
-  displayIds: ReadonlyMap<string, string>;
+  displayIds: Map<string, string>;
   messages: ExportedMessageRepository["messages"];
 }
 
@@ -78,12 +78,14 @@ export class PiMessageRepositoryConverter {
 
     const rebuildFrom = projectionRebuildStart(previous, nodes, dirtyFrom);
     const prefixCount = previous ? firstEntryEndingAfter(previous.entries, rebuildFrom) : 0;
-    const entries = previous ? previous.entries.slice(0, prefixCount) : [];
-    const messages = previous ? previous.messages.slice(0, prefixCount) : [];
-    const displayIds = new Map(previous?.displayIds);
+    const suffixEntries: ProjectionEntry[] = [];
+    const suffixMessages: RepositoryItem[] = [];
+    const displayIds = previous?.displayIds ?? new Map<string, string>();
+    const removedDisplayIds = new Set<string>();
+    const stagedDisplayIds = new Map<string, string>();
     if (previous) {
       for (let index = prefixCount; index < previous.entries.length; index += 1) {
-        for (const member of previous.entries[index]?.members ?? []) displayIds.delete(member.id);
+        for (const member of previous.entries[index]?.members ?? []) removedDisplayIds.add(member.id);
       }
     }
 
@@ -105,15 +107,19 @@ export class PiMessageRepositoryConverter {
       }
 
       const projectedId = resolveProjectedId(previous, nodes, startIndex, node);
-      for (const member of members) displayIds.set(member.id, projectedId);
+      for (const member of members) stagedDisplayIds.set(member.id, projectedId);
       const item = {
         message: this.convertGroup(members, projectedId),
-        parentId: displayId(displayIds, node.parentId),
+        parentId: stagedDisplayId(displayIds, removedDisplayIds, stagedDisplayIds, node.parentId),
       };
-      entries.push({ startIndex, endIndex: index, members, item });
-      messages.push(item);
+      suffixEntries.push({ startIndex, endIndex: index, members, item });
+      suffixMessages.push(item);
     }
 
+    for (const id of removedDisplayIds) displayIds.delete(id);
+    for (const [id, displayId] of stagedDisplayIds) displayIds.set(id, displayId);
+    const entries = mergeProjectionSuffix(previous?.entries, prefixCount, suffixEntries);
+    const messages = mergeProjectionSuffix(previous?.messages, prefixCount, suffixMessages);
     const projection = { nodes, entries, displayIds, messages };
     this.projection = projection;
     return projection;
@@ -294,6 +300,70 @@ function firstEntryEndingAfter(entries: readonly ProjectionEntry[], nodeIndex: n
     else high = middle;
   }
   return low;
+}
+
+interface ProjectionTailArrayView<T> {
+  source: readonly T[];
+  prefixLength: number;
+}
+
+const projectionTailArrayViews = new WeakMap<readonly unknown[], ProjectionTailArrayView<unknown>>();
+
+function mergeProjectionSuffix<T>(previous: readonly T[] | undefined, prefixLength: number, suffix: readonly T[]): T[] {
+  if (!previous) return [...suffix];
+  if (suffix.length === 1 && prefixLength === previous.length - 1) {
+    const current = projectionTailArrayViews.get(previous);
+    const source = current?.prefixLength === prefixLength ? (current.source as readonly T[]) : previous;
+    return createProjectionTailArrayView(source, prefixLength, suffix[0]!);
+  }
+  return [...previous.slice(0, prefixLength), ...suffix];
+}
+
+function createProjectionTailArrayView<T>(source: readonly T[], prefixLength: number, tail: T): T[] {
+  const target: T[] = [];
+  const itemAt = (index: number): T | undefined =>
+    index < prefixLength ? source[index] : index === prefixLength ? tail : undefined;
+  const view = new Proxy(target, {
+    get(array, property, receiver) {
+      if (property === "length") return prefixLength + 1;
+      const index = arrayIndex(property);
+      return index === undefined ? Reflect.get(array, property, receiver) : itemAt(index);
+    },
+    getOwnPropertyDescriptor(array, property) {
+      const index = arrayIndex(property);
+      if (index === undefined) return Reflect.getOwnPropertyDescriptor(array, property);
+      const value = itemAt(index);
+      return value === undefined ? undefined : { configurable: true, enumerable: true, value, writable: false };
+    },
+    has(array, property) {
+      const index = arrayIndex(property);
+      return index === undefined ? Reflect.has(array, property) : index <= prefixLength;
+    },
+    ownKeys() {
+      return [...Array.from({ length: prefixLength + 1 }, (_value, index) => String(index)), "length"];
+    },
+    set: () => false,
+    defineProperty: () => false,
+    deleteProperty: () => false,
+  });
+  projectionTailArrayViews.set(view, { source, prefixLength });
+  return view;
+}
+
+function arrayIndex(property: PropertyKey): number | undefined {
+  if (typeof property !== "string" || property.length === 0) return undefined;
+  const index = Number(property);
+  return Number.isSafeInteger(index) && index >= 0 && String(index) === property ? index : undefined;
+}
+
+function stagedDisplayId(
+  previous: ReadonlyMap<string, string>,
+  removed: ReadonlySet<string>,
+  staged: ReadonlyMap<string, string>,
+  id: string | null,
+): string | null {
+  if (!id) return null;
+  return staged.get(id) ?? (removed.has(id) ? id : (previous.get(id) ?? id));
 }
 
 function displayId(displayIds: ReadonlyMap<string, string>, id: string | null): string | null {

@@ -18,14 +18,13 @@
   max-height: 168px;
   overflow: auto;
   border: 1px solid hsl(var(--border) / 0.72);
-  border-radius: var(--shape-radius-sm);
+  border-radius: var(--shape-radius-xl);
   background: color-mix(in oklab, hsl(var(--muted)) 34%, hsl(var(--background)));
 }
 
 .composer-widget-content {
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  border-left: 2px solid hsl(var(--muted-foreground) / 0.38);
   color: hsl(var(--muted-foreground));
   font-family: var(--font-family-mono);
   font-size: var(--type-size-meta);
@@ -176,7 +175,7 @@
   flex: 0 1 auto;
   color: hsl(var(--foreground) / 0.9);
   font-family: var(--font-family-mono);
-  font-size: var(--type-size-meta);
+  font-size: var(--type-size-control);
 }
 
 .composer-structured-widget-state {
@@ -188,7 +187,7 @@
 
 .composer-structured-widget-status {
   color: hsl(var(--muted-foreground));
-  font-size: var(--type-size-meta);
+  font-size: var(--type-size-control);
   white-space: nowrap;
 }
 

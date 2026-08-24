@@ -31,6 +31,7 @@ export const CHANNELS = {
   sessionsRemove: "desktop:sessions:remove",
   sessionsPromote: "desktop:sessions:promote",
   sessionsPrompt: "desktop:sessions:prompt",
+  sessionsFork: "desktop:sessions:fork",
   sessionsPush: "desktop:sessions:push",
   sessionsCatalogChanged: "desktop:sessions:catalog-changed",
   sessionsAck: "desktop:sessions:ack",

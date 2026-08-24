@@ -264,7 +264,7 @@ describe("PiRpcSessionRuntime", () => {
         readFileSync(commandLog, "utf8")
           .split("\n")
           .filter((command) => command === "get_entries"),
-      ).toHaveLength(1);
+      ).toHaveLength(2);
       const timeline = runtime.bootstrap().timeline;
       const lastCreatedAt = timeline.nodes.at(-1)?.createdAt;
       if (lastCreatedAt === undefined) throw new Error("Expected a projected assistant message");
@@ -277,7 +277,64 @@ describe("PiRpcSessionRuntime", () => {
         const getEntries = readFileSync(commandLog, "utf8")
           .split("\n")
           .filter((command) => command === "get_entries");
-        expect(getEntries).toHaveLength(2);
+        expect(getEntries).toHaveLength(3);
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("forks from a persisted user entry and returns the new session identity", async () => {
+    const userData = temporaryDirectory("desktop-pi-fork-");
+    const runtime = await PiRpcSessionRuntime.create({
+      binding: {
+        mode: "create",
+        projectId: "project-fork",
+        cwd: temporaryDirectory("desktop-pi-cwd-"),
+        agentDir: userData,
+        sessionId: "session-fork-source",
+        createInput: {
+          projectId: "project-fork",
+          createRequestId: "create-fork",
+          model: { provider: "configured-provider", id: "configured-model" },
+          thinkingLevel: "low",
+        },
+      },
+      push: () => undefined,
+      onSummaryChanged: () => undefined,
+      resolvePi: async () => fakePi(),
+    });
+
+    try {
+      await runtime.prompt({
+        requestId: "prompt-fork",
+        projectId: "project-fork",
+        threadId: "session-fork-source",
+        text: "branch from here",
+        images: [],
+      });
+      const user = await vi.waitFor(() => {
+        const persisted = runtime
+          .bootstrap()
+          .timeline.nodes.find((node) => node.kind === "user" && node.sourceEntryId !== undefined);
+        expect(persisted?.sourceEntryId).toBeTruthy();
+        return persisted;
+      });
+      if (!user?.sourceEntryId) throw new Error("Expected a persisted user entry");
+
+      await expect(
+        runtime.fork({ projectId: "project-fork", threadId: "session-fork-source", entryId: user.sourceEntryId }),
+      ).resolves.toMatchObject({
+        projectId: "project-fork",
+        threadId: "session-fork-source-fork",
+        sessionFile: join(userData, "session-fork-source-fork.jsonl"),
+        text: "branch from here",
+        thread: {
+          id: "session-fork-source-fork",
+          parentThreadId: "session-fork-source",
+          origin: "branch",
+          messageCount: 0,
+        },
       });
     } finally {
       await runtime.dispose();

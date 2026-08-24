@@ -26,10 +26,8 @@ export function AssistantMessage() {
   const { showAvatars } = useThinkingVisibility();
   // 一轮（完整 run）只显示一个头像：仅在用户消息后或线程首条 assistant 消息展示。
   const isTurnFirst = useAuiState((state) => {
-    const messages = state.thread.messages;
-    const index = messages.findIndex((message) => message.id === state.message.id);
-    if (index <= 0) return index === 0;
-    return messages[index - 1]?.role === "user";
+    const index = state.message.index;
+    return index === 0 || state.thread.messages[index - 1]?.role === "user";
   });
   const provenanceProvider = useAuiState((state) => piAssistantProvenance(state.message.metadata.custom)?.provider);
   const provenanceModel = useAuiState((state) => piAssistantProvenance(state.message.metadata.custom)?.model);

@@ -6,26 +6,42 @@ const MESSAGE_NAVIGATION_ITEM_HEIGHT_PX = 6;
 const MESSAGE_NAVIGATION_ITEM_GAP_PX = 3;
 const MESSAGE_NAVIGATION_ITEM_STRIDE_PX = MESSAGE_NAVIGATION_ITEM_HEIGHT_PX + MESSAGE_NAVIGATION_ITEM_GAP_PX;
 const MESSAGE_NAVIGATION_HOVER_RADIUS_PX = 14;
-const EMPTY_MESSAGE_NAVIGATION_SUMMARY: readonly MessageNavigationSummary[] = [];
-
-export interface MessageNavigationSummary {
-  markdown: boolean;
-  text: string;
-}
 
 interface MessageNavigationProps {
   scrollerRef: RefObject<HTMLDivElement | null>;
   turnCount: number;
   virtualItems: readonly VirtualItem[];
-  getSummary(index: number): readonly MessageNavigationSummary[];
+  getMessageIds(index: number): readonly string[];
   onSelect(index: number): void;
+}
+
+export function sampleMessageNavigationIndexes(turnCount: number, maxItems: number, requiredIndex: number): number[] {
+  const count = Math.max(0, Math.floor(turnCount));
+  const limit = Math.max(3, Math.floor(maxItems));
+  if (count <= limit) return Array.from({ length: count }, (_value, index) => index);
+
+  const indexes = Array.from({ length: limit }, (_value, slot) => Math.round((slot * (count - 1)) / (limit - 1)));
+  const required = Math.min(count - 1, Math.max(0, Math.floor(requiredIndex)));
+  if (!indexes.includes(required)) {
+    let replacementSlot = 1;
+    let replacementDistance = Number.POSITIVE_INFINITY;
+    for (let slot = 1; slot < limit - 1; slot += 1) {
+      const distance = Math.abs((indexes[slot] ?? 0) - required);
+      if (distance >= replacementDistance) continue;
+      replacementSlot = slot;
+      replacementDistance = distance;
+    }
+    indexes[replacementSlot] = required;
+    indexes.sort((left, right) => left - right);
+  }
+  return indexes;
 }
 
 export function MessageNavigation({
   scrollerRef,
   turnCount,
   virtualItems,
-  getSummary,
+  getMessageIds,
   onSelect,
 }: MessageNavigationProps) {
   const scroller = scrollerRef.current;
@@ -43,7 +59,7 @@ export function MessageNavigation({
 
   const viewportStart = scroller?.scrollTop ?? 0;
   const viewportEnd = viewportStart + (scroller?.clientHeight ?? 0);
-  const navigationHeight = scroller ? Math.max(96, scroller.clientHeight - 56) : undefined;
+  const navigationHeight = Math.max(96, (scroller?.clientHeight ?? 800) - 56);
   let firstVisible = 0;
   for (const item of virtualItems) {
     if (item.index < turnCount && item.end >= viewportStart && item.start <= viewportEnd) {
@@ -52,20 +68,30 @@ export function MessageNavigation({
     }
   }
 
+  const maxNavigationItems = Math.max(
+    3,
+    Math.floor((navigationHeight + MESSAGE_NAVIGATION_ITEM_GAP_PX) / MESSAGE_NAVIGATION_ITEM_STRIDE_PX),
+  );
+  const navigationIndexes = sampleMessageNavigationIndexes(turnCount, maxNavigationItems, firstVisible);
+  const hoveredSlot = hoveredIndex === null ? null : navigationIndexes.indexOf(hoveredIndex);
+
   const updateHoveredIndex = (event: PointerEvent<HTMLDivElement>) => {
     const height = event.currentTarget.clientHeight;
     const itemsHeight =
-      turnCount * MESSAGE_NAVIGATION_ITEM_HEIGHT_PX + (turnCount - 1) * MESSAGE_NAVIGATION_ITEM_GAP_PX;
+      navigationIndexes.length * MESSAGE_NAVIGATION_ITEM_HEIGHT_PX +
+      (navigationIndexes.length - 1) * MESSAGE_NAVIGATION_ITEM_GAP_PX;
     const itemsTop = (height - itemsHeight) / 2;
     const pointerY = event.clientY - navigationTopRef.current - itemsTop;
-    const nearestIndex = Math.min(
-      turnCount - 1,
+    const nearestSlot = Math.min(
+      navigationIndexes.length - 1,
       Math.max(0, Math.round((pointerY - MESSAGE_NAVIGATION_ITEM_HEIGHT_PX / 2) / MESSAGE_NAVIGATION_ITEM_STRIDE_PX)),
     );
-    const nearestCenterY = nearestIndex * MESSAGE_NAVIGATION_ITEM_STRIDE_PX + MESSAGE_NAVIGATION_ITEM_HEIGHT_PX / 2;
+    const nearestCenterY = nearestSlot * MESSAGE_NAVIGATION_ITEM_STRIDE_PX + MESSAGE_NAVIGATION_ITEM_HEIGHT_PX / 2;
     const nearestDistance = Math.abs(pointerY - nearestCenterY);
 
-    setHoveredIndexIfChanged(nearestDistance <= MESSAGE_NAVIGATION_HOVER_RADIUS_PX ? nearestIndex : null);
+    setHoveredIndexIfChanged(
+      nearestDistance <= MESSAGE_NAVIGATION_HOVER_RADIUS_PX ? (navigationIndexes[nearestSlot] ?? null) : null,
+    );
   };
 
   const selectHoveredIndex = () => {
@@ -86,10 +112,9 @@ export function MessageNavigation({
         onPointerLeave={() => setHoveredIndexIfChanged(null)}
         onClick={selectHoveredIndex}
       >
-        {Array.from({ length: turnCount }, (_, index) => {
+        {navigationIndexes.map((index, slot) => {
           const active = index === firstVisible;
-          const hoverDistance = hoveredIndex === null ? null : Math.abs(index - hoveredIndex);
-          const summary = hoverDistance === 0 ? getSummary(index) : EMPTY_MESSAGE_NAVIGATION_SUMMARY;
+          const hoverDistance = hoveredSlot === null ? null : Math.abs(slot - hoveredSlot);
           return (
             <MessageNavigationItem
               key={index}
@@ -98,7 +123,7 @@ export function MessageNavigation({
               current={index === firstVisible}
               hovered={hoverDistance === 0}
               hoverDistance={hoverDistance !== null && hoverDistance <= 5 ? hoverDistance : null}
-              summary={summary}
+              messageIds={getMessageIds(index)}
               workspace={workspace}
               onSelect={onSelect}
             />

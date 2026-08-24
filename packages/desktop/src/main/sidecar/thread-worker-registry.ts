@@ -9,6 +9,8 @@ import type {
   SessionCommandResult,
   SessionControlState,
   SessionCreateInput,
+  SessionForkInput,
+  SessionForkResult,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
@@ -26,6 +28,7 @@ import type {
   ModelConfigurationRevision,
   SidecarEvent,
   ThreadWorkerBinding,
+  ThreadWorkerForkResult,
 } from "../../shared/sidecar-contracts.ts";
 import { collectThreadDescendantIds } from "../../shared/thread-tree.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
@@ -287,6 +290,48 @@ export class ThreadWorkerRegistry {
         ...(result.error !== undefined ? { error: result.error } : {}),
       };
     });
+  }
+
+  async fork(input: SessionForkInput): Promise<SessionForkResult> {
+    const key = workerKey(input.projectId, input.threadId);
+    let record: WorkerRecord | undefined;
+    let forked: ThreadWorkerForkResult;
+    try {
+      forked = await this.withThreadLock(key, async () => {
+        const current = await this.requireUnlocked(input.projectId, input.threadId);
+        record = current;
+        if (current.inFlight > 0)
+          throw new Error("Wait for the current session operation to finish before creating a branch.");
+        current.inFlight += 1;
+        try {
+          return await current.client.request<ThreadWorkerForkResult>({ type: "fork", input }, null);
+        } finally {
+          current.inFlight -= 1;
+          current.retired = true;
+          if (this.records.get(key) === current) this.records.delete(key);
+          await this.awaitRecordShutdown(current);
+        }
+      });
+    } finally {
+      if (record?.retired)
+        this.options.resync(input.projectId, input.threadId, "Pi source session reopened after fork");
+    }
+
+    await this.options.metadata.upsert(
+      input.projectId,
+      this.options.getCwd(input.projectId),
+      forked.sessionFile,
+      forked.thread,
+    );
+    const catalog = this.projectCatalogs.get(input.projectId);
+    catalog?.set(forked.threadId, forked.thread);
+    this.options.catalogChanged?.({ ...forked.thread });
+    return {
+      projectId: forked.projectId,
+      threadId: forked.threadId,
+      text: forked.text,
+      thread: forked.thread,
+    };
   }
 
   async cancel(projectId: string, threadId: string): Promise<void> {

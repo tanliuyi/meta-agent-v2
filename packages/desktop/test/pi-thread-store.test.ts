@@ -978,6 +978,11 @@ describe("PiMessageRepositoryConverter", () => {
     const store = new PiThreadStore(snapshot([...users, assistant], "a"));
     const converter = new PiMessageRepositoryConverter();
     const first = converter.build(store.getSnapshot());
+    Object.defineProperty(first.messages, "slice", {
+      value: () => {
+        throw new Error("尾部流式更新不应复制完整 message 前缀");
+      },
+    });
     let latest = first;
 
     for (let sequence = 1; sequence <= 1_000; sequence += 1) {
@@ -989,6 +994,8 @@ describe("PiMessageRepositoryConverter", () => {
       latest = converter.build(store.getSnapshot());
     }
 
+    expect(Array.isArray(latest.messages)).toBe(true);
+    expect([...latest.messages]).toEqual(latest.messages);
     expect(latest.messages[0]?.message).toBe(first.messages[0]?.message);
     expect(latest.messages[998]?.message).toBe(first.messages[998]?.message);
     expect(latest.messages[0]).toBe(first.messages[0]);
