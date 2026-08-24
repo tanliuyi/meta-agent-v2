@@ -1,4 +1,4 @@
-import type { JsonAgentSessionEvent, RpcExtensionUIRequest } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent, RpcExtensionUIRequest } from "@earendil-works/pi-coding-agent";
 
 export interface RpcExtensionHostState {
   statuses: Record<string, string>;
@@ -364,24 +364,23 @@ export interface PiRpcExtensionError {
   error: string;
 }
 
-/** Pi 0.84.2 RPC strips cumulative `partial`; tool metadata first appears on `toolcall_end`. */
-type PiRpcAssistantMessageEvent =
-  | Exclude<
-      Extract<JsonAgentSessionEvent, { type: "message_update" }>["assistantMessageEvent"],
-      { type: "toolcall_start" }
-    >
-  | { type: "toolcall_start"; contentIndex: number };
+/** Pi 0.84.2 RPC strips cumulative `partial` from assistant message updates. */
+type PiAgentMessageUpdateEvent = Extract<AgentSessionEvent, { type: "message_update" }>;
+type PiRpcAssistantMessageEvent = PiAgentMessageUpdateEvent["assistantMessageEvent"] extends infer Event
+  ? Event extends { partial: unknown }
+    ? Omit<Event, "partial">
+    : Event
+  : never;
 
-export type PiRpcMessageUpdateEvent = Omit<
-  Extract<JsonAgentSessionEvent, { type: "message_update" }>,
-  "assistantMessageEvent"
-> & {
+export type PiRpcMessageUpdateEvent = {
+  type: "message_update";
+  usage: Extract<PiAgentMessageUpdateEvent["message"], { role: "assistant" }>["usage"];
   assistantMessageEvent: PiRpcAssistantMessageEvent;
 };
 
 /** Pi RPC stdout 的公共原子事件集合。Desktop 不维护第二套 timeline event 协议。 */
 export type PiRpcEvent =
-  | Exclude<JsonAgentSessionEvent, { type: "message_update" }>
+  | Exclude<AgentSessionEvent, { type: "message_update" }>
   | PiRpcMessageUpdateEvent
   | RpcExtensionUIRequest
   | PiRpcExtensionError;

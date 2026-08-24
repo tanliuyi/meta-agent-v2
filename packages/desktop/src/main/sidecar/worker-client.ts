@@ -25,6 +25,9 @@ import {
 } from "../../shared/sidecar-wire.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 
+// Covers Pi probing, RPC handshake, and sequential create-session initialization request deadlines.
+export const DEFAULT_SIDECAR_STARTUP_TIMEOUT_MS = 180_000;
+
 interface PendingRequest {
   resolve(value: JsonValue | undefined): void;
   reject(error: Error): void;
@@ -114,14 +117,20 @@ export class SidecarWorkerClient {
     this.child.on("message", (message: SidecarToParentMessage) => this.handleMessage(message));
     this.child.once("error", (error) => this.terminate(error));
     const finalizeProcess = (description: string): void => {
-      const suffix = this.stderrTail.trim() ? `\n${this.stderrTail.trim()}` : "";
-      this.finalizeFailure(this.terminationError ?? new Error(`${description}${suffix}`));
+      const stderr = this.stderrTail.trim();
+      if (this.terminationError) {
+        if (stderr) this.terminationError.message = `${this.terminationError.message}\n${stderr}`;
+        this.finalizeFailure(this.terminationError);
+        return;
+      }
+      this.finalizeFailure(new Error(stderr ? `${description}\n${stderr}` : description));
     };
     this.child.once("exit", (code, signal) => finalizeProcess(`Sidecar exited (${code ?? signal ?? "unknown"})`));
     this.child.once("close", (code, signal) => finalizeProcess(`Sidecar closed (${code ?? signal ?? "unknown"})`));
+    const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_SIDECAR_STARTUP_TIMEOUT_MS;
     this.startupTimer = setTimeout(
-      () => this.terminate(new Error(`Sidecar startup timed out after ${options.startupTimeoutMs ?? 15_000}ms`)),
-      options.startupTimeoutMs ?? 15_000,
+      () => this.terminate(new Error(`Sidecar startup timed out after ${startupTimeoutMs}ms`)),
+      startupTimeoutMs,
     );
     this.child.once("spawn", () => {
       if (this.closed || this.terminating || !this.child.connected) return;

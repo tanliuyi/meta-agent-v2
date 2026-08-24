@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MetadataWorkerClient } from "../src/main/sidecar/metadata-worker-client.ts";
 import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
+import { SIDECAR_PROTOCOL_VERSION } from "../src/shared/sidecar-contracts.ts";
 import { currentRuntimeCompatibility } from "../src/shared/sidecar-wire.ts";
 
 describe("MetadataWorkerClient", () => {
@@ -54,6 +55,7 @@ describe("MetadataWorkerClient", () => {
 
 function loadManifest(): SidecarRuntimeManifest {
   return {
+    protocolVersion: SIDECAR_PROTOCOL_VERSION,
     entries: {
       thread: "",
       metadata: resolve(import.meta.dirname, "../out/sidecar/sidecar/metadata-worker-main.js"),

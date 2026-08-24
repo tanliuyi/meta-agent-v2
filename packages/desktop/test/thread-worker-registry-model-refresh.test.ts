@@ -541,6 +541,7 @@ function thread(): Thread {
 function manifest(): SidecarRuntimeManifest {
   const compatibility = currentRuntimeCompatibility("test");
   return {
+    protocolVersion: SIDECAR_PROTOCOL_VERSION,
     entries: { thread: "", metadata: "" },
     compatibility,
     integrity: { entries: { thread: "", metadata: "" }, files: {} },

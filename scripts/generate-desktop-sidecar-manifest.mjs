@@ -12,21 +12,34 @@ const defaultOutputRoot = join(desktopRoot, "out", "sidecar");
 const defaultPackagedRoot = join(desktopRoot, "output", "pi-sidecar");
 const electronPath = require("electron");
 
-export function generateDesktopSidecarManifests(
+export async function generateDesktopSidecarManifests(
   outputRoot = defaultOutputRoot,
   packagedRoot = defaultPackagedRoot,
 ) {
   const compatibility = runtimeCompatibility(electronPath);
+  const protocolVersion = await sidecarProtocolVersion(outputRoot);
   writeManifest(outputRoot, {
+    protocolVersion,
     entries: sidecarEntries("sidecar"),
     compatibility,
     integrity: runtimeIntegrity(outputRoot, ""),
   });
   writeManifest(packagedRoot, {
+    protocolVersion,
     entries: sidecarEntries("../app.asar.unpacked/out/sidecar/sidecar"),
     compatibility,
     integrity: runtimeIntegrity(outputRoot, "../app.asar.unpacked/out/sidecar"),
   });
+}
+
+async function sidecarProtocolVersion(outputRoot) {
+  const contractsPath = join(outputRoot, "shared", "sidecar-contracts.js");
+  const contracts = await import(pathToFileURL(contractsPath).href);
+  const protocolVersion = contracts.SIDECAR_PROTOCOL_VERSION;
+  if (!Number.isSafeInteger(protocolVersion) || protocolVersion < 1) {
+    throw new Error(`Invalid compiled sidecar protocol version: ${String(protocolVersion)}`);
+  }
+  return protocolVersion;
 }
 
 function sidecarEntries(prefix) {
@@ -83,5 +96,5 @@ function writeManifest(root, manifest) {
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  generateDesktopSidecarManifests();
+  await generateDesktopSidecarManifests();
 }

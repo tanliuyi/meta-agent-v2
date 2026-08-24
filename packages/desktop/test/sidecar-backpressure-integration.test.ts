@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import { SidecarWorkerClient } from "../src/main/sidecar/worker-client.ts";
-import type { SidecarEvent } from "../src/shared/sidecar-contracts.ts";
+import { SIDECAR_PROTOCOL_VERSION, type SidecarEvent } from "../src/shared/sidecar-contracts.ts";
 import { currentRuntimeCompatibility } from "../src/shared/sidecar-wire.ts";
 
 describe("sidecar event backpressure", () => {
@@ -50,6 +50,7 @@ describe("sidecar event backpressure", () => {
 function manifest(): SidecarRuntimeManifest {
   const compatibility = currentRuntimeCompatibility("test");
   return {
+    protocolVersion: SIDECAR_PROTOCOL_VERSION,
     entries: {
       thread: "",
       metadata: resolve(import.meta.dirname, "fixtures/overflow-sidecar.mjs"),

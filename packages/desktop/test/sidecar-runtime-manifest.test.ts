@@ -7,6 +7,7 @@ import {
   loadSidecarRuntimeManifest,
   type SidecarRuntimeManifest,
 } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
+import { SIDECAR_PROTOCOL_VERSION } from "../src/shared/sidecar-contracts.ts";
 import { currentRuntimeCompatibility } from "../src/shared/sidecar-wire.ts";
 
 describe("Desktop sidecar runtime manifest", () => {
@@ -81,6 +82,20 @@ describe("Desktop sidecar runtime manifest", () => {
     );
   });
 
+  it("rejects a manifest for a different sidecar protocol", () => {
+    const appDir = join(root, "out", "main");
+    const manifestRoot = join(root, "out", "sidecar");
+    const manifest = writeManifest(manifestRoot, join(manifestRoot, "runtime"));
+    writeFileSync(
+      join(manifestRoot, "runtime-manifest.json"),
+      JSON.stringify({ ...manifest, protocolVersion: SIDECAR_PROTOCOL_VERSION - 1 }),
+    );
+
+    expect(() => loadSidecarRuntimeManifest({ isPackaged: false, resourcesPath: root, appDir })).toThrow(
+      `protocol mismatch: expected ${SIDECAR_PROTOCOL_VERSION}, got ${SIDECAR_PROTOCOL_VERSION - 1}`,
+    );
+  });
+
   it("rejects compatibility for a different embedded runtime", () => {
     const appDir = join(root, "out", "main");
     const manifestRoot = join(root, "out", "sidecar");
@@ -109,6 +124,7 @@ describe("Desktop sidecar runtime manifest", () => {
     const assetPath = join(runtimeRoot, "asset.txt");
     writeFileSync(assetPath, "asset");
     const manifest: SidecarRuntimeManifest = {
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
       entries,
       compatibility: currentRuntimeCompatibility("test"),
       integrity: {

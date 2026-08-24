@@ -40,7 +40,7 @@
   overflow: hidden;
   padding: var(--space-3) var(--space-4) var(--space-4);
   border: 1px solid hsl(var(--border) / 0.72);
-  border-radius: var(--shape-radius-sm);
+  border-radius: var(--shape-radius-xl);
   background: color-mix(in oklab, hsl(var(--muted)) 34%, hsl(var(--background)));
   color: hsl(var(--muted-foreground));
   font-size: var(--type-size-caption);

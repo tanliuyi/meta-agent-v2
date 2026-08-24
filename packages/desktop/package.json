@@ -1,6 +1,6 @@
 {
   "name": "meta-agent",
-  "version": "0.0.41",
+  "version": "0.1.0",
   "private": true,
   "description": "Meta Agent desktop application",
   "homepage": "https://github.com/tanliuyi/meta-agent-harness",
@@ -32,6 +32,8 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.84.2",
     "@floating-ui/react": "0.27.20",
+    "@mistralai/mistralai": "2.2.6",
+    "@opentelemetry/api": "1.9.0",
     "@rc-component/image": "1.10.0",
     "@tanstack/react-virtual": "3.14.9",
     "@xterm/addon-image": "0.9.0",

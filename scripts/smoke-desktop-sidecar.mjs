@@ -7,12 +7,16 @@ import { tmpdir } from "node:os";
 import { createDesktopSidecarSmokeEnvironment } from "./desktop-smoke-environment.mjs";
 import { resolveElectronSidecarExecutable } from "./desktop-sidecar-executable.mjs";
 import { locateDesktopExecutable } from "./smoke-desktop-gui.mjs";
-import { assertEmbeddedRuntimeManifest } from "./validate-desktop-package.mjs";
+import {
+  assertEmbeddedRuntimeManifest,
+  resolveSidecarProtocolVersion,
+} from "./validate-desktop-package.mjs";
 
 const artifact = parseArtifact(process.argv.slice(2));
 const manifestPath = findManifest(artifact);
 const root = dirname(manifestPath);
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+const protocolVersion = resolveSidecarProtocolVersion(manifest);
 const desktopExecutable = locateDesktopExecutable(artifact);
 const executable = resolveElectronSidecarExecutable(desktopExecutable, {
   requireHelper: process.platform === "darwin",
@@ -59,7 +63,14 @@ for (const field of ["nodeVersion", "modulesAbi", "napi", "platform", "arch", "o
 const agentDir = process.env.PI_CODING_AGENT_DIR ?? (await mkdtemp(join(tmpdir(), "desktop-sidecar-agent-")));
 const userDataDir = await mkdtemp(join(tmpdir(), "desktop-sidecar-user-data-"));
 try {
-  await smokeMetadataWorker(executable, resolve(root, manifest.entries.metadata), manifest.compatibility, agentDir, userDataDir);
+  await smokeMetadataWorker(
+    executable,
+    resolve(root, manifest.entries.metadata),
+    manifest.compatibility,
+    protocolVersion,
+    agentDir,
+    userDataDir,
+  );
 } finally {
   if (!process.env.PI_CODING_AGENT_DIR) await rm(agentDir, { recursive: true, force: true });
   await rm(userDataDir, { recursive: true, force: true });
@@ -103,7 +114,7 @@ function assertFile(path, expectedHash, description) {
   if (expectedHash && actualHash !== expectedHash) throw new Error(`${description} integrity mismatch: ${path}`);
 }
 
-async function smokeMetadataWorker(executable, entry, compatibility, agentDir, userDataDir) {
+async function smokeMetadataWorker(executable, entry, compatibility, protocolVersion, agentDir, userDataDir) {
   const worker = fork(entry, [], {
     execPath: executable,
     env: createDesktopSidecarSmokeEnvironment(process.env, executable, {
@@ -118,14 +129,23 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
     stderr = `${stderr}${chunk}`.slice(-8192);
   });
   const workerInstanceId = `smoke-${process.pid}`;
-  const protocolVersion = 4;
   const ready = new Promise((resolveReady, rejectReady) => {
-    const timer = setTimeout(() => rejectReady(new Error(`metadata sidecar handshake timed out${stderr ? `\n${stderr}` : ""}`)), 15_000);
+    let settled = false;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const reject = (error) => settle(rejectReady, error);
+    const timer = setTimeout(
+      () => reject(new Error(`metadata sidecar handshake timed out${stderr ? `\n${stderr}` : ""}`)),
+      15_000,
+    );
     worker.on("message", (message) => {
       if (message?.kind !== "ready") return;
-      clearTimeout(timer);
       if (message.workerInstanceId !== workerInstanceId) {
-        rejectReady(new Error("metadata sidecar returned the wrong worker generation"));
+        reject(new Error("metadata sidecar returned the wrong worker generation"));
         return;
       }
       for (const field of [
@@ -140,15 +160,15 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
         "runtimeCompatibilityId",
       ]) {
         if (String(message.runtime?.[field]) !== String(compatibility[field])) {
-          rejectReady(new Error(`metadata sidecar ${field} mismatch: ${message.runtime?.[field]} != ${compatibility[field]}`));
+          reject(new Error(`metadata sidecar ${field} mismatch: ${message.runtime?.[field]} != ${compatibility[field]}`));
           return;
         }
       }
-      resolveReady();
+      settle(resolveReady);
     });
-    worker.once("error", rejectReady);
-    worker.once("exit", (code, signal) =>
-      rejectReady(new Error(`metadata sidecar exited (${code ?? signal ?? "unknown"})${stderr ? `\n${stderr}` : ""}`)),
+    worker.once("error", reject);
+    worker.once("close", (code, signal) =>
+      reject(new Error(`metadata sidecar exited (${code ?? signal ?? "unknown"})${stderr ? `\n${stderr}` : ""}`)),
     );
   });
   worker.once("spawn", () => {

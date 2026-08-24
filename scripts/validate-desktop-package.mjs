@@ -21,6 +21,7 @@ export default async function validateDesktopPackage(context) {
   );
 
   assertTargetRuntime(context, manifest);
+  const protocolVersion = resolveSidecarProtocolVersion(manifest);
   assertEmbeddedRuntimeManifest(resources, manifest);
   if (!existsSync(executable) || !statSync(executable).isFile()) {
     throw new Error(`Packaged Electron executable is missing: ${executable}`);
@@ -89,7 +90,14 @@ export default async function validateDesktopPackage(context) {
   const agentDir = await mkdtemp(join(tmpdir(), "desktop-package-agent-"));
   const userDataDir = await mkdtemp(join(tmpdir(), "desktop-package-user-data-"));
   try {
-    await smokeMetadataWorker(sidecarExecutable, entries.metadata, manifest.compatibility, agentDir, userDataDir);
+    await smokeMetadataWorker(
+      sidecarExecutable,
+      entries.metadata,
+      manifest.compatibility,
+      protocolVersion,
+      agentDir,
+      userDataDir,
+    );
   } finally {
     await Promise.all([
       rm(agentDir, { recursive: true, force: true }),
@@ -171,6 +179,13 @@ export function assertTargetRuntime(context, manifest) {
   }
 }
 
+export function resolveSidecarProtocolVersion(manifest) {
+  const protocolVersion = manifest?.protocolVersion;
+  if (!Number.isSafeInteger(protocolVersion) || protocolVersion < 1) {
+    throw new Error(`Packaged sidecar manifest has an invalid protocol version: ${String(protocolVersion)}`);
+  }
+  return protocolVersion;
+}
 
 function assertHash(path, expectedHash, description) {
   if (!expectedHash) return;
@@ -180,7 +195,7 @@ function assertHash(path, expectedHash, description) {
   }
 }
 
-async function smokeMetadataWorker(executable, entry, compatibility, agentDir, userDataDir) {
+async function smokeMetadataWorker(executable, entry, compatibility, protocolVersion, agentDir, userDataDir) {
   const worker = fork(entry, [], {
     execPath: executable,
     env: createDesktopSidecarSmokeEnvironment(process.env, executable, {
@@ -196,15 +211,22 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
   });
   const workerInstanceId = randomUUID();
   const ready = new Promise((resolveReady, rejectReady) => {
+    let settled = false;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const reject = (error) => settle(rejectReady, error);
     const timer = setTimeout(
-      () => rejectReady(new Error(`Packaged metadata sidecar handshake timed out${stderr ? `\n${stderr}` : ""}`)),
+      () => reject(new Error(`Packaged metadata sidecar handshake timed out${stderr ? `\n${stderr}` : ""}`)),
       15_000,
     );
     worker.on("message", (message) => {
       if (message?.kind !== "ready") return;
-      clearTimeout(timer);
       if (message.workerInstanceId !== workerInstanceId) {
-        rejectReady(new Error("Packaged metadata sidecar returned the wrong worker generation"));
+        reject(new Error("Packaged metadata sidecar returned the wrong worker generation"));
         return;
       }
       for (const field of [
@@ -219,21 +241,25 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
         "runtimeCompatibilityId",
       ]) {
         if (String(message.runtime?.[field]) !== String(compatibility[field])) {
-          rejectReady(new Error(`Packaged metadata sidecar ${field} mismatch: ${message.runtime?.[field]} != ${compatibility[field]}`));
+          reject(
+            new Error(
+              `Packaged metadata sidecar ${field} mismatch: ${message.runtime?.[field]} != ${compatibility[field]}`,
+            ),
+          );
           return;
         }
       }
-      resolveReady();
+      settle(resolveReady);
     });
-    worker.once("error", rejectReady);
-    worker.once("exit", (code, signal) =>
-      rejectReady(new Error(`Packaged metadata sidecar exited (${code ?? signal ?? "unknown"})`)),
+    worker.once("error", reject);
+    worker.once("close", (code, signal) =>
+      reject(new Error(`Packaged metadata sidecar exited (${code ?? signal ?? "unknown"})${stderr ? `\n${stderr}` : ""}`)),
     );
   });
   worker.once("spawn", () => {
     worker.send({
       kind: "initialize",
-      protocolVersion: 4,
+      protocolVersion,
       workerInstanceId,
       expectedRuntime: compatibility,
       binding: { role: "metadata", value: { agentDir, userDataDir } },
@@ -241,7 +267,7 @@ async function smokeMetadataWorker(executable, entry, compatibility, agentDir, u
   });
   try {
     await ready;
-    worker.send({ kind: "shutdown", protocolVersion: 4, workerInstanceId });
+    worker.send({ kind: "shutdown", protocolVersion, workerInstanceId });
     await waitForExit(worker, 10_000);
   } finally {
     if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");

@@ -7,6 +7,7 @@ import {
   assertHiddenMacSidecarHelper,
   assertTargetRuntime,
   resolvePackagedExecutable,
+  resolveSidecarProtocolVersion,
 } from "../../../scripts/validate-desktop-package.mjs";
 
 const manifest = (platform: string, arch: string) => ({ compatibility: { platform, arch } });
@@ -28,6 +29,12 @@ describe("packaged Desktop target validation", () => {
     expect(() => assertTargetRuntime({ electronPlatformName: "darwin", arch: 4 }, manifest("darwin", "arm64"))).toThrow(
       "Universal Desktop packaging requires per-architecture sidecar runtimes",
     );
+  });
+
+  it("requires a valid sidecar protocol version in the packaged manifest", () => {
+    expect(resolveSidecarProtocolVersion({ protocolVersion: 5 })).toBe(5);
+    expect(() => resolveSidecarProtocolVersion({})).toThrow("invalid protocol version: undefined");
+    expect(() => resolveSidecarProtocolVersion({ protocolVersion: 0 })).toThrow("invalid protocol version: 0");
   });
 
   it("resolves the packaged Electron executable for the target layout", () => {

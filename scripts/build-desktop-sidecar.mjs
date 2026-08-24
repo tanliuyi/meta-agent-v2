@@ -32,7 +32,7 @@ try {
     cwd: desktopRoot,
     stdio: "inherit",
   });
-  generateDesktopSidecarManifests(stagedRoot, stagedPackagedRoot);
+  await generateDesktopSidecarManifests(stagedRoot, stagedPackagedRoot);
   synchronizeDesktopSidecarOutput(stagedPackagedRoot, packagedRoot);
   synchronizeDesktopSidecarOutput(stagedRoot, outputRoot);
 } finally {

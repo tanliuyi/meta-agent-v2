@@ -1,12 +1,17 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { RuntimeCompatibility, SidecarRole } from "../../shared/sidecar-contracts.ts";
+import {
+  type RuntimeCompatibility,
+  SIDECAR_PROTOCOL_VERSION,
+  type SidecarRole,
+} from "../../shared/sidecar-contracts.ts";
 import { currentRuntimeCompatibility } from "../../shared/sidecar-wire.ts";
 
 const SIDECAR_ROLES = ["thread", "metadata"] as const satisfies readonly SidecarRole[];
 
 export interface SidecarRuntimeManifest {
+  protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
   entries: Record<SidecarRole, string>;
   compatibility: RuntimeCompatibility;
   integrity: {
@@ -72,6 +77,11 @@ function parseManifest(manifestPath: string): SidecarRuntimeManifest {
   const integrityRecord = integrity as Record<string, unknown>;
   const integrityEntries = integrityRecord.entries;
   const files = integrityRecord.files;
+  if (record.protocolVersion !== SIDECAR_PROTOCOL_VERSION) {
+    throw new Error(
+      `Sidecar runtime manifest protocol mismatch: expected ${SIDECAR_PROTOCOL_VERSION}, got ${String(record.protocolVersion)}`,
+    );
+  }
   if (
     typeof integrityEntries !== "object" ||
     integrityEntries === null ||

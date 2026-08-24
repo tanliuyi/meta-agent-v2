@@ -3,11 +3,17 @@ import { describe, expect, it } from "vitest";
 import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import {
   createSidecarEnvironment,
+  DEFAULT_SIDECAR_STARTUP_TIMEOUT_MS,
   resolveSidecarExecutable,
   SidecarWorkerClient,
 } from "../src/main/sidecar/worker-client.ts";
+import { SIDECAR_PROTOCOL_VERSION } from "../src/shared/sidecar-contracts.ts";
 
 describe("SidecarWorkerClient lifecycle", () => {
+  it("allows the sidecar to outlive Pi's bounded startup work", () => {
+    expect(DEFAULT_SIDECAR_STARTUP_TIMEOUT_MS).toBe(180_000);
+  });
+
   it("removes inherited subagent lineage variables from worker environments", () => {
     const environment = createSidecarEnvironment("runtime", "/agent", {
       Path: process.env.PATH,
@@ -62,6 +68,16 @@ describe("SidecarWorkerClient lifecycle", () => {
     }
   });
 
+  it("includes sidecar stderr when startup times out", async () => {
+    const client = new SidecarWorkerClient({
+      manifest: manifest(resolve(import.meta.dirname, "fixtures/startup-stall-sidecar.mjs")),
+      binding: { role: "metadata", value: { agentDir: "/tmp", userDataDir: "/tmp" } },
+      startupTimeoutMs: 500,
+    });
+
+    await expect(client.ready()).rejects.toThrow("Sidecar startup timed out after 500ms\nfixture startup stalled");
+  });
+
   it("escalates an unresponsive worker from graceful shutdown through SIGKILL", async () => {
     const stderr: string[] = [];
     const client = new SidecarWorkerClient({
@@ -88,6 +104,7 @@ function manifest(
   metadataEntry = resolve(import.meta.dirname, "fixtures/stubborn-sidecar.mjs"),
 ): SidecarRuntimeManifest {
   return {
+    protocolVersion: SIDECAR_PROTOCOL_VERSION,
     entries: {
       thread: "",
       metadata: metadataEntry,
