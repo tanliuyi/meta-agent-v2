@@ -172,7 +172,7 @@ describe("ComposerInput", () => {
       stopPropagation,
     };
 
-    expect(acceptHighlightedCommandOnSpace(event, true, { handleKeyDown })).toBe(true);
+    expect(acceptHighlightedCommandOnSpace(event, true, true, { handleKeyDown })).toBe(true);
     expect(handleKeyDown).toHaveBeenCalledWith({
       key: "Enter",
       shiftKey: false,
@@ -183,8 +183,28 @@ describe("ComposerInput", () => {
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(stopPropagation).toHaveBeenCalledOnce();
 
-    expect(acceptHighlightedCommandOnSpace({ ...event, ctrlKey: true }, true, { handleKeyDown })).toBe(false);
-    expect(acceptHighlightedCommandOnSpace(event, false, { handleKeyDown })).toBe(false);
+    expect(acceptHighlightedCommandOnSpace({ ...event, ctrlKey: true }, true, true, { handleKeyDown })).toBe(false);
+    expect(acceptHighlightedCommandOnSpace(event, false, true, { handleKeyDown })).toBe(false);
+  });
+
+  it("命令面板无匹配项时保留普通空格输入", () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handleKeyDown = vi.fn();
+    const event = {
+      key: " ",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefault,
+      stopPropagation,
+    };
+
+    expect(acceptHighlightedCommandOnSpace(event, true, false, { handleKeyDown })).toBe(false);
+    expect(handleKeyDown).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(stopPropagation).not.toHaveBeenCalled();
   });
 
   it("提交普通 Enter 时消费原生事件，避免 Lexical 插入换行", () => {

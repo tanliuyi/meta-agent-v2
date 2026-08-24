@@ -82,14 +82,15 @@ export function DraftSessionProvider({ children }: { children: ReactNode }) {
       createRequestIds.clear();
       projectFallbackAllowed.current = true;
       setProjectId(nextProjectId);
-      setConfig(null);
-      setConfigProjectId(null);
-      setWorktreePath(null);
+      if (configProjectId !== nextProjectId) {
+        setConfig(null);
+        setConfigProjectId(null);
+      }
       setPhase(nextProjectId ? "editing" : "no-project");
       setLoadError(null);
       setNavigationTarget(target);
     },
-    [createRequestIds, runtime],
+    [configProjectId, createRequestIds, runtime],
   );
 
   const value = useMemo<DraftSessionContextValue>(

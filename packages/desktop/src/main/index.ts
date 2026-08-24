@@ -34,6 +34,7 @@ import { ModelsConfigService } from "./models/models-config-service.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
 import { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
+import { attachRendererCrashRecovery } from "./renderer-crash-recovery.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
 import { handleLocalImageRequests, registerLocalImageSchemes } from "./settings/user-avatar-protocol.ts";
 import { locateGitForWindowsBash, locateManagedBash } from "./sidecar/managed-shell-locator.ts";
@@ -64,6 +65,7 @@ let browserManager: BrowserManager | undefined;
 let browserHostServer: BrowserHostServer | undefined;
 let stopAutoUpdateChecks: (() => void) | undefined;
 let quitGuardPending = false;
+let applicationShuttingDown = false;
 const dirtyGuard = new WindowDirtyGuard({
   beforeReload: (window) => sessions?.detachAll(window.webContents.id),
 });
@@ -145,6 +147,25 @@ function createWindow(): void {
 
   dirtyGuard.attach(window);
   trayController.attach(window);
+  const detachCrashRecovery = attachRendererCrashRecovery(window, {
+    isShuttingDown: () => applicationShuttingDown,
+    reload: (crashedWindow) => {
+      const webContentsId = crashedWindow.webContents.id;
+      dirtyGuard.remove(webContentsId);
+      sessions?.detachAll(webContentsId);
+      crashedWindow.webContents.reload();
+    },
+    quit: (crashedWindow) => {
+      dirtyGuard.remove(crashedWindow.webContents.id);
+      app.quit();
+    },
+    report: (message, error) => {
+      if (error === undefined) console.error(message);
+      else console.error(message, error);
+      sidecarLog?.write("main", error === undefined ? message : `${message}: ${String(error)}`);
+    },
+  });
+  window.once("closed", detachCrashRecovery);
   window.once("ready-to-show", () => window.show());
   window.on("maximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, true));
   window.on("unmaximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, false));
@@ -251,8 +272,8 @@ app.whenReady().then(async () => {
     agentDir,
     ...(desktopBashPath ? { shellPath: desktopBashPath } : {}),
     getCwd: (projectId) => projects.getCwd(projectId),
-    push: (payload, workerInstanceId, sidecarSequence) => {
-      if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
+    push: (payload, workerInstanceId, sidecarSequence, payloadJsonLength) => {
+      if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence, payloadJsonLength);
       else workers.acknowledge(workerInstanceId, sidecarSequence);
     },
     failed: (projectId, threadId, error) => {
@@ -432,6 +453,7 @@ app.on("before-quit", (event) => {
   }
   stopAutoUpdateChecks?.();
   stopAutoUpdateChecks = undefined;
+  applicationShuttingDown = true;
   trayController.dispose();
   if (!sessions && !metadata && !sidecarLog && !terminals) return;
   sidecarLog?.write("main", "Desktop shutdown started");

@@ -609,10 +609,6 @@ body.is-resizing-column .sidebar {
   color: hsl(var(--foreground));
 }
 
-.thread-row[data-pending="true"] button,
-.thread-row button:disabled {
-  cursor: wait;
-}
 .running-dot {
   width: 14px;
   height: 14px;

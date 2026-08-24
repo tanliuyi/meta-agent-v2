@@ -103,12 +103,17 @@ vi.mock("../src/renderer/src/components/chat/composer/composer-command-trigger.t
 });
 
 vi.mock("../src/renderer/src/components/chat/composer/composer-quotes.tsx", () => ({ ComposerQuotes: () => null }));
-vi.mock("../src/renderer/src/components/chat/composer/composer-queue.tsx", () => ({ ComposerQueue: () => null }));
+vi.mock("../src/renderer/src/components/chat/composer/composer-queue.tsx", () => ({
+  ComposerQueue: () => <div data-testid="composer-queue" />,
+}));
 vi.mock("../src/renderer/src/components/chat/composer/composer-extension-command.tsx", () => ({
   ComposerExtensionCommand: () => null,
 }));
 vi.mock("../src/renderer/src/components/chat/composer/composer-feedback.tsx", () => ({ ComposerFeedback: () => null }));
-vi.mock("../src/renderer/src/components/chat/composer/composer-widgets.tsx", () => ({ ComposerWidgets: () => null }));
+vi.mock("../src/renderer/src/components/chat/composer/composer-widgets.tsx", () => ({
+  ComposerWidgets: ({ layout }: { layout?: string }) =>
+    layout === "external" ? <div data-testid="external-widgets" /> : null,
+}));
 vi.mock("../src/renderer/src/components/chat/composer/composer-context-usage.tsx", () => ({
   ComposerContextUsage: () => null,
 }));
@@ -429,5 +434,19 @@ describe("Composer 运行中模型控制", () => {
     captured.thinkingControl?.onValueChange("high");
     expect(onSetModel).toHaveBeenCalledWith("custom-provider", "custom-reasoning-model");
     expect(onSetThinking).toHaveBeenCalledWith("high");
+  });
+});
+
+describe("Composer 队列布局", () => {
+  it("引导和 followUp 卡片保持外部悬浮并固定在 composer surface 前", () => {
+    const markup = renderToStaticMarkup(<Composer {...sessionProps()} />);
+    const widgetsStart = markup.indexOf('data-testid="external-widgets"');
+    const queueStart = markup.indexOf('data-testid="composer-queue"');
+    const surfaceStart = markup.indexOf('class="composer-surface ');
+
+    expect(widgetsStart).toBeGreaterThanOrEqual(0);
+    expect(queueStart).toBeGreaterThan(widgetsStart);
+    expect(queueStart).toBeLessThan(surfaceStart);
+    expect(markup.slice(surfaceStart)).not.toContain('data-testid="composer-queue"');
   });
 });

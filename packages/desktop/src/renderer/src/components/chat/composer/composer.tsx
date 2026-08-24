@@ -270,8 +270,8 @@ export function Composer(props: ComposerProps) {
       {props.mode === "session" ? (
         <ComposerExtensionCommand store={record.stores.extensionCommands} command={props.composerCommand} />
       ) : null}
-      {props.mode === "session" ? <ComposerQueue items={props.queue} /> : null}
       <ComposerWidgets widgets={aboveWidgets} layout="external" />
+      {props.mode === "session" ? <ComposerQueue items={props.queue} /> : null}
 
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>

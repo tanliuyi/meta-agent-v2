@@ -42,7 +42,7 @@ const OVERLAY_CLASS = "session-modal-composer-overlay";
 describe("composer trigger overlay stacking", () => {
   it("普通聊天不提升候选层", () => {
     const command = renderToStaticMarkup(
-      <ComposerCommandTrigger commands={[]} onSelect={() => undefined} onOpenChange={() => undefined} />,
+      <ComposerCommandTrigger commands={[]} onSelect={() => undefined} onStateChange={() => undefined} />,
     );
     const file = renderToStaticMarkup(<ComposerFileTrigger projectId="project-1" onOpenChange={() => undefined} />);
 
@@ -54,7 +54,7 @@ describe("composer trigger overlay stacking", () => {
   it("全屏会话 modal 内为 / 与 @ 候选层提升层级", () => {
     const command = renderToStaticMarkup(
       <SessionModalContext.Provider value>
-        <ComposerCommandTrigger commands={[]} onSelect={() => undefined} onOpenChange={() => undefined} />
+        <ComposerCommandTrigger commands={[]} onSelect={() => undefined} onStateChange={() => undefined} />
       </SessionModalContext.Provider>,
     );
     const file = renderToStaticMarkup(

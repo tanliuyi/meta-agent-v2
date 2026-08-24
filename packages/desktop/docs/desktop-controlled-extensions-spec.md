@@ -14,7 +14,7 @@ Meta Agent Desktop 保留 Pi extension 机制作为 agent runtime 的扩展执�
 
 Desktop 只加载以下来源：
 
-1. Desktop 内建 inline extensions；
+1. Desktop 随应用发布的 bundled extensions；
 2. 与 Desktop 同仓库、同版本、同发布周期的精选 extensions；
 3. 用户显式开启 Developer Mode 后批准的本地开发 extension。
 
@@ -45,10 +45,10 @@ Desktop Extension Host Profile
 2. Desktop 不重写 extension registration、event dispatch、tool execution、queue 或 agent loop。
 3. 默认禁止 Pi user/project extension 自动发现。
 4. live session 与 draft metadata 使用相同的 extension source policy。
-5. Desktop 内建 extension 使用 `extensionFactories`。
+5. Desktop 内建 extension 物化为 packaged local entry，并通过 Pi 公共 CLI `-e` 显式加载。
 6. Desktop 精选 extension 使用只读、版本锁定的 bundled entry paths。
 7. Developer Mode extension 必须由用户逐项显式批准，不扫描目录自动加载。
-8. extension 代码只在 Node sidecar 中执行：live session 使用 thread worker，draft discovery 使用 metadata worker；Electron main、preload 和 renderer 不导入 extension 代码。
+8. extension 代码只在 Node sidecar 进程树中执行：live session 使用 thread worker 启动 Pi RPC，draft discovery 使用 metadata worker 按请求启动 disposable Pi RPC；Electron main、preload 和 renderer 不导入 extension 代码。
 9. 每个 thread worker generation 使用不可变 extension set。
 10. extension set 变化通过 replacement worker 生效，不在运行中的 worker 内热替换代码。
 11. Desktop v1 只实现声明式 Host UI，不复刻 Pi TUI。
@@ -56,6 +56,8 @@ Desktop Extension Host Profile
 13. Developer Mode 是信任开关，不是安全 sandbox。
 14. extension 配置与 session timeline 分离，不写入 Pi conversation context。
 15. 当前不为未来扩展中心预建 catalog、installer、publisher 或 artifact registry。
+16. 从旧 Desktop 架构升级时，必须先发现并呈现旧 extension 迁移清单；关闭默认 discovery 不得静默丢弃既有扩展意图。
+17. 旧 extension 文件与 Pi settings 保持原位。Desktop 只保存自己的迁移决策，不删除、移动或改写用户的 Pi 资源。
 
 ### 2.1 规范优先级
 
@@ -113,7 +115,7 @@ v1 不包括：
 
 ### 5.2 内建 extension
 
-由 Desktop 源码直接注册的 inline extension。它通常用于 Desktop 自有 provider 或必须与 Desktop runtime 同步演进的能力。
+由 Desktop 源码构建并随应用发布的 extension。当前外部 Pi RPC 架构要求它物化为 packaged local entry，再通过公共 CLI `-e` 显式加载；它通常用于 Desktop 自有 provider 或必须与 Desktop runtime 同步演进的能力。
 
 ### 5.3 精选 extension
 
@@ -133,17 +135,15 @@ Desktop 在 Pi `ExtensionUIContext` 和 command context 上真实实现的能力
 
 ## 6. Extension 来源
 
-### 6.1 内建 inline extensions
+### 6.1 内建 bundled extensions
 
-内建 extension 使用 Pi `ResourceLoader` 的 `extensionFactories` 注册。
-
-当前 `DesktopBuiltinProviderRegistry` 使用该机制注册 Desktop 自有 provider。该路径必须保留，不应为了关闭用户 extension 而移除 extension runner。
+内建 extension 由 Desktop 构建流程物化为 packaged local entry，经 main-owned registry 解析后与其他受控来源一起通过 Pi 公共 CLI `-e` 加载。外部 Pi RPC 进程边界不提供进程内 `extensionFactories` 注入；不得为保留旧 SDK 方案而在 Electron main、preload 或 renderer 导入 extension。
 
 内建 extension 要求：
 
 - 源码属于 Desktop；
 - 与 Desktop 使用同一版本；
-- 由 sidecar 构建产物导入；
+- entry 位于 packaged/bundled resource root；
 - 必须通过 focused tests 和仓库检查；
 - 不经过 Developer Mode；
 - 不允许被用户单独删除或替换。
@@ -226,43 +226,84 @@ Developer Mode extension 的加载规则：
 
 Developer Mode approval 是用户信任记录，不是 Desktop 认证。
 
-## 7. 受控加载
+### 6.4 旧架构迁移候选
 
-### 7.1 ResourceLoader 配置
+旧 Desktop 架构曾允许普通 Pi user/project extension 进入运行时。升级后的首次受控启动必须在禁用默认 discovery 前建立迁移清单，但旧来源不是新的长期运行时 source 类型。
 
-live session 与 draft config 必须使用同一策略：
+迁移发现范围仅限旧架构已经可能加载的来源：
+
+- Pi 全局与项目 settings 中声明的 extension entry；
+- `~/.pi/agent/extensions` 与受信任项目 `.pi/extensions` 中可自动发现的 entry；
+- Pi settings 中 package manifest 声明并已安装到本地的 extension entry；
+- Desktop 维护的已知旧 ID 到 curated/marketplace replacement 的静态映射。
+
+发现阶段只能读取 settings、目录项、`package.json` 和 Pi manifest，不得在 Electron main、preload 或 renderer 中导入或执行 extension 代码，不得联网、安装 package、刷新 git checkout 或运行 lifecycle script。package source 必须先解析为当前已经存在的本地 entry；`npm:`、`git:` 等 source string 不得原样传给 Pi `-e`。
+
+候选身份由 source kind、canonical source identity 和 manifest-relative entry path 组成。相对路径、symlink、Windows 路径大小写和 Unicode normalization 必须规范化；同一 canonical entry 的多个 settings/directory/package origin 合并展示，不同安装版本或 commit 不得静默合并。inventory 必须保留 scope、原始 origin、package filter、安装版本或 commit、manifest entry 和 canonical local path，防止迁移扩大原有启用集合。
+
+每个候选必须归类为：
 
 ```ts
-resourceLoaderOptions: {
-  noExtensions: true,
-  additionalExtensionPaths: resolvedExtensionSet.entries.flatMap((entry) =>
-    entry.entryPath ? [entry.entryPath] : [],
-  ),
-  extensionFactories: DesktopBuiltinProviderRegistry.getExtensionFactories(),
-  packageManagerOnMissing: async () => "error",
-}
+type LegacyExtensionMigrationStatus =
+  | "unverified"
+  | "ready"
+  | "replacement"
+  | "conflict"
+  | "incompatible"
+  | "failed";
 ```
 
-Pi 当前语义允许 `noExtensions: true` 阻止默认 enabled extension discovery，同时继续加载显式 `additionalExtensionPaths` 和 inline factories。
+处理规则：
+
+- `unverified`：仅完成静态发现，等待用户确认是否信任并执行兼容性探测；
+- `ready`：只表示当前 pinned Pi 下 RPC 启动和 registration 成功；经用户确认后转为已批准的 `development` entry，不声称 tools/events/Host UI 已完整兼容；
+- `replacement`：用户确认后启用对应 curated/marketplace entry，旧 entry 保留但不加载；
+- `conflict`：必须展示所有冲突来源并由用户选择，不得依赖 Pi 的加载顺序；
+- `incompatible`：保留来源、诊断和迁移状态，不进入 RPC worker；
+- `failed`：保留可重试诊断，不删除源文件。
+
+RPC 启动/注册探测只能在 disposable sidecar worker 中执行，使用当前固定 Pi 版本、`--no-extensions` 和单个显式本地 entry。探测必须设置临时空 `PI_CODING_AGENT_DIR`、临时 cwd、`--no-session`、最小环境变量、启动超时、输出上限和确定性进程树清理；不得在用户真实 agentDir/cwd 上触发 Pi migrations。单项通过后必须对最终组合再执行一次启动探测，以发现工具和 flag registration conflict。探测进程具有与 Developer Mode extension 相同的 Node 权限风险，不是安全 sandbox，因此必须在用户确认信任后执行。未经 OS 级文件、网络和子进程隔离时，UI 只能将其描述为“对已信任代码进行 RPC 启动检查”。
+
+迁移状态必须可中断、可恢复且幂等。同一 canonical entry 和 inventory revision 已有终态时不得每次启动重复探测；来源身份或 manifest 变化后必须回到待确认状态。转换为普通 development entry 后遵循 Developer Mode 的显式路径信任语义，不把 migration revision 冒充为持续内容完整性保证。
+
+## 7. 受控加载
+
+### 7.1 Pi RPC launch profile
+
+live session、draft config 和 migration probe 必须经同一个纯 launch-profile builder 生成 Pi 公共 CLI 参数：
+
+```ts
+const extensionArgs = [
+  "--no-extensions",
+  ...resolvedExtensionSet.entries.flatMap((entry) => ["-e", entry.entryPath]),
+];
+```
+
+`PiRpcClient.launch()` 继续统一添加 `--mode rpc`。draft 和 probe 额外添加 `--no-session`；probe 额外使用隔离的 agentDir/cwd/environment。不得在 Electron main、preload 或 renderer 中导入 extension，也不得依赖 Desktop 无法通过外部 Pi CLI 注入的进程内 `extensionFactories`。
+
+Pi 当前公共 CLI 语义允许 `--no-extensions` 阻止默认 enabled extension discovery，同时继续加载显式 `-e` entry。Pi 自身始终加载的 pinned built-in extensions 属于受信基线，不伪装成 Desktop source entry；每次 Pi 升级必须通过 characterization 锁定其集合和行为。
 
 含义：
 
 - 不加载 Pi settings 中的普通 extension 列表；
 - 不自动加载全局或项目 extension 目录；
-- 精选和 Developer Mode entry 只能由 Desktop source policy 注入；
-- 内建 inline extension 继续加载；
-- missing entry 是明确错误，不允许现场安装 dependency 或选择替代文件。
+- Desktop builtin、精选、marketplace 和 Developer Mode entry 必须先物化为 main 已批准的本地 entry，再由 source policy 显式注入；
+- missing entry 是明确错误，不允许启动路径现场安装 dependency、刷新 source 或选择替代文件；
+- draft/live 对同一 generation 生成完全相同且稳定排序的 `-e` 参数。
 
 ### 7.2 ResolvedExtensionSet
 
 ```ts
-type DesktopExtensionSource = "builtin" | "curated" | "development";
+type DesktopExtensionSource =
+  | "builtin"
+  | "curated"
+  | "marketplace"
+  | "development";
 
 interface ResolvedExtensionEntry {
   id: string;
   source: DesktopExtensionSource;
-  entryPath?: string;
-  contentHash?: string;
+  entryPath: string;
   hostProfileVersion: 1;
   capabilities: DesktopExtensionCapability[];
 }
@@ -277,28 +318,27 @@ interface ResolvedExtensionSet {
 
 约束：
 
-- `builtin` entry 可以通过 inline factory 注册，因此不要求暴露路径；
+- 所有 Desktop-controlled entry 必须物化为可传给 Pi 公共 CLI `-e` 的本地路径；
 - `curated` entry path 必须位于 packaged/bundled resource root；
 - `development` entry path 必须存在于 main 的显式批准记录；
 - 同一 extension ID 只能出现一次；
-- path-backed entries 在 source policy 中保持稳定顺序，inline factories 使用内建 registry 的稳定顺序；
-- Pi `ResourceLoader` 先加载所有 path-backed entries，再追加 inline factories，因此不定义跨这两组的任意交错优先级；
+- path-backed entries 在 source policy 中保持稳定顺序；
 - main 生成不可预测的 generation；
 - renderer 不能构造或修改 resolved set；
-- source policy 为 path-backed entry 计算内容哈希，sidecar 启动时重新校验 source、path 与哈希，防止 resolve/load 之间的内容变化复用旧 generation；
+- path-backed entry 的 generation 按本文开头的现行简化决策生成；sidecar 启动时重新校验 source 和 canonical path。Developer Mode 是路径信任，不宣称提供内容完整性；marketplace artifact identity 由 marketplace 规范定义；
 - resolved set 可以进入 diagnostics，但不得进入 LLM context。
 
 ### 7.3 Draft/live 一致性
 
 new-session draft 中显示的 commands、models 和 readiness 必须基于与 live worker 相同的 resolved set。
 
-当前 draft config 由 metadata worker 调用 `createAgentSessionServices()`，因此 extension factories 和 path-backed extensions 会在 metadata worker 中执行。v1 接受这一现实边界，但要求：
+当前 draft config 由 metadata worker 按请求启动独立 Pi RPC 子进程，因此每次 draft 请求必须携带项目对应的 resolved set，并与 live worker 共用同一个 launch-profile builder。v1 要求：
 
 - metadata worker 与 live thread worker 使用同一 source policy 和 resolved set；
-- metadata worker load failure 返回结构化 diagnostics，并由 registry 重启该 metadata worker；
-- Developer Mode extension 可能影响全部 draft metadata 请求，UI 必须明确提示这一风险；
+- 单次 draft Pi 子进程 load failure 返回结构化 diagnostics；
+- Developer Mode extension 可能影响对应项目的 draft metadata 请求，UI 必须明确提示这一风险；
 - extension 代码仍不得进入 Electron main、preload 或 renderer；
-- 如果后续需要将 Developer Mode draft failure 隔离到单次请求，必须使用 disposable draft worker，而不是在 main 中加载 extension。
+- draft 请求必须使用 disposable Pi 子进程，不能在长期 metadata worker 或 main 中加载 extension。
 
 如果 extension settings 在 draft 打开后变化：
 
@@ -523,8 +563,8 @@ thread worker startup payload 增加 resolved extension set 或其安全引用�
 
 1. 校验 worker identity 和 protocol version；
 2. 校验 resolved extension set；
-3. 创建 ResourceLoader；
-4. 加载内建、精选和已批准开发 extension；
+3. 构造唯一 Pi RPC launch profile；
+4. 通过公共 CLI `--no-extensions` 和重复 `-e` 加载内建、精选、marketplace 和已批准开发 extension；
 5. 构建 `AgentSession`；
 6. 绑定 `DesktopExtensionHost`；
 7. 绑定真实 command-context actions；
@@ -587,6 +627,32 @@ interface DesktopExtensionSettings {
     entryPath: string;
     enabled: boolean;
   }>;
+  legacyMigration: {
+    version: 1;
+    state: "pending" | "review-required" | "completed";
+    candidates: Array<{
+      id: string;
+      sourceKind: "settings-entry" | "auto-directory" | "package-entry";
+      canonicalSourceIdentity: string;
+      canonicalEntryPath: string;
+      inventoryRevision: string;
+      origins: Array<{
+        scope: "global" | "project";
+        displaySource: string;
+      }>;
+      package?: {
+        originalSource: string;
+        installedVersionOrCommit: string;
+        manifestEntry: string;
+        extensionsFilter: string[];
+      };
+      status: LegacyExtensionMigrationStatus;
+      approvedForProbe: boolean;
+      probePiVersion?: string;
+      selectedReplacementId?: string;
+      diagnosticCode?: string;
+    }>;
+  };
   revision: number;
 }
 ```
@@ -620,6 +686,7 @@ Desktop 只需要一个设置页，不建设 packages center。
 - 精选 extension 开关；
 - Developer Mode 总开关；
 - 已批准 development entries；
+- 旧架构迁移入口、候选状态和未解决冲突数量；
 - 添加本地 entry；
 - 移除批准记录；
 - reload-required 状态；
@@ -651,7 +718,7 @@ UI 必须：
 - 精选 extension path 来自只读 packaged resources；
 - Developer Mode path 需要逐项批准；
 - renderer 不能直接构造 worker entry list；
-- live extension crash 被限制在对应 thread worker 故障域，draft discovery crash 被限制在 metadata worker；
+- live extension crash 被限制在对应 thread worker 故障域，draft extension crash 被限制在该请求启动的 disposable Pi 子进程；
 - worker replacement 使用 generation/CAS；
 - 不在 runtime 执行 package installation lifecycle；
 - 不支持 TUI component 跨进程渲染；
@@ -697,9 +764,25 @@ Desktop 升级 Pi 时必须：
 1. 运行 Pi public compatibility characterization；
 2. 运行 Host Profile contract tests；
 3. 运行全部内建和精选 extension tests；
-4. 检查 ResourceLoader controlled-loading 行为；
+4. 检查公共 CLI `--no-extensions` + explicit `-e` controlled-loading 行为；
 5. 检查 command-context actions；
 6. 不通过宽泛 runtime duck typing 维持多个未知 Pi 行为分支。
+
+### 15.4 旧 Desktop 架构升级
+
+`--no-extensions` 是迁移完成后的运行时安全边界，不是迁移机制。检测到旧架构 extension 候选时，Desktop 必须满足：
+
+1. 主界面可以启动，候选 extension 不得在 Electron main 或 renderer 执行；
+2. 在创建依赖扩展能力的 draft/live worker 前展示迁移审查；
+3. 用户可以迁移、选择 replacement、保持禁用或暂缓处理；
+4. 暂缓处理不会丢失候选记录，并允许稍后从设置页恢复；
+5. 已知 replacement 不得与旧 entry 同时自动启用；
+6. 不兼容项必须展示稳定错误码和安全 display path；
+7. 不自动改写 extension 源码、安装依赖或建立旧 Host API adapter；
+8. 不修改 Pi TUI 的全局或项目 enabled state；
+9. 迁移成功后，draft 与 live 通过同一 `ResolvedExtensionSet` 显式加载结果。
+
+旧 entry 转成 development entry 时视为新的 Node 代码信任批准，不能沿用旧版本中的隐式自动发现作为永久授权。产品可以批量展示候选，但每个最终启用的本地 entry 必须有明确选择记录。
 
 ## 16. Observability
 
@@ -728,12 +811,24 @@ Developer Mode entry 的绝对路径只进入本地 diagnostics，不发送到 r
 
 完成条件：能够证明关闭默认 discovery 不会误伤内建 provider、skills 或 prompt templates。
 
+### Phase 0.5：旧扩展迁移基础
+
+- 增加只读 legacy discovery，不执行候选代码；
+- 增加 migration settings、revision/CAS 和幂等状态机；
+- 增加已知 replacement registry；
+- 增加 disposable compatibility probe；
+- 在首次受控启动与设置页提供迁移审查；
+- 保留旧文件和 Pi settings，不建立旧 Host API compatibility layer。
+
+完成条件：旧架构用户升级后可以看到全部可发现候选及其处理结果；没有候选会因为 Phase 1 关闭 discovery 而静默消失。
+
 ### Phase 1：受控来源
 
 - 增加静态 curated extension registry；
-- 为 live 和 draft services 设置 `noExtensions: true`；
-- 从统一 resolver 注入 `additionalExtensionPaths`；
-- 保留 `extensionFactories`；
+- 增加唯一 Pi RPC launch-profile builder；
+- live、draft 和 probe 固定传入 `--no-extensions`；
+- 从统一 resolver 生成稳定排序、重复的 `-e <local-entry>`；
+- 将 Pi pinned built-ins 纳入升级 characterization baseline；
 - 引入 `ResolvedExtensionSet` 和 generation；
 - 阻止 renderer/sidecar 自行选择 extension path。
 
@@ -763,13 +858,24 @@ Developer Mode entry 的绝对路径只进入本地 diagnostics，不发送到 r
 
 ## 18. 测试要求
 
-### 18.1 Source policy 单测
+### 18.1 Source policy 与迁移单测
 
 必须覆盖：
 
-- builtin/curated/development 合并；
+- legacy global/project/settings/package discovery；
+- discovery 不导入或执行 extension，首次发现状态为 `unverified`；
+- canonical identity 合并 settings/directory/package aliases，同时保留全部 origins；
+- package filter、多 entry、安装版本/commit 和 manifest entry 不丢失；
+- 扫描不联网、不安装、不刷新 git source、不运行 lifecycle；
+- migration 状态机幂等与中断恢复；
+- inventory revision 变化后重新确认；
+- known replacement 不与旧 entry 同时启用；
+- conflict 必须显式选择；
+- incompatible/failed 候选保留且不进入 resolved set；
+- 迁移不修改 Pi settings 或旧文件；
+- builtin/curated/development/marketplace entry 合并；
 - duplicate ID；
-- path-backed 与 inline factories 的分组稳定顺序；
+- path-backed entries 稳定排序；
 - curated path root 校验；
 - Developer Mode 总开关；
 - approved path records；
@@ -777,16 +883,20 @@ Developer Mode entry 的绝对路径只进入本地 diagnostics，不发送到 r
 - settings revision/CAS；
 - stale draft generation。
 
-### 18.2 ResourceLoader 集成测试
+### 18.2 Pi RPC launch-profile 集成测试
 
-使用真实 Pi services 和 faux provider，证明：
+使用 fake Pi argv fixture、真实 pinned Pi 和 faux provider，证明：
 
-- `noExtensions: true` 禁止默认 global/project discovery；
-- approved additional path 正常加载；
-- inline Desktop provider 仍注册；
-- skills 和 prompt templates 不受影响；
-- draft/live 使用相同 resolved set；
-- extension load error 保留 source identity。
+- `--no-extensions` 禁止默认 global/project discovery；
+- approved local entry 通过独立 `-e` argv 正常加载，含空格路径不被拆分；
+- 不把 `npm:`、`git:` 或未解析 package source 传给 `-e`；
+- Pi pinned built-ins 与 skills/prompt templates 的 characterization 不受影响；
+- draft/live 使用相同 ordered entries 和 generation；
+- probe 使用临时空 agentDir/cwd、最小环境和 `--no-session`；
+- 带 sentinel 副作用的候选证明静态 inventory 不执行代码；
+- probe 前后真实 Pi settings、extensions 与 package 目录保持不变；
+- extension load error 保留 source identity；
+- RPC 启动/registration 成功不会被错误标记为完整 Host Profile 兼容。
 
 ### 18.3 Host contract 测试
 
@@ -832,20 +942,24 @@ Developer Mode entry 的绝对路径只进入本地 diagnostics，不发送到 r
 v1 完成必须同时满足：
 
 1. Desktop 默认不加载任何普通 Pi user/project extension。
-2. Desktop 内建 inline provider 继续工作。
-3. 精选 extension 只来自 Desktop 静态 registry 和 bundled resources。
-4. Developer Mode 默认关闭，entry 必须逐项批准。
-5. renderer 不能直接传入 worker extension paths。
-6. draft 与 live worker 使用同一 resolved extension set。
-7. 同一 worker generation 的 extension set 不可变。
-8. Host Profile 有明确 capability matrix 和 contract tests。
-9. Desktop 不渲染或模拟 Pi TUI component。
-10. shared contracts 不包含无消费者的 TUI compatibility state。
-11. session-changing extension action 不会返回成功 no-op。
-12. Developer Mode 不被描述为安全 sandbox。
-13. extension crash 不在 Electron main 或 renderer 执行插件代码。
-14. Pi 升级有 characterization gate。
-15. focused tests 和仓库 `npm run check` 通过。
+2. 从旧架构升级时，关闭默认 discovery 前已生成可恢复的迁移清单，且不存在静默丢弃的候选。
+3. 旧 extension 文件与 Pi settings 不被 Desktop 删除、移动或改写。
+4. 候选经明确批准后可以执行隔离的 RPC 启动/注册检查；ready、replacement、conflict 和 incompatible 状态均可见且可处理，且 UI 不把检查结果声称为完整兼容认证。
+5. 静态 inventory 不执行 extension、不联网、不安装 package，probe 不在真实 agentDir/cwd 触发 Pi migrations。
+6. 所有 Desktop-controlled extension 只通过 main 解析的本地 entry 和公共 CLI `-e` 加载；Pi pinned built-ins 有 characterization gate。
+7. 精选 extension 只来自 Desktop 静态 registry 和 bundled resources。
+8. Developer Mode 默认关闭，entry 必须逐项批准。
+9. renderer 不能直接传入 worker extension paths。
+10. draft 与 live worker 使用同一 resolved extension set、稳定 argv 和 generation。
+11. 同一 worker generation 的 extension set 不可变。
+12. Host Profile 有明确 capability matrix 和 contract tests。
+13. Desktop 不渲染或模拟 Pi TUI component。
+14. shared contracts 不包含无消费者的 TUI compatibility state。
+15. session-changing extension action 不会返回成功 no-op。
+16. Developer Mode 不被描述为安全 sandbox。
+17. extension crash 不在 Electron main 或 renderer 执行插件代码。
+18. Pi 升级有 characterization gate。
+19. focused tests 和仓库 `npm run check` 通过。
 
 ## 20. 未来演进
 

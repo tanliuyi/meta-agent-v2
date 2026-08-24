@@ -20,7 +20,6 @@ import type { SlashCommand } from "../../../../../shared/contracts.ts";
 import { ComposerDirectiveChip } from "../../assistant-ui/composer-directive-chip.tsx";
 import { ComposerCommandTrigger, slashCommandText } from "./composer-command-trigger.tsx";
 import { ComposerFileTrigger } from "./composer-file-trigger.tsx";
-import { composerCommandTriggerScope } from "./composer-suggestion-model.ts";
 import type { ComposerTriggerStateSnapshot } from "./composer-trigger-state.tsx";
 
 const ESCAPE_CANCEL_WINDOW_MS = 1_000;
@@ -35,10 +34,12 @@ export function acceptHighlightedCommandOnSpace(
     "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey" | "preventDefault" | "stopPropagation"
   >,
   commandTriggerOpen: boolean,
+  commandTriggerHasItems: boolean,
   resource: CommandTriggerKeyboardResource | undefined,
 ): boolean {
   if (
     !commandTriggerOpen ||
+    !commandTriggerHasItems ||
     event.key !== " " ||
     event.shiftKey ||
     event.ctrlKey ||
@@ -125,7 +126,10 @@ export function ComposerInput({
   const triggers = unstable_useTriggerPopoverTriggers();
   const commandTriggerResource = triggers.get("/")?.resource;
   const [fileTriggerOpen, setFileTriggerOpen] = useState(false);
-  const [commandTriggerOpen, setCommandTriggerOpen] = useState(false);
+  const [commandTriggerState, setCommandTriggerState] = useState<ComposerTriggerStateSnapshot>({
+    open: false,
+    hasItems: false,
+  });
   const [dismissedCommandText, setDismissedCommandText] = useState<string | null>(null);
 
   const clearEscapeCancelTimer = useCallback(() => {
@@ -153,7 +157,7 @@ export function ComposerInput({
     if (selectedCommand) {
       const text = slashCommandText(selectedCommand, aui.composer().getState().text);
       setDismissedCommandText(text);
-      setCommandTriggerOpen(false);
+      setCommandTriggerState({ open: false, hasItems: false });
       aui.composer().setText(text);
     }
     onCommandClear();
@@ -178,11 +182,28 @@ export function ComposerInput({
       event.preventDefault();
       return;
     }
-    if (shouldDeferComposerKeyToTrigger(event.key, fileTriggerOpen || commandTriggerOpen)) return;
+    if (
+      (fileTriggerOpen || commandTriggerState.open) &&
+      (event.key === "ArrowDown" ||
+        event.key === "ArrowUp" ||
+        event.key === "Enter" ||
+        event.key === "Tab" ||
+        event.key === "Escape" ||
+        event.key === "Backspace")
+    )
+      return;
 
     if (event.nativeEvent.isComposing) return;
 
-    if (acceptHighlightedCommandOnSpace(event, commandTriggerOpen, commandTriggerResource)) return;
+    if (
+      acceptHighlightedCommandOnSpace(
+        event,
+        commandTriggerState.open,
+        commandTriggerState.hasItems,
+        commandTriggerResource,
+      )
+    )
+      return;
 
     const exitsEmptyCommand =
       selectedCommand &&
@@ -250,7 +271,7 @@ export function ComposerInput({
         <ComposerFileTrigger projectId={projectId} onOpenChange={setFileTriggerOpen} />
       ) : null}
       {dismissedCommandText === composerText ? null : (
-        <ComposerCommandTrigger commands={commands} onSelect={onCommandSelect} onOpenChange={setCommandTriggerOpen} />
+        <ComposerCommandTrigger commands={commands} onSelect={onCommandSelect} onStateChange={setCommandTriggerState} />
       )}
       <div className="composer-input-row">
         {selectedCommand ? (
