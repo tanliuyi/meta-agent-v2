@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSessionRecordStores } from "../src/renderer/src/runtime/pi-session-store.ts";
 import { PROTOCOL_VERSION, type SessionControlState } from "../src/shared/contracts.ts";
 
@@ -59,6 +59,24 @@ describe("SessionControlStore", () => {
 
     expect(control.getSnapshot()?.commands).not.toBe(initial.commands);
     expect(control.getSnapshot()?.commands).toHaveLength(2);
+  });
+});
+
+describe("SessionSummaryStore", () => {
+  it("语义未变化时不通知订阅者", () => {
+    const { summary } = createSessionRecordStores();
+    const listener = vi.fn();
+    summary.subscribe(listener);
+
+    summary.setRunning(false);
+    summary.setConnectionState("attaching");
+    summary.setComposerDirty(false);
+    summary.set({ loading: false, hasPendingAttachments: false });
+    expect(listener).not.toHaveBeenCalled();
+
+    summary.setRunning(true);
+    summary.setRunning(true);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -29,6 +29,7 @@ import {
   THREAD_ASSISTANT_PREVIEW_MAX_CHARS,
   THREAD_USER_PREVIEW_MAX_CHARS,
 } from "../shared/contracts.ts";
+import { PiThreadStore } from "../shared/pi-thread-store.ts";
 import type { ThreadWorkerBinding } from "../shared/sidecar-contracts.ts";
 import { isThinkingLevel } from "../shared/thinking-levels.ts";
 import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
@@ -78,6 +79,7 @@ export class PiRpcSessionRuntime {
   private commands: SlashCommand[];
   private thinkingLevels: ThinkingLevel[];
   private timeline: PiThreadSnapshot;
+  private readonly timelineStore: PiThreadStore;
   private summary: Omit<Thread, "projectId" | "archived" | "running">;
   private revision = 0;
   private sequence = 0;
@@ -92,6 +94,7 @@ export class PiRpcSessionRuntime {
   private refreshTail = Promise.resolve();
   private refreshActive = false;
   private refreshRequested = false;
+  private timelineResyncRequested = false;
   private disposed = false;
 
   private constructor(
@@ -117,6 +120,7 @@ export class PiRpcSessionRuntime {
     ];
     this.thinkingLevels = thinkingLevels;
     this.timeline = this.createSnapshot(handshake.entries.entries, handshake.entries.leafId);
+    this.timelineStore = new PiThreadStore(this.timeline);
     this.summary = summarize(
       this.id,
       state.sessionName,
@@ -128,6 +132,13 @@ export class PiRpcSessionRuntime {
   static async create(options: PiRpcSessionRuntimeOptions): Promise<PiRpcSessionRuntime> {
     const binding = options.binding;
     const environment: NodeJS.ProcessEnv = { ...process.env, PI_CODING_AGENT_DIR: binding.agentDir };
+    environment.PI_BROWSER_SESSION_PROJECT_ID = binding.projectId;
+    environment.PI_BROWSER_SESSION_THREAD_ID = binding.mode === "create" ? binding.sessionId : binding.threadId;
+    if (binding.browserSessionToken !== undefined) {
+      environment.PI_BROWSER_SESSION_TOKEN = binding.browserSessionToken;
+    } else {
+      delete environment.PI_BROWSER_SESSION_TOKEN;
+    }
     if (binding.shellPath) prependEnvironmentPath(environment, dirname(binding.shellPath));
     const pi = await (options.resolvePi ?? resolveAndProbePi)(environment);
     assertSupportedPiVersion(pi.version);
@@ -187,6 +198,7 @@ export class PiRpcSessionRuntime {
   }
 
   bootstrap(): SessionBootstrap {
+    this.timeline = this.timelineStore.getSnapshot();
     return {
       protocolVersion: PROTOCOL_VERSION,
       projectId: this.projectId,
@@ -209,6 +221,10 @@ export class PiRpcSessionRuntime {
   async prompt(input: SessionPromptInput): Promise<SessionCommandResult> {
     this.assertIdentity(input.projectId, input.threadId);
     const wasStreaming = this.state.isStreaming;
+    const commandName = /^\/([^\s]+)/.exec(input.text.trimStart())?.[1];
+    const mayChangePersistedTree =
+      commandName !== undefined &&
+      this.commands.some((command) => command.source === "extension" && command.name === commandName);
     const quotes = input.quotes?.length ? input.quotes : input.quote ? [input.quote] : [];
     const message = withQuoteContext(input.text, quotes);
     try {
@@ -224,6 +240,7 @@ export class PiRpcSessionRuntime {
       this.state = await requestState(this.client);
       this.setPhase(this.state.isCompacting ? "compacting" : this.state.isStreaming ? "running" : "idle");
       this.publishControl();
+      if (mayChangePersistedTree) this.scheduleRefresh(true);
       return { accepted: true, queued: wasStreaming };
     } catch (error) {
       this.lastError = errorMessage(error);
@@ -311,6 +328,8 @@ export class PiRpcSessionRuntime {
       case "message_end":
         return;
       case "entry_appended":
+        this.scheduleRefresh(true);
+        return;
       case "session_info_changed":
         this.scheduleRefresh();
         return;
@@ -326,7 +345,7 @@ export class PiRpcSessionRuntime {
         this.state = { ...this.state, isCompacting: false };
         this.lastError = typeof event.errorMessage === "string" ? event.errorMessage : undefined;
         this.setPhase(event.willRetry === true || this.state.isStreaming ? "running" : "idle");
-        this.scheduleRefresh();
+        this.scheduleRefresh(true);
         return;
       case "auto_retry_start":
         if (typeof event.attempt === "number" && typeof event.maxAttempts === "number") {
@@ -360,7 +379,7 @@ export class PiRpcSessionRuntime {
       case "summarization_retry_finished":
         this.retry = undefined;
         this.setPhase(this.state.isStreaming ? "running" : "idle");
-        this.scheduleRefresh();
+        this.scheduleRefresh(true);
         return;
       case "queue_update":
         this.replaceQueue(event);
@@ -376,8 +395,9 @@ export class PiRpcSessionRuntime {
     }
   }
 
-  private scheduleRefresh(): void {
+  private scheduleRefresh(resyncTimeline = false): void {
     this.refreshRequested = true;
+    if (resyncTimeline) this.timelineResyncRequested = true;
     if (this.refreshActive) return;
     this.refreshActive = true;
     this.refreshTail = this.refreshTail
@@ -385,23 +405,48 @@ export class PiRpcSessionRuntime {
         while (this.refreshRequested && !this.disposed) {
           this.refreshRequested = false;
           const refreshSequence = this.sequence;
+          const resyncTimeline = this.timelineResyncRequested;
+          this.timelineResyncRequested = false;
           const [entriesResponse, state, context] = await Promise.all([
-            this.client.request({ type: "get_entries" }),
+            resyncTimeline ? this.client.request({ type: "get_entries" }) : Promise.resolve(undefined),
             requestState(this.client),
             requestContextUsage(this.client),
           ]);
-          const data = responseRecord(entriesResponse);
-          const entries = Array.isArray(data.entries) ? data.entries : undefined;
-          const leafId = data.leafId;
-          if (!entries || (leafId !== null && typeof leafId !== "string")) {
-            throw new Error("get_entries response is malformed");
+          if (this.sequence !== refreshSequence) {
+            if (resyncTimeline) this.timelineResyncRequested = true;
+            this.refreshRequested = true;
+            continue;
           }
-          if (this.sequence !== refreshSequence || state.isStreaming) continue;
+          if (state.isStreaming) {
+            if (resyncTimeline) this.timelineResyncRequested = true;
+            break;
+          }
+          if (state.sessionId !== this.id) {
+            if (!resyncTimeline) {
+              this.timelineResyncRequested = true;
+              this.refreshRequested = true;
+              continue;
+            }
+            throw new Error(`Pi RPC session identity changed: expected ${this.id}, got ${state.sessionId}`);
+          }
           this.state = state;
           this.context = context;
-          this.replaceTimeline(entries, leafId, refreshSequence);
+          if (resyncTimeline) {
+            if (!entriesResponse) throw new Error("get_entries response is missing");
+            const data = responseRecord(entriesResponse);
+            const entries = Array.isArray(data.entries) ? data.entries : undefined;
+            const leafId = data.leafId;
+            if (!entries || (leafId !== null && typeof leafId !== "string")) {
+              throw new Error("get_entries response is malformed");
+            }
+            this.replaceTimeline(entries, leafId, refreshSequence);
+          } else {
+            this.events = this.events.filter(({ sequence }) => sequence > this.timeline.cursor);
+            this.summary = summarize(this.id, this.state.sessionName, this.timeline, undefined);
+          }
           this.lastError = undefined;
           this.publishControl();
+          this.onSummaryChanged(this);
         }
       })
       .catch((error: unknown) => {
@@ -431,9 +476,9 @@ export class PiRpcSessionRuntime {
       thinkingLevel: this.state.thinkingLevel,
     };
     this.timeline = snapshot;
+    this.timelineStore.replace(snapshot);
     this.events = this.events.filter(({ sequence }) => sequence > cursor);
     this.summary = summarize(this.id, this.state.sessionName, snapshot, undefined);
-    this.onSummaryChanged(this);
   }
 
   private appendExtensionNotices(
@@ -467,30 +512,11 @@ export class PiRpcSessionRuntime {
   private setPhase(phase: PiThreadPhase): void {
     if (this.timeline.phase === phase) return;
     this.timeline = { ...this.timeline, phase };
+    this.timelineStore.replace(this.timeline);
   }
 
-  private replaceQueue(event: Record<string, unknown>): void {
-    const steering = stringArray(event.steering);
-    const followUp = stringArray(event.followUp);
-    this.queue = [
-      ...steering.map(
-        (prompt, index): PiQueueItem => ({
-          id: `rpc:steer:${index}:${prompt}`,
-          mode: "steer",
-          prompt,
-          source: "pi-observed",
-        }),
-      ),
-      ...followUp.map(
-        (prompt, index): PiQueueItem => ({
-          id: `rpc:followUp:${index}:${prompt}`,
-          mode: "followUp",
-          prompt,
-          source: "pi-observed",
-        }),
-      ),
-    ];
-    this.timeline = { ...this.timeline, queue: this.queue };
+  private replaceQueue(_event: Record<string, unknown>): void {
+    this.queue = [...this.timeline.queue];
   }
 
   private handleExtensionUi(event: Record<string, unknown>): void {
@@ -595,6 +621,14 @@ export class PiRpcSessionRuntime {
 
   private emitRpcEvent(event: PiRpcEvent): void {
     this.sequence += 1;
+    try {
+      this.timelineStore.apply(this.sequence, event);
+      this.timeline = this.timelineStore.getStatusSnapshot();
+    } catch (error) {
+      this.timelineResyncRequested = true;
+      this.scheduleRefresh();
+      this.lastError = errorMessage(error);
+    }
     const sequenced = { sequence: this.sequence, event };
     this.events.push(sequenced);
     this.push({

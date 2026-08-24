@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MetadataWorkerClient } from "../src/main/sidecar/metadata-worker-client.ts";
 import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime-manifest.ts";
 import {
+  DEFAULT_THREAD_WORKER_IDLE_TTL_MS,
   type ThreadWorkerClient,
   ThreadWorkerRegistry,
   type ThreadWorkerRegistryOptions,
@@ -20,7 +21,12 @@ import {
   type SessionPushPayload,
   type Thread,
 } from "../src/shared/contracts.ts";
-import { SIDECAR_PROTOCOL_VERSION, type SidecarCommand, type SidecarReady } from "../src/shared/sidecar-contracts.ts";
+import {
+  SIDECAR_PROTOCOL_VERSION,
+  type SidecarCommand,
+  type SidecarEventBody,
+  type SidecarReady,
+} from "../src/shared/sidecar-contracts.ts";
 import { currentRuntimeCompatibility } from "../src/shared/sidecar-wire.ts";
 
 describe("ThreadWorkerRegistry model refresh", () => {
@@ -32,6 +38,129 @@ describe("ThreadWorkerRegistry model refresh", () => {
 
   afterEach(() => {
     rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  it("首次 attach 消费 worker ready bootstrap", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    const first = await registry.attach("project", "thread");
+    registry.detach("project", "thread", first.workerInstanceId);
+    await registry.attach("project", "thread");
+
+    expect(harness.clients[0]?.bootstrapRequestCount).toBe(1);
+    await registry.dispose();
+  });
+
+  it("默认在 90 秒后回收 detached idle worker", () => {
+    expect(DEFAULT_THREAD_WORKER_IDLE_TTL_MS).toBe(90_000);
+  });
+
+  it("detached idle TTL 从最后 attachment 释放时开始", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const harness = createHarness(userDataDir);
+      harness.options.idleTtlMs = DEFAULT_THREAD_WORKER_IDLE_TTL_MS;
+      const registry = new ThreadWorkerRegistry(harness.options);
+      const attachment = await registry.attach("project", "thread");
+
+      await vi.advanceTimersByTimeAsync(DEFAULT_THREAD_WORKER_IDLE_TTL_MS * 2);
+      expect(harness.clients[0]?.shutdownCount).toBe(0);
+      registry.detach("project", "thread", attachment.workerInstanceId);
+
+      await vi.advanceTimersByTimeAsync(DEFAULT_THREAD_WORKER_IDLE_TTL_MS - 1);
+      expect(harness.clients[0]?.shutdownCount).toBe(0);
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(harness.clients[0]?.shutdownCount).toBe(1);
+      await registry.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("live worker 目标已满且无空闲候选时仍允许创建线程", async () => {
+    const harness = createHarness(userDataDir);
+    harness.options.maxLiveWorkers = 1;
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(registry.attach("project", "thread")).resolves.toMatchObject({
+      bootstrap: { threadId: "thread" },
+    });
+    await expect(registry.create(createInput())).resolves.toMatchObject({ projectId: "project" });
+
+    expect(harness.clients).toHaveLength(2);
+    expect(harness.clients[0]?.shutdownCount).toBe(0);
+    expect(harness.clients[1]?.shutdownCount).toBe(0);
+    await registry.dispose();
+  });
+
+  it("并行关闭达到 TTL 的空闲 worker", async () => {
+    const firstShutdown = deferred<void>();
+    const secondShutdown = deferred<void>();
+    const harness = createHarness(userDataDir, { shutdownGates: [firstShutdown, secondShutdown] });
+    harness.options.idleTtlMs = 1;
+    const registry = new ThreadWorkerRegistry(harness.options);
+    const first = await registry.attach("project", "thread");
+    registry.detach("project", "thread", first.workerInstanceId);
+    const second = await registry.attach("project", "thread-2");
+    registry.detach("project", "thread-2", second.workerInstanceId);
+
+    await vi.waitFor(
+      () => {
+        expect(harness.clients[0]?.shutdownCount).toBe(1);
+        expect(harness.clients[1]?.shutdownCount).toBe(1);
+      },
+      { timeout: 2_000 },
+    );
+
+    firstShutdown.resolve();
+    secondShutdown.resolve();
+    await registry.dispose();
+  });
+
+  it("上报 TTL worker shutdown 失败", async () => {
+    const shutdownError = new Error("idle shutdown failed");
+    const harness = createHarness(userDataDir, { shutdownError });
+    harness.options.idleTtlMs = 1;
+    const registry = new ThreadWorkerRegistry(harness.options);
+    const attachment = await registry.attach("project", "thread");
+    registry.detach("project", "thread", attachment.workerInstanceId);
+
+    await vi.waitFor(
+      () => {
+        expect(harness.failed).toHaveBeenCalledWith("project", "thread", shutdownError);
+      },
+      { timeout: 2_000 },
+    );
+    await expect(registry.dispose()).rejects.toThrow("idle shutdown failed");
+  });
+
+  it("invalidates the stable bootstrap when a session event arrives", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    const first = await registry.attach("project", "thread");
+    registry.detach("project", "thread", first.workerInstanceId);
+
+    harness.clients[0]?.emitToolEvent("tool_execution_start", "plugin-defined-tool");
+    await registry.attach("project", "thread");
+
+    expect(harness.clients[0]?.bootstrapRequestCount).toBe(1);
+    await registry.dispose();
+  });
+
+  it("background session 完成后按需请求 bootstrap", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    const first = await registry.attach("project", "thread");
+    registry.detach("project", "thread", first.workerInstanceId);
+    harness.clients[0]?.emitToolEvent("tool_execution_start", "plugin-defined-tool");
+
+    harness.clients[0]?.emitRunning(false);
+    await registry.attach("project", "thread");
+
+    expect(harness.clients[0]?.bootstrapRequestCount).toBe(1);
+    await registry.dispose();
   });
 
   it("publishes catalog changes while any tool is running", async () => {
@@ -262,7 +391,7 @@ describe("ThreadWorkerRegistry model refresh", () => {
     writeCreationReservation(userDataDir);
 
     const recovery = registry.create(createInput());
-    await vi.waitFor(() => expect(harness.clients[0]?.bootstrapRequestCount).toBe(2));
+    await vi.waitFor(() => expect(harness.clients[0]?.bootstrapRequestCount).toBe(1));
     await expect(registry.refreshAllModels({ generation: 9 })).resolves.toBeUndefined();
     expect(harness.clients[0]?.shutdownCount).toBe(0);
 
@@ -281,6 +410,7 @@ interface HarnessOptions {
   hostResponseGate?: ReturnType<typeof deferred<void>>;
   promptRunning?: boolean;
   shutdownError?: Error;
+  shutdownGates?: Array<ReturnType<typeof deferred<void>>>;
 }
 
 interface Harness {
@@ -323,6 +453,7 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
         harnessOptions.bootstrapGate,
         harnessOptions.hostResponseGate,
         harnessOptions.promptRunning ?? false,
+        harnessOptions.shutdownGates?.[clients.length],
         harnessOptions.shutdownError,
       );
       clients.push(client);
@@ -345,6 +476,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   private readonly bootstrapGate?: ReturnType<typeof deferred<void>>;
   private readonly hostResponseGate?: ReturnType<typeof deferred<void>>;
   private running: boolean;
+  private readonly shutdownGate?: ReturnType<typeof deferred<void>>;
   private readonly shutdownError?: Error;
 
   constructor(
@@ -354,6 +486,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
     bootstrapGate?: ReturnType<typeof deferred<void>>,
     hostResponseGate?: ReturnType<typeof deferred<void>>,
     promptRunning = false,
+    shutdownGate?: ReturnType<typeof deferred<void>>,
     shutdownError?: Error,
   ) {
     this.options = options;
@@ -363,6 +496,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
     this.bootstrapGate = bootstrapGate;
     this.hostResponseGate = hostResponseGate;
     this.running = promptRunning;
+    this.shutdownGate = shutdownGate;
     this.shutdownError = shutdownError;
     this.instanceId = `worker-${nextWorkerId++}`;
   }
@@ -388,7 +522,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
     this.requests.push(command.type);
     if (command.type === "bootstrap") {
       this.bootstrapRequestCount += 1;
-      if (this.bootstrapRequestCount > 1) await this.bootstrapGate?.promise;
+      await this.bootstrapGate?.promise;
       return bootstrap("thread") as unknown as T;
     }
     if (command.type === "prompt") {
@@ -402,15 +536,23 @@ class FakeWorkerClient implements ThreadWorkerClient {
 
   acknowledge(): void {}
 
-  emitRunning(running: boolean): void {
-    this.running = running;
+  private emitEvent(sequence: number, event: SidecarEventBody): void {
     this.options.onEvent({
       kind: "event",
       protocolVersion: SIDECAR_PROTOCOL_VERSION,
       workerInstanceId: this.instanceId,
-      sequence: 1,
+      sequence,
       creditCost: 1,
-      event: { type: "summary-changed", summary: { ...thread(), running } },
+      eventJsonLength: JSON.stringify(event).length,
+      event,
+    });
+  }
+
+  emitRunning(running: boolean): void {
+    this.running = running;
+    this.emitEvent(1, {
+      type: "summary-changed",
+      summary: { ...thread(), running },
     });
   }
 
@@ -422,21 +564,15 @@ class FakeWorkerClient implements ThreadWorkerClient {
         : type === "tool_execution_end"
           ? { ...base, type, result: { content: [] }, isError: false }
           : { ...base, type };
-    this.options.onEvent({
-      kind: "event",
-      protocolVersion: SIDECAR_PROTOCOL_VERSION,
-      workerInstanceId: this.instanceId,
-      sequence: 2,
-      creditCost: 1,
-      event: {
-        type: "session-push",
-        payload: { type: "timeline", projectId: "project", threadId: "thread", sequence: 1, event },
-      },
+    this.emitEvent(2, {
+      type: "session-push",
+      payload: { type: "timeline", projectId: "project", threadId: "thread", sequence: 1, event },
     });
   }
 
   async shutdown(): Promise<void> {
     this.shutdownCount += 1;
+    await this.shutdownGate?.promise;
     if (this.shutdownError) throw this.shutdownError;
   }
 }

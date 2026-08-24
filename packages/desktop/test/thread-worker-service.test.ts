@@ -80,6 +80,52 @@ describe("ThreadWorkerService", () => {
     expect(result.readyResult).toBe(bootstrap);
   });
 
+  it("publishes summary changes without duplicating the bootstrap", async () => {
+    const sessionId = "thread";
+    const summary = {
+      id: sessionId,
+      projectId: "project",
+      title: "thread",
+      createdAt: 1,
+      updatedAt: 1,
+      messageCount: 0,
+      preview: "",
+      archived: false,
+      running: false,
+    };
+    const runtime = {
+      id: sessionId,
+      sessionFile: join(root, "sessions", `${sessionId}.jsonl`),
+      bootstrap: vi.fn().mockReturnValue({ threadId: sessionId }),
+      threadSummary: vi.fn().mockReturnValue(summary),
+      dispose: vi.fn(),
+    };
+    mocks.runtimeCreate.mockResolvedValue(runtime);
+    const binding: ThreadWorkerBinding = {
+      mode: "create",
+      projectId: "project",
+      cwd: join(root, "project"),
+      agentDir: join(root, "agent"),
+      sessionId,
+      createInput: {
+        projectId: "project",
+        createRequestId: "request",
+        model: { provider: "provider", id: "model" },
+        thinkingLevel: "off",
+      },
+    };
+
+    await ThreadWorkerService.create({ role: "thread", value: binding }, serviceContext);
+    const runtimeOptions = mocks.runtimeCreate.mock.calls[0]?.[0] as {
+      onSummaryChanged(current: typeof runtime): void;
+    };
+    serviceContext.emit.mockClear();
+    runtimeOptions.onSummaryChanged(runtime);
+
+    expect(serviceContext.emit).toHaveBeenCalledExactlyOnceWith({ type: "summary-changed", summary });
+    expect(runtime.bootstrap).toHaveBeenCalledOnce();
+  });
+
   it("returns authoritative running state with prompt acceptance", async () => {
     const cwd = join(root, "project");
     const agentDir = join(root, "agent");

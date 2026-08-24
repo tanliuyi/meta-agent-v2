@@ -105,6 +105,19 @@ describe("preload session attachment leases", () => {
     expect(receivedB).toHaveLength(1);
   });
 
+  it("uses main transport accounting and rejects invalid delivery bytes", async () => {
+    const api = requiredApi();
+    electron.invoke.mockReset().mockResolvedValueOnce(attachment("bytes", "bytes"));
+    const attached = await api.sessions.attach(input("bytes", "bytes-request"), () => {});
+
+    push({ ...controlPush(attached.attachmentId, "bytes", 1), deliveryBytes: Number.NaN });
+
+    expect(api.sessions.flush(attached.attachmentId)).toEqual({
+      state: "recovering",
+      reason: "preload-buffer-overflow",
+    });
+  });
+
   it("buffers pushes that arrive before the attach invoke resolves", async () => {
     const api = requiredApi();
     const pending = deferred<SessionAttachment>();
@@ -188,6 +201,7 @@ function controlPush(attachmentId: string, threadId: string, sequence: number): 
     attachmentId,
     workerInstanceId: `worker-${sequence}`,
     sidecarSequence: sequence,
+    deliveryBytes: 1_024,
     type: "control",
     projectId: "project",
     threadId,

@@ -1,7 +1,7 @@
 import type { Attachment } from "@assistant-ui/react";
 import type { PiThreadSnapshot, SessionControlState, WorkbenchState } from "../../../shared/contracts.ts";
+import { PiThreadStore } from "../../../shared/pi-thread-store.ts";
 import { mergeSessionControl } from "../shared/session-control-identity.ts";
-import { PiThreadStore } from "./pi-thread-store.ts";
 
 /**
  * 一个 cached session 持有的所有领域 store。
@@ -214,26 +214,35 @@ function createSummaryStore(): SessionSummaryStore {
     connectionState: "attaching",
   };
   const listeners = new Set<() => void>();
+  const publish = (next: CachedSessionSummary): void => {
+    if (
+      summary.composerEmpty === next.composerEmpty &&
+      summary.running === next.running &&
+      summary.loading === next.loading &&
+      summary.hasPendingAttachments === next.hasPendingAttachments &&
+      summary.connectionState === next.connectionState
+    ) {
+      return;
+    }
+    summary = next;
+    for (const listener of listeners) listener();
+  };
 
   return {
     getSnapshot() {
       return summary;
     },
     setRunning(running: boolean) {
-      summary = { ...summary, running };
-      for (const listener of listeners) listener();
+      publish({ ...summary, running });
     },
     setConnectionState(state: SessionConnectionState) {
-      summary = { ...summary, connectionState: state };
-      for (const listener of listeners) listener();
+      publish({ ...summary, connectionState: state });
     },
     setComposerDirty(dirty: boolean) {
-      summary = { ...summary, composerEmpty: !dirty };
-      for (const listener of listeners) listener();
+      publish({ ...summary, composerEmpty: !dirty });
     },
     set(value: Partial<CachedSessionSummary>) {
-      summary = { ...summary, ...value };
-      for (const listener of listeners) listener();
+      publish({ ...summary, ...value });
     },
     subscribe(listener: () => void) {
       listeners.add(listener);

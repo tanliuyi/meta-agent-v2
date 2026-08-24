@@ -13,9 +13,7 @@ import type {
   PiThreadSnapshot,
   PiTimelineNode,
 } from "../../../shared/contracts.ts";
-import { parsePiFileContexts } from "./attachments.ts";
-import { getPiThreadNodesChange } from "./pi-thread-store.ts";
-import { toSessionImageResourceUrl } from "./session-image-resource-ref.ts";
+import { getPiThreadNodesChange } from "../../../shared/pi-thread-store.ts";
 
 type RepositoryItem = ExportedMessageRepository["messages"][number];
 type PiNoticePart = {
@@ -227,8 +225,8 @@ export class PiMessageRepositoryConverter {
 
 function projectionDirtyFrom(previous: ProjectionCache | undefined, nodes: readonly PiTimelineNode[]): number {
   if (!previous) return 0;
-  const change = getPiThreadNodesChange(nodes);
-  if (change?.previousNodes === previous.nodes) return Math.min(change.dirtyFrom, nodes.length);
+  const change = getPiThreadNodesChange(nodes, previous.nodes);
+  if (change) return Math.min(change.dirtyFrom, nodes.length);
 
   const sharedLength = Math.min(previous.nodes.length, nodes.length);
   let index = 0;
@@ -244,13 +242,12 @@ function resolveProjectedId(
   node: PiTimelineNode,
 ): string {
   if (!previous) return node.id;
-  const change = getPiThreadNodesChange(nodes);
-  if (change?.previousNodes !== previous.nodes) return node.id;
-  const previousNode = change.previousNodes[index];
-  if (!previousNode || previousNode.kind !== node.kind) return node.id;
-  if (previousNode.id === node.id) return previous.displayIds.get(node.id) ?? node.id;
-  if (change.rekeyedFrom.get(index) !== previousNode.id || node.sourceEntryId !== node.id) return node.id;
-  return previous.displayIds.get(previousNode.id) ?? node.id;
+  const change = getPiThreadNodesChange(nodes, previous.nodes);
+  if (!change) return node.id;
+  const previousId = change.rekeyedFrom.get(index);
+  if (previousId === undefined) return previous.displayIds.get(node.id) ?? node.id;
+  if (node.sourceEntryId !== node.id) return node.id;
+  return previous.displayIds.get(previousId) ?? node.id;
 }
 
 function projectionRebuildStart(

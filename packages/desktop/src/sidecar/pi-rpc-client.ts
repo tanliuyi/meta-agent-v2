@@ -82,6 +82,7 @@ export class PiRpcClient {
   private writeTail = Promise.resolve();
   private stderrTail = "";
   private terminalError: Error | undefined;
+  private closePromise: Promise<void> | undefined;
   private closing = false;
 
   private constructor(child: ChildProcessWithoutNullStreams, options: PiRpcClientOptions) {
@@ -193,8 +194,12 @@ export class PiRpcClient {
     await this.write(message);
   }
 
-  async close(): Promise<void> {
-    if (this.closing) return;
+  close(): Promise<void> {
+    this.closePromise ??= this.closeOnce();
+    return this.closePromise;
+  }
+
+  private async closeOnce(): Promise<void> {
     this.closing = true;
     this.rejectPending(new Error("Pi RPC client closed"));
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
@@ -209,7 +214,7 @@ export class PiRpcClient {
       delay(writeDrainTimeoutMs).then(() => false),
     ]);
     if (!writesDrained) {
-      this.killProcessTree();
+      await this.killProcessTreeAndWait();
       await Promise.race([exited, delay(2_000)]);
       return;
     }
@@ -224,7 +229,7 @@ export class PiRpcClient {
     ]);
     if (graceful) return;
 
-    this.killProcessTree();
+    await this.killProcessTreeAndWait();
     await Promise.race([exited, delay(2_000)]);
   }
 
@@ -394,7 +399,24 @@ export class PiRpcClient {
         stdio: "ignore",
         windowsHide: true,
       });
+      killer.once("error", () => undefined);
       killer.unref();
+      return;
+    }
+    this.child.kill("SIGKILL");
+  }
+
+  private async killProcessTreeAndWait(): Promise<void> {
+    if (!this.child.pid || this.child.exitCode !== null || this.child.signalCode !== null) return;
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill", ["/pid", String(this.child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      await new Promise<void>((resolve) => {
+        killer.once("error", () => resolve());
+        killer.once("exit", () => resolve());
+      });
       return;
     }
     this.child.kill("SIGKILL");

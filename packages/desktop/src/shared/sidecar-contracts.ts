@@ -12,7 +12,7 @@ import type {
   SessionRemoveResult,
   Thread,
 } from "./contracts.ts";
-export const SIDECAR_PROTOCOL_VERSION = 5;
+export const SIDECAR_PROTOCOL_VERSION = 6;
 
 export type SidecarRole = "thread" | "metadata";
 
@@ -36,6 +36,7 @@ export type ThreadWorkerBinding =
       cwd: string;
       agentDir: string;
       shellPath?: string;
+      browserSessionToken?: string;
       sessionId: string;
       createInput: SessionCreateInput;
     }
@@ -45,6 +46,7 @@ export type ThreadWorkerBinding =
       cwd: string;
       agentDir: string;
       shellPath?: string;
+      browserSessionToken?: string;
       threadId: string;
       sessionFile: string;
       /** 主进程校验前读取的原始 header cwd；worker 启动时用于检测文件被替换。 */
@@ -125,6 +127,8 @@ export interface SidecarEvent {
   workerInstanceId: string;
   sequence: number;
   creditCost: number;
+  /** SidecarEventBody JSON 的 UTF-16 code unit 长度，供下游精确复用计量。 */
+  eventJsonLength: number;
   event: SidecarEventBody;
 }
 
@@ -155,13 +159,26 @@ export interface SidecarShutdown {
   workerInstanceId: string;
 }
 
+export interface SidecarHostShutdown {
+  kind: "host-shutdown";
+  protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+}
+
+export interface SidecarClosed {
+  kind: "closed";
+  protocolVersion: typeof SIDECAR_PROTOCOL_VERSION;
+  workerInstanceId: string;
+  error?: SerializedSidecarError;
+}
+
 export type ParentToSidecarMessage =
   | SidecarInitialize
   | SidecarRequest
   | SidecarEventAck
   | SidecarShutdown
+  | SidecarHostShutdown
   | SidecarChunk;
-export type SidecarToParentMessage = SidecarReady | SidecarResponse | SidecarEvent | SidecarChunk;
+export type SidecarToParentMessage = SidecarReady | SidecarResponse | SidecarEvent | SidecarClosed | SidecarChunk;
 
 export type SidecarEventBody =
   | { type: "session-push"; payload: SessionPushPayload }

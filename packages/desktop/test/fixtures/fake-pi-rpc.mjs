@@ -1,3 +1,4 @@
+import { appendFileSync, writeFileSync } from "node:fs";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
@@ -23,11 +24,22 @@ const requestedSession = argument("--session");
 const sessionId = argument("--session-id") ?? "fake-session";
 const sessionFile = requestedSession ?? join(userData ?? process.cwd(), `${sessionId}.jsonl`);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+if (process.env.FAKE_PI_ENV_LOG) {
+  writeFileSync(
+    process.env.FAKE_PI_ENV_LOG,
+    JSON.stringify({
+      projectId: process.env.PI_BROWSER_SESSION_PROJECT_ID ?? null,
+      threadId: process.env.PI_BROWSER_SESSION_THREAD_ID ?? null,
+      token: process.env.PI_BROWSER_SESSION_TOKEN ?? null,
+    }),
+  );
+}
 const entries = [];
 let leafId = null;
 let sessionName;
 let thinkingLevel = "off";
 let isStreaming = false;
+let identityChanged = false;
 const models = [
   {
     provider: "fake-provider",
@@ -69,7 +81,7 @@ function response(request, data) {
 
 function state() {
   return {
-    sessionId,
+    sessionId: identityChanged ? `${sessionId}-changed` : sessionId,
     sessionFile,
     sessionName,
     model,
@@ -149,6 +161,7 @@ function emitExtensionUi() {
 
 input.on("line", (line) => {
   const request = JSON.parse(line);
+  if (process.env.FAKE_PI_COMMAND_LOG) appendFileSync(process.env.FAKE_PI_COMMAND_LOG, `${request.type}\n`);
   if (process.env.FAKE_PI_MALFORMED === "1") {
     process.stdout.write("not-json\n");
     return;
@@ -241,6 +254,12 @@ input.on("line", (line) => {
         });
         break;
       }
+      if (request.message.startsWith("/extension-command")) {
+        if (process.env.FAKE_PI_EXTENSION_NAVIGATE === "1") {
+          appendMessage({ role: "user", content: "extension navigation", timestamp: timestampNow() });
+        }
+        break;
+      }
       if (request.message === "__summarization_retry__") {
         setTimeout(() => {
           write({
@@ -312,6 +331,7 @@ input.on("line", (line) => {
         appendMessage(assistant);
         write({ type: "message_end", message: assistant });
         isStreaming = false;
+        if (process.env.FAKE_PI_IDENTITY_AFTER_PROMPT === "1") identityChanged = true;
         write({ type: "agent_settled" });
       };
       if (request.message === "__delayed_agent_start__") setTimeout(() => void runAgent(), 50);

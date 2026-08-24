@@ -7,19 +7,32 @@ import {
   type SerializedSidecarError,
   SIDECAR_PROTOCOL_VERSION,
   type SidecarChunk,
+  type SidecarEvent,
 } from "./sidecar-contracts.ts";
 
 export const MAX_SIDECAR_MESSAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_SIDECAR_TRANSFER_BYTES = 64 * 1024 * 1024;
 const SIDECAR_CHUNK_BYTES = 512 * 1024;
 
-export function createSidecarChunks(
+export interface PreparedSidecarMessage {
+  byteLength: number;
+  chunks?: SidecarChunk[];
+}
+
+export function sidecarEventMessageByteLength(message: SidecarEvent, eventByteLength: number): number {
+  const envelopeWithNullEvent = JSON.stringify({ ...message, event: null });
+  return Buffer.byteLength(envelopeWithNullEvent) - Buffer.byteLength("null") + eventByteLength;
+}
+
+export function prepareSidecarMessage(
   message: unknown,
   workerInstanceId: string,
   lane: SidecarChunk["lane"],
-): SidecarChunk[] | undefined {
-  const payload = Buffer.from(JSON.stringify(message));
-  if (payload.byteLength <= MAX_SIDECAR_MESSAGE_BYTES) return undefined;
+): PreparedSidecarMessage {
+  const serialized = JSON.stringify(message);
+  const byteLength = Buffer.byteLength(serialized);
+  if (byteLength <= MAX_SIDECAR_MESSAGE_BYTES) return { byteLength };
+  const payload = Buffer.from(serialized);
   if (payload.byteLength > MAX_SIDECAR_TRANSFER_BYTES) {
     throw new Error(`Sidecar transfer exceeds ${MAX_SIDECAR_TRANSFER_BYTES} bytes`);
   }
@@ -41,7 +54,7 @@ export function createSidecarChunks(
       data: payload.subarray(index * SIDECAR_CHUNK_BYTES, (index + 1) * SIDECAR_CHUNK_BYTES).toString("base64"),
     });
   }
-  return chunks;
+  return { byteLength, chunks };
 }
 
 export class SidecarChunkAssembler {

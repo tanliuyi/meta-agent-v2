@@ -472,6 +472,8 @@ export type SessionPush = SessionPushPayload & {
   attachmentId: string;
   workerInstanceId: string;
   sidecarSequence: number;
+  /** main 计算的保守 UTF-16 transport accounting；preload 不再重复序列化。 */
+  deliveryBytes: number;
 };
 
 /** 所有 Composer 输入统一交给 Pi prompt()。 */

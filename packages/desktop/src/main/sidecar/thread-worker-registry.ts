@@ -29,13 +29,15 @@ import type {
 } from "../../shared/sidecar-contracts.ts";
 import { collectThreadDescendantIds } from "../../shared/thread-tree.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
+import { SharedThreadSidecarProcess } from "./shared-thread-sidecar-client.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
-import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
+import { SidecarRequestError, type SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
 
-const DEFAULT_IDLE_TTL_MS = 5 * 60_000;
+export const DEFAULT_THREAD_WORKER_IDLE_TTL_MS = 90_000;
 const DEFAULT_MAX_LIVE_WORKERS = 4;
 const CATALOG_INITIAL_REFRESH_MS = 100;
 const CATALOG_ACTIVE_TOOL_REFRESH_MS = 500;
+const SESSION_PUSH_EVENT_JSON_PREFIX_LENGTH = '{"type":"session-push","payload":'.length;
 
 export interface ThreadWorkerClient {
   readonly instanceId: string;
@@ -58,6 +60,7 @@ interface WorkerRecord {
   summary?: Thread;
   /** 子会话的父线程 id（create 模式传入），运行时 summary 更新时保持父级关联。 */
   parentThreadId?: string;
+  /** Latest bootstrap with no subsequent sidecar state event; invalidated by live updates. */
   initialBootstrap?: SessionBootstrap;
   lastActivityAt: number;
   inFlight: number;
@@ -84,7 +87,7 @@ export interface ThreadWorkerRegistryOptions {
   agentDir: string;
   shellPath?: string;
   getCwd(projectId: string): string;
-  push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
+  push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number, payloadJsonLength: number): void;
   failed(projectId: string, threadId: string, error: Error): void;
   resync(projectId: string, threadId: string, reason: string): void;
   catalogChanged?(thread: Thread): void;
@@ -114,10 +117,11 @@ export class ThreadWorkerRegistry {
   private reservedWorkerSlots = 0;
   private evictionRunning = false;
   private disposing = false;
+  private sharedThreadSidecar?: SharedThreadSidecarProcess;
 
   constructor(options: ThreadWorkerRegistryOptions) {
     this.options = options;
-    const intervalMs = Math.max(1_000, Math.min(options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS, 60_000));
+    const intervalMs = Math.max(1_000, Math.min(options.idleTtlMs ?? DEFAULT_THREAD_WORKER_IDLE_TTL_MS, 60_000));
     this.idleTimer = setInterval(() => void this.evictIdle(), intervalMs);
     this.idleTimer.unref();
   }
@@ -245,7 +249,9 @@ export class ThreadWorkerRegistry {
     threadId: string,
   ): Promise<{ bootstrap: SessionBootstrap; workerInstanceId: string }> {
     return this.use(projectId, threadId, async (record) => {
-      const bootstrap = await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
+      const bootstrap =
+        record.initialBootstrap ?? (await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000));
+      record.initialBootstrap = undefined;
       record.attachments += 1;
       return { bootstrap, workerInstanceId: record.client.instanceId };
     });
@@ -261,8 +267,8 @@ export class ThreadWorkerRegistry {
     if (record?.client.instanceId === workerInstanceId && record.attachments > 0) {
       record.attachments -= 1;
       if (record.attachments === 0) {
+        record.lastActivityAt = Date.now();
         this.requestCapacityTrim();
-        this.requestRetireRequestedCloseIfIdle(key);
       }
     }
   }
@@ -609,7 +615,6 @@ export class ThreadWorkerRegistry {
         return this.requireUnlocked(projectId, threadId);
       }
       this.records.set(key, record);
-      record.initialBootstrap = undefined;
       record.inFlight -= 1;
       return record;
     } finally {
@@ -698,7 +703,6 @@ export class ThreadWorkerRegistry {
       await this.awaitRecordShutdown(record);
       this.assertProjectAvailable(record.projectId);
       const replacement = await this.open(record.projectId, record.threadId);
-      replacement.initialBootstrap = undefined;
       replacement.inFlight -= 1;
       this.options.resync(record.projectId, record.threadId, reason);
     } catch (error) {
@@ -729,7 +733,12 @@ export class ThreadWorkerRegistry {
         const key = workerKey(record.projectId, record.threadId);
         if (this.records.get(key)?.client !== client) return;
         this.records.delete(key);
-        void this.beginRecordShutdown(record);
+        void this.beginRecordShutdown(record).catch((shutdownError: unknown) =>
+          this.options.log?.(
+            `thread:${record.projectId}`,
+            `Failed to clean up ${record.threadId}: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+          ),
+        );
         if (!record.failureReported) {
           record.failureReported = true;
           this.options.failed(record.projectId, record.threadId, error);
@@ -737,7 +746,18 @@ export class ThreadWorkerRegistry {
       },
       browserSessionToken,
     };
-    client = this.options.createWorkerClient?.(clientOptions) ?? new SidecarWorkerClient(clientOptions);
+    if (this.options.createWorkerClient) {
+      client = this.options.createWorkerClient(clientOptions);
+    } else {
+      if (!this.sharedThreadSidecar?.available) {
+        this.sharedThreadSidecar = new SharedThreadSidecarProcess({
+          manifest: this.options.manifest,
+          agentDir: this.options.agentDir,
+          onStderr: (text) => this.options.log?.("thread-sidecar", text),
+        });
+      }
+      client = this.sharedThreadSidecar.open(clientOptions);
+    }
     this.liveClients.set(client.instanceId, client);
     record = {
       client,
@@ -821,8 +841,13 @@ export class ThreadWorkerRegistry {
     if (record.retired) return;
     record.lastActivityAt = Date.now();
     if (event.event.type === "session-push") {
+      record.initialBootstrap = undefined;
       this.trackCatalogActivity(record, event.event.payload);
-      this.options.push(event.event.payload, event.workerInstanceId, event.sequence);
+      const payloadJsonLength = event.eventJsonLength - SESSION_PUSH_EVENT_JSON_PREFIX_LENGTH - 1;
+      if (!Number.isSafeInteger(payloadJsonLength) || payloadJsonLength < 0) {
+        throw new Error(`Invalid sidecar session-push JSON length: ${event.eventJsonLength}`);
+      }
+      this.options.push(event.event.payload, event.workerInstanceId, event.sequence, payloadJsonLength);
     } else if (event.event.type === "summary-changed") {
       record.summary = record.parentThreadId
         ? { ...event.event.summary, parentThreadId: record.parentThreadId }
@@ -957,8 +982,9 @@ export class ThreadWorkerRegistry {
 
   private async ensureCapacity(): Promise<void> {
     const maximum = this.options.maxLiveWorkers ?? DEFAULT_MAX_LIVE_WORKERS;
-    if (this.records.size + this.reservedWorkerSlots < maximum) return;
-    await this.evictLeastRecentlyUsedIdle();
+    while (this.records.size + this.reservedWorkerSlots >= maximum) {
+      if (!(await this.evictLeastRecentlyUsedIdle())) return;
+    }
   }
 
   private async trimToCapacity(): Promise<void> {
@@ -1008,7 +1034,7 @@ export class ThreadWorkerRegistry {
     this.evictionRunning = true;
     try {
       await this.trimToCapacity();
-      const cutoff = Date.now() - (this.options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS);
+      const cutoff = Date.now() - (this.options.idleTtlMs ?? DEFAULT_THREAD_WORKER_IDLE_TTL_MS);
       const candidates = [...this.records.entries()].filter(
         ([, record]) =>
           !record.retired &&
@@ -1017,22 +1043,35 @@ export class ThreadWorkerRegistry {
           record.attachments === 0 &&
           record.lastActivityAt <= cutoff,
       );
-      for (const [key, record] of candidates) {
-        await this.withThreadLock(key, async () => {
-          if (
-            this.records.get(key) !== record ||
-            record.summary?.running ||
-            record.inFlight > 0 ||
-            record.attachments > 0 ||
-            record.lastActivityAt > cutoff
-          ) {
-            return;
-          }
-          record.retired = true;
-          await this.awaitRecordShutdown(record);
-          if (this.records.get(key) === record) this.records.delete(key);
-        });
-      }
+      const shutdowns = await Promise.allSettled(
+        candidates.map(([key, record]) =>
+          this.withThreadLock(key, async () => {
+            if (
+              this.records.get(key) !== record ||
+              record.summary?.running ||
+              record.inFlight > 0 ||
+              record.attachments > 0 ||
+              record.lastActivityAt > cutoff
+            ) {
+              return;
+            }
+            record.retired = true;
+            await this.awaitRecordShutdown(record);
+            if (this.records.get(key) === record) this.records.delete(key);
+          }),
+        ),
+      );
+      shutdowns.forEach((result, index) => {
+        if (result.status !== "rejected") return;
+        const record = candidates[index]?.[1];
+        if (!record || record.failureReported) return;
+        record.failureReported = true;
+        this.options.failed(
+          record.projectId,
+          record.threadId,
+          result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
+        );
+      });
     } finally {
       this.evictionRunning = false;
     }

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionSupervisor } from "../src/main/pi/session-supervisor.ts";
 import type { ThreadWorkerRegistry } from "../src/main/sidecar/thread-worker-registry.ts";
 import type { ProjectStore } from "../src/main/store/project-store.ts";
-import type { SessionAttachInput, SessionBootstrap, SessionPush } from "../src/shared/contracts.ts";
+import type { SessionAttachInput, SessionBootstrap, SessionPush, SessionPushPayload } from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
 
 interface RegistryMock {
@@ -59,13 +59,45 @@ describe("SessionSupervisor attachment leases", () => {
     const a = await supervisor.attach(1, input("a", "request-a"), aPush);
     const b = await supervisor.attach(1, input("b", "request-b"), bPush);
 
-    supervisor.receive(controlPush("a"), "worker-a", 1);
-    supervisor.receive(controlPush("b"), "worker-b", 1);
+    receive(supervisor, controlPush("a"), "worker-a", 1);
+    receive(supervisor, controlPush("b"), "worker-b", 1);
 
     expect(aPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: a.attachmentId, threadId: "a" }));
     expect(bPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: b.attachmentId, threadId: "b" }));
     expect(aPush).toHaveBeenCalledTimes(1);
     expect(bPush).toHaveBeenCalledTimes(1);
+    await supervisor.dispose();
+  });
+
+  it("reuses sidecar JSON length for exact timeline delivery accounting", async () => {
+    const supervisor = new SessionSupervisor(projectStore(), workers.value);
+    const send = vi.fn<(update: SessionPush) => void>();
+    await supervisor.attach(1, input("thread", "request"), send);
+    const payload = timelinePush("thread");
+
+    supervisor.receive(payload, "worker", 7, JSON.stringify(payload).length);
+
+    const delivered = send.mock.calls[0]?.[0];
+    if (!delivered) throw new Error("Expected a timeline delivery");
+    const { deliveryBytes, ...withoutAccounting } = delivered;
+    expect(deliveryBytes).toBe(JSON.stringify(withoutAccounting).length * 2);
+    await supervisor.dispose();
+  });
+
+  it("does not stringify timeline payloads when the sidecar supplied their length", async () => {
+    const supervisor = new SessionSupervisor(projectStore(), workers.value);
+    const send = vi.fn<(update: SessionPush) => void>();
+    await supervisor.attach(1, input("thread", "request"), send);
+    const payload = timelinePush("thread");
+    const payloadJsonLength = JSON.stringify(payload).length;
+    Object.defineProperty(payload.event, "toJSON", {
+      value: () => {
+        throw new Error("timeline payload was stringified again");
+      },
+    });
+
+    expect(() => supervisor.receive(payload, "worker", 7, payloadJsonLength)).not.toThrow();
+    expect(send).toHaveBeenCalledOnce();
     await supervisor.dispose();
   });
 
@@ -83,7 +115,7 @@ describe("SessionSupervisor attachment leases", () => {
     const attaching = supervisor.attach(1, input("thread", "request"), send);
     await vi.waitFor(() => expect(workers.attach).toHaveBeenCalled());
 
-    supervisor.receive(timelinePush("thread"), "subagent-worker", 4);
+    receive(supervisor, timelinePush("thread"), "subagent-worker", 4);
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({ threadId: "thread", workerInstanceId: "subagent-worker", sidecarSequence: 4 }),
     );
@@ -111,7 +143,7 @@ describe("SessionSupervisor attachment leases", () => {
     const second = await supervisor.attach(1, input("thread", "second", first.attachmentId), secondPush);
 
     supervisor.detach(1, first.attachmentId);
-    supervisor.receive(controlPush("thread"), "worker", 1);
+    receive(supervisor, controlPush("thread"), "worker", 1);
 
     expect(firstPush).not.toHaveBeenCalled();
     expect(secondPush).toHaveBeenCalledWith(expect.objectContaining({ attachmentId: second.attachmentId }));
@@ -125,7 +157,7 @@ describe("SessionSupervisor attachment leases", () => {
     const second = await supervisor.attach(1, input("thread", "second", first.attachmentId), vi.fn());
 
     await expect(supervisor.attach(1, input("thread", "stale", first.attachmentId), vi.fn())).rejects.toThrow("Stale");
-    supervisor.receive(controlPush("thread"), "worker", 1);
+    receive(supervisor, controlPush("thread"), "worker", 1);
     supervisor.acknowledge(1, second.attachmentId, "worker", 1);
     expect(workers.acknowledge).toHaveBeenCalledWith("worker", 1);
     await supervisor.dispose();
@@ -136,7 +168,7 @@ describe("SessionSupervisor attachment leases", () => {
     const one = await supervisor.attach(1, input("thread", "one"), vi.fn());
     const two = await supervisor.attach(2, input("thread", "two"), vi.fn());
 
-    supervisor.receive(timelinePush("thread"), "worker", 8);
+    receive(supervisor, timelinePush("thread"), "worker", 8);
     supervisor.acknowledge(1, one.attachmentId, "worker", 8);
     expect(workers.acknowledge).not.toHaveBeenCalled();
     supervisor.acknowledge(2, two.attachmentId, "worker", 8);
@@ -166,7 +198,7 @@ describe("SessionSupervisor attachment leases", () => {
     await supervisor.attach(1, input("a", "a"), vi.fn());
     await supervisor.attach(1, input("b", "b"), vi.fn());
     supervisor.detachAll(1);
-    supervisor.receive(controlPush("a"), "worker", 1);
+    receive(supervisor, controlPush("a"), "worker", 1);
     expect(workers.detach).toHaveBeenCalledTimes(2);
     expect(workers.acknowledge).toHaveBeenCalledWith("worker", 1);
     await supervisor.dispose();
@@ -199,6 +231,15 @@ describe("SessionSupervisor attachment leases", () => {
     await supervisor.dispose();
   });
 });
+
+function receive(
+  supervisor: SessionSupervisor,
+  payload: SessionPushPayload,
+  workerInstanceId: string,
+  sidecarSequence: number,
+): void {
+  supervisor.receive(payload, workerInstanceId, sidecarSequence, JSON.stringify(payload).length);
+}
 
 function input(threadId: string, requestId: string, replaceAttachmentId?: string): SessionAttachInput {
   return { projectId: "project", threadId, requestId, ...(replaceAttachmentId ? { replaceAttachmentId } : {}) };

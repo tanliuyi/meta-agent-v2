@@ -1,15 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { SIDECAR_PROTOCOL_VERSION } from "../src/shared/sidecar-contracts.ts";
 import {
-  createSidecarChunks,
   currentRuntimeCompatibility,
+  prepareSidecarMessage,
   SidecarChunkAssembler,
   SidecarEventAckTracker,
+  sidecarEventMessageByteLength,
 } from "../src/shared/sidecar-wire.ts";
 
 describe("sidecar runtime compatibility", () => {
-  it("uses protocol version 5 for session resolution timestamps", () => {
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(5);
+  it("uses protocol version 6 for multiplexed thread sidecars", () => {
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(6);
+  });
+
+  it("computes an event envelope byte length without serializing the event twice", () => {
+    const event = { type: "runtime-state" as const, state: "idle" as const };
+    const serializedEvent = JSON.stringify(event);
+    const message = {
+      kind: "event" as const,
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
+      workerInstanceId: "worker-非 ASCII",
+      sequence: 12,
+      creditCost: 1,
+      eventJsonLength: serializedEvent.length,
+      event,
+    };
+
+    expect(sidecarEventMessageByteLength(message, Buffer.byteLength(serializedEvent))).toBe(
+      Buffer.byteLength(JSON.stringify(message)),
+    );
   });
 
   it("uses architecture without compiler build flags for the toolchain identity", () => {
@@ -32,7 +51,9 @@ describe("sidecar chunk transport", () => {
       ok: true as const,
       result: { text: "x".repeat(10 * 1024 * 1024) },
     };
-    const chunks = createSidecarChunks(message, "worker", "control");
+    const prepared = prepareSidecarMessage(message, "worker", "control");
+    const chunks = prepared.chunks;
+    expect(prepared.byteLength).toBe(Buffer.byteLength(JSON.stringify(message)));
     expect(chunks).toBeDefined();
     expect(chunks!.length).toBeGreaterThan(1);
 
@@ -44,7 +65,7 @@ describe("sidecar chunk transport", () => {
 
   it("rejects duplicate chunks instead of growing an ambiguous transfer", () => {
     const message = { value: "x".repeat(10 * 1024 * 1024) };
-    const chunks = createSidecarChunks(message, "worker", "event");
+    const chunks = prepareSidecarMessage(message, "worker", "event").chunks;
     if (!chunks?.[0]) throw new Error("Chunk fixture was not created");
     const assembler = new SidecarChunkAssembler();
 
@@ -53,7 +74,7 @@ describe("sidecar chunk transport", () => {
   });
 
   it("rejects a transfer whose payload was modified in transit", () => {
-    const chunks = createSidecarChunks({ value: "x".repeat(10 * 1024 * 1024) }, "worker", "event");
+    const chunks = prepareSidecarMessage({ value: "x".repeat(10 * 1024 * 1024) }, "worker", "event").chunks;
     if (!chunks?.[0]) throw new Error("Chunk fixture was not created");
     const tampered = chunks.map((chunk, index) =>
       index === 0 ? { ...chunk, data: Buffer.from("tampered").toString("base64") } : chunk,
@@ -66,7 +87,7 @@ describe("sidecar chunk transport", () => {
   });
 
   it("expires incomplete transfers before accepting additional chunks", () => {
-    const chunks = createSidecarChunks({ value: "x".repeat(10 * 1024 * 1024) }, "worker", "control");
+    const chunks = prepareSidecarMessage({ value: "x".repeat(10 * 1024 * 1024) }, "worker", "control").chunks;
     if (!chunks?.[0] || !chunks[1]) throw new Error("Chunk fixture was not created");
     let now = 0;
     const assembler = new SidecarChunkAssembler({ maxTransferAgeMs: 100, now: () => now });

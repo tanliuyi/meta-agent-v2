@@ -1,10 +1,7 @@
 import { type ReactNode, useMemo } from "react";
-import {
-  type CachedSessionRecord,
-  type CachedSessionSummary,
-  createSessionRecordStores,
-  sessionRecordKey,
-} from "../runtime/pi-session-store.ts";
+import { PiThreadStore } from "../../../shared/pi-thread-store.ts";
+import type { CachedSessionRecord, CachedSessionSummary } from "../runtime/pi-session-store.ts";
+import { sessionRecordKey } from "../runtime/pi-session-store.ts";
 import { useDraftSession } from "../state/draft-session-context.tsx";
 import { DRAFT_THREAD_ID, useDraftWorkbench } from "../state/draft-workbench-context.tsx";
 import { type SessionScope, SessionScopeProvider } from "./session-context.tsx";

@@ -6,6 +6,7 @@ import {
   SIDECAR_PROTOCOL_VERSION,
   type SidecarBinding,
   type SidecarCommand,
+  type SidecarEvent,
   type SidecarEventBody,
   type SidecarInitialize,
   type SidecarToParentMessage,
@@ -13,11 +14,12 @@ import {
 import {
   assertRuntimeCompatibility,
   assertSidecarProtocolVersion,
-  createSidecarChunks,
   MAX_SIDECAR_MESSAGE_BYTES,
   MAX_SIDECAR_TRANSFER_BYTES,
+  prepareSidecarMessage,
   SidecarChunkAssembler,
   serializeSidecarError,
+  sidecarEventMessageByteLength,
   toJsonValue,
 } from "../shared/sidecar-wire.ts";
 
@@ -107,7 +109,12 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
   const outstandingEventCredits = new Map<number, number>();
   let bufferedEventBytes = 0;
   let resyncPending = false;
-  const bufferedEvents: Array<{ event: SidecarEventBody; bytes: number; creditCost: number }> = [];
+  const bufferedEvents: Array<{
+    event: SidecarEventBody;
+    bytes: number;
+    jsonLength: number;
+    creditCost: number;
+  }> = [];
   const scheduleCommand = createSidecarCommandScheduler();
   const controlSendQueue: Array<{ message: SidecarToParentMessage; bytes: number }> = [];
   const eventSendQueue: Array<{ message: SidecarToParentMessage; bytes: number }> = [];
@@ -151,24 +158,30 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
     });
   };
 
-  const send = (message: SidecarToParentMessage): void => {
+  const send = (message: SidecarToParentMessage, knownByteLength?: number): void => {
     if (!process.connected || !process.send || closing) return;
     if (message.kind !== "chunk") {
-      const chunks = createSidecarChunks(
+      if (knownByteLength !== undefined && knownByteLength <= MAX_SIDECAR_MESSAGE_BYTES) {
+        enqueueSend(message, knownByteLength);
+        return;
+      }
+      const prepared = prepareSidecarMessage(
         message,
         workerInstanceId ?? message.workerInstanceId,
         message.kind === "event" && message.event.type !== "resync-required" ? "event" : "control",
       );
-      if (chunks) {
-        for (const chunk of chunks) enqueueSend(chunk);
+      if (prepared.chunks) {
+        for (const chunk of prepared.chunks) enqueueSend(chunk);
         return;
       }
+      enqueueSend(message, prepared.byteLength);
+      return;
     }
     enqueueSend(message);
   };
 
-  const enqueueSend = (message: SidecarToParentMessage): void => {
-    const bytes = Buffer.byteLength(JSON.stringify(message));
+  const enqueueSend = (message: SidecarToParentMessage, preparedBytes?: number): void => {
+    const bytes = preparedBytes ?? Buffer.byteLength(JSON.stringify(message));
     if (bytes > MAX_SIDECAR_MESSAGE_BYTES) {
       process.stderr.write(`Sidecar message exceeds ${MAX_SIDECAR_MESSAGE_BYTES} bytes\n`);
       void shutdown();
@@ -191,19 +204,27 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
     pumpSendQueue();
   };
 
-  const sendEvent = (event: SidecarEventBody, creditCost: number, consumeCredit = true): void => {
+  const sendEvent = (
+    event: SidecarEventBody,
+    eventByteLength: number,
+    eventJsonLength: number,
+    creditCost: number,
+    consumeCredit = true,
+  ): void => {
     if (!workerInstanceId) return;
     if (consumeCredit) eventCredit -= creditCost;
     eventSequence += 1;
     outstandingEventCredits.set(eventSequence, creditCost);
-    send({
-      kind: "event",
+    const message: SidecarEvent = {
+      kind: "event" as const,
       protocolVersion: SIDECAR_PROTOCOL_VERSION,
       workerInstanceId,
       sequence: eventSequence,
       creditCost,
+      eventJsonLength,
       event,
-    });
+    };
+    send(message, sidecarEventMessageByteLength(message, eventByteLength));
   };
 
   const drainEvents = (): void => {
@@ -212,16 +233,18 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
       if (!next || eventCredit < next.creditCost) return;
       bufferedEvents.shift();
       bufferedEventBytes -= next.bytes;
-      sendEvent(next.event, next.creditCost);
+      sendEvent(next.event, next.bytes, next.jsonLength, next.creditCost);
     }
   };
 
   const emit = (event: SidecarEventBody): void => {
     if (!workerInstanceId || closing || resyncPending) return;
-    const bytes = Buffer.byteLength(JSON.stringify(event));
+    const serialized = JSON.stringify(event);
+    const bytes = Buffer.byteLength(serialized);
+    const jsonLength = serialized.length;
     const creditCost = Math.max(1, Math.ceil(bytes / (1024 * 1024)));
     if (eventCredit >= creditCost && bufferedEvents.length === 0) {
-      sendEvent(event, creditCost);
+      sendEvent(event, bytes, jsonLength, creditCost);
       return;
     }
     if (bufferedEvents.length >= MAX_BUFFERED_EVENTS || bufferedEventBytes + bytes > MAX_BUFFERED_EVENT_BYTES) {
@@ -237,18 +260,16 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
       eventCredit = INITIAL_EVENT_CREDIT;
       lastAcknowledgedEventSequence = eventSequence;
       resyncPending = true;
-      sendEvent(
-        {
-          type: "resync-required",
-          reason: "event-buffer-overflow",
-          lastSafeSequence,
-        },
-        0,
-        false,
-      );
+      const resyncRequired = {
+        type: "resync-required" as const,
+        reason: "event-buffer-overflow",
+        lastSafeSequence,
+      };
+      const serializedResync = JSON.stringify(resyncRequired);
+      sendEvent(resyncRequired, Buffer.byteLength(serializedResync), serializedResync.length, 0, false);
       return;
     }
-    bufferedEvents.push({ event, bytes, creditCost });
+    bufferedEvents.push({ event, bytes, jsonLength, creditCost });
     bufferedEventBytes += bytes;
   };
 
@@ -306,6 +327,10 @@ export function runSidecarHost(runtime: RuntimeCompatibility, createService: Sid
       if (raw.kind === "chunk") {
         const assembled = chunkAssembler.accept(raw);
         if (assembled !== undefined) handleMessage(assembled as ParentToSidecarMessage);
+        return;
+      }
+      if (raw.kind === "host-shutdown") {
+        await shutdown();
         return;
       }
       if (raw.kind === "initialize") {

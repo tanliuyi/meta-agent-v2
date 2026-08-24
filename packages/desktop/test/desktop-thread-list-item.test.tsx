@@ -5,6 +5,8 @@ import {
   DesktopThreadListItem,
   threadHoverPreview,
 } from "../src/renderer/src/components/layout/desktop-thread-list-item.tsx";
+import { ThreadHoverPreview } from "../src/renderer/src/components/layout/thread-hover-preview.tsx";
+import { createSessionRecord } from "../src/renderer/src/runtime/pi-session-store.ts";
 import type { PiAssistantMessage, PiThreadSnapshot, Thread } from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
 
@@ -185,6 +187,38 @@ describe("DesktopThreadListItem", () => {
         thinkingLevel: "off",
       }),
     ).toEqual({ loaded: false, user: "", assistant: "" });
+  });
+
+  it("hover 不会展开已休眠的 timeline", () => {
+    const record = createSessionRecord({ projectId: "project", threadId: "child" });
+    record.stores.timeline.replace({
+      protocolVersion: PROTOCOL_VERSION,
+      projectId: "project",
+      threadId: "child",
+      cursor: 0,
+      headId: null,
+      nodes: [],
+      queue: [],
+      phase: "idle",
+      thinkingLevel: "off",
+    });
+    expect(record.stores.timeline.hibernate()).toBe(true);
+    const getSnapshot = vi.spyOn(record.stores.timeline, "getSnapshot");
+    const subscribe = vi.spyOn(record.stores.timeline, "subscribe");
+
+    renderToStaticMarkup(
+      <ThreadHoverPreview
+        record={record}
+        fallbackUser=""
+        fallbackAssistant=""
+        setFloating={vi.fn()}
+        floatingStyles={{}}
+      />,
+    );
+
+    expect(getSnapshot).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(record.stores.timeline.getInMemorySnapshot()).toBeNull();
   });
 
   it("renders the localized built-in subagent name separately from the task title", () => {

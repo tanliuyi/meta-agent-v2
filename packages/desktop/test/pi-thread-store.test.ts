@@ -2,11 +2,6 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { PiMessageRepositoryConverter } from "../src/renderer/src/runtime/pi-message-repository.ts";
 import {
-  detachedSnapshot as detachedThreadSnapshot,
-  PiThreadStore,
-  PiThreadStoreError,
-} from "../src/renderer/src/runtime/pi-thread-store.ts";
-import {
   type PiAssistantMessage,
   type PiNoticeMessage,
   type PiRpcEvent,
@@ -14,9 +9,15 @@ import {
   type PiUserMessage,
   PROTOCOL_VERSION,
 } from "../src/shared/contracts.ts";
+import {
+  detachedSnapshot as detachedThreadSnapshot,
+  getPiThreadNodesChange,
+  PiThreadStore,
+  PiThreadStoreError,
+} from "../src/shared/pi-thread-store.ts";
 
 describe("PiThreadStore", () => {
-  it("逐个归约 Pi message 原子事件并立即发布流式文本", () => {
+  it("逐个归约 Pi message 原子事件并按 presentation tick 合并通知", async () => {
     const store = new PiThreadStore(snapshot([], null));
     const listener = vi.fn();
     store.subscribe(listener);
@@ -34,20 +35,104 @@ describe("PiThreadStore", () => {
       assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "你" },
     });
 
-    expect(listener).toHaveBeenCalledTimes(3);
+    expect(listener).not.toHaveBeenCalled();
     expect(store.getSnapshot()).toMatchObject({
       cursor: 3,
       headId: "pi-message:assistant:2",
       nodes: [{ kind: "assistant", status: { type: "running" }, content: [{ type: "text", text: "你" }] }],
     });
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledOnce();
 
     applyRpc(store, 4, {
       type: "message_update",
       usage: started.usage,
       assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "好" },
     });
-    expect(listener).toHaveBeenCalledTimes(4);
     expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ text: "你好" }] });
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("尾部更新保持历史 snapshot 不可变且维持数组语义", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const started = assistantMessage([], "pending");
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+    });
+    const beforeDelta = store.getSnapshot();
+
+    applyRpc(store, 3, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "new" },
+    });
+    const afterDelta = store.getSnapshot();
+
+    expect(Array.isArray(beforeDelta.nodes)).toBe(true);
+    expect(beforeDelta.nodes[0]).toMatchObject({ content: [{ type: "text", text: "" }] });
+    expect(afterDelta.nodes[0]).toMatchObject({ content: [{ type: "text", text: "new" }] });
+    expect([...afterDelta.nodes]).toEqual(afterDelta.nodes);
+    expect(JSON.parse(JSON.stringify(afterDelta.nodes))).toEqual([...afterDelta.nodes]);
+    expect(Object.keys(afterDelta.nodes)).toEqual(["0"]);
+  });
+
+  it("长流式文本批次只触发一次下游投影通知", async () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const listener = vi.fn();
+    store.subscribe(listener);
+    const started = assistantMessage([], "pending");
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+    });
+    for (let sequence = 3; sequence <= 2_002; sequence += 1) {
+      applyRpc(store, sequence, {
+        type: "message_update",
+        usage: started.usage,
+        assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x" },
+      });
+    }
+
+    expect(store.getSnapshot().nodes[0]).toMatchObject({ content: [{ text: "x".repeat(2_000) }] });
+    expect(listener).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("在展示边界前合并同一流式 part 的连续 delta", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const started = assistantMessage([], "pending");
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+    });
+    applyRpc(store, 3, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "first" },
+    });
+    applyRpc(store, 4, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "-second" },
+    });
+
+    expect(store.getStatusSnapshot()).toMatchObject({
+      cursor: 3,
+      nodes: [{ content: [{ text: "first" }] }],
+    });
+    expect(store.getSnapshot()).toMatchObject({
+      cursor: 4,
+      nodes: [{ content: [{ text: "first-second" }] }],
+    });
   });
 
   it("将 turn_start 时的 thinking level 固化到流式 assistant provenance", () => {
@@ -256,6 +341,37 @@ describe("PiThreadStore", () => {
     });
   });
 
+  it("完整 tool JSON 后的流式空白不重复解析全部参数", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const started = assistantMessage([], "pending");
+    applyRpc(store, 1, { type: "message_start", message: started });
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 },
+    });
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      applyRpc(store, 3, {
+        type: "message_update",
+        usage: started.usage,
+        assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: "{}" },
+      });
+      store.getSnapshot();
+      for (let index = 0; index < 100; index += 1) {
+        applyRpc(store, index + 4, {
+          type: "message_update",
+          usage: started.usage,
+          assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: " " },
+        });
+        store.getSnapshot();
+      }
+      expect(parse).toHaveBeenCalledTimes(1);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it("message_end 结束 live user 与 assistant，不依赖 get_entries 快照", () => {
     const store = new PiThreadStore(snapshot([], null));
     const user = { role: "user" as const, content: "问题", timestamp: 1 };
@@ -364,6 +480,53 @@ describe("PiThreadStore", () => {
     applyRpc(store, 1, { type: "agent_start" });
     applyRpc(store, 1, { type: "agent_settled" });
     expect(store.getSnapshot()).toMatchObject({ cursor: 1, phase: "running" });
+  });
+
+  it("休眠时轻量读取不会展开 snapshot", () => {
+    const initial = snapshot([userNode("u", null)], "u");
+    const store = new PiThreadStore(initial);
+
+    expect(store.getInMemorySnapshot()).toBe(initial);
+    expect(store.hibernate()).toBe(true);
+    const bytes = store.getHibernatedBytes();
+    expect(bytes).toBeGreaterThan(0);
+    expect(store.getInMemorySnapshot()).toBeNull();
+    expect(store.getHibernatedBytes()).toBe(bytes);
+    expect(store.getSnapshot()).toEqual(initial);
+  });
+
+  it("节点变更元数据只匹配直接前代，不强持有旧节点数组", () => {
+    const store = new PiThreadStore(snapshot([], null));
+    const first = store.getSnapshot();
+    const started = assistantMessage([], "pending");
+    applyRpc(store, 1, { type: "message_start", message: started });
+    const second = store.getSnapshot();
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+    });
+    const third = store.getSnapshot();
+
+    expect(getPiThreadNodesChange(second.nodes, first.nodes)).toMatchObject({ dirtyFrom: 0 });
+    expect(getPiThreadNodesChange(third.nodes, second.nodes)).toMatchObject({ dirtyFrom: 0 });
+    expect(getPiThreadNodesChange(third.nodes, first.nodes)).toBeUndefined();
+  });
+
+  it("长历史尾部更新直接记录 dirty index，不扫描为零", () => {
+    const store = new PiThreadStore(snapshot([userNode("u", null)], "u"));
+    const started = assistantMessage([], "pending");
+    applyRpc(store, 1, { type: "message_start", message: started });
+    const beforeUpdate = store.getSnapshot();
+
+    applyRpc(store, 2, {
+      type: "message_update",
+      usage: started.usage,
+      assistantMessageEvent: { type: "text_start", contentIndex: 0 },
+    });
+    const afterUpdate = store.getSnapshot();
+
+    expect(getPiThreadNodesChange(afterUpdate.nodes, beforeUpdate.nodes)).toMatchObject({ dirtyFrom: 1 });
   });
 
   it("休眠后恢复并继续归约 Pi 事件", () => {

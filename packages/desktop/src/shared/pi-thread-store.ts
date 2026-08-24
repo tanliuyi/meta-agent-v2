@@ -11,7 +11,7 @@ import {
   type PiTimelineNode,
   type PiToolCallPart,
   PROTOCOL_VERSION,
-} from "../../../shared/contracts.ts";
+} from "./contracts.ts";
 import {
   applyPiToolResult,
   createPiMessageNodeId,
@@ -21,38 +21,85 @@ import {
   projectPiAssistant,
   projectPiMessage,
   toJson,
-} from "../../../shared/pi-message-projector.ts";
+} from "./pi-message-projector.ts";
 
 type Listener = () => void;
 interface PiThreadNodesChange {
-  previousNodes: readonly PiTimelineNode[];
+  previousVersion: object;
   dirtyFrom: number;
   rekeyedFrom: ReadonlyMap<number, string>;
 }
 
-const nodeChanges = new WeakMap<readonly PiTimelineNode[], PiThreadNodesChange>();
+interface PendingStreamEvent {
+  sequence: number;
+  event: PiRpcEvent;
+  deltas: string[];
+}
 
-/** 返回 snapshot 节点的结构共享边界，供线性 projection 只重建变化后缀。 */
-export function getPiThreadNodesChange(nodes: readonly PiTimelineNode[]): PiThreadNodesChange | undefined {
-  return nodeChanges.get(nodes);
+interface StreamingJsonCheckpoint {
+  parsedArgs: PiToolCallPart["args"];
+  nextParseLength: number;
+  depth: number;
+  inString: boolean;
+  escaped: boolean;
+  started: boolean;
+  completed: boolean;
+}
+
+interface TailNodeArrayView {
+  source: readonly PiTimelineNode[];
+  prefixLength: number;
+  tail: PiTimelineNode;
+}
+
+const nodeVersions = new WeakMap<readonly PiTimelineNode[], object>();
+const nodeChanges = new WeakMap<readonly PiTimelineNode[], PiThreadNodesChange>();
+const nodeDirtyFrom = new WeakMap<readonly PiTimelineNode[], number>();
+const tailNodeArrayViews = new WeakMap<readonly PiTimelineNode[], TailNodeArrayView>();
+const streamingJsonCheckpoints = new WeakMap<PiToolCallPart, StreamingJsonCheckpoint>();
+
+/** 返回相邻 snapshot 节点的结构共享边界，供线性 projection 只重建变化后缀。 */
+export function getPiThreadNodesChange(
+  nodes: readonly PiTimelineNode[],
+  previousNodes: readonly PiTimelineNode[],
+): PiThreadNodesChange | undefined {
+  const change = nodeChanges.get(nodes);
+  return change?.previousVersion === nodeVersions.get(previousNodes) ? change : undefined;
 }
 
 /** 直接把 Pi RPC 原子事件归约为 renderer 使用的 timeline snapshot。 */
 export class PiThreadStore {
   private state: PiThreadSnapshot | string;
+  private nodeIds: Set<string> | null;
   private readonly listeners = new Set<Listener>();
+  private readonly pendingListeners = new Set<Listener>();
+  private notificationScheduled = false;
+  private pendingStreamEvent?: PendingStreamEvent;
+  private coalescingStreamKey?: string;
 
   constructor(initial: PiThreadSnapshot = detachedSnapshot()) {
     validateSnapshot(initial);
     this.state = initial;
+    this.nodeIds = new Set(initial.nodes.map((node) => node.id));
   }
 
-  getSnapshot = (): PiThreadSnapshot => this.hydrate();
+  getSnapshot = (): PiThreadSnapshot => {
+    this.flushPendingStreamEvent();
+    return this.hydrate();
+  };
+
+  /** 状态栏只需 phase 等元数据，不应为了每个流式 delta 展平正文。 */
+  getStatusSnapshot = (): PiThreadSnapshot => this.hydrate();
+
+  /** 只读取已展开的 snapshot；hover 等轻量视图不得因此恢复休眠会话。 */
+  getInMemorySnapshot = (): PiThreadSnapshot | null => (typeof this.state === "string" ? null : this.state);
 
   hibernate(): boolean {
+    this.flushPendingStreamEvent();
     if (typeof this.state === "string") return true;
     if (this.listeners.size > 0) return false;
     this.state = JSON.stringify(this.state);
+    this.nodeIds = null;
     return true;
   }
 
@@ -63,34 +110,81 @@ export class PiThreadStore {
   evictHibernated(): boolean {
     if (typeof this.state !== "string" || this.listeners.size > 0) return false;
     this.state = detachedSnapshot();
+    this.nodeIds = new Set();
     return true;
   }
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+      this.pendingListeners.delete(listener);
+    };
   };
 
   replace(snapshot: PiThreadSnapshot): void {
+    this.pendingStreamEvent = undefined;
+    this.coalescingStreamKey = undefined;
     validateSnapshot(snapshot);
     const previousNodes = typeof this.state === "string" ? undefined : this.state.nodes;
     this.state = snapshot;
+    this.nodeIds = new Set(snapshot.nodes.map((node) => node.id));
     if (previousNodes) recordNodeChange(previousNodes, snapshot.nodes);
     this.notify();
   }
 
   apply(sequence: number, event: PiRpcEvent): void {
     const current = this.hydrate();
-    if (sequence <= current.cursor) return;
-    if (sequence !== current.cursor + 1) {
-      throw new PiThreadStoreError(`timeline sequence gap: ${current.cursor} -> ${sequence}`);
+    const currentCursor = this.pendingStreamEvent?.sequence ?? current.cursor;
+    if (sequence <= currentCursor) return;
+    if (sequence !== currentCursor + 1) {
+      throw new PiThreadStoreError(`timeline sequence gap: ${currentCursor} -> ${sequence}`);
     }
 
-    const next = reducePiRpcEvent(current, sequence, event);
-    validateSnapshot(next);
-    recordNodeChange(current.nodes, next.nodes);
-    this.state = next;
+    const streamKey = streamDeltaKey(event);
+    if (streamKey && this.coalescingStreamKey === streamKey) {
+      const pending = this.pendingStreamEvent;
+      if (pending) {
+        pending.sequence = sequence;
+        pending.event = event;
+        pending.deltas.push(streamDelta(event));
+      } else {
+        this.pendingStreamEvent = { sequence, event, deltas: [streamDelta(event)] };
+      }
+      this.notify();
+      return;
+    }
+
+    this.flushPendingStreamEvent();
+    this.applyReduced(sequence, event);
+    this.coalescingStreamKey = streamKey;
     this.notify();
+  }
+
+  private applyReduced(sequence: number, event: PiRpcEvent): void {
+    const current = this.hydrate();
+    const next = reducePiRpcEvent(current, sequence, event);
+    if (next.protocolVersion !== current.protocolVersion || next.threadId !== current.threadId) {
+      throw new PiThreadStoreError("Pi event reducer changed timeline identity");
+    }
+    if (current.nodes !== next.nodes) {
+      const dirtyFrom = nodeDirtyFrom.get(next.nodes);
+      if (dirtyFrom === undefined) {
+        throw new PiThreadStoreError("Pi event reducer changed nodes without change metadata");
+      }
+      this.validateNodeMutation(current, next, dirtyFrom);
+      recordNodeChange(current.nodes, next.nodes, dirtyFrom);
+    } else if (next.headId !== current.headId) {
+      throw new PiThreadStoreError("Pi event reducer changed head without changing nodes");
+    }
+    this.state = next;
+  }
+
+  private flushPendingStreamEvent(): void {
+    const pending = this.pendingStreamEvent;
+    if (!pending) return;
+    this.pendingStreamEvent = undefined;
+    this.applyReduced(pending.sequence, withStreamDelta(pending.event, pending.deltas.join("")));
   }
 
   private hydrate(): PiThreadSnapshot {
@@ -98,11 +192,52 @@ export class PiThreadStore {
     const snapshot = JSON.parse(this.state) as PiThreadSnapshot;
     validateSnapshot(snapshot);
     this.state = snapshot;
+    this.nodeIds = new Set(snapshot.nodes.map((node) => node.id));
     return snapshot;
   }
 
+  private validateNodeMutation(current: PiThreadSnapshot, next: PiThreadSnapshot, dirtyFrom: number): void {
+    const nodeIds = this.nodeIds;
+    if (!nodeIds) throw new PiThreadStoreError("Pi timeline node index is unavailable");
+    if (next.nodes.length === current.nodes.length + 1 && dirtyFrom === current.nodes.length) {
+      const appended = next.nodes[dirtyFrom];
+      if (!appended || appended.parentId !== current.headId || next.headId !== appended.id) {
+        throw new PiThreadStoreError("Pi event reducer appended an invalid timeline node");
+      }
+      if (nodeIds.has(appended.id)) throw new PiThreadStoreError(`重复 snapshot node: ${appended.id}`);
+      nodeIds.add(appended.id);
+      return;
+    }
+    if (next.nodes.length === current.nodes.length && dirtyFrom >= 0 && dirtyFrom < current.nodes.length) {
+      const previous = current.nodes[dirtyFrom];
+      const replacement = next.nodes[dirtyFrom];
+      if (
+        !previous ||
+        !replacement ||
+        replacement.id !== previous.id ||
+        replacement.parentId !== previous.parentId ||
+        next.headId !== current.headId
+      ) {
+        throw new PiThreadStoreError("Pi event reducer replaced an invalid timeline node");
+      }
+      return;
+    }
+    throw new PiThreadStoreError("Pi event reducer produced an unsupported node mutation");
+  }
+
   private notify(): void {
-    for (const listener of this.listeners) listener();
+    for (const listener of this.listeners) this.pendingListeners.add(listener);
+    if (this.notificationScheduled || this.pendingListeners.size === 0) return;
+    this.notificationScheduled = true;
+    schedulePresentationUpdate(() => {
+      this.notificationScheduled = false;
+      this.flushPendingStreamEvent();
+      const listeners = [...this.pendingListeners];
+      this.pendingListeners.clear();
+      for (const listener of listeners) {
+        if (this.listeners.has(listener)) listener();
+      }
+    });
   }
 }
 
@@ -111,6 +246,35 @@ export class PiThreadStoreError extends Error {
     super(message);
     this.name = "PiThreadStoreError";
   }
+}
+
+function streamDeltaKey(event: PiRpcEvent): string | undefined {
+  if (event.type === "bash_execution_update") return `bash:${event.id ?? "anonymous"}`;
+  if (event.type !== "message_update") return undefined;
+  const update = event.assistantMessageEvent;
+  return update.type === "text_delta" || update.type === "thinking_delta" || update.type === "toolcall_delta"
+    ? `${update.type}:${update.contentIndex}`
+    : undefined;
+}
+
+function streamDelta(event: PiRpcEvent): string {
+  if (event.type === "bash_execution_update") return event.delta;
+  if (event.type !== "message_update") throw new PiThreadStoreError("Pi stream event has no delta");
+  const update = event.assistantMessageEvent;
+  if (update.type !== "text_delta" && update.type !== "thinking_delta" && update.type !== "toolcall_delta") {
+    throw new PiThreadStoreError("Pi message event has no stream delta");
+  }
+  return update.delta;
+}
+
+function withStreamDelta(event: PiRpcEvent, delta: string): PiRpcEvent {
+  if (event.type === "bash_execution_update") return { ...event, delta };
+  if (event.type !== "message_update") throw new PiThreadStoreError("Pi stream event has no delta");
+  const update = event.assistantMessageEvent;
+  if (update.type !== "text_delta" && update.type !== "thinking_delta" && update.type !== "toolcall_delta") {
+    throw new PiThreadStoreError("Pi message event has no stream delta");
+  }
+  return { ...event, assistantMessageEvent: { ...update, delta } };
 }
 
 function parseStreamingJson(partialJson: string): unknown {
@@ -125,7 +289,72 @@ function parseStreamingJson(partialJson: string): unknown {
   }
 }
 
-function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, event: PiRpcEvent): PiThreadSnapshot {
+function advanceStreamingJsonCheckpoint(
+  previous: StreamingJsonCheckpoint | undefined,
+  delta: string,
+): Omit<StreamingJsonCheckpoint, "parsedArgs" | "nextParseLength" | "completed"> {
+  let depth = previous?.depth ?? 0;
+  let inString = previous?.inString ?? false;
+  let escaped = previous?.escaped ?? false;
+  let started = previous?.started ?? false;
+  for (const character of delta) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      started = true;
+    } else if (character === "{" || character === "[") {
+      depth += 1;
+      started = true;
+    } else if (character === "}" || character === "]") {
+      depth = Math.max(0, depth - 1);
+    } else if (!/\s/.test(character)) {
+      started = true;
+    }
+  }
+  return { depth, inString, escaped, started };
+}
+
+function updateStreamingToolArgs(part: PiToolCallPart, delta: string): PiToolCallPart {
+  const argsText = part.argsText + delta;
+  const previous = streamingJsonCheckpoints.get(part);
+  const scan = advanceStreamingJsonCheckpoint(previous, delta);
+  const complete = scan.started && scan.depth === 0 && !scan.inString;
+  const becameComplete = complete && previous?.completed !== true;
+  const shouldParse = previous === undefined || argsText.length >= previous.nextParseLength || becameComplete;
+  const parsed = shouldParse ? toJson(parseStreamingJson(argsText)) : (previous?.parsedArgs ?? {});
+  let nextParseLength = previous?.nextParseLength ?? 1_024;
+  if (shouldParse) {
+    while (nextParseLength <= argsText.length) nextParseLength *= 2;
+  }
+  const next: PiToolCallPart = {
+    ...part,
+    args: isJsonObject(parsed) ? parsed : {},
+    argsText,
+    execution: "streaming-args",
+  };
+  streamingJsonCheckpoints.set(next, {
+    ...scan,
+    parsedArgs: next.args,
+    nextParseLength,
+    completed: complete,
+  });
+  return next;
+}
+
+function schedulePresentationUpdate(callback: () => void): void {
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => callback());
+    return;
+  }
+  queueMicrotask(callback);
+}
+
+export function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, event: PiRpcEvent): PiThreadSnapshot {
   const next = { ...snapshot, cursor: sequence };
   switch (event.type) {
     case "agent_start":
@@ -314,14 +543,7 @@ function updateAssistant(snapshot: PiThreadSnapshot, event: PiRpcMessageUpdateEv
       break;
     case "toolcall_delta": {
       const part = requireStreamingPart(content, update.contentIndex, "tool-call");
-      const argsText = part.argsText + update.delta;
-      const args = toJson(parseStreamingJson(argsText));
-      setStreamingPart(content, update.contentIndex, {
-        ...part,
-        args: isJsonObject(args) ? args : {},
-        argsText,
-        execution: "streaming-args",
-      });
+      setStreamingPart(content, update.contentIndex, updateStreamingToolArgs(part, update.delta));
       break;
     }
     case "toolcall_end": {
@@ -522,13 +744,67 @@ function queueItems(sequence: number, steering: readonly string[], followUp: rea
 }
 
 function appendNode(snapshot: PiThreadSnapshot, node: PiTimelineNode): PiThreadSnapshot {
-  return { ...snapshot, headId: node.id, nodes: [...snapshot.nodes, node] };
+  const source = tailNodeArrayViews.has(snapshot.nodes) ? [...snapshot.nodes] : snapshot.nodes;
+  const nodes = createTailNodeArrayView(source, source.length, node);
+  nodeDirtyFrom.set(nodes, snapshot.nodes.length);
+  return { ...snapshot, headId: node.id, nodes };
 }
 
 function replaceNode(snapshot: PiThreadSnapshot, index: number, node: PiTimelineNode): PiThreadSnapshot {
-  const nodes = [...snapshot.nodes];
-  nodes[index] = node;
+  let nodes: readonly PiTimelineNode[];
+  if (index === snapshot.nodes.length - 1) {
+    const current = tailNodeArrayViews.get(snapshot.nodes);
+    nodes = current
+      ? createTailNodeArrayView(current.source, current.prefixLength, node)
+      : createTailNodeArrayView(snapshot.nodes, index, node);
+  } else {
+    const copied = [...snapshot.nodes];
+    copied[index] = node;
+    nodes = copied;
+  }
+  nodeDirtyFrom.set(nodes, index);
   return { ...snapshot, headId: snapshot.headId === snapshot.nodes[index]?.id ? node.id : snapshot.headId, nodes };
+}
+
+function createTailNodeArrayView(
+  source: readonly PiTimelineNode[],
+  prefixLength: number,
+  tail: PiTimelineNode,
+): readonly PiTimelineNode[] {
+  const target: PiTimelineNode[] = [];
+  const nodeAt = (index: number): PiTimelineNode | undefined =>
+    index < prefixLength ? source[index] : index === prefixLength ? tail : undefined;
+  const view = new Proxy(target, {
+    get(array, property, receiver) {
+      if (property === "length") return prefixLength + 1;
+      const index = arrayIndex(property);
+      return index === undefined ? Reflect.get(array, property, receiver) : nodeAt(index);
+    },
+    getOwnPropertyDescriptor(array, property) {
+      const index = arrayIndex(property);
+      if (index === undefined) return Reflect.getOwnPropertyDescriptor(array, property);
+      const value = nodeAt(index);
+      return value === undefined ? undefined : { configurable: true, enumerable: true, value, writable: false };
+    },
+    has(array, property) {
+      const index = arrayIndex(property);
+      return index === undefined ? Reflect.has(array, property) : index <= prefixLength;
+    },
+    ownKeys() {
+      return [...Array.from({ length: prefixLength + 1 }, (_value, index) => String(index)), "length"];
+    },
+    set: () => false,
+    defineProperty: () => false,
+    deleteProperty: () => false,
+  });
+  tailNodeArrayViews.set(view, { source, prefixLength, tail });
+  return view;
+}
+
+function arrayIndex(property: PropertyKey): number | undefined {
+  if (typeof property !== "string" || property.length === 0) return undefined;
+  const index = Number(property);
+  return Number.isSafeInteger(index) && index >= 0 && String(index) === property ? index : undefined;
 }
 
 function findLastNodeIndex(nodes: readonly PiTimelineNode[], predicate: (node: PiTimelineNode) => boolean): number {
@@ -561,12 +837,24 @@ function validateSnapshot(snapshot: PiThreadSnapshot): void {
   }
 }
 
-function recordNodeChange(previousNodes: readonly PiTimelineNode[], nextNodes: readonly PiTimelineNode[]): void {
+function recordNodeChange(
+  previousNodes: readonly PiTimelineNode[],
+  nextNodes: readonly PiTimelineNode[],
+  knownDirtyFrom?: number,
+): void {
   if (previousNodes === nextNodes) return;
-  let dirtyFrom = 0;
-  const sharedLength = Math.min(previousNodes.length, nextNodes.length);
-  while (dirtyFrom < sharedLength && previousNodes[dirtyFrom] === nextNodes[dirtyFrom]) dirtyFrom += 1;
-  nodeChanges.set(nextNodes, { previousNodes, dirtyFrom, rekeyedFrom: new Map() });
+  let previousVersion = nodeVersions.get(previousNodes);
+  if (!previousVersion) {
+    previousVersion = {};
+    nodeVersions.set(previousNodes, previousVersion);
+  }
+  nodeVersions.set(nextNodes, {});
+  let dirtyFrom = knownDirtyFrom ?? 0;
+  if (knownDirtyFrom === undefined) {
+    const sharedLength = Math.min(previousNodes.length, nextNodes.length);
+    while (dirtyFrom < sharedLength && previousNodes[dirtyFrom] === nextNodes[dirtyFrom]) dirtyFrom += 1;
+  }
+  nodeChanges.set(nextNodes, { previousVersion, dirtyFrom, rekeyedFrom: new Map() });
 }
 
 export function detachedSnapshot(): PiThreadSnapshot {

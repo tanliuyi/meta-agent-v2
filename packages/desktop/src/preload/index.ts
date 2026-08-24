@@ -134,7 +134,7 @@ function deliverSessionUpdate(attachment: ActiveSessionAttachment, update: Sessi
     acknowledgeSessionUpdate(update);
     return;
   }
-  const { attachmentId: _attachmentId, ...payload } = update;
+  const { attachmentId: _attachmentId, deliveryBytes: _deliveryBytes, ...payload } = update;
   try {
     attachment.listener(payload);
   } finally {
@@ -147,7 +147,9 @@ function acknowledgeSessionUpdate(update: SessionPush): void {
 }
 
 function estimateSessionUpdateBytes(update: SessionPush): number {
-  return JSON.stringify(update).length * 2;
+  return Number.isSafeInteger(update.deliveryBytes) && update.deliveryBytes >= 0
+    ? update.deliveryBytes
+    : MAX_BUFFERED_SESSION_BYTES + 1;
 }
 
 const platform: DesktopPlatform =

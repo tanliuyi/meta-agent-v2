@@ -409,7 +409,7 @@ export class SessionTransportManager {
     }
     try {
       record.stores.timeline.apply(update.sequence, update.event);
-      const snapshot = record.stores.timeline.getSnapshot();
+      const snapshot = record.stores.timeline.getStatusSnapshot();
       record.stores.runActivity.sync(snapshot);
       record.stores.summary.set({
         running: snapshot.phase === "running" || snapshot.phase === "retrying",

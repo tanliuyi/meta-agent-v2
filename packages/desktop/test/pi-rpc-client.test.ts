@@ -1,10 +1,10 @@
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PiThreadStore } from "../src/renderer/src/runtime/pi-thread-store.ts";
-import type { SessionBootstrap, SessionPushPayload } from "../src/shared/contracts.ts";
+import { PROTOCOL_VERSION, type SessionBootstrap, type SessionPushPayload } from "../src/shared/contracts.ts";
+import { PiThreadStore } from "../src/shared/pi-thread-store.ts";
 import { loadPiDraftConfig } from "../src/sidecar/pi-draft-config.ts";
 import { type ProbedPi, resolvePi } from "../src/sidecar/pi-resolver.ts";
 import { PiRpcClient } from "../src/sidecar/pi-rpc-client.ts";
@@ -29,6 +29,7 @@ function fakePi(): ProbedPi {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -124,9 +125,46 @@ describe("PiRpcSessionRuntime", () => {
     ).rejects.toThrow("install 0.84.2 or newer");
   });
 
+  it("injects each thread browser capability into its Pi RPC child", async () => {
+    const userData = temporaryDirectory("desktop-pi-browser-env-");
+    const environmentLog = join(userData, "browser-env.json");
+    vi.stubEnv("FAKE_PI_ENV_LOG", environmentLog);
+    const runtime = await PiRpcSessionRuntime.create({
+      binding: {
+        mode: "create",
+        projectId: "project-browser",
+        cwd: temporaryDirectory("desktop-pi-cwd-"),
+        agentDir: userData,
+        browserSessionToken: "session-capability",
+        sessionId: "session-browser",
+        createInput: {
+          projectId: "project-browser",
+          createRequestId: "create-browser",
+          model: { provider: "configured-provider", id: "configured-model" },
+          thinkingLevel: "low",
+        },
+      },
+      push: () => undefined,
+      onSummaryChanged: () => undefined,
+      resolvePi: async () => fakePi(),
+    });
+
+    try {
+      expect(JSON.parse(readFileSync(environmentLog, "utf8"))).toEqual({
+        projectId: "project-browser",
+        threadId: "session-browser",
+        token: "session-capability",
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("creates a Pi session and projects a completed prompt", async () => {
     const userData = temporaryDirectory("desktop-pi-user-data-");
     const cwd = temporaryDirectory("desktop-pi-cwd-");
+    const commandLog = join(userData, "commands.log");
+    vi.stubEnv("FAKE_PI_COMMAND_LOG", commandLog);
     const pushes: SessionPushPayload[] = [];
     const runtime = await PiRpcSessionRuntime.create({
       binding: {
@@ -186,6 +224,7 @@ describe("PiRpcSessionRuntime", () => {
       await vi.waitFor(() => {
         expect(runtime.bootstrap().timeline.nodes).toHaveLength(2);
         expect(runtime.bootstrap().timeline.phase).toBe("idle");
+        expect(runtime.bootstrap().control.context?.tokens).toBe(2);
       });
       expect(runtime.bootstrap().timeline.nodes).toMatchObject([
         { kind: "user", content: [{ type: "text", text: "hello" }] },
@@ -221,6 +260,11 @@ describe("PiRpcSessionRuntime", () => {
         ),
       ).toEqual(["reply:", "hello"]);
       expect(runtime.threadSummary(false)).toMatchObject({ title: "hello", messageCount: 2, running: false });
+      expect(
+        readFileSync(commandLog, "utf8")
+          .split("\n")
+          .filter((command) => command === "get_entries"),
+      ).toHaveLength(1);
       const timeline = runtime.bootstrap().timeline;
       const lastCreatedAt = timeline.nodes.at(-1)?.createdAt;
       if (lastCreatedAt === undefined) throw new Error("Expected a projected assistant message");
@@ -229,6 +273,114 @@ describe("PiRpcSessionRuntime", () => {
 
       await runtime.compact();
       await vi.waitFor(() => expect(runtime.bootstrap().timeline.phase).toBe("idle"));
+      await vi.waitFor(() => {
+        const getEntries = readFileSync(commandLog, "utf8")
+          .split("\n")
+          .filter((command) => command === "get_entries");
+        expect(getEntries).toHaveLength(2);
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("performs one authoritative resync and stops when the Pi session identity changes", async () => {
+    const userData = temporaryDirectory("desktop-pi-identity-");
+    const commandLog = join(userData, "commands.log");
+    vi.stubEnv("FAKE_PI_COMMAND_LOG", commandLog);
+    vi.stubEnv("FAKE_PI_IDENTITY_AFTER_PROMPT", "1");
+    const runtime = await PiRpcSessionRuntime.create({
+      binding: {
+        mode: "create",
+        projectId: "project-identity",
+        cwd: temporaryDirectory("desktop-pi-cwd-"),
+        agentDir: userData,
+        sessionId: "session-identity",
+        createInput: {
+          projectId: "project-identity",
+          createRequestId: "create-identity",
+          model: { provider: "configured-provider", id: "configured-model" },
+          thinkingLevel: "low",
+        },
+      },
+      push: () => undefined,
+      onSummaryChanged: () => undefined,
+      resolvePi: async () => fakePi(),
+    });
+
+    try {
+      await runtime.prompt({
+        protocolVersion: PROTOCOL_VERSION,
+        projectId: "project-identity",
+        threadId: "session-identity",
+        clientRequestId: "identity-prompt",
+        text: "identity",
+        images: [],
+      });
+      await vi.waitFor(() =>
+        expect(runtime.bootstrap().control.lastError).toContain(
+          "Pi RPC session identity changed: expected session-identity, got session-identity-changed",
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(
+        readFileSync(commandLog, "utf8")
+          .split("\n")
+          .filter((command) => command === "get_entries"),
+      ).toHaveLength(2);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("resyncs the persisted tree after an extension command can navigate it", async () => {
+    const userData = temporaryDirectory("desktop-pi-extension-navigation-");
+    const commandLog = join(userData, "commands.log");
+    vi.stubEnv("FAKE_PI_COMMAND_LOG", commandLog);
+    vi.stubEnv("FAKE_PI_EXTENSION_NAVIGATE", "1");
+    const runtime = await PiRpcSessionRuntime.create({
+      binding: {
+        mode: "create",
+        projectId: "project-extension-navigation",
+        cwd: temporaryDirectory("desktop-pi-cwd-"),
+        agentDir: userData,
+        sessionId: "session-extension-navigation",
+        createInput: {
+          projectId: "project-extension-navigation",
+          createRequestId: "create-extension-navigation",
+          model: { provider: "configured-provider", id: "configured-model" },
+          thinkingLevel: "low",
+        },
+      },
+      push: () => undefined,
+      onSummaryChanged: () => undefined,
+      resolvePi: async () => fakePi(),
+    });
+
+    try {
+      await runtime.prompt({
+        protocolVersion: PROTOCOL_VERSION,
+        projectId: "project-extension-navigation",
+        threadId: "session-extension-navigation",
+        clientRequestId: "extension-navigation-prompt",
+        text: "/extension-command",
+        images: [],
+      });
+      await vi.waitFor(() =>
+        expect(runtime.bootstrap().timeline.nodes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: "user",
+              content: [expect.objectContaining({ text: "extension navigation" })],
+            }),
+          ]),
+        ),
+      );
+      expect(
+        readFileSync(commandLog, "utf8")
+          .split("\n")
+          .filter((command) => command === "get_entries"),
+      ).toHaveLength(2);
     } finally {
       await runtime.dispose();
     }
@@ -653,6 +805,20 @@ describe("PiRpcClient", () => {
     } finally {
       await client.close();
     }
+  });
+
+  it("并发 close 共享同一个退出完成信号", async () => {
+    const { client } = await PiRpcClient.launch({
+      pi: fakePi(),
+      cwd: temporaryDirectory("desktop-pi-cwd-"),
+      environment: { ...process.env, PI_CODING_AGENT_DIR: temporaryDirectory("desktop-pi-user-data-") },
+    });
+
+    const first = client.close();
+    const second = client.close();
+
+    expect(second).toBe(first);
+    await expect(first).resolves.toBeUndefined();
   });
 
   it("ignores a late response after request timeout without terminating the session", async () => {

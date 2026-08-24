@@ -70,29 +70,45 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
   const draftMaterializingRef = useRef(false);
   const recordsSnapshotRef = useRef<CachedSessionRecord[]>([]);
   const recordsDirtyRef = useRef(false);
+  const trimHibernatedSessions = (): void => {
+    const hibernated = [...recordsRef.current.values()]
+      .map((record) => ({ record, bytes: record.stores.timeline.getHibernatedBytes() }))
+      .filter(({ bytes }) => bytes > 0)
+      .sort((left, right) => left.record.lastAccessedAt - right.record.lastAccessedAt);
+    let retainedCount = hibernated.length;
+    let retainedBytes = hibernated.reduce((total, entry) => total + entry.bytes, 0);
+    for (const entry of hibernated) {
+      if (retainedCount <= MAX_HIBERNATED_SESSION_COUNT && retainedBytes <= MAX_HIBERNATED_SESSION_BYTES) break;
+      if (!entry.record.stores.timeline.evictHibernated()) continue;
+      retainedCount -= 1;
+      retainedBytes -= entry.bytes;
+    }
+  };
+  const hibernateInactiveRecord = (key: string, record: CachedSessionRecord | undefined): void => {
+    if (
+      !record ||
+      recordsRef.current.get(key) !== record ||
+      activeKeyRef.current === key ||
+      holdersRef.current.isHeld(key) ||
+      transportManager.hasCommittedLease(record) ||
+      !record.stores.timeline.hibernate()
+    ) {
+      return;
+    }
+    trimHibernatedSessions();
+  };
+  const detachAndHibernate = (key: string, record: CachedSessionRecord | undefined): void => {
+    void transportManager
+      .detach(key)
+      .then(() => hibernateInactiveRecord(key, record))
+      .catch(() => undefined);
+  };
   const activateKey = (key: string | null): void => {
     const previousKey = activeKeyRef.current;
     if (previousKey === key) return;
     activeKeyRef.current = key;
     if (previousKey && !holdersRef.current.isHeld(previousKey)) {
-      const previousRecord = recordsRef.current.get(previousKey);
-      void transportManager.detach(previousKey).then(() => {
-        if (activeKeyRef.current === previousKey || recordsRef.current.get(previousKey) !== previousRecord) return;
-        if (!previousRecord?.stores.timeline.hibernate()) return;
-
-        const hibernated = [...recordsRef.current.values()]
-          .map((record) => ({ record, bytes: record.stores.timeline.getHibernatedBytes() }))
-          .filter(({ bytes }) => bytes > 0)
-          .sort((left, right) => left.record.lastAccessedAt - right.record.lastAccessedAt);
-        let retainedCount = hibernated.length;
-        let retainedBytes = hibernated.reduce((total, entry) => total + entry.bytes, 0);
-        for (const entry of hibernated) {
-          if (retainedCount <= MAX_HIBERNATED_SESSION_COUNT && retainedBytes <= MAX_HIBERNATED_SESSION_BYTES) break;
-          if (!entry.record.stores.timeline.evictHibernated()) continue;
-          retainedCount -= 1;
-          retainedBytes -= entry.bytes;
-        }
-      });
+      detachAndHibernate(previousKey, recordsRef.current.get(previousKey));
     }
     forceRender((n) => n + 1);
   };
@@ -149,7 +165,9 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
 
       release(key: string) {
         const remaining = holdersRef.current.release(key);
-        if (remaining === 0 && activeKeyRef.current !== key) void transportManager.detach(key);
+        if (remaining === 0 && activeKeyRef.current !== key) {
+          detachAndHibernate(key, recordsRef.current.get(key));
+        }
       },
 
       async retire(key: string) {

@@ -18,8 +18,8 @@ import {
 import {
   assertRuntimeCompatibility,
   assertSidecarProtocolVersion,
-  createSidecarChunks,
   MAX_SIDECAR_MESSAGE_BYTES,
+  prepareSidecarMessage,
   SidecarChunkAssembler,
   SidecarEventAckTracker,
 } from "../../shared/sidecar-wire.ts";
@@ -233,7 +233,7 @@ export class SidecarWorkerClient {
     }
     if (this.terminating) {
       await waitForExit(this.child, timeoutMs).catch(async () => {
-        killProcessTree(this.child, "SIGKILL");
+        await killProcessTreeAndWait(this.child, "SIGKILL");
         await waitForExit(this.child, 2_000);
       });
       return;
@@ -244,9 +244,9 @@ export class SidecarWorkerClient {
       workerInstanceId: this.workerInstanceId,
     });
     await waitForExit(this.child, timeoutMs).catch(async () => {
-      killProcessTree(this.child, "SIGTERM");
+      await killProcessTreeAndWait(this.child, "SIGTERM");
       await waitForExit(this.child, 2_000).catch(async () => {
-        killProcessTree(this.child, "SIGKILL");
+        await killProcessTreeAndWait(this.child, "SIGKILL");
         await waitForExit(this.child, 2_000);
       });
     });
@@ -271,6 +271,19 @@ export class SidecarWorkerClient {
       }
       if (message.kind === "response") {
         this.handleResponse(message);
+        return;
+      }
+      if (message.kind === "closed") {
+        if (message.error) {
+          this.terminate(
+            new SidecarRequestError(
+              message.error.message,
+              message.error.name,
+              message.error.code,
+              message.error.details,
+            ),
+          );
+        }
         return;
       }
       if (message.event.type === "resync-required" && message.sequence >= this.expectedEventSequence) {
@@ -313,17 +326,19 @@ export class SidecarWorkerClient {
       throw new Error("Sidecar IPC channel is disconnected");
     }
     if (message.kind !== "chunk") {
-      const chunks = createSidecarChunks(message, this.workerInstanceId, "control");
-      if (chunks) {
-        for (const chunk of chunks) this.enqueueSend(chunk);
+      const prepared = prepareSidecarMessage(message, this.workerInstanceId, "control");
+      if (prepared.chunks) {
+        for (const chunk of prepared.chunks) this.enqueueSend(chunk);
         return;
       }
+      this.enqueueSend(message, prepared.byteLength);
+      return;
     }
     this.enqueueSend(message);
   }
 
-  private enqueueSend(message: ParentToSidecarMessage): void {
-    const bytes = Buffer.byteLength(JSON.stringify(message));
+  private enqueueSend(message: ParentToSidecarMessage, preparedBytes?: number): void {
+    const bytes = preparedBytes ?? Buffer.byteLength(JSON.stringify(message));
     if (bytes > MAX_SIDECAR_MESSAGE_BYTES)
       throw new Error(`Sidecar message exceeds ${MAX_SIDECAR_MESSAGE_BYTES} bytes`);
     if (this.sendQueue.length >= 160 || this.queuedSendBytes + bytes > 96 * 1024 * 1024) {
@@ -434,11 +449,7 @@ function unknownOutcomeError(commandType: SidecarCommand["type"], reason: string
 function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
   if (!child.pid) return;
   if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    killer.unref();
+    startWindowsTaskkill(child.pid);
     return;
   }
   try {
@@ -446,6 +457,34 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
   } catch {
     child.kill(signal);
   }
+}
+
+async function killProcessTreeAndWait(child: ChildProcess, signal: NodeJS.Signals): Promise<void> {
+  if (process.platform === "win32" && child.pid) {
+    await waitForWindowsTaskkill(child.pid);
+    return;
+  }
+  killProcessTree(child, signal);
+}
+
+function startWindowsTaskkill(pid: number): void {
+  const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  killer.once("error", () => undefined);
+  killer.unref();
+}
+
+async function waitForWindowsTaskkill(pid: number): Promise<void> {
+  const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  await new Promise<void>((resolve) => {
+    killer.once("error", () => resolve());
+    killer.once("exit", () => resolve());
+  });
 }
 
 export function resolveSidecarExecutable(

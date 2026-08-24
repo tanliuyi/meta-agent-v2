@@ -35,6 +35,12 @@ interface PendingRendererAttachment {
   threadId: string;
 }
 
+type SessionPushWithoutDeliveryBytes = SessionPushPayload & {
+  attachmentId: string;
+  workerInstanceId: string;
+  sidecarSequence: number;
+};
+
 interface PendingDeliveryAck {
   workerInstanceId: string;
   sidecarSequence: number;
@@ -298,11 +304,20 @@ export class SessionSupervisor {
     this.publishRuntimeRecovering(projectId, threadId, reason);
   }
 
-  receive(update: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void {
+  receive(
+    update: SessionPushPayload,
+    workerInstanceId: string,
+    sidecarSequence: number,
+    payloadJsonLength: number,
+  ): void {
+    if (!Number.isSafeInteger(payloadJsonLength) || payloadJsonLength < 2) {
+      throw new Error(`Invalid session payload JSON length: ${payloadJsonLength}`);
+    }
     const consumerIds = new Set<string>();
     const consumerBytes = new Map<string, number>();
-    let deliveryTemplate: SessionPush | undefined;
-    let deliveryTemplateBytes = 0;
+    let deliveryTemplate: SessionPushWithoutDeliveryBytes | undefined;
+    let deliveryTemplateBytes: number | undefined;
+    const timelinePayloadJsonLength = update.type === "timeline" ? payloadJsonLength : undefined;
     for (const [ownerId, leases] of this.subscriptions) {
       for (const subscription of leases.values()) {
         if (
@@ -329,13 +344,25 @@ export class SessionSupervisor {
             workerInstanceId,
             sidecarSequence,
           };
-          deliveryTemplateBytes = estimateDeliveryBytes(deliveryTemplate);
+          if (timelinePayloadJsonLength === undefined) {
+            deliveryTemplateBytes = estimateDeliveryBytes(deliveryTemplate);
+          }
         }
-        const delivered: SessionPush = {
+        const deliveredWithoutAccounting: SessionPushWithoutDeliveryBytes = {
           ...deliveryTemplate,
           attachmentId: subscription.attachmentId,
         };
-        const bytes = deliveryTemplateBytes + subscription.attachmentId.length * 2;
+        const baseDeliveryBytes = deliveryTemplateBytes ?? estimateDeliveryBytes(deliveryTemplate);
+        const bytes =
+          timelinePayloadJsonLength !== undefined
+            ? estimateTimelineDeliveryBytes(
+                timelinePayloadJsonLength,
+                subscription.attachmentId,
+                workerInstanceId,
+                sidecarSequence,
+              )
+            : baseDeliveryBytes + subscription.attachmentId.length * 2;
+        const delivered: SessionPush = { ...deliveredWithoutAccounting, deliveryBytes: bytes };
         if (
           subscription.pendingEvents >= MAX_ATTACHMENT_PENDING_EVENTS ||
           subscription.pendingBytes + bytes > MAX_ATTACHMENT_PENDING_BYTES
@@ -557,12 +584,13 @@ export class SessionSupervisor {
 
   private sendControl(_ownerId: number, subscription: RendererSubscription, payload: SessionPushPayload): void {
     try {
-      subscription.send({
+      const update: SessionPushWithoutDeliveryBytes = {
         ...payload,
         attachmentId: subscription.attachmentId,
         workerInstanceId: "desktop-main",
         sidecarSequence: this.runtimeStatusSequence,
-      });
+      };
+      subscription.send({ ...update, deliveryBytes: estimateDeliveryBytes(update) });
     } catch {
       // The renderer is already unavailable; cleanup releases this lease's state.
     }
@@ -584,6 +612,19 @@ function deliveryKey(workerInstanceId: string, sidecarSequence: number): string 
   return `${workerInstanceId}\u0000${sidecarSequence}`;
 }
 
-function estimateDeliveryBytes(update: SessionPush | SessionPushPayload): number {
+function estimateTimelineDeliveryBytes(
+  payloadJsonLength: number,
+  attachmentId: string,
+  workerInstanceId: string,
+  sidecarSequence: number,
+): number {
+  const addedFields =
+    `,"attachmentId":${JSON.stringify(attachmentId)}`.length +
+    `,"workerInstanceId":${JSON.stringify(workerInstanceId)}`.length +
+    `,"sidecarSequence":${String(sidecarSequence)}`.length;
+  return (payloadJsonLength + addedFields) * 2;
+}
+
+function estimateDeliveryBytes(update: SessionPushWithoutDeliveryBytes | SessionPushPayload): number {
   return JSON.stringify(update).length * 2;
 }

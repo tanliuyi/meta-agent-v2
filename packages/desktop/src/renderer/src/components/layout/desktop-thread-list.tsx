@@ -9,9 +9,9 @@ import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
-import { type FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, Fragment, useCallback, useMemo, useRef, useState } from "react";
 import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/contracts.ts";
-import { type CachedSessionRecord, sessionRecordKey } from "../../runtime/pi-session-store.ts";
+import { sessionRecordKey } from "../../runtime/pi-session-store.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useDesktopStore } from "../../state/desktop-store-context.tsx";
 import { useKeyboardShortcuts } from "../../state/keyboard-shortcut-provider.tsx";
@@ -101,7 +101,9 @@ export function DesktopThreadList({
   const [pendingPromote, setPendingPromote] = useState<Thread | null>(null);
   const [promoting, setPromoting] = useState(false);
   const [hoveredPreviewThreadId, setHoveredPreviewThreadId] = useState<string | null>(null);
-  const [previewRecord, setPreviewRecord] = useState<CachedSessionRecord | null>(null);
+  const previewRecord = hoveredPreviewThreadId
+    ? cache.get(sessionRecordKey(project.id, hoveredPreviewThreadId))
+    : undefined;
   const pendingDeleteDescendantIds = useMemo(
     () => (pendingDelete ? threadDescendantIds(threads, pendingDelete.id) : []),
     [pendingDelete, threads],
@@ -125,21 +127,6 @@ export function DesktopThreadList({
   );
   const hasMoreThreads = regularThreadCount > visibleLimit;
   const isExpanded = isThreadListExpanded(visibleLimit, regularThreadCount);
-
-  useEffect(() => {
-    if (!hoveredPreviewThreadId) {
-      setPreviewRecord(null);
-      return;
-    }
-    const key = sessionRecordKey(project.id, hoveredPreviewThreadId);
-    cache.retain(key);
-    const record = cache.ensure({
-      projectId: project.id,
-      threadId: hoveredPreviewThreadId,
-    });
-    setPreviewRecord(record);
-    return () => cache.release(key);
-  }, [cache, hoveredPreviewThreadId, project.id]);
 
   const updatePreviewHover = useCallback((threadId: string, hovered: boolean) => {
     setHoveredPreviewThreadId((current) => (hovered ? threadId : current === threadId ? null : current));

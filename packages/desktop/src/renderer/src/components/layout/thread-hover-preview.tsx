@@ -1,5 +1,5 @@
 import { FloatingPortal } from "@floating-ui/react";
-import { type CSSProperties, useMemo, useSyncExternalStore } from "react";
+import { type CSSProperties } from "react";
 import type { LinkSafetyConfig } from "streamdown";
 import type { PiThreadSnapshot } from "../../../../shared/contracts.ts";
 import {
@@ -60,29 +60,8 @@ export function ThreadHoverPreview({
   setFloating(node: HTMLElement | null): void;
   floatingStyles: CSSProperties;
 }) {
-  const getSnapshot = useMemo(() => {
-    let previous: ThreadHoverPreviewSnapshot | undefined;
-    return () => {
-      const next = record
-        ? threadHoverPreview(record.stores.timeline.getSnapshot())
-        : { loaded: false, user: "", assistant: "" };
-      if (
-        previous &&
-        previous.loaded === next.loaded &&
-        previous.user === next.user &&
-        previous.assistant === next.assistant
-      ) {
-        return previous;
-      }
-      previous = next;
-      return next;
-    };
-  }, [record]);
-  const live = useSyncExternalStore(
-    record?.stores.timeline.subscribe ?? (() => () => undefined),
-    getSnapshot,
-    getSnapshot,
-  );
+  const snapshot = record?.stores.timeline.getInMemorySnapshot();
+  const live = snapshot ? threadHoverPreview(snapshot) : { loaded: false, user: "", assistant: "" };
   const user = live.loaded ? live.user : fallbackUser;
   const assistant = live.loaded ? live.assistant : fallbackAssistant;
   if (!user || !assistant) return null;
