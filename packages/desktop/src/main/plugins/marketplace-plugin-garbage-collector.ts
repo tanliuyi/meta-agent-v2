@@ -35,13 +35,13 @@ export class MarketplacePluginGarbageCollector {
   constructor(
     registry: MarketplacePluginRegistry,
     references: Pick<MarketplaceGenerationReferenceTracker, "isReferenced">,
-    agentDir: string,
+    marketplaceRoot: string,
     lockDirectory: string,
     options: MarketplacePluginGarbageCollectorOptions = {},
   ) {
     this.registry = registry;
     this.references = references;
-    this.marketplaceRoot = join(agentDir, "extensions");
+    this.marketplaceRoot = marketplaceRoot;
     this.lockDirectory = lockDirectory;
     this.now = options.now ?? Date.now;
     this.retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
@@ -134,7 +134,9 @@ export class MarketplacePluginGarbageCollector {
       if (owner.inactiveAt === undefined) await markMarketplaceVersionInactive(owner.record, inactiveAt);
       if (now - inactiveAt < this.retentionMs) continue;
       await rm(versionRoot, { recursive: true, force: true });
-      await rm(join(rootPath, ".meta-agent-versions", `${version.name}.json`), { force: true });
+      await rm(join(rootPath, ".meta-agent-versions", `${version.name}.json`), {
+        force: true,
+      });
       result.removedVersions.push(versionRoot);
     }
     await syncDirectory(versionsPath).catch(() => undefined);

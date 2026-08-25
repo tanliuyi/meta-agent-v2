@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { AuthOauthLoginEvent } from "../shared/auth-config-contracts.ts";
 import type {
   BrowserAction,
@@ -342,6 +342,7 @@ const desktopApi: DesktopApi = {
       tombstoneAttachment(attachmentId);
       ipcRenderer.send(CHANNELS.sessionsDetach, attachmentId);
     },
+    close: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsClose, projectId, threadId),
     prewarm: (projectId, threadId) => ipcRenderer.invoke(CHANNELS.sessionsPrewarm, projectId, threadId),
     rename: (projectId, threadId, title) => ipcRenderer.invoke(CHANNELS.sessionsRename, projectId, threadId, title),
     archive: (projectId, threadId, archived) =>
@@ -367,6 +368,7 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.sessionsRespond, projectId, threadId, response),
   },
   files: {
+    getPath: (file) => webUtils.getPathForFile(file),
     list: (projectId, path, query, requestGroup) =>
       ipcRenderer.invoke(CHANNELS.filesList, projectId, path, query, requestGroup),
     read: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesRead, projectId, path),
@@ -431,6 +433,7 @@ const desktopApi: DesktopApi = {
     setEditorDirty: (dirty) => ipcRenderer.sendSync(CHANNELS.browserSetEditorDirty, dirty) === true,
     /** 会话退役：清理该会话的 webview/guest/映射（renderer 会话记录移除时调用）。 */
     sessionRetire: (identity) => ipcRenderer.invoke(CHANNELS.browserSessionRetire, identity),
+    sessionAcquire: (identity) => ipcRenderer.invoke(CHANNELS.browserSessionAcquire, identity),
     /** 清除指定会话分区数据（cookie/缓存/登录态）。 */
     clearData: (identity) => ipcRenderer.invoke(CHANNELS.browserClearData, identity),
     /** 清除全部会话分区数据（设置页入口）。 */

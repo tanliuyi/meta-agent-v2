@@ -2,7 +2,7 @@ import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useEffect } from "react";
 import { useStore } from "zustand";
 import type { ThinkingLevel } from "../../../../../shared/contracts.ts";
-import { toPiImageInputs } from "../../../runtime/image-attachments.ts";
+import { toPiPromptAttachments } from "../../../runtime/attachments.ts";
 import { sessionRecordKey } from "../../../runtime/pi-session-store.ts";
 import { useDesktopActions } from "../../../state/desktop-context.tsx";
 import { selectProjects } from "../../../state/desktop-selectors.ts";
@@ -98,7 +98,7 @@ export function NewSessionDraft() {
     sessionCache.setDraftMaterializing(true);
     draft.setPhase("materializing");
     try {
-      const images = await toPiImageInputs(state.attachments);
+      const attachments = await toPiPromptAttachments(state.text, state.attachments);
       const materialized = await materializeDraftSession(
         {
           projectId: draft.parent.projectId,
@@ -109,8 +109,8 @@ export function NewSessionDraft() {
           ...(draft.config.extensions.enabledPluginIds
             ? { enabledPluginIds: draft.config.extensions.enabledPluginIds }
             : {}),
-          text: state.text,
-          images,
+          text: attachments.text,
+          images: attachments.images,
         },
         {
           requestIds: draft.createRequestIds,

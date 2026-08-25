@@ -6,6 +6,7 @@ import {
   parseSidebarWidth,
   readStoredSidebarOpen,
   readStoredSidebarWidth,
+  SESSION_INFO_DEFAULT_OPEN,
   SIDEBAR_DEFAULT_OPEN,
   SIDEBAR_DEFAULT_WIDTH,
   writeStoredSidebarOpen,
@@ -41,6 +42,12 @@ describe("sidebar open preference", () => {
     expect(writeValue).toHaveBeenCalledWith("1");
     writeStoredSidebarOpen(false, writeValue);
     expect(writeValue).toHaveBeenCalledWith("0");
+  });
+});
+
+describe("session info default preference", () => {
+  it("保留会话信息面板的默认展开常量", () => {
+    expect(SESSION_INFO_DEFAULT_OPEN).toBe(true);
   });
 });
 

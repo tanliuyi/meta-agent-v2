@@ -70,7 +70,7 @@ describe("new session draft submission", () => {
   });
 
   it("拒绝没有正文和附件的无效 submit", async () => {
-    await expect(prepareDraftSubmission(composerState())).rejects.toThrow("请输入消息或添加图片");
+    await expect(prepareDraftSubmission(composerState())).rejects.toThrow("请输入消息或添加附件");
   });
 
   it("在 committed runtime 重建后完整 reseed Composer", async () => {

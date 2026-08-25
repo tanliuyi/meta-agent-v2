@@ -12,6 +12,7 @@ export function RunActivityGroup({
   hasContent,
   defaultOpenWhenComplete = false,
   stateKey,
+  persistentContent,
   children,
 }: {
   running: boolean;
@@ -20,6 +21,7 @@ export function RunActivityGroup({
   hasContent: boolean;
   defaultOpenWhenComplete?: boolean;
   stateKey: string;
+  persistentContent?: ReactNode;
   children: ReactNode;
 }) {
   const [storedOpen, setOpen] = useReasoningDisclosureState(stateKey);
@@ -54,12 +56,13 @@ export function RunActivityGroup({
   const stateLabel = running ? "正在处理" : "已处理";
   const elapsedLabel = elapsedSeconds === null ? "" : formatElapsedDuration(elapsedSeconds);
   const label = elapsedLabel ? `${stateLabel} ${elapsedLabel}` : stateLabel;
+  const open = running || (storedOpen ?? defaultOpenWhenComplete);
 
   return (
     <ReasoningRoot
       variant="ghost"
       className="aui-run-activity-root w-full"
-      open={running || (storedOpen ?? defaultOpenWhenComplete)}
+      open={open}
       onOpenChange={(nextOpen) => {
         if (!running && hasContent) setOpen(nextOpen);
       }}
@@ -75,6 +78,9 @@ export function RunActivityGroup({
         <ReasoningContent className="aui-run-activity-content text-foreground" fade={false} aria-busy={running}>
           <div className="aui-run-activity-body flex flex-col gap-3 py-2">{children}</div>
         </ReasoningContent>
+      ) : null}
+      {persistentContent !== undefined && persistentContent !== null && (!hasContent || !open) ? (
+        <div className="aui-run-activity-persistent flex flex-col gap-3 py-2">{persistentContent}</div>
       ) : null}
     </ReasoningRoot>
   );

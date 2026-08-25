@@ -169,6 +169,8 @@ export class BrowserManager {
   private readonly sessions = new Map<string, SessionState>();
   /** 曾经受控注册过的会话身份（retire 后仍保持已知；状态按需重建）。 */
   private readonly knownSessions = new Set<string>();
+  /** 每个会话当前持有其浏览器状态的 renderer（webContentsId）集合。 */
+  private readonly sessionOwners = new Map<string, Set<number>>();
   /** 当前仍可调用 RPC 的 worker capability -> session identity。 */
   private readonly sessionCapabilities = new Map<string, BrowserSessionIdentity>();
   /** 已经注册过的 identity，用于 clearAllData 覆盖已 retire 的持久分区。 */
@@ -228,7 +230,10 @@ export class BrowserManager {
   }
 
   revokeSessionCapability(token: string): void {
+    const identity = this.sessionCapabilities.get(token);
     this.sessionCapabilities.delete(token);
+    if (!identity) return;
+    this.destroySessionIfUnowned(browserSessionKey(identity));
   }
 
   /** RPC 等不可信入口的身份校验：仅接受当前已注册且未退役的会话。 */
@@ -236,9 +241,50 @@ export class BrowserManager {
     return this.knownSessions.has(browserSessionKey(identity));
   }
 
-  /** 会话退役：清理该会话的 tabs/pending/历史/标注，并撤销其 RPC 身份。 */
-  retireSession(identity: BrowserSessionIdentity): void {
+  /** 会话退役：只释放该 renderer 的持有权；全部持有者释放后才销毁会话状态。 */
+  retireSession(identity: BrowserSessionIdentity, ownerWebContentsId: number): void {
     const sessionKey = browserSessionKey(identity);
+    const owners = this.sessionOwners.get(sessionKey);
+    if (owners) {
+      owners.delete(ownerWebContentsId);
+      if (owners.size > 0) return;
+      this.sessionOwners.delete(sessionKey);
+    }
+    this.destroySessionIfUnowned(sessionKey);
+  }
+
+  /**
+   * renderer 声明持有某会话的浏览器状态（创建/挂载 browser runtime 时调用）。
+   * 幂等：同一 renderer 重复声明不会重复计数。
+   */
+  acquireSession(identity: BrowserSessionIdentity, ownerWebContentsId: number): void {
+    const state = this.ensureSession(identity);
+    const owners = this.sessionOwners.get(state.sessionKey) ?? new Set<number>();
+    owners.add(ownerWebContentsId);
+    this.sessionOwners.set(state.sessionKey, owners);
+  }
+
+  /** renderer 退出时释放其持有的全部会话，并销毁失去最后 owner 的状态。 */
+  releaseOwner(ownerWebContentsId: number): void {
+    for (const [sessionKey, owners] of this.sessionOwners) {
+      if (!owners.delete(ownerWebContentsId)) continue;
+      if (owners.size > 0) continue;
+      this.sessionOwners.delete(sessionKey);
+      this.destroySessionIfUnowned(sessionKey);
+    }
+  }
+
+  /** renderer owner 与 worker capability 都释放后才真正销毁会话。 */
+  private destroySessionIfUnowned(sessionKey: string): void {
+    if (this.sessionOwners.has(sessionKey)) return;
+    for (const identity of this.sessionCapabilities.values()) {
+      if (browserSessionKey(identity) === sessionKey) return;
+    }
+    this.destroySession(sessionKey);
+  }
+
+  /** 全部持有者释放后由 retireSession 调用：销毁 tabs/pending/历史/标注并撤销 RPC 身份。 */
+  private destroySession(sessionKey: string): void {
     this.knownSessions.delete(sessionKey);
     for (const [token, capabilityIdentity] of this.sessionCapabilities) {
       if (browserSessionKey(capabilityIdentity) === sessionKey) this.sessionCapabilities.delete(token);
@@ -1825,6 +1871,7 @@ export class BrowserManager {
     }
     this.sessions.clear();
     this.sessionCapabilities.clear();
+    this.sessionOwners.clear();
   }
 
   /** 会话状态（不存在则创建）。IPC（renderer）路径使用：renderer 是受信应用代码。 */

@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import type { ThinkingLevel } from "../../../shared/contracts.ts";
-import { toPiImageInputs } from "../runtime/image-attachments.ts";
+import { toPiPromptAttachments } from "../runtime/attachments.ts";
 import { selectProjects } from "../state/desktop-selectors.ts";
 import { dispatchDesktop } from "../state/desktop-store.ts";
 import { useDesktopStore } from "../state/desktop-store-context.tsx";
@@ -160,7 +160,7 @@ export function NewSessionSurface() {
     sessionCache.setDraftMaterializing(true);
     setPhase("materializing");
     try {
-      const images = await toPiImageInputs(state.attachments);
+      const attachments = await toPiPromptAttachments(state.text, state.attachments);
       const materialized = await materializeDraftSession(
         {
           projectId,
@@ -168,8 +168,8 @@ export function NewSessionSurface() {
           thinkingLevel: config.thinkingLevel,
           extensionSetGeneration: config.extensions.extensionSetGeneration,
           ...(config.extensions.enabledPluginIds ? { enabledPluginIds: config.extensions.enabledPluginIds } : {}),
-          text: state.text,
-          images,
+          text: attachments.text,
+          images: attachments.images,
         },
         {
           requestIds: createRequestIds,

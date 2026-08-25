@@ -20,6 +20,7 @@ import {
   sameModalGeometry,
 } from "../src/renderer/src/components/session-modal.tsx";
 import {
+  resolveSessionInfoOpenForWorkbenchPanel,
   SessionSurface,
   setSessionModalGeometry,
   setSessionModalOpen,
@@ -44,6 +45,9 @@ const sessionScope = vi.hoisted(() => ({
         drag: { x: number; y: number };
         size: { width: number; height: number } | null;
       },
+  panelOpen: false,
+  // 会话级会话信息偏好（缺省 undefined = 默认展开）。
+  sessionInfoOpen: undefined as boolean | undefined,
   // workbench store 是否已就绪（attach 完成）；false 时 selector 返回 null。
   ready: false,
 }));
@@ -53,6 +57,9 @@ vi.mock("../src/renderer/src/components/chat/chat-thread.tsx", () => ({
     chatThreadRenderCount.value += 1;
     return <div data-slot="messages" />;
   },
+}));
+vi.mock("../src/renderer/src/components/chat/session-info.tsx", () => ({
+  SessionInfo: ({ open }: { open: boolean }) => <section data-slot="session-info" data-open={String(open)} />,
 }));
 vi.mock("../src/renderer/src/components/layout/topbar.tsx", () => ({
   Topbar: () => <header data-slot="topbar" />,
@@ -66,7 +73,15 @@ vi.mock("../src/renderer/src/components/panel/workbench-panel.tsx", () => ({
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
   useSessionScope: () => sessionScope.scope,
   useSessionWorkbenchSelector: (selector: (workbench: unknown) => unknown) =>
-    selector(sessionScope.ready ? { sessionModal: sessionScope.persisted } : null),
+    selector(
+      sessionScope.ready
+        ? {
+            panelOpen: sessionScope.panelOpen,
+            sessionModal: sessionScope.persisted,
+            sessionInfoOpen: sessionScope.sessionInfoOpen,
+          }
+        : null,
+    ),
 }));
 // 用结构替身替代真实 Radix Portal（SSR 下 portal 返回 null，无法断言内容）。
 vi.mock("@assistant-ui/react", () => ({
@@ -110,6 +125,8 @@ describe("SessionSurface layout", () => {
   beforeEach(() => {
     chatThreadRenderCount.value = 0;
     sessionScope.persisted = undefined;
+    sessionScope.panelOpen = false;
+    sessionScope.sessionInfoOpen = undefined;
     sessionScope.ready = false;
     sessionScope.scope.updateWorkbench.mockClear();
   });
@@ -118,11 +135,56 @@ describe("SessionSurface layout", () => {
     const markup = renderToStaticMarkup(React.createElement(SessionSurface));
 
     expect(markup).toContain(
-      '<div class="session-surface-shell"><header data-slot="topbar"></header><div class="workspace-row session-surface" data-session-key="session-1" data-active="true"><main class="chat-workspace"><div data-slot="messages"></div></main></div></div><section data-slot="bottom"></section><aside data-slot="panel"></aside>',
+      '<div class="session-surface-shell"><header data-slot="topbar"></header><div class="workspace-row session-surface" data-session-key="session-1" data-active="true"><main class="chat-workspace" data-session-info-open="true"><div data-slot="messages"></div><section data-slot="session-info" data-open="true"></section></main></div></div><section data-slot="bottom"></section><aside data-slot="panel"></aside>',
     );
     // 普通态：ChatThread 唯一实例，不渲染 modal。
     expect(chatThreadRenderCount.value).toBe(1);
     expect(markup).not.toContain("data-modal-root");
+  });
+
+  it("collapses session info only while the current session workbench panel is open", () => {
+    expect(resolveSessionInfoOpenForWorkbenchPanel(true, true)).toBe(false);
+    expect(resolveSessionInfoOpenForWorkbenchPanel(true, false)).toBe(false);
+    expect(resolveSessionInfoOpenForWorkbenchPanel(false, true)).toBe(true);
+    expect(resolveSessionInfoOpenForWorkbenchPanel(false, false)).toBe(false);
+  });
+
+  it("keeps the workbench conflict out of the persisted per-session preference", () => {
+    sessionScope.ready = true;
+    sessionScope.sessionInfoOpen = true;
+
+    // workbench 展开：面板派生隐藏，但偏好（以及持久化写回）保持不动。
+    sessionScope.panelOpen = true;
+    let markup = renderToStaticMarkup(React.createElement(SessionSurface));
+    expect(markup).toContain('data-open="false"');
+
+    // workbench 关闭：按偏好自动恢复显示。
+    sessionScope.panelOpen = false;
+    markup = renderToStaticMarkup(React.createElement(SessionSurface));
+    expect(markup).toContain('data-open="true"');
+    expect(markup).toContain('data-session-info-open="true"');
+
+    // 冲突只是派生可见性：任何渲染都不写回偏好。
+    expect(sessionScope.scope.updateWorkbench).not.toHaveBeenCalled();
+  });
+
+  it("keeps session info state isolated per session", () => {
+    sessionScope.ready = true;
+
+    // 会话 A：偏好关闭 + workbench 展开。
+    sessionScope.sessionInfoOpen = false;
+    sessionScope.panelOpen = true;
+    const sessionAMarkup = renderToStaticMarkup(React.createElement(SessionSurface));
+
+    // 会话 B：偏好展开。A 的 workbench 冲突不得影响 B。
+    sessionScope.sessionInfoOpen = true;
+    sessionScope.panelOpen = false;
+    const sessionBMarkup = renderToStaticMarkup(React.createElement(SessionSurface));
+
+    expect(sessionAMarkup).toContain('data-open="false"');
+    expect(sessionBMarkup).toContain('data-open="true"');
+    expect(sessionBMarkup).toContain('data-session-info-open="true"');
+    expect(sessionScope.scope.updateWorkbench).not.toHaveBeenCalled();
   });
 
   it("renders the session thread inside the assistant modal when fullscreen", () => {

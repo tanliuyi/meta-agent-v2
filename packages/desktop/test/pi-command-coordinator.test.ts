@@ -190,7 +190,7 @@ describe("PiCommandCoordinator", () => {
     expect(setText).toHaveBeenCalledWith("blocked");
   });
 
-  it("running 阶段拒绝仅包含图片的输入并恢复附件", async () => {
+  it("running 阶段接受仅包含图片的输入", async () => {
     phase = "running";
     const coordinator = createCoordinator();
     const message: AppendMessage = {
@@ -200,9 +200,33 @@ describe("PiCommandCoordinator", () => {
 
     coordinator.enqueue(message);
 
-    await vi.waitFor(() => expect(report).toHaveBeenCalledOnce());
-    expect(prompt).not.toHaveBeenCalled();
-    expect(addAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: "image" }));
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    expect(prompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "",
+        images: [{ name: "image.png", mimeType: "image/png", data: "aW1hZ2U=" }],
+      }),
+    );
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it("running 阶段接受仅包含文件的输入", async () => {
+    phase = "running";
+    const coordinator = createCoordinator();
+
+    coordinator.enqueue({ ...userMessage(""), attachments: [fileAttachment()] });
+
+    const marker = `<pi-file-context-v1>${JSON.stringify({
+      files: [{ path: "C:\\docs\\report.docx", name: "report.docx" }],
+    })}</pi-file-context-v1>`;
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+    expect(prompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: `${marker}\n\n<file name="C:\\docs\\report.docx">report.docx</file>`,
+        images: [],
+      }),
+    );
+    expect(report).not.toHaveBeenCalled();
   });
 
   it("edit 使用 sourceId，reload 使用 parentId", async () => {
@@ -382,6 +406,24 @@ function userMessage(text: string): AppendMessage {
     parentId: null,
     sourceId: null,
     runConfig: undefined,
+  };
+}
+
+function fileAttachment(): NonNullable<AppendMessage["attachments"]>[number] {
+  return {
+    id: "file",
+    type: "file",
+    name: "report.docx",
+    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    status: { type: "complete" },
+    content: [
+      {
+        type: "file",
+        data: "C:\\docs\\report.docx",
+        filename: "report.docx",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      },
+    ],
   };
 }
 

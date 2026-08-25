@@ -244,7 +244,7 @@ export function OpenWorkbenchPanel({
                 aria-pressed={fullscreen}
                 onClick={onToggleFullscreen}
               >
-                {fullscreen ? <Minimize className="size-4!" /> : <Maximize className="size-4!" />}
+                {fullscreen ? <Minimize className="size-3.5!" /> : <Maximize className="size-3.5!" />}
               </TooltipIconButton>
             ) : null}
           </header>

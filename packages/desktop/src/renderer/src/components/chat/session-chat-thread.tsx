@@ -20,7 +20,7 @@ export function SessionChatThread() {
         <Messages />
         <div
           data-slot="session-composer-footer"
-          className="w-full shrink-0 bg-[linear-gradient(to_bottom,transparent,var(--color-background)_var(--thread-composer-overlap))] pr-(--thread-scrollbar-width) overscroll-contain"
+          className="shrink-0 bg-[linear-gradient(to_bottom,transparent,var(--color-background)_var(--thread-composer-overlap))] pr-(--thread-scrollbar-width) overscroll-contain"
         >
           <div data-slot="session-composer-content" className="mx-auto w-full max-w-(--layout-thread-max-width) pb-4">
             <SessionComposer />

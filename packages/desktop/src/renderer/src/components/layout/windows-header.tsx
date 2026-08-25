@@ -5,20 +5,26 @@ import Square from "lucide-react/dist/esm/icons/square.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { useEffect, useState } from "react";
 import { SidebarToggle } from "./sidebar-toggle.tsx";
+import { WindowsSessionTabs } from "./windows-session-tabs.tsx";
+
+/** 设置页不展示 session 导航。 */
+export function shouldShowWindowsSessionNavigation(pathname: string): boolean {
+  return !pathname.startsWith("/settings");
+}
 
 /** 无边框 BrowserWindow 的 Windows 标题栏。 */
 export function WindowsHeader() {
   const [maximized, setMaximized] = useState(false);
   const { pathname } = useLocation();
-  // 设置页没有侧边栏，隐藏展开/收起按钮。
-  const showSidebarToggle = !pathname.startsWith("/settings");
+  const showSessionNavigation = shouldShowWindowsSessionNavigation(pathname);
 
   useEffect(() => window.desktop.windowControls.onMaximizedChanged(setMaximized), []);
 
   return (
     <header className="windows-header">
       <div className="windows-header-title">
-        {showSidebarToggle ? <SidebarToggle location="window-header" /> : null}
+        {showSessionNavigation ? <SidebarToggle location="window-header" /> : null}
+        {showSessionNavigation ? <WindowsSessionTabs /> : null}
       </div>
       <div className="windows-header-controls" aria-label="窗口控制">
         <button

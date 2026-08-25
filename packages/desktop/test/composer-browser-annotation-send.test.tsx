@@ -13,9 +13,11 @@ const captured = vi.hoisted(() => ({
     text: "",
     isEmpty: true,
     quote: undefined as unknown,
+    attachments: [] as Array<{ id: string; type: string }>,
     setText: vi.fn(),
     send: vi.fn(),
   },
+  running: false,
   events: new Map<string, () => void>(),
   inputOnSubmit: undefined as (() => void) | undefined,
   commandOnSelect: undefined as ((command: SlashCommand) => void) | undefined,
@@ -44,6 +46,7 @@ vi.mock("@assistant-ui/react", () => ({
         text: captured.composerState.text,
         isEmpty: captured.composerState.isEmpty,
         quote: captured.composerState.quote,
+        attachments: captured.composerState.attachments,
       }),
       setText: captured.composerState.setText,
       send: captured.composerState.send,
@@ -53,7 +56,7 @@ vi.mock("@assistant-ui/react", () => ({
   useAuiEvent: (name: string, handler: () => void) => {
     captured.events.set(name, handler);
   },
-  useAuiState: () => ({ thread: { isRunning: false } }),
+  useAuiState: () => ({ thread: { isRunning: captured.running } }),
 }));
 
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
@@ -131,6 +134,38 @@ function draftProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
     onThinkingChange: vi.fn(),
     onPluginsChange: vi.fn(),
     onSubmit: vi.fn(),
+    ...overrides,
+  } as ComposerProps;
+}
+
+function sessionProps(overrides: Partial<ComposerProps> = {}): ComposerProps {
+  return {
+    mode: "session",
+    projectId: "project",
+    threadId: "thread",
+    model: undefined,
+    models: [],
+    commands: [],
+    plugins: [],
+    enabledPluginIds: [],
+    pluginsDisabled: false,
+    pluginsLoading: false,
+    thinkingLevel: "off",
+    thinkingLevels: [],
+    readiness: { state: "ready" },
+    phase: "running",
+    queue: [],
+    widgets: [],
+    working: undefined,
+    context: undefined,
+    composerCommand: undefined,
+    commandsReady: true,
+    modelsLoading: false,
+    onClearQueue: async () => undefined,
+    onRefreshModels: async () => undefined,
+    onSetModel: async () => undefined,
+    onSetThinking: async () => undefined,
+    onPluginsChange: async () => undefined,
     ...overrides,
   } as ComposerProps;
 }
@@ -326,5 +361,38 @@ describe("Composer draft 提交快照", () => {
     expect(consumed).not.toHaveBeenCalled();
 
     unsubscribe();
+  });
+});
+
+describe("Composer running 阶段提交", () => {
+  afterEach(() => {
+    captured.running = false;
+    captured.composerState.attachments = [];
+    captured.composerState.send.mockClear();
+    captured.formOnSubmit = undefined;
+  });
+
+  it("空文本但带附件时允许提交", () => {
+    captured.running = true;
+    captured.composerState.text = "";
+    captured.composerState.attachments = [{ id: "file-1", type: "file" }];
+    renderToStaticMarkup(<Composer {...sessionProps({ phase: "running" })} />);
+    const formSubmit = captured.formOnSubmit;
+    if (!formSubmit) throw new Error("表单 onSubmit 未挂载");
+    formSubmit({ preventDefault: vi.fn() });
+
+    expect(captured.composerState.send).toHaveBeenCalledWith({ steer: true });
+  });
+
+  it("空文本且无附件时拦截提交", () => {
+    captured.running = true;
+    captured.composerState.text = "";
+    captured.composerState.attachments = [];
+    renderToStaticMarkup(<Composer {...sessionProps({ phase: "running" })} />);
+    const formSubmit = captured.formOnSubmit;
+    if (!formSubmit) throw new Error("表单 onSubmit 未挂载");
+    formSubmit({ preventDefault: vi.fn() });
+
+    expect(captured.composerState.send).not.toHaveBeenCalled();
   });
 });

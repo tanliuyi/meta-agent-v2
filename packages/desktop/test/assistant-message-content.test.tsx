@@ -3,9 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 interface TestPart {
-  type: "reasoning" | "tool-call" | "text";
+  type: "reasoning" | "tool-call" | "text" | "data";
   toolName?: string;
   text?: string;
+  name?: string;
+  data?: unknown;
 }
 
 interface TestToolUI {
@@ -15,7 +17,7 @@ interface TestToolUI {
 interface TestMessage {
   id: string;
   role: "user" | "assistant";
-  parts: TestPart[];
+  content: TestPart[];
 }
 
 const viewState = vi.hoisted(() => ({
@@ -98,7 +100,7 @@ vi.mock("@assistant-ui/react", () => ({
         messages:
           viewState.runMessages.length > 0
             ? viewState.runMessages
-            : [{ id: viewState.messageId, role: "assistant", parts: viewState.parts }],
+            : [{ id: viewState.messageId, role: "assistant", content: viewState.parts }],
       },
       tools: { toolUIs: viewState.toolUIs },
     }),
@@ -127,12 +129,14 @@ vi.mock("../src/renderer/src/components/chat/message/chain-of-thought-group.tsx"
 vi.mock("../src/renderer/src/components/chat/message/run-activity-group.tsx", () => ({
   RunActivityGroup: ({
     children,
+    persistentContent,
     hasContent,
     running,
     completedAt,
     defaultOpenWhenComplete,
   }: {
     children: ReactNode;
+    persistentContent?: ReactNode;
     hasContent: boolean;
     running: boolean;
     completedAt?: number;
@@ -146,6 +150,7 @@ vi.mock("../src/renderer/src/components/chat/message/run-activity-group.tsx", ()
       data-default-open-when-complete={defaultOpenWhenComplete}
     >
       {hasContent ? children : null}
+      {!hasContent || (!running && !defaultOpenWhenComplete) ? persistentContent : null}
     </div>
   ),
 }));
@@ -155,7 +160,11 @@ vi.mock("../src/renderer/src/components/chat/tool-view.tsx", () => ({
 }));
 
 vi.mock("../src/renderer/src/components/chat/pi-notice-view.tsx", () => ({
-  PiNoticeView: () => null,
+  PiNoticeView: ({ data }: { data: unknown }) => (
+    <div data-testid="pi-notice">
+      {data && typeof data === "object" && "content" in data && typeof data.content === "string" ? data.content : null}
+    </div>
+  ),
 }));
 
 import { AssistantMessageContent } from "../src/renderer/src/components/chat/message/assistant-message-content.tsx";
@@ -245,9 +254,9 @@ describe("AssistantMessageContent thinking visibility", () => {
     viewState.showAvatars = true;
     viewState.parts = [{ type: "reasoning" }, { type: "tool-call" }];
     viewState.runMessages = [
-      { id: "user", role: "user", parts: [{ type: "text", text: "问题" }] },
-      { id: viewState.messageId, role: "assistant", parts: viewState.parts },
-      { id: "assistant-final", role: "assistant", parts: [{ type: "text", text: "最终回复" }] },
+      { id: "user", role: "user", content: [{ type: "text", text: "问题" }] },
+      { id: viewState.messageId, role: "assistant", content: viewState.parts },
+      { id: "assistant-final", role: "assistant", content: [{ type: "text", text: "最终回复" }] },
     ];
 
     const markup = renderToStaticMarkup(
@@ -266,6 +275,109 @@ describe("AssistantMessageContent thinking visibility", () => {
     );
 
     expect(markup).toContain('data-completed-at="12000"');
+  });
+
+  it("尾部 notification 在 activity 收起后仍渲染", () => {
+    viewState.parts = [
+      { type: "reasoning" },
+      { type: "data", name: "pi-notice", data: { noticeType: "notification", content: "status" } },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <AssistantMessageContent isRunActivityRunning={false} isMessageRunning={false} />,
+    );
+
+    expect(markup).toContain('data-testid="run-activity"');
+    expect(markup).toContain('data-has-content="false"');
+    expect(markup).toContain('data-testid="pi-notice"');
+    expect(markup).toContain("status");
+  });
+
+  it("notification 不拆分同一次 run activity", () => {
+    viewState.parts = [
+      { type: "reasoning" },
+      {
+        type: "data",
+        name: "pi-notice",
+        data: { noticeType: "notification", notificationType: "info", content: "status" },
+      },
+      { type: "reasoning" },
+    ];
+
+    const markup = renderToStaticMarkup(<AssistantMessageContent isRunActivityRunning isMessageRunning />);
+
+    expect(markup.match(/data-testid="run-activity"/g)).toHaveLength(1);
+    expect(markup).toContain("status");
+  });
+
+  it("连续 info notification 仅显示最后一条状态", () => {
+    viewState.parts = [
+      {
+        type: "data",
+        name: "pi-notice",
+        data: { noticeType: "notification", notificationType: "info", content: "TPS 10" },
+      },
+      {
+        type: "data",
+        name: "pi-notice",
+        data: { noticeType: "notification", notificationType: "info", content: "TPS 20" },
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <AssistantMessageContent isRunActivityRunning={false} isMessageRunning={false} />,
+    );
+
+    expect(markup).not.toContain("TPS 10");
+    expect(markup).toContain("TPS 20");
+    expect(markup.match(/data-testid="pi-notice"/g)).toHaveLength(1);
+  });
+
+  it("中间出现 assistant 内容时保留两条 info notification", () => {
+    viewState.parts = [
+      {
+        type: "data",
+        name: "pi-notice",
+        data: { noticeType: "notification", notificationType: "info", content: "TPS 10" },
+      },
+      { type: "reasoning" },
+      {
+        type: "data",
+        name: "pi-notice",
+        data: { noticeType: "notification", notificationType: "info", content: "TPS 20" },
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <AssistantMessageContent isRunActivityRunning={false} isMessageRunning={false} />,
+    );
+
+    expect(markup).toContain("TPS 10");
+    expect(markup).toContain("TPS 20");
+    expect(markup.match(/data-testid="pi-notice"/g)).toHaveLength(2);
+  });
+
+  it("warning notification 不参与 info 状态替换", () => {
+    viewState.parts = [
+      {
+        type: "data",
+        name: "pi-notice",
+        data: { noticeType: "notification", notificationType: "warning", content: "warning 1" },
+      },
+      {
+        type: "data",
+        name: "pi-notice",
+        data: { noticeType: "notification", notificationType: "warning", content: "warning 2" },
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <AssistantMessageContent isRunActivityRunning={false} isMessageRunning={false} />,
+    );
+
+    expect(markup).toContain("warning 1");
+    expect(markup).toContain("warning 2");
+    expect(markup.match(/data-testid="pi-notice"/g)).toHaveLength(2);
   });
 
   it("standalone tool 不压制独立 running indicator", () => {

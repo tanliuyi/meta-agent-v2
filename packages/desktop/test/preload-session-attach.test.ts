@@ -8,6 +8,7 @@ import "../src/preload/index.ts";
 const electron = vi.hoisted(() => ({
   exposed: undefined as DesktopApi | undefined,
   listeners: new Map<string, (event: unknown, payload: unknown) => void>(),
+  getPathForFile: vi.fn(),
   invoke: vi.fn(),
   send: vi.fn(),
   sendSync: vi.fn(),
@@ -19,6 +20,9 @@ vi.mock("electron", () => ({
     exposeInMainWorld: (_name: string, api: DesktopApi) => {
       electron.exposed = api;
     },
+  },
+  webUtils: {
+    getPathForFile: electron.getPathForFile,
   },
   ipcRenderer: {
     invoke: electron.invoke,
@@ -32,6 +36,15 @@ vi.mock("electron", () => ({
 }));
 
 describe("preload session attachment leases", () => {
+  it("exposes Electron-backed file paths to the renderer", () => {
+    const api = requiredApi();
+    const file = new File([], "document.docx");
+    electron.getPathForFile.mockReset().mockReturnValueOnce("C:\\docs\\document.docx");
+
+    expect(api.files.getPath(file)).toBe("C:\\docs\\document.docx");
+    expect(electron.getPathForFile).toHaveBeenCalledWith(file);
+  });
+
   it("buffers and flushes A/B independently", async () => {
     const api = requiredApi();
     electron.invoke.mockReset().mockResolvedValueOnce(attachment("a", "a")).mockResolvedValueOnce(attachment("b", "b"));
@@ -68,6 +81,15 @@ describe("preload session attachment leases", () => {
     expect(receivedB).toHaveLength(1);
     expect(electron.send).toHaveBeenCalledWith(CHANNELS.sessionsDetach, a.attachmentId);
     expect(electron.send).not.toHaveBeenCalledWith(CHANNELS.sessionsDetach, b.attachmentId);
+  });
+
+  it("invokes the completed-thread sidecar close channel", async () => {
+    const api = requiredApi();
+    electron.invoke.mockReset().mockResolvedValueOnce(undefined);
+
+    await api.sessions.close("project", "thread");
+
+    expect(electron.invoke).toHaveBeenCalledWith(CHANNELS.sessionsClose, "project", "thread");
   });
 
   it("reports recovery only for the overflowing lease", async () => {

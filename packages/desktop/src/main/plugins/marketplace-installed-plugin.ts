@@ -3,6 +3,8 @@ import { lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/prom
 import { isAbsolute, relative, resolve } from "node:path";
 import type { InstalledMarketplacePluginRecord } from "./marketplace-plugin-registry.ts";
 
+const ARTIFACT_HASH = /^[a-f0-9]{64}$/;
+
 export class MarketplacePluginRootMismatchError extends Error {
   constructor(pluginId: string) {
     super(`Marketplace extension is outside its managed root: ${pluginId}`);
@@ -46,14 +48,21 @@ export async function validateInstalledMarketplacePlugin(
   if (canonicalRoot !== resolve(canonicalMarketplaceRoot, plugin.id)) {
     throw new MarketplacePluginRootMismatchError(plugin.id);
   }
-  const withinRoot = relative(canonicalRoot, canonicalEntry);
-  if (!withinRoot || withinRoot.startsWith("..") || isAbsolute(withinRoot)) {
-    throw new Error(`Marketplace extension escapes managed root: ${plugin.id}`);
+  if (!ARTIFACT_HASH.test(plugin.artifactHash)) {
+    throw new Error(`Marketplace extension artifact hash is invalid: ${plugin.id}`);
   }
   const expectedVersionRoot = resolve(canonicalRoot, ".versions", plugin.artifactHash);
-  const versionRoot = await realpath(expectedVersionRoot);
-  if (versionRoot !== expectedVersionRoot) {
+  const versionRootInfo = await lstat(expectedVersionRoot);
+  if (!versionRootInfo.isDirectory() || versionRootInfo.isSymbolicLink()) {
+    throw new Error(`Marketplace extension version root is not a managed directory: ${plugin.id}`);
+  }
+  const canonicalVersionRoot = await realpath(expectedVersionRoot);
+  if (canonicalVersionRoot !== expectedVersionRoot) {
     throw new Error(`Marketplace extension version root was redirected: ${plugin.id}`);
+  }
+  const withinVersionRoot = relative(canonicalVersionRoot, canonicalEntry);
+  if (!withinVersionRoot || withinVersionRoot.startsWith("..") || isAbsolute(withinVersionRoot)) {
+    throw new Error(`Marketplace extension entry escapes its version payload: ${plugin.id}`);
   }
   return resolve(canonicalEntry);
 }
@@ -86,7 +95,7 @@ export async function readMarketplaceRootOwnership(rootPath: string): Promise<Ma
   if (
     !isObject(value) ||
     value.version !== 1 ||
-    value.state !== "installed" ||
+    (value.state !== "installed" && value.state !== "broken") ||
     !isObject(value.record) ||
     typeof value.record.id !== "string" ||
     typeof value.record.artifactHash !== "string" ||
@@ -96,6 +105,39 @@ export async function readMarketplaceRootOwnership(rootPath: string): Promise<Ma
     return undefined;
   }
   return { record: value.record as unknown as InstalledMarketplacePluginRecord };
+}
+
+/**
+ * Binds a marker record read from a scanned directory to that exact directory.
+ * A record whose plugin id, root path or entry path does not describe this
+ * directory is not owned by it and must never drive writes anywhere else.
+ */
+export function marketplaceRecordBindsToRoot(
+  record: InstalledMarketplacePluginRecord,
+  rootPath: string,
+  pluginId: string,
+): boolean {
+  if (record.id !== pluginId) return false;
+  if (resolve(record.rootPath) !== resolve(rootPath)) return false;
+  if (!isAbsolute(record.entryPath)) return false;
+  const withinRoot = relative(rootPath, record.entryPath);
+  return withinRoot.length > 0 && !withinRoot.startsWith("..") && !isAbsolute(withinRoot);
+}
+
+export function marketplaceOwnershipMatchesRecord(
+  ownership: MarketplaceRootOwnership | undefined,
+  record: InstalledMarketplacePluginRecord,
+): boolean {
+  return (
+    ownership?.record.id === record.id &&
+    ownership.record.artifactHash === record.artifactHash &&
+    ownership.record.rootPath === record.rootPath &&
+    ownership.record.entryPath === record.entryPath
+  );
+}
+
+export async function isMarketplacePluginOwned(record: InstalledMarketplacePluginRecord): Promise<boolean> {
+  return marketplaceOwnershipMatchesRecord(await readMarketplaceRootOwnership(record.rootPath), record);
 }
 
 export async function readMarketplaceVersionOwner(

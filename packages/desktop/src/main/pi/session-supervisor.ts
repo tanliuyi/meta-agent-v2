@@ -107,6 +107,13 @@ export class SessionSupervisor {
     return this.workers.prewarm(projectId, threadId);
   }
 
+  /** 关闭指定 renderer 的 leases，并在没有其他消费者时退役已完成 thread 的 worker。 */
+  async close(ownerId: number, projectId: string, threadId: string): Promise<void> {
+    this.clearOwnerPendingAttachments(ownerId, projectId, threadId);
+    this.clearOwnerSessionSubscriptions(ownerId, projectId, threadId);
+    await this.workers.close(projectId, threadId);
+  }
+
   create(input: SessionCreateInput): Promise<SessionBootstrap> {
     return this.workers.create(input);
   }
@@ -480,6 +487,24 @@ export class SessionSupervisor {
           availability: { state: "recovering", reason, unknownOutcome: false },
         });
     });
+  }
+
+  private clearOwnerSessionSubscriptions(ownerId: number, projectId: string, threadId: string): void {
+    const leases = this.subscriptions.get(ownerId);
+    if (!leases) return;
+    for (const subscription of [...leases.values()]) {
+      if (subscription.projectId === projectId && subscription.threadId === threadId)
+        this.detachSubscription(ownerId, subscription.attachmentId);
+    }
+  }
+
+  private clearOwnerPendingAttachments(ownerId: number, projectId: string, threadId: string): void {
+    const pending = this.pendingAttachments.get(ownerId);
+    if (!pending) return;
+    for (const [requestId, attachment] of pending) {
+      if (attachment.projectId === projectId && attachment.threadId === threadId) pending.delete(requestId);
+    }
+    if (pending.size === 0) this.pendingAttachments.delete(ownerId);
   }
 
   private clearSessionSubscriptions(projectId: string, threadId: string): void {

@@ -5,8 +5,6 @@ import {
   useAuiEvent,
   useAuiState,
 } from "@assistant-ui/react";
-import Command from "lucide-react/dist/esm/icons/command.mjs";
-import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Readiness, SessionControlState } from "../../../../../shared/contracts.ts";
 import {
@@ -153,7 +151,8 @@ export function Composer(props: ComposerProps) {
   const submitRunning = useCallback(() => {
     if (props.mode !== "session" || sending) return;
     materializeSelectedCommand();
-    if (aui.composer().getState().text.trim().length === 0) return;
+    const composerState = aui.composer().getState();
+    if (composerState.text.trim().length === 0 && composerState.attachments.length === 0) return;
     setSending(true);
     setError(null);
     try {
@@ -307,11 +306,13 @@ export function Composer(props: ComposerProps) {
               <ComposerInput
                 projectId={suggestionProjectId}
                 commands={commands}
+                selectedCommand={selectedCommand}
                 mode={props.mode}
                 isRunning={isRunning}
                 isCancelable={isCancelable}
                 materializing={materializing}
                 onCommandSelect={handleCommandSelect}
+                onCommandClear={() => selectCommand(null)}
                 onSubmit={
                   props.mode === "draft"
                     ? () => void submitDraft()
@@ -335,27 +336,6 @@ export function Composer(props: ComposerProps) {
                       loading={props.pluginsLoading}
                       onValueChange={props.onPluginsChange}
                     />
-                  ) : null}
-                  {selectedCommand ? (
-                    <div className="min-w-0 border-l border-border/70 pl-1">
-                      <div className="group flex h-6 min-w-0 items-center gap-1 rounded-xl px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-within:bg-accent focus-within:text-accent-foreground">
-                        <button
-                          type="button"
-                          aria-label={`移除命令 ${slashCommandDisplayName(selectedCommand)}`}
-                          className="relative flex flex-row items-center justify-center size-3.5 shrink-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          onClick={() => selectCommand(null)}
-                        >
-                          <Command
-                            aria-hidden="true"
-                            className="absolute inset-0 size-3.5 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
-                          />
-                          <span className="absolute inset-0 flex size-3.5 items-center justify-center rounded-full bg-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                            <X aria-hidden="true" className="size-3 text-background" />
-                          </span>
-                        </button>
-                        <span className="max-w-40 truncate">{slashCommandDisplayName(selectedCommand)}</span>
-                      </div>
-                    </div>
                   ) : null}
                   {!draftOptionsInDrawer ? draftSelectionControls : null}
                   {isRunning ? (

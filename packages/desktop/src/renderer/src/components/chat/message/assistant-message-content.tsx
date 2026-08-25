@@ -1,4 +1,4 @@
-import { ErrorPrimitive, MessagePrimitive, useAuiState } from "@assistant-ui/react";
+import { ErrorPrimitive, MessagePrimitive, type PartState, useAuiState } from "@assistant-ui/react";
 import AlertCircle from "lucide-react/dist/esm/icons/circle-alert.mjs";
 import { useMemo } from "react";
 import { useThinkingVisibility } from "../../../state/thinking-visibility.tsx";
@@ -30,6 +30,10 @@ export function AssistantMessageContent({
   const runHasFinalResponse = useAuiState((state) => hasFinalResponseInRun(state.thread.messages, state.message.id));
   const hasNewUserPrompt = useAuiState((state) => hasUserMessageAfter(state.thread.messages, state.message.id));
   const groupMessagePart = useMemo(() => createRunGroupPart(messageParts), [messageParts]);
+  const supersededInfoNotificationData = useMemo(
+    () => findSupersededInfoNotificationData(messageParts),
+    [messageParts],
+  );
   const defaultOpenCompletedActivity = !runHasFinalResponse && (showAvatars || !hasNewUserPrompt);
   const hasGroupedRunActivity = useMemo(
     () => messageParts.some((part) => groupMessagePart(part, { toolUIs })[0] === "group-runActivity"),
@@ -59,19 +63,34 @@ export function AssistantMessageContent({
       <MessagePrimitive.GroupedParts groupBy={groupMessagePart} indicator="never">
         {({ part, children }) => {
           switch (part.type) {
-            case "group-runActivity":
+            case "group-runActivity": {
+              const hasCollapsibleContent = part.indices.some((index) => {
+                const groupedPart = messageParts[index];
+                if (!groupedPart) return false;
+                if (groupedPart.type === "reasoning") return showThinking;
+                return !isNotificationPart(groupedPart);
+              });
+              const persistentNotifications = part.indices.flatMap((index) => {
+                const groupedPart = messageParts[index];
+                if (!isNotificationPart(groupedPart) || supersededInfoNotificationData.has(groupedPart.data)) {
+                  return [];
+                }
+                return [<PiNoticeView key={`${messageId}:notification:${index}`} data={groupedPart.data} />];
+              });
               return (
                 <RunActivityGroup
                   running={isRunActivityRunning}
                   startedAt={runStartedAt}
                   completedAt={runCompletedAt}
-                  hasContent={showThinking || part.indices.some((index) => messageParts[index]?.type !== "reasoning")}
+                  hasContent={hasCollapsibleContent}
                   defaultOpenWhenComplete={defaultOpenCompletedActivity}
                   stateKey={`${messageId}:run-activity`}
+                  persistentContent={persistentNotifications.length > 0 ? persistentNotifications : undefined}
                 >
                   {children}
                 </RunActivityGroup>
               );
+            }
             case "group-chainOfThought": {
               const hasToolCall = part.indices.some((index) => messageParts[index]?.type === "tool-call");
               if (!showThinking && !hasToolCall) return null;
@@ -100,7 +119,8 @@ export function AssistantMessageContent({
             case "tool-call":
               return part.toolUI ?? <ToolView {...part} />;
             case "data":
-              return part.name === "pi-notice" ? <PiNoticeView data={part.data} /> : part.dataRendererUI;
+              if (part.name !== "pi-notice") return part.dataRendererUI;
+              return supersededInfoNotificationData.has(part.data) ? null : <PiNoticeView data={part.data} />;
             default:
               return null;
           }
@@ -114,6 +134,34 @@ export function AssistantMessageContent({
       </MessagePrimitive.Error>
     </div>
   );
+}
+
+function findSupersededInfoNotificationData(parts: readonly PartState[]): ReadonlySet<unknown> {
+  const superseded = new Set<unknown>();
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    const current = parts[index];
+    const next = parts[index + 1];
+    if (isInfoNotificationPart(current) && isInfoNotificationPart(next)) superseded.add(current.data);
+  }
+  return superseded;
+}
+
+function isNotificationPart(part: PartState | undefined): part is PartState & {
+  readonly type: "data";
+  readonly name: "pi-notice";
+  readonly data: { readonly noticeType: "notification"; readonly notificationType?: unknown };
+} {
+  if (part?.type !== "data" || part.name !== "pi-notice") return false;
+  const data = part.data;
+  return !!data && typeof data === "object" && "noticeType" in data && data.noticeType === "notification";
+}
+
+function isInfoNotificationPart(part: PartState | undefined): part is PartState & {
+  readonly type: "data";
+  readonly name: "pi-notice";
+  readonly data: { readonly noticeType: "notification"; readonly notificationType: "info" };
+} {
+  return isNotificationPart(part) && part.data.notificationType === "info";
 }
 
 function piCompletedAt(custom: unknown): number | undefined {

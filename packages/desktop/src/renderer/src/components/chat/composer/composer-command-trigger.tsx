@@ -6,13 +6,9 @@ import TerminalSquare from "lucide-react/dist/esm/icons/square-terminal.mjs";
 import { useMemo, useRef } from "react";
 import type { SlashCommand } from "../../../../../shared/contracts.ts";
 import { useSessionModalContext } from "../../session-modal-context.ts";
-import {
-  searchSlashCommands,
-  slashCommandDisplayDescription,
-  slashCommandDisplayName,
-} from "./composer-suggestion-model.ts";
+import { searchSlashCommands, slashCommandDisplayName } from "./composer-suggestion-model.ts";
 import { ComposerSuggestionScrollSync } from "./composer-suggestion-scroll-sync.tsx";
-import { ComposerTriggerState } from "./composer-trigger-state.tsx";
+import { ComposerTriggerState, type ComposerTriggerStateSnapshot } from "./composer-trigger-state.tsx";
 
 const COMMAND_GROUPS = [
   { source: "builtin", label: "内置命令", icon: TerminalSquare },
@@ -37,11 +33,11 @@ export function slashCommandText(command: SlashCommand, args: string): string {
 interface ComposerCommandTriggerProps {
   commands: readonly SlashCommand[];
   onSelect(command: SlashCommand): void;
-  onOpenChange(open: boolean): void;
+  onStateChange(state: ComposerTriggerStateSnapshot): void;
 }
 
 /** Slash command picker; selection is handled outside the editor so commands never become directive chips. */
-export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: ComposerCommandTriggerProps) {
+export function ComposerCommandTrigger({ commands, onSelect, onStateChange }: ComposerCommandTriggerProps) {
   const inModal = useSessionModalContext();
   const scrollContainer = useRef<HTMLDivElement>(null);
   const adapter = useMemo(
@@ -53,7 +49,7 @@ export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: Com
           id: command.name,
           type: command.source,
           label: slashCommandDisplayName(command),
-          description: slashCommandDisplayDescription(command),
+          description: command.description,
         }));
       },
     }),
@@ -74,7 +70,7 @@ export function ComposerCommandTrigger({ commands, onSelect, onOpenChange }: Com
           if (command) onSelect(command);
         }}
       />
-      <ComposerTriggerState onOpenChange={onOpenChange} />
+      <ComposerTriggerState onStateChange={onStateChange} />
       <ComposerSuggestionScrollSync container={scrollContainer} />
       <ComposerPrimitive.Unstable_TriggerPopoverItems
         ref={scrollContainer}

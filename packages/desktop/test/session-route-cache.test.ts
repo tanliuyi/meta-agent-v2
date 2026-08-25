@@ -1,9 +1,6 @@
 import type { Attachment, CreateAttachment } from "@assistant-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  restoreComposerAttachments,
-  toComposerAttachmentInput,
-} from "../src/renderer/src/runtime/image-attachments.ts";
+import { restoreComposerAttachments, toComposerAttachmentInput } from "../src/renderer/src/runtime/attachments.ts";
 import {
   createSessionRecord,
   parseSessionRecordKey,

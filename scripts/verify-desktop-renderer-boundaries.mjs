@@ -27,6 +27,7 @@ const LOCAL_STYLE_IMPORTS = new Map([
 	["providers-settings.css", '@import "./providers-settings.css" layer(components);'],
 	["keyboard-shortcuts-settings.css", '@import "./keyboard-shortcuts-settings.css" layer(components);'],
 	["chat.css", '@import "./chat.css" layer(components);'],
+	["session-info.css", '@import "./session-info.css";'],
 	["image-preview.css", '@import "./image-preview.css";'],
 	["markdown.css", '@import "./markdown.css" layer(components);'],
 	["panel.css", '@import "./panel.css" layer(components);'],

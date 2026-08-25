@@ -20,6 +20,7 @@
 @import "./providers-settings.css" layer(components);
 @import "./keyboard-shortcuts-settings.css" layer(components);
 @import "./chat.css" layer(components);
+@import "./session-info.css";
 @import "./image-preview.css";
 @import "./markdown.css" layer(components);
 @import "./panel.css" layer(components);

@@ -122,8 +122,8 @@ body.is-resizing-column .workbench-panel {
   display: flex;
   align-items: center;
   gap: 4px;
-  /* 2 个 24px 顶部控制按钮 + 4px 组内间距 + 18px 右侧留白 + 4px 组间距。 */
-  padding: 0 74px 0 8px;
+  /* Windows/Linux 的 workspace 右侧内缩 8px：52px 控制组 + 4px 组间距 + 18px 窗口留白 - 8px 内缩。 */
+  padding: 0 66px 0 8px;
 }
 /* topbar-actions 悬浮于右侧留白上方，需从 drag 矩形中挖洞保持可交互。 */
 .panel-tabs-safe-area {
@@ -131,7 +131,7 @@ body.is-resizing-column .workbench-panel {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 74px;
+  width: 66px;
 }
 .app-frame[data-platform="darwin"] .panel-tabs {
   -webkit-app-region: drag;

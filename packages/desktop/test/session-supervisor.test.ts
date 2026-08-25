@@ -10,6 +10,7 @@ interface RegistryMock {
   attach: ReturnType<typeof vi.fn>;
   detach: ReturnType<typeof vi.fn>;
   acknowledge: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 }
 
@@ -112,6 +113,23 @@ describe("SessionSupervisor attachment leases", () => {
     await supervisor.dispose();
   });
 
+  it("releases only the requesting renderer lease before closing the worker", async () => {
+    const supervisor = new SessionSupervisor(projectStore(), workers.value);
+    const firstPush = vi.fn<(update: SessionPush) => void>();
+    const secondPush = vi.fn<(update: SessionPush) => void>();
+    await supervisor.attach(1, input("thread", "one"), firstPush);
+    await supervisor.attach(2, input("thread", "two"), secondPush);
+
+    await supervisor.close(1, "project", "thread");
+    supervisor.receive(controlPush("thread"), "worker", 1);
+
+    expect(workers.detach).toHaveBeenCalledTimes(1);
+    expect(workers.close).toHaveBeenCalledWith("project", "thread");
+    expect(firstPush).not.toHaveBeenCalled();
+    expect(secondPush).toHaveBeenCalledOnce();
+    await supervisor.dispose();
+  });
+
   it("removes every owner lease on window teardown", async () => {
     const supervisor = new SessionSupervisor(projectStore(), workers.value);
     await supervisor.attach(1, input("a", "a"), vi.fn());
@@ -132,11 +150,13 @@ function registryMock(): RegistryMock {
   const attach = vi.fn(async (_projectId: string, threadId: string) => bootstrap(threadId));
   const detach = vi.fn();
   const acknowledge = vi.fn();
+  const close = vi.fn(async () => {});
   const dispose = vi.fn(async () => {});
   return {
     attach,
     detach,
     acknowledge,
+    close,
     dispose,
     value: {
       list: vi.fn(async () => []),
@@ -145,6 +165,7 @@ function registryMock(): RegistryMock {
       attach,
       detach,
       acknowledge,
+      close,
       dispose,
     } as unknown as ThreadWorkerRegistry,
   };

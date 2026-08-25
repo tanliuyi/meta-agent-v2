@@ -166,6 +166,7 @@ export function registerIpc(
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
   const oauthWebContents = new Set<number>();
+  const browserSessionOwnerWebContents = new Set<number>();
   const oauth = new OauthLoginCoordinator({
     login: (providerId, callbacks) => auth.loginOauth(providerId, callbacks),
   });
@@ -288,9 +289,20 @@ export function registerIpc(
     ipcMain.handle(CHANNELS.browserSettingsSave, (_event, input: SaveBrowserSettingsInput) =>
       browser.saveSettings(input),
     );
-    ipcMain.handle(CHANNELS.browserSessionRetire, (_event, identity: BrowserSessionIdentity) =>
-      browser.retireSession(identity),
+    ipcMain.handle(CHANNELS.browserSessionRetire, (event, identity: BrowserSessionIdentity) =>
+      browser.retireSession(identity, event.sender.id),
     );
+    ipcMain.handle(CHANNELS.browserSessionAcquire, (event, identity: BrowserSessionIdentity) => {
+      const ownerId = event.sender.id;
+      if (!browserSessionOwnerWebContents.has(ownerId)) {
+        browserSessionOwnerWebContents.add(ownerId);
+        event.sender.once("destroyed", () => {
+          browserSessionOwnerWebContents.delete(ownerId);
+          browser.releaseOwner(ownerId);
+        });
+      }
+      browser.acquireSession(identity, ownerId);
+    });
     ipcMain.handle(CHANNELS.browserClearData, (_event, identity: BrowserSessionIdentity) =>
       browser.clearSessionData(identity),
     );
@@ -740,6 +752,9 @@ export function registerIpc(
     sessions.prewarm(projectId, threadId),
   );
   ipcMain.on(CHANNELS.sessionsDetach, (event, attachmentId: string) => sessions.detach(event.sender.id, attachmentId));
+  ipcMain.handle(CHANNELS.sessionsClose, (event, projectId: string, threadId: string) =>
+    sessions.close(event.sender.id, projectId, threadId),
+  );
   ipcMain.on(CHANNELS.sessionsAck, (event, attachmentId: string, workerInstanceId: string, sidecarSequence: number) => {
     if (!Number.isSafeInteger(sidecarSequence) || sidecarSequence < 1) return;
     sessions.acknowledge(event.sender.id, attachmentId, workerInstanceId, sidecarSequence);

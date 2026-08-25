@@ -35,7 +35,12 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar }),
+    () => ({
+      sidebarOpen,
+      sidebarWidth,
+      setSidebarWidth,
+      toggleSidebar,
+    }),
     [sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar],
   );
   return <LayoutContext.Provider value={value}>{children}</LayoutContext.Provider>;

@@ -16,7 +16,7 @@ import {
   useState,
 } from "react";
 import type { DraftSessionConfig, SessionIdentity } from "../../../shared/contracts.ts";
-import { imageAttachmentAdapter } from "../runtime/image-attachments.ts";
+import { attachmentAdapter } from "../runtime/attachments.ts";
 
 const EMPTY_MESSAGES: readonly ThreadMessage[] = [];
 
@@ -28,7 +28,7 @@ export function createDraftRuntimeAdapter(): ExternalStoreAdapter<ThreadMessage>
     messages: EMPTY_MESSAGES,
     isSendDisabled: true,
     onNew: rejectUnexpectedDraftSend,
-    adapters: { attachments: imageAttachmentAdapter },
+    adapters: { attachments: attachmentAdapter },
     unstable_enableToolInvocations: false,
   };
 }

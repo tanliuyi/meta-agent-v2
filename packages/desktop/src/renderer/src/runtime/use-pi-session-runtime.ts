@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "r
 import type { PiQueueItem, SessionControlState } from "../../../shared/contracts.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
 import { useToast } from "../shared/ui/use-toast.ts";
-import { imageAttachmentAdapter, restoreComposerAttachments } from "./image-attachments.ts";
+import { attachmentAdapter, restoreComposerAttachments } from "./attachments.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
 import type { CachedSessionRecord } from "./pi-session-store.ts";
@@ -110,7 +110,7 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
           : undefined,
       onReload: active && snapshot.phase === "idle" && !isSendDisabled ? coordinator.reload : undefined,
       onCancel: hasCommandTarget && isCancelable ? () => coordinator.cancel(snapshotRef.current.queue) : undefined,
-      adapters: { attachments: !isSendDisabled ? imageAttachmentAdapter : undefined },
+      adapters: { attachments: !isSendDisabled ? attachmentAdapter : undefined },
       unstable_enableToolInvocations: false,
     }),
     [

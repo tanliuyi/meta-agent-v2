@@ -285,6 +285,8 @@ export interface DesktopApi {
     attach(input: SessionAttachInput, listener: (update: SessionPushPayload) => void): Promise<SessionAttachment>;
     flush(attachmentId: string): SessionFlushResult;
     detach(attachmentId: string): void;
+    /** 立即关闭已完成 thread 的 sidecar，不删除会话记录。 */
+    close(projectId: string, threadId: string): Promise<void>;
     prewarm(projectId: string, threadId: string): Promise<void>;
     rename(projectId: string, threadId: string, title: string): Promise<void>;
     archive(projectId: string, threadId: string, archived: boolean): Promise<void>;
@@ -306,6 +308,7 @@ export interface DesktopApi {
     respond(projectId: string, threadId: string, response: HostResponse): Promise<void>;
   };
   files: {
+    getPath(file: File): string;
     list(projectId: string, path?: string, query?: string, requestGroup?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
     readImage(projectId: string, path: string): Promise<FileImage>;
@@ -367,8 +370,10 @@ export interface DesktopApi {
     saveSettings(input: SaveBrowserSettingsInput): Promise<SaveBrowserSettingsResult>;
     /** 设置页未保存修改标记（窗口关闭守卫）。 */
     setEditorDirty(dirty: boolean): boolean;
-    /** 会话退役：清理该会话的 webview/guest/映射（renderer 会话记录移除时调用）。 */
+    /** 会话退役：只释放该 renderer 对会话浏览器状态的持有权（最后持有者释放时销毁）。 */
     sessionRetire(identity: BrowserSessionIdentity): Promise<void>;
+    /** 声明该 renderer 持有会话浏览器状态；重复调用幂等。 */
+    sessionAcquire(identity: BrowserSessionIdentity): Promise<void>;
     /** 清除指定会话分区数据（cookie/缓存/登录态）。 */
     clearData(identity: BrowserSessionIdentity): Promise<void>;
     /** 清除全部会话分区数据（设置页入口）。 */

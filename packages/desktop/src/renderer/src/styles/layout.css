@@ -43,6 +43,168 @@
   font-size: var(--type-size-control);
 }
 
+.windows-header-title > .sidebar-toggle {
+  flex: 0 0 24px;
+}
+
+.windows-session-tabs {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  display: flex;
+  min-width: 0;
+  max-width: calc(100% - 32px);
+  height: 100%;
+  flex: 0 1 auto;
+  align-items: center;
+}
+
+.windows-session-tabs-list {
+  position: relative;
+  display: flex;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.windows-session-tabs-list::-webkit-scrollbar {
+  display: none;
+}
+
+.windows-session-tab {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  display: flex;
+  width: clamp(112px, 16vw, 200px);
+  min-width: 112px;
+  height: 30px;
+  align-items: center;
+  border-radius: var(--shape-radius-xl);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.windows-session-tab[data-dragging="true"] {
+  z-index: 1;
+  pointer-events: none;
+  cursor: grabbing;
+  box-shadow: 0 5px 12px hsl(var(--foreground) / 14%);
+}
+
+.windows-session-tab:hover {
+  background: hsl(var(--foreground) / 0.055);
+  color: hsl(var(--foreground));
+}
+
+.windows-session-tab[data-active="true"] {
+  background: hsl(var(--foreground) / 0.09);
+  color: hsl(var(--foreground));
+}
+
+.windows-session-tab-trigger {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 0 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  outline: none;
+}
+
+.windows-session-tab-trigger:focus-visible {
+  box-shadow: inset 0 0 0 1px hsl(var(--ring));
+}
+
+.windows-session-tab-close.windows-session-tab-close {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  flex: 0 0 20px;
+  padding: 0;
+  margin-inline-end: 4px;
+  border-radius: var(--shape-radius-round);
+}
+
+.windows-session-tab-status {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: var(--shape-radius-round);
+}
+
+.windows-session-tab-status-running {
+  background: hsl(var(--primary));
+}
+
+.windows-session-tab-status-completed {
+  background: hsl(var(--info));
+  box-shadow: 0 0 0 2px hsl(var(--info) / 0.18);
+}
+
+.windows-session-tab-status-blocked {
+  background: hsl(var(--warning));
+  box-shadow: 0 0 0 2px hsl(var(--warning) / 0.2);
+}
+
+.windows-session-tab-status-error {
+  background: hsl(var(--destructive));
+  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.18);
+}
+
+.windows-session-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.windows-session-tabs-new.windows-session-tabs-new {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  flex: 0 0 24px;
+  padding: 0;
+  margin-inline: 2px 4px;
+}
+
+.windows-session-tabs-new.windows-session-tabs-new:hover {
+  background: hsl(var(--foreground) / 0.1);
+}
+
+.windows-session-tabs-scroll {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  display: grid;
+  width: 24px;
+  height: 30px;
+  flex: 0 0 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--shape-radius-xs);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: default;
+}
+
+.windows-session-tabs-scroll:hover {
+  background: hsl(var(--foreground) / 0.08);
+  color: hsl(var(--foreground));
+}
+
 .windows-header-title > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -842,6 +1004,21 @@ body.is-resizing-column .sidebar {
   color: hsl(var(--muted-foreground));
   font-size: var(--type-size-meta);
 }
+
+.session-info-toggle {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: hsl(var(--muted-foreground));
+  transition: margin-right var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.workspace:has(> .workbench-panel[data-collapsed]) .session-info-toggle {
+  /* 2 * 24px actions + 4px internal gap + 4px gap before this button. */
+  margin-right: 56px;
+}
+
 .topbar-actions {
   position: fixed;
   top: 10px;

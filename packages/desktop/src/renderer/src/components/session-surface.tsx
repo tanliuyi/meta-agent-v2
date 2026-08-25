@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionModalPersistedState } from "../../../shared/contracts.ts";
+import { SESSION_INFO_DEFAULT_OPEN } from "../state/layout-preference.ts";
 import { ChatThread } from "./chat/chat-thread.tsx";
+import { SessionInfo } from "./chat/session-info.tsx";
 import { Topbar } from "./layout/topbar.tsx";
 import { BottomTerminal } from "./panel/terminal/bottom-terminal.tsx";
 import { WorkbenchPanel } from "./panel/workbench-panel.tsx";
@@ -39,12 +41,24 @@ export function setSessionModalGeometry(
   return { ...state, drag, size };
 }
 
+export function resolveSessionInfoOpenForWorkbenchPanel(panelOpen: boolean, currentSessionInfoOpen: boolean): boolean {
+  return panelOpen ? false : currentSessionInfoOpen;
+}
+
 /** The complete UI for the currently mounted session. */
 export function SessionSurface({ initialFullscreen = false }: SessionSurfaceProps) {
   const { record, active, updateWorkbench } = useSessionScope();
   // 该 session 的 workbench 记录（store 就绪前为 null）；持久化的全屏/modal UI 状态从其中读取。
   const workbench = useSessionWorkbenchSelector((workbench) => workbench);
   const persisted = workbench?.sessionModal ?? null;
+  const workbenchPanelOpen = workbench?.panelOpen === true;
+  // 会话信息面板开关是会话级偏好。workbench 展开时的隐藏只是派生的可见性冲突，
+  // 不写回偏好：workbench 关闭后按偏好恢复，且不会影响其他会话的面板。
+  const sessionInfoOpenPreference = workbench?.sessionInfoOpen ?? SESSION_INFO_DEFAULT_OPEN;
+  const sessionInfoOpen = resolveSessionInfoOpenForWorkbenchPanel(workbenchPanelOpen, sessionInfoOpenPreference);
+  const toggleSessionInfo = useCallback(() => {
+    updateWorkbench({ sessionInfoOpen: !sessionInfoOpenPreference });
+  }, [sessionInfoOpenPreference, updateWorkbench]);
   // 全屏/modal 开关与几何为单一状态对象：lazy 初始化直接按持久化值恢复，
   // 无记录时用默认值 + initialFullscreen（测试注入）。
   const [modalState, setModalState] = useState<SessionModalPersistedState>(() =>
@@ -151,13 +165,16 @@ export function SessionSurface({ initialFullscreen = false }: SessionSurfaceProp
         </SessionModal>
       ) : (
         <div className="session-surface-shell">
-          <Topbar />
+          <Topbar sessionInfoOpen={sessionInfoOpen} onToggleSessionInfo={toggleSessionInfo} />
           <div
             className="workspace-row session-surface"
             data-session-key={record.key}
             data-active={active || undefined}
           >
-            <main className="chat-workspace">{thread}</main>
+            <main className="chat-workspace" data-session-info-open={sessionInfoOpen || undefined}>
+              {thread}
+              <SessionInfo open={sessionInfoOpen} />
+            </main>
           </div>
         </div>
       )}

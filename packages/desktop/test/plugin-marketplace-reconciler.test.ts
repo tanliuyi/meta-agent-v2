@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -49,50 +49,152 @@ describe("MarketplacePluginReconciler", () => {
     );
     const snapshot = await harness.registry.getInternalSnapshot();
     expect(snapshot.plugins).toEqual([
-      expect.objectContaining({ id: harness.record.id, state: "installed", enabled: true }),
+      expect.objectContaining({
+        id: harness.record.id,
+        state: "installed",
+        enabled: true,
+      }),
     ]);
   });
 
-  it("does not damage registry entries owned by another agent directory", async () => {
+  it("migrates a Desktop-owned plugin from the legacy Pi extension root", async () => {
     const harness = await createHarness();
     const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
     if (installed.status !== "saved") throw new Error("Expected registry install");
     await writeMarketplaceProjection(harness.record);
     const logs: string[] = [];
-    const temporaryAgentDir = join(harness.root, "temporary-agent");
-    const reconciler = new MarketplacePluginReconciler(harness.registry, temporaryAgentDir, harness.userDataDir, {
+    const marketplaceRoot = join(harness.root, "desktop-marketplace-root");
+    const reconciler = new MarketplacePluginReconciler(harness.registry, marketplaceRoot, harness.userDataDir, {
       log: (message) => logs.push(message),
     });
 
     await reconciler.reconcile();
 
-    await expect(harness.registry.getSnapshot()).resolves.toEqual(installed.snapshot);
-    await expect(pathExists(join(harness.record.rootPath, "index.ts"))).resolves.toBe(true);
-    expect(logs).toEqual([
-      expect.stringContaining(
-        `Skipped marketplace plugin from a different agent directory while reconciling ${harness.record.id}`,
-      ),
-    ]);
+    const migratedRoot = join(marketplaceRoot, harness.record.id);
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [
+        {
+          id: harness.record.id,
+          rootPath: migratedRoot,
+          entryPath: join(migratedRoot, ".versions", harness.record.artifactHash, "payload", "index.ts"),
+          state: "installed",
+          enabled: true,
+        },
+      ],
+    });
+    await expect(pathExists(harness.record.rootPath)).resolves.toBe(false);
+    await expect(readFile(join(migratedRoot, "index.ts"), "utf8")).resolves.toContain(harness.record.artifactHash);
+    expect(logs).toContain(`Migrated marketplace plugin ${harness.record.id} into the Desktop managed root`);
   });
 
-  it("does not damage a foreign registry entry after its agent directory is removed", async () => {
+  it("preserves a disabled plugin state during migration", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+    await writeMarketplaceProjection(harness.record);
+    const disabled = await harness.registry.commitEnabled(installed.snapshot.revision, harness.record.id, false);
+    if (disabled.status !== "saved") throw new Error("Expected plugin disable");
+    const marketplaceRoot = join(harness.root, "desktop-marketplace-root");
+
+    await new MarketplacePluginReconciler(harness.registry, marketplaceRoot, harness.userDataDir).reconcile();
+
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [{ id: harness.record.id, rootPath: join(marketplaceRoot, harness.record.id), enabled: false }],
+    });
+  });
+
+  it("does not move an invalid legacy payload", async () => {
+    const harness = await createHarness();
+    await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    await writeMarketplaceProjection(harness.record);
+    await rm(harness.record.entryPath, { force: true });
+    const marketplaceRoot = join(harness.root, "desktop-marketplace-root");
+
+    await new MarketplacePluginReconciler(harness.registry, marketplaceRoot, harness.userDataDir).reconcile();
+
+    await expect(pathExists(harness.record.rootPath)).resolves.toBe(true);
+    await expect(pathExists(join(marketplaceRoot, harness.record.id))).resolves.toBe(false);
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [{ id: harness.record.id, rootPath: harness.record.rootPath, state: "broken", enabled: false }],
+    });
+  });
+
+  it("migrates a legacy plugin that an intermediate Desktop version marked broken", async () => {
+    const harness = await createHarness();
+    await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    await writeMarketplaceProjection(harness.record);
+    await harness.registry.markBroken(harness.record.id, harness.record.artifactHash);
+    await writeMarketplaceBrokenMarker({ ...harness.record, state: "broken", enabled: false });
+    const marketplaceRoot = join(harness.root, "desktop-marketplace-root");
+
+    await new MarketplacePluginReconciler(harness.registry, marketplaceRoot, harness.userDataDir).reconcile();
+
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [{ id: harness.record.id, rootPath: join(marketplaceRoot, harness.record.id), state: "installed" }],
+    });
+    await expect(pathExists(harness.record.rootPath)).resolves.toBe(false);
+  });
+
+  it("recovers when the legacy root moved before the registry commit", async () => {
+    const harness = await createHarness();
+    await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    await writeMarketplaceProjection(harness.record);
+    const marketplaceRoot = join(harness.root, "desktop-marketplace-root");
+    const migratedRoot = join(marketplaceRoot, harness.record.id);
+    await cp(harness.record.rootPath, migratedRoot, { recursive: true });
+    await rm(harness.record.rootPath, { recursive: true, force: true });
+
+    await new MarketplacePluginReconciler(harness.registry, marketplaceRoot, harness.userDataDir).reconcile();
+
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [{ id: harness.record.id, rootPath: migratedRoot, state: "installed", enabled: true }],
+    });
+    await expect(readFile(join(migratedRoot, "index.ts"), "utf8")).resolves.toContain(harness.record.artifactHash);
+  });
+
+  it("keeps unrelated files when an out-of-root record has no matching ownership", async () => {
+    const harness = await createHarness();
+    const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
+    if (installed.status !== "saved") throw new Error("Expected registry install");
+    const projection = join(harness.record.rootPath, "index.ts");
+    await writeFile(projection, "user-owned content\n", "utf8");
+    const reconciler = new MarketplacePluginReconciler(
+      harness.registry,
+      join(harness.root, "temporary-marketplace-root"),
+      harness.userDataDir,
+    );
+
+    await reconciler.reconcile();
+
+    await expect(readFile(projection, "utf8")).resolves.toBe("user-owned content\n");
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [{ id: harness.record.id, state: "broken", enabled: false }],
+    });
+  });
+
+  it("marks a stale registry entry broken after its old managed root is removed", async () => {
     const harness = await createHarness();
     const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
     if (installed.status !== "saved") throw new Error("Expected registry install");
     await rm(harness.agentDir, { recursive: true, force: true });
     const logs: string[] = [];
-    const temporaryAgentDir = join(harness.root, "temporary-agent");
-    const reconciler = new MarketplacePluginReconciler(harness.registry, temporaryAgentDir, harness.userDataDir, {
-      log: (message) => logs.push(message),
-    });
+    const temporaryMarketplaceRoot = join(harness.root, "temporary-marketplace-root");
+    const reconciler = new MarketplacePluginReconciler(
+      harness.registry,
+      temporaryMarketplaceRoot,
+      harness.userDataDir,
+      {
+        log: (message) => logs.push(message),
+      },
+    );
 
     await reconciler.reconcile();
 
-    await expect(harness.registry.getSnapshot()).resolves.toEqual(installed.snapshot);
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
+      plugins: [{ id: harness.record.id, state: "broken", enabled: false }],
+    });
     expect(logs).toEqual([
-      expect.stringContaining(
-        `Skipped marketplace plugin from a different agent directory while reconciling ${harness.record.id}`,
-      ),
+      expect.stringContaining(`Marked marketplace plugin broken while reconciling ${harness.record.id}`),
     ]);
   });
 
@@ -101,10 +203,14 @@ describe("MarketplacePluginReconciler", () => {
     const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
     if (installed.status !== "saved") throw new Error("Expected registry install");
     await writeMarketplaceProjection(harness.record);
-    const aliasedAgentDir = join(harness.root, "aliased-agent");
-    await symlink(harness.agentDir, aliasedAgentDir, process.platform === "win32" ? "junction" : "dir");
+    const aliasedMarketplaceRoot = join(harness.root, "aliased-marketplace-root");
+    await symlink(
+      join(harness.agentDir, "extensions"),
+      aliasedMarketplaceRoot,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     const logs: string[] = [];
-    const reconciler = new MarketplacePluginReconciler(harness.registry, aliasedAgentDir, harness.userDataDir, {
+    const reconciler = new MarketplacePluginReconciler(harness.registry, aliasedMarketplaceRoot, harness.userDataDir, {
       log: (message) => logs.push(message),
     });
 
@@ -120,13 +226,21 @@ describe("MarketplacePluginReconciler", () => {
     await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
     await writeMarketplaceProjection(harness.record);
     await harness.registry.markBroken(harness.record.id, harness.record.artifactHash);
-    await writeMarketplaceBrokenMarker({ ...harness.record, state: "broken", enabled: false });
+    await writeMarketplaceBrokenMarker({
+      ...harness.record,
+      state: "broken",
+      enabled: false,
+    });
 
     await harness.reconciler.reconcile();
 
     const snapshot = await harness.registry.getInternalSnapshot();
     expect(snapshot.plugins).toEqual([
-      expect.objectContaining({ id: harness.record.id, state: "installed", enabled: true }),
+      expect.objectContaining({
+        id: harness.record.id,
+        state: "installed",
+        enabled: true,
+      }),
     ]);
     await expect(readFile(join(harness.record.rootPath, "index.ts"), "utf8")).resolves.toContain(
       `./.versions/${harness.record.artifactHash}/payload/index.ts`,
@@ -169,7 +283,11 @@ describe("MarketplacePluginReconciler", () => {
 
     const snapshot = await harness.registry.getInternalSnapshot();
     expect(snapshot.plugins).toEqual([
-      expect.objectContaining({ id: harness.record.id, state: "broken", enabled: false }),
+      expect.objectContaining({
+        id: harness.record.id,
+        state: "broken",
+        enabled: false,
+      }),
     ]);
     expect(JSON.parse(await readFile(join(harness.record.rootPath, ".meta-agent-market.json"), "utf8"))).toMatchObject({
       version: 1,
@@ -188,7 +306,11 @@ describe("MarketplacePluginReconciler", () => {
 
     const snapshot = await harness.registry.getInternalSnapshot();
     expect(snapshot.plugins).toEqual([
-      expect.objectContaining({ id: harness.record.id, state: "installed", enabled: true }),
+      expect.objectContaining({
+        id: harness.record.id,
+        state: "installed",
+        enabled: true,
+      }),
     ]);
     await expect(pathExists(join(harness.record.rootPath, "index.ts"))).resolves.toBe(true);
   });
@@ -211,6 +333,166 @@ describe("MarketplacePluginReconciler", () => {
       record: harness.record,
       inactiveAt: 200,
     });
+  });
+
+  it("does not use a marker record that points at a different root to write anywhere else", async () => {
+    const harness = await createHarness();
+    const externalTarget = join(harness.root, "external-target");
+    await mkdir(externalTarget, { recursive: true });
+    await writeFile(join(externalTarget, "index.ts"), "external content\n", "utf8");
+    const maliciousRoot = join(harness.agentDir, "extensions", harness.record.id);
+    await mkdir(maliciousRoot, { recursive: true });
+    await writeFile(join(maliciousRoot, "index.ts"), "managed content\n", "utf8");
+    await writeFile(
+      join(maliciousRoot, ".meta-agent-market.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          state: "installed",
+          record: {
+            id: harness.record.id,
+            artifactHash: "b".repeat(64),
+            rootPath: externalTarget,
+            entryPath: join(externalTarget, "index.ts"),
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await harness.reconciler.reconcile();
+
+    // 外部目标完全不被触碰：既不移除 projection，也不写 tombstone/version owner。
+    await expect(readFile(join(externalTarget, "index.ts"), "utf8")).resolves.toBe("external content\n");
+    await expect(pathExists(join(externalTarget, ".meta-agent-market.json"))).resolves.toBe(false);
+    await expect(pathExists(join(externalTarget, ".meta-agent-versions"))).resolves.toBe(false);
+    // 扫描根目录本身也保持原样（不猜测、不删除）。
+    await expect(readFile(join(maliciousRoot, "index.ts"), "utf8")).resolves.toBe("managed content\n");
+    await expect(pathExists(maliciousRoot)).resolves.toBe(true);
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({ plugins: [] });
+  });
+
+  it("does not trust a marker whose plugin id or entry path does not describe the scanned root", async () => {
+    const harness = await createHarness();
+    const scannedRoot = join(harness.agentDir, "extensions", harness.record.id);
+    await mkdir(scannedRoot, { recursive: true });
+    await writeFile(join(scannedRoot, "index.ts"), "kept\n", "utf8");
+    const entryOutside = join(harness.root, "outside", "index.ts");
+    for (const record of [
+      // 目录名与 record.id 不符。
+      { ...harness.record, id: "dev.meta-agent.other" },
+      // id/rootPath 正确但 entryPath 逃逸出扫描根。
+      { ...harness.record, entryPath: entryOutside },
+      // artifactHash 不可作为版本目录名（不能允许路径穿越或非摘要值）。
+      { ...harness.record, artifactHash: "../outside" },
+      // entryPath 虽在插件根内，但不属于声明 hash 的不可变版本目录。
+      { ...harness.record, entryPath: join(scannedRoot, "index.ts") },
+    ]) {
+      await writeFile(
+        join(scannedRoot, ".meta-agent-market.json"),
+        `${JSON.stringify({ version: 1, state: "installed", record }, null, 2)}\n`,
+        "utf8",
+      );
+
+      await harness.reconciler.reconcile();
+
+      await expect(readFile(join(scannedRoot, "index.ts"), "utf8")).resolves.toBe("kept\n");
+      await expect(readFile(join(scannedRoot, ".meta-agent-market.json"), "utf8")).resolves.toContain('"installed"');
+    }
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({ plugins: [] });
+  });
+
+  it("preserves a bound marker when its version payload cannot be validated", async () => {
+    const harness = await createHarness();
+    const scannedRoot = join(harness.agentDir, "extensions", harness.record.id);
+    await mkdir(scannedRoot, { recursive: true });
+    await writeFile(join(scannedRoot, "index.ts"), "foreign content\n", "utf8");
+    await writeFile(
+      join(scannedRoot, ".meta-agent-market.json"),
+      `${JSON.stringify({ version: 1, state: "broken", record: harness.record }, null, 2)}\n`,
+      "utf8",
+    );
+    await rm(harness.record.entryPath, { force: true });
+
+    await harness.reconciler.reconcile();
+
+    await expect(readFile(join(scannedRoot, "index.ts"), "utf8")).resolves.toBe("foreign content\n");
+    await expect(readFile(join(scannedRoot, ".meta-agent-market.json"), "utf8")).resolves.toContain('"broken"');
+    await expect(pathExists(join(scannedRoot, ".meta-agent-versions"))).resolves.toBe(false);
+  });
+
+  it("completes an interrupted uninstall left in the legacy root after the managed root moved", async () => {
+    const harness = await createHarness();
+    await writeMarketplaceProjection(harness.record);
+    const managedRoot = join(harness.userDataDir, "plugins", "extensions");
+    const reconciler = new MarketplacePluginReconciler(harness.registry, managedRoot, harness.userDataDir, {
+      legacyRoot: join(harness.agentDir, "extensions"),
+      now: () => 200,
+    });
+
+    await reconciler.reconcile();
+
+    await expect(pathExists(join(harness.record.rootPath, "index.ts"))).resolves.toBe(false);
+    expect(JSON.parse(await readFile(join(harness.record.rootPath, ".meta-agent-market.json"), "utf8"))).toMatchObject({
+      version: 1,
+      state: "uninstalled",
+      pluginId: harness.record.id,
+      artifactHash: harness.record.artifactHash,
+    });
+    await expect(readMarketplaceVersionOwner(harness.record.rootPath, harness.record.artifactHash)).resolves.toEqual({
+      record: harness.record,
+      inactiveAt: 200,
+    });
+    await expect(pathExists(join(managedRoot, harness.record.id))).resolves.toBe(false);
+  });
+
+  it("never deletes unknown or foreign content in the legacy root", async () => {
+    const harness = await createHarness();
+    const legacyRoot = harness.agentDir;
+    const foreignPlugin = join(legacyRoot, "extensions", "dev.user.foreign");
+    await mkdir(foreignPlugin, { recursive: true });
+    await writeFile(join(foreignPlugin, "index.ts"), "user extension\n", "utf8");
+    const stray = join(legacyRoot, "extensions", "com.example.stray");
+    await mkdir(stray, { recursive: true });
+    await writeFile(join(stray, "index.ts"), "stray\n", "utf8");
+    await writeFile(
+      join(stray, ".meta-agent-market.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          state: "installed",
+          record: { ...harness.record, id: "com.example.other", rootPath: stray },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    // 绑定到目录但 payload 已损坏（entry 缺失）：不是完整的 Marketplace 产物，不补完卸载。
+    const brokenPayload = join(legacyRoot, "extensions", harness.record.id);
+    await mkdir(join(brokenPayload, ".versions", harness.record.artifactHash, "payload"), { recursive: true });
+    await writeMarketplaceProjection(harness.record);
+    await rm(harness.record.entryPath, { force: true });
+
+    const managedRoot = join(harness.userDataDir, "plugins", "extensions");
+    const reconciler = new MarketplacePluginReconciler(harness.registry, managedRoot, harness.userDataDir, {
+      legacyRoot: join(legacyRoot, "extensions"),
+      now: () => 200,
+    });
+
+    await reconciler.reconcile();
+
+    await expect(readFile(join(foreignPlugin, "index.ts"), "utf8")).resolves.toBe("user extension\n");
+    await expect(readFile(join(stray, "index.ts"), "utf8")).resolves.toBe("stray\n");
+    await expect(readFile(join(harness.record.rootPath, "index.ts"), "utf8")).resolves.toBe(
+      `export { default } from "./.versions/${harness.record.artifactHash}/payload/index.ts";\n`,
+    );
+    await expect(readFile(join(harness.record.rootPath, ".meta-agent-market.json"), "utf8")).resolves.toContain(
+      '"installed"',
+    );
+    await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({ plugins: [] });
   });
 
   it("removes an uncommitted orphan version payload that only fills the managed root", async () => {
@@ -283,8 +565,18 @@ async function createHarness() {
     rootPath: pluginRoot,
   };
   const registry = new MarketplacePluginRegistry(userDataDir);
-  const reconciler = new MarketplacePluginReconciler(registry, agentDir, userDataDir, { now: () => 200 });
-  return { root, userDataDir, agentDir, versionRoot, record, registry, reconciler };
+  const reconciler = new MarketplacePluginReconciler(registry, join(agentDir, "extensions"), userDataDir, {
+    now: () => 200,
+  });
+  return {
+    root,
+    userDataDir,
+    agentDir,
+    versionRoot,
+    record,
+    registry,
+    reconciler,
+  };
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -303,7 +595,10 @@ describe("MarketplacePluginRegistry scope", () => {
     const installed = await harness.registry.commitInstall(MISSING_MARKETPLACE_REGISTRY_REVISION, harness.record);
     if (installed.status !== "saved") throw new Error("Expected registry install");
 
-    expect(installed.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, scope: "global" });
+    expect(installed.snapshot.plugins[0]).toMatchObject({
+      id: harness.record.id,
+      scope: "global",
+    });
     await expect(harness.registry.getInternalSnapshot()).resolves.toMatchObject({
       plugins: [{ id: harness.record.id, scope: "global" }],
     });
@@ -336,12 +631,18 @@ describe("MarketplacePluginRegistry scope", () => {
     const disabled = await harness.registry.commitEnabled(installed.snapshot.revision, harness.record.id, false);
     expect(disabled).toMatchObject({ status: "saved" });
     if (disabled.status !== "saved") throw new Error("Expected enabled-state commit");
-    expect(disabled.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, enabled: false });
+    expect(disabled.snapshot.plugins[0]).toMatchObject({
+      id: harness.record.id,
+      enabled: false,
+    });
 
     const enabled = await harness.registry.commitEnabled(disabled.snapshot.revision, harness.record.id, true);
     expect(enabled).toMatchObject({ status: "saved" });
     if (enabled.status !== "saved") throw new Error("Expected enabled-state commit");
-    expect(enabled.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, enabled: true });
+    expect(enabled.snapshot.plugins[0]).toMatchObject({
+      id: harness.record.id,
+      enabled: true,
+    });
   });
 
   it("reports conflict, broken and not-installed enabled-state commits", async () => {
@@ -395,7 +696,11 @@ describe("MarketplacePluginRegistry scope", () => {
     );
     expect(global).toMatchObject({ status: "saved" });
     if (global.status !== "saved") throw new Error("Expected scope commit");
-    expect(global.snapshot.plugins[0]).toMatchObject({ id: harness.record.id, scope: "global", projectIds: undefined });
+    expect(global.snapshot.plugins[0]).toMatchObject({
+      id: harness.record.id,
+      scope: "global",
+      projectIds: undefined,
+    });
   });
 
   it("deduplicates project IDs in a project-scoped commit", async () => {
@@ -410,7 +715,9 @@ describe("MarketplacePluginRegistry scope", () => {
     ]);
     expect(project).toMatchObject({ status: "saved" });
     if (project.status !== "saved") throw new Error("Expected scope commit");
-    expect(project.snapshot.plugins[0]).toMatchObject({ projectIds: ["project-a", "project-b"] });
+    expect(project.snapshot.plugins[0]).toMatchObject({
+      projectIds: ["project-a", "project-b"],
+    });
   });
 
   it("rejects a project scope without projects or with invalid IDs", async () => {
@@ -438,7 +745,10 @@ describe("MarketplacePluginRegistry scope", () => {
     if (installed.status !== "saved") throw new Error("Expected registry install");
 
     const conflict = await harness.registry.commitScope("stale-revision", harness.record.id, "global", undefined);
-    expect(conflict).toEqual({ status: "conflict", snapshot: installed.snapshot });
+    expect(conflict).toEqual({
+      status: "conflict",
+      snapshot: installed.snapshot,
+    });
 
     const missing = await harness.registry.commitScope(
       installed.snapshot.revision,

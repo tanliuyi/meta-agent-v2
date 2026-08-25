@@ -242,46 +242,48 @@ export function Messages() {
           getSummary={getTurnSummary}
           onSelect={jumpToTurn}
         />
-        <div
-          ref={contentRef}
-          data-slot="session-message-content"
-          className="mx-auto w-full max-w-(--layout-thread-max-width)"
-        >
-          <div ref={virtualContentRef} style={{ paddingTop, paddingBottom }}>
-            {items.map((item) => {
-              if (activityVisible && item.index === activityIndex) {
+        <div data-slot="session-message-layout">
+          <div
+            ref={contentRef}
+            data-slot="session-message-content"
+            className="mx-auto w-full max-w-(--layout-thread-max-width)"
+          >
+            <div ref={virtualContentRef} style={{ paddingTop, paddingBottom }}>
+              {items.map((item) => {
+                if (activityVisible && item.index === activityIndex) {
+                  return (
+                    <div
+                      key={item.key}
+                      ref={virtualizer.measureElement}
+                      data-index={item.index}
+                      data-slot="session-thread-activity-row"
+                      className="flow-root"
+                    >
+                      <SessionThreadActivity />
+                    </div>
+                  );
+                }
+                const turn = turns[item.index];
+                if (!turn) return null;
                 return (
                   <div
                     key={item.key}
                     ref={virtualizer.measureElement}
                     data-index={item.index}
-                    data-slot="session-thread-activity-row"
+                    data-slot="aui-turn"
                     className="flow-root"
                   >
-                    <SessionThreadActivity />
+                    {turn.messageIds.map((messageId) => (
+                      <ThreadPrimitive.Unstable_MessageById
+                        key={messageId}
+                        messageId={messageId}
+                        components={MESSAGE_COMPONENTS}
+                      />
+                    ))}
                   </div>
                 );
-              }
-              const turn = turns[item.index];
-              if (!turn) return null;
-              return (
-                <div
-                  key={item.key}
-                  ref={virtualizer.measureElement}
-                  data-index={item.index}
-                  data-slot="aui-turn"
-                  className="flow-root"
-                >
-                  {turn.messageIds.map((messageId) => (
-                    <ThreadPrimitive.Unstable_MessageById
-                      key={messageId}
-                      messageId={messageId}
-                      components={MESSAGE_COMPONENTS}
-                    />
-                  ))}
-                </div>
-              );
-            })}
+              })}
+            </div>
           </div>
         </div>
       </div>

@@ -39,7 +39,7 @@ export function SidebarToggle({
       ref={buttonRef}
       variant="ghost"
       size="icon"
-      className="sidebar-toggle size-6 fixed z-999"
+      className={`sidebar-toggle size-6 z-999 ${location === "window-header" ? "shrink-0" : "fixed"}`}
       aria-label={actionLabel}
       aria-controls="sidebar-content"
       aria-expanded={sidebarOpen}

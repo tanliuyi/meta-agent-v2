@@ -5,7 +5,7 @@ import type {
   PendingAttachment,
   ThreadComposerState,
 } from "@assistant-ui/react";
-import { imageAttachmentAdapter, toComposerAttachmentInput } from "./image-attachments.ts";
+import { attachmentAdapter, toComposerAttachmentInput } from "./attachments.ts";
 
 export interface ComposerReseed {
   text: string;
@@ -56,9 +56,9 @@ export function runDraftSubmissionSingleFlight(
 /** 在创建 Pi session 前把 Composer 状态冻结成可发送、可恢复的载荷。 */
 export async function prepareDraftSubmission(
   state: ThreadComposerState,
-  completeAttachment: CompleteAttachmentFn = (attachment) => imageAttachmentAdapter.send(attachment),
+  completeAttachment: CompleteAttachmentFn = (attachment) => attachmentAdapter.send(attachment),
 ): Promise<PreparedComposerSubmission> {
-  if (!state.text.trim() && state.attachments.length === 0) throw new Error("请输入消息或添加图片");
+  if (!state.text.trim() && state.attachments.length === 0) throw new Error("请输入消息或添加附件");
 
   const attachments = await Promise.all(
     state.attachments.map((attachment) =>

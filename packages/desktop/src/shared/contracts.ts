@@ -636,6 +636,8 @@ export interface WorkbenchState {
   terminalTabCounter?: number;
   /** 全屏期间会话 modal 的 UI 状态（渲染进程写入，跨刷新/重启持久化）。 */
   sessionModal?: SessionModalPersistedState;
+  /** 会话信息面板开关（会话级 UI 状态，随 WorkbenchState 持久化；缺省为打开）。 */
+  sessionInfoOpen?: boolean;
 }
 
 /** 全屏会话 modal 的开关与几何状态（session 级 UI 状态，随 WorkbenchState 持久化）。 */

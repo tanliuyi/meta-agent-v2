@@ -8,8 +8,8 @@ import type {
   SessionCommandResult,
   SessionPromptInput,
 } from "../../../shared/contracts.ts";
+import { toComposerAttachmentInput, toPiPromptAttachments } from "./attachments.ts";
 import { getComposerQuotes, getMessageQuotes, parseQuoteValue, toComposerQuote } from "./composer-quotes.ts";
-import { toComposerAttachmentInput, toPiImageInputs } from "./image-attachments.ts";
 
 interface SessionTarget {
   projectId: string;
@@ -162,8 +162,6 @@ export class PiCommandCoordinator {
   ): Promise<SessionCommandResult> {
     const phase = this.getPhase();
     if (phase !== "idle" && phase !== "running") throw new Error(`Pi ${phase} 阶段不接受 Composer submit`);
-    if (phase === "running" && messageText(message).trim().length === 0)
-      throw new Error("Pi running queue 不接受仅包含图片的输入");
     const input = await promptInput(message, target, desiredMode, requestId);
     const isResourceReload = input.text.trim() === "/reload" && input.images.length === 0;
     const progressNotificationId = isResourceReload
@@ -296,12 +294,13 @@ async function promptInput(
   if (message.role !== "user") throw new Error(`Pi Composer 只接受 user message: ${message.role}`);
   const messageQuotes = quotes(message);
   const messageQuote = messageQuotes.length === 1 ? messageQuotes[0] : undefined;
+  const attachments = await toPiPromptAttachments(messageText(message), message.attachments ?? []);
   return {
     requestId,
     projectId: target.projectId,
     threadId: target.threadId,
-    text: messageText(message),
-    images: await toPiImageInputs(message.attachments ?? []),
+    text: attachments.text,
+    images: attachments.images,
     ...(messageQuote ? { quote: messageQuote } : {}),
     ...(messageQuotes.length > 1 ? { quotes: messageQuotes } : {}),
     ...(desiredMode ? { desiredMode } : {}),

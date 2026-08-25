@@ -37,6 +37,7 @@ import { SessionSupervisor } from "./pi/session-supervisor.ts";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "./plugins/default-plugin-marketplace.ts";
 import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
 import { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
+import { resolveMarketplaceExtensionRoot } from "./plugins/marketplace-extension-root.ts";
 import { MarketplaceGenerationReferenceTracker } from "./plugins/marketplace-generation-reference-tracker.ts";
 import { MarketplacePluginGarbageCollector } from "./plugins/marketplace-plugin-garbage-collector.ts";
 import { handleMarketplacePluginIconRequests } from "./plugins/marketplace-plugin-icon-protocol.ts";
@@ -281,6 +282,7 @@ app.whenReady().then(async () => {
     defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
   });
   const marketplaceRegistry = new MarketplacePluginRegistry(userDataDir);
+  const marketplaceRoot = resolveMarketplaceExtensionRoot(userDataDir);
   handleMarketplacePluginIconRequests(marketplaceRegistry);
   const marketplaceLockDirectory = join(userDataDir, "plugins", "locks");
   const pluginConfigurations = new PluginConfigurationService(userDataDir, marketplaceRegistry, {
@@ -289,13 +291,14 @@ app.whenReady().then(async () => {
     decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
   });
   const marketplaceGenerationReferences = new MarketplaceGenerationReferenceTracker();
-  const marketplaceReconciler = new MarketplacePluginReconciler(marketplaceRegistry, agentDir, userDataDir, {
+  const marketplaceReconciler = new MarketplacePluginReconciler(marketplaceRegistry, marketplaceRoot, userDataDir, {
+    legacyRoot: join(agentDir, "extensions"),
     log: (text) => sidecarLog?.write("marketplace", text),
   });
   const marketplaceGarbageCollector = new MarketplacePluginGarbageCollector(
     marketplaceRegistry,
     marketplaceGenerationReferences,
-    agentDir,
+    marketplaceRoot,
     marketplaceLockDirectory,
   );
   const marketplaceReconciliation = marketplaceReconciler.reconcile();
@@ -315,7 +318,7 @@ app.whenReady().then(async () => {
     getCuratedDefinitions: () => curatedExtensions,
     getMarketplaceExtensions: () => marketplaceRegistry.getInternalSnapshot(),
     pluginConfigurations,
-    marketplaceRoot: join(agentDir, "extensions"),
+    marketplaceRoot,
     curatedRoot: app.isPackaged ? join(process.resourcesPath, "extensions") : join(appDir, "../extensions"),
   });
   const updater = new AutoUpdateService({ app });
@@ -332,7 +335,7 @@ app.whenReady().then(async () => {
     marketplaceEndpoints,
     marketplaceRegistry,
     marketplaceLockDirectory,
-    agentDir,
+    marketplaceRoot,
     app.getVersion(),
     runtimeManifest.compatibility,
     {
@@ -407,7 +410,10 @@ app.whenReady().then(async () => {
       const projectKeys = await Promise.all(
         (await projects.list())
           .filter((project) => project.available)
-          .map(async (project) => ({ projectId: project.id, workspaceKey: await getWorkspaceKey(project.id) })),
+          .map(async (project) => ({
+            projectId: project.id,
+            workspaceKey: await getWorkspaceKey(project.id),
+          })),
       );
       const projectIds = projectKeys
         .filter((project) => project.workspaceKey === workspaceKey)

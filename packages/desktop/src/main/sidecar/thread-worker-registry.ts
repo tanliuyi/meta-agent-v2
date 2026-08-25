@@ -89,6 +89,8 @@ interface WorkerRecord {
   desiredExtensionDiagnostics: DesktopExtensionDiagnostic[];
   extensionDiagnostics: DesktopExtensionDiagnostic[];
   retired: boolean;
+  /** 用户已请求关闭但 worker 仍 busy：条件清空后自动退役；新活动开始会取消。 */
+  closeRequested: boolean;
   browserSessionIdentity: BrowserSessionIdentity;
   browserSessionToken?: string;
   shutdownPromise?: Promise<void>;
@@ -516,6 +518,7 @@ export class ThreadWorkerRegistry {
       async (record) => {
         const result = await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000);
         record.attachments += 1;
+        this.cancelRequestedClose(record);
         return decorateBootstrap(record, result);
       },
       true,
@@ -527,6 +530,57 @@ export class ThreadWorkerRegistry {
   prewarm(projectId: string, threadId: string): Promise<void> {
     if (this.options.isActiveSubagentThread?.(projectId, threadId)) return Promise.resolve();
     return this.use(projectId, threadId, async () => undefined);
+  }
+
+  /** 立即退役无 attachment 且已完成的 thread worker；busy thread 记录关闭意图，条件清空后自动退役。 */
+  async close(projectId: string, threadId: string): Promise<void> {
+    if (this.options.isActiveSubagentThread?.(projectId, threadId)) return;
+    const key = workerKey(projectId, threadId);
+    await this.withThreadLock(key, async () => {
+      const record = this.records.get(key);
+      if (!record) return;
+      if (record.summary?.running || record.inFlight > 0 || record.attachments > 0) {
+        record.closeRequested = true;
+        return;
+      }
+      record.retired = true;
+      await this.awaitRecordShutdown(record);
+      if (this.records.get(key) === record) this.records.delete(key);
+    });
+  }
+
+  /** 待定的关闭意图：running/inFlight/attachments 全部清零后自动退役（幂等）。 */
+  private async retireRequestedCloseIfIdle(key: string): Promise<void> {
+    let record: WorkerRecord | undefined;
+    let proceed = false;
+    await this.withThreadLock(key, async () => {
+      const current = this.records.get(key);
+      if (!current || !current.closeRequested) return;
+      if (current.summary?.running || current.inFlight > 0 || current.attachments > 0) return;
+      current.closeRequested = false;
+      current.retired = true;
+      record = current;
+      proceed = true;
+    });
+    if (!proceed || !record) return;
+    try {
+      await this.awaitRecordShutdown(record);
+    } finally {
+      await this.withThreadLock(key, async () => {
+        if (this.records.get(key) === record) this.records.delete(key);
+      });
+    }
+  }
+
+  private requestRetireRequestedCloseIfIdle(key: string): void {
+    void this.retireRequestedCloseIfIdle(key).catch((error: unknown) =>
+      this.options.log?.("thread-close", error instanceof Error ? error.message : String(error)),
+    );
+  }
+
+  /** 新的会话活动（attach/prompt/respond）表明用户仍在用该 worker：取消待定的关闭。 */
+  private cancelRequestedClose(record: WorkerRecord): void {
+    record.closeRequested = false;
   }
 
   detach(projectId: string, threadId: string): void {
@@ -545,7 +599,10 @@ export class ThreadWorkerRegistry {
     }
     if (record && record.attachments > 0) {
       record.attachments -= 1;
-      if (record.attachments === 0) this.requestCapacityTrim();
+      if (record.attachments === 0) {
+        this.requestCapacityTrim();
+        this.requestRetireRequestedCloseIfIdle(key);
+      }
     }
   }
 
@@ -838,6 +895,7 @@ export class ThreadWorkerRegistry {
       }
       record = current;
       record.inFlight += 1;
+      this.cancelRequestedClose(record);
     });
     try {
       await record.client.request({ type: "respondHostUi", response }, 10_000);
@@ -848,6 +906,7 @@ export class ThreadWorkerRegistry {
       await this.withThreadLock(key, async () => {
         record.inFlight -= 1;
       });
+      this.requestRetireRequestedCloseIfIdle(key);
     }
   }
 
@@ -1047,6 +1106,7 @@ export class ThreadWorkerRegistry {
   ): Promise<T> {
     this.assertProjectAvailable(projectId);
     const workspaceKey = await this.options.getWorkspaceKey(projectId);
+    const targetKey = workerKey(projectId, threadId);
     this.assertWorkspaceNotExclusive(workspaceKey);
     this.assertNotActiveSubagent(projectId, threadId);
     this.exclusiveWorkspaceKeys.add(workspaceKey);
@@ -1058,7 +1118,6 @@ export class ThreadWorkerRegistry {
       if (await this.hasPendingWorkerForWorkspace(workspaceKey)) {
         throw new Error("Cannot restore a checkpoint while a thread worker is starting");
       }
-      const targetKey = workerKey(projectId, threadId);
       const lockKeys = [
         ...new Set([
           targetKey,
@@ -1088,6 +1147,7 @@ export class ThreadWorkerRegistry {
         }
         record.lastActivityAt = Date.now();
         record.inFlight += 1;
+        this.cancelRequestedClose(record);
         try {
           return await operation(record);
         } catch (error) {
@@ -1099,6 +1159,7 @@ export class ThreadWorkerRegistry {
         }
       });
     } finally {
+      this.requestRetireRequestedCloseIfIdle(targetKey);
       releaseTerminalBarrier?.();
       this.exclusiveWorkspaceKeys.delete(workspaceKey);
       if (subagentBarrier) this.options.endSubagentWorkspaceMutation?.(workspaceKey);
@@ -1127,6 +1188,7 @@ export class ThreadWorkerRegistry {
       this.exclusiveThreads.add(key);
       record.lastActivityAt = Date.now();
       record.inFlight += 1;
+      this.cancelRequestedClose(record);
     });
     try {
       return await operation(record);
@@ -1139,6 +1201,7 @@ export class ThreadWorkerRegistry {
         record.lastActivityAt = Date.now();
         this.exclusiveThreads.delete(key);
       });
+      this.requestRetireRequestedCloseIfIdle(key);
     }
   }
 
@@ -1174,6 +1237,7 @@ export class ThreadWorkerRegistry {
         record = await this.requireUnlocked(projectId, threadId);
         record.lastActivityAt = Date.now();
         record.inFlight += 1;
+        this.cancelRequestedClose(record);
       });
       if (!waitForExtensionApply || !applyCompletion) break;
       await applyCompletion;
@@ -1188,6 +1252,7 @@ export class ThreadWorkerRegistry {
         record.inFlight -= 1;
         record.lastActivityAt = Date.now();
       });
+      this.requestRetireRequestedCloseIfIdle(key);
     }
   }
 
@@ -1390,6 +1455,7 @@ export class ThreadWorkerRegistry {
       browserSessionIdentity: browserSessionIdentityOf(binding),
       ...(browserSessionToken !== undefined ? { browserSessionToken } : {}),
       retired: false,
+      closeRequested: false,
     };
     try {
       const ready = await client.ready();
@@ -1480,7 +1546,10 @@ export class ThreadWorkerRegistry {
         ? { ...event.event.summary, parentThreadId: record.parentThreadId }
         : event.event.summary;
       if (record.attachments === 0) this.options.catalogChanged?.({ ...record.summary });
-      if (!record.summary.running) this.requestCapacityTrim();
+      if (!record.summary.running) {
+        this.requestCapacityTrim();
+        this.requestRetireRequestedCloseIfIdle(workerKey(record.projectId, record.threadId));
+      }
       if (!record.sessionFile) {
         record.client.acknowledge(event.sequence);
         return;

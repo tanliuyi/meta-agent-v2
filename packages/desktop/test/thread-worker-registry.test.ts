@@ -320,6 +320,86 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("immediately closes a detached completed worker", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    registry.detach("project", "thread");
+
+    await registry.close("project", "thread");
+
+    expect(client.shutdownCount).toBe(1);
+    await registry.attach("project", "thread");
+    expect(harness.clients).toHaveLength(2);
+    registry.detach("project", "thread");
+    await registry.dispose();
+  });
+
+  it("single close retires a running worker as soon as it completes", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    client.emit({ type: "summary-changed", summary: { ...thread("thread"), running: true } });
+    registry.detach("project", "thread");
+
+    // 运行中关闭：只记录关闭意图，worker 保持存活。
+    await registry.close("project", "thread");
+    expect(client.shutdownCount).toBe(0);
+
+    // 运行完成后自动退役，无需再次 close。
+    client.emit({ type: "summary-changed", summary: thread("thread") });
+    await waitFor(() => client.shutdownCount === 1);
+    await registry.dispose();
+  });
+
+  it("logs a deferred shutdown failure and removes the stale worker", async () => {
+    const harness = createHarness(userDataDir);
+    const log = vi.fn();
+    harness.options.log = log;
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    client.emit({ type: "summary-changed", summary: { ...thread("thread"), running: true } });
+    registry.detach("project", "thread");
+    await registry.close("project", "thread");
+    client.shutdownError = new Error("shutdown failed");
+
+    client.emit({ type: "summary-changed", summary: thread("thread") });
+
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith("thread-close", "shutdown failed"));
+    await registry.attach("project", "thread");
+    expect(harness.clients).toHaveLength(2);
+    expect(harness.clients[1]?.readyStarted).toBe(true);
+    registry.detach("project", "thread");
+    await registry.dispose();
+  });
+
+  it("cancels a pending close when the session is attached again", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    await registry.attach("project", "thread");
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    client.emit({ type: "summary-changed", summary: { ...thread("thread"), running: true } });
+    registry.detach("project", "thread");
+    await registry.close("project", "thread");
+    expect(client.shutdownCount).toBe(0);
+
+    // 重新 attach（新 owner 活动）：取消待定关闭。
+    await registry.attach("project", "thread");
+    client.emit({ type: "summary-changed", summary: thread("thread") });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(client.shutdownCount).toBe(0);
+
+    registry.detach("project", "thread");
+    await registry.dispose();
+  });
+
   it("uses a five-minute default idle TTL", async () => {
     vi.useFakeTimers({ now: 0 });
     const harness = createHarness(userDataDir);
@@ -1486,6 +1566,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   readonly bindingExtensionEntries: ReadonlyArray<{ id: string; source: string }>;
   readyStarted = false;
   shutdownCount = 0;
+  shutdownError: Error | undefined;
   private readonly options: WorkerClientOptions;
   private readonly bootstrap: SessionBootstrap;
   private readonly readyGate?: ReturnType<typeof deferred<void>>;
@@ -1562,6 +1643,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
   async shutdown(): Promise<void> {
     this.shutdownCount += 1;
     await this.shutdownGate?.promise;
+    if (this.shutdownError) throw this.shutdownError;
   }
 
   emit(event: SidecarEventBody, sequence = 1): void {

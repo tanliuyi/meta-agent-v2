@@ -655,8 +655,10 @@ describe("BrowserManager 会话隔离", () => {
     });
     const host = hosts.get(101)!;
     states.length = 0;
+    const capability = manager.registerSession(SESSION_A);
+    manager.revokeSessionCapability(capability);
 
-    manager.retireSession(SESSION_A);
+    manager.retireSession(SESSION_A, 1);
 
     expect(manager.tabsList(SESSION_A)).toHaveLength(0);
     expect(manager.browserHistory(SESSION_A)).toEqual([]);
@@ -900,7 +902,9 @@ describe("BrowserManager 会话隔离", () => {
     retiredGuest.removeListener = retiredRemoveListener;
     const retired = setup({ fromWebContentsId: () => retiredGuest });
     await retired.manager.attach(SESSION_A, 101);
-    retired.manager.retireSession(SESSION_A);
+    const retiredCapability = retired.manager.registerSession(SESSION_A);
+    retired.manager.revokeSessionCapability(retiredCapability);
+    retired.manager.retireSession(SESSION_A, 1);
     expect(retiredRemoveListener).toHaveBeenCalledWith("did-finish-load", expect.any(Function));
 
     const disposedRemoveListener = vi.fn(() => ({}) as WebContents);

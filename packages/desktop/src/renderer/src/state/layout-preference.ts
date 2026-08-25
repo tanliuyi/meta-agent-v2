@@ -3,6 +3,7 @@ import { preferencesStorage } from "./preferences-store.ts";
 export const SIDEBAR_OPEN_STORAGE_KEY = "pi-desktop:sidebar-open";
 export const SIDEBAR_WIDTH_STORAGE_KEY = "pi-desktop:sidebar-width";
 export const SIDEBAR_DEFAULT_OPEN = true;
+export const SESSION_INFO_DEFAULT_OPEN = true;
 export const SIDEBAR_DEFAULT_WIDTH = 280;
 export const SIDEBAR_MIN_WIDTH = 220;
 export const SIDEBAR_MAX_WIDTH = 420;

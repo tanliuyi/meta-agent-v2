@@ -1,4 +1,10 @@
-import type { ExportedMessageRepository, ThreadAssistantMessagePart, ThreadMessage } from "@assistant-ui/react";
+import type {
+  CompleteAttachment,
+  ExportedMessageRepository,
+  ThreadAssistantMessagePart,
+  ThreadMessage,
+  ThreadUserMessagePart,
+} from "@assistant-ui/react";
 import type {
   PiAssistantMessage,
   PiAssistantNotificationPart,
@@ -7,6 +13,7 @@ import type {
   PiThreadSnapshot,
   PiTimelineNode,
 } from "../../../shared/contracts.ts";
+import { parsePiFileContexts } from "./attachments.ts";
 import { getPiThreadNodesChange } from "./pi-thread-store.ts";
 
 type RepositoryItem = ExportedMessageRepository["messages"][number];
@@ -300,26 +307,48 @@ function sameMembers(left: readonly PiTimelineNode[], right: readonly PiTimeline
 }
 
 function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>, projectedId: string): ThreadMessage {
-  const images = node.content.flatMap((part, index) => (part.type === "image" ? [{ part, index }] : []));
+  const content: ThreadUserMessagePart[] = [];
+  const attachments: CompleteAttachment[] = [];
+  for (const [partIndex, part] of node.content.entries()) {
+    if (part.type === "image") {
+      const name = imageName(part.mimeType, partIndex);
+      attachments.push({
+        id: `${projectedId}:image:${partIndex}`,
+        type: "image",
+        name,
+        contentType: part.mimeType,
+        status: { type: "complete" },
+        content: [{ type: "image", image: `data:${part.mimeType};base64,${part.data}`, filename: name }],
+      });
+      continue;
+    }
+
+    const parsed = parsePiFileContexts(part.text);
+    if (parsed.text || parsed.files.length === 0) content.push({ type: "text", text: parsed.text });
+    for (const [fileIndex, file] of parsed.files.entries()) {
+      attachments.push({
+        id: `${projectedId}:file:${partIndex}:${fileIndex}`,
+        type: "file",
+        name: file.name,
+        contentType: "application/octet-stream",
+        status: { type: "complete" },
+        content: [
+          {
+            type: "file",
+            data: file.path,
+            filename: file.name,
+            mimeType: "application/octet-stream",
+          },
+        ],
+      });
+    }
+  }
   return {
     id: projectedId,
     role: "user",
     createdAt: new Date(node.createdAt),
-    content: node.content.flatMap((part) => (part.type === "text" ? [{ type: "text" as const, text: part.text }] : [])),
-    attachments: images.map(({ part, index }) => ({
-      id: `${projectedId}:image:${index}`,
-      type: "image",
-      name: imageName(part.mimeType, index),
-      contentType: part.mimeType,
-      status: { type: "complete" },
-      content: [
-        {
-          type: "image",
-          image: `data:${part.mimeType};base64,${part.data}`,
-          filename: imageName(part.mimeType, index),
-        },
-      ],
-    })),
+    content,
+    attachments,
     metadata: {
       custom: {
         ...(node.quotes ? { quotes: node.quotes } : node.quote ? { quote: node.quote } : {}),

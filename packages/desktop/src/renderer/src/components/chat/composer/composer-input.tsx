@@ -1,4 +1,10 @@
-import { ComposerPrimitive, unstable_useTriggerPopoverAriaProps, useAui, useAuiState } from "@assistant-ui/react";
+import {
+  ComposerPrimitive,
+  unstable_useTriggerPopoverAriaProps,
+  unstable_useTriggerPopoverTriggers,
+  useAui,
+  useAuiState,
+} from "@assistant-ui/react";
 import { LexicalComposerInput } from "@assistant-ui/react-lexical";
 import {
   type ClipboardEvent,
@@ -11,10 +17,45 @@ import {
 } from "react";
 import type { SlashCommand } from "../../../../../shared/contracts.ts";
 import { ComposerDirectiveChip } from "../../assistant-ui/composer-directive-chip.tsx";
-import { ComposerCommandTrigger } from "./composer-command-trigger.tsx";
+import { ComposerCommandTrigger, slashCommandText } from "./composer-command-trigger.tsx";
 import { ComposerFileTrigger } from "./composer-file-trigger.tsx";
+import type { ComposerTriggerStateSnapshot } from "./composer-trigger-state.tsx";
 
 const ESCAPE_CANCEL_WINDOW_MS = 1_000;
+
+interface CommandTriggerKeyboardResource {
+  handleKeyDown(event: { readonly key: string; readonly shiftKey: boolean; preventDefault(): void }): boolean;
+}
+
+export function acceptHighlightedCommandOnSpace(
+  event: Pick<
+    KeyboardEvent<HTMLDivElement>,
+    "key" | "shiftKey" | "ctrlKey" | "metaKey" | "altKey" | "preventDefault" | "stopPropagation"
+  >,
+  commandTriggerOpen: boolean,
+  commandTriggerHasItems: boolean,
+  resource: CommandTriggerKeyboardResource | undefined,
+): boolean {
+  if (
+    !commandTriggerOpen ||
+    !commandTriggerHasItems ||
+    event.key !== " " ||
+    event.shiftKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    !resource
+  ) {
+    return false;
+  }
+  const consumed = resource.handleKeyDown({
+    key: "Enter",
+    shiftKey: false,
+    preventDefault: () => event.preventDefault(),
+  });
+  if (consumed) event.stopPropagation();
+  return consumed;
+}
 
 interface FocusedComposerInputState {
   disabled: boolean;
@@ -43,11 +84,13 @@ function syncOptionalAttribute(element: HTMLElement, name: string, value: string
 interface ComposerInputProps {
   projectId: string | undefined;
   commands: readonly SlashCommand[];
+  selectedCommand: SlashCommand | null;
   mode: "draft" | "session";
   isRunning: boolean;
   isCancelable: boolean;
   materializing: boolean;
   onCommandSelect(command: SlashCommand): void;
+  onCommandClear(): void;
   onSubmit(): void;
   onSubmitRunning(): void;
   onEscapeCancelPendingChange(pending: boolean): void;
@@ -60,11 +103,13 @@ interface ComposerInputProps {
 export function ComposerInput({
   projectId,
   commands,
+  selectedCommand,
   mode,
   isRunning,
   isCancelable,
   materializing,
   onCommandSelect,
+  onCommandClear,
   onSubmit,
   onSubmitRunning,
   onEscapeCancelPendingChange,
@@ -75,9 +120,16 @@ export function ComposerInput({
   const runtimeDisabled = useAuiState(
     (state) => state.thread.isDisabled || state.composer.dictation?.inputDisabled === true,
   );
+  const composerText = useAuiState((state) => state.composer.text);
   const triggerAria = unstable_useTriggerPopoverAriaProps();
+  const triggers = unstable_useTriggerPopoverTriggers();
+  const commandTriggerResource = triggers.get("/")?.resource;
   const [fileTriggerOpen, setFileTriggerOpen] = useState(false);
-  const [commandTriggerOpen, setCommandTriggerOpen] = useState(false);
+  const [commandTriggerState, setCommandTriggerState] = useState<ComposerTriggerStateSnapshot>({
+    open: false,
+    hasItems: false,
+  });
+  const [dismissedCommandText, setDismissedCommandText] = useState<string | null>(null);
 
   const clearEscapeCancelTimer = useCallback(() => {
     if (escapeCancelTimer.current !== undefined) window.clearTimeout(escapeCancelTimer.current);
@@ -92,10 +144,24 @@ export function ComposerInput({
 
   useEffect(() => {
     if (!projectId || materializing) setFileTriggerOpen(false);
-    if (materializing) setCommandTriggerOpen(false);
+    if (materializing) setCommandTriggerState({ open: false, hasItems: false });
   }, [materializing, projectId]);
 
+  useEffect(() => {
+    if (dismissedCommandText !== null && dismissedCommandText !== composerText) setDismissedCommandText(null);
+  }, [composerText, dismissedCommandText]);
+
   const disabled = materializing || runtimeDisabled;
+  const dematerializeSelectedCommand = () => {
+    if (selectedCommand) {
+      const text = slashCommandText(selectedCommand, aui.composer().getState().text);
+      setDismissedCommandText(text);
+      setCommandTriggerState({ open: false, hasItems: false });
+      aui.composer().setText(text);
+    }
+    onCommandClear();
+    editorRef.current?.querySelector<HTMLElement>(".aui-lexical-input")?.focus();
+  };
   const ariaControls = triggerAria["aria-controls"];
   const ariaActiveDescendant = triggerAria["aria-activedescendant"];
   const ariaExpanded = triggerAria["aria-expanded"] === true;
@@ -116,7 +182,7 @@ export function ComposerInput({
       return;
     }
     if (
-      (fileTriggerOpen || commandTriggerOpen) &&
+      (fileTriggerOpen || commandTriggerState.open) &&
       (event.key === "ArrowDown" ||
         event.key === "ArrowUp" ||
         event.key === "Enter" ||
@@ -127,6 +193,28 @@ export function ComposerInput({
       return;
 
     if (event.nativeEvent.isComposing) return;
+
+    if (
+      acceptHighlightedCommandOnSpace(
+        event,
+        commandTriggerState.open,
+        commandTriggerState.hasItems,
+        commandTriggerResource,
+      )
+    )
+      return;
+
+    const exitsEmptyCommand =
+      selectedCommand &&
+      aui.composer().getState().text.length === 0 &&
+      (event.key === "Backspace" ||
+        (event.key === " " && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey));
+    if (exitsEmptyCommand) {
+      event.preventDefault();
+      event.stopPropagation();
+      dematerializeSelectedCommand();
+      return;
+    }
 
     if (isRunning && event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();
@@ -181,24 +269,42 @@ export function ComposerInput({
       {projectId && !materializing ? (
         <ComposerFileTrigger projectId={projectId} onOpenChange={setFileTriggerOpen} />
       ) : null}
-      <ComposerCommandTrigger commands={commands} onSelect={onCommandSelect} onOpenChange={setCommandTriggerOpen} />
-      <LexicalComposerInput
-        ref={editorRef}
-        className="caret-primary text-foreground max-h-32 min-h-10 w-full bg-transparent px-1 py-1 text-sm leading-relaxed outline-none [&_.aui-lexical-input]:min-h-8 [&_.aui-lexical-input]:outline-none"
-        submitMode="none"
-        cancelOnEscape={false}
-        directiveChip={ComposerDirectiveChip}
-        onKeyDownCapture={handleInputKeyDown}
-        onPasteCapture={handleInputPaste}
-        placeholder={
-          mode === "draft"
-            ? "发送消息，@ 引用文件"
-            : isRunning
-              ? "运行中，可发送后续消息"
-              : "发送消息，@ 引用文件，/ 执行命令"
-        }
-        autoFocus={mode === "draft"}
-      />
+      {dismissedCommandText === composerText ? null : (
+        <ComposerCommandTrigger commands={commands} onSelect={onCommandSelect} onStateChange={setCommandTriggerState} />
+      )}
+      <div className="composer-input-row">
+        {selectedCommand ? (
+          <button
+            type="button"
+            className="composer-command-prefix"
+            aria-label={`移除命令 /${selectedCommand.name}`}
+            title={`移除命令 /${selectedCommand.name}`}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={dematerializeSelectedCommand}
+          >
+            <span className="composer-command-prefix-label">/{selectedCommand.name}</span>
+          </button>
+        ) : null}
+        <LexicalComposerInput
+          ref={editorRef}
+          className="caret-primary text-foreground max-h-32 min-h-10 w-full bg-transparent px-1 py-1 text-sm leading-relaxed outline-none [&_.aui-lexical-input]:min-h-8 [&_.aui-lexical-input]:outline-none"
+          submitMode="none"
+          cancelOnEscape={false}
+          directiveChip={ComposerDirectiveChip}
+          onKeyDownCapture={handleInputKeyDown}
+          onPasteCapture={handleInputPaste}
+          placeholder={
+            selectedCommand
+              ? (selectedCommand.description ?? "输入命令参数")
+              : mode === "draft"
+                ? "发送消息，@ 引用文件"
+                : isRunning
+                  ? "运行中，可发送后续消息"
+                  : "发送消息，@ 引用文件，/ 执行命令"
+          }
+          autoFocus={mode === "draft"}
+        />
+      </div>
     </>
   );
 }

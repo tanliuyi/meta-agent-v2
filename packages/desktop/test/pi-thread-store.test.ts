@@ -201,6 +201,59 @@ describe("PiMessageRepositoryConverter", () => {
     ]);
   });
 
+  it("将带版本标记的 user file 上下文恢复为 complete attachment", () => {
+    const marker = `<pi-file-context-v1>${JSON.stringify({
+      files: [{ path: "C:\\A&B\\setup.exe", name: "setup.exe" }],
+    })}</pi-file-context-v1>`;
+    const user = {
+      ...userNode("u", null),
+      content: [
+        {
+          type: "text" as const,
+          text: `question\n\n${marker}\n\n<file name="C:\\A&amp;B\\setup.exe">setup.exe</file>`,
+        },
+      ],
+    };
+    const repository = new PiMessageRepositoryConverter().build(snapshot([user], "u"));
+    const converted = repository.messages[0]?.message;
+
+    expect(converted?.role).toBe("user");
+    if (converted?.role !== "user") throw new Error("user message missing");
+    expect(converted.content).toEqual([{ type: "text", text: "question" }]);
+    expect(converted.attachments).toEqual([
+      {
+        id: "u:file:0:0",
+        type: "file",
+        name: "setup.exe",
+        contentType: "application/octet-stream",
+        status: { type: "complete" },
+        content: [
+          {
+            type: "file",
+            data: "C:\\A&B\\setup.exe",
+            filename: "setup.exe",
+            mimeType: "application/octet-stream",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("把无标记的尾部 file 示例保留为正文，不误解读为附件", () => {
+    const text = '用户展示的示例\n\n<file name="C:\\A&amp;B\\setup.exe">setup.exe</file>';
+    const user = {
+      ...userNode("u", null),
+      content: [{ type: "text" as const, text }],
+    };
+    const repository = new PiMessageRepositoryConverter().build(snapshot([user], "u"));
+    const converted = repository.messages[0]?.message;
+
+    expect(converted?.role).toBe("user");
+    if (converted?.role !== "user") throw new Error("user message missing");
+    expect(converted.content).toEqual([{ type: "text", text }]);
+    expect(converted.attachments).toEqual([]);
+  });
+
   it("在 metadata 中保留 user quote", () => {
     const user = { ...userNode("u", null), quote: { text: "引用内容", messageId: "assistant" } };
     const repository = new PiMessageRepositoryConverter().build(snapshot([user], "u"));

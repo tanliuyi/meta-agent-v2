@@ -285,6 +285,11 @@ export function ensureBrowserRuntime(identity: BrowserSessionIdentity): SessionB
   };
   runtimes.set(sessionKey, runtime);
   internalsByKey.set(sessionKey, internals);
+  // 声明本 renderer（webContents）持有该会话的浏览器状态：其他窗口关闭同会话的
+  // tab 时主进程只释放它的持有权，不会销毁本窗口的 tabs/guest/历史。
+  if (typeof window !== "undefined" && window.desktop?.browser) {
+    void window.desktop.browser.sessionAcquire(identity).catch(() => undefined);
+  }
 
   const buffered = bufferedStateEvents.get(sessionKey);
   if (buffered) {

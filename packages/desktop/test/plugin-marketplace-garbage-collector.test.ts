@@ -79,7 +79,9 @@ describe("MarketplacePluginGarbageCollector", () => {
       harness.lockDirectory,
       { now: () => 10_000, retentionMs: 2_000 },
     );
-    await expect(firstCollector.run()).resolves.toMatchObject({ removedVersions: [] });
+    await expect(firstCollector.run()).resolves.toMatchObject({
+      removedVersions: [],
+    });
     await expect(directoryExists(inactive)).resolves.toBe(true);
 
     const restartedCollector = new MarketplacePluginGarbageCollector(
@@ -89,7 +91,9 @@ describe("MarketplacePluginGarbageCollector", () => {
       harness.lockDirectory,
       { now: () => 11_001, retentionMs: 2_000 },
     );
-    await expect(restartedCollector.run()).resolves.toMatchObject({ removedVersions: [inactive] });
+    await expect(restartedCollector.run()).resolves.toMatchObject({
+      removedVersions: [inactive],
+    });
   });
 
   it("collects an unreferenced version without rechecking its files", async () => {
@@ -212,7 +216,7 @@ async function createHarness(pluginId: string) {
   return {
     root,
     userDataDir,
-    agentDir,
+    agentDir: join(agentDir, "extensions"),
     pluginRoot,
     registry: new MarketplacePluginRegistry(userDataDir),
     lockDirectory: join(userDataDir, "plugins", "locks"),

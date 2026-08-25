@@ -48,6 +48,7 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
       '@import "./providers-settings.css" layer(components);',
       '@import "./keyboard-shortcuts-settings.css" layer(components);',
       '@import "./chat.css" layer(components);',
+      '@import "./session-info.css";',
       '@import "./image-preview.css";',
       '@import "./markdown.css" layer(components);',
       '@import "./panel.css" layer(components);',
@@ -77,6 +78,10 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
     "styles/keyboard-shortcuts-settings.css": ".keyboard-shortcuts { color: hsl(var(--foreground)); }",
     "styles/plugin-marketplace.css": ".plugins { color: hsl(var(--foreground)); }",
     "styles/chat.css": '.chat[data-state="open"] { color: hsl(var(--foreground)); }',
+    "styles/session-info.css": [
+      "@layer components { .session-info { color: hsl(var(--foreground)); } }",
+      "@layer overrides { .session-layout { margin-right: 1rem; } }",
+    ].join("\n"),
     "styles/markdown.css": ".markdown { color: hsl(var(--foreground)); }",
     "styles/panel.css": ".panel { color: hsl(var(--foreground)); }",
     "styles/browser-panel.css": ".browser-panel { color: hsl(var(--foreground)); }",

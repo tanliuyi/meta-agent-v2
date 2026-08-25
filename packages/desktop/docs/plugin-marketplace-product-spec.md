@@ -427,7 +427,7 @@ Manifest 要求：
 - plugin ID 使用稳定、大小写敏感、不可复用的市场 identity；
 - version 使用合法 semver；
 - `pi.entry` 必须位于 payload 内并实际存在；
-- 安装器必须生成 Pi CLI 可发现的根 `index.ts` 投影，该文件只静态 re-export 当前 immutable version 的 `pi.entry`；artifact 自身不得覆盖该 installer-owned projection；
+- 安装器必须生成 main-owned 根 `index.ts` 投影，该文件只静态 re-export 当前 immutable version 的 `pi.entry`，用于安装恢复和所有权检查；artifact 自身不得覆盖该 projection；
 - `nativeModules[].path` 和 `executables[].path` 必须在 payload 内实际存在；
 - 每个 native module 必须声明 `node` 或 `napi` ABI kind；Node ABI 要求精确 `modulesAbi`，N-API 要求最低 `minimumNapi`；
 - Linux executable 必须声明 libc baseline，平台 binary 必须声明适用的 OS baseline；
@@ -472,31 +472,21 @@ interface MarketplaceRuntimeTarget {
 
 ## 10. 安装位置与 scope
 
-### 10.1 Global
+### 10.1 Desktop 托管目录
 
-使用 main 已解析的 `agentDir`：
-
-```text
-<agentDir>/extensions/<plugin-id>/
-```
-
-必须完整支持 `PI_CODING_AGENT_DIR`，不得在 renderer、preload 或市场 DTO 中拼接 `~/.pi/agent`。
-
-### 10.2 Project
-
-使用 Pi `CONFIG_DIR_NAME`：
+Marketplace payload 由 Desktop 独占管理：
 
 ```text
-<project>/<CONFIG_DIR_NAME>/extensions/<plugin-id>/
+<userData>/plugins/extensions/<plugin-id>/
 ```
 
-项目安装要求：
+该目录不得位于 `<agentDir>/extensions` 或项目 `.pi/extensions` 下。`agentDir` 仍可用于共享模型、认证、skills、prompts 和 session，但 Marketplace 插件不能进入 Pi CLI 的自动发现路径。Renderer、preload 和市场 DTO 不得构造文件系统路径；main 统一从 Electron `userData` 解析托管根目录。
 
-- project 已被 Desktop/Pi trust policy 信任；
-- renderer 只传 opaque project ID，不传 cwd 或 target path；
-- main 通过 `ProjectStore` 解析真实 cwd；
-- symlink/non-directory project root 按现有 project safety policy 处理；
-- 安装不会自动创建或改变 project trust decision。
+启动 reconcile 若发现 registry 中的旧记录位于当前托管根之外，必须先验证旧 ownership，再在插件锁内迁移到 Desktop 托管根：优先同文件系统原子 rename，`EXDEV` 时复制完整根；在新根重写 projection/ownership 并验证 immutable entry 后更新 registry，最后仅在旧 ownership 仍匹配时删除旧根。迁移必须可从“新根已落位但 registry 未提交”和中间版本已写入 broken marker 的状态恢复。ownership 无法验证、目标根被未知内容占用或 payload 无效时，标记 broken 且不触碰外部文件。
+
+### 10.2 Project scope
+
+Project scope 只控制 Desktop source policy 在哪些项目中启用插件，不改变 payload 的物理位置。项目插件仍存储在 Desktop 托管目录，registry 记录 opaque project ID，main 通过 `ProjectStore` 解析当前作用域。不得向项目 `.pi/extensions` 写入 Marketplace 文件，也不得改变 project trust decision。
 
 ### 10.3 Directory identity 与 immutable versions
 
@@ -724,11 +714,7 @@ blocked
 ### 14.1 Source type
 
 ```ts
-type DesktopExtensionSource =
-  | "builtin"
-  | "curated"
-  | "marketplace"
-  | "development";
+type DesktopExtensionSource = "builtin" | "curated" | "marketplace" | "development";
 ```
 
 Marketplace entry 至少包含：
@@ -751,7 +737,7 @@ interface DesktopMarketplaceExtensionEntry {
 
 ### 14.2 Source policy
 
-Desktop 继续设置 `noExtensions: true`，不重新打开 Pi 普通 global/project auto-discovery。原因是市场安装目录对普通 Pi CLI 可自动发现，但 Desktop 仍需保证：
+Desktop 继续设置 `noExtensions: true`，不重新打开 Pi 普通 global/project auto-discovery。Marketplace payload 位于 Desktop 托管目录，不会被普通 Pi CLI 自动发现。Desktop 仍需保证：
 
 - 只有 registry 中已安装且 enabled 的 marketplace entry 进入 worker；
 - renderer 不能通过在目录中放文件绕过批准；
@@ -761,18 +747,13 @@ Desktop 继续设置 `noExtensions: true`，不重新打开 Pi 普通 global/pro
 - project marketplace entry 按第 10.4 节遮蔽同 ID global entry；
 - source policy 为每个 generation 注册 immutable version reference，供垃圾回收判断。
 
-`DesktopExtensionSourcePolicy` 验证 marketplace path 必须位于对应 scope 的标准 Pi extension root 下 `.versions/<artifact-hash>`，ownership、registry 和 artifact identity 必须一致。
+`DesktopExtensionSourcePolicy` 验证 marketplace path 必须位于 Desktop 托管根目录下 `.versions/<artifact-hash>`，ownership、registry 和 artifact identity 必须一致。
 
-### 14.3 Pi CLI 可见性
+### 14.3 Pi CLI 隔离
 
-市场安装结果位于 Pi 标准 extension 目录，installer-owned root `index.ts` 静态 re-export 当前 immutable version，因此普通 Pi CLI 会按 Pi 原有规则发现它。实际 Pi CLI discovery fixture 是发布门槛，不能只靠 Desktop `additionalExtensionPaths` 测试。Desktop 市场 enable/disable 状态只控制 Desktop 受控 set，不修改 Pi CLI 的 discovery 设置。
+Marketplace 插件只由 Desktop 通过 `additionalExtensionPaths` 显式加载。普通 Pi CLI 不应发现、加载、禁用或卸载这些插件；Desktop 的 enable、scope 和卸载操作也不得修改 Pi settings 或项目 `.pi` 目录。
 
-产品 UI 必须准确说明这个边界：
-
-- “在 Desktop 中禁用”不等于从 Pi CLI 禁用；
-- “卸载”会删除标准目录，因此同时影响 Desktop 和 Pi CLI；
-- project scope 插件遵循 Pi project trust；
-- 如未来需要共享 enable state，必须另立规范，不得静默修改 Pi settings。
+产品 UI 不应暗示插件同时安装到了系统 Pi。若未来需要跨宿主共享插件，必须设计独立的兼容性、启用状态和安装所有权协议，不得复用 Pi 的自动发现目录。
 
 ### 14.4 Apply
 
@@ -1066,7 +1047,7 @@ operation-error
 - 固化 market manifest 和 runtime target schema；
 - 建立 sidecar `RuntimeCompatibility` target fixtures；
 - 建立纯 JS、N-API、Node ABI 和 executable 示例 artifacts；
-- 确认 global/project path 与 `PI_CODING_AGENT_DIR`；
+- 确认 Marketplace payload 只位于 Desktop `userData` 托管根目录，不进入 `PI_CODING_AGENT_DIR` 或项目 `.pi`；
 - 固化可配置 endpoint well-known discovery；
 - 固化 immutable version projection 与启动 reconcile 的文件级收敛。
 
@@ -1080,7 +1061,7 @@ operation-error
 - 实现 global/project install、update、uninstall 和 rollback；
 - 保持 Pi loader 不变。
 
-完成条件：标准 Pi extension 安装到标准目录后，Desktop 通过受控 set 加载，Pi CLI 可按原规则发现。
+完成条件：标准 Pi extension 安装到 Desktop 托管目录后，Desktop 通过受控 set 加载，普通 Pi CLI 不会自动发现。
 
 ### Phase 2：市场 API 与下载
 
@@ -1246,9 +1227,9 @@ git diff --check
 3. 市场只使用应用自有 API/artifact，不调用 Pi npm/git package manager。
 4. 安装过程不运行 npm、lifecycle script 或源码构建。
 5. 安装后的插件仍是标准 Pi Extension，Pi extension loader/runner 无市场专用分支。
-6. Global/project payload 位于 Pi 标准 extension 目录的 immutable version 下，并支持 custom agentDir 和 project trust。
+6. Global/project payload 位于 Desktop `userData` 的托管 immutable version 目录，且不进入系统 Pi 或项目 `.pi` 的自动发现路径。
 7. Desktop 继续关闭普通 extension auto-discovery，只加载 registry 批准的 marketplace immutable entry。
-8. Installer 生成根 `index.ts` projection，真实 Pi CLI discovery fixture 证明普通 Pi CLI 可以发现当前版本。
+8. Installer 生成根 `index.ts` projection 供自身恢复与所有权校验，Desktop 只加载 registry 指向的 immutable entry；普通 Pi CLI 不会发现该目录。
 9. Renderer 不能提交路径、artifact URL 或 resolved entry。
 10. Artifact 下载受大小上限约束，归档经过路径/链接/炸弹防护，manifest 经过 identity、target 与兼容性校验。
 11. Archive traversal、link、collision 和 bomb 被拒绝。
@@ -1260,16 +1241,16 @@ git diff --check
 17. 新版本 apply 失败后恢复目标 session 旧 set；registry 已提交的 mutation 不回滚，由启动 reconcile 补齐文件状态。
 18. Global/project 同 ID 使用 project-over-global，disabled project override 不回退 global。
 19. 本地 development 插件声明相同 `plugin.id` 时优先加载，市场同 ID 版本禁用并给出诊断，移除本地插件后恢复。
-19. Marketplace extension 支持并测试 `providers.register`，同时不扩展未实现的 TUI Host API。
-20. 安装前准确展示 full-trust 和 native code 风险，不使用 sandbox 误导文案。
-21. Capability disclosure 不被描述为 Node/OS 权限限制。
-22. 市场不可用不影响已安装插件和聊天功能。
-23. withdrawn/blocked 状态从 catalog 元数据展示并阻止新安装/重新启用，离线不静默删除已安装插件。
-24. 插件代码不进入 Electron main、preload 或 renderer。
-25. Draft/live 使用相同 marketplace extension set 和 generation。
-26. 页面、endpoint settings、service、validator、installer、reconciler、IPC、source policy 和 worker rollback 有 focused tests。
-27. `desktop-controlled-extensions-spec.md` 与 `node-sidecar-per-thread-spec.md` 已同步修订，不再保留冲突 normative requirements。
-28. Desktop typecheck、根 `npm run check` 和 `git diff --check` 通过。
+20. Marketplace extension 支持并测试 `providers.register`，同时不扩展未实现的 TUI Host API。
+21. 安装前准确展示 full-trust 和 native code 风险，不使用 sandbox 误导文案。
+22. Capability disclosure 不被描述为 Node/OS 权限限制。
+23. 市场不可用不影响已安装插件和聊天功能。
+24. withdrawn/blocked 状态从 catalog 元数据展示并阻止新安装/重新启用，离线不静默删除已安装插件。
+25. 插件代码不进入 Electron main、preload 或 renderer。
+26. Draft/live 使用相同 marketplace extension set 和 generation。
+27. 页面、endpoint settings、service、validator、installer、reconciler、IPC、source policy 和 worker rollback 有 focused tests。
+28. `desktop-controlled-extensions-spec.md` 与 `node-sidecar-per-thread-spec.md` 已同步修订，不再保留冲突 normative requirements。
+29. Desktop typecheck、根 `npm run check` 和 `git diff --check` 通过。
 
 ## 24. 后续演进
 

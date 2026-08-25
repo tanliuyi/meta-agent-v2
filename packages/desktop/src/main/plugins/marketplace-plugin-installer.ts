@@ -21,6 +21,7 @@ import {
 import type { MarketplaceEndpointSettingsService } from "./marketplace-endpoint-settings-service.ts";
 import { appendMarketplaceRuntimeQuery, readBoundedJsonResponse } from "./marketplace-http.ts";
 import {
+  isMarketplacePluginOwned,
   markMarketplaceVersionInactive,
   validateInstalledMarketplacePlugin,
   writeMarketplaceProjection,
@@ -75,7 +76,7 @@ export class MarketplacePluginInstaller {
   private readonly endpoints: MarketplaceEndpointSettingsService;
   private readonly registry: MarketplacePluginRegistry;
   private readonly lockDirectory: string;
-  private readonly agentDir: string;
+  private readonly marketplaceRoot: string;
   private readonly desktopVersion: string;
   private readonly runtime: RuntimeCompatibility;
   private readonly fetchImpl: typeof fetch;
@@ -94,7 +95,7 @@ export class MarketplacePluginInstaller {
     endpoints: MarketplaceEndpointSettingsService,
     registry: MarketplacePluginRegistry,
     lockDirectory: string,
-    agentDir: string,
+    marketplaceRoot: string,
     desktopVersion: string,
     runtime: RuntimeCompatibility,
     options: InstallerOptions = {},
@@ -102,7 +103,7 @@ export class MarketplacePluginInstaller {
     this.endpoints = endpoints;
     this.registry = registry;
     this.lockDirectory = lockDirectory;
-    this.agentDir = agentDir;
+    this.marketplaceRoot = marketplaceRoot;
     this.desktopVersion = desktopVersion;
     this.runtime = runtime;
     this.fetchImpl = options.fetch ?? fetch;
@@ -152,7 +153,10 @@ export class MarketplacePluginInstaller {
     const initial = await this.registry.getSnapshot();
     if (initial.revision !== input.expectedRevision) return { status: "conflict", current: initial };
     if (initial.plugins.some((plugin) => plugin.id === input.pluginId)) {
-      const result = { status: "already-installed", snapshot: initial } as const;
+      const result = {
+        status: "already-installed",
+        snapshot: initial,
+      } as const;
       this.completedInstalls.set(input.requestId, result);
       return result;
     }
@@ -161,9 +165,9 @@ export class MarketplacePluginInstaller {
     const artifact = await this.selectArtifact(endpoint.apiRoot, input.pluginId, input.version);
     const download = await this.getDownloadMetadata(endpoint.apiRoot, artifact, input.pluginId, input.version);
     const artifactUrl = validateArtifactUrl(download.url);
-    const rootPath = join(this.agentDir, "extensions", input.pluginId);
+    const rootPath = join(this.marketplaceRoot, input.pluginId);
     const versionPath = join(rootPath, ".versions", artifact.sha256);
-    const stagingPath = createStagingPath(this.agentDir, input.pluginId, this.createId());
+    const stagingPath = createStagingPath(this.marketplaceRoot, input.pluginId, this.createId());
     await prepareStagingPath(stagingPath);
     let rootCreated = false;
     let versionCreated = false;
@@ -204,7 +208,7 @@ export class MarketplacePluginInstaller {
         rootPath,
       };
       const versionExists = await pathExists(versionPath);
-      if (versionExists) await validateInstalledMarketplacePlugin(record, join(this.agentDir, "extensions"));
+      if (versionExists) await validateInstalledMarketplacePlugin(record, this.marketplaceRoot);
       await mkdir(rootPath, { recursive: true, mode: 0o700 });
       await mkdir(dirname(versionPath), { recursive: true, mode: 0o700 });
       if (versionExists) {
@@ -227,7 +231,10 @@ export class MarketplacePluginInstaller {
       }
       registryCommitted = true;
       await writeMarketplaceProjection(record);
-      const result: InstallMarketplacePluginResult = { status: "installed", snapshot: saved.snapshot };
+      const result: InstallMarketplacePluginResult = {
+        status: "installed",
+        snapshot: saved.snapshot,
+      };
       this.completedInstalls.set(input.requestId, result);
       return result;
     } catch (error) {
@@ -268,12 +275,22 @@ export class MarketplacePluginInstaller {
     }
     const before = initial.plugins.find((plugin) => plugin.id === input.pluginId);
     if (!before) {
-      const result = { status: "not-installed", snapshot: await this.registry.getSnapshot() } as const;
+      const result = {
+        status: "not-installed",
+        snapshot: await this.registry.getSnapshot(),
+      } as const;
       this.completedUpdates.set(input.requestId, result);
       return result;
     }
+    if (before.state === "broken") {
+      throw new Error("Broken marketplace plugins must be uninstalled before reinstalling");
+    }
+    await validateInstalledMarketplacePlugin(before, this.marketplaceRoot);
     if (before.version === input.version) {
-      const result = { status: "same-version", snapshot: await this.registry.getSnapshot() } as const;
+      const result = {
+        status: "same-version",
+        snapshot: await this.registry.getSnapshot(),
+      } as const;
       this.completedUpdates.set(input.requestId, result);
       return result;
     }
@@ -283,7 +300,7 @@ export class MarketplacePluginInstaller {
     const artifactUrl = validateArtifactUrl(download.url);
     const rootPath = before.rootPath;
     const versionPath = join(rootPath, ".versions", artifact.sha256);
-    const stagingPath = createStagingPath(this.agentDir, input.pluginId, this.createId());
+    const stagingPath = createStagingPath(this.marketplaceRoot, input.pluginId, this.createId());
     await prepareStagingPath(stagingPath);
     let versionCreated = false;
     let registryCommitted = false;
@@ -319,7 +336,7 @@ export class MarketplacePluginInstaller {
         entryPath: resolve(versionPath, entryRelative),
       };
       const versionExists = await pathExists(versionPath);
-      if (versionExists) await validateInstalledMarketplacePlugin(after, join(this.agentDir, "extensions"));
+      if (versionExists) await validateInstalledMarketplacePlugin(after, this.marketplaceRoot);
       if (versionExists) {
         await rm(stagingPath, { recursive: true, force: true });
       } else {
@@ -334,14 +351,21 @@ export class MarketplacePluginInstaller {
       if (saved.status !== "saved") {
         await cleanupUncommittedInstall(rootPath, versionPath, versionCreated, false);
         if (saved.status === "conflict") return { status: "conflict", current: saved.snapshot };
-        const result = { status: "not-installed", snapshot: saved.snapshot } as const;
+        const result = {
+          status: "not-installed",
+          snapshot: saved.snapshot,
+        } as const;
         this.completedUpdates.set(input.requestId, result);
         return result;
       }
       registryCommitted = true;
       await markMarketplaceVersionInactive(before, this.now());
       await writeMarketplaceProjection(after);
-      const result = { status: "updated", snapshot: saved.snapshot, reloadRequired: true } as const;
+      const result = {
+        status: "updated",
+        snapshot: saved.snapshot,
+        reloadRequired: true,
+      } as const;
       this.completedUpdates.set(input.requestId, result);
       return result;
     } catch (error) {
@@ -382,32 +406,45 @@ export class MarketplacePluginInstaller {
     }
     const record = initial.plugins.find((plugin) => plugin.id === input.pluginId);
     if (!record) {
-      const result = { status: "not-installed", snapshot: await this.registry.getSnapshot() } as const;
-      this.completedUninstalls.set(input.requestId, result);
-      return result;
-    }
-    const saved = await this.registry.commitUninstall(input.expectedRevision, input.pluginId);
-    if (saved.status === "conflict") return { status: "conflict", current: saved.snapshot };
-    if (saved.status === "not-installed") {
-      const result = { status: "not-installed", snapshot: saved.snapshot } as const;
-      this.completedUninstalls.set(input.requestId, result);
-      return result;
-    }
-    try {
-      const uninstalledAt = this.now();
-      await markMarketplaceVersionInactive(record, uninstalledAt);
-      await writeMarketplaceUninstallTombstone(record, `uninstall-${input.requestId}`, uninstalledAt);
-    } catch {
       const result = {
-        status: "uninstalled",
-        snapshot: saved.snapshot,
-        reloadRequired: true,
-        recoveryPending: true,
+        status: "not-installed",
+        snapshot: await this.registry.getSnapshot(),
       } as const;
       this.completedUninstalls.set(input.requestId, result);
       return result;
     }
-    const result = { status: "uninstalled", snapshot: saved.snapshot, reloadRequired: true } as const;
+    const owned = await isMarketplacePluginOwned(record);
+    const saved = await this.registry.commitUninstall(input.expectedRevision, input.pluginId);
+    if (saved.status === "conflict") return { status: "conflict", current: saved.snapshot };
+    if (saved.status === "not-installed") {
+      const result = {
+        status: "not-installed",
+        snapshot: saved.snapshot,
+      } as const;
+      this.completedUninstalls.set(input.requestId, result);
+      return result;
+    }
+    if (owned) {
+      try {
+        const uninstalledAt = this.now();
+        await markMarketplaceVersionInactive(record, uninstalledAt);
+        await writeMarketplaceUninstallTombstone(record, `uninstall-${input.requestId}`, uninstalledAt);
+      } catch {
+        const result = {
+          status: "uninstalled",
+          snapshot: saved.snapshot,
+          reloadRequired: true,
+          recoveryPending: true,
+        } as const;
+        this.completedUninstalls.set(input.requestId, result);
+        return result;
+      }
+    }
+    const result = {
+      status: "uninstalled",
+      snapshot: saved.snapshot,
+      reloadRequired: true,
+    } as const;
     this.completedUninstalls.set(input.requestId, result);
     return result;
   }
@@ -477,7 +514,9 @@ export class MarketplacePluginInstaller {
     try {
       const response = await this.fetchImpl(url, {
         method: "GET",
-        headers: { accept: "application/vnd.meta-agent.plugin+zip, application/zip" },
+        headers: {
+          accept: "application/vnd.meta-agent.plugin+zip, application/zip",
+        },
         redirect: "error",
         signal: controller.signal,
       });
@@ -630,9 +669,9 @@ async function cleanupUncommittedInstall(
   }
 }
 
-function createStagingPath(agentDir: string, pluginId: string, id: string): string {
+function createStagingPath(marketplaceRoot: string, pluginId: string, id: string): string {
   if (!REQUEST_ID.test(id)) throw new Error("Marketplace staging ID is invalid");
-  return join(agentDir, "extensions", ".meta-agent-marketplace-staging", `${pluginId}-${id}`);
+  return join(marketplaceRoot, ".meta-agent-marketplace-staging", `${pluginId}-${id}`);
 }
 
 async function prepareStagingPath(path: string): Promise<void> {

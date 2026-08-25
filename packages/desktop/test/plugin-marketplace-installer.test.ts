@@ -73,7 +73,7 @@ describe("MarketplacePluginInstaller", () => {
       harness.endpoints as never,
       new MarketplacePluginRegistry(harness.userDataDir),
       join(harness.userDataDir, "plugins", "locks"),
-      harness.agentDir,
+      join(harness.agentDir, "extensions"),
       "0.0.31",
       runtime,
       { fetch: vi.fn() },
@@ -89,7 +89,9 @@ describe("MarketplacePluginInstaller", () => {
   });
 
   it("omits empty runtime compatibility values from artifact requests", async () => {
-    const harness = await createHarness({ runtimeCompatibility: { ...runtime, toolchain: "" } });
+    const harness = await createHarness({
+      runtimeCompatibility: { ...runtime, toolchain: "" },
+    });
     const initial = await harness.registry.getSnapshot();
 
     await expect(
@@ -191,10 +193,37 @@ describe("MarketplacePluginInstaller", () => {
     expect(downgraded).toEqual(
       expect.objectContaining({
         status: "updated",
-        snapshot: expect.objectContaining({ plugins: [expect.objectContaining({ version: "1.0.0" })] }),
+        snapshot: expect.objectContaining({
+          plugins: [expect.objectContaining({ version: "1.0.0" })],
+        }),
       }),
     );
     await expect(readFile(join(pluginRoot, "index.ts"), "utf8")).resolves.toContain(harness.artifactHash);
+  });
+
+  it("rejects updates for quarantined plugins until they are uninstalled", async () => {
+    const harness = await createHarness();
+    const initial = await harness.registry.getSnapshot();
+    const installed = await harness.installer.install({
+      requestId: "install-before-quarantine",
+      expectedRevision: initial.revision,
+      pluginId: "dev.meta-agent.example-tools",
+      version: "1.0.0",
+      confirmFullTrust: true,
+    });
+    if (installed.status !== "installed") throw new Error("Expected installation to succeed");
+    await harness.registry.markBroken("dev.meta-agent.example-tools", harness.artifactHash);
+    const broken = await harness.registry.getSnapshot();
+
+    await expect(
+      harness.installer.update({
+        requestId: "update-quarantined",
+        expectedRevision: broken.revision,
+        pluginId: "dev.meta-agent.example-tools",
+        version: "2.0.0",
+        confirmFullTrust: true,
+      }),
+    ).rejects.toThrow("must be uninstalled before reinstalling");
   });
 
   it("uninstalls through the registry commit point while retaining immutable files", async () => {
@@ -224,7 +253,9 @@ describe("MarketplacePluginInstaller", () => {
       }),
     );
     const pluginRoot = join(harness.agentDir, "extensions", "dev.meta-agent.example-tools");
-    await expect(readFile(join(pluginRoot, "index.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(pluginRoot, "index.ts"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(readFile(join(pluginRoot, ".meta-agent-market.json"), "utf8")).resolves.toContain(
       '"state": "uninstalled"',
     );
@@ -297,7 +328,9 @@ describe("MarketplacePluginInstaller", () => {
     ).resolves.toEqual(expect.objectContaining({ status: "installed", recoveryPending: true }));
 
     await expect(harness.registry.getSnapshot()).resolves.toEqual(
-      expect.objectContaining({ plugins: [expect.objectContaining({ id: "dev.meta-agent.example-tools" })] }),
+      expect.objectContaining({
+        plugins: [expect.objectContaining({ id: "dev.meta-agent.example-tools" })],
+      }),
     );
     await expect(
       readFile(
@@ -580,8 +613,14 @@ describe("MarketplacePluginInstaller", () => {
     if (!releaseEndpoint) throw new Error("endpoint gate was not initialized");
     releaseEndpoint(endpoint);
     const [firstResult, secondResult] = await Promise.all([first, second]);
-    expect(firstResult).toMatchObject({ status: "fulfilled", value: { status: "installed" } });
-    expect(secondResult).toMatchObject({ status: "rejected", error: expect.any(Error) });
+    expect(firstResult).toMatchObject({
+      status: "fulfilled",
+      value: { status: "installed" },
+    });
+    expect(secondResult).toMatchObject({
+      status: "rejected",
+      error: expect.any(Error),
+    });
   });
 
   it("installs without signature metadata", async () => {
@@ -615,7 +654,11 @@ async function createHarness(
   const agentDir = join(root, "agent");
   await mkdir(agentDir, { recursive: true });
   const harnessRuntime = options.runtimeCompatibility ?? runtime;
-  const target = { platform: "universal", arch: "universal", piVersion: harnessRuntime.piVersion };
+  const target = {
+    platform: "universal",
+    arch: "universal",
+    piVersion: harnessRuntime.piVersion,
+  };
   const buildArtifact = (version: string) => {
     const artifactId = `example-tools-${version}-universal`;
     const payload = Buffer.from(
@@ -668,7 +711,14 @@ async function createHarness(
     const sha256 = options.artifactKey ?? createHash("sha256").update(archive).digest("hex");
     const downloadEndpoint = `https://market.test/v1/plugins/dev.meta-agent.example-tools/versions/${version}/artifacts/${artifactId}/download`;
     const artifactUrl = `https://artifacts.test/${artifactId}.meta-plugin`;
-    return { version, artifactId, archive, sha256, downloadEndpoint, artifactUrl };
+    return {
+      version,
+      artifactId,
+      archive,
+      sha256,
+      downloadEndpoint,
+      artifactUrl,
+    };
   };
   const artifacts = new Map(["1.0.0", "2.0.0"].map((version) => [version, buildArtifact(version)]));
   const artifactHash = artifacts.get("1.0.0")!.sha256;
@@ -719,12 +769,14 @@ async function createHarness(
   const endpoints = {
     getActiveEndpoint: vi.fn(async () => trustedEndpoint),
   };
-  const registry = new MarketplacePluginRegistry(userDataDir, { createId: () => "registry-revision" });
+  const registry = new MarketplacePluginRegistry(userDataDir, {
+    createId: () => "registry-revision",
+  });
   const installer = new MarketplacePluginInstaller(
     endpoints as never,
     registry,
     join(userDataDir, "plugins", "locks"),
-    agentDir,
+    join(agentDir, "extensions"),
     "0.0.31",
     harnessRuntime,
     {

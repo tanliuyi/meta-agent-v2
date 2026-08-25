@@ -4,36 +4,52 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const captured = vi.hoisted(() => ({
   cancel: vi.fn(),
+  setText: vi.fn(),
+  composerText: "",
+  placeholder: undefined as string | undefined,
   onKeyDownCapture: undefined as ((event: KeyboardEvent<HTMLDivElement>) => void) | undefined,
 }));
 
 vi.mock("@assistant-ui/react", () => ({
   unstable_useTriggerPopoverAriaProps: () => ({}),
+  unstable_useTriggerPopoverTriggers: () => new Map(),
   useAui: () => ({
-    composer: () => ({ cancel: captured.cancel }),
+    composer: () => ({
+      cancel: captured.cancel,
+      getState: () => ({ text: captured.composerText }),
+      setText: (text: string) => {
+        captured.composerText = text;
+        captured.setText(text);
+      },
+    }),
     thread: () => ({ getState: () => ({ capabilities: { attachments: false } }) }),
   }),
   useAuiState: (
     selector: (state: {
       thread: { isDisabled: boolean };
-      composer: { dictation: { inputDisabled: boolean } | undefined };
+      composer: { dictation: { inputDisabled: boolean } | undefined; text: string };
     }) => unknown,
-  ) => selector({ thread: { isDisabled: false }, composer: { dictation: undefined } }),
+  ) => selector({ thread: { isDisabled: false }, composer: { dictation: undefined, text: captured.composerText } }),
 }));
 
 vi.mock("@assistant-ui/react-lexical", () => ({
   LexicalComposerInput: ({
     onKeyDownCapture,
+    placeholder,
   }: {
     onKeyDownCapture?: (event: KeyboardEvent<HTMLDivElement>) => void;
+    placeholder?: string;
   }) => {
     captured.onKeyDownCapture = onKeyDownCapture;
+    captured.placeholder = placeholder;
     return null;
   },
 }));
 
 vi.mock("../src/renderer/src/components/chat/composer/composer-command-trigger.tsx", () => ({
   ComposerCommandTrigger: () => null,
+  slashCommandText: (command: { name: string }, args: string) =>
+    `/${command.name}${args.trim() ? ` ${args.trim()}` : ""}`,
 }));
 
 vi.mock("../src/renderer/src/components/chat/composer/composer-file-trigger.tsx", () => ({
@@ -41,6 +57,7 @@ vi.mock("../src/renderer/src/components/chat/composer/composer-file-trigger.tsx"
 }));
 
 import {
+  acceptHighlightedCommandOnSpace,
   ComposerInput,
   syncFocusedComposerInput,
 } from "../src/renderer/src/components/chat/composer/composer-input.tsx";
@@ -48,6 +65,9 @@ import {
 describe("ComposerInput", () => {
   beforeEach(() => {
     captured.cancel.mockClear();
+    captured.setText.mockClear();
+    captured.composerText = "";
+    captured.placeholder = undefined;
     captured.onKeyDownCapture = undefined;
   });
 
@@ -89,6 +109,55 @@ describe("ComposerInput", () => {
     expect(attributes.has("aria-activedescendant")).toBe(false);
   });
 
+  it("命令面板打开时以普通空格接受当前高亮命令", () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handleKeyDown = vi.fn().mockReturnValue(true);
+    const event = {
+      key: " ",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefault,
+      stopPropagation,
+    };
+
+    expect(acceptHighlightedCommandOnSpace(event, true, true, { handleKeyDown })).toBe(true);
+    expect(handleKeyDown).toHaveBeenCalledWith({
+      key: "Enter",
+      shiftKey: false,
+      preventDefault: expect.any(Function),
+    });
+    const forwarded = handleKeyDown.mock.calls[0]?.[0] as { preventDefault(): void };
+    forwarded.preventDefault();
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(stopPropagation).toHaveBeenCalledOnce();
+
+    expect(acceptHighlightedCommandOnSpace({ ...event, ctrlKey: true }, true, true, { handleKeyDown })).toBe(false);
+    expect(acceptHighlightedCommandOnSpace(event, false, true, { handleKeyDown })).toBe(false);
+  });
+
+  it("命令面板无匹配项时保留普通空格输入", () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const handleKeyDown = vi.fn();
+    const event = {
+      key: " ",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      preventDefault,
+      stopPropagation,
+    };
+
+    expect(acceptHighlightedCommandOnSpace(event, true, false, { handleKeyDown })).toBe(false);
+    expect(handleKeyDown).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(stopPropagation).not.toHaveBeenCalled();
+  });
+
   it("提交普通 Enter 时消费原生事件，避免 Lexical 插入换行", () => {
     const onSubmit = vi.fn();
     const onSubmitRunning = vi.fn();
@@ -96,11 +165,13 @@ describe("ComposerInput", () => {
       <ComposerInput
         projectId={undefined}
         commands={[]}
+        selectedCommand={null}
         mode="session"
         isRunning={false}
         isCancelable={false}
         materializing={false}
         onCommandSelect={() => undefined}
+        onCommandClear={() => undefined}
         onSubmit={onSubmit}
         onSubmitRunning={onSubmitRunning}
         onEscapeCancelPendingChange={() => undefined}
@@ -139,11 +210,13 @@ describe("ComposerInput", () => {
       <ComposerInput
         projectId={undefined}
         commands={[]}
+        selectedCommand={null}
         mode="session"
         isRunning={true}
         isCancelable={true}
         materializing={false}
         onCommandSelect={() => undefined}
+        onCommandClear={() => undefined}
         onSubmit={() => undefined}
         onSubmitRunning={() => undefined}
         onEscapeCancelPendingChange={onEscapeCancelPendingChange}
@@ -173,5 +246,59 @@ describe("ComposerInput", () => {
     pressEscape();
     expect(onEscapeCancelPendingChange).toHaveBeenLastCalledWith(false);
     expect(captured.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("空参数命令通过 Backspace 或第二个空格还原为普通文本", () => {
+    const onCommandClear = vi.fn();
+    const html = renderToStaticMarkup(
+      <ComposerInput
+        projectId={undefined}
+        commands={[]}
+        selectedCommand={{ name: "review", description: "Review the current changes", source: "extension" }}
+        mode="session"
+        isRunning={false}
+        isCancelable={false}
+        materializing={false}
+        onCommandSelect={() => undefined}
+        onCommandClear={onCommandClear}
+        onSubmit={() => undefined}
+        onSubmitRunning={() => undefined}
+        onEscapeCancelPendingChange={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("/review");
+    expect(html).toContain("移除命令 /review");
+    expect(captured.placeholder).toBe("Review the current changes");
+
+    const handler = captured.onKeyDownCapture;
+    if (!handler) throw new Error("Composer input key handler was not rendered");
+    const press = (key: string) => {
+      const preventDefault = vi.fn();
+      const stopPropagation = vi.fn();
+      handler({
+        key,
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        preventDefault,
+        stopPropagation,
+        nativeEvent: { isComposing: false },
+      } as unknown as KeyboardEvent<HTMLDivElement>);
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(stopPropagation).toHaveBeenCalledOnce();
+    };
+
+    press("Backspace");
+    expect(captured.setText).toHaveBeenLastCalledWith("/review");
+    expect(onCommandClear).toHaveBeenCalledOnce();
+
+    captured.composerText = "";
+    captured.setText.mockClear();
+    onCommandClear.mockClear();
+    press(" ");
+    expect(captured.setText).toHaveBeenLastCalledWith("/review");
+    expect(onCommandClear).toHaveBeenCalledOnce();
   });
 });

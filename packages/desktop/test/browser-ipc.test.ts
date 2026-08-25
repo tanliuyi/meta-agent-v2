@@ -40,6 +40,8 @@ describe("browser IPC", () => {
     getSettingsSnapshot: vi.fn(),
     saveSettings: vi.fn(),
     retireSession: vi.fn(),
+    acquireSession: vi.fn(),
+    releaseOwner: vi.fn(),
     clearSessionData: vi.fn(),
     clearAllData: vi.fn(),
     browserHistory: vi.fn(),
@@ -110,6 +112,7 @@ describe("browser IPC", () => {
     expect(electron.handles.has(CHANNELS.browserSettingsGet)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserSettingsSave)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserSessionRetire)).toBe(true);
+    expect(electron.handles.has(CHANNELS.browserSessionAcquire)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserClearData)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserClearAllData)).toBe(true);
     expect(electron.handles.has(CHANNELS.browserHistory)).toBe(true);
@@ -222,11 +225,29 @@ describe("browser IPC", () => {
     expect(browser.saveSettings).toHaveBeenCalledWith(saveInput);
   });
 
-  test("会话退役/清数据/全量清数据透传会话身份", async () => {
-    await electron.handles.get(CHANNELS.browserSessionRetire)?.({}, IDENTITY);
+  test("会话 owner 获取、退役和 renderer 销毁清理均使用 sender identity", async () => {
+    const destroyedListeners: Array<() => void> = [];
+    const sender = {
+      id: 77,
+      once: vi.fn((event: string, listener: () => void) => {
+        if (event === "destroyed") destroyedListeners.push(listener);
+      }),
+    };
+
+    await electron.handles.get(CHANNELS.browserSessionAcquire)?.({ sender }, IDENTITY);
+    await electron.handles.get(CHANNELS.browserSessionAcquire)?.({ sender }, IDENTITY);
+    await electron.handles.get(CHANNELS.browserSessionRetire)?.({ sender }, IDENTITY);
+
+    expect(browser.acquireSession).toHaveBeenCalledTimes(2);
+    expect(browser.acquireSession).toHaveBeenCalledWith(IDENTITY, 77);
+    expect(browser.retireSession).toHaveBeenCalledWith(IDENTITY, 77);
+    expect(sender.once).toHaveBeenCalledTimes(1);
+
+    destroyedListeners[0]?.();
+    expect(browser.releaseOwner).toHaveBeenCalledWith(77);
+
     await electron.handles.get(CHANNELS.browserClearData)?.({}, IDENTITY);
     await electron.handles.get(CHANNELS.browserClearAllData)?.({});
-    expect(browser.retireSession).toHaveBeenCalledWith(IDENTITY);
     expect(browser.clearSessionData).toHaveBeenCalledWith(IDENTITY);
     expect(browser.clearAllData).toHaveBeenCalledOnce();
   });

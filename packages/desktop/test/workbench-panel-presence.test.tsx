@@ -242,6 +242,7 @@ describe("OpenWorkbenchPanel presence", () => {
 
     expect(markup.indexOf("新建 Panel")).toBeGreaterThan(-1);
     expect(markup.indexOf("进入全屏")).toBeGreaterThan(markup.indexOf("新建 Panel"));
+    expect(markup).toMatch(/lucide-maximize[^\"]*size-3\.5!/);
   });
 
   it("reflects the fullscreen state on the panel tab bar button", () => {
@@ -261,5 +262,6 @@ describe("OpenWorkbenchPanel presence", () => {
 
     expect(markup).toContain("退出全屏");
     expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toMatch(/lucide-minimize[^\"]*size-3\.5!/);
   });
 });
