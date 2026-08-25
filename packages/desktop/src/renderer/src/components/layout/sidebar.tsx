@@ -88,13 +88,7 @@ export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: 
         } as CSSProperties
       }
     >
-      {floating ? (
-        <div className="sidebar-toggle-row">{/* <SidebarToggle location="sidebar" floating /> */}</div>
-      ) : window.desktop.platform === "darwin" ? (
-        <div className="macos-titlebar-space">
-          <SidebarToggle location="sidebar" />
-        </div>
-      ) : null}
+      {floating ? <div className="sidebar-toggle-row" /> : null}
       {floating ? null : (
         <div
           ref={resize.separatorRef}

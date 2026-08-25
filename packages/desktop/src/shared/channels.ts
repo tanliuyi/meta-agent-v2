@@ -49,6 +49,8 @@ export const CHANNELS = {
   filesList: "desktop:files:list",
   filesRead: "desktop:files:read",
   filesReadImage: "desktop:files:read-image",
+  filesPreviewOfficeDocument: "desktop:files:preview-office-document",
+  filesCancelOfficeDocumentPreview: "desktop:files:cancel-office-document-preview",
   filesResolvePath: "desktop:files:resolve-path",
   filesOpen: "desktop:files:open",
   filesWatch: "desktop:files:watch",

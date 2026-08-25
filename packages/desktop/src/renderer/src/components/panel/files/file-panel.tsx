@@ -11,7 +11,7 @@ import Search from "lucide-react/dist/esm/icons/search.mjs";
 import WrapText from "lucide-react/dist/esm/icons/wrap-text.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { FileImage, FileNode, TextFile } from "../../../../../shared/contracts.ts";
+import type { FileImage, FileNode, OfficeDocumentPreview, TextFile } from "../../../../../shared/contracts.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
 import { ContextMenuContent } from "../../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../../shared/ui/context-menu-item.tsx";
@@ -21,6 +21,7 @@ import { useSessionScope, useSessionWorkbench } from "../../session-context.tsx"
 import {
   closeWorkbenchFile,
   isImagePath,
+  isOfficeDocumentPath,
   missingExpandedDirectories,
   openWorkbenchFilePatch,
   parentPath,
@@ -31,6 +32,13 @@ import { highlightFileCode } from "./file-highlight-client.ts";
 import { FilePathBreadcrumb } from "./file-path-breadcrumb.tsx";
 import { FilePreview } from "./file-preview.tsx";
 import { FileTree } from "./file-tree.tsx";
+import {
+  activeFileChange,
+  emptyFileTreeData,
+  removeLoadedFileTreeDirectory,
+  replaceFileTreeDirectory,
+} from "./file-tree-data.ts";
+import { OfficeDocumentPreview as OfficeDocumentPreviewFrame } from "./office-document-preview.tsx";
 
 const FILE_SEARCH_DELAY = 180;
 /** 超过该字符数的文件跳过语法高亮（对齐 VS Code largeFileOptimizations）。 */
@@ -53,11 +61,12 @@ export function FilePanel() {
   const fileWrap = workbench?.fileWrapMode ?? false;
   const fileMarkdownPreview = workbench?.fileMarkdownPreview ?? false;
   const isMarkdown = /\.(md|markdown)$/iu.test(activeFile ?? "");
+  const isOfficeDocument = isOfficeDocumentPath(activeFile ?? "");
   const fileTreeContentId = useId();
   const [query, setQuery] = useState("");
-  const [roots, setRoots] = useState<FileNode[]>([]);
-  const [children, setChildren] = useState<Record<string, FileNode[]>>({});
-  const [file, setFile] = useState<TextFile | FileImage | null>(null);
+  const [tree, setTree] = useState(emptyFileTreeData);
+  const { roots, children } = tree;
+  const [file, setFile] = useState<TextFile | FileImage | OfficeDocumentPreview | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
@@ -72,6 +81,7 @@ export function FilePanel() {
   const workspace = useRef<HTMLDivElement>(null);
   const tabsListRef = useRef<HTMLDivElement>(null);
   const activeProjectId = useRef(projectId);
+  const queryRef = useRef(query);
   const directoryRequests = useRef(new Map<string, Promise<FileNode[]>>());
   const childrenRef = useRef<Record<string, FileNode[]>>({});
   const activeFileRef = useRef<string | null>(null);
@@ -91,6 +101,7 @@ export function FilePanel() {
     },
   });
   activeProjectId.current = projectId;
+  queryRef.current = query;
 
   useEffect(() => {
     const tabs = tabsListRef.current;
@@ -110,8 +121,7 @@ export function FilePanel() {
   }, []);
 
   useEffect(() => {
-    setRoots([]);
-    setChildren({});
+    setTree(emptyFileTreeData());
     setFile(null);
     setTreeError(null);
     setFileError(null);
@@ -122,7 +132,7 @@ export function FilePanel() {
     const generation = ++treeGeneration.current;
     setTreeError(null);
     if (!projectId) {
-      setRoots([]);
+      setTree((current) => replaceFileTreeDirectory(current, "", []));
       setTreeLoading(false);
       return;
     }
@@ -132,7 +142,9 @@ export function FilePanel() {
         void window.desktop.files
           .list(projectId, "", query, "file-panel-root")
           .then((items) => {
-            if (generation === treeGeneration.current) setRoots(items);
+            if (generation === treeGeneration.current) {
+              setTree((current) => replaceFileTreeDirectory(current, "", items));
+            }
           })
           .catch((value: unknown) => {
             if (generation === treeGeneration.current) setTreeError(errorMessage(value));
@@ -154,9 +166,11 @@ export function FilePanel() {
       return;
     }
     setFile(null);
-    const request = isImagePath(activeFile)
-      ? window.desktop.files.readImage(projectId, activeFile)
-      : window.desktop.files.read(projectId, activeFile);
+    const request = isOfficeDocumentPath(activeFile)
+      ? window.desktop.files.previewOfficeDocument(projectId, activeFile)
+      : isImagePath(activeFile)
+        ? window.desktop.files.readImage(projectId, activeFile)
+        : window.desktop.files.read(projectId, activeFile);
     void request
       .then((value) => {
         if (generation === fileGeneration.current) setFile(value);
@@ -164,12 +178,16 @@ export function FilePanel() {
       .catch((value: unknown) => {
         if (generation === fileGeneration.current) setFileError(errorMessage(value));
       });
+    return () => {
+      if (generation === fileGeneration.current) fileGeneration.current += 1;
+      if (isOfficeDocumentPath(activeFile)) void window.desktop.files.cancelOfficeDocumentPreview();
+    };
   }, [activeFile, fileRevision, projectId]);
 
   useEffect(() => {
     const generation = ++highlightGeneration.current;
     setHighlight(null);
-    if (!file || "dataUrl" in file) return;
+    if (!file || "dataUrl" in file || "html" in file) return;
     // 大文件降级：跳过 Shiki 全量 tokenize（对齐 VS Code largeFileOptimizations）。
     if (file.content.length > LARGE_FILE_HIGHLIGHT_CHARS) return;
     void highlightFileCode(file.content, file.language, SHIKI_THEMES).then((tokens) => {
@@ -194,6 +212,7 @@ export function FilePanel() {
         </div>
       );
     }
+    if ("html" in file) return <OfficeDocumentPreviewFrame preview={file} />;
     if (fileMarkdownPreview && isMarkdown) {
       return (
         <div className="file-preview-markdown">
@@ -226,13 +245,21 @@ export function FilePanel() {
       if (!projectId) return;
       const existing = directoryRequests.current.get(path);
       if (!force && (existing || childrenRef.current[path] !== undefined)) return;
-      const created = window.desktop.files.list(projectId, path, "", `file-panel-directory:${path}`);
+      const requestQuery = path === "" ? queryRef.current : "";
+      const created = window.desktop.files.list(
+        projectId,
+        path,
+        requestQuery,
+        path === "" ? "file-panel-root" : `file-panel-directory:${path}`,
+      );
+      if (path === "") treeGeneration.current += 1;
       directoryRequests.current.set(path, created);
       try {
         const items = await created;
         if (activeProjectId.current !== projectId) return;
         if (directoryRequests.current.get(path) !== created) return;
-        setChildren((current) => ({ ...current, [path]: items }));
+        if (path === "" && queryRef.current !== requestQuery) return;
+        setTree((current) => replaceFileTreeDirectory(current, path, items));
       } catch (value) {
         if (activeProjectId.current === projectId && directoryRequests.current.get(path) === created) {
           setTreeError(errorMessage(value));
@@ -253,8 +280,12 @@ export function FilePanel() {
   useEffect(() => {
     if (!projectId) return;
     const unsubscribe = window.desktop.files.onChanged(projectId, (change) => {
-      if (activeFileRef.current && change.updated.includes(activeFileRef.current)) {
-        setFileRevision((revision) => revision + 1);
+      const activePath = activeFileRef.current;
+      const activeChange = activePath ? activeFileChange(change, activePath) : null;
+      if (activeChange === "reload") setFileRevision((revision) => revision + 1);
+      if (activeChange === "deleted") {
+        setFile(null);
+        setFileError("文件已被删除");
       }
       const loaded = new Set<string>(["", ...Object.keys(childrenRef.current)]);
       const affected = new Set<string>();
@@ -267,11 +298,7 @@ export function FilePanel() {
         if (loaded.has(dir)) affected.add(dir);
         if (loaded.has(path)) {
           // 已展开目录本身被删除：清理其缓存并刷新父目录。
-          setChildren((current) => {
-            const next = { ...current };
-            delete next[path];
-            return next;
-          });
+          setTree((current) => removeLoadedFileTreeDirectory(current, path));
           const parent = parentPath(path);
           if (loaded.has(parent)) affected.add(parent);
         }
@@ -529,7 +556,7 @@ export function FilePanel() {
                   <Eye size={14} aria-hidden="true" />
                 </TooltipIconButton>
               ) : null}
-              {isMarkdown && fileMarkdownPreview ? null : (
+              {isOfficeDocument || (isMarkdown && fileMarkdownPreview) ? null : (
                 <TooltipIconButton
                   className="file-wrap-toggle"
                   tooltip={fileWrap ? "关闭换行" : "开启换行"}

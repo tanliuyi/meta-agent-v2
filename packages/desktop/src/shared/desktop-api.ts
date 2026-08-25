@@ -53,6 +53,7 @@ import type {
   FileImage,
   FileNode,
   HostResponse,
+  OfficeDocumentPreview,
   OpenLinkResult,
   Project,
   SessionAttachInput,
@@ -312,6 +313,8 @@ export interface DesktopApi {
     list(projectId: string, path?: string, query?: string, requestGroup?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
     readImage(projectId: string, path: string): Promise<FileImage>;
+    previewOfficeDocument(projectId: string, path: string): Promise<OfficeDocumentPreview>;
+    cancelOfficeDocumentPreview(): Promise<void>;
     resolvePath(projectId: string, path: string): Promise<string>;
     open(projectId: string, path: string): Promise<void>;
     watch(projectId: string): Promise<void>;

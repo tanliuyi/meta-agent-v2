@@ -14,11 +14,11 @@
   );
 }
 
-.app-frame[data-platform="win32"] {
+.app-frame:is([data-platform="win32"], [data-platform="darwin"]) {
   grid-template-rows: var(--layout-window-header-height) minmax(0, 1fr);
 }
 
-.windows-header {
+.desktop-header {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   display: flex;
@@ -29,7 +29,7 @@
   user-select: none;
 }
 
-.windows-header-title {
+.desktop-header-title {
   -webkit-app-region: drag;
   app-region: drag;
   display: flex;
@@ -43,11 +43,15 @@
   font-size: var(--type-size-control);
 }
 
-.windows-header-title > .sidebar-toggle {
+.app-frame[data-platform="darwin"] .desktop-header-title {
+  padding-left: 92px;
+}
+
+.desktop-header-title > .sidebar-toggle {
   flex: 0 0 24px;
 }
 
-.windows-session-tabs {
+.desktop-session-tabs {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   display: flex;
@@ -58,7 +62,7 @@
   align-items: center;
 }
 
-.windows-session-tabs-list {
+.desktop-session-tabs-list {
   position: relative;
   display: flex;
   width: max-content;
@@ -73,11 +77,11 @@
   scrollbar-width: none;
 }
 
-.windows-session-tabs-list::-webkit-scrollbar {
+.desktop-session-tabs-list::-webkit-scrollbar {
   display: none;
 }
 
-.windows-session-tab {
+.desktop-session-tab {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   display: flex;
@@ -94,24 +98,24 @@
   -webkit-user-select: none;
 }
 
-.windows-session-tab[data-dragging="true"] {
+.desktop-session-tab[data-dragging="true"] {
   z-index: 1;
   pointer-events: none;
   cursor: grabbing;
   box-shadow: 0 5px 12px hsl(var(--foreground) / 14%);
 }
 
-.windows-session-tab:hover {
+.desktop-session-tab:hover {
   background: hsl(var(--foreground) / 0.055);
   color: hsl(var(--foreground));
 }
 
-.windows-session-tab[data-active="true"] {
+.desktop-session-tab[data-active="true"] {
   background: hsl(var(--foreground) / 0.09);
   color: hsl(var(--foreground));
 }
 
-.windows-session-tab-trigger {
+.desktop-session-tab-trigger {
   display: flex;
   min-width: 0;
   height: 100%;
@@ -126,11 +130,11 @@
   outline: none;
 }
 
-.windows-session-tab-trigger:focus-visible {
+.desktop-session-tab-trigger:focus-visible {
   box-shadow: inset 0 0 0 1px hsl(var(--ring));
 }
 
-.windows-session-tab-close.windows-session-tab-close {
+.desktop-session-tab-close.desktop-session-tab-close {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   flex: 0 0 20px;
@@ -139,40 +143,46 @@
   border-radius: var(--shape-radius-round);
 }
 
-.windows-session-tab-status {
+.desktop-session-tab-status {
   width: 7px;
   height: 7px;
   flex: 0 0 7px;
   border-radius: var(--shape-radius-round);
 }
 
-.windows-session-tab-status-running {
-  background: hsl(var(--primary));
+.desktop-session-tab-status-running {
+  width: 12px;
+  height: 12px;
+  flex-basis: 12px;
+  border: 2px solid hsl(var(--foreground) / 0.22);
+  border-top-color: hsl(var(--foreground) / 0.82);
+  background: transparent;
+  animation: spin var(--motion-duration-spinner) var(--motion-ease-linear) infinite;
 }
 
-.windows-session-tab-status-completed {
+.desktop-session-tab-status-completed {
   background: hsl(var(--info));
   box-shadow: 0 0 0 2px hsl(var(--info) / 0.18);
 }
 
-.windows-session-tab-status-blocked {
+.desktop-session-tab-status-blocked {
   background: hsl(var(--warning));
   box-shadow: 0 0 0 2px hsl(var(--warning) / 0.2);
 }
 
-.windows-session-tab-status-error {
+.desktop-session-tab-status-error {
   background: hsl(var(--destructive));
   box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.18);
 }
 
-.windows-session-tab-title {
+.desktop-session-tab-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.windows-session-tabs-new.windows-session-tabs-new {
+.desktop-session-tabs-new.desktop-session-tabs-new {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   flex: 0 0 24px;
@@ -180,11 +190,11 @@
   margin-inline: 2px 4px;
 }
 
-.windows-session-tabs-new.windows-session-tabs-new:hover {
+.desktop-session-tabs-new.desktop-session-tabs-new:hover {
   background: hsl(var(--foreground) / 0.1);
 }
 
-.windows-session-tabs-scroll {
+.desktop-session-tabs-scroll {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   display: grid;
@@ -200,18 +210,18 @@
   cursor: default;
 }
 
-.windows-session-tabs-scroll:hover {
+.desktop-session-tabs-scroll:hover {
   background: hsl(var(--foreground) / 0.08);
   color: hsl(var(--foreground));
 }
 
-.windows-header-title > span:last-child {
+.desktop-header-title > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.windows-header-mark {
+.desktop-header-mark {
   display: grid;
   width: 18px;
   height: 18px;
@@ -224,7 +234,7 @@
   font-weight: 700;
 }
 
-.windows-header-controls {
+.desktop-header-controls {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   display: grid;
@@ -232,7 +242,7 @@
   align-self: stretch;
 }
 
-.windows-header-controls button {
+.desktop-header-controls button {
   -webkit-app-region: no-drag;
   app-region: no-drag;
   display: grid;
@@ -247,20 +257,20 @@
   cursor: default;
 }
 
-.windows-header-controls button:hover {
+.desktop-header-controls button:hover {
   background: hsl(var(--foreground) / 0.08);
 }
 
-.windows-header-controls button:active {
+.desktop-header-controls button:active {
   background: hsl(var(--foreground) / 0.14);
 }
 
-.windows-header-controls .windows-header-close:hover {
+.desktop-header-controls .desktop-header-close:hover {
   background: hsl(var(--window-close-background));
   color: hsl(var(--window-close-foreground));
 }
 
-.windows-header-controls .windows-header-close:active {
+.desktop-header-controls .desktop-header-close:active {
   background: hsl(var(--window-close-background-active));
   color: hsl(var(--window-close-foreground));
 }
@@ -304,10 +314,6 @@ body.is-resizing-column .sidebar {
 
 .sidebar[data-collapsed="true"] .sidebar-content {
   display: none;
-}
-
-.app-frame[data-platform="darwin"] .sidebar[data-collapsed="true"] ~ .workspace .topbar {
-  padding-left: 132px;
 }
 
 /* 侧边栏收起后悬停窗口左缘的浮出预览。 */
@@ -360,10 +366,6 @@ body.is-resizing-column .sidebar {
   display: none;
 }
 
-.app-frame[data-platform="darwin"] .sidebar[data-floating="true"] .sidebar-content {
-  padding-top: 0;
-}
-
 /* 浮出面板为绝对定位、高度确定;侧边栏以 flex 列撑满面板宽高,内部 toggle 行与 content 共享高度,底部 footer(设置等)才能贴底。 */
 .floating-sidebar-panel > .sidebar {
   display: flex;
@@ -397,42 +399,14 @@ body.is-resizing-column .sidebar {
   width: 2px;
 }
 
-.macos-titlebar-space {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: var(--layout-topbar-height);
-  z-index: var(--stack-sticky-control);
-  -webkit-app-region: drag;
-  app-region: drag;
-  user-select: none;
-}
-
-.app-frame[data-platform="darwin"] .sidebar-content {
-  padding-top: var(--layout-topbar-height);
-}
-
-.macos-titlebar-space > .sidebar-toggle {
-  position: fixed;
-  top: 10px;
-  left: 92px;
-  z-index: calc(var(--stack-sticky-control) + 1);
-}
-
 .topbar > .sidebar-toggle {
   position: fixed;
   top: 10px;
-  left: 92px;
+  left: 16px;
   z-index: calc(var(--stack-sticky-control) + 1);
 }
 
-.app-frame[data-platform="linux"] .topbar > .sidebar-toggle {
-  top: 10px;
-  left: 16px;
-}
-
-/* 非 darwin 平台侧边栏内展开/收起按钮行，高度与顶栏对齐。 */
+/* 侧边栏内展开/收起按钮行，高度与顶栏对齐。 */
 .sidebar-toggle-row {
   display: flex;
   flex: 0 0 var(--layout-topbar-height);
@@ -462,6 +436,11 @@ body.is-resizing-column .sidebar {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .desktop-session-tab-status-running {
+    border-color: hsl(var(--foreground) / 0.58);
+    animation: none;
+  }
+
   .sidebar,
   .topbar,
   .workspace,
@@ -657,20 +636,16 @@ body.is-resizing-column .sidebar {
     box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
 }
 
-.app-frame[data-platform="darwin"] .workspace {
-  margin-bottom: 0;
-  margin-right: 0;
-  border-radius: 16px 0 0 16px;
-}
-
-.app-frame[data-platform="win32"] .sidebar[data-collapsed="true"] ~ .workspace {
+.app-frame:is([data-platform="win32"], [data-platform="darwin"]) .sidebar[data-collapsed="true"] ~ .workspace {
   border-radius: 8px;
   box-shadow: none;
   margin-left: 8px;
 }
 
-/* 底部终端圆角跟随 win32 工作区收起态圆角，与右侧 Panel 的裁剪效果保持一致。 */
-.app-frame[data-platform="win32"] .sidebar[data-collapsed="true"] ~ .workspace > .bottom-terminal {
+/* 底部终端圆角跟随桌面工作区收起态圆角。 */
+.app-frame:is([data-platform="win32"], [data-platform="darwin"]) .sidebar[data-collapsed="true"]
+  ~ .workspace
+  > .bottom-terminal {
   border-radius: 8px;
 }
 
@@ -684,48 +659,6 @@ body.is-resizing-column .sidebar {
     column-gap var(--motion-duration-standard) var(--motion-ease-emphasized),
     border-radius var(--motion-duration-standard) var(--motion-ease-emphasized),
     box-shadow var(--motion-duration-standard) var(--motion-ease-emphasized);
-}
-
-.app-frame[data-platform="darwin"] .workspace:has(> .workbench-panel:not([data-collapsed])) {
-  column-gap: 0;
-}
-
-.app-frame[data-platform="darwin"] .workspace > :is(.session-surface-shell, .workbench-panel, .bottom-terminal) {
-  border-radius: 0;
-}
-
-.app-frame[data-platform="darwin"] .workspace > .workbench-panel {
-  border: 1px solid hsl(var(--border));
-  border-left: 0;
-}
-
-/* darwin 下终端贴边无圆角，边框改由元素自身提供（同 workbench-panel 的 darwin 方案），
-   伪元素边框禁用；与 Panel 展开时相邻的右缘分界线由终端侧提供（Panel 无左边框）。 */
-.app-frame[data-platform="darwin"] .workspace > .bottom-terminal {
-  border: 1px solid hsl(var(--border));
-}
-
-.app-frame[data-platform="darwin"] .workspace > .bottom-terminal::before {
-  content: none;
-}
-
-/* darwin 下元素自身有 1px 边框，padding box 下移；拖拽条补偿 1px 以对齐 8px gap 正中
-   （同 panel 的 resize-handle-panel darwin 调整模式）。 */
-.app-frame[data-platform="darwin"] .workspace > .bottom-terminal .resize-handle-terminal {
-  top: -9px;
-}
-
-/* 收起动画期间高度为 0，元素自身边框仍占 2px 渲染高度，需一并归零。 */
-.app-frame[data-platform="darwin"] .workspace > .bottom-terminal[data-collapsed] {
-  border: 0;
-}
-
-.app-frame[data-platform="darwin"] .workspace > .workbench-panel::before {
-  content: none;
-}
-
-.app-frame[data-platform="darwin"] .workspace > .workbench-panel .resize-handle-panel {
-  left: -4px;
 }
 
 .workspace:has(> .workbench-panel[data-collapsed]) {
@@ -782,10 +715,6 @@ body.is-resizing-column .sidebar {
     right: 0;
     bottom: 0;
     z-index: var(--stack-workbench-overlay);
-  }
-
-  .app-frame[data-platform="darwin"] .workspace > .workbench-panel {
-    border-left: 1px solid hsl(var(--border));
   }
 
   .workspace > .workbench-panel:not([data-collapsed]) {
@@ -956,7 +885,7 @@ body.is-resizing-column .sidebar {
   justify-content: space-between;
   min-width: 0;
   padding: 0 10px 0 16px;
-  /* 与侧边栏宽度动画同速,避免展开/收起时 darwin 标题缩进跳变。 */
+  /* 与侧边栏宽度动画同速，避免展开/收起时标题缩进跳变。 */
   transition: padding-left var(--motion-duration-standard) var(--motion-ease-emphasized);
   background: hsl(var(--background));
 }
@@ -970,17 +899,6 @@ body.is-resizing-column .sidebar {
   height: 1px;
   background: hsl(var(--border));
   opacity: 0.8;
-}
-
-.app-frame[data-platform="darwin"] .topbar {
-  -webkit-app-region: drag;
-  app-region: drag;
-  user-select: none;
-}
-
-.app-frame[data-platform="darwin"] .topbar :is(button, a, input, select, textarea, [role="button"]) {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
 .topbar-title {
@@ -1030,12 +948,7 @@ body.is-resizing-column .sidebar {
   color: hsl(var(--muted-foreground));
 }
 
-.app-frame[data-platform="darwin"] .topbar-actions {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
-
-.app-frame[data-platform="win32"] .topbar-actions {
+.app-frame:is([data-platform="win32"], [data-platform="darwin"]) .topbar-actions {
   top: calc(var(--layout-window-header-height) + 10px);
 }
 .branch-label {
@@ -1129,13 +1042,6 @@ body.is-resizing-column .sidebar {
   flex-direction: column;
 }
 
-.settings-menu-titlebar {
-  height: var(--layout-topbar-height);
-  flex: 0 0 var(--layout-topbar-height);
-  -webkit-app-region: drag;
-  app-region: drag;
-}
-
 .settings-menu-items {
   display: flex;
   min-height: 0;
@@ -1172,12 +1078,6 @@ body.is-resizing-column .sidebar {
   border-bottom: 1px solid hsl(var(--border) / 0.8);
   background: hsl(var(--background) / 0.88);
   backdrop-filter: blur(16px);
-}
-
-.app-frame[data-platform="darwin"] .settings-header {
-  -webkit-app-region: drag;
-  app-region: drag;
-  user-select: none;
 }
 
 .settings-header h1 {

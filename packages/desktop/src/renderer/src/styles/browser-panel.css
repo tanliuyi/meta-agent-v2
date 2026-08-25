@@ -185,12 +185,6 @@
   border-radius: 0 0 16px 16px;
 }
 
-/* darwin：workbench panel 无圆角（layout.css 中 border-radius: 0），runtime 同步清零。
-   runtime 常驻 body 下的 parking host，不是 .app-frame 后代，经 body:has 引用平台信号。 */
-body:has(.app-frame[data-platform="darwin"]) .browser-session-runtime {
-  border-radius: 0;
-}
-
 /* 屏幕外会话容器（面板未打开/会话在后台）：content-visibility:hidden 保留布局
  * 尺寸（guest 视口不塌缩）且语义清晰，等价于 Chromium 后台化（guest 存活、
  * 读 DOM/执行 JS 正常；截图经 CDP fromSurface:false 可用）。 */

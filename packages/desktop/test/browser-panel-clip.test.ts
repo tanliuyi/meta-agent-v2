@@ -2,7 +2,7 @@
  * 浏览器面板 webview 圆角裁切回归测试：
  * webview 常驻 body 下的 browser-session-runtime（fixed 对齐 .browser-viewport），
  * 不受 .panel-content 的 overflow:hidden 裁切；runtime 自身必须裁切 webview，
- * 且底部圆角与 Panel 内容区同步（非 darwin 16px / darwin 清零）。
+ * 且底部圆角在 macOS 与 Windows 上保持一致。
  */
 
 import { readFileSync } from "node:fs";
@@ -28,11 +28,7 @@ describe("browser panel webview corner clipping", () => {
     expect(panelCss).toMatch(/\.workbench-panel\s*\{[^}]*overflow:\s*visible/s);
   });
 
-  it("resets the runtime radius to 0 on darwin where the workbench panel has no radius", () => {
-    const rule = browserPanelCss.match(
-      /body:has\(\.app-frame\[data-platform="darwin"\]\)\s+\.browser-session-runtime\s*\{([^}]*)\}/,
-    );
-    expect(rule).not.toBeNull();
-    expect(rule?.[1] ?? "").toMatch(/border-radius:\s*0\s*;/);
+  it("does not override the shared radius on macOS", () => {
+    expect(browserPanelCss).not.toMatch(/data-platform="darwin"/);
   });
 });

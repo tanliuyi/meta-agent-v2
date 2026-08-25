@@ -15,6 +15,15 @@ export interface ComposerCompletionContext {
   start: number;
 }
 
+export type ComposerCommandTriggerScope = "all" | "prompt-resource";
+
+/** 命令仅能位于行首；已有 prompt 时，空白后的 slash 只允许插入技能或提示词资源。 */
+export function composerCommandTriggerScope(text: string): ComposerCommandTriggerScope | null {
+  if (text.length === 0 || /^\/[^\s]*$/.test(text)) return "all";
+  if (/\s\/[^\s]*$/.test(text)) return "prompt-resource";
+  return null;
+}
+
 /** 根据输入末尾解析 slash command 或文件引用补全上下文。 */
 export function composerCompletionContext(text: string): ComposerCompletionContext | null {
   if (/^\/[^\s]*$/.test(text)) return { type: "command", query: text.slice(1), start: 0 };

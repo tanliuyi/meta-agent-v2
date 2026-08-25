@@ -24,30 +24,30 @@ import {
 import { useSessionNavigation } from "../../state/session-navigation.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 
-export type WindowsSessionTabStatus = "blocked" | "running" | "error" | "completed" | "idle";
+export type DesktopSessionTabStatus = "blocked" | "running" | "error" | "completed" | "idle";
 
-export interface WindowsSessionTab {
+export interface DesktopSessionTab {
   key: string;
   projectId: string;
   threadId: string;
   title: string;
-  status: WindowsSessionTabStatus;
+  status: DesktopSessionTabStatus;
 }
 
-const WINDOWS_SESSION_TAB_STATUS_LABELS: Record<Exclude<WindowsSessionTabStatus, "idle">, string> = {
+const DESKTOP_SESSION_TAB_STATUS_LABELS: Record<Exclude<DesktopSessionTabStatus, "idle">, string> = {
   blocked: "等待用户操作",
   running: "运行中",
   error: "运行错误",
   completed: "运行已完成",
 };
 
-export function resolveWindowsSessionTabStatus(input: {
+export function resolveDesktopSessionTabStatus(input: {
   blocked: boolean;
   running: boolean;
   error: boolean;
   completed: boolean;
   active: boolean;
-}): WindowsSessionTabStatus {
+}): DesktopSessionTabStatus {
   if (input.blocked) return "blocked";
   if (input.running) return "running";
   if (input.error) return "error";
@@ -55,7 +55,7 @@ export function resolveWindowsSessionTabStatus(input: {
   return "idle";
 }
 
-function useSessionTabStoreSnapshots(records: readonly CachedSessionRecord[]): void {
+function useSessionTabStoreSnapshots(records: readonly CachedSessionRecord[]): string {
   const subscribe = useCallback(
     (notify: () => void) => {
       const unsubscribers = records.flatMap((record) => [
@@ -71,31 +71,32 @@ function useSessionTabStoreSnapshots(records: readonly CachedSessionRecord[]): v
   const getSnapshot = useCallback(
     () =>
       records
-        .map(
-          (record) =>
-            `${record.key}:${record.stores.control.getSnapshot()?.revision ?? -1}:${record.stores.timeline.getSnapshot().cursor}`,
-        )
+        .map((record) => {
+          const control = record.stores.control.getSnapshot();
+          const timeline = record.stores.timeline.getSnapshot();
+          return `${record.key}:${control?.revision ?? -1}:${timeline.threadId}:${timeline.cursor}:${timeline.phase}`;
+        })
         .join("|"),
     [records],
   );
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-export function nextWindowsSessionTab(
-  tabs: readonly WindowsSessionTab[],
+export function nextDesktopSessionTab(
+  tabs: readonly DesktopSessionTab[],
   closedIndex: number,
-): WindowsSessionTab | undefined {
+): DesktopSessionTab | undefined {
   return tabs[closedIndex + 1] ?? tabs[closedIndex - 1];
 }
 
-export function moveWindowsSessionTab(keys: readonly string[], draggedKey: string, insertIndex: number): string[] {
+export function moveDesktopSessionTab(keys: readonly string[], draggedKey: string, insertIndex: number): string[] {
   if (!keys.includes(draggedKey)) return [...keys];
   const reordered = keys.filter((key) => key !== draggedKey);
   reordered.splice(Math.max(0, Math.min(insertIndex, reordered.length)), 0, draggedKey);
   return reordered;
 }
 
-export function WindowsSessionTabs() {
+export function DesktopSessionTabs() {
   const cache = useSessionCache();
   const records = useSessionCacheRecords();
   const activeKey = useSessionCacheActiveKey();
@@ -121,7 +122,7 @@ export function WindowsSessionTabs() {
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
-  useSessionTabStoreSnapshots(records);
+  const storeSnapshots = useSessionTabStoreSnapshots(records);
 
   const orderedRecords = useMemo(() => {
     const recordsByKey = new Map(records.map((record) => [record.key, record]));
@@ -145,20 +146,22 @@ export function WindowsSessionTabs() {
     });
   }, [records]);
 
-  const tabs = useMemo<WindowsSessionTab[]>(
+  const tabs = useMemo<DesktopSessionTab[]>(
     () =>
       orderedRecords.map((record) => {
         const thread = threadCatalogs[record.identity.projectId]?.find(({ id }) => id === record.identity.threadId);
         const control = record.stores.control.getSnapshot();
         const timeline = record.stores.timeline.getSnapshot();
         const latestAssistant = timeline.nodes.findLast((node) => node.kind === "assistant");
-        const running = control?.running ?? thread?.running ?? false;
+        const timelineAttached =
+          timeline.projectId === record.identity.projectId && timeline.threadId === record.identity.threadId;
+        const running = timelineAttached ? timeline.phase !== "idle" : (control?.running ?? thread?.running ?? false);
         return {
           key: record.key,
           projectId: record.identity.projectId,
           threadId: record.identity.threadId,
           title: thread?.title || control?.extensionHost.windowTitle || control?.title || "新会话",
-          status: resolveWindowsSessionTabStatus({
+          status: resolveDesktopSessionTabStatus({
             blocked: (control?.hostRequests.length ?? 0) > 0,
             running,
             error:
@@ -168,7 +171,7 @@ export function WindowsSessionTabs() {
           }),
         };
       }),
-    [activeKey, orderedRecords, threadCatalogs],
+    [activeKey, orderedRecords, storeSnapshots, threadCatalogs],
   );
 
   useLayoutEffect(() => {
@@ -214,12 +217,12 @@ export function WindowsSessionTabs() {
   }, [tabs, updateScrollState]);
 
   useEffect(() => {
-    const activeTab = listRef.current?.querySelector<HTMLElement>('.windows-session-tab-trigger[aria-selected="true"]');
+    const activeTab = listRef.current?.querySelector<HTMLElement>('.desktop-session-tab-trigger[aria-selected="true"]');
     activeTab?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
   }, [activeKey]);
 
   const activate = useCallback(
-    (tab: WindowsSessionTab) => {
+    (tab: DesktopSessionTab) => {
       if (tab.key !== activeKey) void openSession(tab.projectId, tab.threadId);
     },
     [activeKey, openSession],
@@ -231,9 +234,9 @@ export function WindowsSessionTabs() {
   }, [activeKey, openDraft, tabs]);
 
   const closeTab = useCallback(
-    async (tab: WindowsSessionTab, index: number) => {
+    async (tab: DesktopSessionTab, index: number) => {
       if (tab.key === activeKey) {
-        const nextTab = nextWindowsSessionTab(tabs, index);
+        const nextTab = nextDesktopSessionTab(tabs, index);
         if (nextTab) await openSession(nextTab.projectId, nextTab.threadId);
         else await openDraft(tab.projectId);
       }
@@ -256,7 +259,7 @@ export function WindowsSessionTabs() {
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>, key: string) => {
-    if (event.button !== 0 || (event.target as Element).closest(".windows-session-tab-close")) return;
+    if (event.button !== 0 || (event.target as Element).closest(".desktop-session-tab-close")) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     pointerDragRef.current = {
       key,
@@ -303,7 +306,7 @@ export function WindowsSessionTabs() {
       if (event.clientX > center) insertIndex += 1;
     }
     const current = tabs.map(({ key }) => key);
-    const reordered = moveWindowsSessionTab(current, drag.key, insertIndex);
+    const reordered = moveDesktopSessionTab(current, drag.key, insertIndex);
     if (reordered.every((key, index) => key === current[index])) return;
     flipPositionsRef.current = new Map(
       [...tabElementsRef.current].map(([key, element]) => [key, element.getBoundingClientRect().left]),
@@ -344,11 +347,11 @@ export function WindowsSessionTabs() {
   };
 
   return (
-    <nav className="windows-session-tabs" aria-label="已打开的会话">
+    <nav className="desktop-session-tabs" aria-label="已打开的会话">
       {canScrollLeft ? (
         <button
           type="button"
-          className="windows-session-tabs-scroll"
+          className="desktop-session-tabs-scroll"
           aria-label="向左滚动会话标签"
           title="向左滚动"
           onClick={() => listRef.current?.scrollBy({ left: -180, behavior: "smooth" })}
@@ -358,7 +361,7 @@ export function WindowsSessionTabs() {
       ) : null}
       <div
         ref={listRef}
-        className="windows-session-tabs-list"
+        className="desktop-session-tabs-list"
         role="tablist"
         aria-label="会话"
         onPointerMove={handlePointerMove}
@@ -380,7 +383,7 @@ export function WindowsSessionTabs() {
                 if (element) tabElementsRef.current.set(tab.key, element);
                 else tabElementsRef.current.delete(tab.key);
               }}
-              className="windows-session-tab"
+              className="desktop-session-tab"
               data-active={active || undefined}
               data-dragging={draggedKey === tab.key || undefined}
               data-tab-index={index}
@@ -389,7 +392,7 @@ export function WindowsSessionTabs() {
             >
               <button
                 type="button"
-                className="windows-session-tab-trigger"
+                className="desktop-session-tab-trigger"
                 role="tab"
                 aria-selected={active}
                 tabIndex={active || (activeKey === null && index === 0) ? 0 : -1}
@@ -402,15 +405,15 @@ export function WindowsSessionTabs() {
               >
                 {tab.status !== "idle" ? (
                   <span
-                    className={`windows-session-tab-status windows-session-tab-status-${tab.status}`}
-                    aria-label={WINDOWS_SESSION_TAB_STATUS_LABELS[tab.status]}
-                    title={WINDOWS_SESSION_TAB_STATUS_LABELS[tab.status]}
+                    className={`desktop-session-tab-status desktop-session-tab-status-${tab.status}`}
+                    aria-label={DESKTOP_SESSION_TAB_STATUS_LABELS[tab.status]}
+                    title={DESKTOP_SESSION_TAB_STATUS_LABELS[tab.status]}
                   />
                 ) : null}
-                <span className="windows-session-tab-title">{tab.title}</span>
+                <span className="desktop-session-tab-title">{tab.title}</span>
               </button>
               <TooltipIconButton
-                className="windows-session-tab-close size-5! shrink-0"
+                className="desktop-session-tab-close size-5! shrink-0"
                 tooltip="关闭"
                 aria-label={`关闭 ${tab.title}`}
                 onClick={() =>
@@ -423,7 +426,7 @@ export function WindowsSessionTabs() {
           );
         })}
         <TooltipIconButton
-          className="windows-session-tabs-new size-6! shrink-0"
+          className="desktop-session-tabs-new size-6! shrink-0"
           tooltip="新建任务"
           aria-label="新建任务"
           onClick={createTask}
@@ -434,7 +437,7 @@ export function WindowsSessionTabs() {
       {canScrollRight ? (
         <button
           type="button"
-          className="windows-session-tabs-scroll"
+          className="desktop-session-tabs-scroll"
           aria-label="向右滚动会话标签"
           title="向右滚动"
           onClick={() => listRef.current?.scrollBy({ left: 180, behavior: "smooth" })}

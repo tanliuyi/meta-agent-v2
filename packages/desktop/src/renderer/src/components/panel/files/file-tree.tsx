@@ -1,10 +1,4 @@
-import * as ContextMenu from "@radix-ui/react-context-menu";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
-import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
-import File from "lucide-react/dist/esm/icons/file.mjs";
-import Folder from "lucide-react/dist/esm/icons/folder.mjs";
-import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -16,10 +10,17 @@ import {
   useState,
 } from "react";
 import type { FileNode } from "../../../../../shared/contracts.ts";
-import { type FileTreeRow, fileTreeKeyNavigation, setFileTreeRovingTabStop } from "./file-tree-navigation.ts";
+import {
+  buildFileTreeStickyModel,
+  type FileTreeRow,
+  fileTreeKeyNavigation,
+  fileTreeStickyRows,
+} from "./file-tree-navigation.ts";
+import { FileTreeNodeRow } from "./file-tree-node-row.tsx";
 
 const FILE_ROW_HEIGHT = 28;
 const FILE_TREE_OVERSCAN = 12;
+const FILE_TREE_STICKY_MAX_ITEMS = 7;
 
 interface FileTreeProps {
   nodes: readonly FileNode[];
@@ -172,93 +173,131 @@ export function FileTree({
   }, [focusIndex]);
 
   const virtualItems = virtualizer.getVirtualItems();
+  const scrollTop = scrollRef.current?.scrollTop ?? virtualizer.scrollOffset ?? 0;
+  const viewportHeight = scrollRef.current?.clientHeight ?? virtualizer.scrollRect?.height ?? 600;
+  const stickyModel = useMemo(() => buildFileTreeStickyModel(rows), [rows]);
+  const stickyRows = fileTreeStickyRows(
+    rows,
+    stickyModel,
+    scrollTop,
+    viewportHeight,
+    FILE_ROW_HEIGHT,
+    FILE_TREE_STICKY_MAX_ITEMS,
+  );
+  const stickyHeight = stickyRows.reduce(
+    (height, stickyRow) => Math.max(height, stickyRow.position + FILE_ROW_HEIGHT),
+    0,
+  );
+  const stickyContainerRef = useRef<HTMLDivElement | null>(null);
+  const stickyRowElements = useRef(new Map<number, HTMLDivElement>());
+  const syncStickyPositions = useCallback(
+    (element: HTMLDivElement) => {
+      const currentRows = fileTreeStickyRows(
+        rows,
+        stickyModel,
+        element.scrollTop,
+        element.clientHeight,
+        FILE_ROW_HEIGHT,
+        FILE_TREE_STICKY_MAX_ITEMS,
+      );
+      let currentHeight = 0;
+      for (const stickyRow of currentRows) {
+        stickyRowElements.current
+          .get(stickyRow.index)
+          ?.style.setProperty("transform", `translate3d(0, ${stickyRow.position}px, 0)`);
+        currentHeight = Math.max(currentHeight, stickyRow.position + FILE_ROW_HEIGHT);
+      }
+      if (stickyContainerRef.current) stickyContainerRef.current.style.height = `${currentHeight}px`;
+    },
+    [rows, stickyModel],
+  );
   const rovingVisible = virtualItems.some(
     (virtualRow) => rows[virtualRow.index]?.kind === "node" && rows[virtualRow.index]?.path === rovingPath,
   );
   const fallbackIndex = virtualItems.find((virtualRow) => rows[virtualRow.index]?.kind === "node")?.index;
 
   return (
-    <div
-      ref={scrollRef}
-      className="file-tree-virtual"
-      role="tree"
-      aria-label="项目文件"
-      onKeyDown={handleContainerKeyDown}
-    >
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", minHeight: "100%" }}>
-        {virtualItems.map((virtualRow) => {
-          const row = rows[virtualRow.index];
-          if (!row) return null;
-          const rowStyle = {
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: `${FILE_ROW_HEIGHT}px`,
-            transform: `translateY(${virtualRow.start}px)`,
-            "--file-tree-depth": row.depth,
-          } as CSSProperties;
-          if (row.kind === "loading") {
+    <div className="file-tree-viewport" role="tree" aria-label="项目文件" onKeyDown={handleContainerKeyDown}>
+      {stickyRows.length > 0 ? (
+        <div ref={stickyContainerRef} className="file-tree-sticky" style={{ height: `${stickyHeight}px` }}>
+          {stickyRows.map((stickyRow, stickyOrder) => {
+            const row = rows[stickyRow.index];
+            if (!row || row.kind !== "node") return null;
+            const stickyStyle = {
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: `${FILE_ROW_HEIGHT}px`,
+              transform: `translate3d(0, ${stickyRow.position}px, 0)`,
+              zIndex: stickyRows.length - stickyOrder,
+              "--file-tree-depth": row.depth,
+            } as CSSProperties;
             return (
-              <div key={row.path} style={rowStyle} className="file-tree-branch-status" role="status">
-                正在加载
+              <div
+                ref={(element) => {
+                  if (element) stickyRowElements.current.set(stickyRow.index, element);
+                  else stickyRowElements.current.delete(stickyRow.index);
+                }}
+                key={row.path}
+                className="file-tree-sticky-row"
+                style={stickyStyle}
+              >
+                <FileTreeNodeRow
+                  row={row}
+                  index={stickyRow.index}
+                  active={active}
+                  tabIndex={-1}
+                  sticky
+                  onOpen={onOpen}
+                  onPinOpen={onPinOpen}
+                  renderContextMenu={renderContextMenu}
+                  onKeyDown={handleKeyDown}
+                />
               </div>
             );
-          }
-          const node = row.node as FileNode;
-          const open = row.open;
-          const tabIndex = row.path === rovingPath || (!rovingVisible && virtualRow.index === fallbackIndex) ? 0 : -1;
-          const rowButton = (
-            <button
-              type="button"
-              role="treeitem"
-              className="file-row"
-              data-row-index={virtualRow.index}
-              data-node-type={node.type}
-              data-active={active === node.path || undefined}
-              tabIndex={tabIndex}
-              aria-expanded={node.type === "directory" ? open : undefined}
-              aria-level={row.depth + 1}
-              aria-selected={active === node.path}
-              onClick={() => onOpen(node)}
-              onDoubleClick={onPinOpen ? () => onPinOpen(node) : undefined}
-              onFocus={setFileTreeRovingTabStop}
-              onKeyDown={(event) => handleKeyDown(event, virtualRow.index)}
-            >
-              {node.type === "directory" ? (
-                open ? (
-                  <ChevronDown size={13} aria-hidden="true" />
-                ) : (
-                  <ChevronRight size={13} aria-hidden="true" />
-                )
-              ) : (
-                <span className="file-spacer" />
-              )}
-              {node.type === "directory" ? (
-                open ? (
-                  <FolderOpen size={14} aria-hidden="true" />
-                ) : (
-                  <Folder size={14} aria-hidden="true" />
-                )
-              ) : (
-                <File size={14} aria-hidden="true" />
-              )}
-              <span>{node.name}</span>
-            </button>
-          );
-          return (
-            <div key={row.path} style={rowStyle}>
-              {renderContextMenu ? (
-                <ContextMenu.Root>
-                  <ContextMenu.Trigger asChild>{rowButton}</ContextMenu.Trigger>
-                  {renderContextMenu(node)}
-                </ContextMenu.Root>
-              ) : (
-                rowButton
-              )}
-            </div>
-          );
-        })}
+          })}
+          <div className="file-tree-sticky-shadow" aria-hidden="true" />
+        </div>
+      ) : null}
+      <div ref={scrollRef} className="file-tree-virtual" onScroll={(event) => syncStickyPositions(event.currentTarget)}>
+        <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", minHeight: "100%" }}>
+          {virtualItems.map((virtualRow) => {
+            const row = rows[virtualRow.index];
+            if (!row) return null;
+            const rowStyle = {
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: `${FILE_ROW_HEIGHT}px`,
+              transform: `translateY(${virtualRow.start}px)`,
+              "--file-tree-depth": row.depth,
+            } as CSSProperties;
+            if (row.kind === "loading") {
+              return (
+                <div key={row.path} style={rowStyle} className="file-tree-branch-status" role="status">
+                  正在加载
+                </div>
+              );
+            }
+            const tabIndex = row.path === rovingPath || (!rovingVisible && virtualRow.index === fallbackIndex) ? 0 : -1;
+            return (
+              <div key={row.path} style={rowStyle}>
+                <FileTreeNodeRow
+                  row={row}
+                  index={virtualRow.index}
+                  active={active}
+                  tabIndex={tabIndex}
+                  onOpen={onOpen}
+                  onPinOpen={onPinOpen}
+                  renderContextMenu={renderContextMenu}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

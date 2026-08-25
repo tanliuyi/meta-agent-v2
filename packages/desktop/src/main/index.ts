@@ -20,6 +20,7 @@ import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-
 import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
+import { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
 import {
   broadcastBrowserCloseTabRequest,
   broadcastBrowserCreateTabRequest,
@@ -147,7 +148,7 @@ function createWindow(): void {
     show: false,
     frame: process.platform !== "win32",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: process.platform === "darwin" ? { x: 16, y: 16 } : undefined,
+    trafficLightPosition: process.platform === "darwin" ? { x: 16, y: 12 } : undefined,
     backgroundColor: "#ffffff",
     webPreferences: {
       preload: join(appDir, "../preload/index.cjs"),
@@ -503,6 +504,23 @@ app.whenReady().then(async () => {
     projects,
     sessions,
     new FileService(projects),
+    new OfficeDocumentPreviewService(projects, {
+      cacheDir: join(userDataDir, "cache", "office-document-preview"),
+      getConfiguration: async () => {
+        try {
+          const { values } = await pluginConfigurations.getRuntimeConfiguration("pi.officecli");
+          return {
+            installed: true,
+            binaryPath: typeof values.binaryPath === "string" ? values.binaryPath : undefined,
+            dataDir: typeof values.dataDir === "string" ? values.dataDir : undefined,
+            version: typeof values.version === "string" ? values.version : undefined,
+            autoDownload: typeof values.autoDownload === "boolean" ? values.autoDownload : undefined,
+          };
+        } catch {
+          return {};
+        }
+      },
+    }),
     new ProjectFileWatcher(projects, (change) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed()) window.webContents.send(CHANNELS.filesChanged, change);

@@ -8,6 +8,7 @@ const captured = vi.hoisted(() => ({
   composerText: "",
   placeholder: undefined as string | undefined,
   onKeyDownCapture: undefined as ((event: KeyboardEvent<HTMLDivElement>) => void) | undefined,
+  commandSources: [] as string[],
 }));
 
 vi.mock("@assistant-ui/react", () => ({
@@ -47,7 +48,10 @@ vi.mock("@assistant-ui/react-lexical", () => ({
 }));
 
 vi.mock("../src/renderer/src/components/chat/composer/composer-command-trigger.tsx", () => ({
-  ComposerCommandTrigger: () => null,
+  ComposerCommandTrigger: ({ commands }: { commands: readonly { source: string }[] }) => {
+    captured.commandSources = commands.map(({ source }) => source);
+    return "command-trigger";
+  },
   slashCommandText: (command: { name: string }, args: string) =>
     `/${command.name}${args.trim() ? ` ${args.trim()}` : ""}`,
 }));
@@ -57,8 +61,8 @@ vi.mock("../src/renderer/src/components/chat/composer/composer-file-trigger.tsx"
 }));
 
 import {
-  acceptHighlightedCommandOnSpace,
   ComposerInput,
+  shouldDeferComposerKeyToTrigger,
   syncFocusedComposerInput,
 } from "../src/renderer/src/components/chat/composer/composer-input.tsx";
 
@@ -69,11 +73,58 @@ describe("ComposerInput", () => {
     captured.composerText = "";
     captured.placeholder = undefined;
     captured.onKeyDownCapture = undefined;
+    captured.commandSources = [];
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("按 slash 上下文限制可选择的命令来源", () => {
+    const commands = [
+      { name: "reload", source: "builtin" as const },
+      { name: "review", source: "extension" as const },
+      { name: "fix", source: "prompt" as const },
+      { name: "skill:frontend", source: "skill" as const },
+    ];
+    const renderInput = () =>
+      renderToStaticMarkup(
+        <ComposerInput
+          projectId={undefined}
+          commands={commands}
+          selectedCommand={null}
+          mode="session"
+          isRunning={false}
+          isCancelable={false}
+          materializing={false}
+          onCommandSelect={() => undefined}
+          onCommandClear={() => undefined}
+          onSubmit={() => undefined}
+          onSubmitRunning={() => undefined}
+          onEscapeCancelPendingChange={() => undefined}
+        />,
+      );
+
+    expect(renderInput()).toContain("command-trigger");
+    expect(captured.commandSources).toEqual(["builtin", "extension", "prompt", "skill"]);
+
+    captured.composerText = "/rev";
+    expect(renderInput()).toContain("command-trigger");
+    expect(captured.commandSources).toEqual(["builtin", "extension", "prompt", "skill"]);
+
+    captured.composerText = "检查代码 /rev";
+    expect(renderInput()).toContain("command-trigger");
+    expect(captured.commandSources).toEqual(["prompt", "skill"]);
+
+    captured.composerText = "检查代码/rev";
+    expect(renderInput()).not.toContain("command-trigger");
+  });
+
+  it("命令候选只用 Tab 或 Enter 确认，不截获空格", () => {
+    expect(shouldDeferComposerKeyToTrigger("Tab", true)).toBe(true);
+    expect(shouldDeferComposerKeyToTrigger("Enter", true)).toBe(true);
+    expect(shouldDeferComposerKeyToTrigger(" ", true)).toBe(false);
   });
 
   it("同步 ARIA 和禁用状态到实际可聚焦的 contenteditable", () => {
@@ -107,55 +158,6 @@ describe("ComposerInput", () => {
     expect(attributes.get("aria-expanded")).toBe("false");
     expect(attributes.has("aria-controls")).toBe(false);
     expect(attributes.has("aria-activedescendant")).toBe(false);
-  });
-
-  it("命令面板打开时以普通空格接受当前高亮命令", () => {
-    const preventDefault = vi.fn();
-    const stopPropagation = vi.fn();
-    const handleKeyDown = vi.fn().mockReturnValue(true);
-    const event = {
-      key: " ",
-      shiftKey: false,
-      ctrlKey: false,
-      metaKey: false,
-      altKey: false,
-      preventDefault,
-      stopPropagation,
-    };
-
-    expect(acceptHighlightedCommandOnSpace(event, true, true, { handleKeyDown })).toBe(true);
-    expect(handleKeyDown).toHaveBeenCalledWith({
-      key: "Enter",
-      shiftKey: false,
-      preventDefault: expect.any(Function),
-    });
-    const forwarded = handleKeyDown.mock.calls[0]?.[0] as { preventDefault(): void };
-    forwarded.preventDefault();
-    expect(preventDefault).toHaveBeenCalledOnce();
-    expect(stopPropagation).toHaveBeenCalledOnce();
-
-    expect(acceptHighlightedCommandOnSpace({ ...event, ctrlKey: true }, true, true, { handleKeyDown })).toBe(false);
-    expect(acceptHighlightedCommandOnSpace(event, false, true, { handleKeyDown })).toBe(false);
-  });
-
-  it("命令面板无匹配项时保留普通空格输入", () => {
-    const preventDefault = vi.fn();
-    const stopPropagation = vi.fn();
-    const handleKeyDown = vi.fn();
-    const event = {
-      key: " ",
-      shiftKey: false,
-      ctrlKey: false,
-      metaKey: false,
-      altKey: false,
-      preventDefault,
-      stopPropagation,
-    };
-
-    expect(acceptHighlightedCommandOnSpace(event, true, false, { handleKeyDown })).toBe(false);
-    expect(handleKeyDown).not.toHaveBeenCalled();
-    expect(preventDefault).not.toHaveBeenCalled();
-    expect(stopPropagation).not.toHaveBeenCalled();
   });
 
   it("提交普通 Enter 时消费原生事件，避免 Lexical 插入换行", () => {

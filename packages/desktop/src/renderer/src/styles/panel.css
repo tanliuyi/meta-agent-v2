@@ -133,22 +133,6 @@ body.is-resizing-column .workbench-panel {
   bottom: 0;
   width: 66px;
 }
-.app-frame[data-platform="darwin"] .panel-tabs {
-  -webkit-app-region: drag;
-  app-region: drag;
-  user-select: none;
-  /* macOS Panel 右侧有 1px 边框，安全区相应减少 1px。 */
-  padding: 0 73px 0 8px;
-}
-.app-frame[data-platform="darwin"] .panel-tabs-safe-area {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  width: 73px;
-}
-.app-frame[data-platform="darwin"] .panel-tabs :is(button, input, select, textarea, [role="button"]) {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
 .panel-tab-list {
   display: flex;
   min-width: 0;
@@ -629,19 +613,19 @@ body.is-resizing-column .workbench-panel {
   display: flex;
   min-height: 0;
   flex: 1;
-  --file-preview-scrollbar-width: var(--scrollbar-size);
+  /* column-gap: 8px; */
   --file-preview-scrollbar-height: 0px;
 }
 .file-minimap {
-  position: absolute;
-  top: 0;
-  right: var(--file-preview-scrollbar-width);
-  bottom: var(--file-preview-scrollbar-height);
+  position: relative;
   z-index: 1;
-  /* 内容驱动目标宽度（组件计算 --file-minimap-target-width）；容器只通过 max-width 限制，窄布局保留约 56px 下限。 */
+  align-self: stretch;
+  /* minimap 作为代码视口的固定宽度 sibling，避免长行绘制到其下方。 */
   width: min(var(--file-minimap-target-width, 96px), 100%);
   min-width: 56px;
   max-width: 96px;
+  margin-bottom: var(--file-preview-scrollbar-height);
+  flex: 0 0 min(var(--file-minimap-target-width, 96px), 96px);
   border-left: 1px solid hsl(var(--border) / 0.6);
   outline: 0;
   background: hsl(var(--background));
@@ -763,6 +747,7 @@ body.is-resizing-column .workbench-panel {
   min-height: 0;
   min-width: 0;
   flex: 1;
+  --file-preview-content-width: 100%;
   margin: 0;
   padding: 16px 16px 16px 0;
   overflow: auto;
@@ -776,7 +761,7 @@ body.is-resizing-column .workbench-panel {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
+  width: var(--file-preview-content-width, 100%);
 }
 .file-preview-line {
   display: flex;
@@ -804,6 +789,7 @@ body.is-resizing-column .workbench-panel {
 .file-preview-line-number {
   position: sticky;
   left: 0;
+  z-index: 1;
   flex: 0 0 calc(var(--file-preview-line-number-width) + 28px);
   padding: 0 12px 0 16px;
   background: hsl(var(--background));
@@ -850,6 +836,13 @@ html[data-theme="dark"] .file-preview-token {
   font-size: var(--type-size-body);
   overflow-wrap: anywhere;
   overscroll-behavior-y: contain;
+}
+.file-preview-office {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: hsl(var(--background));
 }
 .file-preview-image-wrap {
   display: grid;
@@ -950,11 +943,48 @@ html[data-theme="dark"] .file-preview-token {
   overflow: hidden;
   isolation: isolate;
 }
+.file-tree-viewport {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  --file-tree-indent: 10px;
+}
 .file-tree-virtual {
   /* 滚动容器高度固定为视口（父级 .file-tree 确定高度），内容溢出时由容器滚动。
      不能设成内容高度（rows × 行高），否则容器永远等于内容、无法滚动。 */
+  position: relative;
   height: 100%;
   overflow: auto;
+}
+.file-tree-sticky {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  background: hsl(var(--background));
+}
+.file-tree-sticky-row {
+  background: hsl(var(--background));
+  will-change: transform;
+}
+.file-tree-sticky-shadow {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  box-shadow: 0 2px 4px hsl(var(--foreground) / 0.16);
+  pointer-events: none;
+}
+.file-tree-sticky .file-row {
+  background: hsl(var(--background));
+}
+.file-tree-sticky .file-row:hover {
+  background: hsl(var(--muted) / 0.86);
+}
+.file-tree-sticky .file-row[data-active] {
+  background: hsl(var(--accent));
 }
 .file-breadcrumb-tree .file-tree-virtual {
   max-height: min(390px, calc(100vh - 110px));
@@ -966,7 +996,7 @@ html[data-theme="dark"] .file-preview-token {
 }
 .file-tree-branch-status {
   height: 28px;
-  padding-left: calc(25px + var(--file-tree-depth, 0) * 14px);
+  padding-left: calc(25px + var(--file-tree-depth, 0) * var(--file-tree-indent));
   color: hsl(var(--muted-foreground) / 0.72);
   font-size: var(--type-size-meta);
   line-height: 28px;
@@ -978,8 +1008,9 @@ html[data-theme="dark"] .file-preview-token {
   width: 100%;
   height: 28px;
   padding-right: 8px;
-  padding-left: calc(6px + var(--file-tree-depth, 0) * 14px);
+  padding-left: calc(6px + var(--file-tree-depth, 0) * var(--file-tree-indent));
   border: 0;
+  position: relative;
   color: hsl(var(--foreground) / 0.88);
   font-size: var(--type-size-control);
   text-align: left;
@@ -1000,6 +1031,23 @@ html[data-theme="dark"] .file-preview-token {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: calc(-1 * var(--focus-ring-width));
 }
+.file-tree-indent-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.file-tree-indent-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(12px + var(--file-tree-guide-depth, 0) * var(--file-tree-indent));
+  border-left: 1px solid hsl(var(--foreground) / 0.1);
+}
+.file-row:hover .file-tree-indent-guide,
+.file-row[data-active] .file-tree-indent-guide,
+.file-row:focus-visible .file-tree-indent-guide {
+  border-left-color: hsl(var(--foreground) / 0.24);
+}
 .file-row > svg {
   flex: 0 0 auto;
   color: hsl(var(--muted-foreground));
@@ -1007,15 +1055,25 @@ html[data-theme="dark"] .file-preview-token {
 .file-row[data-node-type="directory"] > svg:last-of-type {
   color: currentColor;
 }
-.file-row span:last-child {
+.file-type-icon {
+  display: inline-flex;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.file-type-icon > div,
+.file-type-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.file-row > span:last-child {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.file-spacer {
-  width: 13px;
-  flex: 0 0 13px;
 }
 .panel-error {
   margin: 8px;

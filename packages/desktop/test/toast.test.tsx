@@ -37,7 +37,18 @@ describe("Toast", () => {
     expect(viewport).toContain("通知 (F8)");
   });
 
-  it("positions the compact viewport below the centered title area", () => {
+  it("auto-closes within five seconds even when a longer duration is requested", () => {
+    const element = Toast({
+      open: true,
+      message: "正在重新加载",
+      duration: 60_000,
+      onDismiss: vi.fn(),
+    }) as ReactElement<{ duration: number }>;
+
+    expect(element.props.duration).toBe(5_000);
+  });
+
+  it("positions the opaque compact toast below the centered title area", () => {
     const css = readFileSync(new URL("../src/renderer/src/styles/components.css", import.meta.url), "utf8");
 
     expect(css).toContain("left: 50%");
@@ -46,7 +57,16 @@ describe("Toast", () => {
     expect(css).toContain("top: calc(var(--layout-window-header-height) + var(--layout-topbar-height) + 8px)");
     expect(css).toContain("width: min(360px, calc(100vw - 24px))");
     expect(css).toContain("min-height: 36px");
-    expect(css).toContain("padding: var(--space-3) var(--space-4)");
+    expect(css).toContain("position: relative");
+    expect(css).toContain("padding: var(--space-3) 36px var(--space-3) var(--space-4)");
+    expect(css).toContain("transform-origin: top center");
+    expect(css).toContain("animation: toast-enter 240ms cubic-bezier(0.16, 1, 0.3, 1)");
+    expect(css).toContain("animation: toast-exit 120ms cubic-bezier(0.4, 0, 1, 1)");
+    expect(css).toContain("transform: translateY(-14px) scale(0.97)");
+    expect(css).toContain("transform: translateY(2px) scale(1)");
+    expect(css).toContain("background: hsl(var(--popover))");
+    expect(css).toContain("background: color-mix(in oklab, hsl(var(--destructive)) 8%, hsl(var(--popover)))");
+    expect(css).toMatch(/\.toast-close \{[\s\S]*?position: absolute;[\s\S]*?top: 8px;[\s\S]*?right: 8px;/);
     expect(css).toContain("border-radius: var(--shape-radius-lg)");
     expect(css).not.toContain("border-left-color");
     expect(css).not.toContain(".toast-icon");

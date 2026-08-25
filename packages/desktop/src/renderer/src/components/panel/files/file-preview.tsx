@@ -15,6 +15,14 @@ import { extractMinimapSegments, FileMinimap } from "./file-minimap.tsx";
 const FILE_PREVIEW_LINE_HEIGHT = 20;
 const FILE_PREVIEW_OVERSCAN = 20;
 
+function syncPreviewContentWidth(preview: HTMLPreElement, reset: boolean): void {
+  if (reset) preview.style.removeProperty("--file-preview-content-width");
+  const style = getComputedStyle(preview);
+  const horizontalPadding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+  const contentWidth = Math.max(preview.clientWidth, preview.scrollWidth) - horizontalPadding;
+  preview.style.setProperty("--file-preview-content-width", `${Math.max(0, contentWidth)}px`);
+}
+
 interface FilePreviewProps {
   file: TextFile;
   highlight: { file: TextFile; tokens: HighlightResult } | null;
@@ -70,7 +78,7 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 行高与滚动条占位随文件内容/换行模式变化重测：文件监听 revision 重读（同路径内容变化）时组件不重挂载，
+  // 行高与横向滚动条占位随文件内容/换行模式变化重测：文件监听 revision 重读（同路径内容变化）时组件不重挂载，
   // 不能只依赖 ResizeObserver（body 盒尺寸不变、不触发回调），必须在此直接同步。
   useLayoutEffect(() => {
     const body = previewBodyRef.current;
@@ -82,7 +90,7 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
       setEstimatedLineHeight((current) => (Math.abs(current - lineHeight) < 0.1 ? current : lineHeight));
     }
 
-    body.style.setProperty("--file-preview-scrollbar-width", `${Math.max(0, pre.offsetWidth - pre.clientWidth)}px`);
+    syncPreviewContentWidth(pre, true);
     body.style.setProperty("--file-preview-scrollbar-height", `${Math.max(0, pre.offsetHeight - pre.clientHeight)}px`);
   }, [file.content, wrap]);
 
@@ -92,23 +100,27 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
     const pre = preRef.current;
     if (!body || !pre) return;
 
-    const syncScrollbarSize = () => {
-      body.style.setProperty("--file-preview-scrollbar-width", `${Math.max(0, pre.offsetWidth - pre.clientWidth)}px`);
+    const syncScrollbarHeight = () => {
+      syncPreviewContentWidth(pre, true);
       body.style.setProperty(
         "--file-preview-scrollbar-height",
         `${Math.max(0, pre.offsetHeight - pre.clientHeight)}px`,
       );
     };
 
-    syncScrollbarSize();
-    const observer = new ResizeObserver(syncScrollbarSize);
+    syncScrollbarHeight();
+    const observer = new ResizeObserver(syncScrollbarHeight);
     observer.observe(body);
     return () => {
       observer.disconnect();
-      body.style.removeProperty("--file-preview-scrollbar-width");
       body.style.removeProperty("--file-preview-scrollbar-height");
     };
   }, [wrap]);
+
+  useLayoutEffect(() => {
+    const preview = preRef.current;
+    if (preview) syncPreviewContentWidth(preview, false);
+  });
 
   // 文件内查找（对齐 VS Code find widget）。
   const findMatchesList = useMemo(

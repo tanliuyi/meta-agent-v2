@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFileTreeStickyModel,
   type FileTreeRow,
   fileTreeKeyNavigation,
+  fileTreeStickyRows,
 } from "../src/renderer/src/components/panel/files/file-tree-navigation.ts";
 
 function rows(...specs: Array<[string, number, boolean, "file" | "directory"]>): FileTreeRow[] {
@@ -57,5 +59,89 @@ describe("fileTreeKeyNavigation", () => {
     expect(fileTreeKeyNavigation(bigTree, 22, "PageUp")).toEqual({ kind: "move", index: 2 });
     expect(fileTreeKeyNavigation(bigTree, 24, "PageDown")).toBeNull();
     expect(fileTreeKeyNavigation(bigTree, 0, "PageUp")).toBeNull();
+  });
+});
+
+function nestedStickyRows(): FileTreeRow[] {
+  return [
+    ...rows(
+      ["root", 0, true, "directory"],
+      ["a", 1, true, "directory"],
+      ["b", 2, true, "directory"],
+      ["c", 3, true, "directory"],
+    ),
+    ...Array.from(
+      { length: 12 },
+      (_, index): FileTreeRow => ({
+        kind: "node",
+        path: `c/file-${index}.ts`,
+        depth: 4,
+        open: false,
+        node: { name: `file-${index}.ts`, path: `c/file-${index}.ts`, type: "file" },
+      }),
+    ),
+    ...rows(["tail.ts", 0, false, "file"]),
+  ];
+}
+
+describe("file tree sticky scroll", () => {
+  it("precomputes parent indices and expanded subtree ends", () => {
+    const tree: FileTreeRow[] = [
+      ...rows(["root", 0, true, "directory"], ["src", 1, true, "directory"], ["src/a.ts", 2, false, "file"]),
+      { kind: "loading", path: "src/loading", depth: 2, open: false },
+      ...rows(["root.ts", 1, false, "file"], ["tail.ts", 0, false, "file"]),
+    ];
+
+    expect(buildFileTreeStickyModel(tree)).toEqual({
+      parentIndices: [null, 0, 1, 1, 0, null],
+      endIndices: [4, 3, 2, 3, 4, 5],
+    });
+  });
+
+  it("stacks visible ancestors beneath the sticky viewport edge", () => {
+    const tree = nestedStickyRows();
+    const sticky = fileTreeStickyRows(tree, buildFileTreeStickyModel(tree), 4 * 28, 280, 28);
+
+    expect(sticky).toEqual([
+      { index: 0, position: 0 },
+      { index: 1, position: 28 },
+      { index: 2, position: 56 },
+      { index: 3, position: 84 },
+    ]);
+  });
+
+  it("limits sticky rows to 40 percent of the viewport and the configured item count", () => {
+    const tree = nestedStickyRows();
+    const model = buildFileTreeStickyModel(tree);
+
+    expect(fileTreeStickyRows(tree, model, 4 * 28, 140, 28)).toHaveLength(2);
+    expect(fileTreeStickyRows(tree, model, 4 * 28, 280, 28, 2)).toHaveLength(2);
+  });
+
+  it("pushes the final sticky directory away at the end of its subtree", () => {
+    const tree: FileTreeRow[] = [
+      ...rows(["root", 0, true, "directory"], ["folder", 1, true, "directory"]),
+      ...Array.from(
+        { length: 4 },
+        (_, index): FileTreeRow => ({
+          kind: "node",
+          path: `folder/file-${index}.ts`,
+          depth: 2,
+          open: false,
+          node: { name: `file-${index}.ts`, path: `folder/file-${index}.ts`, type: "file" },
+        }),
+      ),
+      ...rows(["other.ts", 1, false, "file"]),
+    ];
+
+    expect(fileTreeStickyRows(tree, buildFileTreeStickyModel(tree), 130, 280, 28)).toEqual([
+      { index: 0, position: 0 },
+      { index: 1, position: 10 },
+    ]);
+  });
+
+  it("does not render sticky rows before scrolling", () => {
+    const tree = nestedStickyRows();
+    expect(fileTreeStickyRows(tree, buildFileTreeStickyModel(tree), 0, 280, 28)).toEqual([]);
   });
 });

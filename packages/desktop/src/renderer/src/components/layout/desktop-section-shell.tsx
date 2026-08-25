@@ -52,7 +52,6 @@ export function DesktopSectionShell({
           onKeyDown={resize.onKeyDown}
         />
         <div id="section-menu-content" className="settings-menu-content">
-          {window.desktop.platform === "darwin" ? <div className="settings-menu-titlebar" aria-hidden="true" /> : null}
           <nav className="settings-menu-items" aria-label={menuAriaLabel}>
             {menu}
           </nav>

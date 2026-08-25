@@ -96,6 +96,7 @@ import type { BrowserManager } from "./browser/browser-manager.ts";
 import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ProjectFileWatcher } from "./files/file-watcher.ts";
+import type { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
 import type { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
@@ -133,6 +134,7 @@ export function registerIpc(
   projects: ProjectStore,
   sessions: SessionSupervisor,
   files: FileService,
+  officeDocuments: OfficeDocumentPreviewService,
   fileWatcher: ProjectFileWatcher,
   terminals: TerminalSupervisor,
   models: ModelsConfigService,
@@ -167,6 +169,7 @@ export function registerIpc(
   const modelEditorWebContents = new Set<number>();
   const oauthWebContents = new Set<number>();
   const browserSessionOwnerWebContents = new Set<number>();
+  const officePreviewWebContents = new Set<number>();
   const oauth = new OauthLoginCoordinator({
     login: (providerId, callbacks) => auth.loginOauth(providerId, callbacks),
   });
@@ -829,6 +832,20 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.filesReadImage, (_event, projectId: string, path: string) =>
     files.readImage(projectId, path),
   );
+  ipcMain.handle(CHANNELS.filesPreviewOfficeDocument, (event, projectId: string, path: string) => {
+    const ownerId = event.sender.id;
+    if (!officePreviewWebContents.has(ownerId)) {
+      officePreviewWebContents.add(ownerId);
+      event.sender.once("destroyed", () => {
+        officePreviewWebContents.delete(ownerId);
+        officeDocuments.cancelOwner(ownerId);
+      });
+    }
+    return officeDocuments.preview(ownerId, projectId, path);
+  });
+  ipcMain.handle(CHANNELS.filesCancelOfficeDocumentPreview, (event) => {
+    officeDocuments.cancelOwner(event.sender.id);
+  });
   ipcMain.handle(CHANNELS.filesWatch, (_event, projectId: string) => fileWatcher.watch(projectId));
   ipcMain.handle(CHANNELS.filesUnwatch, (_event, projectId: string) => fileWatcher.unwatch(projectId));
   ipcMain.handle(CHANNELS.filesResolvePath, (_event, projectId: string, path: string) =>

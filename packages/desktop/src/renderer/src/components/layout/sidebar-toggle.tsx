@@ -31,7 +31,7 @@ export function SidebarToggle({
     buttonRef.current?.focus();
   }, [visible]);
 
-  if (window.desktop.platform === "win32" && location === "topbar") return null;
+  if (window.desktop.platform !== "linux" && location === "topbar") return null;
   if (!visible) return null;
 
   return (

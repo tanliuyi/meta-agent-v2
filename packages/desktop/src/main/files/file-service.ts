@@ -1,9 +1,10 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { extname, relative, resolve, sep } from "node:path";
+import { extname, relative, resolve } from "node:path";
 import type { FileImage, FileNode, TextFile } from "../../shared/contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 import { fuzzyMatch } from "./fuzzy.ts";
 import { collectGitignoreLayers, type GitignoreLayer, isPathIgnored, readGitignoreLayer } from "./gitignore.ts";
+import { normalizeProjectRelativePath, resolveProjectFilePath } from "./project-file-path.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -48,9 +49,12 @@ export class FileService {
         const searchResults = await this.search(cwd, normalizedQuery, isCancelled);
         return searchResults;
       }
-      const target = resolveInside(cwd, path);
+      const target = resolveProjectFilePath(cwd, path);
       const layers = await collectGitignoreLayers(cwd, target);
-      if (relative(cwd, target) !== "" && isPathIgnored(normalizeRelative(relative(cwd, target)), true, layers)) {
+      if (
+        relative(cwd, target) !== "" &&
+        isPathIgnored(normalizeProjectRelativePath(relative(cwd, target)), true, layers)
+      ) {
         return [];
       }
       const entries = await readdir(target, { withFileTypes: true });
@@ -63,10 +67,11 @@ export class FileService {
           .map(async (entry): Promise<FileNode | null> => {
             if (entry.name === ".git" || entry.name === "node_modules") return null;
             const child = resolve(target, entry.name);
-            if (isPathIgnored(normalizeRelative(relative(cwd, child)), entry.isDirectory(), layers)) return null;
+            if (isPathIgnored(normalizeProjectRelativePath(relative(cwd, child)), entry.isDirectory(), layers))
+              return null;
             return {
               name: entry.name,
-              path: normalizeRelative(relative(cwd, child)),
+              path: normalizeProjectRelativePath(relative(cwd, child)),
               type: entry.isDirectory() ? "directory" : "file",
               hasChildren: entry.isDirectory() ? await directoryHasChildren(child) : undefined,
             } satisfies FileNode;
@@ -83,12 +88,12 @@ export class FileService {
   /** 读取 Project 内的小型 UTF-8 文本文件。 */
   async read(projectId: string, path: string): Promise<TextFile> {
     const cwd = this.projects.getCwd(projectId);
-    const target = resolveInside(cwd, path);
+    const target = resolveProjectFilePath(cwd, path);
     const info = await stat(target);
     if (!info.isFile()) throw new Error("目标不是文件");
     if (info.size > MAX_FILE_BYTES) throw new Error("文件超过 1 MiB，无法在工作台预览");
     return {
-      path: normalizeRelative(relative(cwd, target)),
+      path: normalizeProjectRelativePath(relative(cwd, target)),
       content: await readFile(target, "utf8"),
       language: languageOf(target),
     };
@@ -97,7 +102,7 @@ export class FileService {
   /** 读取 Project 内的图片文件为 data URL（用于只读预览）。 */
   async readImage(projectId: string, path: string): Promise<FileImage> {
     const cwd = this.projects.getCwd(projectId);
-    const target = resolveInside(cwd, path);
+    const target = resolveProjectFilePath(cwd, path);
     const info = await stat(target);
     if (!info.isFile()) throw new Error("目标不是文件");
     const mime = IMAGE_MIME[extname(target).slice(1).toLowerCase()];
@@ -105,7 +110,7 @@ export class FileService {
     if (info.size > MAX_IMAGE_BYTES) throw new Error("图片超过 10 MiB，无法预览");
     const buffer = await readFile(target);
     return {
-      path: normalizeRelative(relative(cwd, target)),
+      path: normalizeProjectRelativePath(relative(cwd, target)),
       mime,
       dataUrl: `data:${mime};base64,${buffer.toString("base64")}`,
     };
@@ -129,14 +134,15 @@ export class FileService {
       for (const entry of entries) {
         if (entry.name === ".git" || entry.name === "node_modules") continue;
         const target = resolve(dir, entry.name);
-        if (isPathIgnored(normalizeRelative(relative(cwd, target)), entry.isDirectory(), nextLayers)) continue;
+        if (isPathIgnored(normalizeProjectRelativePath(relative(cwd, target)), entry.isDirectory(), nextLayers))
+          continue;
         if (entry.isDirectory()) pending.push({ dir: target, depth: depth + 1, layers: nextLayers });
         const score = fuzzyMatch(query, entry.name);
         if (score !== null) {
           results.push({
             node: {
               name: entry.name,
-              path: normalizeRelative(relative(cwd, target)),
+              path: normalizeProjectRelativePath(relative(cwd, target)),
               type: entry.isDirectory() ? "directory" : "file",
               hasChildren: entry.isDirectory(),
             },
@@ -166,21 +172,8 @@ async function yieldToEventLoop(): Promise<void> {
   await new Promise<void>((resolveYield) => setImmediate(resolveYield));
 }
 
-function resolveInside(cwd: string, path: string): string {
-  const target = resolve(cwd, path);
-  const child = relative(cwd, target);
-  if (child === ".." || child.startsWith(`..${sep}`) || resolve(target) === resolve(cwd, "..")) {
-    throw new Error("文件路径超出 Project cwd");
-  }
-  return target;
-}
-
 async function directoryHasChildren(path: string): Promise<boolean> {
   return (await readdir(path)).length > 0;
-}
-
-function normalizeRelative(path: string): string {
-  return path.split(sep).join("/");
 }
 
 function languageOf(path: string): string {

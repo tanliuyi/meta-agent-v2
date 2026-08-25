@@ -373,6 +373,9 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.filesList, projectId, path, query, requestGroup),
     read: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesRead, projectId, path),
     readImage: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesReadImage, projectId, path),
+    previewOfficeDocument: (projectId, path) =>
+      ipcRenderer.invoke(CHANNELS.filesPreviewOfficeDocument, projectId, path),
+    cancelOfficeDocumentPreview: () => ipcRenderer.invoke(CHANNELS.filesCancelOfficeDocumentPreview),
     resolvePath: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, projectId, path),
     open: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesOpen, projectId, path),
     watch: (projectId) => ipcRenderer.invoke(CHANNELS.filesWatch, projectId),

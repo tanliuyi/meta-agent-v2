@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FilePreview } from "../src/renderer/src/components/panel/files/file-preview.tsx";
 import type { TextFile } from "../src/shared/contracts.ts";
+
+const panelCss = readFileSync(new URL("../src/renderer/src/styles/panel.css", import.meta.url), "utf8");
 
 const file: TextFile = {
   path: "src/index.ts",
@@ -42,6 +45,13 @@ describe("FilePreview", () => {
   it("空行渲染占位空格", () => {
     const markup = render();
     expect(markup).toContain("> </span>");
+  });
+
+  it("横向滚动时固定行号列", () => {
+    expect(panelCss).toMatch(/\.file-preview-body\s*>\s*pre\s*\{[^}]*--file-preview-content-width:\s*100%;/s);
+    expect(panelCss).toMatch(/\.file-preview-row\s*\{[^}]*width:\s*var\(--file-preview-content-width, 100%\);/s);
+    expect(panelCss).toMatch(/\.file-preview-line-number\s*\{[^}]*position:\s*sticky;[^}]*left:\s*0;/s);
+    expect(panelCss).not.toContain("--file-preview-scroll-left");
   });
 
   it("渲染代码缩略图容器", () => {

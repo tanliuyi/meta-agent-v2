@@ -4,32 +4,27 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const timeline = {
-  phase: "running",
-  nodes: [
-    { kind: "user", createdAt: Date.UTC(2025, 0, 2, 3, 4) },
-    { kind: "assistant", createdAt: Date.UTC(2025, 0, 2, 3, 5) },
-    { kind: "tool", createdAt: Date.UTC(2025, 0, 2, 3, 6) },
-  ],
-};
-
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
-  useSessionConnection: () => "ready",
-  useSessionControl: () => ({
-    context: { tokens: 117_800, contextWindow: 272_000, percent: 43.3 },
-    cwd: "G:/workspace/meta-agent-v2",
-    model: { id: "gpt-5.6-solo", name: "GPT 5.6 Solo", provider: "home-gateway" },
-    thinkingLevel: "medium",
-    updatedAt: Date.UTC(2025, 0, 2, 3, 7),
-  }),
   useSessionIdentity: () => ({ projectId: "project-1", threadId: "thread-1" }),
-  useSessionTimelineSelector: (selector: (value: typeof timeline) => unknown) => selector(timeline),
 }));
 
 import { SessionInfo } from "../src/renderer/src/components/chat/session-info.tsx";
+import { TooltipProvider } from "../src/renderer/src/shared/ui/tooltip-provider.tsx";
+
+function renderSessionInfo(open: boolean): string {
+  return renderToStaticMarkup(
+    <TooltipProvider>
+      <SessionInfo open={open} />
+    </TooltipProvider>,
+  );
+}
 
 const css = readFileSync(
   fileURLToPath(new URL("../src/renderer/src/styles/session-info.css", import.meta.url)),
+  "utf8",
+);
+const sessionInfoSource = readFileSync(
+  fileURLToPath(new URL("../src/renderer/src/components/chat/session-info.tsx", import.meta.url)),
   "utf8",
 );
 const messagesSource = readFileSync(
@@ -42,22 +37,40 @@ const threadSource = readFileSync(
 );
 
 describe("SessionInfo", () => {
-  it("renders the current session basics", () => {
-    const markup = renderToStaticMarkup(<SessionInfo open />);
+  it("renders only the session ID and its copy action", () => {
+    const markup = renderSessionInfo(true);
 
     expect(markup).toContain('id="session-info-panel"');
     expect(markup).toContain('data-open="true"');
-    expect(markup).toContain("已连接 · 运行中");
-    expect(markup).toContain("GPT 5.6 Solo (home-gateway/gpt-5.6-solo)");
-    expect(markup).toContain("117.8k / 272k (43%)");
-    expect(markup).toContain("2 条");
-    expect(markup).toContain("G:/workspace/meta-agent-v2");
     expect(markup).toContain("thread-1");
-    expect(markup).toContain("project-1");
+    expect(markup).toContain("复制会话 ID");
+    expect(markup).not.toContain("工作区");
+    expect(markup).not.toContain("目录");
+    expect(markup).not.toContain("G:/workspace/meta-agent-v2");
+    expect(markup).not.toMatch(/<h[1-6]/);
+
+    for (const hiddenText of [
+      "SESSION",
+      "已连接",
+      "运行中",
+      "模型",
+      "思考级别",
+      "上下文",
+      "消息",
+      "创建时间",
+      "更新时间",
+      "项目 ID",
+      "project-1",
+      "GPT 5.6 Solo",
+      "117.8k / 272k (43%)",
+      "2 条",
+    ]) {
+      expect(markup).not.toContain(hiddenText);
+    }
   });
 
   it("keeps the collapsed panel mounted but hidden from the accessibility tree", () => {
-    const markup = renderToStaticMarkup(<SessionInfo open={false} />);
+    const markup = renderSessionInfo(false);
 
     expect(markup).toContain('data-open="false"');
     expect(markup).toContain('aria-hidden="true"');
@@ -65,6 +78,33 @@ describe("SessionInfo", () => {
 });
 
 describe("session info layout", () => {
+  it("balances the list inset against the reserved scrollbar gutter", () => {
+    const listRule = css.match(/\.session-info-list\s*\{([^}]*)\}/s)?.[1] ?? "";
+
+    expect(listRule).toMatch(/padding:\s*8px 0 8px 18px/);
+  });
+
+  it("keeps the session ID on one truncated line and overlays the copy action on hover", () => {
+    const valueRule = css.match(/\.session-info-id-value\s*\{([^}]*)\}/s)?.[1] ?? "";
+    const copyRule = css.match(/\.session-info-copy\s*\{([^}]*)\}/s)?.[1] ?? "";
+    const hoverRule =
+      css.match(
+        /\.session-info-id-row:hover \.session-info-copy,\s*\.session-info-copy:focus-visible\s*\{([^}]*)\}/s,
+      )?.[1] ?? "";
+
+    expect(valueRule).toMatch(/overflow:\s*hidden/);
+    expect(valueRule).toMatch(/text-overflow:\s*ellipsis/);
+    expect(valueRule).toMatch(/white-space:\s*nowrap/);
+    expect(copyRule).toMatch(/position:\s*absolute/);
+    expect(copyRule).toMatch(/opacity:\s*0/);
+    expect(copyRule).toMatch(/pointer-events:\s*none/);
+    expect(hoverRule).toMatch(/opacity:\s*1/);
+    expect(hoverRule).toMatch(/pointer-events:\s*auto/);
+    expect(sessionInfoSource).toMatch(/navigator\.clipboard\.writeText\(identity\.threadId\)/);
+    expect(sessionInfoSource).toMatch(/setCopied\(true\)/);
+    expect(sessionInfoSource).toMatch(/setTimeout\(\(\) => setCopied\(false\), 2_000\)/);
+  });
+
   it("reserves a layout region while keeping the message column centered inside it", () => {
     const openLayoutRule =
       css.match(

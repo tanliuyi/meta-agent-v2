@@ -58,9 +58,9 @@ describe("Topbar session info toggle", () => {
     );
   });
 
-  it("aligns workbench-local actions with the fixed global action group", () => {
+  it("uses the shared panel action spacing on every desktop platform", () => {
     expect(panelCss).toMatch(/\.panel-tabs\s*\{[^}]*padding:\s*0 66px 0 8px;/s);
     expect(panelCss).toMatch(/\.panel-tabs-safe-area\s*\{[^}]*width:\s*66px;/s);
-    expect(panelCss).toMatch(/\.app-frame\[data-platform="darwin"\] \.panel-tabs\s*\{[^}]*padding:\s*0 73px 0 8px;/s);
+    expect(panelCss).not.toMatch(/data-platform="darwin"/);
   });
 });

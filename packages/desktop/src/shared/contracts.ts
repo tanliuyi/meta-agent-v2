@@ -540,6 +540,12 @@ export interface FileImage {
   dataUrl: string;
 }
 
+/** OfficeCLI 生成的 Office 文档 HTML 预览。 */
+export interface OfficeDocumentPreview {
+  path: string;
+  html: string;
+}
+
 /** 单个 Project 内一次合并的文件变化事件（相对路径，目录树增量刷新用）。 */
 export interface FileChangeSet {
   projectId: string;

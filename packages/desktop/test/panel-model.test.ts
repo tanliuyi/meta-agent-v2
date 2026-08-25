@@ -3,6 +3,7 @@ import {
   closeWorkbenchFile,
   filePathSegments,
   isImagePath,
+  isOfficeDocumentPath,
   openWorkbenchFileAsPreview,
   openWorkbenchFilePatch,
   pinWorkbenchFile,
@@ -121,6 +122,20 @@ describe("isImagePath", () => {
     expect(isImagePath("src/index.ts")).toBe(false);
     expect(isImagePath("README.md")).toBe(false);
     expect(isImagePath("no-extension")).toBe(false);
+  });
+});
+
+describe("isOfficeDocumentPath", () => {
+  it("识别 OfficeCLI 支持的 OOXML 文档", () => {
+    expect(isOfficeDocumentPath("docs/report.DOCX")).toBe(true);
+    expect(isOfficeDocumentPath("sheets/budget.xlsx")).toBe(true);
+    expect(isOfficeDocumentPath("slides/demo.pptx")).toBe(true);
+  });
+
+  it("拒绝旧版 Office 和无关格式", () => {
+    expect(isOfficeDocumentPath("legacy.doc")).toBe(false);
+    expect(isOfficeDocumentPath("legacy.xls")).toBe(false);
+    expect(isOfficeDocumentPath("document.pdf")).toBe(false);
   });
 });
 
