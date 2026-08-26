@@ -35,18 +35,26 @@ export function parentPath(path: string): string {
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"]);
 const OFFICE_DOCUMENT_EXTENSIONS = new Set(["docx", "pptx", "xlsx"]);
 
+function extensionOf(path: string): string | null {
+  const dot = path.lastIndexOf(".");
+  return dot === -1 ? null : path.slice(dot + 1).toLowerCase();
+}
+
 /** 判断路径是否为支持预览的图片文件。 */
 export function isImagePath(path: string): boolean {
-  const dot = path.lastIndexOf(".");
-  if (dot === -1) return false;
-  return IMAGE_EXTENSIONS.has(path.slice(dot + 1).toLowerCase());
+  const extension = extensionOf(path);
+  return extension !== null && IMAGE_EXTENSIONS.has(extension);
 }
 
 /** 判断路径是否为可由 OfficeCLI 预览的 OOXML 文档。 */
 export function isOfficeDocumentPath(path: string): boolean {
-  const dot = path.lastIndexOf(".");
-  if (dot === -1) return false;
-  return OFFICE_DOCUMENT_EXTENSIONS.has(path.slice(dot + 1).toLowerCase());
+  const extension = extensionOf(path);
+  return extension !== null && OFFICE_DOCUMENT_EXTENSIONS.has(extension);
+}
+
+/** 判断路径是否为 PDF 文档。 */
+export function isPdfPath(path: string): boolean {
+  return extensionOf(path) === "pdf";
 }
 
 /** 在当前活动 tab 中打开文件，并去除可能出现的重复目标 tab。 */

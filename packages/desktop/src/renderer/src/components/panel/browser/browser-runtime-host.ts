@@ -92,6 +92,20 @@ interface PendingCreateTabRequest {
   sessionKey: string;
 }
 
+interface BrowserSessionOwnership {
+  identity: BrowserSessionIdentity;
+  acquired: Promise<boolean>;
+}
+
+interface BrowserRuntimeHostGlobal {
+  __META_AGENT_BROWSER_SESSION_OWNERSHIPS__?: Map<string, BrowserSessionOwnership>;
+}
+
+const browserRuntimeHostGlobal = globalThis as typeof globalThis & BrowserRuntimeHostGlobal;
+const browserSessionOwnerships =
+  browserRuntimeHostGlobal.__META_AGENT_BROWSER_SESSION_OWNERSHIPS__ ?? new Map<string, BrowserSessionOwnership>();
+browserRuntimeHostGlobal.__META_AGENT_BROWSER_SESSION_OWNERSHIPS__ = browserSessionOwnerships;
+
 export interface BrowserRuntimeHostOptions {
   /** 测试注入：创建 webview 元素。 */
   createWebviewElement?: () => BrowserWebviewElement;
@@ -124,12 +138,30 @@ export function configureBrowserRuntimeHost(options: BrowserRuntimeHostOptions):
 
 /** 清空全部模块状态（测试专用：重置订阅、runtime、缓冲与 parking host）。 */
 export function resetBrowserRuntimeHostForTest(): void {
+  disposeBrowserRuntimeHostLocally();
+  browserSessionOwnerships.clear();
+  nextViewId = 1;
+}
+
+/** 模拟 HMR generation 卸载；保留 renderer 在 main 侧持有的 session ownership。 */
+export function disposeBrowserRuntimeHostForTest(): void {
+  disposeBrowserRuntimeHostLocally();
+}
+
+/** HMR/测试卸载：只释放本 renderer 模块资源，不注销 main 侧 session owner。 */
+function disposeBrowserRuntimeHostLocally(): void {
   nativeStateUnsubscribe?.();
   nativeCreateUnsubscribe?.();
   nativeCloseUnsubscribe?.();
   nativeStateUnsubscribe = undefined;
   nativeCreateUnsubscribe = undefined;
   nativeCloseUnsubscribe = undefined;
+  for (const internals of internalsByKey.values()) {
+    for (const cleanup of internals.elementCleanups.values()) cleanup();
+    for (const timer of internals.pollTimers.values()) clearInterval(timer);
+    for (const element of internals.elementByView.values()) element.remove();
+    internals.runtime.container.remove();
+  }
   runtimes.clear();
   internalsByKey.clear();
   runtimeListeners.clear();
@@ -138,8 +170,12 @@ export function resetBrowserRuntimeHostForTest(): void {
   notifiedRequestIds.clear();
   bufferedStateEvents.clear();
   retirePromises.clear();
+  parkingHost?.remove();
   parkingHost = null;
-  nextViewId = 1;
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(disposeBrowserRuntimeHostLocally);
 }
 
 const runtimes = new Map<string, SessionBrowserRuntime>();
@@ -250,6 +286,48 @@ function identityFromSessionKey(sessionKey: string): BrowserSessionIdentity | nu
   return { projectId, threadId };
 }
 
+function removeOrphanedRuntimeDom(sessionKey: string): void {
+  for (const element of document.querySelectorAll<HTMLElement>(".browser-session-runtime")) {
+    if (element.getAttribute("data-browser-session") === sessionKey) element.remove();
+  }
+  for (const host of document.querySelectorAll<HTMLElement>(".browser-parking-host")) {
+    if (host.children.length === 0) host.remove();
+  }
+}
+
+function acquireBrowserSession(identity: BrowserSessionIdentity): void {
+  if (typeof window === "undefined" || !window.desktop?.browser) return;
+  const sessionKey = browserSessionKey(identity);
+  if (browserSessionOwnerships.has(sessionKey)) return;
+  const ownership: BrowserSessionOwnership = {
+    identity: { ...identity },
+    acquired: window.desktop.browser.sessionAcquire(identity).then(
+      () => true,
+      () => false,
+    ),
+  };
+  browserSessionOwnerships.set(sessionKey, ownership);
+  void ownership.acquired.then((acquired) => {
+    if (!acquired && browserSessionOwnerships.get(sessionKey) === ownership) {
+      browserSessionOwnerships.delete(sessionKey);
+    }
+  });
+}
+
+async function retireOwnedBrowserSession(sessionKey: string): Promise<void> {
+  const ownership = browserSessionOwnerships.get(sessionKey);
+  if (!ownership) return;
+  const acquired = await ownership.acquired;
+  if (runtimes.has(sessionKey) || browserSessionOwnerships.get(sessionKey) !== ownership) return;
+  browserSessionOwnerships.delete(sessionKey);
+  if (!acquired) return;
+  try {
+    await window.desktop.browser.sessionRetire(ownership.identity);
+  } catch {
+    // main 侧清理失败不阻断 renderer 清理。
+  }
+}
+
 /** 创建（或复用）会话 runtime；重放未处理的建 tab 请求并应用缓冲状态。 */
 export function ensureBrowserRuntime(identity: BrowserSessionIdentity): SessionBrowserRuntime {
   ensureNativeSubscriptions();
@@ -257,6 +335,9 @@ export function ensureBrowserRuntime(identity: BrowserSessionIdentity): SessionB
   const existing = runtimes.get(sessionKey);
   if (existing) return existing;
 
+  // Vite HMR 会重建模块级 registry，但旧 webview DOM 仍可能存活。新 generation
+  // 接管前移除同 session 的孤儿容器，防止 guest 与 renderer 持续叠加。
+  removeOrphanedRuntimeDom(sessionKey);
   const container = runtimeOptions.createContainer?.() ?? document.createElement("div");
   container.className = "browser-session-runtime";
   container.setAttribute("data-browser-session", sessionKey);
@@ -287,9 +368,7 @@ export function ensureBrowserRuntime(identity: BrowserSessionIdentity): SessionB
   internalsByKey.set(sessionKey, internals);
   // 声明本 renderer（webContents）持有该会话的浏览器状态：其他窗口关闭同会话的
   // tab 时主进程只释放它的持有权，不会销毁本窗口的 tabs/guest/历史。
-  if (typeof window !== "undefined" && window.desktop?.browser) {
-    void window.desktop.browser.sessionAcquire(identity).catch(() => undefined);
-  }
+  acquireBrowserSession(identity);
 
   const buffered = bufferedStateEvents.get(sessionKey);
   if (buffered) {
@@ -364,7 +443,11 @@ export function retireBrowserRuntime(sessionKey: string): Promise<void> {
 /** 会话退役：先冻结并摘除 runtime，再异步注销 main guest；幂等且防止旧清理删除新 generation。 */
 async function retireBrowserRuntimeInternal(sessionKey: string): Promise<void> {
   const internals = internalsByKey.get(sessionKey);
-  if (!internals || internals.retiring) return;
+  if (!internals) {
+    await retireOwnedBrowserSession(sessionKey);
+    return;
+  }
+  if (internals.retiring) return;
   internals.retiring = true;
   const runtime = internals.runtime;
   const identity = runtime.identity;
@@ -415,13 +498,7 @@ async function retireBrowserRuntimeInternal(sessionKey: string): Promise<void> {
     }
   }
   // 同一 key 在清理期间若已创建新 runtime，新 generation 不能被旧 retire 注销。
-  if (!runtimes.has(sessionKey)) {
-    try {
-      await window.desktop.browser.sessionRetire(identity);
-    } catch {
-      // main 侧清理失败不阻断 renderer 清理。
-    }
-  }
+  if (!runtimes.has(sessionKey)) await retireOwnedBrowserSession(sessionKey);
 }
 
 /** 面板“新建标签页”：创建一个空白视图并 attach。 */

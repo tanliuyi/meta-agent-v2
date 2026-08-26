@@ -1,4 +1,5 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { useCallback, useMemo } from "react";
 import { GENERAL_WORKSPACE_ID, type Project } from "../../../shared/contracts.ts";
 import { useTransportManager } from "../runtime/session-transport-context";
 
@@ -90,42 +91,46 @@ export function resolveRootTarget(
  */
 export function useSessionNavigation() {
   const navigate = useNavigate();
-
-  return {
-    openSession(projectId: string, threadId: string) {
-      return navigate({
+  const openSession = useCallback(
+    (projectId: string, threadId: string) =>
+      navigate({
         to: "/projects/$projectId/session/$threadId",
         params: { projectId, threadId },
-      });
-    },
-
-    openDraft(projectId?: string) {
-      return navigate({
+      }),
+    [navigate],
+  );
+  const openDraft = useCallback(
+    (projectId?: string) =>
+      navigate({
         to: "/new",
         search: draftSearch(projectId),
-      });
-    },
-
-    replaceSession(projectId: string, threadId: string) {
-      return navigate({
+      }),
+    [navigate],
+  );
+  const replaceSession = useCallback(
+    (projectId: string, threadId: string) =>
+      navigate({
         to: "/projects/$projectId/session/$threadId",
         params: { projectId, threadId },
         replace: true,
-      });
-    },
-
-    replaceDraft(projectId?: string) {
-      return navigate({
+      }),
+    [navigate],
+  );
+  const replaceDraft = useCallback(
+    (projectId?: string) =>
+      navigate({
         to: "/new",
         search: draftSearch(projectId),
         replace: true,
-      });
-    },
+      }),
+    [navigate],
+  );
+  const goToRoot = useCallback(() => navigate({ to: "/" }), [navigate]);
 
-    goToRoot() {
-      return navigate({ to: "/" });
-    },
-  };
+  return useMemo(
+    () => ({ openSession, openDraft, replaceSession, replaceDraft, goToRoot }),
+    [goToRoot, openDraft, openSession, replaceDraft, replaceSession],
+  );
 }
 
 export function useSessionRouteParams(): SessionRouteParams | null {

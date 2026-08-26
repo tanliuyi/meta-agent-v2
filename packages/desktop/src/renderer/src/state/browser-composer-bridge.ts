@@ -63,7 +63,10 @@ function rememberQuote(targetKey: string, messageId: string, tabId: number, crea
 }
 
 function forgetQuote(targetKey: string, messageId: string): void {
-  quotedLocationByMessageId.get(targetKey)?.delete(messageId);
+  const byMessageId = quotedLocationByMessageId.get(targetKey);
+  if (!byMessageId) return;
+  byMessageId.delete(messageId);
+  if (byMessageId.size === 0) quotedLocationByMessageId.delete(targetKey);
 }
 
 /** 会话内已注入 composer 的标注引用 messageId（按 tab 过滤；URL 失效同步用）。 */
@@ -266,6 +269,16 @@ function enqueuePending<T>(queue: Map<string, T[]>, targetKey: string, event: T)
   pending.push(event);
   if (pending.length > MAX_PENDING_PER_TARGET) pending.splice(0, pending.length - MAX_PENDING_PER_TARGET);
   queue.set(targetKey, pending);
+}
+
+/** 会话退役时释放桥接订阅、待投递事件、引用定位和失败重试。 */
+export function retireBrowserComposerBridge(targetKey: string): void {
+  composerHandlers.delete(targetKey);
+  consumedHandlers.delete(targetKey);
+  pendingByTarget.delete(targetKey);
+  pendingConsumedByTarget.delete(targetKey);
+  quotedLocationByMessageId.delete(targetKey);
+  pendingRemovalByTarget.delete(targetKey);
 }
 
 /**

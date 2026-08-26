@@ -572,7 +572,7 @@ export class WebContentsHostController implements BrowserHostController {
 
   /** 写剪贴板文本（Electron 系统剪贴板；webview 内粘贴事件由 Electron 处理）。 */
   async clipboardWriteText(text: string): Promise<void> {
-    electronClipboard.writeText(text);
+    await electronClipboard.writeText(text);
   }
 
   /** 按选择器执行元素操作（对齐 Codex PlaywrightLocator 核心命令集）。 */

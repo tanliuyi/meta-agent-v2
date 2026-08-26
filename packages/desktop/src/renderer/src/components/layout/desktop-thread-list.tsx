@@ -14,6 +14,8 @@ import type { Project, SessionRemovePolicy, Thread } from "../../../../shared/co
 import { sessionRecordKey } from "../../runtime/pi-session-store.ts";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useDesktopStore } from "../../state/desktop-store-context.tsx";
+import { useKeyboardShortcuts } from "../../state/keyboard-shortcut-provider.tsx";
+import { DESKTOP_SESSION_TAB_COMMAND_IDS, primaryDigitShortcutHint } from "../../state/keyboard-shortcuts.ts";
 import {
   useSessionCache,
   useSessionCacheActiveKey,
@@ -67,10 +69,20 @@ export function DesktopThreadList({
   const cache = useSessionCache();
   const store = useDesktopStore();
   const activeSessionKey = useSessionCacheActiveKey();
+  const { commandTargets, getBindings, primaryModifierPressed } = useKeyboardShortcuts();
   const params = useParams({ strict: false }) as Record<string, string | undefined>;
   const activeThreadId = params.projectId === project.id ? (params.threadId ?? null) : null;
   const navigationDisabled = useSessionDraftMaterializing();
   const { pinnedThreadKeys, toggleThread: togglePinnedThread } = useThreadPinning();
+  const shortcutNumberBySessionKey = useMemo(() => {
+    const shortcuts = new Map<string, string>();
+    for (const commandId of DESKTOP_SESSION_TAB_COMMAND_IDS) {
+      const target = commandTargets.get(commandId);
+      const hint = primaryDigitShortcutHint(getBindings(commandId));
+      if (target && hint) shortcuts.set(target, hint);
+    }
+    return shortcuts;
+  }, [commandTargets, getBindings]);
   const displayFilter = useMemo<ThreadDisplayFilter | undefined>(() => {
     if (!displayThreads) return undefined;
     const displayIds = new Set(displayThreads.map(({ id }) => id));
@@ -258,6 +270,11 @@ export function DesktopThreadList({
               isDeletePending={pendingKeys.has(`delete:${thread.id}`)}
               isPromotePending={pendingKeys.has(`promote:${thread.id}`)}
               isPinned={pinnedThreadKeys.has(pinnedThreadKey(thread.projectId, thread.id))}
+              shortcutHint={
+                primaryModifierPressed
+                  ? shortcutNumberBySessionKey.get(sessionRecordKey(thread.projectId, thread.id))
+                  : undefined
+              }
               depth={depth}
               childCount={childCount}
               runningChildCount={runningChildCount}

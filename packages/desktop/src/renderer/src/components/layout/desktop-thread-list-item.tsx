@@ -40,6 +40,7 @@ interface DesktopThreadListItemProps {
   isDeletePending: boolean;
   isPromotePending: boolean;
   isPinned?: boolean;
+  shortcutHint?: string;
   depth: number;
   childCount: number;
   runningChildCount: number;
@@ -211,7 +212,11 @@ export const DesktopThreadListItem = memo(function DesktopThreadListItem(props: 
                 {props.runningChildCount}
               </span>
             ) : null}
-            {thread.running ? (
+            {props.shortcutHint !== undefined ? (
+              <span className="desktop-thread-shortcut-hint" aria-hidden="true">
+                {props.shortcutHint}
+              </span>
+            ) : thread.running ? (
               <span className="running-dot" aria-label="运行中" />
             ) : thread.completed === true && !props.active ? (
               <span className="completed-dot" aria-label="运行已完成" />

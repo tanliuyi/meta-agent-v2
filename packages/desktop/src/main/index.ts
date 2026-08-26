@@ -21,6 +21,7 @@ import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-sou
 import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
 import { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
+import { handlePdfPreviewRequests, registerPdfPreviewScheme } from "./files/pdf-preview-protocol.ts";
 import {
   broadcastBrowserCloseTabRequest,
   broadcastBrowserCreateTabRequest,
@@ -102,6 +103,7 @@ const minimumWindowBounds = { width: 1024, height: 680 };
 const hasSingleInstanceLock = runtimeSetupSelection || !app.isPackaged ? true : app.requestSingleInstanceLock();
 
 registerLocalImageSchemes();
+registerPdfPreviewScheme();
 registerBrowserInternalScheme();
 
 if (!hasSingleInstanceLock) app.quit();
@@ -155,6 +157,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      plugins: true,
       // IAB 内置浏览器面板依赖 renderer 侧 <webview> 标签；保持其余隔离默认不变。
       webviewTag: true,
     },
@@ -253,6 +256,8 @@ app.whenReady().then(async () => {
     join(agentDir, "projects.json"),
     generalWorkspaceCwd,
   );
+  const files = new FileService(projects);
+  handlePdfPreviewRequests(projects);
   const projectsLoad = projects.load();
   const getWorkspaceKey = (projectId: string): Promise<string> =>
     resolveWorkspaceMutationKey(projects.getCwd(projectId));
@@ -503,7 +508,7 @@ app.whenReady().then(async () => {
   registerIpc(
     projects,
     sessions,
-    new FileService(projects),
+    files,
     new OfficeDocumentPreviewService(projects, {
       cacheDir: join(userDataDir, "cache", "office-document-preview"),
       getConfiguration: async () => {

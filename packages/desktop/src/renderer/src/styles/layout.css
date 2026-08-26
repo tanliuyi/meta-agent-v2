@@ -111,7 +111,7 @@
 }
 
 .desktop-session-tab[data-active="true"] {
-  background: hsl(var(--foreground) / 0.09);
+  background: color-mix(in oklab, hsl(var(--primary)) 14%, hsl(var(--sidebar)));
   color: hsl(var(--foreground));
 }
 
@@ -141,6 +141,31 @@
   padding: 0;
   margin-inline-end: 4px;
   border-radius: var(--shape-radius-round);
+}
+
+.desktop-session-tab-close.desktop-session-tab-close[data-shortcut-hint="true"] {
+  border-radius: var(--shape-radius-xl);
+  background: hsl(var(--shortcut-hint-background));
+  color: hsl(var(--shortcut-hint-foreground));
+}
+
+.desktop-session-tab-shortcut-hint,
+.desktop-thread-shortcut-hint {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.desktop-thread-shortcut-hint {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  border-radius: var(--shape-radius-xl);
+  background: hsl(var(--shortcut-hint-background));
+  color: hsl(var(--shortcut-hint-foreground));
 }
 
 .desktop-session-tab-status {

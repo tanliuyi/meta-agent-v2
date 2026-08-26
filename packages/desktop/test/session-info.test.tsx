@@ -105,16 +105,19 @@ describe("session info layout", () => {
     expect(sessionInfoSource).toMatch(/setTimeout\(\(\) => setCopied\(false\), 2_000\)/);
   });
 
-  it("reserves a layout region while keeping the message column centered inside it", () => {
+  it("keeps messages, the composer, and the scroll control centered in the reserved region", () => {
     const openLayoutRule =
       css.match(
-        /\.chat-workspace\[data-session-info-open\] \[data-slot="session-message-layout"\],\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-composer-footer"\]\s*\{([^}]*)\}/s,
+        /\.chat-workspace\[data-session-info-open\] \[data-slot="session-message-layout"\],\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-composer-footer"\],\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-scroll-to-bottom-layout"\]\s*\{([^}]*)\}/s,
       )?.[1] ?? "";
 
     expect(openLayoutRule).toMatch(/margin-right:\s*calc\(var\(--session-info-panel-width\) \+ 24px\)/);
     expect(openLayoutRule).not.toMatch(/\bwidth\s*:/);
     expect(messagesSource).toMatch(
       /data-slot="session-message-layout">\s*<div\s+ref=\{contentRef\}\s+data-slot="session-message-content"\s+className="mx-auto w-full max-w-\(--layout-thread-max-width\)"/s,
+    );
+    expect(messagesSource).toMatch(
+      /data-slot="session-scroll-to-bottom-layout"\s+className="[^"]*self-stretch[^"]*"[\s\S]*className="aui-thread-scroll-to-bottom[^"]*right-1\/2[^"]*translate-x-1\/2/,
     );
     expect(threadSource).toMatch(
       /data-slot="session-composer-footer"\s+className="shrink-0 [^"]+"[\s\S]*data-slot="session-composer-content" className="mx-auto w-full max-w-\(--layout-thread-max-width\)/,
@@ -127,7 +130,7 @@ describe("session info layout", () => {
     const workspaceRule = css.match(/^\s*\.chat-workspace\s*\{([^}]*)\}/m)?.[1] ?? "";
     const narrowLayoutRule =
       css.match(
-        /@container session-workspace \(max-width: 1153px\)\s*\{\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-message-layout"\],\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-composer-footer"\]\s*\{([^}]*)\}/s,
+        /@container session-workspace \(max-width: 1153px\)\s*\{\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-message-layout"\],\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-composer-footer"\],\s*\.chat-workspace\[data-session-info-open\] \[data-slot="session-scroll-to-bottom-layout"\]\s*\{([^}]*)\}/s,
       )?.[1] ?? "";
 
     expect(workspaceRule).toMatch(/container-name:\s*session-workspace/);

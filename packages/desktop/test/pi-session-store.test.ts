@@ -3,6 +3,24 @@ import { createSessionRecordStores } from "../src/renderer/src/runtime/pi-sessio
 import { PROTOCOL_VERSION, type SessionControlState } from "../src/shared/contracts.ts";
 
 describe("SessionControlStore", () => {
+  it("会话 UI 状态按 record 隔离并复制浏览器快照", () => {
+    const first = createSessionRecordStores();
+    const second = createSessionRecordStores();
+    const urls = ["https://example.com/"];
+
+    first.browserUi.setSnapshot({ urls, activeIndex: 0 });
+    urls.push("https://mutated.example/");
+
+    expect(first.browserUi.getSnapshot()).toEqual({ urls: ["https://example.com/"], activeIndex: 0 });
+    expect(second.browserUi.getSnapshot()).toBeUndefined();
+    second.browserUi.setSnapshot({ urls: [], activeIndex: 0 });
+    expect(second.browserUi.getSnapshot()).toEqual({ urls: [], activeIndex: 0 });
+    expect(first.extensionCommands.applyRevision("host", 2)).toBe(true);
+    expect(first.extensionCommands.applyRevision("host", 2)).toBe(false);
+    expect(first.extensionCommands.applyRevision("host", 1)).toBe(false);
+    expect(second.extensionCommands.applyRevision("host", 1)).toBe(true);
+  });
+
   it("apply 对语义未变化的嵌套引用复用旧引用，消除无谓刷新", () => {
     const { control } = createSessionRecordStores();
     const initial = controlState(1);

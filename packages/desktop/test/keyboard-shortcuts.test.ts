@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DESKTOP_SESSION_TAB_COMMAND_IDS,
   effectiveKeyboardShortcuts,
   formatKeyboardShortcut,
   isSafeKeyboardShortcut,
@@ -7,6 +8,7 @@ import {
   KEYBOARD_SHORTCUTS_STORAGE_KEY,
   keyboardShortcutFromEvent,
   keyboardShortcutKey,
+  primaryDigitShortcutHint,
   readKeyboardShortcutConfig,
   writeKeyboardShortcutConfig,
 } from "../src/renderer/src/state/keyboard-shortcuts.ts";
@@ -105,6 +107,28 @@ describe("keyboard shortcuts", () => {
     expect(isSafeKeyboardShortcut({ modifiers: ["shift"], key: "a" })).toBe(false);
     expect(isSafeKeyboardShortcut({ modifiers: ["alt"], key: "a" })).toBe(true);
     expect(isSafeKeyboardShortcut({ modifiers: [], key: "F2" })).toBe(true);
+  });
+
+  it("为前九个会话标签页提供主修饰键数字快捷键", () => {
+    expect(DESKTOP_SESSION_TAB_COMMAND_IDS).toHaveLength(9);
+    expect(
+      DESKTOP_SESSION_TAB_COMMAND_IDS.map((id) => {
+        const command = KEYBOARD_COMMANDS.find((candidate) => candidate.id === id);
+        return command ? { binding: command.defaultBindings[0], allowInEditable: command.allowInEditable } : undefined;
+      }),
+    ).toEqual(
+      Array.from({ length: 9 }, (_, index) => ({
+        binding: { modifiers: ["mod"], key: String(index + 1) },
+        allowInEditable: true,
+      })),
+    );
+  });
+
+  it("快捷键提示只显示实际启用的主修饰键数字绑定", () => {
+    expect(primaryDigitShortcutHint([{ modifiers: ["mod"], key: "7" }])).toBe("7");
+    expect(primaryDigitShortcutHint([{ modifiers: ["mod", "shift"], key: "7" }])).toBeUndefined();
+    expect(primaryDigitShortcutHint([{ modifiers: ["mod"], key: "k" }])).toBeUndefined();
+    expect(primaryDigitShortcutHint([])).toBeUndefined();
   });
 
   it("读取 JSON 时移除与其他命令默认键冲突的覆盖", () => {

@@ -55,6 +55,7 @@ import type {
   HostResponse,
   OfficeDocumentPreview,
   OpenLinkResult,
+  PdfDocumentPreview,
   Project,
   SessionAttachInput,
   SessionAttachment,
@@ -313,6 +314,7 @@ export interface DesktopApi {
     list(projectId: string, path?: string, query?: string, requestGroup?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
     readImage(projectId: string, path: string): Promise<FileImage>;
+    previewPdf(projectId: string, path: string): Promise<PdfDocumentPreview>;
     previewOfficeDocument(projectId: string, path: string): Promise<OfficeDocumentPreview>;
     cancelOfficeDocumentPreview(): Promise<void>;
     resolvePath(projectId: string, path: string): Promise<string>;

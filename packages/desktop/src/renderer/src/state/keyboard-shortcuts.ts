@@ -20,6 +20,18 @@ export interface KeyboardCommand {
   allowInEditable: boolean;
 }
 
+export const DESKTOP_SESSION_TAB_COMMAND_IDS = [
+  "session.tab.activate.1",
+  "session.tab.activate.2",
+  "session.tab.activate.3",
+  "session.tab.activate.4",
+  "session.tab.activate.5",
+  "session.tab.activate.6",
+  "session.tab.activate.7",
+  "session.tab.activate.8",
+  "session.tab.activate.9",
+] as const;
+
 export const KEYBOARD_COMMANDS = [
   {
     id: "task.new",
@@ -41,6 +53,69 @@ export const KEYBOARD_COMMANDS = [
     description: "显示或隐藏侧边栏",
     defaultBindings: [{ modifiers: ["mod"], key: "b" }],
     allowInEditable: false,
+  },
+  {
+    id: "session.tab.activate.1",
+    title: "切换到标签页 1",
+    description: "打开第 1 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "1" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.2",
+    title: "切换到标签页 2",
+    description: "打开第 2 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "2" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.3",
+    title: "切换到标签页 3",
+    description: "打开第 3 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "3" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.4",
+    title: "切换到标签页 4",
+    description: "打开第 4 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "4" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.5",
+    title: "切换到标签页 5",
+    description: "打开第 5 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "5" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.6",
+    title: "切换到标签页 6",
+    description: "打开第 6 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "6" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.7",
+    title: "切换到标签页 7",
+    description: "打开第 7 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "7" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.8",
+    title: "切换到标签页 8",
+    description: "打开第 8 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "8" }],
+    allowInEditable: true,
+  },
+  {
+    id: "session.tab.activate.9",
+    title: "切换到标签页 9",
+    description: "打开第 9 个会话标签页",
+    defaultBindings: [{ modifiers: ["mod"], key: "9" }],
+    allowInEditable: true,
   },
   {
     id: "app.settings.open",
@@ -236,6 +311,30 @@ export function effectiveKeyboardShortcuts(
 ): readonly KeyboardShortcut[] {
   const override = overrides[command.id];
   return override === undefined ? command.defaultBindings : (override ?? []);
+}
+
+export function primaryDigitShortcutHint(bindings: readonly KeyboardShortcut[]): string | undefined {
+  return bindings.find(({ modifiers, key }) => modifiers.length === 1 && modifiers[0] === "mod" && /^[1-9]$/u.test(key))
+    ?.key;
+}
+
+export interface SessionTabTarget {
+  identity: { projectId: string; threadId: string };
+}
+
+export function isSessionTabCommand(
+  commandId: KeyboardCommandId,
+): commandId is (typeof DESKTOP_SESSION_TAB_COMMAND_IDS)[number] {
+  return DESKTOP_SESSION_TAB_COMMAND_IDS.some((candidate) => candidate === commandId);
+}
+
+export function sessionTabTargetForCommand<T extends SessionTabTarget>(
+  commandId: KeyboardCommandId,
+  targets: readonly T[],
+): T | undefined {
+  if (!isSessionTabCommand(commandId)) return undefined;
+  const index = DESKTOP_SESSION_TAB_COMMAND_IDS.indexOf(commandId);
+  return targets[index];
 }
 
 export function isEditableKeyboardTarget(target: EventTarget | null): boolean {

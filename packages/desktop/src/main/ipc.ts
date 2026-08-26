@@ -832,6 +832,9 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.filesReadImage, (_event, projectId: string, path: string) =>
     files.readImage(projectId, path),
   );
+  ipcMain.handle(CHANNELS.filesPreviewPdf, (_event, projectId: string, path: string) =>
+    files.previewPdf(projectId, path),
+  );
   ipcMain.handle(CHANNELS.filesPreviewOfficeDocument, (event, projectId: string, path: string) => {
     const ownerId = event.sender.id;
     if (!officePreviewWebContents.has(ownerId)) {

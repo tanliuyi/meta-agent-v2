@@ -118,26 +118,30 @@
 @layer overrides {
   /* 外层让出 panel 区域，内层消息列继续在剩余空间内保持 mx-auto/max-width。 */
   [data-slot="session-message-layout"],
-  [data-slot="session-composer-footer"] {
+  [data-slot="session-composer-footer"],
+  [data-slot="session-scroll-to-bottom-layout"] {
     min-width: 0;
     transition: margin-right 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
   .chat-workspace[data-session-info-open] [data-slot="session-message-layout"],
-  .chat-workspace[data-session-info-open] [data-slot="session-composer-footer"] {
+  .chat-workspace[data-session-info-open] [data-slot="session-composer-footer"],
+  .chat-workspace[data-session-info-open] [data-slot="session-scroll-to-bottom-layout"] {
     margin-right: calc(var(--session-info-panel-width) + 24px);
   }
 
   @container session-workspace (max-width: 1153px) {
     .chat-workspace[data-session-info-open] [data-slot="session-message-layout"],
-    .chat-workspace[data-session-info-open] [data-slot="session-composer-footer"] {
+    .chat-workspace[data-session-info-open] [data-slot="session-composer-footer"],
+    .chat-workspace[data-session-info-open] [data-slot="session-scroll-to-bottom-layout"] {
       margin-right: 0;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
     [data-slot="session-message-layout"],
-    [data-slot="session-composer-footer"] {
+    [data-slot="session-composer-footer"],
+    [data-slot="session-scroll-to-bottom-layout"] {
       transition-duration: 0s;
     }
   }

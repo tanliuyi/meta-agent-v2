@@ -16,6 +16,8 @@ import {
 } from "react";
 import type { CachedSessionRecord } from "../../runtime/pi-session-store.ts";
 import { useDesktopSelector } from "../../state/desktop-context.tsx";
+import { useKeyboardShortcuts } from "../../state/keyboard-shortcut-provider.tsx";
+import { DESKTOP_SESSION_TAB_COMMAND_IDS, primaryDigitShortcutHint } from "../../state/keyboard-shortcuts.ts";
 import {
   useSessionCache,
   useSessionCacheActiveKey,
@@ -102,6 +104,7 @@ export function DesktopSessionTabs() {
   const activeKey = useSessionCacheActiveKey();
   const threadCatalogs = useDesktopSelector((state) => state.threadCatalogs);
   const { openDraft, openSession } = useSessionNavigation();
+  const { getBindings, primaryModifierPressed, registerCommandHandler } = useKeyboardShortcuts();
   const listRef = useRef<HTMLDivElement>(null);
   const tabElementsRef = useRef(new Map<string, HTMLDivElement>());
   const flipPositionsRef = useRef<Map<string, number> | null>(null);
@@ -155,7 +158,11 @@ export function DesktopSessionTabs() {
         const latestAssistant = timeline.nodes.findLast((node) => node.kind === "assistant");
         const timelineAttached =
           timeline.projectId === record.identity.projectId && timeline.threadId === record.identity.threadId;
-        const running = timelineAttached ? timeline.phase !== "idle" : (control?.running ?? thread?.running ?? false);
+        const active = record.key === activeKey;
+        const running =
+          active && timelineAttached
+            ? timeline.phase !== "idle"
+            : (thread?.running ?? control?.running ?? (timelineAttached && timeline.phase !== "idle"));
         return {
           key: record.key,
           projectId: record.identity.projectId,
@@ -167,11 +174,20 @@ export function DesktopSessionTabs() {
             error:
               !running && latestAssistant?.status.type === "incomplete" && latestAssistant.status.reason === "error",
             completed: thread?.completed === true,
-            active: record.key === activeKey,
+            active,
           }),
         };
       }),
     [activeKey, orderedRecords, storeSnapshots, threadCatalogs],
+  );
+  const shortcutTabs = useMemo(
+    () =>
+      orderedRecords.slice(0, DESKTOP_SESSION_TAB_COMMAND_IDS.length).map((record) => ({
+        key: record.key,
+        projectId: record.identity.projectId,
+        threadId: record.identity.threadId,
+      })),
+    [orderedRecords],
   );
 
   useLayoutEffect(() => {
@@ -227,6 +243,21 @@ export function DesktopSessionTabs() {
     },
     [activeKey, openSession],
   );
+
+  useEffect(() => {
+    const unregister = shortcutTabs.map((tab, index) =>
+      registerCommandHandler(
+        DESKTOP_SESSION_TAB_COMMAND_IDS[index]!,
+        () => {
+          if (tab.key !== activeKey) void openSession(tab.projectId, tab.threadId);
+        },
+        tab.key,
+      ),
+    );
+    return () => {
+      for (const dispose of unregister) dispose();
+    };
+  }, [activeKey, openSession, registerCommandHandler, shortcutTabs]);
 
   const createTask = useCallback(() => {
     const projectId = tabs.find(({ key }) => key === activeKey)?.projectId;
@@ -376,6 +407,9 @@ export function DesktopSessionTabs() {
       >
         {tabs.map((tab, index) => {
           const active = tab.key === activeKey;
+          const commandId = DESKTOP_SESSION_TAB_COMMAND_IDS[index];
+          const shortcutHint =
+            primaryModifierPressed && commandId ? primaryDigitShortcutHint(getBindings(commandId)) : undefined;
           return (
             <div
               key={tab.key}
@@ -414,13 +448,20 @@ export function DesktopSessionTabs() {
               </button>
               <TooltipIconButton
                 className="desktop-session-tab-close size-5! shrink-0"
+                data-shortcut-hint={shortcutHint !== undefined || undefined}
                 tooltip="关闭"
                 aria-label={`关闭 ${tab.title}`}
                 onClick={() =>
                   void closeTab(tab, index).catch((error: unknown) => console.error("关闭会话失败", error))
                 }
               >
-                <X size={12} aria-hidden="true" />
+                {shortcutHint ? (
+                  <span className="desktop-session-tab-shortcut-hint" aria-hidden="true">
+                    {shortcutHint}
+                  </span>
+                ) : (
+                  <X size={12} aria-hidden="true" />
+                )}
               </TooltipIconButton>
             </div>
           );

@@ -71,6 +71,21 @@ describe("FileService", () => {
     await expect(files.readImage(project.id, "first-target.txt")).rejects.toThrow("不是支持的图片格式");
   });
 
+  it("为 PDF 返回受控预览 URL，并拒绝其他格式", async () => {
+    const { files, project } = await createService();
+    await writeFile(join(project.cwd, "report.PDF"), "%PDF-1.7");
+
+    const preview = await files.previewPdf(project.id, "report.PDF");
+    expect(preview.path).toBe("report.PDF");
+    const url = new URL(preview.url);
+    expect(url.protocol).toBe("meta-agent-pdf:");
+    expect(url.hostname).toBe("project");
+    expect(url.searchParams.get("projectId")).toBe(project.id);
+    expect(url.searchParams.get("path")).toBe("report.PDF");
+
+    await expect(files.previewPdf(project.id, "first-target.txt")).rejects.toThrow("不是 PDF 文件");
+  });
+
   it("目录列表与搜索排除 .gitignore 中的文件与目录", async () => {
     const { files, project } = await createService();
     await writeFile(

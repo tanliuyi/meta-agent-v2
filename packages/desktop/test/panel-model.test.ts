@@ -4,6 +4,7 @@ import {
   filePathSegments,
   isImagePath,
   isOfficeDocumentPath,
+  isPdfPath,
   openWorkbenchFileAsPreview,
   openWorkbenchFilePatch,
   pinWorkbenchFile,
@@ -136,6 +137,15 @@ describe("isOfficeDocumentPath", () => {
     expect(isOfficeDocumentPath("legacy.doc")).toBe(false);
     expect(isOfficeDocumentPath("legacy.xls")).toBe(false);
     expect(isOfficeDocumentPath("document.pdf")).toBe(false);
+  });
+});
+
+describe("isPdfPath", () => {
+  it("仅识别 PDF 扩展名（不区分大小写）", () => {
+    expect(isPdfPath("docs/report.pdf")).toBe(true);
+    expect(isPdfPath("docs/report.PDF")).toBe(true);
+    expect(isPdfPath("docs/report.pdf.txt")).toBe(false);
+    expect(isPdfPath("docs/report")).toBe(false);
   });
 });
 

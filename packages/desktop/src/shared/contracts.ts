@@ -546,6 +546,12 @@ export interface OfficeDocumentPreview {
   html: string;
 }
 
+/** Electron 内置查看器使用的 PDF 预览。 */
+export interface PdfDocumentPreview {
+  path: string;
+  url: string;
+}
+
 /** 单个 Project 内一次合并的文件变化事件（相对路径，目录树增量刷新用）。 */
 export interface FileChangeSet {
   projectId: string;

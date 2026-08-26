@@ -20,8 +20,10 @@ import { useSessionScope } from "../../session-context.tsx";
 import { createCommandDecorationManager } from "./terminal-command-decorations.ts";
 import { attachVisualCursorImeAnchor, constrainTerminalComposition } from "./terminal-composition.ts";
 import { registerTerminalLinkProviders } from "./terminal-links.ts";
+import { TerminalOutputQueue } from "./terminal-output-queue.ts";
 import { shouldUseWebglRenderer } from "./terminal-renderer.ts";
 import { TerminalSearchBar } from "./terminal-search-bar.tsx";
+import { TerminalStartupBuffer } from "./terminal-startup-buffer.ts";
 import { MouseWheelClassifier } from "./terminal-wheel-classifier.ts";
 
 export interface TerminalViewHandle {
@@ -48,6 +50,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
   const { fontSize: uiFontSize } = useFont();
   const container = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const outputQueueRef = useRef<TerminalOutputQueue | null>(null);
   const syncSizeRef = useRef<(() => void) | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const revision = useRef(0);
@@ -93,9 +96,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     if (!projectId || !threadId || !terminal) return;
     const next = await window.desktop.terminals.restart(projectId, threadId, terminalId, terminal.cols, terminal.rows);
     if (next.revision >= revision.current) {
-      terminal.reset();
-      terminal.write(next.output);
       revision.current = next.revision;
+      await outputQueueRef.current?.replace(next.output);
       setStatus(next.running ? null : { kind: "exited", message: "终端进程已退出" });
     }
   }, [projectId, terminalId, threadId]);
@@ -107,10 +109,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
   useEffect(() => {
     if (!projectId || !threadId || !container.current) return;
     let active = true;
-    let opened = false;
+    let phase: "opening" | "opened" | "failed" = "opening";
     let webgl: WebglAddon | null = null;
     let image: ImageAddon | null = null;
-    const pending: TerminalEvent[] = [];
+    const pending = new TerminalStartupBuffer();
     const rootStyle = getComputedStyle(document.documentElement);
     const terminal = new Terminal({
       cursorBlink: true,
@@ -144,49 +146,50 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
     const unicode11 = new Unicode11Addon();
     terminal.loadAddon(unicode11);
     terminal.open(container.current);
+    const output = new TerminalOutputQueue(terminal);
     terminalRef.current = terminal;
+    outputQueueRef.current = output;
     searchAddonRef.current = search;
     let resizeFrame: number | undefined;
     let lastGrid: TerminalGrid | undefined;
     // 进程退出后暂停 PTY resize 同步（避免与主进程退出竞态窗口的无效 IPC）。
     let exited = false;
     let lastFitAt = 0;
+    let authoritativeSync: Promise<void> | null = null;
+    let syncRetryDelayMs = 25;
+
+    function startAuthoritativeSync(): void {
+      if (authoritativeSync) return;
+      phase = "opening";
+      const sync = openFromAuthoritativeSnapshot();
+      authoritativeSync = sync;
+      void sync.finally(() => {
+        if (authoritativeSync === sync) authoritativeSync = null;
+      });
+    }
 
     const matches = (event: TerminalEvent) =>
       event.projectId === projectId && event.threadId === threadId && event.terminalId === terminalId;
     const apply = (event: TerminalEvent) => {
       if (event.revision <= revision.current) return;
       revision.current = event.revision;
-      if (event.type === "data") terminal.write(event.data);
-      else if (event.type === "reset") {
-        terminal.reset();
+      if (event.type === "data") {
+        if (!output.write(event.data)) {
+          pending.clear();
+          startAuthoritativeSync();
+        }
+      } else if (event.type === "reset") {
+        pending.clear();
+        void output.reset();
         exited = false;
         setStatus(null);
-        // reset 可能来自 restart 或注入失败的自动回退：重新拉取快照刷新内容。
-        void window.desktop.terminals
-          .open(projectId, threadId, terminalId, terminal.cols, terminal.rows)
-          .then((snapshot) => {
-            if (!active) return;
-            if (snapshot.revision > revision.current) {
-              terminal.write(snapshot.output);
-              revision.current = snapshot.revision;
-            }
-            exited = !snapshot.running;
-            setStatus(snapshot.running ? null : { kind: "exited", message: "终端进程已退出" });
-          })
-          .catch(() => {
-            // 拉取失败保持现状（reset 已清屏，后续事件流继续驱动）。
-          });
+        startAuthoritativeSync();
       } else {
         exited = true;
         setStatus({ kind: "exited", message: `终端进程已退出 (${event.exitCode})` });
       }
     };
-    const unsubscribe = window.desktop.terminals.onEvent((event) => {
-      if (!active || !matches(event)) return;
-      if (!opened) pending.push(event);
-      else apply(event);
-    });
+    let unsubscribe = (): void => undefined;
     const input = terminal.onData((data) => {
       // 进程退出后拦截输入：不向主进程发送（否则触发 write 错误），重启后自动恢复。
       if (exited) return;
@@ -216,7 +219,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
           fit.fit();
           if (exited) return;
           const grid = { columns: terminal.cols, rows: terminal.rows };
-          if (!opened || isSameTerminalGrid(lastGrid, grid)) return;
+          if (phase !== "opened" || isSameTerminalGrid(lastGrid, grid)) return;
           lastGrid = grid;
           void window.desktop.terminals
             .resize(projectId, threadId, terminalId, grid.columns, grid.rows)
@@ -341,25 +344,63 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
 
     const disposeLinks = registerTerminalLinkProviders(terminal, projectId);
 
-    void window.desktop.terminals
-      .open(projectId, threadId, terminalId, terminal.cols, terminal.rows)
-      .then((initial) => {
+    const openFromAuthoritativeSnapshot = async (): Promise<void> => {
+      try {
+        while (active) {
+          const initial = await window.desktop.terminals.open(
+            projectId,
+            threadId,
+            terminalId,
+            terminal.cols,
+            terminal.rows,
+          );
+          if (!active) return;
+          const beforeWrite = pending.drain();
+          if (beforeWrite.truncated) {
+            await waitForTerminalSyncRetry(syncRetryDelayMs);
+            syncRetryDelayMs = Math.min(syncRetryDelayMs * 2, 500);
+            continue;
+          }
+
+          revision.current = initial.revision;
+          exited = !initial.running;
+          await output.replace(initial.output);
+          if (!active) return;
+
+          const afterWrite = pending.drain();
+          if (afterWrite.truncated) {
+            await waitForTerminalSyncRetry(syncRetryDelayMs);
+            syncRetryDelayMs = Math.min(syncRetryDelayMs * 2, 500);
+            continue;
+          }
+          syncRetryDelayMs = 25;
+          phase = "opened";
+          setStatus(initial.running ? null : { kind: "exited", message: "终端进程已退出" });
+          syncSize();
+          for (const event of [...beforeWrite.events, ...afterWrite.events]) apply(event);
+          return;
+        }
+      } catch (value: unknown) {
         if (!active) return;
-        terminal.write(initial.output);
-        revision.current = initial.revision;
-        opened = true;
-        exited = !initial.running;
-        syncSize();
-        for (const event of pending) apply(event);
-        setStatus(initial.running ? null : { kind: "exited", message: "终端进程已退出" });
-      })
-      .catch((value: unknown) => {
-        if (active) setStatus({ kind: "error", message: errorMessage(value) });
-      });
+        phase = "failed";
+        exited = true;
+        pending.clear();
+        setStatus({ kind: "error", message: errorMessage(value) });
+      }
+    };
+    unsubscribe = window.desktop.terminals.onEvent((event) => {
+      if (!active || !matches(event)) return;
+      if (phase === "opening") pending.append(event);
+      else if (phase === "opened") apply(event);
+    });
+    startAuthoritativeSync();
 
     return () => {
       active = false;
+      pending.clear();
       terminalRef.current = null;
+      outputQueueRef.current = null;
+      output.dispose();
       syncSizeRef.current = null;
       searchAddonRef.current = null;
       resize.disconnect();
@@ -430,6 +471,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, { terminalId: string 
 
 /** 同步终端尺寸的 fit 节流窗口：拖拽期间避免每帧触发字体测量。 */
 const FIT_THROTTLE_MS = 80;
+
+function waitForTerminalSyncRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
 export interface TerminalGrid {
   columns: number;

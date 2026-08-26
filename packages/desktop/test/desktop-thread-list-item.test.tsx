@@ -28,6 +28,7 @@ function renderThread(
     compactRoot?: boolean;
     active?: boolean;
     pinned?: boolean;
+    shortcutHint?: number;
   } = {},
 ): string {
   return renderToStaticMarkup(
@@ -41,6 +42,7 @@ function renderThread(
       isDeletePending={false}
       isPromotePending={false}
       isPinned={options.pinned}
+      shortcutHint={options.shortcutHint}
       depth={options.depth ?? 1}
       childCount={options.childCount ?? 0}
       runningChildCount={options.runningChildCount ?? 0}
@@ -99,6 +101,14 @@ describe("DesktopThreadListItem", () => {
 
     expect(markup).not.toContain('data-slot="subagent-name"');
     expect(markup).toContain(">Inspect the renderer tree</span>");
+  });
+
+  it("shows the matching header tab shortcut hint in place of the loading status", () => {
+    const markup = renderThread({ ...baseThread, running: true }, { shortcutHint: 3 });
+
+    expect(markup).toContain('class="desktop-thread-shortcut-hint"');
+    expect(markup).toContain(">3</span>");
+    expect(markup).not.toContain("running-dot");
   });
 
   it("shows only the number of running child sessions", () => {

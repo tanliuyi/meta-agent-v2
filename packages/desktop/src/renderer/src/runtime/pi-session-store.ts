@@ -16,6 +16,8 @@ export interface SessionRecordStores {
   readonly runActivity: SessionRunActivityStore;
   readonly disclosure: SessionDisclosureStore;
   readonly connection: SessionConnectionStore;
+  readonly browserUi: SessionBrowserUiStore;
+  readonly extensionCommands: SessionExtensionCommandStore;
 }
 
 export interface SessionControlStore {
@@ -80,6 +82,20 @@ export interface SessionConnectionStore {
   subscribe(listener: () => void): () => void;
 }
 
+export interface SessionBrowserUiSnapshot {
+  readonly urls: readonly string[];
+  readonly activeIndex: number;
+}
+
+export interface SessionBrowserUiStore {
+  getSnapshot(): SessionBrowserUiSnapshot | undefined;
+  setSnapshot(snapshot: SessionBrowserUiSnapshot): void;
+}
+
+export interface SessionExtensionCommandStore {
+  applyRevision(hostId: string, revision: number): boolean;
+}
+
 export interface SessionIdentity {
   projectId: string;
   threadId: string;
@@ -128,6 +144,8 @@ export function createSessionRecordStores(): SessionRecordStores {
     runActivity: createRunActivityStore(),
     disclosure: createDisclosureStore(),
     connection: createConnectionStore(),
+    browserUi: createBrowserUiStore(),
+    extensionCommands: createExtensionCommandStore(),
   };
 }
 
@@ -279,6 +297,31 @@ function createConnectionStore(): SessionConnectionStore {
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+  };
+}
+
+function createBrowserUiStore(): SessionBrowserUiStore {
+  let snapshot: SessionBrowserUiSnapshot | undefined;
+
+  return {
+    getSnapshot() {
+      return snapshot ? { urls: [...snapshot.urls], activeIndex: snapshot.activeIndex } : undefined;
+    },
+    setSnapshot(value: SessionBrowserUiSnapshot) {
+      snapshot = { urls: [...value.urls], activeIndex: value.activeIndex };
+    },
+  };
+}
+
+function createExtensionCommandStore(): SessionExtensionCommandStore {
+  const appliedRevisions = new Map<string, number>();
+
+  return {
+    applyRevision(hostId: string, revision: number) {
+      if ((appliedRevisions.get(hostId) ?? 0) >= revision) return false;
+      appliedRevisions.set(hostId, revision);
+      return true;
     },
   };
 }

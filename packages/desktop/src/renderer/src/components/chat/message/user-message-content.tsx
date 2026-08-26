@@ -48,6 +48,7 @@ export function UserMessageContent() {
       </div>
       {isLong ? (
         <Button
+          data-slot="user-message-expand-toggle"
           type="button"
           variant="ghost"
           size="sm"

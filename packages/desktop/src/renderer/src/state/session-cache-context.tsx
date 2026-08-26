@@ -6,6 +6,7 @@ import {
   sessionRecordKey,
 } from "../runtime/pi-session-store.ts";
 import { useTransportManager } from "../runtime/session-transport-context";
+import { retireBrowserComposerBridge } from "./browser-composer-bridge.ts";
 import { SessionHolderRegistry } from "./session-holders.ts";
 
 export interface SessionCacheState {
@@ -157,7 +158,9 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
         if (!record) return;
         // 先完成 browser runtime 的 detach/sessionRetire，再释放 transport 和 record，
         // 避免旧 generation 的异步清理删除同 key 的新 runtime。
-        await retireBrowserRuntime(key).catch(() => undefined);
+        const browserRetirement = retireBrowserRuntime(key).catch(() => undefined);
+        retireBrowserComposerBridge(key);
+        await browserRetirement;
         await transportManager.retire(key);
         if (recordsRef.current.get(key) !== record) return;
         recordsRef.current.delete(key);
@@ -168,10 +171,13 @@ export function SessionCacheProvider({ children }: { children: ReactNode }) {
 
       async retireProject(projectId: string) {
         const records = [...recordsRef.current.values()].filter((record) => record.identity.projectId === projectId);
-        for (const record of records) {
+        const browserRetirements = records.map((record) => {
           holdersRef.current.remove(record.key);
-          await retireBrowserRuntime(record.key).catch(() => undefined);
-        }
+          const retirement = retireBrowserRuntime(record.key).catch(() => undefined);
+          retireBrowserComposerBridge(record.key);
+          return retirement;
+        });
+        await Promise.all(browserRetirements);
         await Promise.all(records.map((record) => transportManager.retire(record.key)));
         let recordsChanged = false;
         for (const record of records) {

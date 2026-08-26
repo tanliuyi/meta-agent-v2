@@ -118,6 +118,8 @@
     --shape-radius-lg: 9px;
     --shape-radius-xl: 12px;
     --shape-radius-round: 999px;
+    --shortcut-hint-background: 0 0% 100%;
+    --shortcut-hint-foreground: 0 0% 7%;
 
     --motion-duration-fast: 120ms;
     --motion-duration-standard: 200ms;
@@ -252,7 +254,7 @@
     --selection-background: hsl(var(--primary) / 0.14);
     --scrollbar-thumb: hsl(var(--foreground) / 0.18);
     --scrollbar-thumb-hover: hsl(var(--foreground) / 0.3);
-    --elevation-popover: 0 10px 30px hsl(var(--foreground) / 0.12);
+    --elevation-popover: 0 16px 24px hsl(var(--foreground) / 0.02);
     --elevation-workbench: -12px 0 30px hsl(var(--foreground) / 0.08);
     --elevation-sidebar-floating: 12px 0 30px hsl(var(--foreground) / 0.1);
     --elevation-composer: 0 4px 16px -8px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);

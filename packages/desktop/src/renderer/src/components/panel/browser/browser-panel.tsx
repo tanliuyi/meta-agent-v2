@@ -28,6 +28,7 @@ import {
   parseBrowserInternalPage,
 } from "../../../../../shared/browser-internal-contracts.ts";
 import { appendComposerQuote } from "../../../runtime/composer-quotes.ts";
+import type { SessionBrowserUiSnapshot } from "../../../runtime/pi-session-store.ts";
 import { DropdownMenu } from "../../../shared/ui/dropdown-menu.tsx";
 import { DropdownMenuContent } from "../../../shared/ui/dropdown-menu-content.tsx";
 import { DropdownMenuItem } from "../../../shared/ui/dropdown-menu-item.tsx";
@@ -74,6 +75,7 @@ import {
   tabIdOfView,
   webviewOf,
 } from "./browser-runtime-host.ts";
+import { browserSessionSnapshot, normalizeBrowserSessionSnapshot } from "./browser-session-snapshot.ts";
 
 /**
  * 内置浏览器（IAB）面板。
@@ -116,7 +118,7 @@ const BROWSER_DEVICE_PRESETS = [
 
 /** 面板卸载时保存的 tab URL 快照（按会话）；重新挂载时恢复（应用重启后 main 无浏览器状态）。 */
 function sessionStorageKey(sessionKey: string): string {
-  return `meta-agent.browser.session.v2.${sessionKey}`;
+  return `meta-agent.browser.session.v3.${sessionKey}`;
 }
 
 /** 地址栏输入规范化：空忽略；带协议原样；否则补 https://。 */
@@ -178,15 +180,23 @@ export function BrowserPanel() {
   const activeView = views.find((view) => view.viewId === activeViewId);
   // 显示 URL：attach/navigate 过渡期 tab.url 为 about:blank 时回退到视图目标 URL。
   const activeUrl = displayUrlOf(activeTab?.url ?? "", activeView?.pendingUrl ?? "");
-  const sessionUrlsRef = useRef<string[]>([]);
-  const urlByTabId = new Map(tabs.map((tab) => [tab.tabId, tab.url]));
-  sessionUrlsRef.current = views
-    .map((view) => {
-      const tabId = tabIdOfView(runtime, view.viewId);
-      const tabUrl = (tabId === undefined ? "" : urlByTabId.get(tabId)) ?? "";
-      return displayUrlOf(tabUrl, view.pendingUrl);
-    })
-    .filter((url) => url.length > 0);
+  const sessionSnapshotRef = useRef<SessionBrowserUiSnapshot>(
+    record.stores.browserUi.getSnapshot() ?? { urls: [], activeIndex: 0 },
+  );
+  const sessionSnapshotReadyRef = useRef(runtime.views.length > 0 || runtime.tabs.length > 0);
+  const currentSessionSnapshot = (): SessionBrowserUiSnapshot => {
+    const currentUrlByTabId = new Map(runtime.tabs.map((tab) => [tab.tabId, tab.url]));
+    return browserSessionSnapshot(
+      runtime.views.map((view) => {
+        const tabId = tabIdOfView(runtime, view.viewId);
+        const tabUrl = (tabId === undefined ? "" : currentUrlByTabId.get(tabId)) ?? "";
+        return { url: displayUrlOf(tabUrl, view.pendingUrl), active: tabId === runtime.activeTabId };
+      }),
+      sessionSnapshotRef.current.activeIndex,
+    );
+  };
+  if (sessionSnapshotReadyRef.current) sessionSnapshotRef.current = currentSessionSnapshot();
+  const pendingActiveIndexRef = useRef<number | null>(null);
   const annotationGeneration = useRef(0);
   // 标注模式会话代号：进入/退出时递增，使退出前发出的异步 hover/拾取结果失效（不回写）。
   const annotationModeGeneration = useRef(0);
@@ -237,24 +247,49 @@ export function BrowserPanel() {
       .getSettings()
       .then((snapshot) => {
         if (cancelled) return;
-        if (runtime.views.length > 0 || runtime.tabs.length > 0) return;
-        const urls = snapshot.settings.restoreTabsOnLaunch ? readStoredSessionUrls(sessionKey) : [];
-        if (urls.length === 0) {
+        if (runtime.views.length > 0 || runtime.tabs.length > 0) {
+          sessionSnapshotReadyRef.current = true;
+          sessionSnapshotRef.current = currentSessionSnapshot();
+          return;
+        }
+        const restored = snapshot.settings.restoreTabsOnLaunch
+          ? readStoredSessionSnapshot(sessionKey, record.stores.browserUi.getSnapshot())
+          : { urls: [], activeIndex: 0 };
+        sessionSnapshotRef.current = restored;
+        sessionSnapshotReadyRef.current = true;
+        pendingActiveIndexRef.current = restored.activeIndex;
+        if (restored.urls.length === 0) {
           createBlankView(runtime);
           return;
         }
-        for (const url of urls) createView(runtime, url);
+        for (const url of restored.urls) createView(runtime, url);
         if (runtime.views.length === 0) createBlankView(runtime);
       })
       .catch(() => {
         if (cancelled) return;
-        if (runtime.views.length === 0) createBlankView(runtime);
+        sessionSnapshotReadyRef.current = true;
+        if (runtime.views.length === 0) {
+          sessionSnapshotRef.current = { urls: [], activeIndex: 0 };
+          createBlankView(runtime);
+        }
       });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey]);
+
+  // runtime 重建时，等目标 view attach 获得 tabId 后恢复之前的活跃索引。
+  useEffect(() => {
+    const index = pendingActiveIndexRef.current;
+    if (index === null) return;
+    const view = runtime.views[index];
+    if (!view) return;
+    const tabId = tabIdOfView(runtime, view.viewId);
+    if (tabId === undefined) return;
+    pendingActiveIndexRef.current = null;
+    if (tabId !== activeTabId) void window.desktop.browser.selectTab(identity, tabId);
+  }, [activeTabId, identity, runtime, runtimeVersion]);
 
   // 把会话 runtime 容器 CSS 定位到面板视口矩形（webview 元素不移动，guest 不销毁）。
   function positionContainerToViewport(container: HTMLElement, viewport: HTMLElement): void {
@@ -359,15 +394,16 @@ export function BrowserPanel() {
     return () => observer.disconnect();
   }, []);
 
-  // 面板卸载时保存当前 tab URL（下次挂载恢复）；不 detach 任何 webview。
+  // 面板卸载时保存当前 tab URL 与活跃索引；不 detach 任何 webview。
   useEffect(() => {
     return () => {
-      const urls = sessionUrlsRef.current;
-      lastBrowserSessionByKey.set(sessionKey, urls);
+      if (!sessionSnapshotReadyRef.current) return;
+      const snapshot = sessionSnapshotRef.current;
+      record.stores.browserUi.setSnapshot(snapshot);
       try {
-        window.localStorage.setItem(sessionStorageKey(sessionKey), JSON.stringify(urls));
+        window.localStorage.setItem(sessionStorageKey(sessionKey), JSON.stringify(snapshot));
       } catch {
-        // localStorage 不可用时仍保留当前 renderer 生命周期的内存会话。
+        // localStorage 不可用时仍保留 cached session record 中的内存会话。
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1581,22 +1617,32 @@ export function BrowserPanel() {
   );
 }
 
-/** 读取会话持久化的 tab URL 列表（内存态优先，localStorage 兜底）。 */
-function readStoredSessionUrls(sessionKey: string): string[] {
-  const memory = lastBrowserSessionByKey.get(sessionKey) ?? [];
-  let stored: string[] = [];
+/** 读取会话持久化的 tab 快照（record 内存态优先，localStorage 兜底）。 */
+function readStoredSessionSnapshot(
+  sessionKey: string,
+  cached: SessionBrowserUiSnapshot | undefined,
+): SessionBrowserUiSnapshot {
+  let stored: SessionBrowserUiSnapshot = { urls: [], activeIndex: 0 };
   try {
     const raw = window.localStorage.getItem(sessionStorageKey(sessionKey));
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    stored = Array.isArray(parsed) ? parsed.filter((url): url is string => typeof url === "string") : [];
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "urls" in parsed &&
+      Array.isArray(parsed.urls) &&
+      "activeIndex" in parsed &&
+      typeof parsed.activeIndex === "number"
+    ) {
+      stored = {
+        urls: parsed.urls.filter((url): url is string => typeof url === "string"),
+        activeIndex: parsed.activeIndex,
+      };
+    }
   } catch {
-    stored = [];
+    stored = { urls: [], activeIndex: 0 };
   }
-  // memory 优先于 stored：内存态是当前 renderer 生命周期最新值，避免已关闭的旧 URL 复活。
+  // record 内存态是当前 renderer 生命周期最新值，避免已关闭的旧 URL 复活。
   // 不去重：会话内允许多个相同 URL 的标签，恢复时应保持一致。
-  const urls = memory.length > 0 ? memory : stored;
-  return urls.filter((url) => url.length > 0);
+  return normalizeBrowserSessionSnapshot(cached ?? stored);
 }
-
-/** 面板卸载时保存的 tab URL（内存态；会话键隔离）。 */
-const lastBrowserSessionByKey = new Map<string, string[]>();

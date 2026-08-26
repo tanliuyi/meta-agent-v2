@@ -287,7 +287,10 @@ export function Messages() {
           </div>
         </div>
       </div>
-      <div className="pointer-events-none relative z-(--stack-sticky-control) h-0 w-full">
+      <div
+        data-slot="session-scroll-to-bottom-layout"
+        className="pointer-events-none relative z-(--stack-sticky-control) h-0 self-stretch"
+      >
         <TooltipIconButton
           tooltip="滚动到底部"
           side="top"

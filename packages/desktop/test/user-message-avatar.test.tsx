@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import React, { type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +19,7 @@ const viewState = vi.hoisted(() => ({
 }));
 
 const userRoot = vi.hoisted(() => ({ classNames: [] as string[] }));
+const overridesCss = readFileSync(new URL("../src/renderer/src/styles/overrides.css", import.meta.url), "utf8");
 
 vi.mock("@assistant-ui/react", () => ({
   MessagePrimitive: {
@@ -98,6 +100,12 @@ describe("UserMessage avatar", () => {
     expect(userRoot.classNames[0]).toContain("contents");
     expect(userRoot.classNames[0]).not.toContain("sticky");
     expect(html).toContain("aui-user-message-sticky");
+  });
+
+  it("展开用户消息后取消吸顶定位", () => {
+    expect(overridesCss).toMatch(
+      /\.aui-user-message-sticky:has\(\[data-slot="user-message-expand-toggle"\]\[aria-expanded="true"\]\)\s*\{\s*position: static;\s*z-index: auto;\s*\}/,
+    );
   });
 
   it("使用路径 URL 渲染自定义用户头像", () => {

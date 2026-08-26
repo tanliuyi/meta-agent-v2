@@ -11,3 +11,8 @@
 .message-navigation-summary-markdown .aui-md :where(*) {
   font-size: var(--type-size-ui);
 }
+
+.aui-user-message-sticky:has([data-slot="user-message-expand-toggle"][aria-expanded="true"]) {
+  position: static;
+  z-index: auto;
+}

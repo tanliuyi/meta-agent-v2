@@ -275,11 +275,7 @@ export function Composer(props: ComposerProps) {
   return (
     <div className="composer-wrap" data-draft-composer={props.mode === "draft" || undefined}>
       {props.mode === "session" ? (
-        <ComposerExtensionCommand
-          projectId={props.projectId}
-          threadId={props.threadId}
-          command={props.composerCommand}
-        />
+        <ComposerExtensionCommand store={record.stores.extensionCommands} command={props.composerCommand} />
       ) : null}
       {props.mode === "session" ? (
         <ComposerQueue

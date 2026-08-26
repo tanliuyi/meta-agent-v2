@@ -40,9 +40,21 @@ const electron = vi.hoisted(() => {
   const popup = vi.fn();
   const buildFromTemplate = vi.fn(() => ({ popup }));
   const fromWebContents = vi.fn(() => undefined);
-  const writeText = vi.fn();
-  const writeImage = vi.fn();
-  const createFromDataURL = vi.fn(() => ({ isEmpty: () => false }));
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  const write = vi.fn().mockResolvedValue(undefined);
+  const clipboardItemInputs: Array<Record<string, Blob>> = [];
+  class ClipboardItemMock {
+    readonly items: Record<string, Blob>;
+    readonly types: string[];
+
+    constructor(items: Record<string, Blob>) {
+      this.items = items;
+      this.types = Object.keys(items);
+      clipboardItemInputs.push(items);
+    }
+  }
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+  const createFromDataURL = vi.fn(() => ({ isEmpty: () => false, toPNG: () => png }));
   return {
     sessions,
     browserSession,
@@ -50,7 +62,9 @@ const electron = vi.hoisted(() => {
     buildFromTemplate,
     fromWebContents,
     writeText,
-    writeImage,
+    write,
+    clipboardItemInputs,
+    ClipboardItemMock,
     createFromDataURL,
   };
 });
@@ -76,7 +90,8 @@ vi.mock("electron", () => ({
   },
   BrowserWindow: { fromWebContents: electron.fromWebContents },
   Menu: { buildFromTemplate: electron.buildFromTemplate },
-  clipboard: { writeText: electron.writeText, writeImage: electron.writeImage },
+  clipboard: { writeText: electron.writeText, write: electron.write },
+  ClipboardItem: electron.ClipboardItemMock,
   nativeImage: { createFromDataURL: electron.createFromDataURL },
 }));
 
@@ -746,7 +761,10 @@ describe("BrowserManager 会话隔离", () => {
 
     await expect(manager.copyScreenshot(SESSION_A, 1)).resolves.toEqual({ ok: true });
     expect(electron.createFromDataURL).toHaveBeenCalledWith("data:image/png;base64,AAAA");
-    expect(electron.writeImage).toHaveBeenCalledWith(expect.objectContaining({ isEmpty: expect.any(Function) }));
+    expect(electron.write).toHaveBeenCalledWith([expect.objectContaining({ types: ["image/png"] })]);
+    const pngBlob = electron.clipboardItemInputs.at(-1)?.["image/png"];
+    expect(pngBlob).toBeInstanceOf(Blob);
+    expect(pngBlob).toMatchObject({ type: "image/png", size: 4 });
   });
 
   test("navigate 不存在的 tab 返回错误", async () => {

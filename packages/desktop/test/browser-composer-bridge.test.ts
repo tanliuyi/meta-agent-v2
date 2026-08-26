@@ -9,6 +9,7 @@ import {
   failBrowserAnnotationRemoval,
   invalidateBrowserAnnotationQuotes,
   removeBrowserAnnotationFromComposer,
+  retireBrowserComposerBridge,
   subscribeBrowserAnnotationConsumed,
   subscribeBrowserAnnotationToComposer,
   updateBrowserAnnotationInComposer,
@@ -23,6 +24,25 @@ const payload = (targetKey: string, messageId: string, tabId = 1, creationPageUr
 });
 
 describe("browser annotation composer bridge", () => {
+  it("会话退役后释放订阅、待投递事件、引用位置和失败重试", () => {
+    const targetKey = "session:retired";
+    const composerHandler = vi.fn();
+    const consumedHandler = vi.fn();
+
+    emitBrowserAnnotationToComposer(payload(targetKey, "annotation-retired"));
+    failBrowserAnnotationRemoval(targetKey, [`${BROWSER_ANNOTATION_QUOTE_PREFIX}annotation-retired`]);
+    emitBrowserAnnotationConsumed({ targetKey, messageIds: [] });
+    retireBrowserComposerBridge(targetKey);
+
+    expect(browserAnnotationMessageIdsByTab(targetKey, 1)).toEqual([]);
+    const unsubscribeComposer = subscribeBrowserAnnotationToComposer(targetKey, composerHandler);
+    const unsubscribeConsumed = subscribeBrowserAnnotationConsumed(targetKey, consumedHandler);
+    expect(composerHandler).not.toHaveBeenCalled();
+    expect(consumedHandler).not.toHaveBeenCalled();
+    unsubscribeComposer();
+    unsubscribeConsumed();
+  });
+
   it("在目标 composer 尚未挂载时暂存，并在订阅后消费", () => {
     const targetKey = "session:queued";
     const queued = payload(targetKey, "annotation-1");

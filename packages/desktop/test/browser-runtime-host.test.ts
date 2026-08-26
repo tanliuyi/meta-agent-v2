@@ -12,6 +12,7 @@ import {
   configureBrowserRuntimeHost,
   createBlankView,
   displayUrlOf,
+  disposeBrowserRuntimeHostForTest,
   ensureBrowserRuntime,
   getBrowserRuntime,
   openInternalPageView,
@@ -100,6 +101,17 @@ class FakeDocument {
     if (tag === "webview") node.setWebContentsId(7); // 模拟已 attach 的 guest
     return node;
   }
+
+  querySelectorAll(selector: string): FakeNode[] {
+    const className = selector.startsWith(".") ? selector.slice(1) : selector;
+    const matches: FakeNode[] = [];
+    const visit = (node: FakeNode): void => {
+      if (node.className.split(/\s+/u).includes(className)) matches.push(node);
+      for (const child of node.children) visit(child);
+    };
+    visit(this.body);
+    return matches;
+  }
 }
 
 interface DesktopStub {
@@ -107,6 +119,7 @@ interface DesktopStub {
   detach: ReturnType<typeof vi.fn>;
   navigate: ReturnType<typeof vi.fn>;
   selectTab: ReturnType<typeof vi.fn>;
+  sessionAcquire: ReturnType<typeof vi.fn>;
   sessionRetire: ReturnType<typeof vi.fn>;
   onStateChanged: ReturnType<typeof vi.fn>;
   onCreateTabRequest: ReturnType<typeof vi.fn>;
@@ -150,6 +163,7 @@ beforeEach(() => {
     detach: vi.fn(async () => undefined),
     navigate: vi.fn(async () => ({ ok: true })),
     selectTab: vi.fn(async () => null),
+    sessionAcquire: vi.fn(async () => undefined),
     sessionRetire: vi.fn(async () => undefined),
     onStateChanged: vi.fn((handler) => {
       desktop.stateHandler = handler;
@@ -517,6 +531,48 @@ describe("browser runtime host 会话路由", () => {
     expect(notifications.length).toBeGreaterThan(0);
     expect(runtime.views).toHaveLength(1);
     unsubscribe();
+  });
+
+  test("module dispose 只清理本地 runtime，不注销 main session owner", async () => {
+    const first = ensureBrowserRuntime(SESSION_A);
+    createBlankView(first);
+    await flushAttach();
+    const firstContainer = first.container as unknown as FakeNode;
+
+    resetBrowserRuntimeHostForTest();
+
+    expect(firstContainer.parentElement).toBeNull();
+    expect(desktop.sessionRetire).not.toHaveBeenCalled();
+  });
+
+  test("HMR 后可退役未重建的后台 session owner", async () => {
+    ensureBrowserRuntime(SESSION_A);
+    ensureBrowserRuntime(SESSION_B);
+    await Promise.resolve();
+
+    disposeBrowserRuntimeHostForTest();
+    ensureBrowserRuntime(SESSION_A);
+    await retireBrowserRuntime(browserSessionKey(SESSION_B));
+
+    expect(desktop.sessionAcquire).toHaveBeenCalledTimes(2);
+    expect(desktop.sessionRetire).toHaveBeenCalledWith(SESSION_B);
+    expect(desktop.sessionRetire).not.toHaveBeenCalledWith(SESSION_A);
+  });
+
+  test("新 module generation 接管时清理未执行 dispose 的孤儿 runtime DOM", () => {
+    const documentNode = document as unknown as FakeDocument;
+    const orphanHost = new FakeNode();
+    orphanHost.className = "browser-parking-host";
+    const orphanRuntime = new FakeNode();
+    orphanRuntime.className = "browser-session-runtime";
+    orphanRuntime.setAttribute("data-browser-session", browserSessionKey(SESSION_A));
+    orphanHost.appendChild(orphanRuntime);
+    documentNode.body.appendChild(orphanHost);
+
+    ensureBrowserRuntime(SESSION_A);
+
+    expect(orphanRuntime.parentElement).toBeNull();
+    expect(orphanHost.parentElement).toBeNull();
   });
 
   test("retire 清理 webview/guest/映射且不影响其他会话", async () => {

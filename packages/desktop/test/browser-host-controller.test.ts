@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { WebContentsHostController } from "../src/main/browser/browser-host-controller.ts";
 
 vi.mock("electron", () => ({
-  clipboard: { writeText: vi.fn(), readText: vi.fn(() => "mocked") },
+  clipboard: { writeText: vi.fn(() => Promise.resolve()), readText: vi.fn(() => Promise.resolve("mocked")) },
 }));
 
 const AX_TREE = {
@@ -458,6 +458,9 @@ describe("WebContentsHostController 新能力（对齐 Codex browser_use）", ()
     await host.clipboardWriteText("hello");
     expect(electronClipboard.writeText).toHaveBeenCalledWith("hello");
     await expect(host.clipboardReadText()).resolves.toBe("mocked");
+
+    vi.mocked(electronClipboard.writeText).mockRejectedValueOnce(new Error("clipboard write failed"));
+    await expect(host.clipboardWriteText("failure")).rejects.toThrow("clipboard write failed");
   });
 
   test("downloadEvents 记录 will-download（含 setSavePath 与 done 后最终路径）", async () => {

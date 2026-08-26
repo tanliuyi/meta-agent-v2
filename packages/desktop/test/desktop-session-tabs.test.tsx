@@ -42,7 +42,14 @@ vi.mock("../src/renderer/src/state/layout.tsx", () => ({
 }));
 
 vi.mock("../src/renderer/src/state/keyboard-shortcut-provider.tsx", () => ({
-  useKeyboardShortcuts: () => ({ getBindings: () => [] }),
+  useKeyboardShortcuts: () => ({
+    getBindings: (commandId: string) => {
+      const index = Number(commandId.at(-1));
+      return Number.isInteger(index) ? [{ modifiers: ["mod"], key: String(index) }] : [];
+    },
+    primaryModifierPressed: false,
+    registerCommandHandler: () => () => undefined,
+  }),
 }));
 
 vi.mock("../src/renderer/src/components/assistant-ui/tooltip-icon-button.tsx", () => ({
@@ -75,6 +82,14 @@ const mainSource = readFileSync(new URL("../src/main/index.ts", import.meta.url)
 const layoutCss = readFileSync(new URL("../src/renderer/src/styles/layout.css", import.meta.url), "utf8");
 const desktopHeaderSource = readFileSync(
   new URL("../src/renderer/src/components/layout/desktop-header.tsx", import.meta.url),
+  "utf8",
+);
+const desktopSessionTabsSource = readFileSync(
+  new URL("../src/renderer/src/components/layout/desktop-session-tabs.tsx", import.meta.url),
+  "utf8",
+);
+const keyboardShortcutProviderSource = readFileSync(
+  new URL("../src/renderer/src/state/keyboard-shortcut-provider.tsx", import.meta.url),
   "utf8",
 );
 const desktopWindowTitleSource = readFileSync(
@@ -158,6 +173,21 @@ describe("DesktopSessionTabs", () => {
     const markup = renderToStaticMarkup(<DesktopSessionTabs />);
 
     expect(markup).not.toContain('aria-label="运行中"');
+  });
+
+  it("uses the catalog completion state when an inactive timeline is stale", () => {
+    setupSessions();
+    const second = testState.records[1]!;
+    second.stores.timeline.replace({
+      ...second.stores.timeline.getSnapshot(),
+      projectId: "project-b",
+      threadId: "thread-b",
+      phase: "running",
+    });
+
+    const markup = renderToStaticMarkup(<DesktopSessionTabs />);
+
+    expect(markup).toMatch(/role="tab" aria-selected="false"[^>]*>.*aria-label="运行已完成".*Second session<\/span>/s);
   });
 
   it("falls back to control state before the timeline is attached", () => {
@@ -278,6 +308,19 @@ describe("DesktopSessionTabs", () => {
     expect(layoutCss).toMatch(
       /\.desktop-session-tab-close\.desktop-session-tab-close\s*\{[^}]*flex:\s*0 0 20px;[^}]*padding:\s*0;[^}]*margin-inline-end:\s*4px;[^}]*border-radius:\s*var\(--shape-radius-round\);/s,
     );
+    expect(layoutCss).toMatch(
+      /\.desktop-session-tab-close\.desktop-session-tab-close\[data-shortcut-hint="true"\]\s*\{[^}]*border-radius:\s*var\(--shape-radius-xl\);[^}]*background:\s*hsl\(var\(--shortcut-hint-background\)\);[^}]*color:\s*hsl\(var\(--shortcut-hint-foreground\)\);/s,
+    );
+    expect(layoutCss).toMatch(
+      /\.desktop-session-tab-shortcut-hint,\s*\.desktop-thread-shortcut-hint\s*\{[^}]*font-size:\s*11px;[^}]*font-variant-numeric:\s*tabular-nums;[^}]*font-weight:\s*600;/s,
+    );
+    expect(layoutCss).toMatch(
+      /\.desktop-thread-shortcut-hint\s*\{[^}]*width:\s*20px;[^}]*height:\s*20px;[^}]*border-radius:\s*var\(--shape-radius-xl\);[^}]*background:\s*hsl\(var\(--shortcut-hint-background\)\);/s,
+    );
+    expect(keyboardShortcutProviderSource).toMatch(/window\.addEventListener\("keydown", onKeyDown\)/);
+    expect(keyboardShortcutProviderSource).toMatch(/window\.addEventListener\("keyup", onKeyUp\)/);
+    expect(keyboardShortcutProviderSource).toMatch(/window\.addEventListener\("blur", onBlur\)/);
+    expect(desktopSessionTabsSource).toMatch(/orderedRecords\.slice\(0, DESKTOP_SESSION_TAB_COMMAND_IDS\.length\)/);
     expect(layoutCss).toMatch(
       /\.desktop-session-tab-status-running\s*\{[^}]*width:\s*12px;[^}]*border-top-color:\s*hsl\(var\(--foreground\)[^}]*animation:\s*spin/s,
     );

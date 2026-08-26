@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
-import type { FileImage, FileNode, TextFile } from "../../shared/contracts.ts";
+import type { FileImage, FileNode, PdfDocumentPreview, TextFile } from "../../shared/contracts.ts";
+import { pdfPreviewUrl } from "../../shared/pdf-preview-contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 import { fuzzyMatch } from "./fuzzy.ts";
 import { collectGitignoreLayers, type GitignoreLayer, isPathIgnored, readGitignoreLayer } from "./gitignore.ts";
@@ -113,6 +114,20 @@ export class FileService {
       path: normalizeProjectRelativePath(relative(cwd, target)),
       mime,
       dataUrl: `data:${mime};base64,${buffer.toString("base64")}`,
+    };
+  }
+
+  /** 校验 Project 内的 PDF，并返回 Electron 内置查看器使用的受控 URL。 */
+  async previewPdf(projectId: string, path: string): Promise<PdfDocumentPreview> {
+    const cwd = this.projects.getCwd(projectId);
+    const target = resolveProjectFilePath(cwd, path);
+    if (extname(target).toLowerCase() !== ".pdf") throw new Error("不是 PDF 文件");
+    const info = await stat(target);
+    if (!info.isFile()) throw new Error("目标不是文件");
+    const normalizedPath = normalizeProjectRelativePath(relative(cwd, target));
+    return {
+      path: normalizedPath,
+      url: pdfPreviewUrl(projectId, normalizedPath),
     };
   }
 

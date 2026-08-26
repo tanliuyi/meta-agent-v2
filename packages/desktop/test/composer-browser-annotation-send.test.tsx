@@ -60,7 +60,9 @@ vi.mock("@assistant-ui/react", () => ({
 }));
 
 vi.mock("../src/renderer/src/components/session-context.tsx", () => ({
-  useSessionScope: () => ({ record: { key: "session:test" } }),
+  useSessionScope: () => ({
+    record: { key: "session:test", stores: { extensionCommands: { applyRevision: vi.fn() } } },
+  }),
 }));
 
 vi.mock("../src/renderer/src/components/chat/composer/composer-input.tsx", () => ({

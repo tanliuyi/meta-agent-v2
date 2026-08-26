@@ -20,6 +20,7 @@ import { basename, join } from "node:path";
 import type { WebContents } from "electron";
 import {
   BrowserWindow,
+  ClipboardItem,
   clipboard,
   webContents as electronWebContents,
   Menu,
@@ -1329,7 +1330,11 @@ export class BrowserManager {
       const shot = await entry.host.captureScreenshot();
       const image = nativeImage.createFromDataURL(shot.dataUrl);
       if (image.isEmpty()) return { ok: false, error: "页面截图为空" };
-      clipboard.writeImage(image);
+      await clipboard.write([
+        new ClipboardItem({
+          "image/png": new Blob([Uint8Array.from(image.toPNG())], { type: "image/png" }),
+        }),
+      ]);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: messageOf(error) };
@@ -1371,7 +1376,11 @@ export class BrowserManager {
           this.options.log?.(`browser context menu download failed: ${messageOf(error)}`);
         }
       },
-      copyText: (text) => clipboard.writeText(text),
+      copyText: (text) => {
+        void clipboard.writeText(text).catch((error: unknown) => {
+          this.options.log?.(`browser context menu copy failed: ${messageOf(error)}`);
+        });
+      },
       copyImage: (x, y) => webContents.copyImageAt(x, y),
       copyVideoFrame: (x, y) => webContents.copyVideoFrameAt(x, y),
       replaceMisspelling: (word) => webContents.replaceMisspelling(word),
