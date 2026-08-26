@@ -6,6 +6,10 @@ import { FilePreview } from "../src/renderer/src/components/panel/files/file-pre
 import type { TextFile } from "../src/shared/contracts.ts";
 
 const panelCss = readFileSync(new URL("../src/renderer/src/styles/panel.css", import.meta.url), "utf8");
+const highlightClientSource = readFileSync(
+  new URL("../src/renderer/src/components/panel/files/file-highlight-client.ts", import.meta.url),
+  "utf8",
+);
 
 const file: TextFile = {
   path: "src/index.ts",
@@ -35,6 +39,12 @@ describe("FilePreview", () => {
       highlight: { file, tokens: { tokens, fg: "#D8DEE9" } as never },
     });
     expect(markup).toContain("file-preview-token");
+  });
+
+  it("使用 Vite 可静态分析的 Worker 构造形式", () => {
+    expect(highlightClientSource).toContain(
+      'new Worker(new URL("./file-highlight.worker.ts", import.meta.url), { type: "module" })',
+    );
   });
 
   it("大文件降级时显示提示", () => {

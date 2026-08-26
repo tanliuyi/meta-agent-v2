@@ -10,12 +10,10 @@ let worker: Worker | null | undefined;
 let nextId = 0;
 const pending = new Map<number, (tokens: HighlightResult | null) => void>();
 
-const workerUrl = new URL("./file-highlight.worker.ts", import.meta.url);
-
 function getWorker(): Worker | null {
   if (worker !== undefined) return worker;
   try {
-    worker = new Worker(workerUrl, { type: "module" });
+    worker = new Worker(new URL("./file-highlight.worker.ts", import.meta.url), { type: "module" });
     worker.onmessage = (event: MessageEvent<HighlightResponse>) => {
       const resolve = pending.get(event.data.id);
       pending.delete(event.data.id);
