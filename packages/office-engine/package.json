@@ -1,0 +1,35 @@
+{
+  "name": "@earendil-works/pi-office-engine",
+  "version": "0.83.0",
+  "description": "Safe read-only Office Open XML package inspection",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsgo -p tsconfig.build.json",
+    "typecheck": "tsgo --noEmit -p tsconfig.build.json",
+    "test": "vitest --run --coverage"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.7.3",
+    "fflate": "0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "@vitest/coverage-v8": "4.1.9",
+    "typescript": "5.9.3",
+    "vitest": "4.1.9"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "license": "MIT"
+}
