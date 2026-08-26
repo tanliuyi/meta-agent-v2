@@ -35,6 +35,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
   },
   renderer: {
+    worker: {
+      format: "es",
+    },
     build: {
       rollupOptions: {
         input: {
