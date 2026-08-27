@@ -1,7 +1,7 @@
 {
   "name": "@earendil-works/pi-office-engine",
   "version": "0.83.0",
-  "description": "Safe read-only Office Open XML package inspection",
+  "description": "Safe Office Open XML package inspection and transactional editing",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -19,8 +19,10 @@
     "test": "vitest --run --coverage"
   },
   "dependencies": {
+    "@noble/hashes": "2.3.0",
     "fast-xml-parser": "5.7.3",
-    "fflate": "0.8.2"
+    "fflate": "0.8.2",
+    "saxes": "6.0.0"
   },
   "devDependencies": {
     "@types/node": "24.12.4",

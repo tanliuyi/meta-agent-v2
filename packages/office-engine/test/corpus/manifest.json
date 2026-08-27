@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 2,
+  "licenses": [
+    {
+      "file": "MAMMOTH-LICENSE.txt",
+      "sha256": "59d0910e3653681cc461f299ceedca65b6b9b82ff695a6cfacde55f7bef02704",
+      "spdx": "BSD-2-Clause",
+      "attribution": "Copyright (c) 2013, Michael Williamson",
+      "kind": "license"
+    },
+    {
+      "file": "APACHE-POI-LICENSE.txt",
+      "sha256": "6e7c918e5a49f677c1b85a9eb2d035cd85c217fc42af6b4a336964a434001a9c",
+      "spdx": "Apache-2.0",
+      "attribution": "Apache License",
+      "kind": "license"
+    },
+    {
+      "file": "APACHE-POI-NOTICE.txt",
+      "sha256": "8e41ec916a59981a28397e2b46d7fb851eea02f7d179d75f030eb248916a4a09",
+      "spdx": "Apache-2.0",
+      "attribution": "Apache POI",
+      "kind": "notice"
+    }
+  ],
+  "fixtures": [
+    {
+      "filename": "comments.docx",
+      "sha256": "adc9f524d176f562db830c346c1e9e21c6a6aa6768d9c09892a423f1257fe17c",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/comments.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/comments.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "comment-reference",
+        "comments-part",
+        "custom-xml"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word unsupported comments boundary regression"
+      },
+      "expected": {
+        "inspect": "opens",
+        "warnings": [
+          {
+            "code": "UNSUPPORTED_COMMENTS",
+            "part": "word/comments.xml"
+          },
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "blocked",
+        "blockedReason": "comment-boundary"
+      }
+    },
+    {
+      "filename": "footnotes.docx",
+      "sha256": "a3d786ba3ad53833dd3d5e01bd55e93b628c1287d8f9210eb94cb7533f270306",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/footnotes.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/footnotes.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "footnote-reference",
+        "footnotes-part",
+        "endnotes-part",
+        "custom-xml"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word unsupported notes boundary regression"
+      },
+      "expected": {
+        "inspect": "opens",
+        "warnings": [
+          {
+            "code": "UNSUPPORTED_ENDNOTE",
+            "part": "word/endnotes.xml"
+          },
+          {
+            "code": "UNSUPPORTED_FOOTNOTE",
+            "part": "word/footnotes.xml"
+          },
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "blocked",
+        "blockedReason": "note-reference"
+      }
+    },
+    {
+      "filename": "single-paragraph.docx",
+      "sha256": "7d89bf44b4d6940234efb6973d24706c881aa875bb794bfbe54efd92f9c6cf3e",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/single-paragraph.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/single-paragraph.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "single-text-run",
+        "bookmark-boundary",
+        "section-properties"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word bookmark boundary fail-closed regression"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "Walking on imported air"
+        },
+        "warnings": [
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "blocked",
+        "blockedReason": "bookmark-boundary"
+      }
+    },
+    {
+      "filename": "strict-format.docx",
+      "sha256": "86d90f50d8fd3310c4079291c6622878d8f4d8864d665d1e34841f407e7b7662",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/strict-format.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/strict-format.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "strict"
+      },
+      "features": [
+        "strict-ooxml",
+        "body-paragraph",
+        "single-editable-text-run"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word strict OOXML editable roundtrip"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "Test"
+        },
+        "warnings": [],
+        "operation": "editable"
+      }
+    },
+    {
+      "filename": "bug66312.docx",
+      "sha256": "de03dd0ac02c04e07790c400ee5cb36b580e38750d6c56c2b8528a53219cb46a",
+      "source": {
+        "repository": "https://github.com/apache/poi",
+        "revision": "4554f204cbbf00ecbcaed134fe57e43a1779a612",
+        "version": "REL_5_4_1",
+        "fixturePath": "test-data/document/bug66312.docx",
+        "url": "https://raw.githubusercontent.com/apache/poi/4554f204cbbf00ecbcaed134fe57e43a1779a612/test-data/document/bug66312.docx"
+      },
+      "license": {
+        "id": "APACHE-POI-LICENSE.txt",
+        "spdx": "Apache-2.0",
+        "attribution": "Apache License"
+      },
+      "legalFiles": ["APACHE-POI-LICENSE.txt", "APACHE-POI-NOTICE.txt"],
+      "producer": {
+        "name": "LibreOffice",
+        "version": "7.3.6.2 Linux X86_64",
+        "application": "LibreOffice/7.3.6.2$Linux_X86_64 LibreOffice_project/30$Build-2"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "two-identical-text-runs",
+        "libreoffice-produced"
+      ],
+      "audit": {
+        "privacy": "fixture contains only the literal word World; reviewed for personal data",
+        "rationale": "Apache POI Apache-2.0 test fixture provides fixed LibreOffice producer coverage and editable target identity"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "World"
+        },
+        "warnings": [
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "editable"
+      }
+    }
+  ]
+}

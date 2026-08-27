@@ -5,6 +5,7 @@ import { OfficeEngineError, officeError } from "./errors.ts";
 export const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
 export const TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE =
 	"http://schemas.openxmlformats.org/package/2006/relationships";
+const STRICT_PACKAGE_RELATIONSHIPS_NAMESPACE = "http://purl.oclc.org/ooxml/package/relationships";
 export const TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP =
 	"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
 export const STRICT_OFFICE_DOCUMENT_RELATIONSHIP =
@@ -17,8 +18,22 @@ export interface DocxMainPart {
 	readonly contentType: typeof WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE;
 }
 
+export interface DocxPartWarning {
+	readonly code:
+		| "UNSUPPORTED_HEADER"
+		| "UNSUPPORTED_FOOTER"
+		| "UNSUPPORTED_FOOTNOTE"
+		| "UNSUPPORTED_ENDNOTE"
+		| "UNSUPPORTED_COMMENTS"
+		| "UNSUPPORTED_DRAWING"
+		| "UNSUPPORTED_PART";
+	readonly part: string;
+	readonly message: string;
+}
+
 export interface DocxPackageResolution {
 	readonly mainPart: DocxMainPart;
+	readonly warnings: readonly DocxPartWarning[];
 }
 
 type XmlRecord = Record<string, unknown>;
@@ -31,7 +46,7 @@ interface XmlElement {
 }
 
 const XML_LIMIT = 16 * 1024 * 1024;
-const XML_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const XML_DECODER = new TextDecoder("utf-8", { fatal: true });
 const PREDEFINED_ENTITY_VALUES: Readonly<Record<string, string>> = Object.freeze({
 	amp: "&",
 	quot: '"',
@@ -51,6 +66,20 @@ const XML_PARSER = new XMLParser({
 	parseAttributeValue: false,
 	maxNestedTags: 100,
 });
+const DIGITAL_SIGNATURE_RELATIONSHIP_TYPES = new Set([
+	"http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/origin",
+	"http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature",
+	"http://purl.oclc.org/ooxml/package/relationships/digital-signature/origin",
+	"http://purl.oclc.org/ooxml/package/relationships/digital-signature/signature",
+]);
+const DIGITAL_SIGNATURE_CONTENT_TYPES = new Set([
+	"application/vnd.openxmlformats-package.digital-signature-origin",
+	"application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml",
+]);
+
+function isDigitalSignatureType(value: string, types: ReadonlySet<string>): boolean {
+	return types.has(value.toLowerCase());
+}
 
 function asRecord(value: unknown): XmlRecord | undefined {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
@@ -151,19 +180,6 @@ function decodeParsedValue(value: unknown): unknown {
 }
 
 function parseXml(bytes: Uint8Array): XmlRecord {
-	const xml = decodeAndValidateXmlPart(bytes);
-	try {
-		const parsed: unknown = XML_PARSER.parse(xml.charCodeAt(0) === 0xfeff ? xml.slice(1) : xml);
-		const record = asRecord(decodeParsedValue(parsed));
-		if (record === undefined) throw officeError("XML_INVALID");
-		return record;
-	} catch (error) {
-		if (error instanceof OfficeEngineError) throw error;
-		throw officeError("XML_INVALID");
-	}
-}
-
-export function decodeAndValidateXmlPart(bytes: Uint8Array): string {
 	if (bytes.byteLength > XML_LIMIT) throw officeError("XML_TOO_LARGE");
 	let xml: string;
 	try {
@@ -173,11 +189,21 @@ export function decodeAndValidateXmlPart(bytes: Uint8Array): string {
 	}
 	validateXmlLexicalSafety(xml);
 	if (XMLValidator.validate(xml, { allowBooleanAttributes: false }) !== true) throw officeError("XML_INVALID");
-	return xml;
+	try {
+		const parsed: unknown = XML_PARSER.parse(xml);
+		const record = asRecord(decodeParsedValue(parsed));
+		if (record === undefined) throw officeError("XML_INVALID");
+		return record;
+	} catch (error) {
+		if (error instanceof OfficeEngineError) throw error;
+		throw officeError("XML_INVALID");
+	}
 }
 
 function readXml(archive: PackageArchive, path: string): XmlRecord {
 	try {
+		const entry = archive.entries().find((item) => item.path === path);
+		if (entry !== undefined && entry.uncompressedSize > XML_LIMIT) throw officeError("XML_TOO_LARGE");
 		return parseXml(archive.read(path));
 	} catch (error) {
 		if (error instanceof OfficeEngineError) throw error;
@@ -195,7 +221,10 @@ function namespaceBindings(record: XmlRecord, inherited: ReadonlyMap<string, str
 	return bindings;
 }
 
-function qNameParts(qName: string): { readonly local: string; readonly prefix: string } {
+function qNameParts(qName: string): {
+	readonly local: string;
+	readonly prefix: string;
+} {
 	const separator = qName.indexOf(":");
 	return separator < 0
 		? { local: qName, prefix: "" }
@@ -244,6 +273,26 @@ function childElements(
 		}
 	}
 	return result;
+}
+
+function validateElementSchema(
+	element: XmlElement,
+	allowedChildren: ReadonlySet<string>,
+	allowedAttributes: ReadonlySet<string>,
+	code: "DOCX_CONTENT_TYPE_INVALID" | "DOCX_RELATIONSHIP_INVALID",
+): void {
+	for (const [qName, value] of Object.entries(element.record)) {
+		if (qName.startsWith("@_")) {
+			const attributeName = qName.slice(2);
+			const namespaceDeclaration =
+				(attributeName === "xmlns" || attributeName.startsWith("xmlns:")) && value === element.namespace;
+			if (!namespaceDeclaration && !allowedAttributes.has(attributeName)) throw officeError(code);
+			continue;
+		}
+		if (!allowedChildren.has(qNameParts(qName).local)) throw officeError(code);
+		const bindings = namespaceBindings(asRecord(Array.isArray(value) ? value[0] : value) ?? {}, element.bindings);
+		if (elementNamespace(qName, bindings) !== element.namespace) throw officeError(code);
+	}
 }
 
 function attribute(record: XmlRecord, name: string): string | undefined {
@@ -319,7 +368,7 @@ function rejectEncodedPathSyntax(target: string): void {
 	}
 }
 
-function resolveRelationshipTarget(target: string): string {
+function resolveRelationshipTarget(target: string, sourcePart?: string): string {
 	if (target.length === 0 || target.includes("\\") || target.includes("\u0000"))
 		throw officeError("DOCX_TARGET_INVALID");
 	rejectEncodedPathSyntax(target);
@@ -336,22 +385,38 @@ function resolveRelationshipTarget(target: string): string {
 		decoded.includes("\u0000") ||
 		decoded.includes("?") ||
 		decoded.includes("#") ||
-		/^[A-Za-z][A-Za-z0-9+.-]*:/.test(decoded)
+		/^[A-Za-z][A-Za-z0-9+.-]*:/.test(decoded) ||
+		/[\u2044\u2215\u2216\u2217\u29f8\uff0f\uff3c\u2024\u2025]/u.test(decoded)
 	) {
 		throw officeError("DOCX_TARGET_INVALID");
 	}
-	const rooted = decoded.startsWith("/");
-	const path = rooted ? decoded.slice(1) : decoded;
-	const segments = path.split("/");
+	if (sourcePart === undefined && decoded.startsWith("/")) {
+		decoded = decoded.slice(1);
+	} else if (sourcePart !== undefined && decoded.startsWith("/")) {
+		throw officeError("DOCX_TARGET_INVALID");
+	}
+	const decodedSegments = decoded.split("/");
+	if (
+		decodedSegments.some((segment) => segment.length === 0 || segment === ".") ||
+		(sourcePart === undefined && decodedSegments.includes(".."))
+	)
+		throw officeError("DOCX_TARGET_INVALID");
+	const base =
+		sourcePart === undefined
+			? []
+			: sourcePart
+					.slice(0, sourcePart.lastIndexOf("/") + 1)
+					.split("/")
+					.filter(Boolean);
+	const segments = [...base, ...decodedSegments];
 	const resolved: string[] = [];
 	for (const segment of segments) {
-		if (segment === ".") continue;
+		if (segment.length === 0 || segment === ".") continue;
 		if (segment === "..") {
 			if (resolved.length === 0) throw officeError("DOCX_TARGET_INVALID");
 			resolved.pop();
 			continue;
 		}
-		if (segment.length === 0) throw officeError("DOCX_TARGET_INVALID");
 		resolved.push(segment);
 	}
 	if (resolved.length === 0) throw officeError("DOCX_TARGET_INVALID");
@@ -362,11 +427,72 @@ function resolveRelationshipTarget(target: string): string {
 	}
 }
 
+const RELATIONSHIP_ATTRIBUTES = new Set(["Id", "Type", "Target", "TargetMode"]);
+
+interface ParsedRelationship {
+	readonly id: string;
+	readonly type: string;
+	readonly target: string;
+	readonly targetMode: string | undefined;
+}
+
+function parseRelationships(root: XmlElement): ParsedRelationship[] {
+	validateElementSchema(root, new Set(["Relationship"]), new Set(), "DOCX_RELATIONSHIP_INVALID");
+	const ids = new Set<string>();
+	return childElements(root, "Relationship", "DOCX_RELATIONSHIP_INVALID").map((relationship) => {
+		validateElementSchema(relationship, new Set(), RELATIONSHIP_ATTRIBUTES, "DOCX_RELATIONSHIP_INVALID");
+		const id = requiredAttribute(relationship.record, "Id", "DOCX_RELATIONSHIP_INVALID");
+		if (!isNcName(id) || ids.has(id)) throw officeError("DOCX_RELATIONSHIP_INVALID");
+		ids.add(id);
+		const type = requiredAttribute(relationship.record, "Type", "DOCX_RELATIONSHIP_INVALID");
+		const target = requiredAttribute(relationship.record, "Target", "DOCX_RELATIONSHIP_INVALID");
+		const targetMode = attribute(relationship.record, "TargetMode");
+		if (targetMode !== undefined && targetMode !== "Internal" && targetMode !== "External")
+			throw officeError("DOCX_RELATIONSHIP_INVALID");
+		if (isDigitalSignatureType(type, DIGITAL_SIGNATURE_RELATIONSHIP_TYPES)) throw officeError("ARCHIVE_INVALID");
+		return { id, type, target, targetMode };
+	});
+}
+
+function relationshipPartSource(path: string): string {
+	if (!path.endsWith(".rels") || path === "_rels/.rels") throw officeError("DOCX_RELATIONSHIP_INVALID");
+	const marker = "/_rels/";
+	const markerIndex = path.indexOf(marker);
+	if (markerIndex < 0 || !path.endsWith(".rels") || path.slice(markerIndex + marker.length).includes("/_rels/"))
+		throw officeError("DOCX_RELATIONSHIP_INVALID");
+	const source = `${path.slice(0, markerIndex)}/${path.slice(markerIndex + marker.length, -5)}`;
+	if (source.endsWith("/")) throw officeError("DOCX_RELATIONSHIP_INVALID");
+	return source;
+}
+
 function extensionOf(path: string): string | undefined {
 	const slash = path.lastIndexOf("/");
 	const dot = path.lastIndexOf(".");
 	if (dot <= slash || dot === path.length - 1) return undefined;
 	return path.slice(dot + 1).toLowerCase();
+}
+
+const RELATIONSHIP_WARNING_CODES: ReadonlyMap<string, DocxPartWarning["code"]> = new Map(
+	(
+		[
+			["header", "UNSUPPORTED_HEADER"],
+			["footer", "UNSUPPORTED_FOOTER"],
+			["footnotes", "UNSUPPORTED_FOOTNOTE"],
+			["endnotes", "UNSUPPORTED_ENDNOTE"],
+			["comments", "UNSUPPORTED_COMMENTS"],
+			["image", "UNSUPPORTED_DRAWING"],
+			["drawing", "UNSUPPORTED_DRAWING"],
+			["oleObject", "UNSUPPORTED_PART"],
+			["object", "UNSUPPORTED_PART"],
+		] as ReadonlyArray<readonly [string, DocxPartWarning["code"]]>
+	).flatMap(([local, code]) => [
+		[`http://schemas.openxmlformats.org/officeDocument/2006/relationships/${local}`, code],
+		[`http://purl.oclc.org/ooxml/officeDocument/relationships/${local}`, code],
+	]),
+);
+
+function warningCodeForRelationship(type: string): DocxPartWarning["code"] | undefined {
+	return RELATIONSHIP_WARNING_CODES.get(type);
 }
 
 function contentTypeFor(
@@ -380,82 +506,109 @@ function contentTypeFor(
 }
 
 export function resolveDocx(archive: PackageArchive): DocxPackageResolution {
-	let contentTypes: XmlRecord;
-	try {
-		contentTypes = readXml(archive, "[Content_Types].xml");
-	} catch (error) {
-		if (error instanceof OfficeEngineError && error.code === "ARCHIVE_INVALID")
-			throw officeError("DOCX_MISSING_CONTENT_TYPES");
-		throw error;
-	}
+	const entries = new Set(archive.entries().map((entry) => entry.path));
+	const contentTypes = (() => {
+		try {
+			return readXml(archive, "[Content_Types].xml");
+		} catch (error) {
+			if (error instanceof OfficeEngineError && error.code === "ARCHIVE_INVALID")
+				throw officeError("DOCX_MISSING_CONTENT_TYPES");
+			throw error;
+		}
+	})();
 	const typesRoot = rootElement(
 		contentTypes,
 		"Types",
 		new Set([CONTENT_TYPES_NAMESPACE]),
 		"DOCX_CONTENT_TYPE_INVALID",
 	);
+	validateElementSchema(typesRoot, new Set(["Default", "Override"]), new Set(), "DOCX_CONTENT_TYPE_INVALID");
 	const overrides = new Map<string, string>();
 	const defaults = new Map<string, string>();
 	for (const override of childElements(typesRoot, "Override", "DOCX_CONTENT_TYPE_INVALID")) {
-		const path = resolvePartName(requiredAttribute(override.record, "PartName", "DOCX_CONTENT_TYPE_INVALID"));
+		validateElementSchema(override, new Set(), new Set(["PartName", "ContentType"]), "DOCX_CONTENT_TYPE_INVALID");
+		const part = resolvePartName(requiredAttribute(override.record, "PartName", "DOCX_CONTENT_TYPE_INVALID"));
 		const type = requiredAttribute(override.record, "ContentType", "DOCX_CONTENT_TYPE_INVALID");
-		if (overrides.has(path)) throw officeError("DOCX_CONTENT_TYPE_INVALID");
-		overrides.set(path, type);
+		if (overrides.has(part)) throw officeError("DOCX_CONTENT_TYPE_INVALID");
+		if (isDigitalSignatureType(type, DIGITAL_SIGNATURE_CONTENT_TYPES)) throw officeError("ARCHIVE_INVALID");
+		overrides.set(part, type);
 	}
 	for (const defaultType of childElements(typesRoot, "Default", "DOCX_CONTENT_TYPE_INVALID")) {
+		validateElementSchema(defaultType, new Set(), new Set(["Extension", "ContentType"]), "DOCX_CONTENT_TYPE_INVALID");
 		const extension = requiredAttribute(defaultType.record, "Extension", "DOCX_CONTENT_TYPE_INVALID").toLowerCase();
 		const type = requiredAttribute(defaultType.record, "ContentType", "DOCX_CONTENT_TYPE_INVALID");
-		if (extension.includes("/") || extension.includes("\\") || extension.includes(".") || defaults.has(extension)) {
+		if (extension.includes("/") || extension.includes("\\") || extension.includes(".") || defaults.has(extension))
 			throw officeError("DOCX_CONTENT_TYPE_INVALID");
-		}
+		if (isDigitalSignatureType(type, DIGITAL_SIGNATURE_CONTENT_TYPES)) throw officeError("ARCHIVE_INVALID");
 		defaults.set(extension, type);
 	}
-
-	let relationships: XmlRecord;
+	const warnings = new Map<string, DocxPartWarning>();
+	const inspectRelationships = (relationshipPath: string, sourcePart: string | undefined): ParsedRelationship[] => {
+		const root = rootElement(
+			readXml(archive, relationshipPath),
+			"Relationships",
+			new Set([TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE, STRICT_PACKAGE_RELATIONSHIPS_NAMESPACE]),
+			"DOCX_RELATIONSHIP_INVALID",
+		);
+		const relationships = parseRelationships(root);
+		for (const relationship of relationships) {
+			const isOfficeDocument =
+				relationship.type === TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP ||
+				relationship.type === STRICT_OFFICE_DOCUMENT_RELATIONSHIP;
+			if (relationship.targetMode === "External") {
+				if (sourcePart === undefined && isOfficeDocument) throw officeError("DOCX_EXTERNAL_RELATIONSHIP");
+				continue;
+			}
+			const target = resolveRelationshipTarget(relationship.target, sourcePart);
+			if (!entries.has(target)) {
+				if (sourcePart === undefined && isOfficeDocument) continue;
+				throw officeError("DOCX_TARGET_INVALID");
+			}
+			const code = warningCodeForRelationship(relationship.type);
+			if (code !== undefined && target !== sourcePart)
+				warnings.set(`${code}:${target}`, {
+					code,
+					part: target,
+					message: `${target} is outside editable main document scope`,
+				});
+		}
+		return relationships;
+	};
+	for (const entry of archive.entries()) {
+		if (!entry.path.toLowerCase().endsWith(".rels") || entry.path === "_rels/.rels") continue;
+		const source = relationshipPartSource(entry.path);
+		if (!entries.has(source)) throw officeError("DOCX_RELATIONSHIP_INVALID");
+		inspectRelationships(entry.path, source);
+	}
+	let rootRelationships: ParsedRelationship[];
 	try {
-		relationships = readXml(archive, "_rels/.rels");
+		rootRelationships = inspectRelationships("_rels/.rels", undefined);
 	} catch (error) {
 		if (error instanceof OfficeEngineError && error.code === "ARCHIVE_INVALID")
 			throw officeError("DOCX_MISSING_ROOT_RELATIONSHIPS");
 		throw error;
 	}
-	const relationshipRoot = rootElement(
-		relationships,
-		"Relationships",
-		new Set([TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE]),
-		"DOCX_RELATIONSHIP_INVALID",
+	const candidates = rootRelationships.filter(
+		(relationship) =>
+			relationship.type === TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP ||
+			relationship.type === STRICT_OFFICE_DOCUMENT_RELATIONSHIP,
 	);
-	const candidates: Array<{ readonly target: string; readonly external: boolean }> = [];
-	const relationshipIds = new Set<string>();
-	for (const relationship of childElements(relationshipRoot, "Relationship", "DOCX_RELATIONSHIP_INVALID")) {
-		const id = requiredAttribute(relationship.record, "Id", "DOCX_RELATIONSHIP_INVALID");
-		if (!isNcName(id) || relationshipIds.has(id)) throw officeError("DOCX_RELATIONSHIP_INVALID");
-		relationshipIds.add(id);
-		const type = requiredAttribute(relationship.record, "Type", "DOCX_RELATIONSHIP_INVALID");
-		const target = requiredAttribute(relationship.record, "Target", "DOCX_RELATIONSHIP_INVALID");
-		const targetMode = attribute(relationship.record, "TargetMode");
-		if (targetMode !== undefined && targetMode !== "Internal" && targetMode !== "External") {
-			throw officeError("DOCX_RELATIONSHIP_INVALID");
-		}
-		if (type !== TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP && type !== STRICT_OFFICE_DOCUMENT_RELATIONSHIP) continue;
-		candidates.push({ target, external: targetMode === "External" });
-	}
 	if (candidates.length === 0) throw officeError("DOCX_MISSING_OFFICE_DOCUMENT");
 	if (candidates.length > 1) throw officeError("DOCX_DUPLICATE_OFFICE_DOCUMENT");
-	const candidate = candidates[0];
-	if (candidate.external) throw officeError("DOCX_EXTERNAL_RELATIONSHIP");
-	const path = resolveRelationshipTarget(candidate.target);
-	try {
-		archive.read(path);
-	} catch (error) {
-		if (error instanceof OfficeEngineError && error.code === "ARCHIVE_INVALID")
-			throw officeError("DOCX_MAIN_PART_MISSING");
-		throw error;
-	}
-	if (contentTypeFor(overrides, defaults, path) !== WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE) {
+	const mainPart = resolveRelationshipTarget(candidates[0].target);
+	if (!entries.has(mainPart)) throw officeError("DOCX_MAIN_PART_MISSING");
+	if (contentTypeFor(overrides, defaults, mainPart)?.toLowerCase() !== WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE)
 		throw officeError("DOCX_MAIN_CONTENT_TYPE_INVALID");
-	}
-	return { mainPart: { path, contentType: WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE } };
+	warnings.delete(`UNSUPPORTED_PART:${mainPart}`);
+	return {
+		mainPart: {
+			path: mainPart,
+			contentType: WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE,
+		},
+		warnings: [...warnings.values()].sort(
+			(left, right) => left.part.localeCompare(right.part) || left.code.localeCompare(right.code),
+		),
+	};
 }
 
 export const resolveDocxMainPart = resolveDocx;

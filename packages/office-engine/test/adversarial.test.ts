@@ -2,6 +2,7 @@ import { zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
 	CONTENT_TYPES_NAMESPACE,
+	normalizeOpcPath,
 	OfficeEngineError,
 	PackageArchive,
 	resolveDocx,
@@ -248,9 +249,9 @@ function expectCode(action: () => unknown, code: string): void {
 }
 
 describe("adversarial DOCX manifests", () => {
-	it("accepts XML declarations and literal forbidden text in comments/CDATA", () => {
+	it("accepts XML declarations and literal forbidden text in comments", () => {
 		const declaration = '<?xml version="1.0" encoding="UTF-8"?>';
-		const contentTypesXml = `${declaration}<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><!-- &unknown; <!DOCTYPE Types> --><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/><Description><![CDATA[&unknown; <!DOCTYPE Types>]]></Description></Types>`;
+		const contentTypesXml = `${declaration}<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><!-- &unknown; <!DOCTYPE Types> --><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`;
 		const relationshipsXml = `${declaration}<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml"/></Relationships>`;
 		expect(resolveDocx(PackageArchive.open(docx({ contentTypesXml, relationshipsXml }))).mainPart.path).toBe(
 			"word/document.xml",
@@ -276,6 +277,65 @@ describe("adversarial DOCX manifests", () => {
 			() => resolveDocx(PackageArchive.open(docx({ relationshipTarget: "//host/word/document.xml" }))),
 			"DOCX_TARGET_INVALID",
 		);
+	});
+
+	it("resolves deep relative relationships and distinguishes external relationship scope", () => {
+		const types = `<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`;
+		const root = `<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml"/></Relationships>`;
+		const deep = `<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="urn:test" Target="../../embeddings/item.bin"/></Relationships>`;
+		const external = `<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.test/" TargetMode="External"/></Relationships>`;
+		const files: Array<readonly [string, Uint8Array]> = [
+			["[Content_Types].xml", text(types)],
+			["_rels/.rels", text(root)],
+			[
+				"word/document.xml",
+				text(
+					'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>',
+				),
+			],
+			["word/charts/chart1.xml", text("<chart/>")],
+			["word/charts/_rels/chart1.xml.rels", text(deep)],
+			["embeddings/item.bin", text("item")],
+			["word/_rels/document.xml.rels", text(external)],
+		];
+		expect(resolveDocx(PackageArchive.open(zip(files))).mainPart.path).toBe("word/document.xml");
+
+		for (const invalidTarget of ["../../../item.bin", "/embeddings/item.bin", "../.."]) {
+			const invalid = deep.replace("../../embeddings/item.bin", invalidTarget);
+			expectCode(
+				() =>
+					resolveDocx(
+						PackageArchive.open(
+							zip(
+								files.map(([path, value]) => [path, path.endsWith("chart1.xml.rels") ? text(invalid) : value]),
+							),
+						),
+					),
+				"DOCX_TARGET_INVALID",
+			);
+		}
+		expectCode(
+			() =>
+				resolveDocx(
+					PackageArchive.open(docx({ targetMode: "External", relationshipTarget: "https://example.test/" })),
+				),
+			"DOCX_EXTERNAL_RELATIONSHIP",
+		);
+	});
+
+	it("rejects unknown OPC elements and attributes", () => {
+		for (const contentTypesXml of [
+			`<Types xmlns="${CONTENT_TYPES_NAMESPACE}" extra="x"><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`,
+			`<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Unknown/><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`,
+			`<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}" extra="x"/></Types>`,
+		])
+			expectCode(() => resolveDocx(PackageArchive.open(docx({ contentTypesXml }))), "DOCX_CONTENT_TYPE_INVALID");
+		for (const relationshipsXml of [
+			`<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}" extra="x"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml"/></Relationships>`,
+			`<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Unknown/><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml"/></Relationships>`,
+			`<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml" extra="x"/></Relationships>`,
+		])
+			expectCode(() => resolveDocx(PackageArchive.open(docx({ relationshipsXml }))), "DOCX_RELATIONSHIP_INVALID");
 	});
 
 	it("requires relationship attributes, unique IDs, and valid Unicode NCNames", () => {
@@ -356,13 +416,44 @@ describe("adversarial DOCX manifests", () => {
 		expectCode(() => PackageArchive.open(stored), "ZIP_DECOMPRESSION_FAILED");
 	});
 });
+it("rejects relationship parts without a valid owning source", () => {
+	const contentTypes = `<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`;
+	const root = `<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml"/></Relationships>`;
+	const part = `<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"/>`;
+	expectCode(
+		() =>
+			resolveDocx(
+				PackageArchive.open(
+					zip([
+						["[Content_Types].xml", text(contentTypes)],
+						["_rels/.rels", text(root)],
+						[
+							"word/document.xml",
+							text(
+								'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>',
+							),
+						],
+						["word/_rels/missing.rels", text(part)],
+					]),
+				),
+			),
+		"DOCX_RELATIONSHIP_INVALID",
+	);
+});
 it("decodes predefined and numeric XML references in target attributes", () => {
 	const target = "custom/a&b.xml";
 	const contentTypes = `<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Default Extension="bin" ContentType="application/x&quot;&lt;&gt;&apos;"/><Override PartName="/${escapedAttribute(target)}" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`;
 	const relationships = `<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="custom/a&amp;b.xml" TargetMode="Internal"/></Relationships>`;
 	expect(
-		resolveDocx(PackageArchive.open(docx({ target, contentTypesXml: contentTypes, relationshipsXml: relationships })))
-			.mainPart.path,
+		resolveDocx(
+			PackageArchive.open(
+				docx({
+					target,
+					contentTypesXml: contentTypes,
+					relationshipsXml: relationships,
+				}),
+			),
+		).mainPart.path,
 	).toBe(target);
 
 	const numericTarget = "custom/a b.xml";
@@ -410,18 +501,16 @@ it("accepts Strict officeDocument type with the standard package namespace", () 
 			),
 		).mainPart.path,
 	).toBe("word/document.xml");
-	expectCode(
-		() =>
-			resolveDocx(
-				PackageArchive.open(
-					docx({
-						packageNamespace: "http://purl.oclc.org/ooxml/package/relationships",
-						relationshipType: STRICT_OFFICE_DOCUMENT_RELATIONSHIP,
-					}),
-				),
+	expect(
+		resolveDocx(
+			PackageArchive.open(
+				docx({
+					packageNamespace: "http://purl.oclc.org/ooxml/package/relationships",
+					relationshipType: STRICT_OFFICE_DOCUMENT_RELATIONSHIP,
+				}),
 			),
-		"DOCX_RELATIONSHIP_INVALID",
-	);
+		).mainPart.path,
+	).toBe("word/document.xml");
 });
 
 it("uses defaults, override precedence, and rejects duplicate content type declarations", () => {
@@ -447,11 +536,13 @@ it("uses defaults, override precedence, and rejects duplicate content type decla
 
 it("validates exact relationship modes, URI syntax, dot segments, and case", () => {
 	expect(resolveDocx(PackageArchive.open(docx({ targetMode: "Internal" }))).mainPart.path).toBe("word/document.xml");
-	expect(resolveDocx(PackageArchive.open(docx({ relationshipTarget: "word/./document.xml" }))).mainPart.path).toBe(
-		"word/document.xml",
+	expectCode(
+		() => resolveDocx(PackageArchive.open(docx({ relationshipTarget: "word/./document.xml" }))),
+		"DOCX_TARGET_INVALID",
 	);
-	expect(resolveDocx(PackageArchive.open(docx({ relationshipTarget: "a/../word/document.xml" }))).mainPart.path).toBe(
-		"word/document.xml",
+	expectCode(
+		() => resolveDocx(PackageArchive.open(docx({ relationshipTarget: "a/../word/document.xml" }))),
+		"DOCX_TARGET_INVALID",
 	);
 	expectCode(() => resolveDocx(PackageArchive.open(docx({ targetMode: "Bogus" }))), "DOCX_RELATIONSHIP_INVALID");
 	expectCode(
@@ -593,6 +684,17 @@ describe("adversarial ZIP metadata", () => {
 		expectCode(() => PackageArchive.open(result), "ZIP_ENTRY_OVERLAP");
 	});
 
+	it("rejects malformed UTF-8 names and oversized normalized paths", () => {
+		expectCode(() => normalizeOpcPath(null as unknown as string), "ARCHIVE_UNSAFE_PATH");
+		expectCode(() => normalizeOpcPath("x".repeat(1025)), "ARCHIVE_PATH_TOO_LONG");
+		const malformed = copy(zip([["a.txt", text("x")]]));
+		const record = records(malformed)[0];
+		malformed[record.central + 46] = 0xff;
+		malformed[record.local + 30] = 0xff;
+		write16(malformed, record.central + 8, read16(malformed, record.central + 8) | 0x0800);
+		write16(malformed, record.local + 6, read16(malformed, record.local + 6) | 0x0800);
+		expectCode(() => PackageArchive.open(malformed), "ARCHIVE_UNSAFE_PATH");
+	});
 	it("covers archive budget, directory, local-header, and decompression branches", () => {
 		const base = zip([["a.txt", text("x")]]);
 		expect(PackageArchive.from(base).entries()).toHaveLength(1);
@@ -602,10 +704,21 @@ describe("adversarial ZIP metadata", () => {
 		expectCode(() => PackageArchive.open(base, { maxEntries: 10_001 }), "ARCHIVE_LIMIT_INVALID");
 		expectCode(() => PackageArchive.open(base, { maxCompressionRatio: 0 }), "ARCHIVE_LIMIT_INVALID");
 		expectCode(
-			() => PackageArchive.open(base, { maxCompressionRatio: Number.POSITIVE_INFINITY }),
+			() =>
+				PackageArchive.open(base, {
+					maxCompressionRatio: Number.POSITIVE_INFINITY,
+				}),
 			"ARCHIVE_LIMIT_INVALID",
 		);
 		expectCode(() => PackageArchive.open(base, { maxCompressionRatio: 201 }), "ARCHIVE_LIMIT_INVALID");
+
+		const malformedExtra = withCentralExtra(base, 0x1234);
+		write16(malformedExtra, records(malformedExtra)[0].central + 30, 1);
+		expectCode(() => PackageArchive.open(malformedExtra), "ZIP_CENTRAL_DIRECTORY_INVALID");
+
+		const malformedLength = withCentralExtra(base, 0x1234);
+		write16(malformedLength, records(malformedLength)[0].central + 53, 0xffff);
+		expectCode(() => PackageArchive.open(malformedLength), "ZIP_CENTRAL_DIRECTORY_INVALID");
 
 		const noEocdZip64 = new Uint8Array(4);
 		write32(noEocdZip64, 0, 0x06064b50);
@@ -683,7 +796,12 @@ describe("adversarial ZIP metadata", () => {
 		const prefixedRelationships = `<pr:Relationships xmlns:pr="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><pr:Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml"/></pr:Relationships>`;
 		expect(
 			resolveDocx(
-				PackageArchive.open(docx({ contentTypesXml: prefixedTypes, relationshipsXml: prefixedRelationships })),
+				PackageArchive.open(
+					docx({
+						contentTypesXml: prefixedTypes,
+						relationshipsXml: prefixedRelationships,
+					}),
+				),
 			).mainPart.path,
 		).toBe("word/document.xml");
 		const entityDeclaration = `<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><!ENTITY x "bad"></Types>`;
@@ -705,7 +823,7 @@ describe("adversarial ZIP metadata", () => {
 		const scalarRoot = `<Types xmlns="${CONTENT_TYPES_NAMESPACE}">text</Types>`;
 		expectCode(
 			() => resolveDocx(PackageArchive.open(docx({ contentTypesXml: scalarRoot }))),
-			"DOCX_MAIN_CONTENT_TYPE_INVALID",
+			"DOCX_CONTENT_TYPE_INVALID",
 		);
 		const scalarChild = `<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Override>text</Override></Types>`;
 		expectCode(
@@ -741,7 +859,15 @@ describe("adversarial ZIP metadata", () => {
 		);
 		const noExtensionTypes = `<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Default Extension="xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`;
 		expectCode(
-			() => resolveDocx(PackageArchive.open(docx({ target: "word/document", contentTypesXml: noExtensionTypes }))),
+			() =>
+				resolveDocx(
+					PackageArchive.open(
+						docx({
+							target: "word/document",
+							contentTypesXml: noExtensionTypes,
+						}),
+					),
+				),
 			"DOCX_MAIN_CONTENT_TYPE_INVALID",
 		);
 		const missingTarget = `<Relationships xmlns="${TRANSITIONAL_PACKAGE_RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}"/></Relationships>`;

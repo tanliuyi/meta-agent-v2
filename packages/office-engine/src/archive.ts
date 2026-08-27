@@ -1,3 +1,4 @@
+import { sha256 } from "@noble/hashes/sha2.js";
 import { deflateSync, Inflate } from "fflate";
 import { OfficeEngineError, officeError } from "./errors.ts";
 
@@ -28,19 +29,26 @@ export interface PackageArchiveEntry {
 }
 
 type InternalEntry = PackageArchiveEntry & {
-	readonly centralHeaderOffset: number;
-	readonly centralRecordLength: number;
-	readonly flags: number;
 	readonly localHeaderOffset: number;
 	readonly dataOffset: number;
+	readonly centralOffset: number;
+	readonly centralRecordLength: number;
+	readonly localRecordLength: number;
+	readonly descriptorOffset: number;
+	readonly descriptorLength: 0 | 12 | 16;
+	readonly descriptorSigned: boolean;
+	readonly eocdOffset: number;
+};
+type ArchiveLayoutSegment = {
+	readonly start: number;
+	readonly end: number;
 };
 
-interface ParsedArchive {
-	readonly centralOffset: number;
-	readonly centralSize: number;
-	readonly eocdOffset: number;
-	readonly entries: ReadonlyArray<InternalEntry>;
-}
+type ParsedArchive = {
+	readonly entries: InternalEntry[];
+	readonly opaqueSegments: readonly ArchiveLayoutSegment[];
+	readonly centralStart: number;
+};
 
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 const UTF8_ENCODER = new TextEncoder();
@@ -53,7 +61,6 @@ const DEFLATE_METHOD = 8;
 const STORED_METHOD = 0;
 const UTF8_FLAG = 0x0800;
 const DEFLATE_OPTION_FLAGS = 0x0006;
-const REWRITE_ENTRY = Symbol("rewriteEntry");
 
 function readU16(bytes: Uint8Array, offset: number): number {
 	return bytes[offset] | (bytes[offset + 1] << 8);
@@ -61,13 +68,6 @@ function readU16(bytes: Uint8Array, offset: number): number {
 
 function readU32(bytes: Uint8Array, offset: number): number {
 	return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
-}
-
-function writeU32(bytes: Uint8Array, offset: number, value: number): void {
-	bytes[offset] = value & 0xff;
-	bytes[offset + 1] = (value >>> 8) & 0xff;
-	bytes[offset + 2] = (value >>> 16) & 0xff;
-	bytes[offset + 3] = (value >>> 24) & 0xff;
 }
 
 function hasRange(bytes: Uint8Array, offset: number, length: number, limit = bytes.length): boolean {
@@ -163,13 +163,17 @@ function normalizePathWithLimit(path: string, maxPathBytes: number): string {
 	return normalized;
 }
 
-function crc32(bytes: Uint8Array): number {
-	let crc = 0xffffffff;
+function updateCrc32(crc: number, bytes: Uint8Array): number {
+	let current = crc;
 	for (const byte of bytes) {
-		crc ^= byte;
-		for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+		current ^= byte;
+		for (let bit = 0; bit < 8; bit += 1) current = (current >>> 1) ^ (current & 1 ? 0xedb88320 : 0);
 	}
-	return (crc ^ 0xffffffff) >>> 0;
+	return current;
+}
+
+function crc32(bytes: Uint8Array): number {
+	return (updateCrc32(0xffffffff, bytes) ^ 0xffffffff) >>> 0;
 }
 
 function findEndOfCentralDirectory(bytes: Uint8Array): number {
@@ -189,7 +193,7 @@ function findEndOfCentralDirectory(bytes: Uint8Array): number {
 }
 
 function validateFlags(flags: number, method: number): void {
-	const allowed = method === DEFLATE_METHOD ? UTF8_FLAG | DEFLATE_OPTION_FLAGS : UTF8_FLAG;
+	const allowed = (method === DEFLATE_METHOD ? UTF8_FLAG | DEFLATE_OPTION_FLAGS : UTF8_FLAG) | 8;
 	if ((flags & ~allowed) !== 0) throw officeError("ZIP_FLAGS_INVALID");
 }
 
@@ -204,26 +208,33 @@ function validateVersion(localVersion: number, centralVersion: number, method: n
 	}
 }
 
-function decompressEntry(bytes: Uint8Array, entry: InternalEntry, maxSingleUncompressedBytes: number): Uint8Array {
+function decompressEntry(
+	bytes: Uint8Array,
+	entry: InternalEntry,
+	maxSingleUncompressedBytes: number,
+	collect: boolean,
+): Uint8Array {
 	const compressed = bytes.subarray(entry.dataOffset, entry.dataOffset + entry.compressedSize);
 	try {
+		if (entry.uncompressedSize > maxSingleUncompressedBytes) throw officeError("ARCHIVE_SINGLE_SIZE_LIMIT");
 		if (entry.compressionMethod === DEFLATE_METHOD && compressed.length === 0) {
 			throw officeError("ZIP_DECOMPRESSION_FAILED");
 		}
 		if (entry.compressionMethod === STORED_METHOD) {
-			const output = new Uint8Array(compressed);
-			if (output.length !== entry.uncompressedSize) throw officeError("ZIP_DECOMPRESSION_FAILED");
-			if (crc32(output) !== entry.crc32) throw officeError("ZIP_CRC_MISMATCH");
-			return output;
+			if (compressed.length !== entry.uncompressedSize) throw officeError("ZIP_DECOMPRESSION_FAILED");
+			if (crc32(compressed) !== entry.crc32) throw officeError("ZIP_CRC_MISMATCH");
+			return collect ? new Uint8Array(compressed) : new Uint8Array();
 		}
 
 		const chunks: Uint8Array[] = [];
 		let outputSize = 0;
+		let crc = 0xffffffff;
 		const hardLimit = Math.min(maxSingleUncompressedBytes, entry.uncompressedSize);
 		const inflater = new Inflate((chunk) => {
 			if (chunk.length > hardLimit - outputSize) throw officeError("ZIP_DECOMPRESSION_FAILED");
 			outputSize += chunk.length;
-			chunks.push(new Uint8Array(chunk));
+			crc = updateCrc32(crc, chunk);
+			if (collect) chunks.push(new Uint8Array(chunk));
 		});
 		const chunkSize = 32 * 1024;
 		if (compressed.length === 0) {
@@ -235,13 +246,14 @@ function decompressEntry(bytes: Uint8Array, entry: InternalEntry, maxSingleUncom
 			}
 		}
 		if (outputSize !== entry.uncompressedSize) throw officeError("ZIP_DECOMPRESSION_FAILED");
+		if ((crc ^ 0xffffffff) >>> 0 !== entry.crc32) throw officeError("ZIP_CRC_MISMATCH");
+		if (!collect) return new Uint8Array();
 		const output = new Uint8Array(outputSize);
 		let outputOffset = 0;
 		for (const chunk of chunks) {
 			output.set(chunk, outputOffset);
 			outputOffset += chunk.length;
 		}
-		if (crc32(output) !== entry.crc32) throw officeError("ZIP_CRC_MISMATCH");
 		return output;
 	} catch (error) {
 		if (error instanceof OfficeEngineError) throw error;
@@ -295,7 +307,6 @@ function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): ParsedArchive {
 		}
 		if (diskNumberStart !== 0) throw officeError("ZIP_MULTI_DISK");
 		if ((flags & 1) !== 0) throw officeError("ZIP_ENCRYPTED");
-		if ((flags & 8) !== 0) throw officeError("ZIP_DATA_DESCRIPTOR");
 		if (method !== STORED_METHOD && method !== DEFLATE_METHOD) throw officeError("ZIP_UNSUPPORTED_COMPRESSION");
 		validateFlags(flags, method);
 		const nameBytes = bytes.subarray(cursor + 46, cursor + 46 + nameLength);
@@ -328,7 +339,6 @@ function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): ParsedArchive {
 		}
 		validateVersion(localVersionNeeded, versionNeeded, method);
 		if ((localFlags & 1) !== 0) throw officeError("ZIP_ENCRYPTED");
-		if ((localFlags & 8) !== 0) throw officeError("ZIP_DATA_DESCRIPTOR");
 		validateFlags(localFlags, localMethod);
 		const localNameBytes = bytes.subarray(localHeaderOffset + 30, localHeaderOffset + 30 + localNameLength);
 		validateFilenameEncoding(localNameBytes, localFlags);
@@ -338,126 +348,208 @@ function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): ParsedArchive {
 			!bytesEqual(nameBytes, localNameBytes) ||
 			flags !== localFlags ||
 			method !== localMethod ||
-			crc !== localCrc ||
-			compressedSize !== localCompressedSize ||
-			uncompressedSize !== localUncompressedSize
+			(!((flags & 8) !== 0) &&
+				(crc !== localCrc || compressedSize !== localCompressedSize || uncompressedSize !== localUncompressedSize))
 		) {
 			throw officeError("ZIP_LOCAL_CENTRAL_MISMATCH");
 		}
 		if (!hasRange(bytes, dataOffset, compressedSize, centralOffset)) throw officeError("ZIP_ENTRY_RANGE_INVALID");
+		let descriptorLength: 0 | 12 | 16 = 0;
+		let descriptorSigned = false;
+		const descriptorOffset = dataOffset + compressedSize;
+		if ((flags & 8) !== 0) {
+			if (!hasRange(bytes, descriptorOffset, 12, centralOffset)) throw officeError("ZIP_ENTRY_RANGE_INVALID");
+			const candidate12 = descriptorOffset;
+			const candidate16 = descriptorOffset + 4;
+			const valid12 =
+				hasRange(bytes, candidate12, 12, centralOffset) &&
+				readU32(bytes, candidate12) === crc &&
+				readU32(bytes, candidate12 + 4) === compressedSize &&
+				readU32(bytes, candidate12 + 8) === uncompressedSize;
+			const valid16 =
+				hasRange(bytes, candidate16, 12, centralOffset) &&
+				readU32(bytes, descriptorOffset) === 0x08074b50 &&
+				readU32(bytes, candidate16) === crc &&
+				readU32(bytes, candidate16 + 4) === compressedSize &&
+				readU32(bytes, candidate16 + 8) === uncompressedSize;
+			if (valid12 === valid16) throw officeError("ZIP_LOCAL_CENTRAL_MISMATCH");
+			descriptorLength = valid16 ? 16 : 12;
+			descriptorSigned = valid16;
+		}
 		entries.push({
 			path,
 			compressedSize,
 			uncompressedSize,
 			compressionMethod: method,
 			crc32: crc,
-			centralHeaderOffset: cursor,
-			centralRecordLength: recordLength,
-			flags,
 			localHeaderOffset,
 			dataOffset,
+			centralOffset: cursor,
+			centralRecordLength: recordLength,
+			localRecordLength: 30 + localNameLength + localExtraLength + compressedSize + descriptorLength,
+			descriptorOffset,
+			descriptorLength,
+			descriptorSigned,
+			eocdOffset: eocd,
 		});
 		cursor += recordLength;
 	}
 	if (cursor !== centralOffset + centralSize) throw officeError("ZIP_CENTRAL_DIRECTORY_INVALID");
 
 	const ranges = entries
-		.map((entry) => ({ start: entry.localHeaderOffset, end: entry.dataOffset + entry.compressedSize }))
+		.map((entry) => ({ start: entry.localHeaderOffset, end: entry.localHeaderOffset + entry.localRecordLength }))
 		.sort((left, right) => left.start - right.start);
 	for (let index = 1; index < ranges.length; index += 1) {
 		if (ranges[index].start < ranges[index - 1].end) throw officeError("ZIP_ENTRY_OVERLAP");
 	}
-	return { centralOffset, centralSize, eocdOffset: eocd, entries };
+	const opaqueSegments: ArchiveLayoutSegment[] = [];
+	let opaqueStart = 0;
+	for (const range of ranges) {
+		if (opaqueStart < range.start) opaqueSegments.push({ start: opaqueStart, end: range.start });
+		opaqueStart = range.end;
+	}
+	if (opaqueStart < centralOffset) opaqueSegments.push({ start: opaqueStart, end: centralOffset });
+	return { entries, opaqueSegments, centralStart: centralOffset };
 }
 
-function replaceEntryBytes(
-	bytes: Uint8Array,
-	parsed: ParsedArchive,
-	target: InternalEntry,
-	content: Uint8Array,
-	maxArchiveBytes: number,
-): Uint8Array {
-	const compressionLevel =
-		(target.flags & DEFLATE_OPTION_FLAGS) === 2 ? 9 : (target.flags & DEFLATE_OPTION_FLAGS) === 0 ? 6 : 1;
-	const replacementData =
-		target.compressionMethod === STORED_METHOD
-			? new Uint8Array(content)
-			: deflateSync(content, { level: compressionLevel });
-	const replacementCrc = crc32(content);
-	const originalRecordEnd = target.dataOffset + target.compressedSize;
-	const replacementRecordSize = target.dataOffset - target.localHeaderOffset + replacementData.length;
-	const localSize = parsed.centralOffset - (originalRecordEnd - target.localHeaderOffset) + replacementRecordSize;
-	const outputSize = localSize + parsed.centralSize + (bytes.length - parsed.eocdOffset);
-	if (outputSize > maxArchiveBytes) throw officeError("ARCHIVE_TOO_LARGE");
-	const output = new Uint8Array(outputSize);
+export interface ArchiveDeltaReport {
+	readonly target: string;
+	readonly sourceSha256: string;
+	readonly outputSha256: string;
+	readonly changedEntries: readonly string[];
+	readonly unchangedEntries: readonly string[];
+}
 
-	let outputOffset = 0;
-	let inputOffset = 0;
-	const rewrittenOffsets = new Map<string, number>();
-	const entriesByLocalOffset = [...parsed.entries].sort(
-		(left, right) => left.localHeaderOffset - right.localHeaderOffset,
-	);
-	for (const entry of entriesByLocalOffset) {
-		output.set(bytes.subarray(inputOffset, entry.localHeaderOffset), outputOffset);
-		outputOffset += entry.localHeaderOffset - inputOffset;
-		rewrittenOffsets.set(entry.path, outputOffset);
-		const entryEnd = entry.dataOffset + entry.compressedSize;
-		if (entry !== target) {
-			output.set(bytes.subarray(entry.localHeaderOffset, entryEnd), outputOffset);
-			outputOffset += entryEnd - entry.localHeaderOffset;
+function archiveHash(value: Uint8Array): string {
+	return Array.from(sha256(value), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function verifyReplacement(
+	source: Uint8Array,
+	output: Uint8Array,
+	path: string,
+	replacement: Uint8Array,
+): ArchiveDeltaReport {
+	const targetPath = normalizeOpcPath(path);
+	const sourceParsed = parseArchive(source, validateLimits(undefined));
+	const outputParsed = parseArchive(output, validateLimits(undefined));
+	const sourceEntries = sourceParsed.entries;
+	const outputEntries = outputParsed.entries;
+	if (sourceEntries.length !== outputEntries.length) throw officeError("ARCHIVE_INVALID");
+	const sourceTarget = sourceEntries.find((entry) => entry.path === targetPath);
+	const outputTarget = outputEntries.find((entry) => entry.path === targetPath);
+	if (sourceTarget === undefined || outputTarget === undefined) throw officeError("ARCHIVE_INVALID");
+	const localDelta = outputTarget.compressedSize - sourceTarget.compressedSize;
+	const sourceCentralStart = sourceParsed.centralStart;
+	const outputCentralStart = outputParsed.centralStart;
+	if (outputCentralStart !== sourceCentralStart + localDelta) throw officeError("ARCHIVE_INVALID");
+
+	const changed: string[] = [];
+	const unchanged: string[] = [];
+	const outputByPath = new Map(outputEntries.map((entry) => [entry.path, entry]));
+	for (const left of sourceEntries) {
+		const right = outputByPath.get(left.path);
+		if (right === undefined) throw officeError("ARCHIVE_INVALID");
+		const leftCentral = source.slice(left.centralOffset, left.centralOffset + left.centralRecordLength);
+		const rightCentral = output.slice(right.centralOffset, right.centralOffset + right.centralRecordLength);
+		if (left.descriptorLength !== right.descriptorLength || left.descriptorSigned !== right.descriptorSigned)
+			throw officeError("ARCHIVE_INVALID");
+		if (
+			!bytesEqual(leftCentral.slice(0, 16), rightCentral.slice(0, 16)) ||
+			!bytesEqual(leftCentral.slice(28, 42), rightCentral.slice(28, 42)) ||
+			!bytesEqual(leftCentral.slice(46), rightCentral.slice(46))
+		)
+			throw officeError("ARCHIVE_INVALID");
+		const expectedLocalOffset =
+			left.localHeaderOffset > sourceTarget.localHeaderOffset
+				? left.localHeaderOffset + localDelta
+				: left.localHeaderOffset;
+		if (right.localHeaderOffset !== expectedLocalOffset) throw officeError("ARCHIVE_INVALID");
+		if (left.path === targetPath) {
+			const after = new PackageArchive(output);
+			if (!bytesEqual(after.read(targetPath), replacement)) throw officeError("ARCHIVE_INVALID");
+			if (
+				!bytesEqual(
+					source.subarray(left.localHeaderOffset, left.localHeaderOffset + 14),
+					output.subarray(right.localHeaderOffset, right.localHeaderOffset + 14),
+				) ||
+				!bytesEqual(
+					source.subarray(left.localHeaderOffset + 26, left.dataOffset),
+					output.subarray(right.localHeaderOffset + 26, right.dataOffset),
+				)
+			)
+				throw officeError("ARCHIVE_INVALID");
+			changed.push(targetPath);
 		} else {
-			const headerLength = target.dataOffset - target.localHeaderOffset;
-			output.set(bytes.subarray(target.localHeaderOffset, target.dataOffset), outputOffset);
-			writeU32(output, outputOffset + 14, replacementCrc);
-			writeU32(output, outputOffset + 18, replacementData.length);
-			writeU32(output, outputOffset + 22, content.length);
-			output.set(replacementData, outputOffset + headerLength);
-			outputOffset += headerLength + replacementData.length;
+			const leftLocal = source.subarray(left.localHeaderOffset, left.localHeaderOffset + left.localRecordLength);
+			const rightLocal = output.subarray(right.localHeaderOffset, right.localHeaderOffset + right.localRecordLength);
+			if (!bytesEqual(leftLocal, rightLocal)) throw officeError("ARCHIVE_INVALID");
+			unchanged.push(left.path);
 		}
-		inputOffset = entryEnd;
-	}
-	output.set(bytes.subarray(inputOffset, parsed.centralOffset), outputOffset);
-	outputOffset += parsed.centralOffset - inputOffset;
-	const rewrittenCentralOffset = outputOffset;
-
-	for (const entry of parsed.entries) {
-		const centralRecord = new Uint8Array(
-			bytes.subarray(entry.centralHeaderOffset, entry.centralHeaderOffset + entry.centralRecordLength),
-		);
-		const localOffset = rewrittenOffsets.get(entry.path);
-		if (localOffset === undefined) throw officeError("ARCHIVE_INVALID");
-		writeU32(centralRecord, 42, localOffset);
-		if (entry === target) {
-			writeU32(centralRecord, 16, replacementCrc);
-			writeU32(centralRecord, 20, replacementData.length);
-			writeU32(centralRecord, 24, content.length);
-		}
-		output.set(centralRecord, outputOffset);
-		outputOffset += centralRecord.length;
 	}
 
-	output.set(bytes.subarray(parsed.eocdOffset), outputOffset);
-	writeU32(output, outputOffset + 12, parsed.centralSize);
-	writeU32(output, outputOffset + 16, rewrittenCentralOffset);
-	return output;
+	const sourceByLocal = [...sourceEntries].sort((left, right) => left.localHeaderOffset - right.localHeaderOffset);
+	const outputByLocal = [...outputEntries].sort((left, right) => left.localHeaderOffset - right.localHeaderOffset);
+	if (sourceByLocal.length !== outputByLocal.length) throw officeError("ARCHIVE_INVALID");
+	for (let index = 0; index < sourceByLocal.length; index += 1) {
+		if (sourceByLocal[index].path !== outputByLocal[index].path) throw officeError("ARCHIVE_INVALID");
+	}
+	if (sourceParsed.opaqueSegments.length !== outputParsed.opaqueSegments.length) throw officeError("ARCHIVE_INVALID");
+	for (let index = 0; index < sourceParsed.opaqueSegments.length; index += 1) {
+		const sourceSegment = sourceParsed.opaqueSegments[index];
+		const outputSegment = outputParsed.opaqueSegments[index];
+		const shift = sourceSegment.start >= sourceTarget.dataOffset + sourceTarget.compressedSize ? localDelta : 0;
+		if (
+			outputSegment.start !== sourceSegment.start + shift ||
+			outputSegment.end - outputSegment.start !== sourceSegment.end - sourceSegment.start
+		)
+			throw officeError("ARCHIVE_INVALID");
+		if (
+			!bytesEqual(
+				source.slice(sourceSegment.start, sourceSegment.end),
+				output.slice(outputSegment.start, outputSegment.end),
+			)
+		)
+			throw officeError("ARCHIVE_INVALID");
+	}
+	if (changed.length !== 1) throw officeError("ARCHIVE_INVALID");
+	const sourceEnd = sourceEntries[0]?.eocdOffset ?? source.length - 22;
+	const outputEnd = outputEntries[0]?.eocdOffset ?? output.length - 22;
+	const sourceEocd = source.slice(sourceEnd, sourceEnd + 22),
+		outputEocd = output.slice(outputEnd, outputEnd + 22);
+	if (
+		!bytesEqual(sourceEocd.slice(0, 16), outputEocd.slice(0, 16)) ||
+		!bytesEqual(source.slice(sourceEnd + 20), output.slice(outputEnd + 20)) ||
+		readU32(outputEocd, 16) !== sourceCentralStart + localDelta
+	)
+		throw officeError("ARCHIVE_INVALID");
+	return Object.freeze({
+		target: targetPath,
+		sourceSha256: archiveHash(source),
+		outputSha256: archiveHash(output),
+		changedEntries: changed,
+		unchangedEntries: unchanged,
+	});
 }
 
 export class PackageArchive {
 	private readonly bytes: Uint8Array;
 	private readonly archiveEntries: ReadonlyArray<InternalEntry>;
 	private readonly byPath: ReadonlyMap<string, InternalEntry>;
-	private readonly limits: ArchiveLimits;
-	private readonly parsed: ParsedArchive;
+	private readonly maxSingleUncompressedBytes: number;
+	private readonly maxArchiveBytes: number;
 
 	constructor(input: Uint8Array, limits?: Partial<ArchiveLimits>) {
 		const selectedLimits = validateLimits(limits);
 		if (input.byteLength > selectedLimits.maxArchiveBytes) throw officeError("ARCHIVE_TOO_LARGE");
 		this.bytes = new Uint8Array(input);
-		this.parsed = parseArchive(this.bytes, selectedLimits);
-		this.archiveEntries = this.parsed.entries;
-		this.limits = selectedLimits;
-		for (const entry of this.archiveEntries)
-			decompressEntry(this.bytes, entry, selectedLimits.maxSingleUncompressedBytes);
+		this.archiveEntries = parseArchive(this.bytes, selectedLimits).entries;
+		this.maxSingleUncompressedBytes = selectedLimits.maxSingleUncompressedBytes;
+		this.maxArchiveBytes = selectedLimits.maxArchiveBytes;
+		for (const entry of this.archiveEntries) {
+			if (entry.path.toLowerCase().startsWith("_xmlsignatures/")) throw officeError("ARCHIVE_INVALID");
+			decompressEntry(this.bytes, entry, selectedLimits.maxSingleUncompressedBytes, false);
+		}
 		const pathMap = new Map<string, InternalEntry>();
 		for (const entry of this.archiveEntries) pathMap.set(entry.path, entry);
 		this.byPath = pathMap;
@@ -485,23 +577,7 @@ export class PackageArchive {
 		const normalized = normalizeOpcPath(path);
 		const entry = this.byPath.get(normalized);
 		if (entry === undefined) throw officeError("ARCHIVE_INVALID");
-		return decompressEntry(this.bytes, entry, this.limits.maxSingleUncompressedBytes);
-	}
-
-	[REWRITE_ENTRY](path: string, content: Uint8Array): PackageArchive {
-		const normalized = normalizeOpcPath(path);
-		const entry = this.byPath.get(normalized);
-		if (entry === undefined) throw officeError("ARCHIVE_INVALID");
-		if (bytesEqual(this.read(normalized), content)) return new PackageArchive(this.bytes, this.limits);
-		if (content.byteLength > this.limits.maxSingleUncompressedBytes) throw officeError("ARCHIVE_SINGLE_SIZE_LIMIT");
-		const totalUncompressed = this.archiveEntries.reduce((total, item) => total + item.uncompressedSize, 0);
-		if (totalUncompressed - entry.uncompressedSize + content.byteLength > this.limits.maxTotalUncompressedBytes) {
-			throw officeError("ARCHIVE_TOTAL_SIZE_LIMIT");
-		}
-		return new PackageArchive(
-			replaceEntryBytes(this.bytes, this.parsed, entry, content, this.limits.maxArchiveBytes),
-			this.limits,
-		);
+		return decompressEntry(this.bytes, entry, this.maxSingleUncompressedBytes, true);
 	}
 
 	serialize(): Uint8Array {
@@ -511,8 +587,61 @@ export class PackageArchive {
 	save(): Uint8Array {
 		return this.serialize();
 	}
-}
 
-export function rewritePackageEntry(archive: PackageArchive, path: string, content: Uint8Array): PackageArchive {
-	return archive[REWRITE_ENTRY](path, content);
+	replace(path: string, content: Uint8Array): Uint8Array {
+		const normalized = normalizeOpcPath(path);
+		const target = this.byPath.get(normalized);
+		if (target === undefined) throw officeError("ARCHIVE_INVALID");
+		if (bytesEqual(content, this.read(normalized))) return this.serialize();
+		if (content.byteLength > this.maxSingleUncompressedBytes || content.byteLength > 0xffffffff)
+			throw officeError("ARCHIVE_SINGLE_SIZE_LIMIT");
+		if (this.bytes.length - target.compressedSize + content.byteLength > this.maxArchiveBytes)
+			throw officeError("ARCHIVE_TOO_LARGE");
+		const compressed = target.compressionMethod === STORED_METHOD ? new Uint8Array(content) : deflateSync(content);
+		const updated = new Uint8Array(this.bytes.length + compressed.length - target.compressedSize);
+		const localDelta = compressed.length - target.compressedSize;
+		const centralStart =
+			this.archiveEntries.length === 0
+				? this.bytes.length
+				: Math.min(...this.archiveEntries.map((entry) => entry.centralOffset));
+
+		const copyRange = (sourceStart: number, sourceEnd: number, destinationStart: number): void => {
+			updated.set(this.bytes.subarray(sourceStart, sourceEnd), destinationStart);
+		};
+		copyRange(0, target.dataOffset, 0);
+		updated.set(compressed, target.dataOffset);
+		copyRange(target.dataOffset + target.compressedSize, centralStart, target.dataOffset + compressed.length);
+		copyRange(centralStart, this.bytes.length, centralStart + localDelta);
+		const local = target.localHeaderOffset;
+		const central = target.centralOffset + localDelta;
+		const write32 = (offset: number, value: number): void => {
+			updated[offset] = value & 255;
+			updated[offset + 1] = (value >>> 8) & 255;
+			updated[offset + 2] = (value >>> 16) & 255;
+			updated[offset + 3] = (value >>> 24) & 255;
+		};
+		if ((readU16(this.bytes, local + 6) & 8) === 0) {
+			write32(local + 14, crc32(content));
+			write32(local + 18, compressed.length);
+			write32(local + 22, content.length);
+		} else {
+			const descriptor = target.descriptorOffset + localDelta + (target.descriptorSigned ? 4 : 0);
+			write32(descriptor, crc32(content));
+			write32(descriptor + 4, compressed.length);
+			write32(descriptor + 8, content.length);
+		}
+		write32(central + 16, crc32(content));
+		write32(central + 20, compressed.length);
+		write32(central + 24, content.length);
+		for (const entry of this.archiveEntries) {
+			const centralRecord = entry.centralOffset + localDelta;
+			if (entry.localHeaderOffset > target.localHeaderOffset)
+				write32(centralRecord + 42, entry.localHeaderOffset + localDelta);
+		}
+		const eocd = target.eocdOffset + localDelta;
+
+		write32(eocd + 16, centralStart + localDelta);
+		verifyReplacement(this.bytes, updated, normalized, content);
+		return updated;
+	}
 }
