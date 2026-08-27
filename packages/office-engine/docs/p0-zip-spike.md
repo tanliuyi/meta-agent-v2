@@ -42,6 +42,14 @@ The RSS delta varies between rounds because the runtime allocator retains native
 
 ## P0/P1 Decision Notes
 
-- `fflate` `0.8.2` supports bounded stream inflate through its streaming API, but it does not expose all central-directory metadata together with a raw compressed-entry copy.
-- P0 no-op serialization returns the original package bytes byte-for-byte. It does not require an edited ZIP writer.
-- The P1 edited raw-copy writer dependency choice remains a gate before continuing that implementation.
+- `fflate` `0.8.2` remains the bounded streaming inflate/deflate implementation. Its high-level ZIP API does not expose enough metadata for raw-copy rewriting, so `PackageArchive` owns the small ZIP metadata rewrite layer already required for validation.
+- P0 no-op serialization returns the original package bytes byte-for-byte.
+- The package-internal `rewritePackageEntry(archive, path, content)` resolves the P1 edited raw-copy writer gate without another dependency:
+  - the target entry keeps its original stored/deflate method and deflate-level flags;
+  - every untouched local header, extra field, filename, and compressed payload is copied byte-for-byte;
+  - the target local/central CRC and sizes are replaced;
+  - central-directory local offsets are updated because a changed compressed size can move later records;
+  - EOCD comments and bytes outside entry records are preserved;
+  - the generated archive is reopened under the original resource limits before it is returned.
+- The writer intentionally replaces existing entries only and is not exported from the package entry point. Adding, deleting, renaming, ZIP64, encryption, data descriptors, and unsupported compression methods remain out of scope.
+- P1 DOCX editing can proceed on this writer, but semantic operations must remain the only public document mutation surface; Desktop and Agent callers must not use raw package entry replacement directly.

@@ -31,7 +31,7 @@ interface XmlElement {
 }
 
 const XML_LIMIT = 16 * 1024 * 1024;
-const XML_DECODER = new TextDecoder("utf-8", { fatal: true });
+const XML_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const PREDEFINED_ENTITY_VALUES: Readonly<Record<string, string>> = Object.freeze({
 	amp: "&",
 	quot: '"',
@@ -151,6 +151,19 @@ function decodeParsedValue(value: unknown): unknown {
 }
 
 function parseXml(bytes: Uint8Array): XmlRecord {
+	const xml = decodeAndValidateXmlPart(bytes);
+	try {
+		const parsed: unknown = XML_PARSER.parse(xml.charCodeAt(0) === 0xfeff ? xml.slice(1) : xml);
+		const record = asRecord(decodeParsedValue(parsed));
+		if (record === undefined) throw officeError("XML_INVALID");
+		return record;
+	} catch (error) {
+		if (error instanceof OfficeEngineError) throw error;
+		throw officeError("XML_INVALID");
+	}
+}
+
+export function decodeAndValidateXmlPart(bytes: Uint8Array): string {
 	if (bytes.byteLength > XML_LIMIT) throw officeError("XML_TOO_LARGE");
 	let xml: string;
 	try {
@@ -160,15 +173,7 @@ function parseXml(bytes: Uint8Array): XmlRecord {
 	}
 	validateXmlLexicalSafety(xml);
 	if (XMLValidator.validate(xml, { allowBooleanAttributes: false }) !== true) throw officeError("XML_INVALID");
-	try {
-		const parsed: unknown = XML_PARSER.parse(xml);
-		const record = asRecord(decodeParsedValue(parsed));
-		if (record === undefined) throw officeError("XML_INVALID");
-		return record;
-	} catch (error) {
-		if (error instanceof OfficeEngineError) throw error;
-		throw officeError("XML_INVALID");
-	}
+	return xml;
 }
 
 function readXml(archive: PackageArchive, path: string): XmlRecord {

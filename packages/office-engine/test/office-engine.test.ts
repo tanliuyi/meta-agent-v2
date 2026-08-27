@@ -1,5 +1,6 @@
 import { zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
+import { rewritePackageEntry } from "../src/archive.ts";
 import {
 	OfficeEngineError,
 	PackageArchive,
@@ -50,12 +51,100 @@ function findEocd(data: Uint8Array): number {
 interface ZipRecord {
 	readonly central: number;
 	readonly local: number;
+	readonly data: number;
+	readonly compressedSize: number;
+	readonly path: string;
+}
+
+function zipRecords(data: Uint8Array): ZipRecord[] {
+	const end = findEocd(data);
+	const count = readU16(data, end + 10);
+	let central = readU32(data, end + 16);
+	const result: ZipRecord[] = [];
+	for (let index = 0; index < count; index += 1) {
+		if (readU32(data, central) !== CENTRAL) throw new Error("fixture central record not found");
+		const nameLength = readU16(data, central + 28);
+		const extraLength = readU16(data, central + 30);
+		const commentLength = readU16(data, central + 32);
+		const local = readU32(data, central + 42);
+		const localNameLength = readU16(data, local + 26);
+		const localExtraLength = readU16(data, local + 28);
+		result.push({
+			central,
+			local,
+			data: local + 30 + localNameLength + localExtraLength,
+			compressedSize: readU32(data, central + 20),
+			path: textDecoder.decode(data.subarray(central + 46, central + 46 + nameLength)),
+		});
+		central += 46 + nameLength + extraLength + commentLength;
+	}
+	return result;
 }
 
 function firstZipRecord(data: Uint8Array): ZipRecord {
-	const central = readU32(data, findEocd(data) + 16);
-	if (readU32(data, central) !== CENTRAL) throw new Error("fixture central record not found");
-	return { central, local: readU32(data, central + 42) };
+	const record = zipRecords(data)[0];
+	if (record === undefined) throw new Error("fixture central record not found");
+	return record;
+}
+
+function localRecord(data: Uint8Array, path: string): Uint8Array {
+	const record = zipRecords(data).find((item) => item.path === path);
+	if (record === undefined) throw new Error(`fixture record not found: ${path}`);
+	return data.slice(record.local, record.data + record.compressedSize);
+}
+
+function addZipPrefix(data: Uint8Array, prefix: Uint8Array): Uint8Array {
+	const originalEocd = findEocd(data);
+	const originalCentral = readU32(data, originalEocd + 16);
+	const result = new Uint8Array(data.length + prefix.length);
+	result.set(prefix);
+	result.set(data, prefix.length);
+	const shiftedEocd = originalEocd + prefix.length;
+	writeU32(result, shiftedEocd + 16, originalCentral + prefix.length);
+	const count = readU16(data, originalEocd + 10);
+	let central = originalCentral;
+	for (let index = 0; index < count; index += 1) {
+		const shiftedCentral = central + prefix.length;
+		writeU32(result, shiftedCentral + 42, readU32(data, central + 42) + prefix.length);
+		central += 46 + readU16(data, central + 28) + readU16(data, central + 30) + readU16(data, central + 32);
+	}
+	return result;
+}
+
+function addLocalGap(data: Uint8Array, afterPath: string, gap: Uint8Array): Uint8Array {
+	const after = zipRecords(data).find((record) => record.path === afterPath);
+	if (after === undefined) throw new Error(`fixture record not found: ${afterPath}`);
+	const insertionOffset = after.data + after.compressedSize;
+	const originalEocd = findEocd(data);
+	const originalCentral = readU32(data, originalEocd + 16);
+	const result = new Uint8Array(data.length + gap.length);
+	result.set(data.subarray(0, insertionOffset), 0);
+	result.set(gap, insertionOffset);
+	result.set(data.subarray(insertionOffset), insertionOffset + gap.length);
+	const shiftedEocd = originalEocd + gap.length;
+	writeU32(result, shiftedEocd + 16, originalCentral + gap.length);
+	const count = readU16(data, originalEocd + 10);
+	let central = originalCentral;
+	for (let index = 0; index < count; index += 1) {
+		const shiftedCentral = central + gap.length;
+		writeU32(
+			result,
+			shiftedCentral + 42,
+			readU32(data, central + 42) + (readU32(data, central + 42) >= insertionOffset ? gap.length : 0),
+		);
+		central += 46 + readU16(data, central + 28) + readU16(data, central + 30) + readU16(data, central + 32);
+	}
+	return result;
+}
+
+function addEocdComment(data: Uint8Array, comment: Uint8Array): Uint8Array {
+	const originalEocd = findEocd(data);
+	const result = new Uint8Array(data.length + comment.length);
+	result.set(data.subarray(0, originalEocd), 0);
+	result.set(data.subarray(originalEocd), originalEocd);
+	writeU16(result, originalEocd + 20, comment.length);
+	result.set(comment, originalEocd + 22);
+	return result;
 }
 
 function zip(files: ReadonlyArray<readonly [string, Uint8Array]>): Uint8Array {
@@ -76,6 +165,7 @@ interface DocxFixtureOptions {
 	readonly contentType?: string;
 	readonly contentTypesXml?: string;
 	readonly relationshipsXml?: string;
+	readonly metadataBom?: boolean;
 }
 
 function docx(options: DocxFixtureOptions = {}): Uint8Array {
@@ -87,9 +177,17 @@ function docx(options: DocxFixtureOptions = {}): Uint8Array {
 	const relationshipsXml =
 		options.relationshipsXml ??
 		`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${options.relationshipType ?? TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="${target}"${options.targetMode === undefined ? "" : ` TargetMode="${options.targetMode}"`}/>${options.extraRelationships ?? ""}</Relationships>`;
+	const metadataBytes = (xml: string): Uint8Array => {
+		if (!options.metadataBom) return bytes(xml);
+		const encoded = bytes(xml);
+		const result = new Uint8Array(encoded.length + 3);
+		result.set([0xef, 0xbb, 0xbf]);
+		result.set(encoded, 3);
+		return result;
+	};
 	return zip([
-		["[Content_Types].xml", bytes(contentTypesXml)],
-		["_rels/.rels", bytes(relationshipsXml)],
+		["[Content_Types].xml", metadataBytes(contentTypesXml)],
+		["_rels/.rels", metadataBytes(relationshipsXml)],
 		[
 			target,
 			bytes(
@@ -142,6 +240,107 @@ describe("PackageArchive", () => {
 		mutableEntry.path = "changed";
 		expect(textDecoder.decode(archive.read("data.txt"))).toBe("original");
 		expect(archive.entries()[0].path).toBe("data.txt");
+	});
+
+	it("raw-copies untouched entries while replacing a deflated entry", () => {
+		const input = zipSync({
+			"before.bin": [bytes("before"), { level: 0 }],
+			"target.xml": [bytes("old text"), { level: 9 }],
+			"after.bin": [bytes("after"), { level: 0 }],
+		});
+		const original = new Uint8Array(input);
+		const beforeRecord = localRecord(input, "before.bin");
+		const afterRecord = localRecord(input, "after.bin");
+		const originalMethod = PackageArchive.open(input)
+			.entries()
+			.find((entry) => entry.path === "target.xml")?.compressionMethod;
+
+		const rewritten = rewritePackageEntry(
+			PackageArchive.open(input),
+			"target.xml",
+			bytes("new text with a different size"),
+		);
+		const output = rewritten.serialize();
+
+		expect(textDecoder.decode(rewritten.read("target.xml"))).toBe("new text with a different size");
+		expect(rewritten.entries().find((entry) => entry.path === "target.xml")?.compressionMethod).toBe(originalMethod);
+		expect(localRecord(output, "before.bin")).toEqual(beforeRecord);
+		expect(localRecord(output, "after.bin")).toEqual(afterRecord);
+		expect(PackageArchive.open(output).serialize()).toEqual(output);
+		expect(input).toEqual(original);
+	});
+
+	it("preserves local-record gaps, archive prefix, and EOCD comment", () => {
+		const base = zipSync({
+			"before.bin": [bytes("before"), { level: 0 }],
+			"target.xml": [bytes("old text"), { level: 9 }],
+			"after.bin": [bytes("after"), { level: 0 }],
+		});
+		const localGap = bytes("local-record-gap");
+		const prefix = bytes("archive-prefix");
+		const input = addEocdComment(
+			addLocalGap(addZipPrefix(base, prefix), "before.bin", localGap),
+			bytes("zip-comment"),
+		);
+		const before = zipRecords(input).find((record) => record.path === "before.bin");
+		const target = zipRecords(input).find((record) => record.path === "target.xml");
+		if (before === undefined || target === undefined) throw new Error("fixture records not found");
+		expect(input.subarray(before.data + before.compressedSize, target.local)).toEqual(localGap);
+		const output = rewritePackageEntry(
+			PackageArchive.open(input),
+			"target.xml",
+			bytes("replacement text"),
+		).serialize();
+		const outputEocd = findEocd(output);
+
+		expect(localRecord(output, "before.bin")).toEqual(localRecord(input, "before.bin"));
+		expect(localRecord(output, "after.bin")).toEqual(localRecord(input, "after.bin"));
+		const outputRecords = zipRecords(output);
+		const outputBefore = outputRecords.find((record) => record.path === "before.bin");
+		const outputTarget = outputRecords.find((record) => record.path === "target.xml");
+		if (outputBefore === undefined || outputTarget === undefined) throw new Error("output records not found");
+		expect(output.subarray(outputBefore.data + outputBefore.compressedSize, outputTarget.local)).toEqual(localGap);
+		expect(output.subarray(0, prefix.length)).toEqual(prefix);
+		expect(output.subarray(outputEocd + 22)).toEqual(bytes("zip-comment"));
+		expect(PackageArchive.open(output).read("target.xml")).toEqual(bytes("replacement text"));
+	});
+
+	it("preserves stored compression, exact no-op bytes, and replacement budgets", () => {
+		const input = zipSync({ "target.txt": [bytes("old"), { level: 0 }] });
+		const archive = PackageArchive.open(input);
+		expect(rewritePackageEntry(archive, "target.txt", bytes("old")).serialize()).toEqual(input);
+
+		const rewritten = rewritePackageEntry(archive, "target.txt", bytes("replacement"));
+		expect(rewritten.entries()[0].compressionMethod).toBe(0);
+		expect(textDecoder.decode(rewritten.read("target.txt"))).toBe("replacement");
+		expectCode(() => rewritePackageEntry(archive, "missing.txt", bytes("x")), "ARCHIVE_INVALID");
+		expectCode(
+			() =>
+				rewritePackageEntry(
+					PackageArchive.open(input, { maxSingleUncompressedBytes: 3 }),
+					"target.txt",
+					bytes("four"),
+				),
+			"ARCHIVE_SINGLE_SIZE_LIMIT",
+		);
+		expectCode(
+			() =>
+				rewritePackageEntry(
+					PackageArchive.open(input, { maxTotalUncompressedBytes: 3 }),
+					"target.txt",
+					bytes("four"),
+				),
+			"ARCHIVE_TOTAL_SIZE_LIMIT",
+		);
+		expectCode(
+			() =>
+				rewritePackageEntry(
+					PackageArchive.open(input, { maxArchiveBytes: input.length }),
+					"target.txt",
+					bytes("longer"),
+				),
+			"ARCHIVE_TOO_LARGE",
+		);
 	});
 
 	it("rejects unsafe paths and NFC/case-insensitive duplicates", () => {
@@ -256,6 +455,10 @@ describe("DOCX resolver", () => {
 			resolveDocx(PackageArchive.open(docx({ relationshipType: STRICT_OFFICE_DOCUMENT_RELATIONSHIP }))).mainPart
 				.path,
 		).toBe("word/document.xml");
+	});
+
+	it("accepts a UTF-8 BOM in content types and relationships metadata", () => {
+		expect(resolveDocx(PackageArchive.open(docx({ metadataBom: true }))).mainPart.path).toBe("word/document.xml");
 	});
 
 	it("rejects DTD, entity references, external and invalid relationship cases", () => {

@@ -1,4 +1,4 @@
-import { Inflate } from "fflate";
+import { deflateSync, Inflate } from "fflate";
 import { OfficeEngineError, officeError } from "./errors.ts";
 
 export interface ArchiveLimits {
@@ -28,9 +28,19 @@ export interface PackageArchiveEntry {
 }
 
 type InternalEntry = PackageArchiveEntry & {
+	readonly centralHeaderOffset: number;
+	readonly centralRecordLength: number;
+	readonly flags: number;
 	readonly localHeaderOffset: number;
 	readonly dataOffset: number;
 };
+
+interface ParsedArchive {
+	readonly centralOffset: number;
+	readonly centralSize: number;
+	readonly eocdOffset: number;
+	readonly entries: ReadonlyArray<InternalEntry>;
+}
 
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 const UTF8_ENCODER = new TextEncoder();
@@ -43,6 +53,7 @@ const DEFLATE_METHOD = 8;
 const STORED_METHOD = 0;
 const UTF8_FLAG = 0x0800;
 const DEFLATE_OPTION_FLAGS = 0x0006;
+const REWRITE_ENTRY = Symbol("rewriteEntry");
 
 function readU16(bytes: Uint8Array, offset: number): number {
 	return bytes[offset] | (bytes[offset + 1] << 8);
@@ -50,6 +61,13 @@ function readU16(bytes: Uint8Array, offset: number): number {
 
 function readU32(bytes: Uint8Array, offset: number): number {
 	return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+}
+
+function writeU32(bytes: Uint8Array, offset: number, value: number): void {
+	bytes[offset] = value & 0xff;
+	bytes[offset + 1] = (value >>> 8) & 0xff;
+	bytes[offset + 2] = (value >>> 16) & 0xff;
+	bytes[offset + 3] = (value >>> 24) & 0xff;
 }
 
 function hasRange(bytes: Uint8Array, offset: number, length: number, limit = bytes.length): boolean {
@@ -231,7 +249,7 @@ function decompressEntry(bytes: Uint8Array, entry: InternalEntry, maxSingleUncom
 	}
 }
 
-function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): InternalEntry[] {
+function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): ParsedArchive {
 	const eocd = findEndOfCentralDirectory(bytes);
 	const disk = readU16(bytes, eocd + 4);
 	const centralDisk = readU16(bytes, eocd + 6);
@@ -333,6 +351,9 @@ function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): InternalEntry[]
 			uncompressedSize,
 			compressionMethod: method,
 			crc32: crc,
+			centralHeaderOffset: cursor,
+			centralRecordLength: recordLength,
+			flags,
 			localHeaderOffset,
 			dataOffset,
 		});
@@ -346,21 +367,95 @@ function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): InternalEntry[]
 	for (let index = 1; index < ranges.length; index += 1) {
 		if (ranges[index].start < ranges[index - 1].end) throw officeError("ZIP_ENTRY_OVERLAP");
 	}
-	return entries;
+	return { centralOffset, centralSize, eocdOffset: eocd, entries };
+}
+
+function replaceEntryBytes(
+	bytes: Uint8Array,
+	parsed: ParsedArchive,
+	target: InternalEntry,
+	content: Uint8Array,
+	maxArchiveBytes: number,
+): Uint8Array {
+	const compressionLevel =
+		(target.flags & DEFLATE_OPTION_FLAGS) === 2 ? 9 : (target.flags & DEFLATE_OPTION_FLAGS) === 0 ? 6 : 1;
+	const replacementData =
+		target.compressionMethod === STORED_METHOD
+			? new Uint8Array(content)
+			: deflateSync(content, { level: compressionLevel });
+	const replacementCrc = crc32(content);
+	const originalRecordEnd = target.dataOffset + target.compressedSize;
+	const replacementRecordSize = target.dataOffset - target.localHeaderOffset + replacementData.length;
+	const localSize = parsed.centralOffset - (originalRecordEnd - target.localHeaderOffset) + replacementRecordSize;
+	const outputSize = localSize + parsed.centralSize + (bytes.length - parsed.eocdOffset);
+	if (outputSize > maxArchiveBytes) throw officeError("ARCHIVE_TOO_LARGE");
+	const output = new Uint8Array(outputSize);
+
+	let outputOffset = 0;
+	let inputOffset = 0;
+	const rewrittenOffsets = new Map<string, number>();
+	const entriesByLocalOffset = [...parsed.entries].sort(
+		(left, right) => left.localHeaderOffset - right.localHeaderOffset,
+	);
+	for (const entry of entriesByLocalOffset) {
+		output.set(bytes.subarray(inputOffset, entry.localHeaderOffset), outputOffset);
+		outputOffset += entry.localHeaderOffset - inputOffset;
+		rewrittenOffsets.set(entry.path, outputOffset);
+		const entryEnd = entry.dataOffset + entry.compressedSize;
+		if (entry !== target) {
+			output.set(bytes.subarray(entry.localHeaderOffset, entryEnd), outputOffset);
+			outputOffset += entryEnd - entry.localHeaderOffset;
+		} else {
+			const headerLength = target.dataOffset - target.localHeaderOffset;
+			output.set(bytes.subarray(target.localHeaderOffset, target.dataOffset), outputOffset);
+			writeU32(output, outputOffset + 14, replacementCrc);
+			writeU32(output, outputOffset + 18, replacementData.length);
+			writeU32(output, outputOffset + 22, content.length);
+			output.set(replacementData, outputOffset + headerLength);
+			outputOffset += headerLength + replacementData.length;
+		}
+		inputOffset = entryEnd;
+	}
+	output.set(bytes.subarray(inputOffset, parsed.centralOffset), outputOffset);
+	outputOffset += parsed.centralOffset - inputOffset;
+	const rewrittenCentralOffset = outputOffset;
+
+	for (const entry of parsed.entries) {
+		const centralRecord = new Uint8Array(
+			bytes.subarray(entry.centralHeaderOffset, entry.centralHeaderOffset + entry.centralRecordLength),
+		);
+		const localOffset = rewrittenOffsets.get(entry.path);
+		if (localOffset === undefined) throw officeError("ARCHIVE_INVALID");
+		writeU32(centralRecord, 42, localOffset);
+		if (entry === target) {
+			writeU32(centralRecord, 16, replacementCrc);
+			writeU32(centralRecord, 20, replacementData.length);
+			writeU32(centralRecord, 24, content.length);
+		}
+		output.set(centralRecord, outputOffset);
+		outputOffset += centralRecord.length;
+	}
+
+	output.set(bytes.subarray(parsed.eocdOffset), outputOffset);
+	writeU32(output, outputOffset + 12, parsed.centralSize);
+	writeU32(output, outputOffset + 16, rewrittenCentralOffset);
+	return output;
 }
 
 export class PackageArchive {
 	private readonly bytes: Uint8Array;
 	private readonly archiveEntries: ReadonlyArray<InternalEntry>;
 	private readonly byPath: ReadonlyMap<string, InternalEntry>;
-	private readonly maxSingleUncompressedBytes: number;
+	private readonly limits: ArchiveLimits;
+	private readonly parsed: ParsedArchive;
 
 	constructor(input: Uint8Array, limits?: Partial<ArchiveLimits>) {
 		const selectedLimits = validateLimits(limits);
 		if (input.byteLength > selectedLimits.maxArchiveBytes) throw officeError("ARCHIVE_TOO_LARGE");
 		this.bytes = new Uint8Array(input);
-		this.archiveEntries = parseArchive(this.bytes, selectedLimits);
-		this.maxSingleUncompressedBytes = selectedLimits.maxSingleUncompressedBytes;
+		this.parsed = parseArchive(this.bytes, selectedLimits);
+		this.archiveEntries = this.parsed.entries;
+		this.limits = selectedLimits;
 		for (const entry of this.archiveEntries)
 			decompressEntry(this.bytes, entry, selectedLimits.maxSingleUncompressedBytes);
 		const pathMap = new Map<string, InternalEntry>();
@@ -390,7 +485,23 @@ export class PackageArchive {
 		const normalized = normalizeOpcPath(path);
 		const entry = this.byPath.get(normalized);
 		if (entry === undefined) throw officeError("ARCHIVE_INVALID");
-		return decompressEntry(this.bytes, entry, this.maxSingleUncompressedBytes);
+		return decompressEntry(this.bytes, entry, this.limits.maxSingleUncompressedBytes);
+	}
+
+	[REWRITE_ENTRY](path: string, content: Uint8Array): PackageArchive {
+		const normalized = normalizeOpcPath(path);
+		const entry = this.byPath.get(normalized);
+		if (entry === undefined) throw officeError("ARCHIVE_INVALID");
+		if (bytesEqual(this.read(normalized), content)) return new PackageArchive(this.bytes, this.limits);
+		if (content.byteLength > this.limits.maxSingleUncompressedBytes) throw officeError("ARCHIVE_SINGLE_SIZE_LIMIT");
+		const totalUncompressed = this.archiveEntries.reduce((total, item) => total + item.uncompressedSize, 0);
+		if (totalUncompressed - entry.uncompressedSize + content.byteLength > this.limits.maxTotalUncompressedBytes) {
+			throw officeError("ARCHIVE_TOTAL_SIZE_LIMIT");
+		}
+		return new PackageArchive(
+			replaceEntryBytes(this.bytes, this.parsed, entry, content, this.limits.maxArchiveBytes),
+			this.limits,
+		);
 	}
 
 	serialize(): Uint8Array {
@@ -400,4 +511,8 @@ export class PackageArchive {
 	save(): Uint8Array {
 		return this.serialize();
 	}
+}
+
+export function rewritePackageEntry(archive: PackageArchive, path: string, content: Uint8Array): PackageArchive {
+	return archive[REWRITE_ENTRY](path, content);
 }
