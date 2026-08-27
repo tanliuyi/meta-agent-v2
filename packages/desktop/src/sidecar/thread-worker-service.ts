@@ -1,7 +1,7 @@
-import { createReadStream, lstatSync } from "node:fs";
-import { resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { realpath, stat } from "node:fs/promises";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { resolveGitWorktree } from "../main/git-worktrees.ts";
+import { samePath } from "../main/path-identity.ts";
 import { validateResolvedExtensionSet } from "../main/pi/desktop-extension-runtime-policy.ts";
 import { SessionRuntime } from "../main/pi/session-runtime.ts";
 import { getRegisteredSubagentChildExtensions } from "../main/pi/subagents/child-extension-registry.ts";
@@ -13,6 +13,7 @@ import type {
   ThreadWorkerBinding,
 } from "../shared/sidecar-contracts.ts";
 import { resolveDesktopSessionDirectory } from "./desktop-session-directory.ts";
+import { readSessionFileHeader } from "./session-file-header.ts";
 import type { SidecarService, SidecarServiceContext } from "./sidecar-host.ts";
 
 export class ThreadWorkerService implements SidecarService {
@@ -34,14 +35,22 @@ export class ThreadWorkerService implements SidecarService {
     let sessionManager: SessionManager | undefined;
     const sessionDir = resolveDesktopSessionDirectory(input.projectId, input.agentDir);
     if (input.mode === "create") {
-      sessionManager = SessionManager.create(input.cwd, sessionDir, {
+      const cwd = await resolveCreateCwd(input.projectCwd, input.cwd);
+      sessionManager = SessionManager.create(cwd, sessionDir, {
         id: createSessionId,
         ...(input.parentSessionFile ? { parentSession: input.parentSessionFile } : {}),
       });
     } else {
-      const sessionFile = await resolveCanonicalSessionFile(input);
-      sessionManager = SessionManager.open(sessionFile, sessionDir, input.cwd);
+      const header = await readSessionFileHeader(input.sessionFile, input.projectId, input.threadId);
+      if (header.cwd !== input.sessionHeaderCwd) {
+        throw new Error(`Session cwd changed before open: ${input.projectId}/${input.threadId}`);
+      }
+      sessionManager = SessionManager.open(header.sessionFile, sessionDir, input.cwd);
+      if (sessionManager.getSessionId() !== input.threadId) {
+        throw new Error(`Session identity changed before open: ${input.projectId}/${input.threadId}`);
+      }
     }
+    const cwd = sessionManager.getCwd();
     const parentThreadId = input.mode === "create" ? input.sessionId : input.threadId;
     const approvedChildExtensionPaths = new Set(
       extensionSet.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
@@ -57,7 +66,7 @@ export class ThreadWorkerService implements SidecarService {
     try {
       runtime = await SessionRuntime.create({
         projectId: input.projectId,
-        cwd: input.cwd,
+        cwd,
         agentDir: input.agentDir,
         ...(input.shellPath ? { shellPath: input.shellPath } : {}),
         sessionManager,
@@ -158,43 +167,13 @@ export class ThreadWorkerService implements SidecarService {
   }
 }
 
-async function resolveCanonicalSessionFile(input: Extract<ThreadWorkerBinding, { mode: "open" }>): Promise<string> {
-  const requestedPath = resolve(input.sessionFile);
-  let stats: ReturnType<typeof lstatSync>;
-  try {
-    stats = lstatSync(requestedPath);
-  } catch {
-    throw new Error(`Session file does not exist before open: ${requestedPath}`);
+async function resolveCreateCwd(projectCwd: string, candidate: string): Promise<string> {
+  if (!samePath(projectCwd, candidate)) return resolveGitWorktree(projectCwd, candidate);
+  const [canonicalProjectCwd, canonicalCandidate] = await Promise.all([realpath(projectCwd), realpath(candidate)]);
+  if (!samePath(canonicalProjectCwd, canonicalCandidate) || !(await stat(canonicalCandidate)).isDirectory()) {
+    throw new Error("Session cwd is no longer the selected Project directory");
   }
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error(`Session file is not a regular file before open: ${requestedPath}`);
-  }
-  const lines = createInterface({ input: createReadStream(requestedPath, { encoding: "utf8" }), crlfDelay: Infinity });
-  let header: unknown;
-  for await (const line of lines) {
-    try {
-      header = JSON.parse(line);
-    } catch {
-      header = null;
-    }
-    break;
-  }
-  lines.close();
-  if (!isSessionHeader(header) || header.id !== input.threadId) {
-    throw new Error(`Session identity does not match ${input.projectId}/${input.threadId}: ${requestedPath}`);
-  }
-  return requestedPath;
-}
-
-function isSessionHeader(value: unknown): value is { type: "session"; id: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    value.type === "session" &&
-    "id" in value &&
-    typeof value.id === "string"
-  );
+  return canonicalCandidate;
 }
 
 export function threadWorkerBinding(value: ThreadWorkerBinding): SidecarBinding {

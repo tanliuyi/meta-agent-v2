@@ -92,7 +92,7 @@ export class MetadataWorkerService implements SidecarService {
           return { status: "active", retryAfterMs: CREATION_RESERVATION_GRACE_MS - reservationAgeMs };
         }
         try {
-          await this.index.resolve(reservation.projectId, reservation.cwd, reservation.sessionId);
+          await this.index.resolve(reservation.projectId, reservation.projectCwd, reservation.sessionId);
           return { status: "committed" };
         } catch {
           return { status: "orphan" };

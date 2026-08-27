@@ -45,6 +45,8 @@ interface DraftSessionContextValue {
   setConfig: Dispatch<SetStateAction<DraftSessionConfig | null>>;
   configProjectId: string | null;
   setConfigProjectId: Dispatch<SetStateAction<string | null>>;
+  worktreePath: string | null;
+  setWorktreePath: Dispatch<SetStateAction<string | null>>;
   phase: DraftPhase;
   setPhase: Dispatch<SetStateAction<DraftPhase>>;
   loadError: string | null;
@@ -66,6 +68,7 @@ export function DraftSessionProvider({ children }: { children: ReactNode }) {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [config, setConfig] = useState<DraftSessionConfig | null>(null);
   const [configProjectId, setConfigProjectId] = useState<string | null>(null);
+  const [worktreePath, setWorktreePath] = useState<string | null>(null);
   const [phase, setPhase] = useState<DraftPhase>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [navigationTarget, setNavigationTarget] = useState<SessionIdentity | null>(null);
@@ -81,6 +84,7 @@ export function DraftSessionProvider({ children }: { children: ReactNode }) {
       setProjectId(nextProjectId);
       setConfig(null);
       setConfigProjectId(null);
+      setWorktreePath(null);
       setPhase(nextProjectId ? "editing" : "no-project");
       setLoadError(null);
       setNavigationTarget(target);
@@ -97,6 +101,8 @@ export function DraftSessionProvider({ children }: { children: ReactNode }) {
       setConfig,
       configProjectId,
       setConfigProjectId,
+      worktreePath,
+      setWorktreePath,
       phase,
       setPhase,
       loadError,
@@ -108,7 +114,18 @@ export function DraftSessionProvider({ children }: { children: ReactNode }) {
       projectFallbackAllowed,
       clear,
     }),
-    [clear, config, configProjectId, createRequestIds, loadError, navigationTarget, phase, projectId, runtime],
+    [
+      clear,
+      config,
+      configProjectId,
+      createRequestIds,
+      loadError,
+      navigationTarget,
+      phase,
+      projectId,
+      runtime,
+      worktreePath,
+    ],
   );
 
   return <DraftSessionContext.Provider value={value}>{children}</DraftSessionContext.Provider>;

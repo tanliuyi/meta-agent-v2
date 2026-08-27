@@ -17,6 +17,7 @@ export const CHANNELS = {
   projectsOpenExternally: "desktop:projects:open-externally",
   projectsRemove: "desktop:projects:remove",
   projectsActive: "desktop:projects:active",
+  projectsWorktrees: "desktop:projects:worktrees",
   sessionsList: "desktop:sessions:list",
   sessionsListWithPaths: "desktop:sessions:list-with-paths",
   sessionsDraftConfig: "desktop:sessions:draft-config",

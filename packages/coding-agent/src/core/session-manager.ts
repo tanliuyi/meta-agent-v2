@@ -568,7 +568,7 @@ function parseSessionHeaderCandidate(line: string): SessionHeader | null | undef
 	return entry;
 }
 
-function readSessionHeader(filePath: string): SessionHeader | null {
+function readSessionHeaderBounded(filePath: string): SessionHeader | null {
 	const fd = openSync(filePath, "r");
 	try {
 		const decoder = new StringDecoder("utf8");
@@ -612,9 +612,31 @@ function readSessionHeader(filePath: string): SessionHeader | null {
 	}
 }
 
+function readSessionHeaderWithFallback(filePath: string): {
+	header: SessionHeader | null;
+	preloadedFileEntries?: FileEntry[];
+} {
+	try {
+		return { header: readSessionHeaderBounded(filePath) };
+	} catch (error) {
+		if (!(error instanceof SessionHeaderScanLimitError)) throw error;
+		const preloadedFileEntries = loadEntriesFromFile(filePath);
+		const firstEntry = preloadedFileEntries[0];
+		return {
+			header: firstEntry?.type === "session" ? firstEntry : null,
+			preloadedFileEntries,
+		};
+	}
+}
+
+/** Reads the authoritative session header using the same compatibility rules as SessionManager.open(). */
+export function readSessionHeader(filePath: string): SessionHeader | null {
+	return readSessionHeaderWithFallback(filePath).header;
+}
+
 function readSessionHeaderForDiscovery(filePath: string): SessionHeader | null {
 	try {
-		return readSessionHeader(filePath);
+		return readSessionHeaderBounded(filePath);
 	} catch {
 		// Discovery is best-effort: unreadable or oversized files are not sessions,
 		// and one corrupt file must not prevent other sessions from being found.
@@ -1532,16 +1554,9 @@ export class SessionManager {
 		let header: SessionHeader | null = null;
 		let preloadedFileEntries: FileEntry[] | undefined;
 		if (cwdOverride === undefined && existsSync(resolvedPath)) {
-			try {
-				header = readSessionHeader(resolvedPath);
-			} catch (error) {
-				if (!(error instanceof SessionHeaderScanLimitError)) throw error;
-				// The bounded scan is only a discovery optimization. A full load remains
-				// authoritative for legacy files with very large headers or prefixes.
-				preloadedFileEntries = loadEntriesFromFile(resolvedPath);
-				const firstEntry = preloadedFileEntries[0];
-				header = firstEntry?.type === "session" ? firstEntry : null;
-			}
+			const resolvedHeader = readSessionHeaderWithFallback(resolvedPath);
+			header = resolvedHeader.header;
+			preloadedFileEntries = resolvedHeader.preloadedFileEntries;
 		}
 		const cwd = cwdOverride ?? (header ? getSessionHeaderCwd(header) : undefined) ?? process.cwd();
 		// If no sessionDir provided, derive from file's parent directory

@@ -8,6 +8,7 @@ import { useDesktopActions } from "../../../state/desktop-context.tsx";
 import { selectProjects } from "../../../state/desktop-selectors.ts";
 import { useDesktopStore } from "../../../state/desktop-store-context.tsx";
 import {
+  draftCreateRequestKey,
   isStaleExtensionSetError,
   materializeDraftSession,
   selectDraftModel,
@@ -22,7 +23,7 @@ import { useSessionCache } from "../../../state/session-cache-context.tsx";
 import { useSessionDraft } from "../../../state/session-draft-context.tsx";
 import { workbenchPanelTabKey } from "../../../state/workbench-tab-context.tsx";
 import { DraftComposerThread } from "../../chat/draft-composer-thread.tsx";
-import { useSessionScope, useSessionWorkbenchTabs } from "../../session-context.tsx";
+import { useSessionControlSelector, useSessionScope, useSessionWorkbenchTabs } from "../../session-context.tsx";
 import { NEW_SESSION_PANEL_KIND } from "../builtin-panel-kinds.ts";
 
 /**
@@ -36,24 +37,27 @@ export function NewSessionDraft() {
   const sessionCache = useSessionCache();
   const desktopStore = useDesktopStore();
   const workbenchTabs = useSessionWorkbenchTabs();
+  const parentCwd = useSessionControlSelector((control) => control?.cwd);
   const binding = useSessionDraft(record.key);
   const draft = binding?.draft ?? null;
   const runtime = binding?.runtime ?? null;
   const project =
     useStore(desktopStore, selectProjects).find((entry) => entry.id === draft?.parent.projectId && entry.available) ??
     null;
+  const worktreePath = parentCwd && parentCwd !== project?.cwd ? parentCwd : undefined;
 
   // 加载主 session 所在项目的草稿配置；主 session 变化（换 record）时重新加载。
   useEffect(() => {
     if (!draft) return;
-    const projectId = draft.parent.projectId;
-    writeStoredDraftProject(projectId);
-    let active = true;
     draft.setConfig(null);
     draft.setLoadError(null);
     draft.setPhase("editing");
+    if (!parentCwd) return;
+    const projectId = draft.parent.projectId;
+    writeStoredDraftProject(projectId);
+    let active = true;
     void window.desktop.sessions
-      .getDraftConfig(projectId)
+      .getDraftConfig(projectId, worktreePath)
       .then((next) => {
         if (!active) return;
         draft.setConfig(applyStoredDraftSelection(next, projectId));
@@ -65,7 +69,7 @@ export function NewSessionDraft() {
     return () => {
       active = false;
     };
-  }, [draft]);
+  }, [draft, parentCwd, worktreePath]);
 
   if (!draft || !runtime) {
     return <div className="panel-content sidebar-session-loading">正在同步草稿…</div>;
@@ -89,7 +93,7 @@ export function NewSessionDraft() {
   };
 
   const submit = async (): Promise<void> => {
-    if (draft.submitInFlight) return;
+    if (draft.submitInFlight || !parentCwd) return;
     if (!draft.config?.model || draft.config.readiness.state !== "ready") return;
     const composer = runtime.thread.composer;
     const state = composer.getState();
@@ -102,6 +106,7 @@ export function NewSessionDraft() {
       const materialized = await materializeDraftSession(
         {
           projectId: draft.parent.projectId,
+          ...(worktreePath ? { worktreePath } : {}),
           parentThreadId: draft.parent.threadId,
           model: { provider: draft.config.model.provider, id: draft.config.model.id },
           thinkingLevel: draft.config.thinkingLevel,
@@ -137,7 +142,7 @@ export function NewSessionDraft() {
     } catch (reason) {
       draft.setPhase("editing");
       if (isStaleExtensionSetError(reason)) {
-        draft.createRequestIds.delete(draft.parent.projectId);
+        draft.createRequestIds.delete(draftCreateRequestKey(draft.parent.projectId, worktreePath));
         draft.setConfig(null);
       }
       throw reason;

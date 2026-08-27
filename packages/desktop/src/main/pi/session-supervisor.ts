@@ -91,8 +91,11 @@ export class SessionSupervisor {
       .filter((thread) => !thread.archived);
   }
 
-  getDraftConfig(projectId: string): Promise<DraftSessionConfig> {
-    return this.workers.getDraftConfig(projectId);
+  async getDraftConfig(projectId: string, worktreePath?: string): Promise<DraftSessionConfig> {
+    const cwd = worktreePath
+      ? await this.projects.resolveSessionCwd(projectId, worktreePath)
+      : this.projects.getCwd(projectId);
+    return this.workers.getDraftConfig(projectId, cwd);
   }
 
   getExtensionState(projectId: string, threadId: string) {
@@ -114,8 +117,11 @@ export class SessionSupervisor {
     await this.workers.close(projectId, threadId);
   }
 
-  create(input: SessionCreateInput): Promise<SessionBootstrap> {
-    return this.workers.create(input);
+  async create(input: SessionCreateInput): Promise<SessionBootstrap> {
+    const worktreePath = input.worktreePath
+      ? await this.projects.resolveWorktree(input.projectId, input.worktreePath)
+      : undefined;
+    return this.workers.create({ ...input, ...(worktreePath ? { worktreePath } : {}) });
   }
 
   async attach(

@@ -38,6 +38,14 @@ export interface Project {
   issue?: string;
 }
 
+/** Project 所属 Git 仓库中的一个 worktree；path 保留 Project 在仓库内的相对位置。 */
+export interface GitWorktree {
+  path: string;
+  branch: string | null;
+  head: string;
+  current: boolean;
+}
+
 /** Pi 会话在线程列表中的摘要。 */
 export interface Thread {
   id: string;
@@ -116,6 +124,8 @@ export interface DraftSessionConfig {
 /** 首次 prompt materialize session 时原子应用的配置。 */
 export interface SessionCreateInput {
   projectId: string;
+  /** 经主进程校验、属于该 Project Git 仓库的 worktree 目录。 */
+  worktreePath?: string;
   createRequestId: string;
   extensionSetGeneration: string;
   model: { provider: string; id: string };

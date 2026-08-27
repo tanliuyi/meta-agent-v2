@@ -1,5 +1,6 @@
 import type {
   DraftSessionConfig,
+  GitWorktree,
   PiQueueItem,
   PiThreadPhase,
   Project,
@@ -15,9 +16,13 @@ export type ComposerProps =
       config: DraftSessionConfig | null;
       configLoading: boolean;
       phase: "editing" | "materializing";
+      /** 当前 Project 可选的 Git worktree；空数组表示非 Git 项目。 */
+      worktrees?: readonly GitWorktree[];
+      worktreePath?: string | null;
       /** 固定项目（如侧边栏草稿），隐藏项目选择器。 */
       fixedProject?: boolean;
       onProjectChange(projectId: string): Promise<void>;
+      onWorktreeChange?(path: string): void;
       onModelChange(provider: string, modelId: string): void;
       onThinkingChange(level: SessionControlState["thinkingLevel"]): void;
       onPluginsChange(enabledPluginIds: string[] | null): void;

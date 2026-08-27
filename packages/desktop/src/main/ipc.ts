@@ -719,12 +719,15 @@ export function registerIpc(
     terminals.disposeProject(projectId);
     return projects.remove(projectId);
   });
+  ipcMain.handle(CHANNELS.projectsWorktrees, (_event, projectId: string) => projects.listWorktrees(projectId));
 
   ipcMain.handle(CHANNELS.sessionsList, (_event, projectId: string, includeArchived?: boolean) =>
     sessions.list(projectId, includeArchived),
   );
   ipcMain.handle(CHANNELS.sessionsListWithPaths, (_event, projectId: string) => sessions.listWithPaths(projectId));
-  ipcMain.handle(CHANNELS.sessionsDraftConfig, (_event, projectId: string) => sessions.getDraftConfig(projectId));
+  ipcMain.handle(CHANNELS.sessionsDraftConfig, (_event, projectId: string, worktreePath?: string) =>
+    sessions.getDraftConfig(projectId, worktreePath),
+  );
   ipcMain.handle(
     CHANNELS.sessionsCreate,
     async (_event, input: SessionCreateInput): Promise<SessionCreateIpcResult> => {

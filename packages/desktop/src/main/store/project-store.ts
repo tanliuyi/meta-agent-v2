@@ -4,6 +4,8 @@ import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/
 import { basename, dirname, join, resolve } from "node:path";
 import { GENERAL_WORKSPACE_ID, type Project, type WorkbenchState } from "../../shared/contracts.ts";
 import { filePathWithoutLocation } from "../../shared/file-location.ts";
+import { listGitWorktrees, resolveGitWorktree } from "../git-worktrees.ts";
+import { samePath } from "../path-identity.ts";
 
 type ProjectStatus = "available" | "missing" | "permissionDenied" | "invalid";
 
@@ -207,6 +209,20 @@ export class ProjectStore {
     return this.requireStored(projectId).path;
   }
 
+  listWorktrees(projectId: string) {
+    return listGitWorktrees(this.getCwd(projectId));
+  }
+
+  resolveWorktree(projectId: string, candidate: string): Promise<string> {
+    return resolveGitWorktree(this.getCwd(projectId), candidate);
+  }
+
+  async resolveSessionCwd(projectId: string, candidate: string): Promise<string> {
+    const projectCwd = this.getCwd(projectId);
+    if (samePath(projectCwd, candidate)) return projectCwd;
+    return this.resolveWorktree(projectId, candidate);
+  }
+
   isArchived(projectId: string, threadId: string): boolean {
     this.assertProjectAccessible(projectId);
     return this.desktopState.archivedThreads[projectId]?.includes(threadId) ?? false;
@@ -352,10 +368,6 @@ function statusFromError(error: unknown): ProjectStatus {
   if (code === "ENOENT") return "missing";
   if (code === "EACCES" || code === "EPERM") return "permissionDenied";
   return "invalid";
-}
-
-function samePath(left: string, right: string): boolean {
-  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 function isMissingFile(error: unknown): boolean {

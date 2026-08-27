@@ -56,7 +56,8 @@ describe("MetadataWorkerService", () => {
     await register(thread("committed"), path);
     const reservation = {
       projectId: "project",
-      cwd: root,
+      projectCwd: root,
+      cwd: join(root, "linked-worktree"),
       sessionId: "committed",
       createRequestId: "create-request",
       state: "reserved" as const,

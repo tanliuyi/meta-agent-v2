@@ -235,6 +235,7 @@ export {
 	migrateSessionEntries,
 	type NewSessionOptions,
 	parseSessionEntries,
+	readSessionHeader,
 	type SessionContext,
 	type SessionEntry,
 	type SessionEntryBase,

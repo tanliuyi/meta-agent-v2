@@ -47,6 +47,7 @@ export type ThreadWorkerBinding =
   | {
       mode: "create";
       projectId: string;
+      projectCwd: string;
       cwd: string;
       agentDir: string;
       shellPath?: string;
@@ -64,6 +65,8 @@ export type ThreadWorkerBinding =
       shellPath?: string;
       threadId: string;
       sessionFile: string;
+      /** 主进程校验前读取的原始 header cwd；worker 启动时用于检测文件被替换。 */
+      sessionHeaderCwd: string;
       initialUpdatedAt?: number;
       /** 会话级激活的插件子集（来自索引）；缺失表示继承项目级（全部激活）。 */
       enabledPluginIds?: string[];
@@ -252,6 +255,7 @@ export type ThreadSidecarCommand =
 
 export interface CreationReservation {
   projectId: string;
+  projectCwd: string;
   cwd: string;
   sessionId: string;
   createRequestId: string;

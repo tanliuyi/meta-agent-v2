@@ -38,6 +38,10 @@ export function selectDraftThinkingLevel(
   return config?.thinkingLevels.includes(thinkingLevel) ? { ...config, thinkingLevel } : config;
 }
 
+export function draftCreateRequestKey(projectId: string, worktreePath?: string): string {
+  return worktreePath ? `${projectId}\0${worktreePath}` : projectId;
+}
+
 export function ensureDraftCreateRequestId(
   requestIds: Map<string, string>,
   projectId: string,
@@ -52,6 +56,7 @@ export function ensureDraftCreateRequestId(
 
 interface DraftMaterializationInput {
   projectId: string;
+  worktreePath?: string;
   model: SessionCreateInput["model"];
   thinkingLevel: SessionCreateInput["thinkingLevel"];
   extensionSetGeneration: string;
@@ -79,9 +84,11 @@ export async function materializeDraftSession(
   input: DraftMaterializationInput,
   dependencies: DraftMaterializationDependencies,
 ): Promise<DraftMaterializationResult> {
-  const createRequestId = ensureDraftCreateRequestId(dependencies.requestIds, input.projectId);
+  const createRequestKey = draftCreateRequestKey(input.projectId, input.worktreePath);
+  const createRequestId = ensureDraftCreateRequestId(dependencies.requestIds, createRequestKey);
   const bootstrap = await dependencies.sessions.create({
     projectId: input.projectId,
+    ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
     createRequestId,
     extensionSetGeneration: input.extensionSetGeneration,
     model: input.model,
@@ -89,7 +96,7 @@ export async function materializeDraftSession(
     ...(input.enabledPluginIds ? { enabledPluginIds: input.enabledPluginIds } : {}),
     ...(input.parentThreadId ? { parentThreadId: input.parentThreadId } : {}),
   });
-  dependencies.requestIds.delete(input.projectId);
+  dependencies.requestIds.delete(createRequestKey);
 
   const target = { projectId: input.projectId, threadId: bootstrap.threadId };
   const recordKey = sessionRecordKey(target.projectId, target.threadId);

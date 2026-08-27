@@ -26,6 +26,7 @@ import { ModelSelect } from "../model-select.tsx";
 import { PluginSelect } from "../plugin-select.tsx";
 import { ProjectSelect } from "../project-select.tsx";
 import { ThinkingSelect } from "../thinking-select.tsx";
+import { WorktreeSelect } from "../worktree-select.tsx";
 import { slashCommandAcceptsArguments, slashCommandText } from "./composer-command-trigger.tsx";
 import { ComposerContextUsage } from "./composer-context-usage.tsx";
 import { ComposerExtensionCommand } from "./composer-extension-command.tsx";
@@ -259,6 +260,19 @@ export function Composer(props: ComposerProps) {
                   reportError(value);
                 },
               );
+            }}
+          />
+        ) : null}
+        {!props.fixedProject && (props.worktrees?.length ?? 0) > 0 ? (
+          <WorktreeSelect
+            className="worktree-select-trigger max-w-56"
+            worktrees={props.worktrees ?? []}
+            value={props.worktreePath ?? null}
+            disabled={disabled}
+            onValueChange={(path) => {
+              setError(null);
+              selectCommand(null);
+              props.onWorktreeChange?.(path);
             }}
           />
         ) : null}

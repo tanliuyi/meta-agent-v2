@@ -49,7 +49,9 @@ import type {
 } from "../../shared/sidecar-contracts.ts";
 import type { SubagentHostRequest, SubagentRunEvent } from "../../shared/subagent-contracts.ts";
 import { collectThreadDescendantIds } from "../../shared/thread-tree.ts";
+import { readSessionFileHeader } from "../../sidecar/session-file-header.ts";
 import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
+import { samePath } from "../path-identity.ts";
 import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
@@ -68,10 +70,15 @@ export interface ThreadWorkerClient {
   shutdown(timeoutMs?: number): Promise<void>;
 }
 
+type ThreadWorkerSpawnBinding =
+  | Extract<ThreadWorkerBinding, { mode: "create" }>
+  | Omit<Extract<ThreadWorkerBinding, { mode: "open" }>, "sessionHeaderCwd">;
+
 interface WorkerRecord {
   client: ThreadWorkerClient;
   projectId: string;
   threadId: string;
+  cwd: string;
   workspaceKey: string;
   summary?: Thread;
   /** 子会话的父线程 id（create 模式传入），运行时 summary 更新时保持父级关联。 */
@@ -106,6 +113,7 @@ export interface ThreadWorkerRegistryOptions {
   extensionSourcePolicy: DesktopExtensionSourcePolicy;
   generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
   getCwd(projectId: string): string;
+  resolveSessionCwd(projectId: string, cwd: string): Promise<string>;
   getWorkspaceKey(projectId: string): Promise<string>;
   push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number): void;
   failed(projectId: string, threadId: string, error: Error): void;
@@ -247,11 +255,15 @@ export class ThreadWorkerRegistry {
     else this.options.acknowledgeSubagent?.(workerInstanceId, sidecarSequence);
   }
 
-  async getDraftConfig(projectId: string): Promise<DraftSessionConfig> {
+  async getDraftConfig(projectId: string, cwd = this.options.getCwd(projectId)): Promise<DraftSessionConfig> {
     this.assertProjectAvailable(projectId);
-    const cwd = this.options.getCwd(projectId);
     const { set: extensionSet, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
     return this.options.metadata.getDraftConfig(projectId, cwd, extensionSet, allEntries);
+  }
+
+  getSessionCwd(projectId: string, threadId: string): string | undefined {
+    const record = this.records.get(workerKey(projectId, threadId));
+    return record && !record.retired ? record.cwd : undefined;
   }
 
   async getExtensionState(projectId: string, threadId: string) {
@@ -433,22 +445,32 @@ export class ThreadWorkerRegistry {
     this.assertWorkspaceNotExclusive(workspaceKey);
     const recovered = await this.recoverCreationRequest(input.projectId, input.createRequestId);
     if (recovered) return recovered;
-    const cwd = this.options.getCwd(input.projectId);
+    const projectCwd = this.options.getCwd(input.projectId);
+    const cwd = input.worktreePath ?? projectCwd;
     const { set: extensionSet, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(input.projectId);
     if (input.extensionSetGeneration !== extensionSet.generation) {
       throw new StaleDraftExtensionSetError(input.extensionSetGeneration, extensionSet.generation);
     }
     this.assertProjectAvailable(input.projectId);
     const sessionId = randomUUID();
-    this.writeCreationReservation(input.projectId, cwd, sessionId, input.createRequestId, "reserved", undefined);
+    this.writeCreationReservation(
+      input.projectId,
+      projectCwd,
+      cwd,
+      sessionId,
+      input.createRequestId,
+      "reserved",
+      undefined,
+    );
     // 父会话通常在 registry 中有活跃 worker（sessionFile 已知）；冷会话回退到 metadata 索引。
     const parentSessionFile =
       input.parentThreadId &&
       (this.records.get(workerKey(input.projectId, input.parentThreadId))?.sessionFile ??
-        (await this.options.metadata.resolve(input.projectId, cwd, input.parentThreadId)).path);
+        (await this.options.metadata.resolve(input.projectId, projectCwd, input.parentThreadId)).path);
     const binding: ThreadWorkerBinding = {
       mode: "create",
       projectId: input.projectId,
+      projectCwd,
       cwd,
       agentDir: this.options.agentDir,
       ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
@@ -920,12 +942,7 @@ export class ThreadWorkerRegistry {
           await current.client.request({ type: "rename", title }, 30_000);
           current.summary = await current.client.request<Thread>({ type: "getSummary", archived: false }, 30_000);
           if (current.sessionFile) {
-            await this.options.metadata.upsert(
-              projectId,
-              this.options.getCwd(projectId),
-              current.sessionFile,
-              withSessionEnabledPluginIds(current, current.summary),
-            );
+            await this.persistMetadata(current, current.summary);
           }
         } catch (error) {
           if (isUnknownOutcome(error)) this.retireAfterUnknown(workerKey(projectId, threadId), current, error);
@@ -1321,7 +1338,25 @@ export class ThreadWorkerRegistry {
     });
   }
 
-  private async spawn(binding: ThreadWorkerBinding): Promise<WorkerRecord> {
+  private async validateOpenBinding(binding: ThreadWorkerSpawnBinding): Promise<ThreadWorkerBinding> {
+    if (binding.mode === "create") return binding;
+    const header = await readSessionFileHeader(binding.sessionFile, binding.projectId, binding.threadId);
+    const cwd = await this.options.resolveSessionCwd(binding.projectId, header.cwd);
+    return { ...binding, cwd, sessionFile: header.sessionFile, sessionHeaderCwd: header.cwd };
+  }
+
+  private persistMetadata(record: WorkerRecord, summary: Thread): Promise<void> {
+    if (!record.sessionFile)
+      throw new Error(`Session file is not materialized: ${record.projectId}/${record.threadId}`);
+    const projectCwd = this.options.getCwd(record.projectId);
+    const thread = withSessionEnabledPluginIds(record, summary);
+    return samePath(record.cwd, projectCwd)
+      ? this.options.metadata.upsert(record.projectId, projectCwd, record.sessionFile, thread)
+      : this.options.metadata.registerExternal(record.projectId, projectCwd, record.sessionFile, thread);
+  }
+
+  private async spawn(input: ThreadWorkerSpawnBinding): Promise<WorkerRecord> {
+    const binding = await this.validateOpenBinding(input);
     const blockedReason = this.blockedDevelopmentSets.get(binding.extensionSet.generation);
     if (blockedReason) {
       throw new Error(`Development extension set is blocked after repeated failures: ${blockedReason}`);
@@ -1435,6 +1470,7 @@ export class ThreadWorkerRegistry {
       client,
       projectId: binding.projectId,
       threadId: binding.mode === "open" ? binding.threadId : "",
+      cwd: binding.cwd,
       workspaceKey,
       lastActivityAt: Date.now(),
       inFlight: 1,
@@ -1464,7 +1500,11 @@ export class ThreadWorkerRegistry {
       }
       const bootstrap = ready.result as unknown as SessionBootstrap;
       if (!bootstrap?.threadId) throw new Error("Thread worker did not return a bootstrap");
+      if (!samePath(binding.cwd, bootstrap.control.cwd)) {
+        throw new Error(`Thread worker cwd mismatch: expected ${binding.cwd}, got ${bootstrap.control.cwd}`);
+      }
       record.threadId = bootstrap.threadId;
+      record.cwd = bootstrap.control.cwd;
       record.initialBootstrap = bootstrap;
       record.summary = summaryFromBootstrap(bootstrap);
       record.extensionDiagnostics = bootstrap.control.extensionSet.diagnostics.map((diagnostic) => ({
@@ -1472,12 +1512,7 @@ export class ThreadWorkerRegistry {
         workerInstanceId: client.instanceId,
       }));
       if (record.sessionFile) {
-        await this.options.metadata.upsert(
-          record.projectId,
-          this.options.getCwd(record.projectId),
-          record.sessionFile,
-          withSessionEnabledPluginIds(record, record.summary),
-        );
+        await this.persistMetadata(record, record.summary);
       }
       return record;
     } catch (error) {
@@ -1554,13 +1589,7 @@ export class ThreadWorkerRegistry {
         record.client.acknowledge(event.sequence);
         return;
       }
-      void this.options.metadata
-        .upsert(
-          record.projectId,
-          this.options.getCwd(record.projectId),
-          record.sessionFile,
-          withSessionEnabledPluginIds(record, record.summary),
-        )
+      void this.persistMetadata(record, record.summary)
         .catch((error: unknown) => this.options.log?.(`metadata:${record.projectId}`, String(error)))
         .finally(() => record.client.acknowledge(event.sequence));
     } else if (event.event.type === "resync-required") {
@@ -1571,6 +1600,7 @@ export class ThreadWorkerRegistry {
       this.writeCreationReservation(
         event.event.projectId,
         this.options.getCwd(event.event.projectId),
+        record.cwd,
         event.event.sessionId,
         record.createRequestId ?? "unknown",
         "materialized",
@@ -1789,6 +1819,7 @@ export class ThreadWorkerRegistry {
 
   private writeCreationReservation(
     projectId: string,
+    projectCwd: string,
     cwd: string,
     sessionId: string,
     createRequestId: string,
@@ -1805,6 +1836,7 @@ export class ThreadWorkerRegistry {
       `${JSON.stringify(
         {
           projectId,
+          projectCwd,
           cwd,
           sessionId,
           createRequestId,

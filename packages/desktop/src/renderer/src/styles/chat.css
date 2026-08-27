@@ -744,7 +744,8 @@
   align-items: center;
   gap: var(--space-2);
 }
-.draft-composer-drawer .project-select-trigger {
+.draft-composer-drawer .project-select-trigger,
+.draft-composer-drawer .worktree-select-trigger {
   max-width: min(224px, 100%);
 }
 .composer-toolbar-start {
@@ -763,7 +764,8 @@
   flex: 0 1 auto;
   max-width: 100%;
 }
-.composer-toolbar-start .project-select-trigger {
+.composer-toolbar-start .project-select-trigger,
+.composer-toolbar-start .worktree-select-trigger {
   min-width: 0;
   flex: 0 1 auto;
 }
@@ -778,10 +780,12 @@
   }
 }
 @container composer (max-width: 440px) {
-  .composer-wrap .project-select-trigger {
+  .composer-wrap .project-select-trigger,
+  .composer-wrap .worktree-select-trigger {
     max-width: 112px;
   }
-  .draft-composer-drawer .project-select-trigger {
+  .draft-composer-drawer .project-select-trigger,
+  .draft-composer-drawer .worktree-select-trigger {
     max-width: 100%;
   }
 }

@@ -52,6 +52,7 @@ import type {
   FileChangeSet,
   FileImage,
   FileNode,
+  GitWorktree,
   HostResponse,
   OfficeDocumentPreview,
   OpenLinkResult,
@@ -276,13 +277,14 @@ export interface DesktopApi {
     openExternally(projectId: string): Promise<void>;
     remove(projectId: string): Promise<void>;
     getActive(): Promise<Project | null>;
+    listWorktrees(projectId: string): Promise<GitWorktree[]>;
   };
   sessions: {
     list(projectId: string, includeArchived?: boolean): Promise<Thread[]>;
     /** 保留 session.jsonl 绝对路径的会话列表（@ 提及会话引用用）。 */
     listWithPaths(projectId: string): Promise<SessionMentionCandidate[]>;
     onCatalogChanged(listener: (thread: Thread) => void): () => void;
-    getDraftConfig(projectId: string): Promise<DraftSessionConfig>;
+    getDraftConfig(projectId: string, worktreePath?: string): Promise<DraftSessionConfig>;
     create(input: SessionCreateInput): Promise<SessionBootstrap>;
     attach(input: SessionAttachInput, listener: (update: SessionPushPayload) => void): Promise<SessionAttachment>;
     flush(attachmentId: string): SessionFlushResult;

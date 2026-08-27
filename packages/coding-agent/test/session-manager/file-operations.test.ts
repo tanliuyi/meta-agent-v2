@@ -3,7 +3,12 @@ import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, w
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findMostRecentSession, loadEntriesFromFile, SessionManager } from "../../src/core/session-manager.ts";
+import {
+	findMostRecentSession,
+	loadEntriesFromFile,
+	readSessionHeader,
+	SessionManager,
+} from "../../src/core/session-manager.ts";
 
 const HEADER_SCAN_LIMIT_BYTES = 1024 * 1024;
 
@@ -90,6 +95,7 @@ describe("loadEntriesFromFile", () => {
 		writeSessionHeader(file, storedCwd, sessionId, prefix);
 
 		const sessionManager = SessionManager.open(file, tempDir);
+		expect(readSessionHeader(file)).toMatchObject({ id: sessionId, cwd: storedCwd });
 		expect(sessionManager.getSessionId()).toBe(sessionId);
 		expect(sessionManager.getCwd()).toBe(storedCwd);
 	});

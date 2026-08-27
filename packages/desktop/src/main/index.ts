@@ -390,6 +390,7 @@ app.whenReady().then(async () => {
     extensionSourcePolicy,
     generationReferences: marketplaceGenerationReferences,
     getCwd: (projectId) => projects.getCwd(projectId),
+    resolveSessionCwd: (projectId, cwd) => projects.resolveSessionCwd(projectId, cwd),
     getWorkspaceKey,
     push: (payload, workerInstanceId, sidecarSequence) => {
       if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence);
@@ -446,6 +447,7 @@ app.whenReady().then(async () => {
     projects,
     broadcastTerminalEvent,
     createTerminalShellResolver(agentDir, desktopBashPath),
+    (projectId, threadId) => workers.getSessionCwd(projectId, threadId),
   );
   const providers = new ProvidersConfigService(models, auth, authModelRuntime);
   const desktopProviderEnvKeys = new Map(

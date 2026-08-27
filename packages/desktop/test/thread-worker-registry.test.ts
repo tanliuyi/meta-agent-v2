@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,11 +28,31 @@ import {
   type SidecarReady,
 } from "../src/shared/sidecar-contracts.ts";
 
+const codingAgentMocks = vi.hoisted(() => ({
+  readSessionHeader: vi.fn(),
+}));
+
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+  readSessionHeader: codingAgentMocks.readSessionHeader,
+}));
+
 describe("ThreadWorkerRegistry", () => {
   let userDataDir: string;
 
   beforeEach(() => {
     userDataDir = mkdtempSync(join(tmpdir(), "thread-worker-registry-"));
+    codingAgentMocks.readSessionHeader.mockReset();
+    codingAgentMocks.readSessionHeader.mockImplementation((path: string) => {
+      for (const line of readFileSync(path, "utf8").split("\n")) {
+        try {
+          const entry = JSON.parse(line) as { type?: string };
+          if (entry.type === "session") return entry;
+        } catch {
+          // Match SessionManager compatibility: malformed prefix lines are skipped.
+        }
+      }
+      return null;
+    });
   });
 
   afterEach(() => {
@@ -192,6 +212,34 @@ describe("ThreadWorkerRegistry", () => {
       expect.objectContaining({ generation: "extensions-generation" }),
       [],
     );
+    expect(harness.clients).toHaveLength(0);
+    await registry.dispose();
+  });
+
+  it("loads draft configuration from the selected worktree cwd", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await registry.getDraftConfig("project", "/workspace-linked");
+
+    expect(harness.options.metadata.getDraftConfig).toHaveBeenCalledWith(
+      "project",
+      "/workspace-linked",
+      expect.objectContaining({ generation: "extensions-generation" }),
+      [],
+    );
+    await registry.dispose();
+  });
+
+  it("rejects an indexed session cwd before spawning a worker", async () => {
+    const harness = createHarness(userDataDir);
+    harness.options.resolveSessionCwd = vi.fn(async () => {
+      throw new Error("Session cwd is outside the project worktrees");
+    });
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(registry.attach("project", "thread")).rejects.toThrow("outside the project worktrees");
+
     expect(harness.clients).toHaveLength(0);
     await registry.dispose();
   });
@@ -472,6 +520,41 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
+  it("registers linked-worktree session metadata as external", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    const created = await registry.create({
+      projectId: "project",
+      worktreePath: "/workspace-linked",
+      createRequestId: "worktree-create",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+    });
+    const client = harness.clients[0];
+    if (!client) throw new Error("Worker was not created");
+    const sessionFile = join(userDataDir, `${created.threadId}.jsonl`);
+
+    client.emit({
+      type: "session-materialized",
+      projectId: "project",
+      sessionId: created.threadId,
+      sessionFile,
+    });
+    client.emit({ type: "summary-changed", summary: thread(created.threadId) }, 2);
+
+    await vi.waitFor(() =>
+      expect(harness.registerExternal).toHaveBeenCalledWith(
+        "project",
+        "/workspace",
+        sessionFile,
+        expect.objectContaining({ id: created.threadId }),
+      ),
+    );
+    expect(harness.upsert).not.toHaveBeenCalled();
+    await registry.dispose();
+  });
+
   it("retries an active orphaned creation reservation instead of rejecting the draft", async () => {
     const harness = createHarness(userDataDir);
     writeCreationReservation(userDataDir, "stale-session");
@@ -532,6 +615,24 @@ describe("ThreadWorkerRegistry", () => {
 
     // 父会话在 registry 中有活跃 worker 时，直接使用其 sessionFile（不经 metadata 索引）。
     expect(harness.clients[1]?.bindingParentSessionFile).toBe(join(userDataDir, "parent.jsonl"));
+    await registry.dispose();
+  });
+
+  it("resolves a cold parent from the Project metadata index for a worktree child", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await registry.create({
+      projectId: "project",
+      worktreePath: "/workspace-linked",
+      createRequestId: "child-create",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+      parentThreadId: "cold-parent",
+    });
+
+    expect(harness.metadataResolve).toHaveBeenCalledWith("project", "/workspace", "cold-parent");
     await registry.dispose();
   });
 
@@ -1430,6 +1531,7 @@ interface Harness {
   failed: ReturnType<typeof vi.fn>;
   catalogChanged: ReturnType<typeof vi.fn>;
   metadataRenameCold: ReturnType<typeof vi.fn>;
+  metadataResolve: ReturnType<typeof vi.fn>;
   metadataList: ReturnType<typeof vi.fn>;
   metadataRemoveCold: ReturnType<typeof vi.fn>;
   metadataPromoteCold: ReturnType<typeof vi.fn>;
@@ -1437,6 +1539,7 @@ interface Harness {
   cleanupSessionCheckpoints: ReturnType<typeof vi.fn>;
   resolveExtensions: ReturnType<typeof vi.fn>;
   resolveWithAll: ReturnType<typeof vi.fn>;
+  registerExternal: ReturnType<typeof vi.fn>;
   upsert: ReturnType<typeof vi.fn>;
   resync: ReturnType<typeof vi.fn>;
 }
@@ -1459,10 +1562,12 @@ function createHarness(
   const failed = vi.fn<(projectId: string, threadId: string, error: Error) => void>();
   const catalogChanged = vi.fn<(thread: Thread) => void>();
   const metadataRenameCold = vi.fn(async () => {});
-  const metadataResolve = vi.fn(async (_projectId: string, _cwd: string, threadId: string) => ({
-    id: threadId,
-    path: join(userDataDir, `${threadId}.jsonl`),
-  }));
+  const metadataResolve = vi.fn(async (_projectId: string, _cwd: string, threadId: string) => {
+    const path = join(userDataDir, `${threadId}.jsonl`);
+    if (!existsSync(path))
+      writeFileSync(path, `${JSON.stringify({ type: "session", id: threadId, cwd: "/workspace" })}\n`);
+    return { id: threadId, path };
+  });
   const metadataList = vi.fn(async (): Promise<Thread[]> => []);
   const metadataRemoveCold = vi.fn(async (_projectId: string, _cwd: string, threadId: string, policy: string) => ({
     removedThreadIds: policy === "subtree" && threadId === "parent" ? ["parent", "child", "grandchild"] : [threadId],
@@ -1488,6 +1593,7 @@ function createHarness(
       extensions: { extensionSetGeneration: "extensions-generation", diagnostics: [] },
     })),
     resolve: metadataResolve,
+    registerExternal: vi.fn(async () => {}),
     upsert: vi.fn(async () => {}),
     renameCold: metadataRenameCold,
     removeCold: metadataRemoveCold,
@@ -1513,6 +1619,7 @@ function createHarness(
     extensionSourcePolicy,
     generationReferences: overrides?.generationReferences,
     getCwd: () => "/workspace",
+    resolveSessionCwd: async (_projectId, cwd) => cwd,
     getWorkspaceKey: async () => "workspace",
     push,
     failed,
@@ -1549,6 +1656,7 @@ function createHarness(
     cleanupSessionCheckpoints,
     resolveExtensions,
     resolveWithAll,
+    registerExternal: metadata.registerExternal,
     upsert: metadata.upsert,
     resync,
   };
@@ -1603,7 +1711,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
       id: entry.id,
       source: entry.source,
     }));
-    this.bootstrap = bootstrap(threadId, this.bindingGeneration);
+    this.bootstrap = bootstrap(threadId, this.bindingGeneration, options.binding.value.cwd);
   }
 
   async ready(): Promise<SidecarReady> {
@@ -1671,6 +1779,7 @@ function writeCreationReservation(userDataDir: string, sessionId: string): void 
     join(directory, `${sessionId}.json`),
     JSON.stringify({
       projectId: "project",
+      projectCwd: "/workspace",
       cwd: "/workspace",
       sessionId,
       createRequestId: "create-request",
@@ -1680,7 +1789,11 @@ function writeCreationReservation(userDataDir: string, sessionId: string): void 
   );
 }
 
-function bootstrap(threadId: string, extensionGeneration = "extensions-generation"): SessionBootstrap {
+function bootstrap(
+  threadId: string,
+  extensionGeneration = "extensions-generation",
+  cwd = "/workspace",
+): SessionBootstrap {
   return {
     protocolVersion: PROTOCOL_VERSION,
     projectId: "project",
@@ -1702,7 +1815,7 @@ function bootstrap(threadId: string, extensionGeneration = "extensions-generatio
       threadId,
       title: threadId,
       updatedAt: 1,
-      cwd: "/workspace",
+      cwd,
       running: false,
       queueModes: { steering: "one-at-a-time", followUp: "one-at-a-time" },
       models: [],

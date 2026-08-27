@@ -1,6 +1,6 @@
 import { ThreadPrimitive } from "@assistant-ui/react";
 import { cn } from "@renderer/shared/lib/cn";
-import type { DraftSessionConfig, Project, ThinkingLevel } from "../../../../shared/contracts.ts";
+import type { DraftSessionConfig, GitWorktree, Project, ThinkingLevel } from "../../../../shared/contracts.ts";
 import type { DesktopExtensionDiagnostic } from "../../../../shared/desktop-extension-contracts.ts";
 import { Composer } from "./composer/composer.tsx";
 import { ComposerFeedback, type ComposerFeedbackTone } from "./composer/composer-feedback.tsx";
@@ -11,6 +11,8 @@ interface DraftComposerThreadProps {
   config: DraftSessionConfig | null;
   configLoading: boolean;
   phase: "editing" | "materializing";
+  worktrees?: readonly GitWorktree[];
+  worktreePath?: string | null;
   error?: string | null;
   diagnostics?: readonly DesktopExtensionDiagnostic[];
   /** 固定项目（如侧边栏草稿），隐藏项目选择器。 */
@@ -18,6 +20,7 @@ interface DraftComposerThreadProps {
   /** 工作台 panel 内嵌草稿：隐藏标题并将 composer 靠下对齐。 */
   compact?: boolean;
   onProjectChange(projectId: string): Promise<void>;
+  onWorktreeChange?(path: string): void;
   onModelChange(provider: string, modelId: string): void;
   onThinkingChange(level: ThinkingLevel): void;
   onPluginsChange(enabledPluginIds: string[] | null): void;

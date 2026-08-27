@@ -287,6 +287,7 @@ const desktopApi: DesktopApi = {
     openExternally: (projectId) => ipcRenderer.invoke(CHANNELS.projectsOpenExternally, projectId),
     remove: (projectId) => ipcRenderer.invoke(CHANNELS.projectsRemove, projectId),
     getActive: () => ipcRenderer.invoke(CHANNELS.projectsActive),
+    listWorktrees: (projectId) => ipcRenderer.invoke(CHANNELS.projectsWorktrees, projectId),
   },
   sessions: {
     list: (projectId, includeArchived) => ipcRenderer.invoke(CHANNELS.sessionsList, projectId, includeArchived),
@@ -296,7 +297,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.on(CHANNELS.sessionsCatalogChanged, handler);
       return () => ipcRenderer.removeListener(CHANNELS.sessionsCatalogChanged, handler);
     },
-    getDraftConfig: (projectId) => ipcRenderer.invoke(CHANNELS.sessionsDraftConfig, projectId),
+    getDraftConfig: (projectId, worktreePath) =>
+      ipcRenderer.invoke(CHANNELS.sessionsDraftConfig, projectId, worktreePath),
     create: async (input) => {
       const result = (await ipcRenderer.invoke(CHANNELS.sessionsCreate, input)) as SessionCreateIpcResult;
       if (result.ok) return result.bootstrap;

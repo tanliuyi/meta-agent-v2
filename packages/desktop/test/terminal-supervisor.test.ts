@@ -21,6 +21,24 @@ afterEach(async () => {
 });
 
 describe("TerminalSupervisor", () => {
+  it("在会话 cwd 中启动终端", async () => {
+    const { project, root, store } = await createStore();
+    const worktreeCwd = join(root, "worktree");
+    await mkdir(worktreeCwd);
+    ptyMock.spawn.mockReturnValue(new FakePty());
+    const terminals = new TerminalSupervisor(
+      store,
+      () => undefined,
+      () => ({ file: "shell", args: [] }),
+      (_projectId, threadId) => (threadId === "worktree-thread" ? worktreeCwd : undefined),
+    );
+
+    terminals.open(project.id, "worktree-thread", "bottom", 80, 24);
+
+    expect(ptyMock.spawn).toHaveBeenCalledWith("shell", [], expect.objectContaining({ cwd: worktreeCwd }));
+    terminals.dispose();
+  });
+
   it("按 session 独立保留输出并复用已打开的 PTY", async () => {
     const { project, store } = await createStore();
     const first = new FakePty();
@@ -41,12 +59,21 @@ describe("TerminalSupervisor", () => {
   });
 
   it("注入的 shell 启动即退（非 0 退出码）时自动降级为无注入重启", async () => {
-    const { project, store } = await createStore();
+    const { project, root, store } = await createStore();
+    const worktreeCwd = join(root, "worktree");
+    await mkdir(worktreeCwd);
     const injectedPty = new FakePty();
     const fallbackPty = new FakePty();
     ptyMock.spawn.mockReturnValueOnce(injectedPty).mockReturnValueOnce(fallbackPty);
     const events: TerminalEvent[] = [];
-    const terminals = new TerminalSupervisor(store, (event) => events.push(event));
+    let sessionCwdAvailable = true;
+    const shell = process.platform === "win32" ? "bash.exe" : "bash";
+    const terminals = new TerminalSupervisor(
+      store,
+      (event) => events.push(event),
+      () => ({ file: shell, args: ["-i"] }),
+      () => (sessionCwdAvailable ? worktreeCwd : undefined),
+    );
     const start = Date.now();
     vi.setSystemTime(start);
 
@@ -59,6 +86,7 @@ describe("TerminalSupervisor", () => {
 
       // 启动 1 秒后以退出码 2 退出（模拟注入导致 shell 初始化失败）
       vi.setSystemTime(start + 1_000);
+      sessionCwdAvailable = false;
       injectedPty.emitExit(2);
 
       // 自动回退：第二次 spawn 无注入参数，且发出 reset 事件
@@ -68,6 +96,10 @@ describe("TerminalSupervisor", () => {
       expect(events).toContainEqual(
         expect.objectContaining({ type: "reset", projectId: project.id, threadId: "thread", terminalId: "bottom" }),
       );
+      expect(ptyMock.spawn.mock.calls.map((call) => (call[2] as { cwd: string }).cwd)).toEqual([
+        worktreeCwd,
+        worktreeCwd,
+      ]);
       // 回退后的终端可继续写入
       expect(() => terminals.write(project.id, "thread", "bottom", "echo hi\r")).not.toThrow();
       expect(fallbackPty.write).toHaveBeenCalledWith("echo hi\r");

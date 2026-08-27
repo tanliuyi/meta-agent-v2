@@ -10,6 +10,7 @@ interface RegistryMock {
   attach: ReturnType<typeof vi.fn>;
   detach: ReturnType<typeof vi.fn>;
   acknowledge: ReturnType<typeof vi.fn>;
+  create: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 }
@@ -19,6 +20,35 @@ describe("SessionSupervisor attachment leases", () => {
 
   beforeEach(() => {
     workers = registryMock();
+  });
+
+  it("validates and canonicalizes a selected worktree before worker creation", async () => {
+    const resolveWorktree = vi.fn(async () => "/canonical/worktree");
+    const supervisor = new SessionSupervisor(projectStore(resolveWorktree), workers.value);
+
+    await supervisor.create({
+      projectId: "project",
+      worktreePath: "/candidate/worktree",
+      createRequestId: "create",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+    });
+
+    expect(resolveWorktree).toHaveBeenCalledWith("project", "/candidate/worktree");
+    expect(workers.create).toHaveBeenCalledWith(expect.objectContaining({ worktreePath: "/canonical/worktree" }));
+    await supervisor.dispose();
+  });
+
+  it("loads draft configuration from a validated worktree", async () => {
+    const resolveSessionCwd = vi.fn(async () => "/canonical/worktree");
+    const supervisor = new SessionSupervisor(projectStore(undefined, resolveSessionCwd), workers.value);
+
+    await supervisor.getDraftConfig("project", "/candidate/worktree");
+
+    expect(resolveSessionCwd).toHaveBeenCalledWith("project", "/candidate/worktree");
+    expect(workers.value.getDraftConfig).toHaveBeenCalledWith("project", "/canonical/worktree");
+    await supervisor.dispose();
   });
 
   it("keeps independent A/B leases for one renderer window and routes pushes by identity", async () => {
@@ -150,18 +180,20 @@ function registryMock(): RegistryMock {
   const attach = vi.fn(async (_projectId: string, threadId: string) => bootstrap(threadId));
   const detach = vi.fn();
   const acknowledge = vi.fn();
+  const create = vi.fn(async () => bootstrap("created"));
   const close = vi.fn(async () => {});
   const dispose = vi.fn(async () => {});
   return {
     attach,
     detach,
     acknowledge,
+    create,
     close,
     dispose,
     value: {
       list: vi.fn(async () => []),
       getDraftConfig: vi.fn(),
-      create: vi.fn(),
+      create,
       attach,
       detach,
       acknowledge,
@@ -171,8 +203,16 @@ function registryMock(): RegistryMock {
   };
 }
 
-function projectStore(): ProjectStore {
-  return { isArchived: () => false } as unknown as ProjectStore;
+function projectStore(
+  resolveWorktree = vi.fn(async (_projectId: string, candidate: string) => candidate),
+  resolveSessionCwd = vi.fn(async (_projectId: string, candidate: string) => candidate),
+): ProjectStore {
+  return {
+    isArchived: () => false,
+    getCwd: () => "/workspace",
+    resolveWorktree,
+    resolveSessionCwd,
+  } as unknown as ProjectStore;
 }
 
 function bootstrap(threadId: string): SessionBootstrap {

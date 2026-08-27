@@ -13,6 +13,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
+  readSessionHeader: (path: string) => {
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      try {
+        const entry = JSON.parse(line) as { type?: string };
+        if (entry.type === "session") return entry;
+      } catch {
+        // Match SessionManager compatibility: malformed prefix lines are skipped.
+      }
+    }
+    return null;
+  },
   SessionManager: {
     list: mocks.listSessions,
     create: mocks.createSession,
@@ -52,7 +63,8 @@ describe("ThreadWorkerService", () => {
     const sessionId = "general-thread";
     const sessionFile = join(agentDir, "sessions", "--general--", `${sessionId}.jsonl`);
     const bootstrap = { threadId: sessionId };
-    mocks.createSession.mockReturnValue({ getSessionFile: () => sessionFile });
+    mkdirSync(cwd, { recursive: true });
+    mocks.createSession.mockReturnValue({ getSessionFile: () => sessionFile, getCwd: () => cwd });
     mocks.runtimeCreate.mockResolvedValue({
       id: sessionId,
       bootstrap: vi.fn().mockReturnValue(bootstrap),
@@ -61,6 +73,7 @@ describe("ThreadWorkerService", () => {
     const binding: ThreadWorkerBinding = {
       mode: "create",
       projectId: GENERAL_WORKSPACE_ID,
+      projectCwd: cwd,
       cwd,
       agentDir,
       sessionId,
@@ -91,14 +104,46 @@ describe("ThreadWorkerService", () => {
     expect(result.readyResult).toBe(bootstrap);
   });
 
+  it("rejects a missing Project cwd before creating the SessionManager or runtime", async () => {
+    const cwd = join(root, "missing-project");
+    const binding: ThreadWorkerBinding = {
+      mode: "create",
+      projectId: GENERAL_WORKSPACE_ID,
+      projectCwd: cwd,
+      cwd,
+      agentDir: join(root, "agent"),
+      sessionId: "thread",
+      createInput: {
+        projectId: GENERAL_WORKSPACE_ID,
+        createRequestId: "request",
+        extensionSetGeneration: "extensions-generation",
+        model: { provider: "provider", id: "model" },
+        thinkingLevel: "off",
+      },
+      extensionSet: {
+        generation: "extensions-generation",
+        projectId: GENERAL_WORKSPACE_ID,
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
+    };
+
+    await expect(
+      ThreadWorkerService.create({ role: "thread", value: binding }, { emit: () => undefined }),
+    ).rejects.toThrow();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.runtimeCreate).not.toHaveBeenCalled();
+  });
+
   it("opens general workspace sessions with the short directory and original cwd", async () => {
     const cwd = join(root, "workspaces", "general");
     const agentDir = join(root, "agent");
     const sessionId = "general-thread";
     const sessionFile = join(agentDir, "sessions", "--general--", `${sessionId}.jsonl`);
     mkdirSync(join(agentDir, "sessions", "--general--"), { recursive: true });
-    writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: sessionId, cwd })}\n`);
-    mocks.openSession.mockReturnValue({});
+    writeFileSync(sessionFile, `\nnot json\n${JSON.stringify({ type: "session", id: sessionId, cwd })}\n`);
+    mocks.openSession.mockReturnValue({ getCwd: () => cwd, getSessionId: () => sessionId });
     mocks.runtimeCreate.mockResolvedValue({
       id: sessionId,
       bootstrap: vi.fn().mockReturnValue({ threadId: sessionId }),
@@ -111,6 +156,7 @@ describe("ThreadWorkerService", () => {
       agentDir,
       threadId: sessionId,
       sessionFile,
+      sessionHeaderCwd: cwd,
       initialUpdatedAt: 4_000,
       extensionSet: {
         generation: "extensions-generation",
@@ -127,7 +173,69 @@ describe("ThreadWorkerService", () => {
     );
 
     expect(mocks.openSession).toHaveBeenCalledWith(sessionFile, join(agentDir, "sessions", "--general--"), cwd);
-    expect(mocks.runtimeCreate).toHaveBeenCalledWith(expect.objectContaining({ initialUpdatedAt: 4_000 }));
+    expect(mocks.runtimeCreate).toHaveBeenCalledWith(expect.objectContaining({ cwd, initialUpdatedAt: 4_000 }));
+  });
+
+  it("rejects a session identity change after the header check and before runtime startup", async () => {
+    const cwd = join(root, "project");
+    const sessionFile = join(root, "sessions", "session.jsonl");
+    mkdirSync(join(root, "sessions"), { recursive: true });
+    writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: "thread", cwd })}\n`);
+    mocks.openSession.mockReturnValue({
+      getCwd: () => cwd,
+      getSessionId: () => "replacement-thread",
+    });
+    const binding: ThreadWorkerBinding = {
+      mode: "open",
+      projectId: "project",
+      cwd,
+      agentDir: join(root, "agent"),
+      threadId: "thread",
+      sessionFile,
+      sessionHeaderCwd: cwd,
+      extensionSet: {
+        generation: "extensions-generation",
+        projectId: "project",
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
+    };
+
+    await expect(
+      ThreadWorkerService.create({ role: "thread", value: binding }, { emit: () => undefined }),
+    ).rejects.toThrow("Session identity changed before open");
+    expect(mocks.runtimeCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed session cwd before opening the SessionManager or runtime", async () => {
+    const trustedCwd = join(root, "project");
+    const changedCwd = join(root, "outside");
+    const sessionFile = join(root, "sessions", "session.jsonl");
+    mkdirSync(join(root, "sessions"), { recursive: true });
+    writeFileSync(sessionFile, `${JSON.stringify({ type: "session", id: "thread", cwd: changedCwd })}\n`);
+    const binding: ThreadWorkerBinding = {
+      mode: "open",
+      projectId: "project",
+      cwd: trustedCwd,
+      agentDir: join(root, "agent"),
+      threadId: "thread",
+      sessionFile,
+      sessionHeaderCwd: trustedCwd,
+      extensionSet: {
+        generation: "extensions-generation",
+        projectId: "project",
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
+    };
+
+    await expect(
+      ThreadWorkerService.create({ role: "thread", value: binding }, { emit: () => undefined }),
+    ).rejects.toThrow("Session cwd changed before open");
+    expect(mocks.openSession).not.toHaveBeenCalled();
+    expect(mocks.runtimeCreate).not.toHaveBeenCalled();
   });
 
   it("rejects a session identity mismatch before opening or migrating the file", async () => {

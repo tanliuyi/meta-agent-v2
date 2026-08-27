@@ -29,6 +29,17 @@ describe("draft creation request", () => {
     expect(harness.onMaterialized).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread" }));
   });
 
+  it("将选中的 worktree 加入创建请求", async () => {
+    const harness = createHarness();
+
+    await materializeDraftSession({ ...input(), worktreePath: "/workspace/worktree" }, harness.dependencies);
+
+    expect(harness.create).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project", worktreePath: "/workspace/worktree" }),
+    );
+    expect(harness.dependencies.requestIds).toHaveLength(0);
+  });
+
   it("attach 失败时 retire cache 并删除未提交 session", async () => {
     const harness = createHarness();
     harness.ensureAttached.mockRejectedValueOnce(new Error("attach failed"));
@@ -91,6 +102,7 @@ function createHarness(promptResult: SessionCommandResult = { accepted: true, qu
   const onMaterialized = vi.fn(() => order.push("catalog"));
   return {
     order,
+    create,
     ensureAttached,
     prompt,
     remove,

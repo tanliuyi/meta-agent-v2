@@ -1,12 +1,13 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
-import type { ThinkingLevel } from "../../../shared/contracts.ts";
+import type { GitWorktree, ThinkingLevel } from "../../../shared/contracts.ts";
 import { toPiPromptAttachments } from "../runtime/attachments.ts";
 import { selectProjects } from "../state/desktop-selectors.ts";
 import { dispatchDesktop } from "../state/desktop-store.ts";
 import { useDesktopStore } from "../state/desktop-store-context.tsx";
 import {
+  draftCreateRequestKey,
   isStaleExtensionSetError,
   materializeDraftSession,
   selectDraftModel,
@@ -32,8 +33,19 @@ export function NewSessionSurface() {
   const sessionCache = useSessionCache();
   const desktopStore = useDesktopStore();
   const draft = useDraftSession();
-  const { runtime, projectId, setProjectId, config, setConfig, configProjectId, setConfigProjectId, phase, setPhase } =
-    draft;
+  const {
+    runtime,
+    projectId,
+    setProjectId,
+    config,
+    setConfig,
+    configProjectId,
+    setConfigProjectId,
+    worktreePath,
+    setWorktreePath,
+    phase,
+    setPhase,
+  } = draft;
   const {
     loadError,
     setLoadError,
@@ -46,6 +58,13 @@ export function NewSessionSurface() {
   const catalogProjects = useStore(desktopStore, selectProjects);
   const catalogLoading = useStore(desktopStore, (state) => state.loading);
   const projects = useMemo(() => catalogProjects.filter((project) => project.available), [catalogProjects]);
+  const [worktreeCatalog, setWorktreeCatalog] = useState<{ projectId: string | null; worktrees: GitWorktree[] }>({
+    projectId: null,
+    worktrees: [],
+  });
+  const worktrees = worktreeCatalog.projectId === projectId ? worktreeCatalog.worktrees : [];
+  const worktreesReady = projectId !== null && worktreeCatalog.projectId === projectId;
+  const configTargetId = projectId ? draftCreateRequestKey(projectId, worktreePath ?? undefined) : null;
 
   useEffect(() => {
     if (!navigationTarget) return;
@@ -94,22 +113,17 @@ export function NewSessionSurface() {
   }, [setConfig, setConfigProjectId]);
 
   useEffect(() => {
-    if (catalogLoading) return;
-    if (!projectId) {
-      setConfig(null);
-      setConfigProjectId(null);
-      return;
-    }
-    if (configProjectId === projectId) return;
+    if (catalogLoading || !worktreesReady || !projectId) return;
+    if (configProjectId === configTargetId) return;
     let active = true;
     setConfig(null);
     setLoadError(null);
     void window.desktop.sessions
-      .getDraftConfig(projectId)
+      .getDraftConfig(projectId, worktreePath ?? undefined)
       .then((next) => {
         if (!active) return;
         setConfig(applyStoredDraftSelection(next, projectId));
-        setConfigProjectId(projectId);
+        setConfigProjectId(configTargetId);
         setLoadError(null);
       })
       .catch((reason: unknown) => {
@@ -118,7 +132,41 @@ export function NewSessionSurface() {
     return () => {
       active = false;
     };
-  }, [catalogLoading, configProjectId, projectId, setConfig, setConfigProjectId, setLoadError]);
+  }, [
+    catalogLoading,
+    configProjectId,
+    configTargetId,
+    projectId,
+    setConfig,
+    setConfigProjectId,
+    setLoadError,
+    worktreePath,
+    worktreesReady,
+  ]);
+
+  useEffect(() => {
+    setConfig(null);
+    setConfigProjectId(null);
+    setWorktreeCatalog({ projectId: null, worktrees: [] });
+    setWorktreePath(null);
+    if (!projectId) return;
+    let active = true;
+    void window.desktop.projects
+      .listWorktrees(projectId)
+      .then((next) => {
+        if (!active) return;
+        setWorktreeCatalog({ projectId, worktrees: next });
+        setWorktreePath(next.find((worktree) => worktree.current)?.path ?? next[0]?.path ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setWorktreeCatalog({ projectId, worktrees: [] });
+        setWorktreePath(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, setConfig, setConfigProjectId, setWorktreePath]);
 
   const project = projects.find((entry) => entry.id === projectId) ?? null;
 
@@ -130,7 +178,15 @@ export function NewSessionSurface() {
     projectFallbackAllowed.current = true;
     writeStoredDraftProject(nextProjectId);
     setProjectId(nextProjectId);
+    setWorktreeCatalog({ projectId: null, worktrees: [] });
+    setWorktreePath(null);
     await navigate({ to: "/new", search: { projectId: nextProjectId }, replace: true });
+  }
+
+  function selectWorktree(nextWorktreePath: string) {
+    setConfig(null);
+    setConfigProjectId(null);
+    setWorktreePath(nextWorktreePath);
   }
 
   function selectModel(provider: string, modelId: string) {
@@ -152,7 +208,8 @@ export function NewSessionSurface() {
 
   async function submit() {
     if (submitInFlight.current) return;
-    if (!projectId || !config?.model || config.readiness.state !== "ready") return;
+    if (!projectId || configProjectId !== configTargetId || !config?.model || config.readiness.state !== "ready")
+      return;
     const composer = runtime.thread.composer;
     const state = composer.getState();
     if (state.isEmpty) return;
@@ -164,6 +221,7 @@ export function NewSessionSurface() {
       const materialized = await materializeDraftSession(
         {
           projectId,
+          ...(worktreePath ? { worktreePath } : {}),
           model: { provider: config.model.provider, id: config.model.id },
           thinkingLevel: config.thinkingLevel,
           extensionSetGeneration: config.extensions.extensionSetGeneration,
@@ -188,7 +246,7 @@ export function NewSessionSurface() {
     } catch (reason) {
       setPhase("editing");
       if (isStaleExtensionSetError(reason)) {
-        createRequestIds.delete(projectId);
+        createRequestIds.delete(draftCreateRequestKey(projectId, worktreePath ?? undefined));
         setConfig(null);
         setConfigProjectId(null);
       }
@@ -215,12 +273,15 @@ export function NewSessionSurface() {
       <DraftComposerThread
         projects={projects}
         project={project}
+        worktrees={worktrees}
+        worktreePath={worktreePath}
         config={config}
         configLoading={config === null}
         phase={phase === "materializing" ? "materializing" : "editing"}
         error={loadError}
         diagnostics={config?.extensions.diagnostics}
         onProjectChange={selectProject}
+        onWorktreeChange={selectWorktree}
         onModelChange={selectModel}
         onThinkingChange={selectThinking}
         onPluginsChange={selectPlugins}

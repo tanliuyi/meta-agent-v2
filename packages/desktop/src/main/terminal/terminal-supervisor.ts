@@ -52,16 +52,19 @@ export class TerminalSupervisor {
   private readonly projects: ProjectStore;
   private readonly changed: (event: TerminalEvent) => void;
   private readonly resolveShell: TerminalShellResolver;
+  private readonly resolveSessionCwd?: (projectId: string, threadId: string) => string | undefined;
   private readonly restoreBlockedProjects = new Map<string, number>();
 
   constructor(
     projects: ProjectStore,
     changed: (event: TerminalEvent) => void,
     resolveShell: TerminalShellResolver = () => resolveTerminalShell(),
+    resolveSessionCwd?: (projectId: string, threadId: string) => string | undefined,
   ) {
     this.projects = projects;
     this.changed = changed;
     this.resolveShell = resolveShell;
+    this.resolveSessionCwd = resolveSessionCwd;
   }
 
   /** Close affected PTYs, await their exit, and block terminal input for the restore duration. */
@@ -187,9 +190,10 @@ export class TerminalSupervisor {
     cols: number,
     rows: number,
     allowInjection = true,
+    cwdOverride?: string,
   ): TerminalProcess {
     const key = terminalKey(projectId, threadId, terminalId);
-    const cwd = this.projects.getCwd(projectId);
+    const cwd = cwdOverride ?? this.resolveSessionCwd?.(projectId, threadId) ?? this.projects.getCwd(projectId);
     const shell = this.resolveShell(cwd);
     // 注入 shell integration（bash 追加 --rcfile，zsh 附加 ZDOTDIR）；失败时静默降级为普通 spawn
     const injection = allowInjection ? prepareShellInjection(shell.file, shell.args, process.env) : undefined;
@@ -230,7 +234,7 @@ export class TerminalSupervisor {
         Date.now() - terminal.startedAt < INJECTION_FALLBACK_GRACE_MS
       ) {
         this.terminals.delete(key);
-        const fallback = this.create(projectId, threadId, terminalId, cols, rows, false);
+        const fallback = this.create(projectId, threadId, terminalId, cols, rows, false, cwd);
         this.terminals.set(key, fallback);
         this.changed({ type: "reset", projectId, threadId, terminalId, revision: fallback.revision });
         return;
