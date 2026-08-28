@@ -15,6 +15,7 @@ import type {
 } from "../../../shared/contracts.ts";
 import { parsePiFileContexts } from "./attachments.ts";
 import { getPiThreadNodesChange } from "./pi-thread-store.ts";
+import { toSessionImageResourceUrl } from "./session-image-resource-ref.ts";
 
 type RepositoryItem = ExportedMessageRepository["messages"][number];
 type PiNoticePart = {
@@ -318,7 +319,7 @@ function userMessage(node: Extract<PiTimelineNode, { kind: "user" }>, projectedI
         name,
         contentType: part.mimeType,
         status: { type: "complete" },
-        content: [{ type: "image", image: `data:${part.mimeType};base64,${part.data}`, filename: name }],
+        content: [{ type: "image", image: toSessionImageResourceUrl(part), filename: name }],
       });
       continue;
     }

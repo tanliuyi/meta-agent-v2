@@ -36,9 +36,7 @@ function asSnapshot(value: unknown): BrowserSnapshot | undefined {
 
 function asImageResourceRef(value: unknown): SessionImageResourceRef | undefined {
   if (!isRecord(value) || typeof value.resourceId !== "string" || typeof value.mimeType !== "string") return undefined;
-  const unavailable =
-    value.unavailable === "too-large" || value.unavailable === "budget-exceeded" ? value.unavailable : undefined;
-  return { resourceId: value.resourceId, mimeType: value.mimeType, ...(unavailable ? { unavailable } : {}) };
+  return { resourceId: value.resourceId, mimeType: value.mimeType };
 }
 
 /** 截图来源：内嵌 dataUrl 或历史 timeline 的图像资源引用。 */

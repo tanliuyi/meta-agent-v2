@@ -197,13 +197,12 @@ export interface PiTimelineNodeBase {
   label?: string;
 }
 
-export type PiUserContentPart = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+export type PiUserContentPart = { type: "text"; text: string } | ({ type: "image" } & SessionImageResourceRef);
 
 /** timeline 中携带的轻量图像资源引用；主体按需经 sessions.readImageResource 读取。 */
 export interface SessionImageResourceRef {
   resourceId: string;
   mimeType: string;
-  unavailable?: "too-large" | "budget-exceeded";
 }
 
 /** 图像资源主体（base64 data），仅经 readImageResource 单图返回，不进 timeline/bootstrap。 */

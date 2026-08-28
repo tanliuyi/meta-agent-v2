@@ -19,24 +19,4 @@ describe("parseToolResult image parts", () => {
     expect(parsed?.images).toEqual([{ resourceId: "resource-1", mimeType: "image/png" }]);
     expect(parsed?.text).toBe("");
   });
-
-  it("preserves unavailable resource reasons", () => {
-    const parsed = parseToolResult({
-      content: [
-        {
-          type: "image",
-          resourceId: "00000000-0000-4000-8000-000000000000",
-          mimeType: "image/png",
-          unavailable: "too-large",
-        },
-      ],
-    });
-    expect(parsed?.images).toEqual([
-      {
-        resourceId: "00000000-0000-4000-8000-000000000000",
-        mimeType: "image/png",
-        unavailable: "too-large",
-      },
-    ]);
-  });
 });

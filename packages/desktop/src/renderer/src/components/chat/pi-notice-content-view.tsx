@@ -1,5 +1,6 @@
 import { StreamdownMarkdown } from "@renderer/components/assistant-ui/streamdown/streamdown-markdown";
 import type { PiNoticeContent } from "../../../../shared/contracts.ts";
+import { ToolImage } from "./tools/tool-image.tsx";
 
 export function PiNoticeContentView({ id, title, content }: { id: string; title: string; content: PiNoticeContent }) {
   if (content.type === "text") return <StreamdownMarkdown>{content.text}</StreamdownMarkdown>;
@@ -22,11 +23,7 @@ export function PiNoticeContentView({ id, title, content }: { id: string; title:
         part.type === "text" ? (
           <StreamdownMarkdown key={`${id}:text:${index}`}>{part.text}</StreamdownMarkdown>
         ) : (
-          <img
-            key={`${id}:image:${index}`}
-            src={`data:${part.mimeType};base64,${part.data}`}
-            alt={`${title} ${index + 1}`}
-          />
+          <ToolImage key={`${id}:image:${index}`} resource={part} alt={`${title} ${index + 1}`} />
         ),
       )}
     </div>

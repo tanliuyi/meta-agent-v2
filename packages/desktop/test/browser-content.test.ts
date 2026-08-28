@@ -10,20 +10,6 @@ describe("asScreenshotSource", () => {
     expect(asScreenshotSource({ dataUrl: resource, width: 800 })).toEqual(resource);
   });
 
-  it("preserves unavailable screenshot reasons", () => {
-    expect(
-      asScreenshotSource({
-        resourceId: "00000000-0000-4000-8000-000000000000",
-        mimeType: "image/png",
-        unavailable: "budget-exceeded",
-      }),
-    ).toEqual({
-      resourceId: "00000000-0000-4000-8000-000000000000",
-      mimeType: "image/png",
-      unavailable: "budget-exceeded",
-    });
-  });
-
   it("rejects malformed screenshot values", () => {
     expect(asScreenshotSource({ dataUrl: { resourceId: "resource-1" } })).toBeUndefined();
     expect(asScreenshotSource(null)).toBeUndefined();

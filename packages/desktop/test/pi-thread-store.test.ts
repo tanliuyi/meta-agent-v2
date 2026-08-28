@@ -196,7 +196,13 @@ describe("PiMessageRepositoryConverter", () => {
       expect.objectContaining({
         id: "u:image:1",
         status: { type: "complete" },
-        content: [{ type: "image", image: "data:image/png;base64,aW1hZ2U=", filename: "image-2.png" }],
+        content: [
+          {
+            type: "image",
+            image: "pi-session-image:00000000-0000-4000-8000-000000000001#image%2Fpng",
+            filename: "image-2.png",
+          },
+        ],
       }),
     ]);
   });
@@ -738,7 +744,15 @@ function userNode(id: string, parentId: string | null, image = false): PiUserMes
     kind: "user",
     content: [
       { type: "text", text: "question" },
-      ...(image ? ([{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }] as const) : []),
+      ...(image
+        ? ([
+            {
+              type: "image",
+              resourceId: "00000000-0000-4000-8000-000000000001",
+              mimeType: "image/png",
+            },
+          ] as const)
+        : []),
     ],
     delivery: { state: "persisted" },
   };

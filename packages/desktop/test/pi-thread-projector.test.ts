@@ -1029,6 +1029,29 @@ describe("PiThreadProjector timeline image resources", () => {
   const SCREENSHOT_DATA = "base64-screenshot-body";
   const SNAPSHOT_SHOT_DATA = "base64-snapshot-shot-body";
 
+  it("将历史用户消息图片替换为资源引用，且可原样读回", () => {
+    const user = {
+      role: "user",
+      content: [
+        { type: "text", text: "查看图片" },
+        { type: "image", data: "base64-user-image-body", mimeType: "image/png" },
+      ],
+      timestamp: 1,
+    } as AgentSession["messages"][number];
+    const { session } = sessionHarness([messageEntry("u", null, user)]);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+
+    const node = projector.snapshot().nodes[0];
+    if (node?.kind !== "user") throw new Error("user node missing");
+    expect(node.content[0]).toEqual({ type: "text", text: "查看图片" });
+    const image = node.content[1];
+    if (image?.type !== "image") throw new Error("user image missing");
+    expect(image).toMatchObject({ type: "image", mimeType: "image/png" });
+    expect(JSON.stringify(projector.snapshot())).not.toContain("base64-user-image-body");
+    expect(projector.readImageResource(image.resourceId)?.data).toBe("base64-user-image-body");
+    projector.dispose();
+  });
+
   it("将历史 toolResult 图像主体替换为资源引用，且可原样读回", () => {
     const content = [
       { type: "image" as const, data: TOOL_IMAGE_DATA, mimeType: "image/png" },
@@ -1107,7 +1130,7 @@ describe("PiThreadProjector timeline image resources", () => {
     projector.dispose();
   });
 
-  it("超出单图上限时投影为显式不可用引用", () => {
+  it("超大单图仍投影为可按需读取的资源引用", () => {
     const oversized = "x".repeat(8 * 1024 * 1024 + 1);
     const entries: SessionEntry[] = [
       messageEntry("u", null, userMessage("超大图片", 1)),
@@ -1128,14 +1151,11 @@ describe("PiThreadProjector timeline image resources", () => {
     const part = node.content[0];
     if (part?.type !== "tool-call") throw new Error("tool part missing");
     const projectedContent = (part.result as Record<string, unknown>).content as unknown[];
-    expect(projectedContent[0]).toEqual({
-      type: "image",
-      resourceId: "00000000-0000-4000-8000-000000000000",
-      mimeType: "image/png",
-      unavailable: "too-large",
-    });
+    const projectedImage = projectedContent[0] as { type: string; resourceId: string; mimeType: string };
+    expect(projectedImage).toMatchObject({ type: "image", mimeType: "image/png" });
+    expect(projectedImage.resourceId).not.toBe("");
     expect(JSON.stringify(projector.snapshot())).not.toContain(oversized);
-    expect(projector.readImageResource("00000000-0000-4000-8000-000000000000")).toBeUndefined();
+    expect(projector.readImageResource(projectedImage.resourceId)?.data).toBe(oversized);
     projector.dispose();
   });
 

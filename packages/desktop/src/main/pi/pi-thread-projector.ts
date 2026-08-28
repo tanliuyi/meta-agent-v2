@@ -60,11 +60,6 @@ interface PendingQuoteAttachment {
   quotes: readonly PiQuote[];
 }
 
-const MAX_SESSION_IMAGE_RESOURCE_BASE64_BYTES = 8 * 1024 * 1024;
-const MAX_SESSION_IMAGE_RESOURCE_BYTES = 64 * 1024 * 1024;
-const MAX_SESSION_IMAGE_RESOURCES = 4_096;
-const UNAVAILABLE_IMAGE_RESOURCE_ID = "00000000-0000-4000-8000-000000000000";
-
 /** 将 Pi public session tree 与 live events 投影为 Desktop timeline。 */
 export class PiThreadProjector {
   private readonly projectId: string;
@@ -78,7 +73,7 @@ export class PiThreadProjector {
   private readonly imageResources = new Map<string, { mimeType: string; data: string }>();
   /** 同一图像在 live、持久化和 branch rebuild 间复用 resourceId，避免重复主体与孤儿引用。 */
   private readonly imageResourceIds = new Map<string, string>();
-  private imageResourceBytes = 0;
+  private readonly registerImage = (mimeType: string, data: string) => this.registerImageResource(mimeType, data);
   private nodeIds: string[] = [];
   private nodeSnapshot: PiTimelineNode[] | undefined;
   private readonly byId = new Map<string, PiTimelineNode>();
@@ -371,7 +366,6 @@ export class PiThreadProjector {
     this.flush();
     this.imageResources.clear();
     this.imageResourceIds.clear();
-    this.imageResourceBytes = 0;
   }
 
   private startMessage(message: AgentMessage): void {
@@ -397,9 +391,9 @@ export class PiThreadProjector {
           content:
             pending?.text === undefined
               ? pendingQuotes && pendingQuotes.length > 0
-                ? userContentWithQuoteStrip(message.content, pendingQuotes)
-                : userContent(message.content)
-              : userContentWithText(message.content, pending.text),
+                ? userContentWithQuoteStrip(message.content, pendingQuotes, this.registerImage)
+                : userContent(message.content, this.registerImage)
+              : userContentWithText(message.content, pending.text, this.registerImage),
           ...(pendingQuotes && pendingQuotes.length > 0 ? quoteFields(pendingQuotes) : {}),
           delivery: {
             state: "live",
@@ -427,7 +421,7 @@ export class PiThreadProjector {
         }
         if (!message.display) return;
         const id = this.transientId("custom");
-        const node = customNotice(id, parentId, message);
+        const node = customNotice(id, parentId, message, this.registerImage);
         this.addNode(node, message);
         this.liveMessages.add(message);
         return;
@@ -529,7 +523,7 @@ export class PiThreadProjector {
         if (!current || current.kind !== "user") return;
         this.replaceNode({
           ...current,
-          content: current.quote || current.quotes ? current.content : userContent(message.content),
+          content: current.quote || current.quotes ? current.content : userContent(message.content, this.registerImage),
         });
         return;
       }
@@ -554,7 +548,7 @@ export class PiThreadProjector {
         if (!id) return;
         const current = this.byId.get(id);
         if (!current) return;
-        this.replaceNode(customNotice(id, current.parentId, message, current.sourceEntryId));
+        this.replaceNode(customNotice(id, current.parentId, message, this.registerImage, current.sourceEntryId));
         return;
       }
       case "bashExecution":
@@ -619,7 +613,7 @@ export class PiThreadProjector {
     const slashNodeId = slashRequestId ? this.slashResultNodes.get(slashRequestId) : undefined;
     if (entry.type === "custom_message" && !entry.display && slashNodeId) {
       const current = this.byId.get(slashNodeId);
-      if (current?.kind === "notice") this.replaceNode(updateCustomNotice(current, entry));
+      if (current?.kind === "notice") this.replaceNode(updateCustomNotice(current, entry, this.registerImage));
       this.visibleByEntryId.set(entry.id, slashNodeId);
       return;
     }
@@ -638,7 +632,7 @@ export class PiThreadProjector {
       return;
     }
 
-    const projected = projectEntry(entry, parentId, this.thinkingLevel);
+    const projected = projectEntry(entry, parentId, this.thinkingLevel, this.registerImage);
     if (!projected) {
       if (entry.type === "message" && entry.message.role === "toolResult") this.foldToolResult(entry.message);
       if (entry.type === "label") this.applyLabel(entry.targetId);
@@ -703,11 +697,17 @@ export class PiThreadProjector {
       const slashNodeId = slashRequestId ? this.slashResultNodes.get(slashRequestId) : undefined;
       if (entry.type === "custom_message" && !entry.display && slashNodeId) {
         const current = this.byId.get(slashNodeId);
-        if (current?.kind === "notice") this.replaceNode(updateCustomNotice(current, entry), false);
+        if (current?.kind === "notice") this.replaceNode(updateCustomNotice(current, entry, this.registerImage), false);
         this.visibleByEntryId.set(entry.id, slashNodeId);
         continue;
       }
-      const node = projectEntry(entry, parentId, this.thinkingLevel, quoteAttachments.get(entry.id));
+      const node = projectEntry(
+        entry,
+        parentId,
+        this.thinkingLevel,
+        this.registerImage,
+        quoteAttachments.get(entry.id),
+      );
       if (!node) {
         if (entry.type === "message" && entry.message.role === "toolResult") this.foldToolResult(entry.message, false);
         this.visibleByEntryId.set(entry.id, parentId);
@@ -910,7 +910,7 @@ export class PiThreadProjector {
         !node.sourceEntryId &&
         node.content.type === "custom" &&
         node.content.customType === entry.customType &&
-        sameJson(node.content.content, userContent(entry.content)) &&
+        sameJson(node.content.content, userContent(entry.content, this.registerImage)) &&
         sameJson(node.content.details, entry.details),
     );
     return uniqueNodeMatch(candidates, `custom entry ${entry.id}`)?.id;
@@ -926,7 +926,7 @@ export class PiThreadProjector {
         !boundIds.has(node.id) &&
         node.content.type === "custom" &&
         node.content.customType === message.customType &&
-        sameJson(node.content.content, userContent(message.content)) &&
+        sameJson(node.content.content, userContent(message.content, this.registerImage)) &&
         sameJson(node.content.details, message.details),
     );
     return uniqueNodeMatch(candidates, `custom message ${message.customType}`);
@@ -1000,32 +1000,20 @@ export class PiThreadProjector {
 
   /** 登记投影中遇到的原始图像主体（base64），返回 worker 生命周期内稳定的轻量引用。 */
   private registerImageResource(mimeType: string, data: string): SessionImageResourceRef {
-    const bytes = Buffer.byteLength(data, "utf8");
-    if (bytes > MAX_SESSION_IMAGE_RESOURCE_BASE64_BYTES) {
-      return { resourceId: UNAVAILABLE_IMAGE_RESOURCE_ID, mimeType, unavailable: "too-large" };
-    }
-
     const digest = createHash("sha256").update(mimeType).update("\0").update(data).digest("hex");
     const existingId = this.imageResourceIds.get(digest);
     const existing = existingId ? this.imageResources.get(existingId) : undefined;
     if (existingId && existing?.mimeType === mimeType && existing.data === data) {
       return { resourceId: existingId, mimeType };
     }
-    if (
-      this.imageResources.size >= MAX_SESSION_IMAGE_RESOURCES ||
-      this.imageResourceBytes + bytes > MAX_SESSION_IMAGE_RESOURCE_BYTES
-    ) {
-      return { resourceId: UNAVAILABLE_IMAGE_RESOURCE_ID, mimeType, unavailable: "budget-exceeded" };
-    }
 
     const resourceId = randomUUID();
     this.imageResources.set(resourceId, { mimeType, data });
     this.imageResourceIds.set(digest, resourceId);
-    this.imageResourceBytes += bytes;
     return { resourceId, mimeType };
   }
 
-  /** 读取 timeline 引用的图像资源主体；未知、超限或 worker 已结束的 ID 返回 undefined。 */
+  /** 读取 timeline 引用的图像资源主体；未知或 worker 已结束的 ID 返回 undefined。 */
   readImageResource(resourceId: string): SessionImageResource | undefined {
     const resource = this.imageResources.get(resourceId);
     return resource ? { resourceId, ...resource } : undefined;
@@ -1103,6 +1091,7 @@ function slashResultRequestId(entry: SessionEntry): string | undefined {
 function updateCustomNotice(
   current: Extract<PiTimelineNode, { kind: "notice" }>,
   entry: Extract<SessionEntry, { type: "custom_message" }>,
+  registerImageResource: (mimeType: string, data: string) => SessionImageResourceRef,
 ): PiTimelineNode {
   return {
     ...current,
@@ -1110,7 +1099,7 @@ function updateCustomNotice(
     content: {
       type: "custom",
       customType: entry.customType,
-      content: userContent(entry.content),
+      content: userContent(entry.content, registerImageResource),
       ...(entry.details !== undefined ? { details: toJson(entry.details) } : {}),
     },
   };
@@ -1120,12 +1109,21 @@ function projectEntry(
   entry: SessionEntry,
   parentId: string | null,
   thinkingLevel: ThinkingLevel,
+  registerImageResource: (mimeType: string, data: string) => SessionImageResourceRef,
   quotes?: readonly PiQuote[],
 ): PiTimelineNode | undefined {
   const createdAt = timestamp(entry.timestamp);
   switch (entry.type) {
     case "message":
-      return projectPersistedMessage(entry.id, parentId, createdAt, entry.message, thinkingLevel, quotes);
+      return projectPersistedMessage(
+        entry.id,
+        parentId,
+        createdAt,
+        entry.message,
+        thinkingLevel,
+        registerImageResource,
+        quotes,
+      );
     case "custom_message":
       return entry.display
         ? {
@@ -1139,7 +1137,7 @@ function projectEntry(
             content: {
               type: "custom",
               customType: entry.customType,
-              content: userContent(entry.content),
+              content: userContent(entry.content, registerImageResource),
               ...(entry.details !== undefined ? { details: toJson(entry.details) } : {}),
             },
           }
@@ -1194,6 +1192,7 @@ function projectPersistedMessage(
   completedAt: number,
   message: AgentMessage,
   thinkingLevel: ThinkingLevel,
+  registerImageResource: (mimeType: string, data: string) => SessionImageResourceRef,
   quotes?: readonly PiQuote[],
 ): PiTimelineNode | undefined {
   switch (message.role) {
@@ -1204,7 +1203,9 @@ function projectPersistedMessage(
         parentId,
         createdAt: completedAt,
         kind: "user",
-        content: quotes?.length ? userContentWithQuoteStrip(message.content, quotes) : userContent(message.content),
+        content: quotes?.length
+          ? userContentWithQuoteStrip(message.content, quotes, registerImageResource)
+          : userContent(message.content, registerImageResource),
         delivery: { state: "persisted" },
         ...(quotes?.length ? quoteFields(quotes) : {}),
       };
@@ -1231,7 +1232,7 @@ function projectPersistedMessage(
         },
       };
     case "custom":
-      return message.display ? customNotice(id, parentId, message, id, completedAt) : undefined;
+      return message.display ? customNotice(id, parentId, message, registerImageResource, id, completedAt) : undefined;
     case "compactionSummary":
       return {
         id,
@@ -1315,6 +1316,7 @@ function customNotice(
   id: string,
   parentId: string | null,
   message: CustomMessage,
+  registerImageResource: (mimeType: string, data: string) => SessionImageResourceRef,
   sourceEntryId?: string,
   createdAt = message.timestamp,
 ): PiTimelineNode {
@@ -1329,7 +1331,7 @@ function customNotice(
     content: {
       type: "custom",
       customType: message.customType,
-      content: userContent(message.content),
+      content: userContent(message.content, registerImageResource),
       ...(message.details !== undefined ? { details: toJson(message.details) } : {}),
     },
   };
@@ -1445,8 +1447,9 @@ function assistantPartKey(part: PiAssistantPart): string | undefined {
 function userContentWithQuoteStrip(
   content: string | readonly unknown[],
   quotes: readonly PiQuote[],
+  registerImageResource: (mimeType: string, data: string) => SessionImageResourceRef,
 ): PiUserContentPart[] {
-  const parts = userContent(content);
+  const parts = userContent(content, registerImageResource);
   const first = parts[0];
   if (!first || first.type !== "text") return parts;
   const stripped = stripQuotePrefix(first.text, quotes);
@@ -1455,11 +1458,21 @@ function userContentWithQuoteStrip(
   return stripped.length === 0 ? rest : [{ type: "text", text: stripped }, ...rest];
 }
 
-function userContentWithText(content: string | readonly unknown[], text: string): PiUserContentPart[] {
-  return [{ type: "text", text }, ...userContent(content).filter((part) => part.type === "image")];
+function userContentWithText(
+  content: string | readonly unknown[],
+  text: string,
+  registerImageResource: (mimeType: string, data: string) => SessionImageResourceRef,
+): PiUserContentPart[] {
+  return [
+    { type: "text", text },
+    ...userContent(content, registerImageResource).filter((part) => part.type === "image"),
+  ];
 }
 
-function userContent(content: string | readonly unknown[]): PiUserContentPart[] {
+function userContent(
+  content: string | readonly unknown[],
+  registerImageResource: (mimeType: string, data: string) => SessionImageResourceRef,
+): PiUserContentPart[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   return content.flatMap((part): PiUserContentPart[] => {
     if (!part || typeof part !== "object" || !("type" in part)) return [];
@@ -1472,7 +1485,7 @@ function userContent(content: string | readonly unknown[]): PiUserContentPart[] 
       "mimeType" in part &&
       typeof part.mimeType === "string"
     )
-      return [{ type: "image", data: part.data, mimeType: part.mimeType }];
+      return [{ type: "image", ...registerImageResource(part.mimeType, part.data) }];
     return [];
   });
 }

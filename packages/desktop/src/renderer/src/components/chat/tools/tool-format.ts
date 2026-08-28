@@ -108,11 +108,7 @@ export function parseToolResult(value: unknown): ParsedToolResult | undefined {
     if (!part || typeof part !== "object" || !("type" in part) || part.type !== "image") return [];
     if (!("mimeType" in part) || typeof part.mimeType !== "string") return [];
     if ("resourceId" in part && typeof part.resourceId === "string") {
-      const unavailable =
-        "unavailable" in part && (part.unavailable === "too-large" || part.unavailable === "budget-exceeded")
-          ? part.unavailable
-          : undefined;
-      return [{ resourceId: part.resourceId, mimeType: part.mimeType, ...(unavailable ? { unavailable } : {}) }];
+      return [{ resourceId: part.resourceId, mimeType: part.mimeType }];
     }
     if (!("data" in part) || typeof part.data !== "string") return [];
     return [{ data: part.data, mimeType: part.mimeType }];

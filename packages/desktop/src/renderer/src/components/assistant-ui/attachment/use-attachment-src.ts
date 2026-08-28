@@ -1,8 +1,10 @@
 import { useAuiState } from "@assistant-ui/react";
 import { useShallow } from "zustand/shallow";
+import { parseSessionImageResourceUrl } from "../../../runtime/session-image-resource-ref.ts";
+import { useSessionImageResource } from "../../session-image-resource.ts";
 import { useFileSrc } from "./use-file-src.ts";
 
-/** 优先读取待上传 File 的 object URL，否则使用已完成附件中的持久化图片地址。 */
+/** 优先读取待上传 File；历史会话图片通过资源引用按需读取；其他附件使用其持久化地址。 */
 export function useAttachmentSrc(): string | undefined {
   const { file, src } = useAuiState(
     useShallow((state): { file?: File; src?: string } => {
@@ -12,6 +14,8 @@ export function useAttachmentSrc(): string | undefined {
       return image ? { src: image } : {};
     }),
   );
+  const resource = parseSessionImageResourceUrl(src);
+  const sessionImage = useSessionImageResource(resource);
 
-  return useFileSrc(file) ?? src;
+  return useFileSrc(file) ?? sessionImage.src ?? (resource ? undefined : src);
 }
