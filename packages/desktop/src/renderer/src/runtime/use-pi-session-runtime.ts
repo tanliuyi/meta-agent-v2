@@ -10,7 +10,7 @@ import {
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import type { PiQueueItem, SessionControlState } from "../../../shared/contracts.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
-import { imageAttachmentAdapter, restoreComposerAttachments } from "./image-attachments.ts";
+import { attachmentAdapter, restoreComposerAttachments } from "./attachments.ts";
 import { PiCommandCoordinator } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
 import type { CachedSessionRecord } from "./pi-session-store.ts";
@@ -99,7 +99,7 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
       onNew: coordinator.rejectUnexpectedOnNew,
       queue,
       onCancel: hasCommandTarget && isCancelable ? coordinator.cancel : undefined,
-      adapters: { attachments: !isSendDisabled ? imageAttachmentAdapter : undefined },
+      adapters: { attachments: !isSendDisabled ? attachmentAdapter : undefined },
       unstable_enableToolInvocations: false,
     }),
     [coordinator, hasCommandTarget, isAgentRunning, isCancelable, isLoading, isSendDisabled, queue, repository],
@@ -144,12 +144,13 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
 
     if (!isSendDisabled && !restoreState.complete && !restoreState.restorePromise) {
       const currentRestore = restoreState;
-      currentRestore.restorePromise = restoreComposerAttachments(
+      const restorePromise = restoreComposerAttachments(
         (attachment) => composer.addAttachment(attachment),
         currentRestore.savedAttachments,
         currentRestore.restoredAttachments,
       );
-      void currentRestore.restorePromise.then(
+      currentRestore.restorePromise = restorePromise;
+      void restorePromise.then(
         () => {
           currentRestore.complete = true;
           currentRestore.restorePromise = null;

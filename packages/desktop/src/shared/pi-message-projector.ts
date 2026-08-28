@@ -7,6 +7,7 @@ import type {
   PiTimelineNode,
   PiToolCallPart,
   PiUserContentPart,
+  SessionImageResourceRef,
   ThinkingLevel,
 } from "./contracts.ts";
 
@@ -22,7 +23,10 @@ interface PiMessageProjectionOptions {
   sourceEntryId?: string;
   completedAt?: number;
   thinkingLevel?: ThinkingLevel;
+  registerImageResource?: RegisterImageResource;
 }
+
+export type RegisterImageResource = (mimeType: string, data: string) => SessionImageResourceRef;
 
 export function createPiMessageNodeId(message: PiMessage, nodes: readonly PiTimelineNode[]): string {
   const base = `pi-message:${message.role}:${message.timestamp}`;
@@ -34,7 +38,8 @@ export function createPiMessageNodeId(message: PiMessage, nodes: readonly PiTime
 }
 
 export function projectPiMessage(options: PiMessageProjectionOptions): PiTimelineNode | undefined {
-  const { id, parentId, message, finished, sourceEntryId, completedAt, thinkingLevel = "off" } = options;
+  const { id, parentId, message, finished, sourceEntryId, completedAt, thinkingLevel = "off", registerImageResource } =
+    options;
   const source = sourceEntryId ? { sourceEntryId } : {};
   switch (message.role) {
     case "user":
@@ -44,7 +49,7 @@ export function projectPiMessage(options: PiMessageProjectionOptions): PiTimelin
         parentId,
         createdAt: message.timestamp,
         kind: "user",
-        content: piUserContent(message.content),
+        content: piUserContent(message.content, registerImageResource),
         delivery: finished ? { state: "persisted" } : { state: "live" },
       };
     case "assistant":
@@ -82,7 +87,7 @@ export function projectPiMessage(options: PiMessageProjectionOptions): PiTimelin
             content: {
               type: "custom",
               customType: message.customType,
-              content: piUserContent(message.content),
+              content: piUserContent(message.content, registerImageResource),
               ...(message.details !== undefined ? { details: toJson(message.details) } : {}),
             },
           }
@@ -176,21 +181,31 @@ export function projectPiAssistant(options: {
   };
 }
 
-export function applyPiToolResult(part: PiToolCallPart, message: PiToolResult): PiToolCallPart {
+export function applyPiToolResult(
+  part: PiToolCallPart,
+  message: PiToolResult,
+  registerImageResource?: RegisterImageResource,
+): PiToolCallPart {
   return {
     ...part,
     execution: message.isError ? "error" : "complete",
-    result: toJson({
-      content: message.content,
-      ...(message.details !== undefined ? { details: message.details } : {}),
-      ...(message.addedToolNames ? { addedToolNames: message.addedToolNames } : {}),
-      ...(message.usage ? { usage: message.usage } : {}),
-    }),
+    result: projectPiToolResult(
+      {
+        content: message.content,
+        ...(message.details !== undefined ? { details: message.details } : {}),
+        ...(message.addedToolNames ? { addedToolNames: message.addedToolNames } : {}),
+        ...(message.usage ? { usage: message.usage } : {}),
+      },
+      registerImageResource,
+    ),
     isError: message.isError,
   };
 }
 
-export function piUserContent(content: string | readonly unknown[]): PiUserContentPart[] {
+export function piUserContent(
+  content: string | readonly unknown[],
+  registerImageResource?: RegisterImageResource,
+): PiUserContentPart[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   return content.flatMap((part): PiUserContentPart[] => {
     if (!part || typeof part !== "object" || !("type" in part)) return [];
@@ -204,9 +219,32 @@ export function piUserContent(content: string | readonly unknown[]): PiUserConte
       "mimeType" in part &&
       typeof part.mimeType === "string"
     ) {
-      return [{ type: "image", data: part.data, mimeType: part.mimeType }];
+      return registerImageResource
+        ? [{ type: "image", ...registerImageResource(part.mimeType, part.data) }]
+        : [];
     }
     return [];
+  });
+}
+
+export function projectPiToolResult(value: unknown, registerImageResource?: RegisterImageResource): JsonValue {
+  if (!registerImageResource || !isPlainRecord(value)) return toJson(value);
+  return toJson({
+    ...value,
+    ...(Array.isArray(value.content)
+      ? {
+          content: value.content.map((part) => {
+            if (!isPlainRecord(part)) return part;
+            if (part.type !== "image" || typeof part.data !== "string" || typeof part.mimeType !== "string") {
+              return part;
+            }
+            return { type: "image", ...registerImageResource(part.mimeType, part.data) };
+          }),
+        }
+      : {}),
+    ...(isPlainRecord(value.details)
+      ? { details: projectPiToolDetails(value.details, registerImageResource) }
+      : {}),
   });
 }
 
@@ -246,6 +284,42 @@ function piAssistantStatus(message: PiAssistant): PiAssistantStatus {
     default:
       throw new Error(`Unsupported Pi assistant stop reason: ${String(message.stopReason)}`);
   }
+}
+
+function projectPiToolDetails(
+  details: Record<string, unknown>,
+  registerImageResource: RegisterImageResource,
+): Record<string, unknown> {
+  const projected = { ...details };
+  projected.screenshot = projectScreenshot(details.screenshot, registerImageResource);
+  if (isPlainRecord(details.snapshot)) {
+    projected.snapshot = {
+      ...details.snapshot,
+      screenshot: projectScreenshot(details.snapshot.screenshot, registerImageResource),
+    };
+  }
+  return projected;
+}
+
+function projectScreenshot(value: unknown, registerImageResource: RegisterImageResource): unknown {
+  if (typeof value === "string") return dataUrlToImageResourceRef(value, registerImageResource) ?? value;
+  if (!isPlainRecord(value) || typeof value.dataUrl !== "string") return value;
+  const ref = dataUrlToImageResourceRef(value.dataUrl, registerImageResource);
+  return ref ? { ...value, dataUrl: ref } : value;
+}
+
+const DATA_URL_PATTERN = /^data:image\/([A-Za-z0-9.+-]+);base64,(.+)$/s;
+
+function dataUrlToImageResourceRef(
+  value: string,
+  registerImageResource: RegisterImageResource,
+): SessionImageResourceRef | undefined {
+  const match = DATA_URL_PATTERN.exec(value);
+  return match ? registerImageResource(`image/${match[1]}`, match[2] ?? "") : undefined;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isJsonObject(value: JsonValue): value is { [key: string]: JsonValue } {

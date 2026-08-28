@@ -96,8 +96,8 @@ export function NewSessionDraft() {
           projectId: draft.parent.projectId,
           model: { provider: draft.config.model.provider, id: draft.config.model.id },
           thinkingLevel: draft.config.thinkingLevel,
-          text: state.text,
-          images,
+          text: attachments.text,
+          images: attachments.images,
         },
         {
           requestIds: draft.createRequestIds,

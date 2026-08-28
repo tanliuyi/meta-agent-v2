@@ -430,6 +430,7 @@ export function isMutationCommand(commandType: SidecarCommand["type"]): boolean 
     "listSessionsWithPaths",
     "resolveSession",
     "getDraftConfig",
+    "getImageResource",
     "prepareProjection",
     "garbageCollectProjections",
     "recoverCreationReservation",

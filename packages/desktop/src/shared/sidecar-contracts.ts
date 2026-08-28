@@ -8,13 +8,14 @@ import type {
   SessionCreateInput,
   SessionForkInput,
   SessionForkResult,
+  SessionImageResource,
   SessionPromptInput,
   SessionPushPayload,
   SessionRemovePolicy,
   SessionRemoveResult,
   Thread,
 } from "./contracts.ts";
-export const SIDECAR_PROTOCOL_VERSION = 6;
+export const SIDECAR_PROTOCOL_VERSION = 7;
 
 export type SidecarRole = "thread" | "metadata";
 
@@ -213,6 +214,7 @@ export type ThreadSidecarCommand =
   | { type: "rename"; title: string }
   | { type: "respondHostUi"; response: HostResponse }
   | { type: "getSummary"; archived: boolean }
+  | { type: "getImageResource"; resourceId: string }
   | { type: "ping" };
 
 export interface CreationReservation {
@@ -287,6 +289,7 @@ export type SidecarCommandResult =
   | Thread
   | Thread[]
   | SessionRemoveResult
+  | SessionImageResource
   | SessionResolution
   | { pong: true }
   | null;

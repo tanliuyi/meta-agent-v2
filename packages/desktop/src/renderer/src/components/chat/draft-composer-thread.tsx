@@ -1,6 +1,6 @@
 import { ThreadPrimitive } from "@assistant-ui/react";
 import { cn } from "@renderer/shared/lib/cn";
-import type { DraftSessionConfig, Project, ThinkingLevel } from "../../../../shared/contracts.ts";
+import type { DraftSessionConfig, GitWorktree, Project, ThinkingLevel } from "../../../../shared/contracts.ts";
 import { Composer } from "./composer/composer.tsx";
 import { ComposerFeedback } from "./composer/composer-feedback.tsx";
 

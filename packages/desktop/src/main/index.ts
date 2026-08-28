@@ -272,6 +272,7 @@ app.whenReady().then(async () => {
     agentDir,
     ...(desktopBashPath ? { shellPath: desktopBashPath } : {}),
     getCwd: (projectId) => projects.getCwd(projectId),
+    resolveSessionCwd: (projectId, cwd) => projects.resolveSessionCwd(projectId, cwd),
     push: (payload, workerInstanceId, sidecarSequence, payloadJsonLength) => {
       if (supervisor) supervisor.receive(payload, workerInstanceId, sidecarSequence, payloadJsonLength);
       else workers.acknowledge(workerInstanceId, sidecarSequence);
@@ -334,20 +335,12 @@ app.whenReady().then(async () => {
     files,
     new OfficeDocumentPreviewService(projects, {
       cacheDir: join(userDataDir, "cache", "office-document-preview"),
-      getConfiguration: async () => {
-        try {
-          const { values } = await pluginConfigurations.getRuntimeConfiguration("pi.officecli");
-          return {
-            installed: true,
-            binaryPath: typeof values.binaryPath === "string" ? values.binaryPath : undefined,
-            dataDir: typeof values.dataDir === "string" ? values.dataDir : undefined,
-            version: typeof values.version === "string" ? values.version : undefined,
-            autoDownload: typeof values.autoDownload === "boolean" ? values.autoDownload : undefined,
-          };
-        } catch {
-          return {};
-        }
-      },
+      getConfiguration: async () => ({
+        binaryPath: process.env.PI_OFFICECLI_BINARY_PATH,
+        dataDir: process.env.PI_OFFICECLI_DATA_DIR,
+        version: process.env.PI_OFFICECLI_VERSION,
+        autoDownload: process.env.PI_OFFICECLI_AUTO_DOWNLOAD !== "0",
+      }),
     }),
     new ProjectFileWatcher(projects, (change) => {
       for (const window of BrowserWindow.getAllWindows()) {

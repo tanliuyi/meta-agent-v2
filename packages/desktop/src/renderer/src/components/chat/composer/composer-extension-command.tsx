@@ -1,12 +1,12 @@
 import { useAui } from "@assistant-ui/react";
 import { useEffect } from "react";
 import type { RpcExtensionHostState } from "../../../../../shared/contracts.ts";
+import type { SessionExtensionCommandStore } from "../../../runtime/pi-session-store.ts";
 
 const appliedRevisions = new Map<string, number>();
 
 interface ComposerExtensionCommandProps {
-  projectId: string;
-  threadId: string;
+  store: SessionExtensionCommandStore;
   command: RpcExtensionHostState["composerCommand"];
 }
 

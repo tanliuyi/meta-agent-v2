@@ -11,6 +11,7 @@ import type {
   SessionCreateInput,
   SessionForkInput,
   SessionForkResult,
+  SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
@@ -31,6 +32,8 @@ import type {
   ThreadWorkerForkResult,
 } from "../../shared/sidecar-contracts.ts";
 import { collectThreadDescendantIds } from "../../shared/thread-tree.ts";
+import { readSessionFileHeader } from "../../sidecar/session-file-header.ts";
+import { samePath } from "../path-identity.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
 import { SharedThreadSidecarProcess } from "./shared-thread-sidecar-client.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
@@ -60,6 +63,7 @@ interface WorkerRecord {
   client: ThreadWorkerClient;
   projectId: string;
   threadId: string;
+  cwd: string;
   summary?: Thread;
   /** 子会话的父线程 id（create 模式传入），运行时 summary 更新时保持父级关联。 */
   parentThreadId?: string;
@@ -90,6 +94,7 @@ export interface ThreadWorkerRegistryOptions {
   agentDir: string;
   shellPath?: string;
   getCwd(projectId: string): string;
+  resolveSessionCwd(projectId: string, cwd: string): Promise<string>;
   push(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number, payloadJsonLength: number): void;
   failed(projectId: string, threadId: string, error: Error): void;
   resync(projectId: string, threadId: string, reason: string): void;
@@ -182,8 +187,12 @@ export class ThreadWorkerRegistry {
 
   async getDraftConfig(projectId: string, cwd = this.options.getCwd(projectId)): Promise<DraftSessionConfig> {
     this.assertProjectAvailable(projectId);
-    const cwd = this.options.getCwd(projectId);
     return this.options.metadata.getDraftConfig(projectId, cwd);
+  }
+
+  getSessionCwd(projectId: string, threadId: string): string | undefined {
+    const record = this.records.get(workerKey(projectId, threadId));
+    return record && !record.retired ? record.cwd : undefined;
   }
 
   create(input: SessionCreateInput): Promise<SessionBootstrap> {
@@ -199,10 +208,11 @@ export class ThreadWorkerRegistry {
     this.assertProjectAvailable(input.projectId);
     const recovered = await this.recoverCreationRequest(input.projectId, input.createRequestId);
     if (recovered) return recovered;
-    const cwd = this.options.getCwd(input.projectId);
+    const projectCwd = this.options.getCwd(input.projectId);
+    const cwd = input.worktreePath ?? projectCwd;
     this.assertProjectAvailable(input.projectId);
     const sessionId = randomUUID();
-    this.writeCreationReservation(input.projectId, cwd, sessionId, input.createRequestId, "reserved", undefined);
+    this.writeCreationReservation(input.projectId, projectCwd, cwd, sessionId, input.createRequestId, "reserved");
     const binding: ThreadWorkerBinding = {
       mode: "create",
       projectId: input.projectId,
@@ -256,6 +266,7 @@ export class ThreadWorkerRegistry {
         record.initialBootstrap ?? (await record.client.request<SessionBootstrap>({ type: "bootstrap" }, 30_000));
       record.initialBootstrap = undefined;
       record.attachments += 1;
+      this.cancelRequestedClose(record);
       return { bootstrap, workerInstanceId: record.client.instanceId };
     });
   }
@@ -265,6 +276,51 @@ export class ThreadWorkerRegistry {
     return this.use(projectId, threadId, async () => undefined);
   }
 
+  /** 立即退役无 attachment 且已完成的 thread worker；busy thread 在条件清空后自动退役。 */
+  async close(projectId: string, threadId: string): Promise<void> {
+    const key = workerKey(projectId, threadId);
+    await this.withThreadLock(key, async () => {
+      const record = this.records.get(key);
+      if (!record) return;
+      if (record.summary?.running || record.inFlight > 0 || record.attachments > 0) {
+        record.closeRequested = true;
+        return;
+      }
+      record.retired = true;
+      await this.awaitRecordShutdown(record);
+      if (this.records.get(key) === record) this.records.delete(key);
+    });
+  }
+
+  private async retireRequestedCloseIfIdle(key: string): Promise<void> {
+    let record: WorkerRecord | undefined;
+    await this.withThreadLock(key, async () => {
+      const current = this.records.get(key);
+      if (!current?.closeRequested || current.summary?.running || current.inFlight > 0 || current.attachments > 0) return;
+      current.closeRequested = false;
+      current.retired = true;
+      record = current;
+    });
+    if (!record) return;
+    try {
+      await this.awaitRecordShutdown(record);
+    } finally {
+      await this.withThreadLock(key, async () => {
+        if (this.records.get(key) === record) this.records.delete(key);
+      });
+    }
+  }
+
+  private requestRetireRequestedCloseIfIdle(key: string): void {
+    void this.retireRequestedCloseIfIdle(key).catch((error: unknown) =>
+      this.options.log?.("thread-close", error instanceof Error ? error.message : String(error)),
+    );
+  }
+
+  private cancelRequestedClose(record: WorkerRecord): void {
+    record.closeRequested = false;
+  }
+
   detach(projectId: string, threadId: string, workerInstanceId: string): void {
     const record = this.records.get(workerKey(projectId, threadId));
     if (record?.client.instanceId === workerInstanceId && record.attachments > 0) {
@@ -272,6 +328,7 @@ export class ThreadWorkerRegistry {
       if (record.attachments === 0) {
         record.lastActivityAt = Date.now();
         this.requestCapacityTrim();
+        this.requestRetireRequestedCloseIfIdle(workerKey(projectId, threadId));
       }
     }
   }
@@ -290,6 +347,16 @@ export class ThreadWorkerRegistry {
         ...(result.error !== undefined ? { error: result.error } : {}),
       };
     });
+  }
+
+  async readImageResource(
+    projectId: string,
+    threadId: string,
+    resourceId: string,
+  ): Promise<SessionImageResource | undefined> {
+    return this.use(projectId, threadId, (record) =>
+      record.client.request<SessionImageResource | undefined>({ type: "getImageResource", resourceId }, 30_000),
+    );
   }
 
   async fork(input: SessionForkInput): Promise<SessionForkResult> {
@@ -611,6 +678,7 @@ export class ThreadWorkerRegistry {
       record = await this.requireUnlocked(projectId, threadId);
       record.lastActivityAt = Date.now();
       record.inFlight += 1;
+      this.cancelRequestedClose(record);
     });
     try {
       return await operation(record);
@@ -668,8 +736,10 @@ export class ThreadWorkerRegistry {
   }
 
   private async open(projectId: string, threadId: string): Promise<WorkerRecord> {
-    const cwd = this.options.getCwd(projectId);
-    const session = await this.options.metadata.resolve(projectId, cwd, threadId);
+    const projectCwd = this.options.getCwd(projectId);
+    const session = await this.options.metadata.resolve(projectId, projectCwd, threadId);
+    const header = await readSessionFileHeader(session.path, projectId, threadId);
+    const cwd = await this.options.resolveSessionCwd(projectId, header.cwd);
     return this.spawn({
       mode: "open",
       projectId,
@@ -677,7 +747,8 @@ export class ThreadWorkerRegistry {
       agentDir: this.options.agentDir,
       ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
       threadId,
-      sessionFile: session.path,
+      sessionFile: header.sessionFile,
+      sessionHeaderCwd: header.cwd,
       initialUpdatedAt: session.updatedAt,
     });
   }
@@ -808,6 +879,7 @@ export class ThreadWorkerRegistry {
       client,
       projectId: binding.projectId,
       threadId: binding.mode === "open" ? binding.threadId : "",
+      cwd: binding.cwd,
       lastActivityAt: Date.now(),
       inFlight: 1,
       attachments: 0,
@@ -816,6 +888,7 @@ export class ThreadWorkerRegistry {
       browserSessionIdentity: browserSessionIdentityOf(binding),
       ...(browserSessionToken !== undefined ? { browserSessionToken } : {}),
       retired: false,
+      closeRequested: false,
       activeToolCalls: new Set(),
     };
     try {
@@ -901,6 +974,7 @@ export class ThreadWorkerRegistry {
       if (!record.summary.running) {
         this.requestCapacityTrim();
         this.requestDeferredModelRefresh(record);
+        this.requestRetireRequestedCloseIfIdle(workerKey(record.projectId, record.threadId));
       }
       if (!record.sessionFile) {
         record.client.acknowledge(event.sequence);

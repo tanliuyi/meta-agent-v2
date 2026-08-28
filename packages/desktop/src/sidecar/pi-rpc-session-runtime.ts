@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { delimiter, dirname } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { projectPersistedBranch } from "../main/pi/pi-thread-projector.ts";
@@ -18,6 +19,8 @@ import type {
   SessionCommandResult,
   SessionControlState,
   SessionForkInput,
+  SessionImageResource,
+  SessionImageResourceRef,
   SessionPromptInput,
   SessionPushPayload,
   SlashCommand,
@@ -82,6 +85,10 @@ export class PiRpcSessionRuntime {
   private persistedEntries: SessionEntry[];
   private timeline: PiThreadSnapshot;
   private readonly timelineStore: PiThreadStore;
+  private readonly imageResources = new Map<string, { mimeType: string; data: string }>();
+  private readonly imageResourceIds = new Map<string, string>();
+  private readonly registerImage = (mimeType: string, data: string): SessionImageResourceRef =>
+    this.registerImageResource(mimeType, data);
   private summary: Omit<Thread, "projectId" | "archived" | "running">;
   private revision = 0;
   private sequence = 0;
@@ -124,7 +131,7 @@ export class PiRpcSessionRuntime {
     this.thinkingLevels = thinkingLevels;
     this.persistedEntries = [...handshake.entries.entries];
     this.timeline = this.createSnapshot(this.persistedEntries, handshake.entries.leafId);
-    this.timelineStore = new PiThreadStore(this.timeline);
+    this.timelineStore = new PiThreadStore(this.timeline, this.registerImage);
     this.summary = summarize(
       this.id,
       state.sessionName,
@@ -340,6 +347,11 @@ export class PiRpcSessionRuntime {
     this.onSummaryChanged(this);
   }
 
+  readImageResource(resourceId: string): SessionImageResource | undefined {
+    const resource = this.imageResources.get(resourceId);
+    return resource ? { resourceId, ...resource } : undefined;
+  }
+
   async respond(response: HostResponse): Promise<void> {
     const request = this.hostRequests.find((item) => item.id === response.requestId);
     if (!request) throw new Error(`Pi extension UI request not found: ${response.requestId}`);
@@ -363,6 +375,8 @@ export class PiRpcSessionRuntime {
     for (const timer of this.hostRequestTimers.values()) clearTimeout(timer);
     this.hostRequestTimers.clear();
     this.hostRequests = [];
+    this.imageResources.clear();
+    this.imageResourceIds.clear();
     await this.client.close();
   }
 
@@ -525,7 +539,7 @@ export class PiRpcSessionRuntime {
 
   private replaceTimeline(entries: readonly SessionEntry[], leafId: string | null, cursor: number): void {
     const phase = this.timeline.phase;
-    const projection = projectPersistedBranch(entries, leafId);
+    const projection = projectPersistedBranch(entries, leafId, this.registerImage);
     const withNotices = this.appendExtensionNotices(projection.nodes, projection.headId);
     const snapshot: PiThreadSnapshot = {
       protocolVersion: PROTOCOL_VERSION,
@@ -558,7 +572,7 @@ export class PiRpcSessionRuntime {
   }
 
   private createSnapshot(entries: readonly SessionEntry[], leafId: string | null): PiThreadSnapshot {
-    const projection = projectPersistedBranch(entries, leafId);
+    const projection = projectPersistedBranch(entries, leafId, this.registerImage);
     return {
       protocolVersion: PROTOCOL_VERSION,
       projectId: this.projectId,
@@ -570,6 +584,19 @@ export class PiRpcSessionRuntime {
       phase: this.state.isCompacting ? "compacting" : this.state.isStreaming ? "running" : "idle",
       thinkingLevel: this.state.thinkingLevel,
     };
+  }
+
+  private registerImageResource(mimeType: string, data: string): SessionImageResourceRef {
+    const digest = createHash("sha256").update(mimeType).update("\0").update(data).digest("hex");
+    const existingId = this.imageResourceIds.get(digest);
+    const existing = existingId ? this.imageResources.get(existingId) : undefined;
+    if (existingId && existing?.mimeType === mimeType && existing.data === data) {
+      return { resourceId: existingId, mimeType };
+    }
+    const resourceId = randomUUID();
+    this.imageResources.set(resourceId, { mimeType, data });
+    this.imageResourceIds.set(digest, resourceId);
+    return { resourceId, mimeType };
   }
 
   private setPhase(phase: PiThreadPhase): void {

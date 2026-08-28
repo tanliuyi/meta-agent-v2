@@ -60,6 +60,7 @@ import type {
   SessionFlushResult,
   SessionForkInput,
   SessionForkResult,
+  SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,

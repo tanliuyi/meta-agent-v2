@@ -20,6 +20,8 @@ import {
   type PiToolResult,
   projectPiAssistant,
   projectPiMessage,
+  projectPiToolResult,
+  type RegisterImageResource,
   toJson,
 } from "./pi-message-projector.ts";
 
@@ -76,11 +78,13 @@ export class PiThreadStore {
   private notificationScheduled = false;
   private pendingStreamEvent?: PendingStreamEvent;
   private coalescingStreamKey?: string;
+  private readonly registerImageResource?: RegisterImageResource;
 
-  constructor(initial: PiThreadSnapshot = detachedSnapshot()) {
+  constructor(initial: PiThreadSnapshot = detachedSnapshot(), registerImageResource?: RegisterImageResource) {
     validateSnapshot(initial);
     this.state = initial;
     this.nodeIds = new Set(initial.nodes.map((node) => node.id));
+    this.registerImageResource = registerImageResource;
   }
 
   getSnapshot = (): PiThreadSnapshot => {
@@ -163,7 +167,7 @@ export class PiThreadStore {
 
   private applyReduced(sequence: number, event: PiRpcEvent): void {
     const current = this.hydrate();
-    const next = reducePiRpcEvent(current, sequence, event);
+    const next = reducePiRpcEvent(current, sequence, event, this.registerImageResource);
     if (next.protocolVersion !== current.protocolVersion || next.threadId !== current.threadId) {
       throw new PiThreadStoreError("Pi event reducer changed timeline identity");
     }
@@ -354,7 +358,12 @@ function schedulePresentationUpdate(callback: () => void): void {
   queueMicrotask(callback);
 }
 
-export function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, event: PiRpcEvent): PiThreadSnapshot {
+export function reducePiRpcEvent(
+  snapshot: PiThreadSnapshot,
+  sequence: number,
+  event: PiRpcEvent,
+  registerImageResource?: RegisterImageResource,
+): PiThreadSnapshot {
   const next = { ...snapshot, cursor: sequence };
   switch (event.type) {
     case "agent_start":
@@ -371,11 +380,11 @@ export function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, e
     case "turn_end":
       return { ...next, activeTurnId: undefined, activeTurnThinkingLevel: undefined };
     case "message_start":
-      return startMessage(next, event.message);
+      return startMessage(next, event.message, registerImageResource);
     case "message_update":
       return updateAssistant(next, event);
     case "message_end":
-      return finishMessage(next, event.message);
+      return finishMessage(next, event.message, registerImageResource);
     case "tool_execution_start":
       return updateTool(next, event.toolCallId, (part) => ({ ...part, execution: "running" }));
     case "tool_execution_update":
@@ -388,7 +397,7 @@ export function reducePiRpcEvent(snapshot: PiThreadSnapshot, sequence: number, e
       return updateTool(next, event.toolCallId, (part) => ({
         ...part,
         execution: event.isError ? "error" : "complete",
-        result: toJson(event.result),
+        result: projectPiToolResult(event.result, registerImageResource),
         isError: event.isError,
       }));
     case "queue_update":
@@ -462,7 +471,11 @@ function applyBashDelta(
   });
 }
 
-function startMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThreadSnapshot {
+function startMessage(
+  snapshot: PiThreadSnapshot,
+  message: PiMessage,
+  registerImageResource?: RegisterImageResource,
+): PiThreadSnapshot {
   if (message.role === "toolResult") return snapshot;
   const id = createPiMessageNodeId(message, snapshot.nodes);
   const thinkingLevel =
@@ -475,6 +488,7 @@ function startMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThreadS
     message,
     finished: false,
     thinkingLevel,
+    registerImageResource,
   });
   return node ? appendNode(snapshot, node) : snapshot;
 }
@@ -613,8 +627,12 @@ function requireStreamingPart<Type extends PiAssistantPart["type"]>(
   return part as Extract<PiAssistantPart, { type: Type }>;
 }
 
-function finishMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThreadSnapshot {
-  if (message.role === "toolResult") return applyToolResult(snapshot, message);
+function finishMessage(
+  snapshot: PiThreadSnapshot,
+  message: PiMessage,
+  registerImageResource?: RegisterImageResource,
+): PiThreadSnapshot {
+  if (message.role === "toolResult") return applyToolResult(snapshot, message, registerImageResource);
   const index = findLastNodeIndex(snapshot.nodes, (node) => {
     if (message.role === "assistant") return node.kind === "assistant" && node.status.type === "running";
     if (message.role === "user") return node.kind === "user" && node.delivery.state === "live";
@@ -630,6 +648,7 @@ function finishMessage(snapshot: PiThreadSnapshot, message: PiMessage): PiThread
     finished: true,
     completedAt: Date.now(),
     ...(current.kind === "assistant" ? { thinkingLevel: current.provenance.thinkingLevel } : {}),
+    registerImageResource,
   });
   return projected ? replaceNode(snapshot, index, projected) : snapshot;
 }
@@ -674,8 +693,14 @@ function updateTool(
   throw new PiThreadStoreError(`Pi tool event references unknown tool call: ${toolCallId}`);
 }
 
-function applyToolResult(snapshot: PiThreadSnapshot, message: PiToolResult): PiThreadSnapshot {
-  return updateTool(snapshot, message.toolCallId, (part) => applyPiToolResult(part, message));
+function applyToolResult(
+  snapshot: PiThreadSnapshot,
+  message: PiToolResult,
+  registerImageResource?: RegisterImageResource,
+): PiThreadSnapshot {
+  return updateTool(snapshot, message.toolCallId, (part) =>
+    applyPiToolResult(part, message, registerImageResource),
+  );
 }
 
 function appendNotification(

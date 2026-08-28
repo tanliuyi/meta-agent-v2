@@ -1,12 +1,17 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
-import type { DraftSessionConfig, ThinkingLevel } from "../../../shared/contracts.ts";
-import { toPiImageInputs } from "../runtime/image-attachments.ts";
+import type { DraftSessionConfig, GitWorktree, ThinkingLevel } from "../../../shared/contracts.ts";
+import { toPiPromptAttachments } from "../runtime/attachments.ts";
 import { selectProjects } from "../state/desktop-selectors.ts";
 import { dispatchDesktop } from "../state/desktop-store.ts";
 import { useDesktopStore } from "../state/desktop-store-context.tsx";
-import { materializeDraftSession, selectDraftModel, selectDraftThinkingLevel } from "../state/draft-creation.ts";
+import {
+  draftCreateRequestKey,
+  materializeDraftSession,
+  selectDraftModel,
+  selectDraftThinkingLevel,
+} from "../state/draft-creation.ts";
 import {
   applyStoredDraftSelection,
   persistDraftSelection,
@@ -54,7 +59,14 @@ export function NewSessionSurface() {
   const catalogProjects = useStore(desktopStore, selectProjects);
   const catalogLoading = useStore(desktopStore, (state) => state.loading);
   const projects = useMemo(() => catalogProjects.filter((project) => project.available), [catalogProjects]);
-  const refreshedConfigProjectId = useRef<string | null>(null);
+  const [worktreeCatalog, setWorktreeCatalog] = useState<{ projectId: string | null; worktrees: GitWorktree[] }>({
+    projectId: null,
+    worktrees: [],
+  });
+  const worktrees = worktreeCatalog.projectId === projectId ? worktreeCatalog.worktrees : [];
+  const worktreesReady = projectId !== null && worktreeCatalog.projectId === projectId;
+  const configTargetId = projectId ? draftCreateRequestKey(projectId, worktreePath ?? undefined) : null;
+  const refreshedConfigTargetId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!navigationTarget) return;
@@ -98,22 +110,17 @@ export function NewSessionSurface() {
   }, [catalogLoading, projectId, projects]);
 
   useEffect(() => {
-    if (catalogLoading) return;
-    if (!projectId) {
-      setConfig(null);
-      setConfigProjectId(null);
-      return;
-    }
-    if (configProjectId === projectId && config !== null && refreshedConfigProjectId.current === projectId) {
+    if (catalogLoading || !worktreesReady || !projectId || !configTargetId) return;
+    if (configProjectId === configTargetId && config !== null && refreshedConfigTargetId.current === configTargetId) {
       return;
     }
     let active = true;
-    if (configProjectId !== projectId) setConfig(null);
+    if (configProjectId !== configTargetId) setConfig(null);
     setLoadError(null);
-    void getDraftConfig(projectId)
+    void getDraftConfig(projectId, worktreePath ?? undefined)
       .then((next) => {
         if (!active) return;
-        refreshedConfigProjectId.current = projectId;
+        refreshedConfigTargetId.current = configTargetId;
         setConfig(applyStoredDraftSelection(next, projectId));
         setConfigProjectId(configTargetId);
         setLoadError(null);
@@ -124,7 +131,42 @@ export function NewSessionSurface() {
     return () => {
       active = false;
     };
-  }, [catalogLoading, config, configProjectId, projectId, setConfig, setConfigProjectId, setLoadError]);
+  }, [
+    catalogLoading,
+    config,
+    configProjectId,
+    configTargetId,
+    projectId,
+    setConfig,
+    setConfigProjectId,
+    setLoadError,
+    worktreePath,
+    worktreesReady,
+  ]);
+
+  useEffect(() => {
+    setConfig(null);
+    setConfigProjectId(null);
+    setWorktreeCatalog({ projectId: null, worktrees: [] });
+    setWorktreePath(null);
+    if (!projectId) return;
+    let active = true;
+    void window.desktop.projects
+      .listWorktrees(projectId)
+      .then((next) => {
+        if (!active) return;
+        setWorktreeCatalog({ projectId, worktrees: next });
+        setWorktreePath(next.find((worktree) => worktree.current)?.path ?? next[0]?.path ?? null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setWorktreeCatalog({ projectId, worktrees: [] });
+        setWorktreePath(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, setConfig, setConfigProjectId, setWorktreePath]);
 
   const project = projects.find((entry) => entry.id === projectId) ?? null;
 
@@ -177,8 +219,8 @@ export function NewSessionSurface() {
           ...(worktreePath ? { worktreePath } : {}),
           model: { provider: config.model.provider, id: config.model.id },
           thinkingLevel: config.thinkingLevel,
-          text: state.text,
-          images,
+          text: attachments.text,
+          images: attachments.images,
         },
         {
           requestIds: createRequestIds,
@@ -238,12 +280,13 @@ export function NewSessionSurface() {
   );
 }
 
-function getDraftConfig(projectId: string): Promise<DraftSessionConfig> {
-  const pending = pendingDraftConfigs.get(projectId);
+function getDraftConfig(projectId: string, worktreePath?: string): Promise<DraftSessionConfig> {
+  const key = draftCreateRequestKey(projectId, worktreePath);
+  const pending = pendingDraftConfigs.get(key);
   if (pending) return pending;
-  const request = window.desktop.sessions.getDraftConfig(projectId).finally(() => {
-    if (pendingDraftConfigs.get(projectId) === request) pendingDraftConfigs.delete(projectId);
+  const request = window.desktop.sessions.getDraftConfig(projectId, worktreePath).finally(() => {
+    if (pendingDraftConfigs.get(key) === request) pendingDraftConfigs.delete(key);
   });
-  pendingDraftConfigs.set(projectId, request);
+  pendingDraftConfigs.set(key, request);
   return request;
 }

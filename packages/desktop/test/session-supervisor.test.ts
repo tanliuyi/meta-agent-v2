@@ -184,7 +184,7 @@ describe("SessionSupervisor attachment leases", () => {
     await supervisor.attach(2, input("thread", "two"), secondPush);
 
     await supervisor.close(1, "project", "thread");
-    supervisor.receive(controlPush("thread"), "worker", 1);
+    receive(supervisor, controlPush("thread"), "worker", 1);
 
     expect(workers.detach).toHaveBeenCalledTimes(1);
     expect(workers.close).toHaveBeenCalledWith("project", "thread");

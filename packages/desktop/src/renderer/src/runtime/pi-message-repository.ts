@@ -13,7 +13,9 @@ import type {
   PiThreadSnapshot,
   PiTimelineNode,
 } from "../../../shared/contracts.ts";
+import { parsePiFileContexts } from "./attachments.ts";
 import { getPiThreadNodesChange } from "../../../shared/pi-thread-store.ts";
+import { toSessionImageResourceUrl } from "./session-image-resource-ref.ts";
 
 type RepositoryItem = ExportedMessageRepository["messages"][number];
 type PiNoticePart = {

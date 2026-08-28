@@ -11,6 +11,7 @@ import {
   createPiMessageNodeId,
   piUserContent,
   projectPiMessage,
+  type RegisterImageResource,
   toJson,
 } from "../../shared/pi-message-projector.ts";
 import { isThinkingLevel } from "../../shared/thinking-levels.ts";
@@ -33,6 +34,7 @@ export interface PersistedBranchProjection {
 export function projectPersistedBranch(
   entries: readonly SessionEntry[],
   leafId: string | null,
+  registerImageResource?: RegisterImageResource,
 ): PersistedBranchProjection {
   const branch = activeBranch(entries, leafId);
   const quoteAttachments = new Map<string, readonly PiQuote[]>();
@@ -72,7 +74,7 @@ export function projectPersistedBranch(
           const part = assistant.content[partIndex];
           if (!part || part.type !== "tool-call") break;
           const content = [...assistant.content];
-          content[partIndex] = applyPiToolResult(part, message);
+          content[partIndex] = applyPiToolResult(part, message, registerImageResource);
           nodes[assistantIndex] = { ...assistant, content };
           break;
         }
@@ -88,6 +90,7 @@ export function projectPersistedBranch(
           finished: true,
           completedAt: timestampMs(entry.timestamp),
           thinkingLevel: messageThinkingLevel,
+          registerImageResource,
         });
         if (!projected) break;
         const quotes = message.role === "user" ? quoteAttachments.get(entry.id) : undefined;
@@ -109,7 +112,7 @@ export function projectPersistedBranch(
           content: {
             type: "custom",
             customType: entry.customType,
-            content: piUserContent(entry.content),
+            content: piUserContent(entry.content, registerImageResource),
             ...(entry.details !== undefined ? { details: toJson(entry.details) } : {}),
           },
         };

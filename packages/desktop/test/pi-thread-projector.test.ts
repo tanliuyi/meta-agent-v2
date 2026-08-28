@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { projectPersistedBranch } from "../src/main/pi/pi-thread-projector.ts";
 import { QUOTE_ATTACHMENT_CUSTOM_TYPE, withQuoteContext } from "../src/main/pi/quote-context.ts";
+import type { SessionImageResource } from "../src/shared/contracts.ts";
 
 describe("projectPersistedBranch", () => {
   it("projects an RPC branch and folds tool results into the owning assistant", () => {
@@ -160,6 +161,56 @@ describe("projectPersistedBranch", () => {
       },
     ]);
   });
+
+  it("projects persisted images as lazy resources without embedding base64 payloads", () => {
+    const resources = new Map<string, SessionImageResource>();
+    const register = (mimeType: string, data: string) => {
+      const resource = { resourceId: `resource-${resources.size + 1}`, mimeType, data };
+      resources.set(resource.resourceId, resource);
+      return { resourceId: resource.resourceId, mimeType };
+    };
+    const user = {
+      role: "user",
+      content: [
+        { type: "text", text: "查看图片" },
+        { type: "image", data: "base64-user-image", mimeType: "image/png" },
+      ],
+      timestamp: 1,
+    };
+    const result = {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "read",
+      content: [{ type: "image", data: "base64-tool-image", mimeType: "image/jpeg" }],
+      isError: false,
+      timestamp: 3,
+    };
+    const entries = [
+      messageEntry("u", null, user),
+      messageEntry("a", "u", assistantMessage("toolUse", 2, [toolCall("call-1")])),
+      messageEntry("r", "a", result),
+    ];
+
+    const projection = projectPersistedBranch(entries, "r", register);
+    const serialized = JSON.stringify(projection);
+
+    expect(serialized).not.toContain("base64-user-image");
+    expect(serialized).not.toContain("base64-tool-image");
+    expect(projection.nodes).toMatchObject([
+      { kind: "user", content: [{ type: "text" }, { type: "image", resourceId: "resource-1" }] },
+      {
+        kind: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            result: { content: [{ type: "image", resourceId: "resource-2", mimeType: "image/jpeg" }] },
+          },
+        ],
+      },
+    ]);
+    expect(resources.get("resource-1")?.data).toBe("base64-user-image");
+    expect(resources.get("resource-2")?.data).toBe("base64-tool-image");
+  });
 });
 
 function userMessage(text: string, timestamp: number) {
@@ -213,173 +264,3 @@ function messageEntry(id: string, parentId: string | null, message: unknown, per
 function iso(timestamp: number): string {
   return new Date(timestamp).toISOString();
 }
-
-describe("PiThreadProjector timeline image resources", () => {
-  const TOOL_IMAGE_DATA = "base64-tool-image-body";
-  const SCREENSHOT_DATA = "base64-screenshot-body";
-  const SNAPSHOT_SHOT_DATA = "base64-snapshot-shot-body";
-
-  it("将历史用户消息图片替换为资源引用，且可原样读回", () => {
-    const user = {
-      role: "user",
-      content: [
-        { type: "text", text: "查看图片" },
-        { type: "image", data: "base64-user-image-body", mimeType: "image/png" },
-      ],
-      timestamp: 1,
-    } as AgentSession["messages"][number];
-    const { session } = sessionHarness([messageEntry("u", null, user)]);
-    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
-
-    const node = projector.snapshot().nodes[0];
-    if (node?.kind !== "user") throw new Error("user node missing");
-    expect(node.content[0]).toEqual({ type: "text", text: "查看图片" });
-    const image = node.content[1];
-    if (image?.type !== "image") throw new Error("user image missing");
-    expect(image).toMatchObject({ type: "image", mimeType: "image/png" });
-    expect(JSON.stringify(projector.snapshot())).not.toContain("base64-user-image-body");
-    expect(projector.readImageResource(image.resourceId)?.data).toBe("base64-user-image-body");
-    projector.dispose();
-  });
-
-  it("将历史 toolResult 图像主体替换为资源引用，且可原样读回", () => {
-    const content = [
-      { type: "image" as const, data: TOOL_IMAGE_DATA, mimeType: "image/png" },
-      { type: "text" as const, text: "ok" },
-    ];
-    const details = {
-      screenshot: `data:image/png;base64,${SCREENSHOT_DATA}`,
-      snapshot: {
-        url: "https://example.com",
-        tree: [] as unknown[],
-        screenshot: `data:image/png;base64,${SNAPSHOT_SHOT_DATA}`,
-      },
-      other: "data:text/plain;base64,keep-me-as-text",
-      plain: "hello",
-    };
-    const entries: SessionEntry[] = [
-      messageEntry("u", null, userMessage("图片测试", 1)),
-      messageEntry("a", "u", assistantMessage("toolUse", 2, [toolCall("call-1")])),
-      messageEntry("r", "a", {
-        role: "toolResult",
-        toolCallId: "call-1",
-        toolName: "read",
-        content,
-        details,
-        isError: false,
-        timestamp: 3,
-      } as AgentSession["messages"][number]),
-    ];
-    const { session } = sessionHarness(entries);
-    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
-    const snapshot = projector.snapshot();
-    const assistantNode = snapshot.nodes[1];
-    expect(assistantNode?.kind).toBe("assistant");
-    if (assistantNode?.kind !== "assistant") throw new Error("assistant node missing");
-    const part = assistantNode.content[0];
-    expect(part.type).toBe("tool-call");
-    if (part.type !== "tool-call") throw new Error("tool part missing");
-
-    const projectedContent = (part.result as Record<string, unknown>).content as unknown[];
-    expect(projectedContent).toEqual([
-      { type: "image", resourceId: expect.any(String), mimeType: "image/png" },
-      { type: "text", text: "ok" },
-    ]);
-    expect(JSON.stringify(snapshot)).not.toContain(TOOL_IMAGE_DATA);
-    expect(JSON.stringify(snapshot)).not.toContain(SCREENSHOT_DATA);
-    expect(JSON.stringify(snapshot)).not.toContain(SNAPSHOT_SHOT_DATA);
-
-    const imageRef = projectedContent[0] as { resourceId: string; mimeType: string };
-    expect(projector.readImageResource(imageRef.resourceId)).toEqual({
-      resourceId: imageRef.resourceId,
-      mimeType: "image/png",
-      data: TOOL_IMAGE_DATA,
-    });
-
-    const detailsOut = (part.result as Record<string, unknown>).details as Record<string, unknown>;
-    const screenshot = detailsOut.screenshot as { resourceId: string; mimeType: string };
-    expect(screenshot).toMatchObject({ mimeType: "image/png" });
-    expect(projector.readImageResource(screenshot.resourceId)?.data).toBe(SCREENSHOT_DATA);
-    const snapshotOut = detailsOut.snapshot as { screenshot: { resourceId: string; mimeType: string } };
-    expect(projector.readImageResource(snapshotOut.screenshot.resourceId)?.data).toBe(SNAPSHOT_SHOT_DATA);
-    expect(detailsOut.other).toBe("data:text/plain;base64,keep-me-as-text");
-    expect(detailsOut.plain).toBe("hello");
-    expect(projector.readImageResource("unknown-resource")).toBeUndefined();
-
-    projector.beginTreeNavigation();
-    projector.endTreeNavigation();
-    const rebuiltAssistant = projector.snapshot().nodes[1];
-    if (rebuiltAssistant?.kind !== "assistant") throw new Error("rebuilt assistant node missing");
-    const rebuiltTool = rebuiltAssistant.content[0];
-    if (rebuiltTool?.type !== "tool-call") throw new Error("rebuilt tool part missing");
-    const rebuiltContent = (rebuiltTool.result as Record<string, unknown>).content as unknown[];
-    expect(rebuiltContent[0]).toEqual(imageRef);
-    const rebuiltDetails = (rebuiltTool.result as Record<string, unknown>).details as Record<string, unknown>;
-    expect(rebuiltDetails.screenshot).toEqual(screenshot);
-    expect(projector.readImageResource(imageRef.resourceId)?.data).toBe(TOOL_IMAGE_DATA);
-    projector.dispose();
-  });
-
-  it("超大单图仍投影为可按需读取的资源引用", () => {
-    const oversized = "x".repeat(8 * 1024 * 1024 + 1);
-    const entries: SessionEntry[] = [
-      messageEntry("u", null, userMessage("超大图片", 1)),
-      messageEntry("a", "u", assistantMessage("toolUse", 2, [toolCall("call-large")])),
-      messageEntry("r", "a", {
-        role: "toolResult",
-        toolCallId: "call-large",
-        toolName: "read",
-        content: [{ type: "image", data: oversized, mimeType: "image/png" }],
-        isError: false,
-        timestamp: 3,
-      } as AgentSession["messages"][number]),
-    ];
-    const { session } = sessionHarness(entries);
-    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
-    const node = projector.snapshot().nodes[1];
-    if (node?.kind !== "assistant") throw new Error("assistant node missing");
-    const part = node.content[0];
-    if (part?.type !== "tool-call") throw new Error("tool part missing");
-    const projectedContent = (part.result as Record<string, unknown>).content as unknown[];
-    const projectedImage = projectedContent[0] as { type: string; resourceId: string; mimeType: string };
-    expect(projectedImage).toMatchObject({ type: "image", mimeType: "image/png" });
-    expect(projectedImage.resourceId).not.toBe("");
-    expect(JSON.stringify(projector.snapshot())).not.toContain(oversized);
-    expect(projector.readImageResource(projectedImage.resourceId)?.data).toBe(oversized);
-    projector.dispose();
-  });
-
-  it("live tool_execution_end 结果同样图像资源化", () => {
-    const { session } = sessionHarness([]);
-    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
-    const assistant = assistantMessage("toolUse", 2, [toolCall("call-live")]);
-    projector.handle({ type: "message_start", message: assistant });
-    projector.handle({
-      type: "tool_execution_end",
-      toolCallId: "call-live",
-      toolName: "read",
-      result: {
-        content: [{ type: "image", data: "base64-live-body", mimeType: "image/png" }],
-        details: { screenshot: "data:image/png;base64,base64-live-shot" },
-      },
-      isError: false,
-    });
-
-    const compact = JSON.stringify(projector.snapshot());
-    expect(compact).not.toContain("base64-live-body");
-    expect(compact).not.toContain("base64-live-shot");
-    const node = projector.snapshot().nodes[0];
-    expect(node?.kind).toBe("assistant");
-    if (node?.kind !== "assistant") throw new Error("assistant node missing");
-    const part = node.content[0];
-    expect(part.type).toBe("tool-call");
-    if (part.type !== "tool-call") throw new Error("tool part missing");
-    const content = (part.result as Record<string, unknown>).content as unknown[];
-    const ref = content[0] as { resourceId: string; mimeType: string };
-    expect(projector.readImageResource(ref.resourceId)?.data).toBe("base64-live-body");
-    const details = (part.result as Record<string, unknown>).details as Record<string, unknown>;
-    const screenshot = details.screenshot as { resourceId: string };
-    expect(projector.readImageResource(screenshot.resourceId)?.data).toBe("base64-live-shot");
-    projector.dispose();
-  });
-});

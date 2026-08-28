@@ -52,6 +52,49 @@ describe("ThreadWorkerRegistry model refresh", () => {
     await registry.dispose();
   });
 
+  it("opens a session in its validated header cwd", async () => {
+    const harness = createHarness(userDataDir);
+    writeSessionFile(join(userDataDir, "thread.jsonl"), "thread", "/recorded/worktree");
+    const resolveSessionCwd = vi.fn(async () => "/canonical/worktree");
+    harness.options.resolveSessionCwd = resolveSessionCwd;
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await registry.attach("project", "thread");
+
+    expect(resolveSessionCwd).toHaveBeenCalledWith("project", "/recorded/worktree");
+    expect(harness.clients[0]?.binding).toMatchObject({
+      role: "thread",
+      value: { mode: "open", cwd: "/canonical/worktree", sessionHeaderCwd: "/recorded/worktree" },
+    });
+    await registry.dispose();
+  });
+
+  it("defers close until the last attachment is released", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+    const attachment = await registry.attach("project", "thread");
+
+    await registry.close("project", "thread");
+    expect(harness.clients[0]?.shutdownCount).toBe(0);
+    registry.detach("project", "thread", attachment.workerInstanceId);
+
+    await vi.waitFor(() => expect(harness.clients[0]?.shutdownCount).toBe(1));
+    await registry.dispose();
+  });
+
+  it("reads lazy image resources through the thread worker", async () => {
+    const harness = createHarness(userDataDir);
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await expect(registry.readImageResource("project", "thread", "resource-1")).resolves.toEqual({
+      resourceId: "resource-1",
+      mimeType: "image/png",
+      data: "base64-image",
+    });
+    expect(harness.clients[0]?.requests).toContain("getImageResource");
+    await registry.dispose();
+  });
+
   it("默认在 90 秒后回收 detached idle worker", () => {
     expect(DEFAULT_THREAD_WORKER_IDLE_TTL_MS).toBe(90_000);
   });
@@ -486,6 +529,10 @@ interface Harness {
 }
 
 function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {}): Harness {
+  const agentDir = join(userDataDir, "agent");
+  mkdirSync(agentDir, { recursive: true });
+  writeSessionFile(join(userDataDir, "thread.jsonl"), "thread");
+  writeSessionFile(join(userDataDir, "thread-2.jsonl"), "thread-2");
   const clients: FakeWorkerClient[] = [];
   const failed = vi.fn();
   const resync = vi.fn();
@@ -494,7 +541,11 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
   const metadataUpsert = vi.fn(async () => undefined);
   const metadata = {
     list: metadataList,
-    resolve: vi.fn(async () => ({ id: "thread", path: join(userDataDir, "thread.jsonl"), updatedAt: 1 })),
+    resolve: vi.fn(async (_projectId: string, _cwd: string, threadId: string) => ({
+      id: threadId,
+      path: join(userDataDir, `${threadId}.jsonl`),
+      updatedAt: 1,
+    })),
     upsert: metadataUpsert,
     invalidateProject: vi.fn(async () => undefined),
   } as unknown as MetadataWorkerClient;
@@ -502,9 +553,12 @@ function createHarness(userDataDir: string, harnessOptions: HarnessOptions = {})
     manifest: manifest(),
     metadata,
     userDataDir,
-    agentDir: join(userDataDir, "agent"),
+    agentDir,
     getCwd: () => "/workspace",
-    push: vi.fn<(payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number) => void>(),
+    resolveSessionCwd: async (_projectId, cwd) => cwd,
+    push: vi.fn<
+      (payload: SessionPushPayload, workerInstanceId: string, sidecarSequence: number, payloadJsonLength: number) => void
+    >(),
     failed,
     resync,
     catalogChanged,
@@ -586,7 +640,7 @@ class FakeWorkerClient implements ThreadWorkerClient {
       workerInstanceId: this.instanceId,
       role: "thread",
       runtime: this.options.manifest.compatibility,
-      result: bootstrap(threadId) as unknown as JsonValue,
+      result: bootstrap(threadId, this.options.binding.value.cwd) as unknown as JsonValue,
     };
   }
 
@@ -611,12 +665,21 @@ class FakeWorkerClient implements ThreadWorkerClient {
         parentThreadId: "thread",
         origin: "branch",
       };
+      const sessionFile = join(this.binding.value.agentDir, "branch.jsonl");
+      writeSessionFile(sessionFile, "branch");
       return {
         projectId: "project",
         threadId: "branch",
-        sessionFile: join(this.binding.value.agentDir, "branch.jsonl"),
+        sessionFile,
         text: "original prompt",
         thread: branch,
+      } as T;
+    }
+    if (command.type === "getImageResource") {
+      return {
+        resourceId: command.resourceId,
+        mimeType: "image/png",
+        data: "base64-image",
       } as T;
     }
     if (command.type === "getSummary") return { ...thread(), running: this.running } as T;
@@ -678,6 +741,19 @@ function createInput(): SessionCreateInput {
   };
 }
 
+function writeSessionFile(path: string, id: string, cwd = "/workspace"): void {
+  writeFileSync(
+    path,
+    `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id,
+      timestamp: new Date(0).toISOString(),
+      cwd,
+    })}\n`,
+  );
+}
+
 function writeCreationReservation(userDataDir: string): void {
   const directory = join(userDataDir, "creation-reservations");
   mkdirSync(directory, { recursive: true });
@@ -712,7 +788,7 @@ function promptInput(): SessionPromptInput {
   };
 }
 
-function bootstrap(threadId: string): SessionBootstrap {
+function bootstrap(threadId: string, cwd = "/workspace"): SessionBootstrap {
   return {
     protocolVersion: PROTOCOL_VERSION,
     projectId: "project",
@@ -736,7 +812,7 @@ function bootstrap(threadId: string): SessionBootstrap {
       threadId,
       title: threadId,
       updatedAt: 1,
-      cwd: "/workspace",
+      cwd,
       running: false,
       queueModes: { steering: "one-at-a-time", followUp: "one-at-a-time" },
       models: [],

@@ -9,8 +9,8 @@ import {
 } from "../src/shared/sidecar-wire.ts";
 
 describe("sidecar runtime compatibility", () => {
-  it("uses protocol version 6 for multiplexed thread sidecars", () => {
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(6);
+  it("uses protocol version 7 for lazy image reads", () => {
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(7);
   });
 
   it("computes an event envelope byte length without serializing the event twice", () => {

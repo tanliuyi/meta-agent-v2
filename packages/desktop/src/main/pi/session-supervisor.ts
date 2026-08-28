@@ -10,6 +10,7 @@ import type {
   SessionCreateInput,
   SessionForkInput,
   SessionForkResult,
+  SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPush,
@@ -358,7 +359,6 @@ export class SessionSupervisor {
           ...deliveryTemplate,
           attachmentId: subscription.attachmentId,
         };
-        const baseDeliveryBytes = deliveryTemplateBytes ?? estimateDeliveryBytes(deliveryTemplate);
         const bytes =
           timelinePayloadJsonLength !== undefined
             ? estimateTimelineDeliveryBytes(
@@ -367,7 +367,7 @@ export class SessionSupervisor {
                 workerInstanceId,
                 sidecarSequence,
               )
-            : baseDeliveryBytes + subscription.attachmentId.length * 2;
+            : (deliveryTemplateBytes ?? estimateDeliveryBytes(deliveryTemplate)) + subscription.attachmentId.length * 2;
         const delivered: SessionPush = { ...deliveredWithoutAccounting, deliveryBytes: bytes };
         if (
           subscription.pendingEvents >= MAX_ATTACHMENT_PENDING_EVENTS ||
