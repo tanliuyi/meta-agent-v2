@@ -9,11 +9,17 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
+      "@earendil-works/pi-office-engine": ["../office-engine/src/index.ts"],
       "@renderer/*": ["src/renderer/src/*"]
     },
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/src/**/*.ts", "src/renderer/src/**/*.tsx", "src/shared/**/*.ts"],
+  "include": [
+    "src/renderer/src/**/*.ts",
+    "src/renderer/src/**/*.tsx",
+    "src/shared/**/*.ts",
+    "../office-engine/src/**/*.ts"
+  ],
   "exclude": ["src/shared/sidecar-wire.ts"]
 }

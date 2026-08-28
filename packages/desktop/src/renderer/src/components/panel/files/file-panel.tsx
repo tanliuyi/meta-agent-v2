@@ -11,13 +11,11 @@ import Search from "lucide-react/dist/esm/icons/search.mjs";
 import WrapText from "lucide-react/dist/esm/icons/wrap-text.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
 import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type {
-  FileImage,
-  FileNode,
-  OfficeDocumentPreview,
-  PdfDocumentPreview,
-  TextFile,
-} from "../../../../../shared/contracts.ts";
+import type { FileImage, FileNode, TextFile } from "../../../../../shared/contracts.ts";
+import {
+  type OfficeDocumentPreview as OfficeDocumentPreviewData,
+  officeDocumentFormat,
+} from "../../../../../shared/office-document-contracts.ts";
 import { errorMessage } from "../../../shared/lib/error-message.ts";
 import { ContextMenuContent } from "../../../shared/ui/context-menu-content.tsx";
 import { ContextMenuItem } from "../../../shared/ui/context-menu-item.tsx";
@@ -39,14 +37,7 @@ import { highlightFileCode } from "./file-highlight-client.ts";
 import { FilePathBreadcrumb } from "./file-path-breadcrumb.tsx";
 import { FilePreview } from "./file-preview.tsx";
 import { FileTree } from "./file-tree.tsx";
-import {
-  activeFileChange,
-  emptyFileTreeData,
-  removeLoadedFileTreeDirectory,
-  replaceFileTreeDirectory,
-} from "./file-tree-data.ts";
-import { OfficeDocumentPreview as OfficeDocumentPreviewFrame } from "./office-document-preview.tsx";
-import { PdfDocumentPreview as PdfDocumentPreviewFrame } from "./pdf-document-preview.tsx";
+import { OfficeDocumentPreview } from "./office-document-preview.tsx";
 
 const FILE_SEARCH_DELAY = 180;
 /** 超过该字符数的文件跳过语法高亮（对齐 VS Code largeFileOptimizations）。 */
@@ -69,13 +60,13 @@ export function FilePanel() {
   const fileWrap = workbench?.fileWrapMode ?? false;
   const fileMarkdownPreview = workbench?.fileMarkdownPreview ?? false;
   const isMarkdown = /\.(md|markdown)$/iu.test(activeFile ?? "");
-  const isOfficeDocument = isOfficeDocumentPath(activeFile ?? "");
-  const isPdfDocument = isPdfPath(activeFile ?? "");
+  const activeOfficeFormat = officeDocumentFormat(activeFile ?? "");
+  const isOfficeDocument = activeOfficeFormat !== undefined;
   const fileTreeContentId = useId();
   const [query, setQuery] = useState("");
-  const [tree, setTree] = useState(emptyFileTreeData);
-  const { roots, children } = tree;
-  const [file, setFile] = useState<TextFile | FileImage | OfficeDocumentPreview | PdfDocumentPreview | null>(null);
+  const [roots, setRoots] = useState<FileNode[]>([]);
+  const [children, setChildren] = useState<Record<string, FileNode[]>>({});
+  const [file, setFile] = useState<TextFile | FileImage | OfficeDocumentPreviewData | null>(null);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
@@ -175,13 +166,11 @@ export function FilePanel() {
       return;
     }
     setFile(null);
-    const request = isOfficeDocumentPath(activeFile)
+    const request = officeDocumentFormat(activeFile)
       ? window.desktop.files.previewOfficeDocument(projectId, activeFile)
-      : isPdfPath(activeFile)
-        ? window.desktop.files.previewPdf(projectId, activeFile)
-        : isImagePath(activeFile)
-          ? window.desktop.files.readImage(projectId, activeFile)
-          : window.desktop.files.read(projectId, activeFile);
+      : isImagePath(activeFile)
+        ? window.desktop.files.readImage(projectId, activeFile)
+        : window.desktop.files.read(projectId, activeFile);
     void request
       .then((value) => {
         if (generation === fileGeneration.current) setFile(value);
@@ -191,14 +180,14 @@ export function FilePanel() {
       });
     return () => {
       if (generation === fileGeneration.current) fileGeneration.current += 1;
-      if (isOfficeDocumentPath(activeFile)) void window.desktop.files.cancelOfficeDocumentPreview();
+      if (officeDocumentFormat(activeFile)) void window.desktop.files.cancelOfficeDocumentPreview();
     };
   }, [activeFile, fileRevision, projectId]);
 
   useEffect(() => {
     const generation = ++highlightGeneration.current;
     setHighlight(null);
-    if (!file || "dataUrl" in file || "html" in file || "url" in file) return;
+    if (!file || "dataUrl" in file || "kind" in file) return;
     // 大文件降级：跳过 Shiki 全量 tokenize（对齐 VS Code largeFileOptimizations）。
     if (file.content.length > LARGE_FILE_HIGHLIGHT_CHARS) return;
     void highlightFileCode(file.content, file.language, SHIKI_THEMES).then((tokens) => {
@@ -223,8 +212,9 @@ export function FilePanel() {
         </div>
       );
     }
-    if ("html" in file) return <OfficeDocumentPreviewFrame preview={file} />;
-    if ("url" in file) return <PdfDocumentPreviewFrame preview={file} />;
+    if ("kind" in file) {
+      return <OfficeDocumentPreview preview={file} onCommitted={(committed) => setFile(committed)} />;
+    }
     if (fileMarkdownPreview && isMarkdown) {
       return (
         <div className="file-preview-markdown">
@@ -568,7 +558,7 @@ export function FilePanel() {
                   <Eye size={14} aria-hidden="true" />
                 </TooltipIconButton>
               ) : null}
-              {isOfficeDocument || isPdfDocument || (isMarkdown && fileMarkdownPreview) ? null : (
+              {isOfficeDocument || (isMarkdown && fileMarkdownPreview) ? null : (
                 <TooltipIconButton
                   className="file-wrap-toggle"
                   tooltip={fileWrap ? "关闭换行" : "开启换行"}

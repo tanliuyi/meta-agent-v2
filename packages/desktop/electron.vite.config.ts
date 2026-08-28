@@ -13,7 +13,7 @@ export default defineConfig({
       rollupOptions: {
         output: { format: "cjs" },
         external: [
-          /^@earendil-works\/pi-(?:ai|agent-core|coding-agent|tui)(?:\/.*)?$/,
+          /^@earendil-works\/pi-(?:agent-core|coding-agent|office-engine|tui)(?:\/.*)?$/,
           /^jiti(?:\/.*)?$/,
           /^@babel\//,
           /^highlight\.js(?:\/.*)?$/,

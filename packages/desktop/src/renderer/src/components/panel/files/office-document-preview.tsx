@@ -1,33 +1,20 @@
-import type { OfficeDocumentPreview as OfficeDocumentPreviewData } from "../../../../../shared/contracts.ts";
+import type {
+  DocxDocumentPreview,
+  OfficeDocumentPreview as OfficeDocumentPreviewData,
+  XlsxDocumentPreview,
+} from "../../../../../shared/office-document-contracts.ts";
+import { DocxDocumentPreviewView } from "./docx-document-preview.tsx";
+import { LegacyOfficeDocumentPreviewView } from "./legacy-office-document-preview.tsx";
+import { XlsxDocumentPreviewView } from "./xlsx-document-preview.tsx";
 
-const OFFICE_PREVIEW_CSP = [
-  "default-src 'none'",
-  "img-src data: blob:",
-  "style-src 'unsafe-inline'",
-  "font-src data:",
-  "form-action 'none'",
-  "base-uri 'none'",
-].join("; ");
-
-export function secureOfficeDocumentHtml(html: string): string {
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${OFFICE_PREVIEW_CSP}">`;
-  if (/<head(?:\s[^>]*)?>/iu.test(html)) {
-    return html.replace(/<head(?:\s[^>]*)?>/iu, (head) => `${head}${meta}`);
-  }
-  if (/<html(?:\s[^>]*)?>/iu.test(html)) {
-    return html.replace(/<html(?:\s[^>]*)?>/iu, (root) => `${root}<head>${meta}</head>`);
-  }
-  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
-}
-
-export function OfficeDocumentPreview({ preview }: { preview: OfficeDocumentPreviewData }) {
-  return (
-    <iframe
-      className="file-preview-office"
-      title={`${preview.path} 文档预览`}
-      sandbox=""
-      referrerPolicy="no-referrer"
-      srcDoc={secureOfficeDocumentHtml(preview.html)}
-    />
-  );
+export function OfficeDocumentPreview({
+  preview,
+  onCommitted,
+}: {
+  preview: OfficeDocumentPreviewData;
+  onCommitted?(preview: DocxDocumentPreview | XlsxDocumentPreview): void;
+}) {
+  if (preview.kind === "legacy-html") return <LegacyOfficeDocumentPreviewView preview={preview} />;
+  if (preview.kind === "xlsx") return <XlsxDocumentPreviewView preview={preview} onCommitted={onCommitted} />;
+  return <DocxDocumentPreviewView preview={preview} onCommitted={onCommitted} />;
 }

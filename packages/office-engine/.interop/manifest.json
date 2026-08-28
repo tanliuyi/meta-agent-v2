@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-28T08:08:19.547Z",
+  "cases": [
+    {
+      "id": "replace-text-run",
+      "sourceFixture": "strict-format.docx",
+      "operation": "replace_text_run",
+      "probe": {
+        "requiredTexts": [
+          "Replaced by pi office engine."
+        ],
+        "forbiddenTexts": [
+          "Test"
+        ]
+      },
+      "generatedSha256": "d8b72553ba45f1ea1db0663edd5b7af3bf1e58e0bbef887dd8a78fae762e7927"
+    },
+    {
+      "id": "replace-text-range",
+      "sourceFixture": "open-as-read-only.docx",
+      "operation": "replace_text_range",
+      "probe": {
+        "requiredTexts": [
+          "Externally reopened range."
+        ],
+        "forbiddenTexts": [
+          "This document is opened as read-only, because marked as final in DOCX."
+        ]
+      },
+      "generatedSha256": "797e63af884b55b5c38dc712859016aa5787f50096989f46fe564b821910caf9"
+    },
+    {
+      "id": "insert-paragraph",
+      "sourceFixture": "strict-format.docx",
+      "operation": "insert_paragraph_after",
+      "probe": {
+        "requiredTexts": [
+          "Test",
+          "Inserted by pi office engine."
+        ],
+        "forbiddenTexts": []
+      },
+      "generatedSha256": "cb93514a2d1d971f4d8e2d80f6fcb80229fb5574e8f9f83e4ca67a8b6097ad7a"
+    },
+    {
+      "id": "delete-paragraph",
+      "sourceFixture": "strict-format.docx",
+      "operation": "delete_paragraph",
+      "probe": {
+        "requiredTexts": [],
+        "forbiddenTexts": [
+          "Test"
+        ]
+      },
+      "generatedSha256": "2a6a43f8578309c8bc126295b149b6a60b88c476747279582cba9b43c4f6565c"
+    },
+    {
+      "id": "set-run-style",
+      "sourceFixture": "strict-format.docx",
+      "operation": "set_text_run_style",
+      "probe": {
+        "requiredTexts": [
+          "Test"
+        ],
+        "forbiddenTexts": [],
+        "style": {
+          "text": "Test",
+          "bold": true,
+          "italic": true
+        }
+      },
+      "generatedSha256": "56109a9737c4dd75502e44ad5a83dec57ca2fee01ce0966d7321962c76e54955"
+    },
+    {
+      "id": "replace-header-footer",
+      "sourceFixture": "header-footer.docx",
+      "operation": "replace_related_text_run",
+      "probe": {
+        "requiredTexts": [
+          "Externally reopened header.",
+          "Externally reopened footer."
+        ],
+        "forbiddenTexts": [
+          "This is a simple header, with a € euro symbol in it.",
+          "The footer, with Molière, has Unicode in it."
+        ]
+      },
+      "generatedSha256": "abf0d1a3d88ecfa1602c545c214ed94c279024ee7e7b8f46907168aad4bb88af"
+    },
+    {
+      "id": "replace-comment-text",
+      "sourceFixture": "comments.docx",
+      "operation": "replace_comment_text_run",
+      "probe": {
+        "requiredTexts": [
+          "Externally reopened comment."
+        ],
+        "forbiddenTexts": [
+          "A tachyon walks into a bar."
+        ]
+      },
+      "generatedSha256": "893e735d119fd7b0882e35b051075d9e98d925893a3cba8c66c86f1dbea3c8e2"
+    },
+    {
+      "id": "no-op",
+      "sourceFixture": "strict-format.docx",
+      "operation": "no_op",
+      "probe": {
+        "requiredTexts": [
+          "Test"
+        ],
+        "forbiddenTexts": []
+      },
+      "generatedSha256": "86d90f50d8fd3310c4079291c6622878d8f4d8864d665d1e34841f407e7b7662"
+    }
+  ]
+}

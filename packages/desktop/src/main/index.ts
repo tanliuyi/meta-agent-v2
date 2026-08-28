@@ -1,8 +1,9 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getShellConfig, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { app, BrowserWindow, Menu, safeStorage } from "electron";
+import { createModels } from "@earendil-works/pi-ai";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { app, BrowserWindow, Menu, safeStorage, webContents } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
 import { CHANNELS } from "../shared/channels.ts";
@@ -20,8 +21,8 @@ import { DesktopExtensionSettingsService } from "./extensions/desktop-extension-
 import { DesktopExtensionSourcePolicy } from "./extensions/desktop-extension-source-policy.ts";
 import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
+import { NativeOfficeDocumentService } from "./files/native-office-document-service.ts";
 import { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
-import { handlePdfPreviewRequests, registerPdfPreviewScheme } from "./files/pdf-preview-protocol.ts";
 import {
   broadcastBrowserCloseTabRequest,
   broadcastBrowserCreateTabRequest,
@@ -33,8 +34,7 @@ import {
 } from "./ipc.ts";
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
-import { DesktopBuiltinProviderRegistry } from "./pi/desktop-builtin-provider.ts";
-import { deleteSessionCheckpoints } from "./pi/extensions/pi-rewind/src/core.ts";
+import { createOfficeDocumentHostServer, type OfficeDocumentHostServer } from "./office/office-document-host-server.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "./plugins/default-plugin-marketplace.ts";
 import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
@@ -82,11 +82,14 @@ let subagents: SubagentWorkerRegistry | undefined;
 let terminals: TerminalSupervisor | undefined;
 let browserManager: BrowserManager | undefined;
 let browserHostServer: BrowserHostServer | undefined;
+let officeDocuments: NativeOfficeDocumentService | undefined;
+let officePreviews: OfficeDocumentPreviewService | undefined;
+let officeHostServer: OfficeDocumentHostServer | undefined;
 let stopAutoUpdateChecks: (() => void) | undefined;
 let stopMarketplaceGarbageCollection: (() => void) | undefined;
 let quitGuardPending = false;
 const dirtyGuard = new WindowDirtyGuard({
-  beforeReload: (window) => sessions?.detachAll(window.webContents.id),
+  beforeReload: (window) => cleanupRendererOwner(window.webContents.id),
 });
 const appDir = dirname(fileURLToPath(import.meta.url));
 const trayController = new TrayController({
@@ -166,6 +169,25 @@ function createWindow(): void {
 
   dirtyGuard.attach(window);
   trayController.attach(window);
+  const detachCrashRecovery = attachRendererCrashRecovery(window, {
+    isShuttingDown: () => applicationShuttingDown,
+    reload: (crashedWindow) => {
+      const webContentsId = crashedWindow.webContents.id;
+      dirtyGuard.remove(webContentsId);
+      cleanupRendererOwner(webContentsId);
+      crashedWindow.webContents.reload();
+    },
+    quit: (crashedWindow) => {
+      dirtyGuard.remove(crashedWindow.webContents.id);
+      app.quit();
+    },
+    report: (message, error) => {
+      if (error === undefined) console.error(message);
+      else console.error(message, error);
+      sidecarLog?.write("main", error === undefined ? message : `${message}: ${String(error)}`);
+    },
+  });
+  window.once("closed", detachCrashRecovery);
   window.once("ready-to-show", () => window.show());
   window.on("maximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, true));
   window.on("unmaximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, false));
@@ -263,6 +285,25 @@ app.whenReady().then(async () => {
     resolveWorkspaceMutationKey(projects.getCwd(projectId));
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
+  const files = new FileService(projects);
+  const nativeOfficeDocuments = new NativeOfficeDocumentService(projects, {
+    onPlanCreated: (ownerId, plan) => {
+      const owner = webContents.fromId(ownerId);
+      if (owner && !owner.isDestroyed()) owner.send(CHANNELS.filesOfficeDocumentPlanCreated, plan);
+    },
+    onAudit: (audit) => sidecarLog?.write("office-document", JSON.stringify(audit)),
+  });
+  officeDocuments = nativeOfficeDocuments;
+  const officePreviewService = new OfficeDocumentPreviewService(projects, {
+    cacheDir: join(userDataDir, "cache", "office-document-preview"),
+    getConfiguration: async () => ({
+      binaryPath: process.env.PI_OFFICECLI_BINARY_PATH,
+      dataDir: process.env.PI_OFFICECLI_DATA_DIR,
+      version: process.env.PI_OFFICECLI_VERSION,
+      autoDownload: process.env.PI_OFFICECLI_AUTO_DOWNLOAD !== "0",
+    }),
+  });
+  officePreviews = officePreviewService;
   const models = new ModelsConfigService(agentDir, {
     log: (text) => sidecarLog?.write("models", text),
   });
@@ -493,6 +534,16 @@ app.whenReady().then(async () => {
     process.env.PI_BROWSER_HOST_PORT = String(browserEndpoint.port);
     process.env.PI_BROWSER_TOKEN = browserEndpoint.token;
   }
+  const officeHostServerInstance = await createOfficeDocumentHostServer(nativeOfficeDocuments, {
+    resolveSessionCapability: (token) => browserManagerInstance.resolveSessionCapability(token),
+    log: (text) => sidecarLog?.write("office-document-host", text),
+  });
+  officeHostServer = officeHostServerInstance;
+  const officeEndpoint = officeHostServerInstance.getEndpoint();
+  if (officeEndpoint) {
+    process.env.PI_OFFICE_HOST_PORT = String(officeEndpoint.port);
+    process.env.PI_OFFICE_TOKEN = officeEndpoint.token;
+  }
   let modelConfigurationGeneration = 0;
   const subagentSettings = new SubagentSettingsConfigService({
     agentDir,
@@ -513,23 +564,8 @@ app.whenReady().then(async () => {
     projects,
     sessions,
     files,
-    new OfficeDocumentPreviewService(projects, {
-      cacheDir: join(userDataDir, "cache", "office-document-preview"),
-      getConfiguration: async () => {
-        try {
-          const { values } = await pluginConfigurations.getRuntimeConfiguration("pi.officecli");
-          return {
-            installed: true,
-            binaryPath: typeof values.binaryPath === "string" ? values.binaryPath : undefined,
-            dataDir: typeof values.dataDir === "string" ? values.dataDir : undefined,
-            version: typeof values.version === "string" ? values.version : undefined,
-            autoDownload: typeof values.autoDownload === "boolean" ? values.autoDownload : undefined,
-          };
-        } catch {
-          return {};
-        }
-      },
-    }),
+    nativeOfficeDocuments,
+    officePreviewService,
     new ProjectFileWatcher(projects, (change) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed()) window.webContents.send(CHANNELS.filesChanged, change);
@@ -675,10 +711,18 @@ app.on("before-quit", (event) => {
   terminals = undefined;
   browserManager?.dispose();
   browserManager = undefined;
+  officeDocuments?.dispose();
+  officeDocuments = undefined;
+  officePreviews = undefined;
+  const currentOfficeHostServer = officeHostServer;
+  officeHostServer = undefined;
   void browserHostServer?.dispose();
   browserHostServer = undefined;
   currentTerminals?.dispose();
   void (async () => {
+    await currentOfficeHostServer
+      ?.dispose()
+      .catch((error: unknown) => console.error("Failed to stop Office document host:", error));
     await currentSessions
       ?.dispose()
       .catch((error: unknown) => console.error("Failed to stop Pi thread workers:", error));
@@ -695,3 +739,9 @@ app.on("before-quit", (event) => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+function cleanupRendererOwner(webContentsId: number): void {
+  sessions?.detachAll(webContentsId);
+  officeDocuments?.closeOwner(webContentsId);
+  officePreviews?.cancelOwner(webContentsId);
+}

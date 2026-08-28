@@ -29,6 +29,7 @@ export interface PackageArchiveEntry {
 }
 
 type InternalEntry = PackageArchiveEntry & {
+	readonly directory: boolean;
 	readonly localHeaderOffset: number;
 	readonly dataOffset: number;
 	readonly centralOffset: number;
@@ -213,6 +214,12 @@ function normalizePathWithLimit(path: string, maxPathBytes: number): string {
 	return normalized;
 }
 
+function normalizeZipEntryPath(path: string, maxPathBytes: number): { path: string; directory: boolean } {
+	const directory = path.endsWith("/");
+	const normalized = normalizePathWithLimit(directory ? path.slice(0, -1) : path, maxPathBytes);
+	return { path: directory ? `${normalized}/` : normalized, directory };
+}
+
 function updateCrc32(crc: number, bytes: Uint8Array): number {
 	let current = crc;
 	for (const byte of bytes) {
@@ -362,7 +369,8 @@ function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): ParsedArchive {
 		const nameBytes = bytes.subarray(cursor + 46, cursor + 46 + nameLength);
 		validateFilenameEncoding(nameBytes, flags);
 		const name = decodeName(nameBytes);
-		const path = normalizePathWithLimit(name, limits.maxPathBytes);
+		const normalizedEntry = normalizeZipEntryPath(name, limits.maxPathBytes);
+		const path = normalizedEntry.path;
 		const key = pathKey(path);
 		if (seen.has(key)) throw officeError("ARCHIVE_DUPLICATE_PATH");
 		seen.add(key);
@@ -428,6 +436,7 @@ function parseArchive(bytes: Uint8Array, limits: ArchiveLimits): ParsedArchive {
 		}
 		entries.push({
 			path,
+			directory: normalizedEntry.directory,
 			compressedSize,
 			uncompressedSize,
 			compressionMethod: method,
@@ -601,7 +610,9 @@ export class PackageArchive {
 			decompressEntry(this.bytes, entry, selectedLimits.maxSingleUncompressedBytes, false);
 		}
 		const pathMap = new Map<string, InternalEntry>();
-		for (const entry of this.archiveEntries) pathMap.set(entry.path, entry);
+		for (const entry of this.archiveEntries) {
+			if (!entry.directory) pathMap.set(entry.path, entry);
+		}
 		this.byPath = pathMap;
 	}
 
@@ -614,13 +625,15 @@ export class PackageArchive {
 	}
 
 	entries(): ReadonlyArray<PackageArchiveEntry> {
-		return this.archiveEntries.map(({ path, compressedSize, uncompressedSize, compressionMethod, crc32 }) => ({
-			path,
-			compressedSize,
-			uncompressedSize,
-			compressionMethod,
-			crc32,
-		}));
+		return this.archiveEntries
+			.filter((entry) => !entry.directory)
+			.map(({ path, compressedSize, uncompressedSize, compressionMethod, crc32 }) => ({
+				path,
+				compressedSize,
+				uncompressedSize,
+				compressionMethod,
+				crc32,
+			}));
 	}
 
 	read(path: string): Uint8Array {

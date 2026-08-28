@@ -8,7 +8,12 @@ import { commitXlsx, inspectXlsx, OfficeEngineError, PackageArchive, planXlsx } 
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 
 function fixture(
-	options: { readonly nested?: boolean; readonly strictPackage?: boolean; readonly bomWorksheet?: boolean } = {},
+	options: {
+		readonly nested?: boolean;
+		readonly strictPackage?: boolean;
+		readonly bomWorksheet?: boolean;
+		readonly secondWorksheet?: boolean;
+	} = {},
 ): Uint8Array {
 	const workbookPart = options.nested ? "xl/nested/workbook.xml" : "xl/workbook.xml";
 	const workbookRelationshipsPart = options.nested
@@ -19,25 +24,39 @@ function fixture(
 	const packageNamespace = options.strictPackage
 		? "http://purl.oclc.org/ooxml/package/relationships"
 		: "http://schemas.openxmlformats.org/package/2006/relationships";
+	const secondWorksheetContentType = options.secondWorksheet
+		? '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+		: "";
+	const secondSheet = options.secondWorksheet ? '<sheet name="Forecast" sheetId="2" r:id="rSheet2"/>' : "";
+	const secondWorksheetRelationship = options.secondWorksheet
+		? '<Relationship Id="rSheet2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
+		: "";
 	const worksheet =
 		'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="2" t="s"><v>0</v></c><c r="B1"><v>42</v></c><c r="C1"><f>SUM(B1:B1)</f><v>42</v></c><c r="D1" t="s"><v>1</v></c><c r="E1" t="b"><v>1</v></c><c r="F1" t="b"><v>2</v></c><c r="G1" t="s"><v>99</v></c><c r="H1" t="e"><v>#REF!</v></c><c r="I1"/><c r="J1"><v>not-a-number</v></c></row></sheetData></worksheet>';
 	return zipSync({
 		"[Content_Types].xml": encode(
-			`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/${workbookPart}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`,
+			`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/${workbookPart}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>${secondWorksheetContentType}<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`,
 		),
 		"_rels/.rels": encode(
 			`<Relationships xmlns="${packageNamespace}"><Relationship Id="root" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="${workbookPart}"/></Relationships>`,
 		),
 		[workbookPart]: encode(
-			'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Budget" sheetId="1" r:id="rSheet1"/></sheets></workbook>',
+			`<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Budget" sheetId="1" r:id="rSheet1"/>${secondSheet}</sheets></workbook>`,
 		),
 		[workbookRelationshipsPart]: encode(
-			`<Relationships xmlns="${packageNamespace}"><Relationship Id="rSheet1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="${worksheetTarget}"/><Relationship Id="rStrings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="${sharedStringsTarget}"/></Relationships>`,
+			`<Relationships xmlns="${packageNamespace}"><Relationship Id="rSheet1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="${worksheetTarget}"/>${secondWorksheetRelationship}<Relationship Id="rStrings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="${sharedStringsTarget}"/></Relationships>`,
 		),
 		"xl/sharedStrings.xml": encode(
 			'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>Revenue</t></si><si><r><t>Rich </t></r><r><t>text</t></r></si></sst>',
 		),
 		"xl/worksheets/sheet1.xml": encode(`${options.bomWorksheet ? "\uFEFF" : ""}${worksheet}`),
+		...(options.secondWorksheet
+			? {
+					"xl/worksheets/sheet2.xml": encode(
+						'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>7</v></c></row></sheetData></worksheet>',
+					),
+				}
+			: {}),
 		"docProps/custom.xml": encode("unchanged"),
 	});
 }
@@ -47,8 +66,8 @@ function replaceText(archive: PackageArchive, part: string, search: string, repl
 	return PackageArchive.open(archive.replace(part, encode(xml.replace(search, replacement))));
 }
 
-function operation(snapshot: ReturnType<typeof inspectXlsx>, address: string, replacement: string) {
-	const sheet = snapshot.sheets[0];
+function operation(snapshot: ReturnType<typeof inspectXlsx>, address: string, replacement: string, sheetIndex = 0) {
+	const sheet = snapshot.sheets[sheetIndex];
 	const cell = sheet?.cells.find((item) => item.address === address);
 	if (!sheet || !cell) throw new Error("fixture cell missing");
 	return {
@@ -396,6 +415,31 @@ describe("XLSX native transaction", () => {
 			sharedRelationship.replace("/>", ' TargetMode="External"/>'),
 		);
 		expect(() => inspectXlsx(externalShared, "external-shared")).toThrowError(OfficeEngineError);
+	});
+
+	it("rejects cross-worksheet transactions and unsupported structure or sharedStrings operations", () => {
+		const archive = PackageArchive.open(fixture({ secondWorksheet: true }));
+		const snapshot = inspectXlsx(archive, "xlsx-boundaries");
+		expect(snapshot.sheets).toHaveLength(2);
+		expect(() =>
+			planXlsx(
+				archive,
+				snapshot,
+				{
+					protocolVersion: 1,
+					operations: [operation(snapshot, "A1", "Changed"), operation(snapshot, "A1", "8", 1)],
+				},
+				Date.now() + 60_000,
+			),
+		).toThrowError(OfficeEngineError);
+
+		for (const type of ["create_cell", "add_worksheet", "set_shared_string"]) {
+			const envelope = {
+				protocolVersion: 1,
+				operations: [{ type }],
+			} as unknown as Parameters<typeof planXlsx>[2];
+			expect(() => planXlsx(archive, snapshot, envelope, Date.now() + 60_000)).toThrowError(OfficeEngineError);
+		}
 	});
 
 	it("requires exact keys, hashes, existing addresses, and a single worksheet", () => {

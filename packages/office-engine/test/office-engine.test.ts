@@ -274,6 +274,20 @@ describe("PackageArchive", () => {
 		expect(archive.entries()[0].path).toBe("data.txt");
 	});
 
+	it("accepts safe directory records without exposing them as package parts", () => {
+		const base = PackageArchive.open(docx());
+		const input = zip([
+			["word/", bytes("")],
+			["_rels/", bytes("")],
+			...base.entries().map((entry) => [entry.path, base.read(entry.path)] as const),
+		]);
+		const archive = PackageArchive.open(input);
+
+		expect(archive.entries().every((entry) => !entry.path.endsWith("/"))).toBe(true);
+		expect(resolveDocx(archive).mainPart.path).toBe("word/document.xml");
+		expect(archive.serialize()).toEqual(input);
+	});
+
 	it("rejects unsafe paths and NFC/case-insensitive duplicates", () => {
 		expectCode(() => PackageArchive.open(zip([["../evil.txt", bytes("x")]])), "ARCHIVE_UNSAFE_PATH");
 		expectCode(() => PackageArchive.open(zip([["a\\b.txt", bytes("x")]])), "ARCHIVE_UNSAFE_PATH");

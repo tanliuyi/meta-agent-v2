@@ -2,16 +2,10 @@
   "extends": "./tsconfig.sidecar.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "..",
+    "rootDir": "../..",
     "baseUrl": ".",
     "paths": {
-      "@earendil-works/pi-ai": ["../ai/src/index.ts"],
-      "@earendil-works/pi-ai/compat": ["../ai/src/compat.ts"],
-      "@earendil-works/pi-ai/*": ["../ai/src/*.ts"],
-      "@earendil-works/pi-agent-core": ["../agent/src/index.ts"],
-      "@earendil-works/pi-coding-agent": ["../coding-agent/src/index.ts"],
-      "@earendil-works/pi-coding-agent/*": ["../coding-agent/src/*"],
-      "@earendil-works/pi-tui": ["../tui/src/index.ts"]
+      "@earendil-works/pi-office-engine": ["../office-engine/src/index.ts"]
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@earendil-works/pi-office-engine",
-  "version": "0.83.0",
+  "version": "0.84.2",
   "description": "Safe Office Open XML package inspection and transactional editing",
   "private": true,
   "type": "module",
