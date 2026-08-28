@@ -1,6 +1,8 @@
 import type { BrowserSnapshot, BrowserSnapshotNode } from "../../../../../shared/browser-contracts.ts";
+import type { SessionImageResourceRef } from "../../../../../shared/contracts.ts";
 import type { ToolResultContentProps } from "./tool-content-types.ts";
 import { parseToolResult } from "./tool-format.ts";
+import { ToolImage } from "./tool-image.tsx";
 import { ToolResult } from "./tool-result.tsx";
 
 /**
@@ -32,11 +34,19 @@ function asSnapshot(value: unknown): BrowserSnapshot | undefined {
   return value as unknown as BrowserSnapshot;
 }
 
-/** 截图 dataUrl：兼容字符串（snapshot 内嵌）与 { dataUrl } 对象（browser_screenshot 工具）。 */
-function asScreenshotDataUrl(value: unknown): string | undefined {
+function asImageResourceRef(value: unknown): SessionImageResourceRef | undefined {
+  if (!isRecord(value) || typeof value.resourceId !== "string" || typeof value.mimeType !== "string") return undefined;
+  const unavailable =
+    value.unavailable === "too-large" || value.unavailable === "budget-exceeded" ? value.unavailable : undefined;
+  return { resourceId: value.resourceId, mimeType: value.mimeType, ...(unavailable ? { unavailable } : {}) };
+}
+
+/** 截图来源：内嵌 dataUrl 或历史 timeline 的图像资源引用。 */
+export function asScreenshotSource(value: unknown): string | SessionImageResourceRef | undefined {
   if (typeof value === "string") return value;
-  if (isRecord(value) && typeof value.dataUrl === "string") return value.dataUrl;
-  return undefined;
+  if (!isRecord(value)) return undefined;
+  if (typeof value.dataUrl === "string") return value.dataUrl;
+  return asImageResourceRef(value.dataUrl) ?? asImageResourceRef(value);
 }
 
 /** 仅展示浏览器工具结果的组件。 */
@@ -45,7 +55,7 @@ export function BrowserContent({ result, error, expanded }: ToolResultContentPro
   const parsed = parseToolResult(result);
   const details = parsed?.details;
   const snapshot = asSnapshot(details?.snapshot);
-  const screenshot = asScreenshotDataUrl(details?.screenshot) ?? snapshot?.screenshot ?? undefined;
+  const screenshot = asScreenshotSource(details?.screenshot) ?? snapshot?.screenshot ?? undefined;
   const interactiveCount = countInteractiveNodes(snapshot?.tree);
   const hasText = Boolean(parsed?.text.trim() || (parsed?.images?.length ?? 0) > 0);
 
@@ -58,7 +68,13 @@ export function BrowserContent({ result, error, expanded }: ToolResultContentPro
           {interactiveCount > 0 ? <span className="browser-snapshot-meta">{interactiveCount} 个可交互元素</span> : null}
         </div>
       ) : null}
-      {screenshot ? <img className="browser-screenshot" src={screenshot} alt="页面截图" /> : null}
+      {screenshot ? (
+        typeof screenshot === "string" ? (
+          <img className="browser-screenshot" src={screenshot} alt="页面截图" />
+        ) : (
+          <ToolImage className="browser-screenshot" resource={screenshot} alt="页面截图" />
+        )
+      ) : null}
       {hasText ? <ToolResult result={result} error={error} expanded={expanded} previewLines={15} /> : null}
     </div>
   );

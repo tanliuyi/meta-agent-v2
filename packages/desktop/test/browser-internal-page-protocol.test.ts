@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const electron = vi.hoisted(() => ({
   handler: undefined as ((request: Request) => Response | Promise<Response>) | undefined,
+  handled: false,
   fetch: vi.fn(async () => new Response("ok")),
   registerSchemesAsPrivileged: vi.fn(),
-  handle: vi.fn((_scheme: string, handler: (request: Request) => Response | Promise<Response>) => {
+  isProtocolHandled: vi.fn(() => electron.handled),
+  handle: vi.fn(async (_scheme: string, handler: (request: Request) => Response | Promise<Response>) => {
+    electron.handled = true;
     electron.handler = handler;
   }),
 }));
@@ -13,6 +16,7 @@ vi.mock("electron", () => ({
   net: { fetch: electron.fetch },
   protocol: {
     handle: electron.handle,
+    isProtocolHandled: electron.isProtocolHandled,
     registerSchemesAsPrivileged: electron.registerSchemesAsPrivileged,
   },
 }));
@@ -26,7 +30,9 @@ describe("browser internal page protocol", () => {
   beforeEach(() => {
     electron.fetch.mockClear();
     electron.registerSchemesAsPrivileged.mockClear();
+    electron.isProtocolHandled.mockClear();
     electron.handle.mockClear();
+    electron.handled = false;
     electron.handler = undefined;
   });
 
@@ -42,14 +48,28 @@ describe("browser internal page protocol", () => {
   });
 
   test("可向浏览器 partition session 安装相同 handler", () => {
-    const sessionHandle = vi.fn();
+    const sessionHandle = vi.fn(async () => {});
+    const sessionIsProtocolHandled = vi.fn(() => false);
 
     handleBrowserInternalPageRequests("C:/app/renderer", undefined, {
-      protocol: { handle: sessionHandle },
+      protocol: { handle: sessionHandle, isProtocolHandled: sessionIsProtocolHandled },
     } as never);
 
+    expect(sessionIsProtocolHandled).toHaveBeenCalledWith("browser");
     expect(sessionHandle).toHaveBeenCalledWith("browser", expect.any(Function));
     expect(electron.handle).not.toHaveBeenCalled();
+  });
+
+  test("同一 session 已安装 handler 时不重复注册", () => {
+    const sessionHandle = vi.fn(async () => {});
+    const sessionIsProtocolHandled = vi.fn(() => true);
+
+    handleBrowserInternalPageRequests("C:/app/renderer", undefined, {
+      protocol: { handle: sessionHandle, isProtocolHandled: sessionIsProtocolHandled },
+    } as never);
+
+    expect(sessionIsProtocolHandled).toHaveBeenCalledWith("browser");
+    expect(sessionHandle).not.toHaveBeenCalled();
   });
 
   test("开发资源固定代理到 renderer origin", async () => {

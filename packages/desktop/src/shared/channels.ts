@@ -47,6 +47,7 @@ export const CHANNELS = {
   sessionsSetModel: "desktop:sessions:set-model",
   sessionsSetThinking: "desktop:sessions:set-thinking",
   sessionsRespond: "desktop:sessions:respond",
+  sessionsReadImageResource: "desktop:sessions:read-image-resource",
   filesList: "desktop:files:list",
   filesRead: "desktop:files:read",
   filesReadImage: "desktop:files:read-image",

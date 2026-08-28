@@ -108,6 +108,11 @@ describe("ThreadWorkerRegistry", () => {
     const harness = createHarness(userDataDir);
     const acknowledgeSubagent = vi.fn(() => true);
     const cancelSubagent = vi.fn(async () => undefined);
+    const readSubagentImageResource = vi.fn(async (_projectId: string, _threadId: string, resourceId: string) => ({
+      resourceId,
+      mimeType: "image/png",
+      data: "image-body",
+    }));
     harness.options.isActiveSubagentThread = (_projectId, threadId) => threadId === "subagent";
     harness.options.attachSubagent = async (_projectId, threadId) =>
       threadId === "subagent"
@@ -115,6 +120,7 @@ describe("ThreadWorkerRegistry", () => {
         : undefined;
     harness.options.acknowledgeSubagent = acknowledgeSubagent;
     harness.options.cancelSubagent = cancelSubagent;
+    harness.options.readSubagentImageResource = readSubagentImageResource;
     const registry = new ThreadWorkerRegistry(harness.options);
 
     await expect(registry.attach("project", "subagent")).resolves.toMatchObject({
@@ -123,9 +129,21 @@ describe("ThreadWorkerRegistry", () => {
     });
     await expect(registry.prewarm("project", "subagent")).resolves.toBeUndefined();
     await expect(registry.cancel("project", "subagent")).resolves.toEqual({ steering: [], followUp: [] });
+    await expect(
+      registry.readImageResource("project", "subagent", "00000000-0000-4000-8000-000000000001"),
+    ).resolves.toEqual({
+      resourceId: "00000000-0000-4000-8000-000000000001",
+      mimeType: "image/png",
+      data: "image-body",
+    });
     registry.acknowledge("subagent-worker", 7);
 
     expect(harness.clients).toHaveLength(0);
+    expect(readSubagentImageResource).toHaveBeenCalledWith(
+      "project",
+      "subagent",
+      "00000000-0000-4000-8000-000000000001",
+    );
     expect(cancelSubagent).toHaveBeenCalledWith("project", "subagent");
     expect(acknowledgeSubagent).toHaveBeenCalledWith("subagent-worker", 7);
     await registry.dispose();

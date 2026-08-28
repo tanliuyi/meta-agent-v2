@@ -1,3 +1,5 @@
+import type { SessionImageResourceRef } from "../../../../../shared/contracts.ts";
+
 /** 编辑工具中可结构化展示的单次文本替换。 */
 export interface ToolEdit {
   oldText: string;
@@ -19,10 +21,7 @@ export interface ParsedToolResult {
   images?: readonly ParsedToolImage[];
 }
 
-export interface ParsedToolImage {
-  data: string;
-  mimeType: string;
-}
+export type ParsedToolImage = { data: string; mimeType: string } | SessionImageResourceRef;
 
 interface SplitText {
   lines: string[];
@@ -107,8 +106,15 @@ export function parseToolResult(value: unknown): ParsedToolResult | undefined {
     .replace(/\r/g, "");
   const images = value.content.flatMap((part): ParsedToolImage[] => {
     if (!part || typeof part !== "object" || !("type" in part) || part.type !== "image") return [];
-    if (!("data" in part) || typeof part.data !== "string") return [];
     if (!("mimeType" in part) || typeof part.mimeType !== "string") return [];
+    if ("resourceId" in part && typeof part.resourceId === "string") {
+      const unavailable =
+        "unavailable" in part && (part.unavailable === "too-large" || part.unavailable === "budget-exceeded")
+          ? part.unavailable
+          : undefined;
+      return [{ resourceId: part.resourceId, mimeType: part.mimeType, ...(unavailable ? { unavailable } : {}) }];
+    }
+    if (!("data" in part) || typeof part.data !== "string") return [];
     return [{ data: part.data, mimeType: part.mimeType }];
   });
   const details = "details" in value && isRecord(value.details) ? value.details : undefined;

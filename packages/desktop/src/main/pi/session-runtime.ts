@@ -22,6 +22,7 @@ import {
   type SessionControlState,
   type SessionCreateInput,
   type SessionEditInput,
+  type SessionImageResource,
   type SessionPromptInput,
   type SessionPushPayload,
   type SessionReloadInput,
@@ -291,6 +292,11 @@ export class SessionRuntime {
 
   get file(): string | undefined {
     return this.session.sessionFile;
+  }
+
+  /** 读取 timeline 引用的图像资源主体（worker 生命周期内有效）。 */
+  readImageResource(resourceId: string): SessionImageResource | undefined {
+    return this.projector.readImageResource(resourceId);
   }
 
   /** attach 或 sequence resync 时直接返回完整 Pi snapshot。 */

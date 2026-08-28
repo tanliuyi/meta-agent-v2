@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type {
   AgentSession,
   AgentSessionEvent,
@@ -20,6 +21,8 @@ import {
   type PiToolCallPart,
   type PiUserContentPart,
   PROTOCOL_VERSION,
+  type SessionImageResource,
+  type SessionImageResourceRef,
   type ThinkingLevel,
 } from "../../shared/contracts.ts";
 import { parseQuoteAttachmentData, QUOTE_ATTACHMENT_CUSTOM_TYPE, stripQuotePrefix } from "./quote-context.ts";
@@ -57,6 +60,11 @@ interface PendingQuoteAttachment {
   quotes: readonly PiQuote[];
 }
 
+const MAX_SESSION_IMAGE_RESOURCE_BASE64_BYTES = 8 * 1024 * 1024;
+const MAX_SESSION_IMAGE_RESOURCE_BYTES = 64 * 1024 * 1024;
+const MAX_SESSION_IMAGE_RESOURCES = 4_096;
+const UNAVAILABLE_IMAGE_RESOURCE_ID = "00000000-0000-4000-8000-000000000000";
+
 /** 将 Pi public session tree 与 live events 投影为 Desktop timeline。 */
 export class PiThreadProjector {
   private readonly projectId: string;
@@ -66,6 +74,11 @@ export class PiThreadProjector {
   onUserEntryPersisted?: (entryId: string, requestId: string, quotes: readonly PiQuote[]) => void;
   /** requestId → 结构化引用；在 user entry 落盘（或 prompt 被拒/清空）前一直保留，覆盖 queued prompt 消费晚于 finishPrompt 的情况。 */
   private readonly pendingQuoteAttachments = new Map<string, readonly PiQuote[]>();
+  /** 投影中被替换的原始图像主体（base64），worker 生命周期内持有，按 resourceId 按需读取。 */
+  private readonly imageResources = new Map<string, { mimeType: string; data: string }>();
+  /** 同一图像在 live、持久化和 branch rebuild 间复用 resourceId，避免重复主体与孤儿引用。 */
+  private readonly imageResourceIds = new Map<string, string>();
+  private imageResourceBytes = 0;
   private nodeIds: string[] = [];
   private nodeSnapshot: PiTimelineNode[] | undefined;
   private readonly byId = new Map<string, PiTimelineNode>();
@@ -280,7 +293,7 @@ export class PiThreadProjector {
         this.replaceTool(event.toolCallId, (part) => ({
           ...part,
           execution: event.isError ? "error" : "complete",
-          result: toJson(event.result),
+          result: this.projectToolResultJson(event.result),
           isError: event.isError,
         }));
         return;
@@ -356,6 +369,9 @@ export class PiThreadProjector {
 
   dispose(): void {
     this.flush();
+    this.imageResources.clear();
+    this.imageResourceIds.clear();
+    this.imageResourceBytes = 0;
   }
 
   private startMessage(message: AgentMessage): void {
@@ -847,7 +863,7 @@ export class PiThreadProjector {
     const update = (part: PiToolCallPart): PiToolCallPart => ({
       ...part,
       execution: message.isError ? "error" : "complete",
-      result: toJson({
+      result: this.projectToolResultJson({
         content: message.content,
         ...(message.details !== undefined ? { details: message.details } : {}),
         ...(message.addedToolNames ? { addedToolNames: message.addedToolNames } : {}),
@@ -980,6 +996,89 @@ export class PiThreadProjector {
 
   private transientId(kind: string): string {
     return `live:${this.session.sessionId}:${kind}:${++this.transientCounter}`;
+  }
+
+  /** 登记投影中遇到的原始图像主体（base64），返回 worker 生命周期内稳定的轻量引用。 */
+  private registerImageResource(mimeType: string, data: string): SessionImageResourceRef {
+    const bytes = Buffer.byteLength(data, "utf8");
+    if (bytes > MAX_SESSION_IMAGE_RESOURCE_BASE64_BYTES) {
+      return { resourceId: UNAVAILABLE_IMAGE_RESOURCE_ID, mimeType, unavailable: "too-large" };
+    }
+
+    const digest = createHash("sha256").update(mimeType).update("\0").update(data).digest("hex");
+    const existingId = this.imageResourceIds.get(digest);
+    const existing = existingId ? this.imageResources.get(existingId) : undefined;
+    if (existingId && existing?.mimeType === mimeType && existing.data === data) {
+      return { resourceId: existingId, mimeType };
+    }
+    if (
+      this.imageResources.size >= MAX_SESSION_IMAGE_RESOURCES ||
+      this.imageResourceBytes + bytes > MAX_SESSION_IMAGE_RESOURCE_BYTES
+    ) {
+      return { resourceId: UNAVAILABLE_IMAGE_RESOURCE_ID, mimeType, unavailable: "budget-exceeded" };
+    }
+
+    const resourceId = randomUUID();
+    this.imageResources.set(resourceId, { mimeType, data });
+    this.imageResourceIds.set(digest, resourceId);
+    this.imageResourceBytes += bytes;
+    return { resourceId, mimeType };
+  }
+
+  /** 读取 timeline 引用的图像资源主体；未知、超限或 worker 已结束的 ID 返回 undefined。 */
+  readImageResource(resourceId: string): SessionImageResource | undefined {
+    const resource = this.imageResources.get(resourceId);
+    return resource ? { resourceId, ...resource } : undefined;
+  }
+
+  /** 将 toolResult 载荷中的图像主体替换为资源引用：content image parts 与 details 截图。 */
+  private projectToolResultJson(value: unknown): JsonValue {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return toJson(value);
+    const record = value as Record<string, unknown>;
+    return toJson({
+      ...record,
+      ...(Array.isArray(record.content) ? { content: this.projectContentImages(record.content) } : {}),
+      ...(isPlainRecord(record.details) ? { details: this.projectDetailsImages(record.details) } : {}),
+    });
+  }
+
+  /** 替换 content 数组中 {type:image,data,mimeType} 图像主体的 data 为资源引用。 */
+  private projectContentImages(content: readonly unknown[]): unknown[] {
+    return content.map((part) => {
+      if (!part || typeof part !== "object" || Array.isArray(part)) return part;
+      const record = part as Record<string, unknown>;
+      if (record.type !== "image" || typeof record.data !== "string" || typeof record.mimeType !== "string") {
+        return part;
+      }
+      const ref = this.registerImageResource(record.mimeType, record.data);
+      return { type: "image", ...ref };
+    });
+  }
+
+  /** 替换 details 中已知截图字段（screenshot / snapshot.screenshot）的 data URL 为资源引用。 */
+  private projectDetailsImages(details: Record<string, unknown>): Record<string, unknown> {
+    const projected = { ...details };
+    projected.screenshot = this.projectScreenshot(details.screenshot);
+    const snapshot = details.snapshot;
+    if (isPlainRecord(snapshot)) {
+      projected.snapshot = { ...snapshot, screenshot: this.projectScreenshot(snapshot.screenshot) };
+    }
+    return projected;
+  }
+
+  /** 将 data URL 截图替换为资源引用；非 data URL 原样返回。 */
+  private projectScreenshot(value: unknown): unknown {
+    if (typeof value === "string") {
+      const ref = dataUrlToImageResourceRef(value, (mimeType, data) => this.registerImageResource(mimeType, data));
+      return ref ?? value;
+    }
+    if (isPlainRecord(value) && typeof value.dataUrl === "string") {
+      const ref = dataUrlToImageResourceRef(value.dataUrl, (mimeType, data) =>
+        this.registerImageResource(mimeType, data),
+      );
+      return ref ? { ...value, dataUrl: ref } : value;
+    }
+    return value;
   }
 
   private nextQueueId(mode: "steer" | "followUp"): string {
@@ -1449,6 +1548,10 @@ function isJsonObject(value: JsonValue): value is { [key: string]: JsonValue } {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(toJson(left)) === JSON.stringify(toJson(right));
 }
@@ -1492,4 +1595,16 @@ export function toJson(value: unknown, seen = new WeakSet<object>()): JsonValue 
 
 function assertNever(value: never): never {
   throw new ProjectionError(`不支持的 Pi discriminator: ${String(value)}`);
+}
+
+const DATA_URL_PATTERN = /^data:image\/([A-Za-z0-9.+-]+);base64,(.+)$/s;
+
+/** 将 image/png 等 data URL 拆为资源引用；非图像 data URL 返回 undefined 保持原样。 */
+function dataUrlToImageResourceRef(
+  value: string,
+  register: (mimeType: string, data: string) => SessionImageResourceRef,
+): SessionImageResourceRef | undefined {
+  const match = DATA_URL_PATTERN.exec(value);
+  if (!match) return undefined;
+  return register(`image/${match[1]}`, match[2] ?? "");
 }

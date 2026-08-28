@@ -13,6 +13,7 @@ import type {
   SessionControlState,
   SessionCreateInput,
   SessionEditInput,
+  SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
@@ -125,6 +126,11 @@ export interface ThreadWorkerRegistryOptions {
   listSubagentThreads?(projectId: string): readonly Thread[];
   isActiveSubagentThread?(projectId: string, threadId: string): boolean;
   attachSubagent?(projectId: string, threadId: string): Promise<SessionBootstrap | undefined>;
+  readSubagentImageResource?(
+    projectId: string,
+    threadId: string,
+    resourceId: string,
+  ): Promise<SessionImageResource | undefined>;
   cancelSubagent?(projectId: string, threadId: string): Promise<void>;
   acknowledgeSubagent?(workerInstanceId: string, sidecarSequence: number): boolean;
   beginSubagentWorkspaceMutation?(workspaceKey: string): void;
@@ -636,6 +642,21 @@ export class ThreadWorkerRegistry {
 
   async edit(input: SessionEditInput): Promise<SessionCommandResult> {
     return this.use(input.projectId, input.threadId, (record) => record.client.request({ type: "edit", input }, null));
+  }
+
+  async readImageResource(
+    projectId: string,
+    threadId: string,
+    resourceId: string,
+  ): Promise<SessionImageResource | undefined> {
+    if (this.options.isActiveSubagentThread?.(projectId, threadId)) {
+      const readSubagentImageResource = this.options.readSubagentImageResource;
+      if (!readSubagentImageResource) throw new Error("Active subagent image resources are unavailable");
+      return readSubagentImageResource(projectId, threadId, resourceId);
+    }
+    return this.use(projectId, threadId, (record) =>
+      record.client.request<SessionImageResource | undefined>({ type: "getImageResource", resourceId }, 30_000),
+    );
   }
 
   async reload(input: SessionReloadInput): Promise<SessionCommandResult> {

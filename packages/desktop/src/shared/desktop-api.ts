@@ -68,6 +68,7 @@ import type {
   SessionCreateInput,
   SessionEditInput,
   SessionFlushResult,
+  SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPushPayload,
@@ -310,6 +311,8 @@ export interface DesktopApi {
     setModel(projectId: string, threadId: string, provider: string, modelId: string): Promise<void>;
     setThinking(projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]): Promise<void>;
     respond(projectId: string, threadId: string, response: HostResponse): Promise<void>;
+    /** 按 attachment 租约读取 timeline 引用的图像资源主体；主体仅经此通道返回，不进 timeline。 */
+    readImageResource(attachmentId: string, resourceId: string): Promise<SessionImageResource | undefined>;
   };
   files: {
     getPath(file: File): string;

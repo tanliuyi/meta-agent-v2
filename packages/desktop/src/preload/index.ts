@@ -368,6 +368,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.sessionsSetThinking, projectId, threadId, level),
     respond: (projectId, threadId, response) =>
       ipcRenderer.invoke(CHANNELS.sessionsRespond, projectId, threadId, response),
+    readImageResource: (attachmentId, resourceId) =>
+      ipcRenderer.invoke(CHANNELS.sessionsReadImageResource, attachmentId, resourceId),
   },
   files: {
     getPath: (file) => webUtils.getPathForFile(file),

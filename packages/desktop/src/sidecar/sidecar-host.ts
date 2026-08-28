@@ -47,6 +47,7 @@ const REENTRANT_CONTROL_COMMANDS = new Set<SidecarCommand["type"]>([
   "ping",
   "rename",
   "getSummary",
+  "getImageResource",
   "cancel",
   "clearQueue",
   "setThinking",

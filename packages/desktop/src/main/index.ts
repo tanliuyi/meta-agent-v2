@@ -408,6 +408,8 @@ app.whenReady().then(async () => {
     listSubagentThreads: (projectId) => activeSubagents.listThreads(projectId),
     isActiveSubagentThread: (projectId, threadId) => activeSubagents.isActiveThread(projectId, threadId),
     attachSubagent: (projectId, threadId) => activeSubagents.attach(projectId, threadId),
+    readSubagentImageResource: (projectId, threadId, resourceId) =>
+      activeSubagents.readImageResource(projectId, threadId, resourceId),
     cancelSubagent: (projectId, threadId) => activeSubagents.cancelActiveThread(projectId, threadId),
     acknowledgeSubagent: (workerInstanceId, sidecarSequence) =>
       activeSubagents.acknowledge(workerInstanceId, sidecarSequence),

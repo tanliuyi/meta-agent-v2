@@ -1,3 +1,5 @@
+import type { SessionImageResourceRef } from "./contracts.ts";
+
 /**
  * Desktop 内置浏览器（IAB）IPC 契约。
  *
@@ -193,8 +195,8 @@ export interface BrowserSnapshot {
   timestamp: number;
   viewport: { width: number; height: number; dpr: number };
   tree: BrowserSnapshotNode[];
-  /** data:image/png;base64，仅 withScreenshot=true 时非 null。 */
-  screenshot: string | null;
+  /** data:image/png;base64，仅 withScreenshot=true 时非 null；历史 timeline 中为画面资源引用。 */
+  screenshot: string | SessionImageResourceRef | null;
 }
 
 export type BrowserSnapshotResult = { ok: true; snapshot: BrowserSnapshot } | { ok: false; error: string };

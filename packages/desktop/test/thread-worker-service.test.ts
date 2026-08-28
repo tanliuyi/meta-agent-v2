@@ -104,6 +104,63 @@ describe("ThreadWorkerService", () => {
     expect(result.readyResult).toBe(bootstrap);
   });
 
+  it("forwards getImageResource to the runtime and returns the resource", async () => {
+    const cwd = join(root, "workspaces", "general");
+    const agentDir = join(root, "agent");
+    const sessionId = "general-thread";
+    const sessionFile = join(agentDir, "sessions", "--general--", `${sessionId}.jsonl`);
+    const bootstrap = { threadId: sessionId };
+    mkdirSync(cwd, { recursive: true });
+    mocks.createSession.mockReturnValue({ getSessionFile: () => sessionFile, getCwd: () => cwd });
+    const readImageResource = vi.fn().mockReturnValue({
+      resourceId: "resource-1",
+      mimeType: "image/png",
+      data: "body",
+    });
+    mocks.runtimeCreate.mockResolvedValue({
+      id: sessionId,
+      bootstrap: vi.fn().mockReturnValue(bootstrap),
+      readImageResource,
+      dispose: vi.fn(),
+    });
+    const binding: ThreadWorkerBinding = {
+      mode: "create",
+      projectId: GENERAL_WORKSPACE_ID,
+      projectCwd: cwd,
+      cwd,
+      agentDir,
+      sessionId,
+      createInput: {
+        projectId: GENERAL_WORKSPACE_ID,
+        createRequestId: "request",
+        extensionSetGeneration: "extensions-generation",
+        model: { provider: "provider", id: "model" },
+        thinkingLevel: "off",
+      },
+      extensionSet: {
+        generation: "extensions-generation",
+        projectId: GENERAL_WORKSPACE_ID,
+        entries: [],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
+    };
+
+    const result = await ThreadWorkerService.create(
+      { role: "thread", value: binding },
+      { emit: () => undefined, requestHost: async () => undefined, flushEvents: async () => undefined },
+    );
+    const service = result.service;
+
+    await expect(service.command({ type: "getImageResource", resourceId: "resource-1" })).resolves.toEqual({
+      resourceId: "resource-1",
+      mimeType: "image/png",
+      data: "body",
+    });
+    expect(readImageResource).toHaveBeenCalledWith("resource-1");
+    await service.dispose();
+  });
+
   it("rejects a missing Project cwd before creating the SessionManager or runtime", async () => {
     const cwd = join(root, "missing-project");
     const binding: ThreadWorkerBinding = {

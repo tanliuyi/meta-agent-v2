@@ -1,4 +1,5 @@
 import { parseToolResult } from "./tool-format.ts";
+import { ToolImage } from "./tool-image.tsx";
 
 interface ToolResultProps {
   result: unknown;
@@ -28,14 +29,23 @@ export function ToolResult({ result, error, expanded, previewLines = 20, preview
         </div>
       ) : null}
       {visibleLines.length > 0 ? <pre className="tool-result">{visibleLines.join("\n")}</pre> : null}
-      {images.map((image, index) => (
-        <img
-          className="tool-result-image"
-          src={`data:${image.mimeType};base64,${image.data}`}
-          alt={`工具输出图像 ${index + 1}`}
-          key={`${image.mimeType}:${index}`}
-        />
-      ))}
+      {images.map((image, index) =>
+        "data" in image ? (
+          <img
+            className="tool-result-image"
+            src={`data:${image.mimeType};base64,${image.data}`}
+            alt={`工具输出图像 ${index + 1}`}
+            key={`${image.mimeType}:${index}`}
+          />
+        ) : (
+          <ToolImage
+            className="tool-result-image"
+            resource={image}
+            alt={`工具输出图像 ${index + 1}`}
+            key={image.resourceId}
+          />
+        ),
+      )}
     </div>
   );
 }

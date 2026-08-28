@@ -459,11 +459,12 @@ export class SidecarWorkerClient {
   }
 }
 
-function isMutationCommand(commandType: SidecarCommand["type"]): boolean {
+export function isMutationCommand(commandType: SidecarCommand["type"]): boolean {
   return ![
     "ping",
     "bootstrap",
     "subagentBootstrap",
+    "getImageResource",
     "getSummary",
     "getCheckpointDiff",
     "listSessions",

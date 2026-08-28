@@ -139,4 +139,28 @@ describe("sidecar command scheduling", () => {
     await prompt;
     expect(calls).toEqual(["prompt-start", "getSummary", "prompt-end"]);
   });
+
+  it("prompt 运行期间图像资源读取立即执行", async () => {
+    const schedule = createSidecarCommandScheduler();
+    let releasePrompt!: () => void;
+    const promptBlocked = new Promise<void>((resolve) => {
+      releasePrompt = resolve;
+    });
+    const calls: string[] = [];
+
+    const prompt = schedule("prompt", async () => {
+      calls.push("prompt-start");
+      await promptBlocked;
+      calls.push("prompt-end");
+    });
+    await vi.waitFor(() => expect(calls).toEqual(["prompt-start"]));
+
+    await schedule("getImageResource", async () => {
+      calls.push("image");
+    });
+
+    expect(calls).toEqual(["prompt-start", "image"]);
+    releasePrompt();
+    await prompt;
+  });
 });

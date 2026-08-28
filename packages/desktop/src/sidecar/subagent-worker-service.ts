@@ -157,6 +157,8 @@ export class SubagentWorkerService implements SidecarService {
       }
       case "subagentBootstrap":
         return this.bootstrap();
+      case "getImageResource":
+        return this.projector?.readImageResource(subagentCommand.resourceId);
       case "subagentCancel":
         this.assertRunId(subagentCommand.runId);
         this.cancelled = true;

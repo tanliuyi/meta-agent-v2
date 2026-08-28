@@ -105,6 +105,7 @@ export type SubagentWorkerCommand =
   | { type: "subagentRun"; request: SubagentRunRequest }
   | { type: "refreshModelConfiguration"; revision: { generation: number } }
   | { type: "subagentBootstrap" }
+  | { type: "getImageResource"; resourceId: string }
   | { type: "subagentCancel"; runId: string }
   | { type: "subagentSteer"; runId: string; message: string }
   | { type: "ping" };

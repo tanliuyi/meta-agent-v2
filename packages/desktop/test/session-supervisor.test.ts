@@ -13,6 +13,7 @@ interface RegistryMock {
   create: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
+  readImageResource: ReturnType<typeof vi.fn>;
 }
 
 describe("SessionSupervisor attachment leases", () => {
@@ -170,6 +171,33 @@ describe("SessionSupervisor attachment leases", () => {
     expect(workers.acknowledge).toHaveBeenCalledWith("worker", 1);
     await supervisor.dispose();
   });
+
+  it("reads image resources only under the caller's active attachment lease", async () => {
+    const readImageResource = vi.fn(async () => ({
+      resourceId: "resource-1",
+      mimeType: "image/png",
+      data: "abc",
+    }));
+    workers.readImageResource = readImageResource;
+    workers.value.readImageResource = readImageResource;
+    const supervisor = new SessionSupervisor(projectStore(), workers.value);
+    const attachment = await supervisor.attach(1, input("thread", "request"), () => {});
+
+    await expect(supervisor.readImageResource(1, attachment.attachmentId, "resource-1")).resolves.toEqual({
+      resourceId: "resource-1",
+      mimeType: "image/png",
+      data: "abc",
+    });
+    expect(readImageResource).toHaveBeenCalledWith("project", "thread", "resource-1");
+
+    await expect(supervisor.readImageResource(1, "stale-attachment", "resource-1")).rejects.toThrow(
+      "Session attachment is not active",
+    );
+    await expect(supervisor.readImageResource(2, attachment.attachmentId, "resource-1")).rejects.toThrow(
+      "Session attachment is not active",
+    );
+    await supervisor.dispose();
+  });
 });
 
 function input(threadId: string, requestId: string, replaceAttachmentId?: string): SessionAttachInput {
@@ -183,6 +211,7 @@ function registryMock(): RegistryMock {
   const create = vi.fn(async () => bootstrap("created"));
   const close = vi.fn(async () => {});
   const dispose = vi.fn(async () => {});
+  const readImageResource = vi.fn(async () => undefined);
   return {
     attach,
     detach,
@@ -190,6 +219,7 @@ function registryMock(): RegistryMock {
     create,
     close,
     dispose,
+    readImageResource,
     value: {
       list: vi.fn(async () => []),
       getDraftConfig: vi.fn(),
@@ -199,6 +229,7 @@ function registryMock(): RegistryMock {
       acknowledge,
       close,
       dispose,
+      readImageResource,
     } as unknown as ThreadWorkerRegistry,
   };
 }

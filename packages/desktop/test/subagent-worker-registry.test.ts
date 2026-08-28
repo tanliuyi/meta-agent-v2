@@ -8,7 +8,12 @@ import type { SidecarRuntimeManifest } from "../src/main/sidecar/sidecar-runtime
 import { type SubagentWorkerClient, SubagentWorkerRegistry } from "../src/main/sidecar/subagent-worker-registry.ts";
 import { assertHostRequestIdentity } from "../src/main/sidecar/thread-worker-registry.ts";
 import type { WorkerClientOptions } from "../src/main/sidecar/worker-client.ts";
-import { PROTOCOL_VERSION, type SessionBootstrap, type SessionPushPayload } from "../src/shared/contracts.ts";
+import {
+  PROTOCOL_VERSION,
+  type SessionBootstrap,
+  type SessionImageResource,
+  type SessionPushPayload,
+} from "../src/shared/contracts.ts";
 import type { RuntimeCompatibility, SidecarEvent } from "../src/shared/sidecar-contracts.ts";
 import type { SubagentRunRequest } from "../src/shared/subagent-contracts.ts";
 
@@ -105,6 +110,7 @@ class FakeClient implements SubagentWorkerClient {
   cancelError?: Error;
   run?: Promise<unknown>;
   bootstrapResult?: SessionBootstrap;
+  imageResource?: SessionImageResource;
 
   constructor(options: WorkerClientOptions) {
     this.options = options;
@@ -130,6 +136,7 @@ class FakeClient implements SubagentWorkerClient {
       return { status: "completed" } as T;
     }
     if (command.type === "subagentBootstrap") return this.bootstrapResult as T;
+    if (command.type === "getImageResource") return this.imageResource as T;
     if (command.type === "subagentCancel" && this.cancelError) throw this.cancelError;
     return null as T;
   }
@@ -509,6 +516,43 @@ describe("SubagentWorkerRegistry", () => {
 
     workerClient.emitSidecarEvent(event(workerClient.instanceId, 2, { type: "completed", runId: "run-1" }));
     expect(summaries.at(-1)).toMatchObject({ id: "workflow-child", running: false });
+    release();
+    await run;
+  });
+
+  it("reads image resources from the active subagent worker that owns the timeline", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let client: FakeClient | undefined;
+    const registry = new SubagentWorkerRegistry({
+      manifest: manifest(),
+      agentDir: process.cwd(),
+      createWorkerClient: (options) => {
+        client = new FakeClient(options);
+        client.run = pending.then(() => ({ status: "completed" }));
+        client.imageResource = {
+          resourceId: "00000000-0000-4000-8000-000000000001",
+          mimeType: "image/png",
+          data: "image-body",
+        };
+        return client;
+      },
+    });
+    const run = registry.handleHostRequest({ type: "subagent.run", request: runRequest() }, () => undefined);
+    await expect.poll(() => client).toBeDefined();
+    client?.emitSidecarEvent(event(client.instanceId, 1, { type: "started", runId: "run-1", threadId: "child" }));
+
+    await expect(
+      registry.readImageResource("project", "child", "00000000-0000-4000-8000-000000000001"),
+    ).resolves.toEqual({
+      resourceId: "00000000-0000-4000-8000-000000000001",
+      mimeType: "image/png",
+      data: "image-body",
+    });
+    expect(client?.commandTypes).toContain("getImageResource");
+
     release();
     await run;
   });

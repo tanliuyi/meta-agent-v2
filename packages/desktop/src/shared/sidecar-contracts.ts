@@ -9,6 +9,7 @@ import type {
   SessionControlState,
   SessionCreateInput,
   SessionEditInput,
+  SessionImageResource,
   SessionPromptInput,
   SessionPushPayload,
   SessionReloadInput,
@@ -251,6 +252,7 @@ export type ThreadSidecarCommand =
   | { type: "respondHostUi"; response: HostResponse }
   | { type: "getSummary"; archived: boolean }
   | { type: "branch"; input: SessionBranchInput }
+  | { type: "getImageResource"; resourceId: string }
   | { type: "ping" };
 
 export interface CreationReservation {
@@ -330,6 +332,7 @@ export type SidecarCommandResult =
   | SessionRemoveResult
   | SessionCheckpointDiffResult
   | SessionCheckpointRestoreResult
+  | SessionImageResource
   | { path: string; id: string }
   | { pong: true }
   | null;

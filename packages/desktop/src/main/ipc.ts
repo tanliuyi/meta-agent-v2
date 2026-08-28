@@ -122,6 +122,8 @@ const memoryEditorWebContents = new Set<number>();
 const autoTitleEditorWebContents = new Set<number>();
 const browserEditorWebContents = new Set<number>();
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function handleTrustedBrowserDataRequest<T>(event: IpcMainInvokeEvent, request: () => T): T {
   const isMainRenderer =
     Boolean(BrowserWindow.fromWebContents(event.sender)) && event.senderFrame === event.sender.mainFrame;
@@ -828,6 +830,12 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsRespond, (_event, projectId: string, threadId: string, response: HostResponse) =>
     sessions.respond(projectId, threadId, response),
   );
+  ipcMain.handle(CHANNELS.sessionsReadImageResource, (event, attachmentId: string, resourceId: string) => {
+    if (typeof attachmentId !== "string" || typeof resourceId !== "string" || !UUID_PATTERN.test(resourceId)) {
+      throw new Error("Invalid image resource request");
+    }
+    return sessions.readImageResource(event.sender.id, attachmentId, resourceId);
+  });
   ipcMain.handle(CHANNELS.filesList, (event, projectId: string, path?: string, query?: string, requestGroup?: string) =>
     files.list(projectId, path, query, `${event.sender.id}\0${requestGroup ?? "default"}`),
   );

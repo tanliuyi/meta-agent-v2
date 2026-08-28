@@ -156,6 +156,8 @@ export class ThreadWorkerService implements SidecarService {
       case "rename":
         this.runtime.rename(command.title);
         return null;
+      case "getImageResource":
+        return this.runtime.readImageResource(command.resourceId);
       case "respondHostUi":
         this.runtime.respond(command.response);
         return null;

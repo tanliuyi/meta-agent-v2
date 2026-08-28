@@ -1,6 +1,12 @@
 import { closeSync, openSync, readSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { JsonValue, SessionBootstrap, SessionPushPayload, Thread } from "../../shared/contracts.ts";
+import type {
+  JsonValue,
+  SessionBootstrap,
+  SessionImageResource,
+  SessionPushPayload,
+  Thread,
+} from "../../shared/contracts.ts";
 import type { ModelConfigurationRevision, SidecarEvent } from "../../shared/sidecar-contracts.ts";
 import type {
   SubagentHostRequest,
@@ -138,6 +144,16 @@ export class SubagentWorkerRegistry {
       throw new Error(`Subagent session handoff is blocked: ${record.metadataFailure.message}`);
     }
     return record.client.request<SessionBootstrap>({ type: "subagentBootstrap" }, 30_000);
+  }
+
+  async readImageResource(
+    projectId: string,
+    threadId: string,
+    resourceId: string,
+  ): Promise<SessionImageResource | undefined> {
+    const record = this.recordForThread(projectId, threadId);
+    if (!record) return undefined;
+    return record.client.request<SessionImageResource | undefined>({ type: "getImageResource", resourceId }, 30_000);
   }
 
   async cancelActiveThread(projectId: string, threadId: string): Promise<void> {

@@ -12,6 +12,7 @@ import type {
   SessionControlState,
   SessionCreateInput,
   SessionEditInput,
+  SessionImageResource,
   SessionMentionCandidate,
   SessionPromptInput,
   SessionPush,
@@ -315,6 +316,17 @@ export class SessionSupervisor {
 
   respond(projectId: string, threadId: string, response: HostResponse): Promise<void> {
     return this.workers.respond(projectId, threadId, response);
+  }
+
+  /** 在 attachment 租约内读取 timeline 图像资源主体；错误 renderer 或已 detach 的 attachment 无法读取。 */
+  async readImageResource(
+    ownerId: number,
+    attachmentId: string,
+    resourceId: string,
+  ): Promise<SessionImageResource | undefined> {
+    const subscription = this.subscriptionFor(ownerId, attachmentId);
+    if (!subscription) throw new Error("Session attachment is not active");
+    return this.workers.readImageResource(subscription.projectId, subscription.threadId, resourceId);
   }
 
   detach(ownerId: number, attachmentId: string): void {
