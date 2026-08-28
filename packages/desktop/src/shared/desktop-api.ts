@@ -54,7 +54,6 @@ import type {
   FileNode,
   GitWorktree,
   HostResponse,
-  OfficeDocumentPreview,
   OpenLinkResult,
   PdfDocumentPreview,
   Project,
@@ -102,6 +101,38 @@ import type {
   SaveMemorySettingsResult,
 } from "./memory-settings-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
+import type {
+  SessionCheckpointDiffInput,
+  SessionCheckpointDiffResult,
+  SessionCheckpointRestoreInput,
+  SessionCheckpointRestoreResult,
+} from "./pi-rewind-contracts.ts";
+import type {
+  PluginConfigurationSnapshot,
+  SavePluginConfigurationInput,
+  SavePluginConfigurationResult,
+} from "./plugin-configuration-contracts.ts";
+import type {
+  InstalledMarketplacePluginsSnapshot,
+  InstallMarketplacePluginInput,
+  InstallMarketplacePluginResult,
+  ListMarketplacePluginsInput,
+  MarketplaceEndpointSettingsSnapshot,
+  MarketplacePluginPage,
+  MarketplacePluginSummary,
+  SaveMarketplaceEndpointInput,
+  SaveMarketplaceEndpointResult,
+  SetMarketplacePluginEnabledInput,
+  SetMarketplacePluginEnabledResult,
+  SetMarketplacePluginScopeInput,
+  SetMarketplacePluginScopeResult,
+  TestMarketplaceEndpointInput,
+  TestMarketplaceEndpointResult,
+  UninstallMarketplacePluginInput,
+  UninstallMarketplacePluginResult,
+  UpdateMarketplacePluginInput,
+  UpdateMarketplacePluginResult,
+} from "./plugin-marketplace-contracts.ts";
 import type {
   CommitOfficeDocumentInput,
   CommitOfficeDocumentResult,
@@ -300,6 +331,7 @@ export interface DesktopApi {
     list(projectId: string, path?: string, query?: string, requestGroup?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
     readImage(projectId: string, path: string): Promise<FileImage>;
+    previewPdf(projectId: string, path: string): Promise<PdfDocumentPreview>;
     previewOfficeDocument(projectId: string, path: string): Promise<OfficeDocumentPreview>;
     getDocxEditorSource(documentId: string): Promise<DocxEditorSource>;
     saveDocxEditor(input: SaveDocxEditorInput): Promise<SaveDocxEditorResult>;

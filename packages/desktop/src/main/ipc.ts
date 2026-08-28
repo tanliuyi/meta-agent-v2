@@ -73,6 +73,28 @@ import {
   type PlanOfficeDocumentInput,
   type SaveDocxEditorInput,
 } from "../shared/office-document-contracts.ts";
+import type {
+  SessionCheckpointDiffInput,
+  SessionCheckpointDiffResult,
+  SessionCheckpointRestoreInput,
+  SessionCheckpointRestoreResult,
+} from "../shared/pi-rewind-contracts.ts";
+import type {
+  SavePluginConfigurationInput,
+  SavePluginConfigurationResult,
+} from "../shared/plugin-configuration-contracts.ts";
+import type {
+  InstallMarketplacePluginInput,
+  ListMarketplacePluginsInput,
+  SaveMarketplaceEndpointInput,
+  SetMarketplacePluginEnabledInput,
+  SetMarketplacePluginEnabledResult,
+  SetMarketplacePluginScopeInput,
+  SetMarketplacePluginScopeResult,
+  TestMarketplaceEndpointInput,
+  UninstallMarketplacePluginInput,
+  UpdateMarketplacePluginInput,
+} from "../shared/plugin-marketplace-contracts.ts";
 import type { SavePreferencesInput } from "../shared/preferences-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
@@ -158,6 +180,7 @@ export function registerIpc(
   const subscribedWebContents = new Set<number>();
   const modelEditorWebContents = new Set<number>();
   const oauthWebContents = new Set<number>();
+  const browserSessionOwnerWebContents = new Set<number>();
   const officePreviewWebContents = new Set<number>();
   const oauth = new OauthLoginCoordinator({
     login: (providerId, callbacks) => auth.loginOauth(providerId, callbacks),
@@ -830,6 +853,9 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.filesRead, (_event, projectId: string, path: string) => files.read(projectId, path));
   ipcMain.handle(CHANNELS.filesReadImage, (_event, projectId: string, path: string) =>
     files.readImage(projectId, path),
+  );
+  ipcMain.handle(CHANNELS.filesPreviewPdf, (_event, projectId: string, path: string) =>
+    files.previewPdf(projectId, path),
   );
   ipcMain.handle(CHANNELS.filesPreviewOfficeDocument, (event, projectId: string, path: string) => {
     const ownerId = event.sender.id;

@@ -51,6 +51,7 @@ export const CHANNELS = {
   filesList: "desktop:files:list",
   filesRead: "desktop:files:read",
   filesReadImage: "desktop:files:read-image",
+  filesPreviewPdf: "desktop:files:preview-pdf",
   filesPreviewOfficeDocument: "desktop:files:preview-office-document",
   filesGetDocxEditorSource: "desktop:files:get-docx-editor-source",
   filesSaveDocxEditor: "desktop:files:save-docx-editor",

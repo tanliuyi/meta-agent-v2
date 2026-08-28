@@ -1,8 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createModels } from "@earendil-works/pi-ai";
-import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { getShellConfig, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { app, BrowserWindow, Menu, safeStorage, webContents } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
 import windowStateKeeper from "electron-window-state";
@@ -23,6 +22,7 @@ import { FileService } from "./files/file-service.ts";
 import { ProjectFileWatcher } from "./files/file-watcher.ts";
 import { NativeOfficeDocumentService } from "./files/native-office-document-service.ts";
 import { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
+import { handlePdfPreviewRequests, registerPdfPreviewScheme } from "./files/pdf-preview-protocol.ts";
 import {
   broadcastBrowserCloseTabRequest,
   broadcastBrowserCreateTabRequest,
@@ -35,6 +35,8 @@ import {
 import { FileCredentialStore } from "./models/credential-store.ts";
 import { ModelsConfigService } from "./models/models-config-service.ts";
 import { createOfficeDocumentHostServer, type OfficeDocumentHostServer } from "./office/office-document-host-server.ts";
+import { DesktopBuiltinProviderRegistry } from "./pi/desktop-builtin-provider.ts";
+import { deleteSessionCheckpoints } from "./pi/extensions/pi-rewind/src/core.ts";
 import { SessionSupervisor } from "./pi/session-supervisor.ts";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "./plugins/default-plugin-marketplace.ts";
 import { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
@@ -169,25 +171,6 @@ function createWindow(): void {
 
   dirtyGuard.attach(window);
   trayController.attach(window);
-  const detachCrashRecovery = attachRendererCrashRecovery(window, {
-    isShuttingDown: () => applicationShuttingDown,
-    reload: (crashedWindow) => {
-      const webContentsId = crashedWindow.webContents.id;
-      dirtyGuard.remove(webContentsId);
-      cleanupRendererOwner(webContentsId);
-      crashedWindow.webContents.reload();
-    },
-    quit: (crashedWindow) => {
-      dirtyGuard.remove(crashedWindow.webContents.id);
-      app.quit();
-    },
-    report: (message, error) => {
-      if (error === undefined) console.error(message);
-      else console.error(message, error);
-      sidecarLog?.write("main", error === undefined ? message : `${message}: ${String(error)}`);
-    },
-  });
-  window.once("closed", detachCrashRecovery);
   window.once("ready-to-show", () => window.show());
   window.on("maximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, true));
   window.on("unmaximize", () => window.webContents.send(CHANNELS.windowMaximizedChanged, false));
@@ -285,7 +268,6 @@ app.whenReady().then(async () => {
     resolveWorkspaceMutationKey(projects.getCwd(projectId));
   sidecarLog = new SidecarLog(userDataDir);
   sidecarLog.write("main", `Sidecar log initialized at ${sidecarLog.path}`);
-  const files = new FileService(projects);
   const nativeOfficeDocuments = new NativeOfficeDocumentService(projects, {
     onPlanCreated: (ownerId, plan) => {
       const owner = webContents.fromId(ownerId);
