@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "legalArtifacts": [
+    {
+      "file": "APACHE-POI-LICENSE.txt",
+      "sha256": "6e7c918e5a49f677c1b85a9eb2d035cd85c217fc42af6b4a336964a434001a9c",
+      "spdx": "Apache-2.0",
+      "attribution": "Apache License",
+      "kind": "license"
+    },
+    {
+      "file": "APACHE-POI-NOTICE.txt",
+      "sha256": "8e41ec916a59981a28397e2b46d7fb851eea02f7d179d75f030eb248916a4a09",
+      "spdx": "Apache-2.0",
+      "attribution": "The Apache Software Foundation",
+      "kind": "notice"
+    }
+  ],
+  "fixtures": [
+    {
+      "filename": "simple-normal.xlsx",
+      "sha256": "6b300c76d7b6ba32e45c40086f5c8cea4b269946f7786a73e0d6f08c3acfe1e4",
+      "source": {
+        "repository": "https://github.com/apache/poi",
+        "revision": "87cdef57b0f714369c391e625180a59507a24576",
+        "fixturePath": "test-data/spreadsheet/SimpleNormal.xlsx",
+        "url": "https://raw.githubusercontent.com/apache/poi/87cdef57b0f714369c391e625180a59507a24576/test-data/spreadsheet/SimpleNormal.xlsx"
+      },
+      "license": {
+        "id": "APACHE-POI-LICENSE.txt",
+        "spdx": "Apache-2.0",
+        "attribution": "Apache License"
+      },
+      "legalFiles": ["APACHE-POI-LICENSE.txt", "APACHE-POI-NOTICE.txt"],
+      "producer": {
+        "name": "Microsoft Excel",
+        "version": "14.0300",
+        "application": "Microsoft Excel"
+      },
+      "format": {
+        "extension": ".xlsx",
+        "workbookPart": "xl/workbook.xml"
+      },
+      "features": ["two-worksheets", "shared-strings", "numeric-cells", "formula-cell"],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real Microsoft Excel workbook for existing-cell native roundtrip"
+      },
+      "expected": {
+        "sheetId": "sheet:rId1",
+        "cellId": "rId1:A1",
+        "address": "A1",
+        "value": "test"
+      }
+    }
+  ]
+}

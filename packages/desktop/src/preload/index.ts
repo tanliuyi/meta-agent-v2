@@ -380,7 +380,18 @@ const desktopApi: DesktopApi = {
     previewPdf: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesPreviewPdf, projectId, path),
     previewOfficeDocument: (projectId, path) =>
       ipcRenderer.invoke(CHANNELS.filesPreviewOfficeDocument, projectId, path),
+    getDocxEditorSource: (documentId) => ipcRenderer.invoke(CHANNELS.filesGetDocxEditorSource, documentId),
+    saveDocxEditor: (input) => ipcRenderer.invoke(CHANNELS.filesSaveDocxEditor, input),
+    inspectOfficeDocument: (input) => ipcRenderer.invoke(CHANNELS.filesInspectOfficeDocument, input),
+    planOfficeDocument: (input) => ipcRenderer.invoke(CHANNELS.filesPlanOfficeDocument, input),
+    discardOfficeDocumentPlan: (input) => ipcRenderer.invoke(CHANNELS.filesDiscardOfficeDocumentPlan, input),
+    commitOfficeDocument: (input) => ipcRenderer.invoke(CHANNELS.filesCommitOfficeDocument, input),
     cancelOfficeDocumentPreview: () => ipcRenderer.invoke(CHANNELS.filesCancelOfficeDocumentPreview),
+    onOfficeDocumentPlanCreated(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, plan: Parameters<typeof listener>[0]) => listener(plan);
+      ipcRenderer.on(CHANNELS.filesOfficeDocumentPlanCreated, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.filesOfficeDocumentPlanCreated, handler);
+    },
     resolvePath: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, projectId, path),
     open: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesOpen, projectId, path),
     watch: (projectId) => ipcRenderer.invoke(CHANNELS.filesWatch, projectId),

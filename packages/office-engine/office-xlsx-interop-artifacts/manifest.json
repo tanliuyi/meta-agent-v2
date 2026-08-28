@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-28T08:08:22.493Z",
+  "case": {
+    "id": "set-existing-cell",
+    "input": "inputs/set-existing-cell.xlsx",
+    "inputSha256": "1ae5e4dc8146c95b3847187ea8fcc7c268c5f30b7bb54547babf8b55b3e5c349",
+    "sheetId": "sheet:rId1",
+    "cellId": "rId1:A1",
+    "address": "A1",
+    "expectedValue": "Interop approved"
+  }
+}

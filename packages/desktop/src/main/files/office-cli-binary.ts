@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { access, chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { withRuntimeLock } from "../sidecar/runtime-lock.ts";
 
 const MIRROR_BASE = "https://d.officecli.ai";
 const GITHUB_BASE = "https://github.com/iOfficeAI/OfficeCLI";
@@ -15,7 +16,6 @@ const CHECKSUM_TIMEOUT_MS = 30_000;
 const activeInstalls = new Map<string, Promise<string>>();
 
 export interface OfficeCliLocationConfiguration {
-  installed?: boolean;
   binaryPath?: string;
   dataDir?: string;
   version?: string;
@@ -47,11 +47,10 @@ export async function resolveOfficeCliBinary(
   return undefined;
 }
 
-/** 仅为已安装且允许自动下载的插件初始化 OfficeCLI。 */
+/** 为尚未迁移的 PPTX 只读预览初始化内部 OfficeCLI runtime。 */
 export async function installOfficeCliBinary(configuration: OfficeCliLocationConfiguration): Promise<string> {
-  if (!configuration.installed) throw new Error("请先安装并启用 pi-officecli 插件");
   if (configuration.autoDownload === false) {
-    throw new Error("pi-officecli 已关闭自动下载。请配置 binaryPath，或在插件设置中开启自动下载");
+    throw new Error("OfficeCLI 只读预览 runtime 已关闭自动下载，请配置 binaryPath");
   }
   const asset = officeCliAsset(process.platform, process.arch);
   if (!asset) throw new Error(`OfficeCLI 不支持当前平台 ${process.platform}/${process.arch}`);
@@ -62,7 +61,14 @@ export async function installOfficeCliBinary(configuration: OfficeCliLocationCon
   );
   const existing = activeInstalls.get(target);
   if (existing) return existing;
-  const install = downloadOfficeCli(target, asset, version).finally(() => activeInstalls.delete(target));
+  const install = withRuntimeLock(dirname(target), async () => {
+    try {
+      await access(target, process.platform === "win32" ? constants.F_OK : constants.X_OK);
+      return target;
+    } catch {
+      return downloadOfficeCli(target, asset, version);
+    }
+  }).finally(() => activeInstalls.delete(target));
   activeInstalls.set(target, install);
   return install;
 }
@@ -104,7 +110,7 @@ async function downloadOfficeCli(target: string, asset: string, version: string)
       try {
         const binary = await fetchBuffer(assetUrl, DOWNLOAD_TIMEOUT_MS, MAX_BINARY_BYTES);
         const expectedChecksum = await fetchExpectedChecksum(baseUrl, version, asset);
-        if (expectedChecksum && createHash("sha256").update(binary).digest("hex") !== expectedChecksum) {
+        if (createHash("sha256").update(binary).digest("hex") !== expectedChecksum) {
           throw new Error(`SHA256 校验失败: ${asset}`);
         }
         await writeFile(temporary, binary, { mode: 0o755 });
@@ -125,20 +131,16 @@ async function downloadOfficeCli(target: string, asset: string, version: string)
   );
 }
 
-async function fetchExpectedChecksum(baseUrl: string, version: string, asset: string): Promise<string | undefined> {
-  try {
-    const checksumUrl = `${baseUrl}/releases/download/${version}/SHA256SUMS`;
-    const text = (await fetchBuffer(checksumUrl, CHECKSUM_TIMEOUT_MS, MAX_CHECKSUM_BYTES)).toString("utf8");
-    for (const line of text.split("\n")) {
-      const [hash, rawName] = line.trim().split(/\s+/u);
-      if (hash && rawName?.replace(/^\*/u, "") === asset && /^[a-f0-9]{64}$/iu.test(hash)) {
-        return hash.toLowerCase();
-      }
+async function fetchExpectedChecksum(baseUrl: string, version: string, asset: string): Promise<string> {
+  const checksumUrl = `${baseUrl}/releases/download/${version}/SHA256SUMS`;
+  const text = (await fetchBuffer(checksumUrl, CHECKSUM_TIMEOUT_MS, MAX_CHECKSUM_BYTES)).toString("utf8");
+  for (const line of text.split("\n")) {
+    const [hash, rawName] = line.trim().split(/\s+/u);
+    if (hash && rawName?.replace(/^\*/u, "") === asset && /^[a-f0-9]{64}$/iu.test(hash)) {
+      return hash.toLowerCase();
     }
-  } catch {
-    // 与插件保持一致：checksum 服务不可用时继续使用 HTTPS 下载。
   }
-  return undefined;
+  throw new Error(`SHA256SUMS 缺少目标 asset: ${asset}`);
 }
 
 async function fetchBuffer(url: string, timeoutMs: number, maxBytes: number): Promise<Buffer> {
@@ -149,9 +151,25 @@ async function fetchBuffer(url: string, timeoutMs: number, maxBytes: number): Pr
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const contentLength = Number(response.headers.get("content-length"));
     if (Number.isFinite(contentLength) && contentLength > maxBytes) throw new Error("下载内容超过大小限制");
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > maxBytes) throw new Error("下载内容超过大小限制");
-    return buffer;
+    if (!response.body) throw new Error("下载响应缺少内容");
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const reader = response.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          controller.abort();
+          throw new Error("下载内容超过大小限制");
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks, total);
   } finally {
     clearTimeout(timeout);
   }

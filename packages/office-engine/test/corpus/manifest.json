@@ -1,0 +1,405 @@
+{
+  "schemaVersion": 2,
+  "licenses": [
+    {
+      "file": "MAMMOTH-LICENSE.txt",
+      "sha256": "59d0910e3653681cc461f299ceedca65b6b9b82ff695a6cfacde55f7bef02704",
+      "spdx": "BSD-2-Clause",
+      "attribution": "Copyright (c) 2013, Michael Williamson",
+      "kind": "license"
+    },
+    {
+      "file": "APACHE-POI-LICENSE.txt",
+      "sha256": "6e7c918e5a49f677c1b85a9eb2d035cd85c217fc42af6b4a336964a434001a9c",
+      "spdx": "Apache-2.0",
+      "attribution": "Apache License",
+      "kind": "license"
+    },
+    {
+      "file": "APACHE-POI-NOTICE.txt",
+      "sha256": "8e41ec916a59981a28397e2b46d7fb851eea02f7d179d75f030eb248916a4a09",
+      "spdx": "Apache-2.0",
+      "attribution": "Apache POI",
+      "kind": "notice"
+    },
+    {
+      "file": "LIBREOFFICE-MPL-2.0.txt",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "spdx": "MPL-2.0",
+      "attribution": "Mozilla Public License Version 2.0",
+      "kind": "license"
+    }
+  ],
+  "fixtures": [
+    {
+      "filename": "comments.docx",
+      "sha256": "adc9f524d176f562db830c346c1e9e21c6a6aa6768d9c09892a423f1257fe17c",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/comments.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/comments.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "comment-reference",
+        "comments-part",
+        "custom-xml"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word unsupported comments boundary regression"
+      },
+      "expected": {
+        "inspect": "opens",
+        "warnings": [
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          },
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/comments.xml"
+          }
+        ],
+        "operation": "blocked",
+        "blockedReason": "comment-boundary"
+      }
+    },
+    {
+      "filename": "footnotes.docx",
+      "sha256": "a3d786ba3ad53833dd3d5e01bd55e93b628c1287d8f9210eb94cb7533f270306",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/footnotes.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/footnotes.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "footnote-reference",
+        "footnotes-part",
+        "endnotes-part",
+        "custom-xml"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word unsupported notes boundary regression"
+      },
+      "expected": {
+        "inspect": "opens",
+        "warnings": [
+          {
+            "code": "UNSUPPORTED_ENDNOTE",
+            "part": "word/endnotes.xml"
+          },
+          {
+            "code": "UNSUPPORTED_FOOTNOTE",
+            "part": "word/footnotes.xml"
+          },
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "blocked",
+        "blockedReason": "note-reference"
+      }
+    },
+    {
+      "filename": "single-paragraph.docx",
+      "sha256": "7d89bf44b4d6940234efb6973d24706c881aa875bb794bfbe54efd92f9c6cf3e",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/single-paragraph.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/single-paragraph.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "single-text-run",
+        "bookmark-boundary",
+        "section-properties"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word bookmark boundary fail-closed regression"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "Walking on imported air"
+        },
+        "warnings": [
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "blocked",
+        "blockedReason": "bookmark-boundary"
+      }
+    },
+    {
+      "filename": "strict-format.docx",
+      "sha256": "86d90f50d8fd3310c4079291c6622878d8f4d8864d665d1e34841f407e7b7662",
+      "source": {
+        "repository": "https://github.com/mwilliamson/mammoth.js",
+        "revision": "v1.10.0",
+        "version": "1.10.0",
+        "fixturePath": "test/test-data/strict-format.docx",
+        "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/v1.10.0/test/test-data/strict-format.docx"
+      },
+      "license": {
+        "id": "MAMMOTH-LICENSE.txt",
+        "spdx": "BSD-2-Clause",
+        "attribution": "Copyright (c) 2013, Michael Williamson"
+      },
+      "legalFiles": ["MAMMOTH-LICENSE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "14.0000/16.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "strict"
+      },
+      "features": [
+        "strict-ooxml",
+        "body-paragraph",
+        "single-editable-text-run"
+      ],
+      "audit": {
+        "privacy": "fixture contains no personal data; reviewed from upstream test corpus",
+        "rationale": "real-world Microsoft Word strict OOXML editable roundtrip"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "Test"
+        },
+        "warnings": [],
+        "operation": "editable"
+      }
+    },
+    {
+      "filename": "header-footer.docx",
+      "sha256": "ec439ac0643294e1e2961b381983304e044444f3a8f0dc465a98adf9ebee0e67",
+      "source": {
+        "repository": "https://github.com/apache/poi",
+        "revision": "87cdef57b0f714369c391e625180a59507a24576",
+        "version": "trunk-2026-08-28",
+        "fixturePath": "test-data/document/HeaderFooterUnicode.docx",
+        "url": "https://raw.githubusercontent.com/apache/poi/87cdef57b0f714369c391e625180a59507a24576/test-data/document/HeaderFooterUnicode.docx"
+      },
+      "license": {
+        "id": "APACHE-POI-LICENSE.txt",
+        "spdx": "Apache-2.0",
+        "attribution": "Apache License"
+      },
+      "legalFiles": ["APACHE-POI-LICENSE.txt", "APACHE-POI-NOTICE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "12.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "header-parts",
+        "footer-parts",
+        "unicode-text",
+        "editable-related-text-runs"
+      ],
+      "audit": {
+        "privacy": "fixture contains only generic header and footer test text; reviewed for personal data",
+        "rationale": "real-world Microsoft Word fixture covers existing header and footer Unicode text roundtrip"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRelatedRun": {
+          "part": "header",
+          "relatedPartId": "header:rId7",
+          "paragraphId": "header:rId7:p-0",
+          "runId": "header:rId7:p-0:r-0",
+          "text": "This is a simple header, with a € euro symbol in it."
+        },
+        "warnings": [
+          {
+            "code": "UNSUPPORTED_ENDNOTE",
+            "part": "word/endnotes.xml"
+          },
+          {
+            "code": "UNSUPPORTED_FOOTNOTE",
+            "part": "word/footnotes.xml"
+          },
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "editable"
+      }
+    },
+    {
+      "filename": "bug66312.docx",
+      "sha256": "de03dd0ac02c04e07790c400ee5cb36b580e38750d6c56c2b8528a53219cb46a",
+      "source": {
+        "repository": "https://github.com/apache/poi",
+        "revision": "4554f204cbbf00ecbcaed134fe57e43a1779a612",
+        "version": "REL_5_4_1",
+        "fixturePath": "test-data/document/bug66312.docx",
+        "url": "https://raw.githubusercontent.com/apache/poi/4554f204cbbf00ecbcaed134fe57e43a1779a612/test-data/document/bug66312.docx"
+      },
+      "license": {
+        "id": "APACHE-POI-LICENSE.txt",
+        "spdx": "Apache-2.0",
+        "attribution": "Apache License"
+      },
+      "legalFiles": ["APACHE-POI-LICENSE.txt", "APACHE-POI-NOTICE.txt"],
+      "producer": {
+        "name": "LibreOffice",
+        "version": "7.3.6.2 Linux X86_64",
+        "application": "LibreOffice/7.3.6.2$Linux_X86_64 LibreOffice_project/30$Build-2"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "two-identical-text-runs",
+        "libreoffice-produced"
+      ],
+      "audit": {
+        "privacy": "fixture contains only the literal word World; reviewed for personal data",
+        "rationale": "Apache POI Apache-2.0 test fixture provides fixed LibreOffice producer coverage and editable target identity"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "World"
+        },
+        "warnings": [
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "editable"
+      }
+    },
+    {
+      "filename": "open-as-read-only.docx",
+      "sha256": "0606d61d2d1097411aabb9e7d564aa10ec77c9e033ab46f603a1e910e2be082f",
+      "source": {
+        "repository": "https://github.com/LibreOffice/core",
+        "revision": "03762554ad40639b2286f86e3016591c3ac24137",
+        "version": "6.2.0.0.alpha0",
+        "fixturePath": "sw/qa/extras/ooxmlexport/data/open-as-read-only.docx",
+        "url": "https://raw.githubusercontent.com/LibreOffice/core/03762554ad40639b2286f86e3016591c3ac24137/sw/qa/extras/ooxmlexport/data/open-as-read-only.docx"
+      },
+      "license": {
+        "id": "LIBREOFFICE-MPL-2.0.txt",
+        "spdx": "MPL-2.0",
+        "attribution": "Mozilla Public License Version 2.0"
+      },
+      "legalFiles": ["LIBREOFFICE-MPL-2.0.txt"],
+      "producer": {
+        "name": "LibreOfficeDev",
+        "version": "6.2.0.0.alpha0 Linux X86_64",
+        "application": "LibreOfficeDev/6.2.0.0.alpha0$Linux_X86_64 LibreOffice_project/37f3786ac60d17182f6037305c5372a65f292f5c"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "four-editable-text-runs",
+        "cross-run-range",
+        "marked-as-final",
+        "libreoffice-produced"
+      ],
+      "audit": {
+        "privacy": "fixture contains generic test text; creator and lastModifiedBy metadata are empty",
+        "rationale": "official LibreOffice test fixture provides fixed LibreOffice producer coverage for a same-paragraph multi-run range roundtrip"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "This document is "
+        },
+        "warnings": [],
+        "operation": "editable"
+      }
+    }
+  ]
+}

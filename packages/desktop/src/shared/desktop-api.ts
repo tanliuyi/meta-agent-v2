@@ -54,7 +54,6 @@ import type {
   FileNode,
   GitWorktree,
   HostResponse,
-  OfficeDocumentPreview,
   OpenLinkResult,
   PdfDocumentPreview,
   Project,
@@ -134,6 +133,19 @@ import type {
   UpdateMarketplacePluginInput,
   UpdateMarketplacePluginResult,
 } from "./plugin-marketplace-contracts.ts";
+import type {
+  CommitOfficeDocumentInput,
+  CommitOfficeDocumentResult,
+  DiscardOfficeDocumentPlanInput,
+  DocxEditorSource,
+  InspectOfficeDocumentInput,
+  OfficeDocumentInspection,
+  OfficeDocumentPlan,
+  OfficeDocumentPreview,
+  PlanOfficeDocumentInput,
+  SaveDocxEditorInput,
+  SaveDocxEditorResult,
+} from "./office-document-contracts.ts";
 import type { PreferencesSnapshot, SavePreferencesInput, SavePreferencesResult } from "./preferences-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
 import type {
@@ -321,7 +333,14 @@ export interface DesktopApi {
     readImage(projectId: string, path: string): Promise<FileImage>;
     previewPdf(projectId: string, path: string): Promise<PdfDocumentPreview>;
     previewOfficeDocument(projectId: string, path: string): Promise<OfficeDocumentPreview>;
+    getDocxEditorSource(documentId: string): Promise<DocxEditorSource>;
+    saveDocxEditor(input: SaveDocxEditorInput): Promise<SaveDocxEditorResult>;
+    inspectOfficeDocument(input: InspectOfficeDocumentInput): Promise<OfficeDocumentInspection>;
+    planOfficeDocument(input: PlanOfficeDocumentInput): Promise<OfficeDocumentPlan>;
+    discardOfficeDocumentPlan(input: DiscardOfficeDocumentPlanInput): Promise<void>;
+    commitOfficeDocument(input: CommitOfficeDocumentInput): Promise<CommitOfficeDocumentResult>;
     cancelOfficeDocumentPreview(): Promise<void>;
+    onOfficeDocumentPlanCreated(listener: (plan: OfficeDocumentPlan) => void): () => void;
     resolvePath(projectId: string, path: string): Promise<string>;
     open(projectId: string, path: string): Promise<void>;
     watch(projectId: string): Promise<void>;

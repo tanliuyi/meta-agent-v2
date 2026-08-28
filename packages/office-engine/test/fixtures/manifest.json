@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "generated-minimal-run",
+      "class": "minimal",
+      "producer": "generated",
+      "license": "MIT",
+      "source": "packages/office-engine/test/transaction.test.ts",
+      "features": ["body-paragraph", "single-text-run", "properties"],
+      "expected": "editable-single-run",
+      "repositoryInclusion": "generated-from-source"
+    }
+  ]
+}

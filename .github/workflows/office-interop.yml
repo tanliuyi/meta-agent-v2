@@ -1,0 +1,148 @@
+name: Office interoperability
+
+on:
+  pull_request:
+    paths:
+      - "packages/office-engine/**"
+      - "packages/desktop/docs/office-engine-spec.md"
+      - "packages/desktop/package.json"
+      - "packages/desktop/src/main/index.ts"
+      - "packages/desktop/src/main/ipc.ts"
+      - "packages/desktop/src/main/files/**office**"
+      - "packages/desktop/src/main/files/**xlsx**"
+      - "packages/desktop/src/main/files/atomic-file-replacement.ts"
+      - "packages/desktop/src/main/office/**"
+      - "packages/desktop/src/preload/index.ts"
+      - "packages/desktop/src/sidecar/pi-office-document-extension.ts"
+      - "packages/desktop/src/sidecar/pi-rpc-session-runtime.ts"
+      - "packages/desktop/src/renderer/src/components/panel/files/**office**"
+      - "packages/desktop/src/renderer/src/components/panel/files/**docx**"
+      - "packages/desktop/src/renderer/src/components/panel/files/**xlsx**"
+      - "packages/desktop/src/shared/channels.ts"
+      - "packages/desktop/src/shared/desktop-api.ts"
+      - "packages/desktop/src/shared/**office**"
+      - "packages/desktop/test/**office**"
+      - "packages/desktop/test/**docx**"
+      - "packages/desktop/test/**xlsx**"
+      - "packages/desktop/test/atomic-file-replacement.test.ts"
+      - ".github/workflows/office-interop.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/office-engine/**"
+      - "packages/desktop/docs/office-engine-spec.md"
+      - "packages/desktop/package.json"
+      - "packages/desktop/src/main/index.ts"
+      - "packages/desktop/src/main/ipc.ts"
+      - "packages/desktop/src/main/files/**office**"
+      - "packages/desktop/src/main/files/**xlsx**"
+      - "packages/desktop/src/main/files/atomic-file-replacement.ts"
+      - "packages/desktop/src/main/office/**"
+      - "packages/desktop/src/preload/index.ts"
+      - "packages/desktop/src/sidecar/pi-office-document-extension.ts"
+      - "packages/desktop/src/sidecar/pi-rpc-session-runtime.ts"
+      - "packages/desktop/src/renderer/src/components/panel/files/**office**"
+      - "packages/desktop/src/renderer/src/components/panel/files/**docx**"
+      - "packages/desktop/src/renderer/src/components/panel/files/**xlsx**"
+      - "packages/desktop/src/shared/channels.ts"
+      - "packages/desktop/src/shared/desktop-api.ts"
+      - "packages/desktop/src/shared/**office**"
+      - "packages/desktop/test/**office**"
+      - "packages/desktop/test/**docx**"
+      - "packages/desktop/test/**xlsx**"
+      - "packages/desktop/test/atomic-file-replacement.test.ts"
+      - ".github/workflows/office-interop.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: office-interop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  performance:
+    name: Deterministic performance budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e6a545a121f360c57f72e0d597f4e755b3 # v7.0.1
+      - uses: actions/setup-node@820762e6c8b3a8b23cfd73004f7c8a73c4e7c9f2 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Enforce Office engine performance budgets
+        run: npm --prefix packages/office-engine run performance:check -- "$RUNNER_TEMP/office-performance.json"
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: office-performance
+          path: ${{ runner.temp }}/office-performance.json
+          if-no-files-found: error
+
+  libreoffice:
+    name: LibreOffice reopen and visual comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e6a545a121f360c57f72e0d597f4e755b3 # v7.0.1
+      - uses: actions/setup-node@820762e6c8b3a8b23cfd73004f7c8a73c4e7c9f2 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install --yes libreoffice-writer libreoffice-calc poppler-utils imagemagick fonts-liberation
+      - run: npm ci --ignore-scripts
+      - name: Generate interoperability corpus
+        run: npm --prefix packages/office-engine run interop:generate -- "$RUNNER_TEMP/office-interop"
+      - name: Reopen with LibreOffice and compare renderings
+        run: npm --prefix packages/office-engine run interop:libreoffice -- "$RUNNER_TEMP/office-interop"
+      - name: Generate XLSX interoperability corpus
+        run: npm --prefix packages/office-engine run xlsx-interop:generate -- "$RUNNER_TEMP/xlsx-interop"
+      - name: Reopen XLSX with LibreOffice Calc and compare renderings
+        run: npm --prefix packages/office-engine run xlsx-interop:libreoffice -- "$RUNNER_TEMP/xlsx-interop"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: office-interop-libreoffice
+          path: |
+            ${{ runner.temp }}/office-interop
+            ${{ runner.temp }}/xlsx-interop
+          if-no-files-found: error
+
+  word:
+    name: Microsoft Word reopen and visual comparison
+    runs-on: [self-hosted, Windows, office]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e6a545a121f360c57f72e0d597f4e755b3 # v7.0.1
+      - uses: actions/setup-node@820762e6c8b3a8b23cfd73004f7c8a73c4e7c9f2 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Generate interoperability corpus
+        shell: pwsh
+        run: npm --prefix packages/office-engine run interop:generate -- "$env:RUNNER_TEMP\office-interop"
+      - name: Reopen with Word and compare renderings
+        shell: pwsh
+        run: npm --prefix packages/office-engine run interop:word -- "$env:RUNNER_TEMP\office-interop"
+      - name: Generate XLSX interoperability corpus
+        shell: pwsh
+        run: npm --prefix packages/office-engine run xlsx-interop:generate -- "$env:RUNNER_TEMP\xlsx-interop"
+      - name: Reopen XLSX with Excel and compare renderings
+        shell: pwsh
+        run: npm --prefix packages/office-engine run xlsx-interop:excel -- "$env:RUNNER_TEMP\xlsx-interop"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: office-interop-word
+          path: |
+            ${{ runner.temp }}\office-interop
+            ${{ runner.temp }}\xlsx-interop
+          if-no-files-found: error

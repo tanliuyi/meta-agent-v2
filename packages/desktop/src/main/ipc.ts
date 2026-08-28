@@ -65,6 +65,14 @@ import type {
   SaveMemorySettingsInput,
 } from "../shared/memory-settings-contracts.ts";
 import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
+import {
+  type CommitOfficeDocumentInput,
+  type DiscardOfficeDocumentPlanInput,
+  type InspectOfficeDocumentInput,
+  officeDocumentFormat,
+  type PlanOfficeDocumentInput,
+  type SaveDocxEditorInput,
+} from "../shared/office-document-contracts.ts";
 import type {
   SessionCheckpointDiffInput,
   SessionCheckpointDiffResult,
@@ -96,6 +104,7 @@ import type { BrowserManager } from "./browser/browser-manager.ts";
 import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
 import type { FileService } from "./files/file-service.ts";
 import type { ProjectFileWatcher } from "./files/file-watcher.ts";
+import type { NativeOfficeDocumentService } from "./files/native-office-document-service.ts";
 import type { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
 import type { ModelsConfigService } from "./models/models-config-service.ts";
 import type { SessionSupervisor } from "./pi/session-supervisor.ts";
@@ -136,7 +145,8 @@ export function registerIpc(
   projects: ProjectStore,
   sessions: SessionSupervisor,
   files: FileService,
-  officeDocuments: OfficeDocumentPreviewService,
+  officeDocuments: NativeOfficeDocumentService,
+  officePreviews: OfficeDocumentPreviewService,
   fileWatcher: ProjectFileWatcher,
   terminals: TerminalSupervisor,
   models: ModelsConfigService,
@@ -719,6 +729,7 @@ export function registerIpc(
   });
   ipcMain.handle(CHANNELS.projectsRemove, async (_event, projectId: string) => {
     terminals.disposeProject(projectId);
+    officeDocuments.closeProject(projectId);
     return projects.remove(projectId);
   });
   ipcMain.handle(CHANNELS.projectsWorktrees, (_event, projectId: string) => projects.listWorktrees(projectId));
@@ -852,13 +863,36 @@ export function registerIpc(
       officePreviewWebContents.add(ownerId);
       event.sender.once("destroyed", () => {
         officePreviewWebContents.delete(ownerId);
-        officeDocuments.cancelOwner(ownerId);
+        officeDocuments.closeOwner(ownerId);
+        officePreviews.cancelOwner(ownerId);
       });
     }
-    return officeDocuments.preview(ownerId, projectId, path);
+    const format = officeDocumentFormat(path);
+    return format === "docx" || format === "xlsx"
+      ? officeDocuments.open(ownerId, projectId, path)
+      : officePreviews.preview(ownerId, projectId, path);
   });
+  ipcMain.handle(CHANNELS.filesGetDocxEditorSource, (event, documentId: string) =>
+    officeDocuments.getDocxEditorSource(event.sender.id, documentId),
+  );
+  ipcMain.handle(CHANNELS.filesSaveDocxEditor, (event, input: SaveDocxEditorInput) =>
+    officeDocuments.saveDocxEditor(event.sender.id, input),
+  );
+  ipcMain.handle(CHANNELS.filesInspectOfficeDocument, (event, input: InspectOfficeDocumentInput) =>
+    officeDocuments.inspect(event.sender.id, input.documentId, input.query),
+  );
+  ipcMain.handle(CHANNELS.filesPlanOfficeDocument, (event, input: PlanOfficeDocumentInput) =>
+    officeDocuments.plan(event.sender.id, input),
+  );
+  ipcMain.handle(CHANNELS.filesDiscardOfficeDocumentPlan, (event, input: DiscardOfficeDocumentPlanInput) => {
+    officeDocuments.discard(event.sender.id, input);
+  });
+  ipcMain.handle(CHANNELS.filesCommitOfficeDocument, (event, input: CommitOfficeDocumentInput) =>
+    officeDocuments.commit(event.sender.id, input),
+  );
   ipcMain.handle(CHANNELS.filesCancelOfficeDocumentPreview, (event) => {
-    officeDocuments.cancelOwner(event.sender.id);
+    officeDocuments.closeOwner(event.sender.id);
+    officePreviews.cancelOwner(event.sender.id);
   });
   ipcMain.handle(CHANNELS.filesWatch, (_event, projectId: string) => fileWatcher.watch(projectId));
   ipcMain.handle(CHANNELS.filesUnwatch, (_event, projectId: string) => fileWatcher.unwatch(projectId));

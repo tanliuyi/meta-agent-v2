@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
-import type { OfficeDocumentPreview } from "../../shared/contracts.ts";
+import type { OfficeDocumentPreview } from "../../shared/office-document-contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
 import {
   installOfficeCliBinary,
@@ -11,7 +11,7 @@ import {
 } from "./office-cli-binary.ts";
 import { normalizeProjectRelativePath, resolveProjectFilePath } from "./project-file-path.ts";
 
-const OFFICE_DOCUMENT_EXTENSIONS = new Set([".docx", ".pptx", ".xlsx"]);
+const OFFICE_DOCUMENT_EXTENSIONS = new Set([".pptx"]);
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_HTML_BYTES = 32 * 1024 * 1024;
 const MAX_ERROR_OUTPUT_BYTES = 64 * 1024;
@@ -52,32 +52,37 @@ export class OfficeDocumentPreviewService {
     const controller = new AbortController();
     this.activeRequests.set(ownerId, controller);
     let temporaryOutput: string | undefined;
+    let temporarySource: string | undefined;
 
     try {
-      const cwd = this.projects.getCwd(projectId);
-      const target = resolveProjectFilePath(cwd, path);
-      const extension = extname(target).toLowerCase();
+      const configuredCwd = this.projects.getCwd(projectId);
+      const candidate = resolveProjectFilePath(configuredCwd, path);
+      const extension = extname(candidate).toLowerCase();
       if (!OFFICE_DOCUMENT_EXTENSIONS.has(extension)) throw new Error("不是支持的 Office 文档格式");
+      const cwd = await realpath(configuredCwd);
+      const target = await realpath(candidate);
+      resolveProjectFilePath(cwd, target);
+      const format = "pptx" as const;
       const sourceInfo = await stat(target);
       if (!sourceInfo.isFile()) throw new Error("目标不是文件");
 
       const configuration = await this.getConfiguration();
       let binary = await (this.options.resolveBinary ?? resolveOfficeCliBinary)(configuration);
-      if (!binary && configuration.installed && configuration.autoDownload !== false) {
+      if (!binary && configuration.autoDownload !== false) {
         binary = await (this.options.installBinary ?? installOfficeCliBinary)(configuration);
       }
       if (!binary) {
-        throw new Error("未找到 OfficeCLI。请安装并启用 pi-officecli 插件，或在插件设置中配置 binaryPath");
+        throw new Error("未找到 OfficeCLI 只读预览 runtime，请配置 binaryPath 或开启自动下载");
       }
       const binaryInfo = await stat(binary);
       if (controller.signal.aborted) throw new Error("文档预览已取消");
 
+      const sourceBytes = await readFile(target);
+      const sourceSha256 = createHash("sha256").update(sourceBytes).digest("hex");
       const cacheKey = createHash("sha256")
         .update(target)
         .update("\0")
-        .update(String(sourceInfo.size))
-        .update("\0")
-        .update(String(sourceInfo.mtimeMs))
+        .update(sourceSha256)
         .update("\0")
         .update(binary)
         .update("\0")
@@ -92,12 +97,16 @@ export class OfficeDocumentPreviewService {
       }
       if (cachedHtml !== undefined) {
         return {
+          kind: "legacy-html",
+          format,
           path: normalizeProjectRelativePath(relative(cwd, target)),
           html: cachedHtml,
         };
       }
 
       await mkdir(this.options.cacheDir, { recursive: true });
+      temporarySource = join(this.options.cacheDir, `${cacheKey}.${randomUUID()}.pptx`);
+      await writeFile(temporarySource, sourceBytes, { flag: "wx", mode: 0o400 });
       temporaryOutput = join(this.options.cacheDir, `${cacheKey}.${randomUUID()}.html`);
       let timedOut = false;
       const timeout = setTimeout(() => {
@@ -107,7 +116,7 @@ export class OfficeDocumentPreviewService {
       try {
         await (this.options.runner ?? runOfficeCli)({
           binary,
-          args: ["view", target, "html", "-o", temporaryOutput],
+          args: ["view", temporarySource, "html", "-o", temporaryOutput],
           cwd,
           signal: controller.signal,
         });
@@ -119,6 +128,12 @@ export class OfficeDocumentPreviewService {
         clearTimeout(timeout);
       }
 
+      const renderedSourceSha256 = createHash("sha256")
+        .update(await readFile(target))
+        .digest("hex");
+      if (renderedSourceSha256 !== sourceSha256) {
+        throw new Error("STALE_DOCUMENT");
+      }
       const html = await readPreviewHtml(temporaryOutput, this.options.maxHtmlBytes ?? DEFAULT_MAX_HTML_BYTES);
       try {
         await rename(temporaryOutput, output);
@@ -128,10 +143,13 @@ export class OfficeDocumentPreviewService {
       }
       await prunePreviewCache(this.options.cacheDir).catch(() => undefined);
       return {
+        kind: "legacy-html",
+        format,
         path: normalizeProjectRelativePath(relative(cwd, target)),
         html,
       };
     } finally {
+      if (temporarySource) await rm(temporarySource, { force: true }).catch(() => undefined);
       if (temporaryOutput) await rm(temporaryOutput, { force: true }).catch(() => undefined);
       if (this.activeRequests.get(ownerId) === controller) this.activeRequests.delete(ownerId);
     }
@@ -146,7 +164,6 @@ export class OfficeDocumentPreviewService {
     try {
       const configuration = await this.options.getConfiguration?.();
       return {
-        installed: configuration?.installed,
         binaryPath: configuration?.binaryPath?.trim() || undefined,
         dataDir: configuration?.dataDir?.trim() || undefined,
         version: configuration?.version?.trim() || undefined,
