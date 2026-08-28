@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "source": "local Node v25.2.1 win32 x64 run including 10,000-cell XLSX; ZIP history in packages/office-engine/docs/p0-zip-spike.md",
+    "archive10MiB": { "elapsedMs": 429.8399, "rssDeltaBytes": 10035200 },
+    "archive50MiB": { "elapsedMs": 2971.7234, "rssDeltaBytes": 61788160 },
+    "inspect1000ParagraphsMs": 70.4099,
+    "inspect10000ParagraphsMs": 4039.1675,
+    "planAndCommit10000ParagraphsMs": 8384.3036,
+    "inspect10000CellsMs": 142.2521,
+    "planAndCommit10000CellsMs": 491.3969
+  },
+  "thresholds": {
+    "archive10MiB": { "elapsedMs": 5000, "rssDeltaBytes": 201326592 },
+    "archive50MiB": { "elapsedMs": 15000, "rssDeltaBytes": 536870912 },
+    "inspect1000ParagraphsMs": 3000,
+    "inspect10000ParagraphsMs": 12000,
+    "planAndCommit10000ParagraphsMs": 30000,
+    "inspect10000CellsMs": 1200,
+    "planAndCommit10000CellsMs": 4000
+  }
+}

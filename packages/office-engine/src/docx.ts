@@ -1,5 +1,5 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
-import { normalizeOpcPath, type PackageArchive } from "./archive.ts";
+import { normalizeOpcPath, type PackageArchive, resolveOpcRelationshipTarget } from "./archive.ts";
 import { OfficeEngineError, officeError } from "./errors.ts";
 
 export const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
@@ -31,8 +31,15 @@ export interface DocxPartWarning {
 	readonly message: string;
 }
 
+export interface DocxRelatedPart {
+	readonly relationshipId: string;
+	readonly kind: "header" | "footer" | "comments";
+	readonly path: string;
+}
+
 export interface DocxPackageResolution {
 	readonly mainPart: DocxMainPart;
+	readonly relatedParts: readonly DocxRelatedPart[];
 	readonly warnings: readonly DocxPartWarning[];
 }
 
@@ -352,76 +359,9 @@ function resolvePartName(partName: string): string {
 	}
 }
 
-function rejectEncodedPathSyntax(target: string): void {
-	for (const match of target.matchAll(/%([0-9a-f]{2})/gi)) {
-		const codePoint = Number.parseInt(match[1], 16);
-		if (
-			codePoint === 0x2f ||
-			codePoint === 0x5c ||
-			codePoint === 0x2e ||
-			codePoint === 0x3f ||
-			codePoint === 0x23 ||
-			codePoint === 0x00
-		) {
-			throw officeError("DOCX_TARGET_INVALID");
-		}
-	}
-}
-
 function resolveRelationshipTarget(target: string, sourcePart?: string): string {
-	if (target.length === 0 || target.includes("\\") || target.includes("\u0000"))
-		throw officeError("DOCX_TARGET_INVALID");
-	rejectEncodedPathSyntax(target);
-	let decoded: string;
 	try {
-		decoded = decodeURIComponent(target);
-	} catch {
-		throw officeError("DOCX_TARGET_INVALID");
-	}
-	if (
-		decoded.length === 0 ||
-		decoded.startsWith("//") ||
-		decoded.includes("\\") ||
-		decoded.includes("\u0000") ||
-		decoded.includes("?") ||
-		decoded.includes("#") ||
-		/^[A-Za-z][A-Za-z0-9+.-]*:/.test(decoded) ||
-		/[\u2044\u2215\u2216\u2217\u29f8\uff0f\uff3c\u2024\u2025]/u.test(decoded)
-	) {
-		throw officeError("DOCX_TARGET_INVALID");
-	}
-	if (sourcePart === undefined && decoded.startsWith("/")) {
-		decoded = decoded.slice(1);
-	} else if (sourcePart !== undefined && decoded.startsWith("/")) {
-		throw officeError("DOCX_TARGET_INVALID");
-	}
-	const decodedSegments = decoded.split("/");
-	if (
-		decodedSegments.some((segment) => segment.length === 0 || segment === ".") ||
-		(sourcePart === undefined && decodedSegments.includes(".."))
-	)
-		throw officeError("DOCX_TARGET_INVALID");
-	const base =
-		sourcePart === undefined
-			? []
-			: sourcePart
-					.slice(0, sourcePart.lastIndexOf("/") + 1)
-					.split("/")
-					.filter(Boolean);
-	const segments = [...base, ...decodedSegments];
-	const resolved: string[] = [];
-	for (const segment of segments) {
-		if (segment.length === 0 || segment === ".") continue;
-		if (segment === "..") {
-			if (resolved.length === 0) throw officeError("DOCX_TARGET_INVALID");
-			resolved.pop();
-			continue;
-		}
-		resolved.push(segment);
-	}
-	if (resolved.length === 0) throw officeError("DOCX_TARGET_INVALID");
-	try {
-		return normalizeOpcPath(resolved.join("/"));
+		return resolveOpcRelationshipTarget(target, sourcePart);
 	} catch {
 		throw officeError("DOCX_TARGET_INVALID");
 	}
@@ -495,6 +435,17 @@ function warningCodeForRelationship(type: string): DocxPartWarning["code"] | und
 	return RELATIONSHIP_WARNING_CODES.get(type);
 }
 
+function editableRelatedPartKind(type: string): DocxRelatedPart["kind"] | undefined {
+	for (const kind of ["header", "footer", "comments"] as const) {
+		if (
+			type === `http://schemas.openxmlformats.org/officeDocument/2006/relationships/${kind}` ||
+			type === `http://purl.oclc.org/ooxml/officeDocument/relationships/${kind}`
+		)
+			return kind;
+	}
+	return undefined;
+}
+
 function contentTypeFor(
 	overrides: ReadonlyMap<string, string>,
 	defaults: ReadonlyMap<string, string>,
@@ -543,6 +494,7 @@ export function resolveDocx(archive: PackageArchive): DocxPackageResolution {
 		defaults.set(extension, type);
 	}
 	const warnings = new Map<string, DocxPartWarning>();
+	const resolvedRelationships = new Map<string, Array<ParsedRelationship & { readonly resolvedTarget: string }>>();
 	const inspectRelationships = (relationshipPath: string, sourcePart: string | undefined): ParsedRelationship[] => {
 		const root = rootElement(
 			readXml(archive, relationshipPath),
@@ -563,6 +515,11 @@ export function resolveDocx(archive: PackageArchive): DocxPackageResolution {
 			if (!entries.has(target)) {
 				if (sourcePart === undefined && isOfficeDocument) continue;
 				throw officeError("DOCX_TARGET_INVALID");
+			}
+			if (sourcePart !== undefined) {
+				const sourceRelationships = resolvedRelationships.get(sourcePart) ?? [];
+				sourceRelationships.push({ ...relationship, resolvedTarget: target });
+				resolvedRelationships.set(sourcePart, sourceRelationships);
 			}
 			const code = warningCodeForRelationship(relationship.type);
 			if (code !== undefined && target !== sourcePart)
@@ -600,11 +557,38 @@ export function resolveDocx(archive: PackageArchive): DocxPackageResolution {
 	if (contentTypeFor(overrides, defaults, mainPart)?.toLowerCase() !== WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE)
 		throw officeError("DOCX_MAIN_CONTENT_TYPE_INVALID");
 	warnings.delete(`UNSUPPORTED_PART:${mainPart}`);
+	const relatedPartKeys = new Set<string>();
+	const relatedParts = (resolvedRelationships.get(mainPart) ?? [])
+		.map((relationship): DocxRelatedPart | undefined => {
+			const kind = editableRelatedPartKind(relationship.type);
+			return kind === undefined
+				? undefined
+				: { relationshipId: relationship.id, kind, path: relationship.resolvedTarget };
+		})
+		.filter((part): part is DocxRelatedPart => part !== undefined)
+		.sort(
+			(left, right) =>
+				left.kind.localeCompare(right.kind) ||
+				left.path.localeCompare(right.path) ||
+				left.relationshipId.localeCompare(right.relationshipId),
+		)
+		.filter((part) => {
+			const key = `${part.kind}:${part.path}`;
+			if (relatedPartKeys.has(key)) return false;
+			relatedPartKeys.add(key);
+			return true;
+		});
+	for (const part of relatedParts) {
+		if (part.kind === "header") warnings.delete(`UNSUPPORTED_HEADER:${part.path}`);
+		if (part.kind === "footer") warnings.delete(`UNSUPPORTED_FOOTER:${part.path}`);
+		if (part.kind === "comments") warnings.delete(`UNSUPPORTED_COMMENTS:${part.path}`);
+	}
 	return {
 		mainPart: {
 			path: mainPart,
 			contentType: WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE,
 		},
+		relatedParts,
 		warnings: [...warnings.values()].sort(
 			(left, right) => left.part.localeCompare(right.part) || left.code.localeCompare(right.code),
 		),

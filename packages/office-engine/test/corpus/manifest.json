@@ -21,6 +21,13 @@
       "spdx": "Apache-2.0",
       "attribution": "Apache POI",
       "kind": "notice"
+    },
+    {
+      "file": "LIBREOFFICE-MPL-2.0.txt",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "spdx": "MPL-2.0",
+      "attribution": "Mozilla Public License Version 2.0",
+      "kind": "license"
     }
   ],
   "fixtures": [
@@ -64,12 +71,12 @@
         "inspect": "opens",
         "warnings": [
           {
-            "code": "UNSUPPORTED_COMMENTS",
-            "part": "word/comments.xml"
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
           },
           {
             "code": "BLOCKED_CONTENT",
-            "part": "word/document.xml"
+            "part": "word/comments.xml"
           }
         ],
         "operation": "blocked",
@@ -233,6 +240,69 @@
       }
     },
     {
+      "filename": "header-footer.docx",
+      "sha256": "ec439ac0643294e1e2961b381983304e044444f3a8f0dc465a98adf9ebee0e67",
+      "source": {
+        "repository": "https://github.com/apache/poi",
+        "revision": "87cdef57b0f714369c391e625180a59507a24576",
+        "version": "trunk-2026-08-28",
+        "fixturePath": "test-data/document/HeaderFooterUnicode.docx",
+        "url": "https://raw.githubusercontent.com/apache/poi/87cdef57b0f714369c391e625180a59507a24576/test-data/document/HeaderFooterUnicode.docx"
+      },
+      "license": {
+        "id": "APACHE-POI-LICENSE.txt",
+        "spdx": "Apache-2.0",
+        "attribution": "Apache License"
+      },
+      "legalFiles": ["APACHE-POI-LICENSE.txt", "APACHE-POI-NOTICE.txt"],
+      "producer": {
+        "name": "Microsoft Office Word",
+        "version": "12.0000",
+        "application": "Microsoft Office Word"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "header-parts",
+        "footer-parts",
+        "unicode-text",
+        "editable-related-text-runs"
+      ],
+      "audit": {
+        "privacy": "fixture contains only generic header and footer test text; reviewed for personal data",
+        "rationale": "real-world Microsoft Word fixture covers existing header and footer Unicode text roundtrip"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRelatedRun": {
+          "part": "header",
+          "relatedPartId": "header:rId7",
+          "paragraphId": "header:rId7:p-0",
+          "runId": "header:rId7:p-0:r-0",
+          "text": "This is a simple header, with a € euro symbol in it."
+        },
+        "warnings": [
+          {
+            "code": "UNSUPPORTED_ENDNOTE",
+            "part": "word/endnotes.xml"
+          },
+          {
+            "code": "UNSUPPORTED_FOOTNOTE",
+            "part": "word/footnotes.xml"
+          },
+          {
+            "code": "BLOCKED_CONTENT",
+            "part": "word/document.xml"
+          }
+        ],
+        "operation": "editable"
+      }
+    },
+    {
       "filename": "bug66312.docx",
       "sha256": "de03dd0ac02c04e07790c400ee5cb36b580e38750d6c56c2b8528a53219cb46a",
       "source": {
@@ -280,6 +350,54 @@
             "part": "word/document.xml"
           }
         ],
+        "operation": "editable"
+      }
+    },
+    {
+      "filename": "open-as-read-only.docx",
+      "sha256": "0606d61d2d1097411aabb9e7d564aa10ec77c9e033ab46f603a1e910e2be082f",
+      "source": {
+        "repository": "https://github.com/LibreOffice/core",
+        "revision": "03762554ad40639b2286f86e3016591c3ac24137",
+        "version": "6.2.0.0.alpha0",
+        "fixturePath": "sw/qa/extras/ooxmlexport/data/open-as-read-only.docx",
+        "url": "https://raw.githubusercontent.com/LibreOffice/core/03762554ad40639b2286f86e3016591c3ac24137/sw/qa/extras/ooxmlexport/data/open-as-read-only.docx"
+      },
+      "license": {
+        "id": "LIBREOFFICE-MPL-2.0.txt",
+        "spdx": "MPL-2.0",
+        "attribution": "Mozilla Public License Version 2.0"
+      },
+      "legalFiles": ["LIBREOFFICE-MPL-2.0.txt"],
+      "producer": {
+        "name": "LibreOfficeDev",
+        "version": "6.2.0.0.alpha0 Linux X86_64",
+        "application": "LibreOfficeDev/6.2.0.0.alpha0$Linux_X86_64 LibreOffice_project/37f3786ac60d17182f6037305c5372a65f292f5c"
+      },
+      "format": {
+        "extension": ".docx",
+        "mainPart": "word/document.xml",
+        "namespace": "transitional"
+      },
+      "features": [
+        "body-paragraph",
+        "four-editable-text-runs",
+        "cross-run-range",
+        "marked-as-final",
+        "libreoffice-produced"
+      ],
+      "audit": {
+        "privacy": "fixture contains generic test text; creator and lastModifiedBy metadata are empty",
+        "rationale": "official LibreOffice test fixture provides fixed LibreOffice producer coverage for a same-paragraph multi-run range roundtrip"
+      },
+      "expected": {
+        "inspect": "opens",
+        "editableRun": {
+          "paragraphId": "p-0",
+          "runId": "r-0-0",
+          "text": "This document is "
+        },
+        "warnings": [],
         "operation": "editable"
       }
     }

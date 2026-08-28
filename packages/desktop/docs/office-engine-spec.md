@@ -108,9 +108,15 @@ renderer 和 Agent 使用 typed contract；二者都不持有引擎内部对象�
 
 ### D4：operation 不暴露 OOXML
 
-Agent 只能提交受版本控制的判别联合。首期操作是单个 text run 的精确替换：
+Agent 只能提交受版本控制的判别联合。当前协议包含精确 run 替换、同段跨 run 范围替换和直属正文段落插入/删除：
 
 ```ts
+export interface TextPrecondition {
+  documentRevision: number;
+  expectedText: string;
+  expectedTextSha256: string;
+}
+
 export interface ReplaceTextRunOperation {
   type: "replace_text_run";
   target: {
@@ -118,15 +124,50 @@ export interface ReplaceTextRunOperation {
     paragraphId: string;
     runId: string;
   };
-  precondition: {
-    documentRevision: number;
-    expectedText: string;
-    expectedTextSha256: string;
-  };
+  precondition: TextPrecondition;
   replacement: string;
 }
 
-export type DocumentOperation = ReplaceTextRunOperation;
+export interface ReplaceTextRangeOperation {
+  type: "replace_text_range";
+  target: {
+    part: "document";
+    paragraphId: string;
+    start: { runId: string; offset: number };
+    end: { runId: string; offset: number };
+  };
+  precondition: TextPrecondition;
+  replacement: string;
+}
+
+export interface InsertParagraphAfterOperation {
+  type: "insert_paragraph_after";
+  target: { part: "document"; paragraphId: string };
+  precondition: TextPrecondition;
+  replacement: string;
+}
+
+export interface DeleteParagraphOperation {
+  type: "delete_paragraph";
+  target: { part: "document"; paragraphId: string };
+  precondition: TextPrecondition;
+}
+
+export interface SetTextRunStyleOperation {
+  type: "set_text_run_style";
+  target: { part: "document"; paragraphId: string; runId: string };
+  precondition: TextPrecondition & {
+    expectedProperties: { bold: boolean; italic: boolean; styleId?: string };
+  };
+  replacement: { bold?: boolean; italic?: boolean };
+}
+
+export type DocumentOperation =
+  | ReplaceTextRunOperation
+  | ReplaceTextRangeOperation
+  | InsertParagraphAfterOperation
+  | DeleteParagraphOperation
+  | SetTextRunStyleOperation;
 
 export interface DocumentOperationEnvelope {
   protocolVersion: 1;
@@ -410,7 +451,7 @@ DOCX 切换交付必须删除或收敛以下 DOCX 旧路径：
 - 输入：未加密 `.docx`；
 - 主文档：由 package root `officeDocument` relationship 解析，target 必须存在、位于 package 内并具有受支持的 WordprocessingML content type；
 - 检查：普通 body paragraph 和普通 text run；
-- 编辑：一个或多个普通 text run 的完整文本替换；
+- 编辑：一个或多个普通 text run 的完整文本替换、同一普通段落内的跨 run 连续范围替换、直属正文普通段落的插入/删除，以及普通 text run 的 bold/italic 样式；
 - 保留：run properties、paragraph properties、所有未触及 XML slice、其他 ZIP entries；
 - 输出：新的 `.docx`，保存后可由引擎重开；
 - UI：自有 RenderTree 文档视图、结构化 diff、明确批准和保存结果；
@@ -425,7 +466,8 @@ DOCX 切换交付必须删除或收敛以下 DOCX 旧路径：
 - content control 边界；
 - hyperlink 跨边界替换；
 - drawing、textbox、header/footer、footnote/endnote；
-- 跨 run substring 替换；
+- 跨 paragraph 或穿越 blocked run 的 substring 替换；
+- 对非直属正文或包含 blocked content 的 paragraph 执行插入/删除；
 - 会改变关系、media、style、numbering 或 content types 的操作；
 - 加密、带数字签名或无法验证完整性的 package。
 
@@ -545,6 +587,8 @@ CI 分层执行：
 
 性能阈值必须基于 CI runner 基线制定，报告值和失败阈值分开保存。
 
+实现状态：`packages/office-engine/scripts/performance-gate.ts` 以固定 10/50 MiB payload、1,000/10,000 paragraph 和 10,000 paragraph 单 run transaction 执行预算检查；`performance-budget.json` 分离基线与失败阈值，`.github/workflows/office-interop.yml` 的 hosted performance job 上传独立报告并在越界时失败。详见 `packages/office-engine/docs/performance-gate.md`。
+
 ## 11. 可观测性与审计
 
 每个 transaction 生成不含正文的审计记录：
@@ -639,13 +683,31 @@ GenOffice `ee/` 当前虽只有 LICENSE/README 且不进默认构建，其许可
 
 按 corpus 和产品需求逐项增加跨 run range、paragraph insert/delete、comments、styles、headers/footers 等能力。每项能力必须同时增加 operation、blocked boundary、roundtrip、互操作和视觉测试。
 
+当前状态：
+
+- `replace_text_range` 已交付，详见 `packages/office-engine/docs/p3-cross-run-range.md`；
+- `insert_paragraph_after` 和 `delete_paragraph` 已交付，详见 `packages/office-engine/docs/p3-paragraph-operations.md`；
+- comments、headers/footers 已交付，现有纯文本 run 分别通过 `replace_comment_text_run` 与 `replace_related_text_run` 修改；正文批注锚点保持阻断，新增/删除批注不在当前范围，详见 `packages/office-engine/docs/p3-related-parts.md`；
+- `set_text_run_style` 的 bold/italic 修改已交付，详见 `packages/office-engine/docs/p3-run-styles.md`；
+- 已交付能力的引擎 roundtrip、Desktop 原生审批与定向视觉测试已覆盖；外部互操作门禁、八组确定性用例、LibreOffice hosted lane 和 Microsoft Word self-hosted lane 已实现，详见 `packages/office-engine/docs/external-interop-gate.md`。当前开发环境没有对应应用，因此本提交的发布门禁仍须以两个 CI lane 的成功结果和证据产物解除，不得以 producer fixture 的引擎 roundtrip 代替。
+
 ### P4：第二格式决策
 
-P2 稳定后依据产品需求选择 PPTX 或 XLSX：
+P4 选择 **XLSX**。产品侧已有 `quarterly.xlsx`、`budget.xlsx` 等真实工作流，现有 OPC/raw-copy transaction 基础可直接复用；PPTX 的 shape、theme 和 layout 语义范围明显更大。
 
-- PPTX 优先时复用 OPC、transaction、durable element identity 和 RenderTree 原则；
-- XLSX 优先时先实现 raw-copy archive、touched-entry manifest 和公式/共享字符串安全边界；
-- 不在决策前为两者创建空 package 或占位抽象。
+首个 XLSX 增量已交付，严格限制为：
+
+- 固定来源 corpus、workbook/worksheet relationship resolver；
+- 有界 sheet/range inspection，元素 ID 使用 sheet relationship ID 与 A1 地址；
+- 仅修改现有、非公式 cell；写入局部 `inlineStr`，不创建 worksheet、row/cell、sharedStrings 或 package entry；
+- 单 worksheet transaction、preimage/touched-entry/reopen 复验；
+- Desktop 原生虚拟 grid、Agent inspect/plan、renderer-only approval；initial preview 最多携带 500 cells，renderer 可见区间通过 owner-bound IPC 分块读取；
+- XLSX 路径完成后删除 XLSX OfficeCLI preview 分支，PPTX 暂时保留现有只读预览；
+- LibreOffice Calc 与 Microsoft Excel 外部互操作为发布门禁。
+
+实现、corpus、边界和运行命令详见 `packages/office-engine/docs/p4-xlsx.md`。引擎 roundtrip、Desktop/Agent/renderer 定向测试与自动化 lane 已交付；当前开发环境没有 Calc/Excel，因此发布仍须等待两个 CI lane 的实际成功结果与证据产物。
+
+不实现公式引擎、公式 cell 写入、sharedStrings 修改、样式编辑或结构增删。
 
 ## 14. 验收标准
 
@@ -662,18 +724,19 @@ P2 稳定后依据产品需求选择 PPTX 或 XLSX：
 9. corpus 来源、许可证和特征 manifest 完整。
 10. 新增定点测试、coverage gate、Desktop typecheck 和根 `npm run check` 全部通过。
 11. DOCX 运行路径和 Agent tool registry 中不存在 OfficeCLI 调用、HTML preview 或失败回退。
+12. XLSX 运行路径不存在 OfficeCLI 调用或 HTML fallback；PPTX 是唯一保留的 legacy HTML preview 格式。
+13. XLSX 公式、缺失 cell、结构增删、跨 worksheet transaction 与 sharedStrings 写入全部 fail-closed。
+14. XLSX 保存结果通过引擎 reopen、LibreOffice Calc lane 和已配置的 Microsoft Excel lane。
 
 ## 15. 开放问题
 
 以下问题必须在对应里程碑开始前解决，不阻塞 RFC 合入：
 
 1. 哪个 ZIP 库能够同时满足安全预算、raw entry copy、metadata preservation 和流式写入；
-2. Word 自动化 lane 使用企业 CI Windows runner，还是独立兼容性实验室；
-3. diff panel 的交互形态与放置位置；
-4. Agent sidecar 到 main 的 typed host bridge 是否复用现有 Desktop host RPC；
-5. corpus 中真实客户文件的脱敏、授权和本地-only 测试策略；
-6. 首期是否需要内存内 undo，还是重新打开文件并生成反向 operation；
-7. P2 后优先进入 PPTX 还是 XLSX。
+2. diff panel 的交互形态与放置位置；
+3. Agent sidecar 到 main 的 typed host bridge 是否复用现有 Desktop host RPC；
+4. corpus 中真实客户文件的脱敏、授权和本地-only 测试策略；
+5. 首期是否需要内存内 undo，还是重新打开文件并生成反向 operation。
 
 ## 16. 实施前检查
 

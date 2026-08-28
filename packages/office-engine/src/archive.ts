@@ -157,6 +157,56 @@ export function normalizeOpcPath(path: string): string {
 	return normalized;
 }
 
+export function resolveOpcRelationshipTarget(target: string, sourcePart?: string): string {
+	if (typeof target !== "string" || target.length === 0 || target.includes("\\") || target.includes("\u0000"))
+		throw officeError("ARCHIVE_UNSAFE_PATH");
+	for (const match of target.matchAll(/%([0-9a-f]{2})/giu)) {
+		const codePoint = Number.parseInt(match[1]!, 16);
+		if ([0x00, 0x23, 0x2e, 0x2f, 0x3f, 0x5c].includes(codePoint)) throw officeError("ARCHIVE_UNSAFE_PATH");
+	}
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(target);
+	} catch {
+		throw officeError("ARCHIVE_UNSAFE_PATH");
+	}
+	if (
+		decoded.length === 0 ||
+		decoded.startsWith("//") ||
+		decoded.includes("\\") ||
+		decoded.includes("\u0000") ||
+		decoded.includes("?") ||
+		decoded.includes("#") ||
+		/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(decoded) ||
+		/[\u2044\u2215\u2216\u2217\u29f8\uff0f\uff3c\u2024\u2025]/u.test(decoded)
+	)
+		throw officeError("ARCHIVE_UNSAFE_PATH");
+	if (sourcePart === undefined && decoded.startsWith("/")) decoded = decoded.slice(1);
+	else if (sourcePart !== undefined && decoded.startsWith("/")) throw officeError("ARCHIVE_UNSAFE_PATH");
+	const decodedSegments = decoded.split("/");
+	if (
+		decodedSegments.some((segment) => segment.length === 0 || segment === ".") ||
+		(sourcePart === undefined && decodedSegments.includes(".."))
+	)
+		throw officeError("ARCHIVE_UNSAFE_PATH");
+	const base =
+		sourcePart === undefined
+			? []
+			: sourcePart
+					.slice(0, sourcePart.lastIndexOf("/") + 1)
+					.split("/")
+					.filter(Boolean);
+	const resolved: string[] = [];
+	for (const segment of [...base, ...decodedSegments]) {
+		if (segment === "..") {
+			if (resolved.length === 0) throw officeError("ARCHIVE_UNSAFE_PATH");
+			resolved.pop();
+		} else resolved.push(segment);
+	}
+	if (resolved.length === 0) throw officeError("ARCHIVE_UNSAFE_PATH");
+	return normalizeOpcPath(resolved.join("/"));
+}
+
 function normalizePathWithLimit(path: string, maxPathBytes: number): string {
 	const normalized = normalizeOpcPath(path);
 	if (UTF8_ENCODER.encode(normalized).length > maxPathBytes) throw officeError("ARCHIVE_PATH_TOO_LONG");

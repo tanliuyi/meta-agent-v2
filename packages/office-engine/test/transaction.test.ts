@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,6 +9,7 @@ import {
 	PackageArchive,
 	planDocx,
 	sha256Hex,
+	TRANSACTION_BUDGETS,
 	validateDocumentOperationEnvelope,
 } from "../src/index.ts";
 
@@ -30,6 +33,27 @@ const fixtureWithMain = (document: string, level: 0 | 6 = 6): Uint8Array =>
 		"[Content_Types].xml": [new TextEncoder().encode(contentTypes), { level }],
 		"_rels/.rels": [new TextEncoder().encode(rels), { level }],
 		"word/document.xml": [new TextEncoder().encode(document), { level }],
+	});
+const fixtureWithRelatedParts = (): Uint8Array =>
+	zipSync({
+		"[Content_Types].xml": new TextEncoder().encode(
+			contentTypes.replace(
+				"</Types>",
+				'<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>',
+			),
+		),
+		"_rels/.rels": new TextEncoder().encode(rels),
+		"word/document.xml": new TextEncoder().encode(main),
+		"word/_rels/document.xml.rels": new TextEncoder().encode(
+			'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>',
+		),
+		"word/header1.xml": new TextEncoder().encode(
+			'\uFEFF<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Header</w:t></w:r></w:p></w:hdr>',
+		),
+		"word/footer1.xml": new TextEncoder().encode(
+			'\uFEFF<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Footer</w:t></w:r></w:p></w:ftr>',
+		),
+		"docProps/custom.xml": new TextEncoder().encode("keep-related"),
 	});
 function expectCode(action: () => unknown, code: string): void {
 	try {
@@ -69,6 +93,222 @@ describe("P1 DOCX transaction", () => {
 		expect(changed).toContain("A&amp;B");
 		expect(reopened.read("docProps/custom.xml")).toEqual(archive.read("docProps/custom.xml"));
 	});
+	it("edits existing header and footer runs in one verified multi-part transaction", () => {
+		const archive = PackageArchive.open(fixtureWithRelatedParts());
+		const snapshot = inspectDocx(archive, "related");
+		expect(snapshot.relatedParts.map((part) => ({ id: part.id, kind: part.kind }))).toEqual([
+			{ id: "footer:rFooter", kind: "footer" },
+			{ id: "header:rHeader", kind: "header" },
+		]);
+		const [footer, header] = snapshot.relatedParts;
+		const footerRun = footer.paragraphs[0].runs[0];
+		const headerRun = header.paragraphs[0].runs[0];
+		expect(new Set([footerRun.id, headerRun.id, snapshot.paragraphs[0].runs[0].id]).size).toBe(3);
+		const plan = planDocx(
+			archive,
+			snapshot,
+			{
+				protocolVersion: 1,
+				operations: [
+					{
+						type: "replace_related_text_run",
+						target: {
+							part: "header",
+							relatedPartId: header.id,
+							paragraphId: header.paragraphs[0].id,
+							runId: headerRun.id,
+						},
+						precondition: {
+							documentRevision: 1,
+							expectedText: headerRun.text,
+							expectedTextSha256: headerRun.anchor.textHash,
+						},
+						replacement: "A&B Header",
+					},
+					{
+						type: "replace_related_text_run",
+						target: {
+							part: "footer",
+							relatedPartId: footer.id,
+							paragraphId: footer.paragraphs[0].id,
+							runId: footerRun.id,
+						},
+						precondition: {
+							documentRevision: 1,
+							expectedText: footerRun.text,
+							expectedTextSha256: footerRun.anchor.textHash,
+						},
+						replacement: "Next Footer",
+					},
+				],
+			},
+			Date.now() + 10_000,
+		);
+		expect(plan.touchedParts).toEqual(["word/footer1.xml", "word/header1.xml"]);
+		expect(plan.semanticDiff).toMatchObject([
+			{ type: "related-text", part: "header", relatedPartId: header.id, after: "A&B Header" },
+			{ type: "related-text", part: "footer", relatedPartId: footer.id, after: "Next Footer" },
+		]);
+		const output = commitDocx(archive, snapshot, plan);
+		const reopenedArchive = PackageArchive.open(output);
+		expect(new TextDecoder().decode(reopenedArchive.read("word/header1.xml"))).toContain("A&amp;B Header");
+		expect(new TextDecoder().decode(reopenedArchive.read("word/footer1.xml"))).toContain("Next Footer");
+		expect(reopenedArchive.read("word/_rels/document.xml.rels")).toEqual(
+			archive.read("word/_rels/document.xml.rels"),
+		);
+		expect(reopenedArchive.read("docProps/custom.xml")).toEqual(archive.read("docProps/custom.xml"));
+		const reopened = inspectDocx(reopenedArchive, "related", 2);
+		expect(reopened.relatedParts[0].paragraphs[0].runs[0].id).toBe(footerRun.id);
+		expect(reopened.relatedParts[1].paragraphs[0].runs[0].id).toBe(headerRun.id);
+		expect(reopened.relatedParts[0].paragraphs[0].runs[0].text).toBe("Next Footer");
+		expect(reopened.relatedParts[1].paragraphs[0].runs[0].text).toBe("A&B Header");
+	});
+
+	it("edits an existing comment text run without changing its document anchor", () => {
+		const source = new Uint8Array(readFileSync(resolve(import.meta.dirname, "corpus/comments.docx")));
+		const original = PackageArchive.open(source);
+		const archive = PackageArchive.open(
+			original.replace(
+				"word/comments.xml",
+				new Uint8Array([0xef, 0xbb, 0xbf, ...original.read("word/comments.xml")]),
+			),
+		);
+		const snapshot = inspectDocx(archive, "comments");
+		expect(snapshot.comments.map((comment) => ({ id: comment.id, author: comment.author }))).toEqual([
+			{ id: "comment:rId6:0", author: "Michael Williamson" },
+			{ id: "comment:rId6:2", author: "Michael Williamson" },
+		]);
+		const comment = snapshot.comments[0];
+		const paragraph = comment.paragraphs[0];
+		expect(paragraph.runs[0]).toMatchObject({ text: "", editable: false, blockedReason: "complex-run" });
+		const run = paragraph.runs[1];
+		expect(run).toMatchObject({ text: "A tachyon walks into a bar.", editable: true });
+		const plan = planDocx(
+			archive,
+			snapshot,
+			{
+				protocolVersion: 1,
+				operations: [
+					{
+						type: "replace_comment_text_run",
+						target: { part: "comments", commentId: comment.id, paragraphId: paragraph.id, runId: run.id },
+						precondition: {
+							documentRevision: 1,
+							expectedText: run.text,
+							expectedTextSha256: run.anchor.textHash,
+						},
+						replacement: "Reviewed & approved.",
+					},
+				],
+			},
+			Date.now() + 10_000,
+		);
+		expect(plan.touchedParts).toEqual(["word/comments.xml"]);
+		expect(plan.semanticDiff).toMatchObject([
+			{ type: "comment-text", commentId: comment.id, runId: run.id, after: "Reviewed & approved." },
+		]);
+		const output = commitDocx(archive, snapshot, plan);
+		const reopenedArchive = PackageArchive.open(output);
+		expect(reopenedArchive.read("word/document.xml")).toEqual(archive.read("word/document.xml"));
+		expect(new TextDecoder().decode(reopenedArchive.read("word/comments.xml"))).toContain("Reviewed &amp; approved.");
+		const reopened = inspectDocx(reopenedArchive, "comments", 2);
+		expect(reopened.comments[0].paragraphs[0].runs[1]).toMatchObject({ id: run.id, text: "Reviewed & approved." });
+	});
+
+	it("edits bold and italic while preserving unrelated run properties", () => {
+		const document =
+			'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr data="keep"><w:rStyle w:val="Body"/><w:color w:val="FF0000"/><w:b/></w:rPr><w:t>Styled</w:t></w:r></w:p></w:body></w:document>';
+		const archive = PackageArchive.open(fixtureWithMain(document));
+		const snapshot = inspectDocx(archive, "style");
+		const run = snapshot.paragraphs[0].runs[0];
+		const plan = planDocx(
+			archive,
+			snapshot,
+			{
+				protocolVersion: 1,
+				operations: [
+					{
+						type: "set_text_run_style",
+						target: { part: "document", paragraphId: "p-0", runId: run.id },
+						precondition: {
+							documentRevision: 1,
+							expectedText: "Styled",
+							expectedTextSha256: run.anchor.textHash,
+							expectedProperties: { bold: true, italic: false, styleId: "Body" },
+						},
+						replacement: { bold: false, italic: true },
+					},
+				],
+			},
+			Date.now() + 10_000,
+		);
+		expect(plan.touchedRuns).toEqual([run.id]);
+		expect(plan.patchManifest).toMatchObject([{ kind: "run_style" }]);
+		expect(plan.semanticDiff).toEqual([
+			{
+				type: "run-style",
+				runId: run.id,
+				before: { bold: true, italic: false, styleId: "Body" },
+				after: { bold: false, italic: true, styleId: "Body" },
+			},
+		]);
+		const output = commitDocx(archive, snapshot, plan);
+		const xml = new TextDecoder().decode(PackageArchive.open(output).read("word/document.xml"));
+		expect(xml).toContain(
+			'<w:rPr data="keep"><w:rStyle w:val="Body"/><w:color w:val="FF0000"/><w:b w:val="0"/><w:i w:val="1"/></w:rPr>',
+		);
+		expect(inspectDocx(PackageArchive.open(output), "style", 2).paragraphs[0].runs[0].properties).toEqual({
+			bold: false,
+			italic: true,
+			styleId: "Body",
+		});
+	});
+
+	it("adds run properties for strict and self-closing property nodes and rejects ambiguous styles", () => {
+		for (const rPr of ["", "<s:rPr/>"]) {
+			const document = `<s:document xmlns:s="http://purl.oclc.org/ooxml/wordprocessingml/main"><s:body><s:p><s:r>${rPr}<s:t>x</s:t></s:r></s:p></s:body></s:document>`;
+			const archive = PackageArchive.open(fixtureWithMain(document));
+			const snapshot = inspectDocx(archive, `strict-style-${rPr.length}`);
+			const run = snapshot.paragraphs[0].runs[0];
+			const plan = planDocx(
+				archive,
+				snapshot,
+				{
+					protocolVersion: 1,
+					operations: [
+						{
+							type: "set_text_run_style",
+							target: { part: "document", paragraphId: "p-0", runId: run.id },
+							precondition: {
+								documentRevision: 1,
+								expectedText: "x",
+								expectedTextSha256: run.anchor.textHash,
+								expectedProperties: { bold: false, italic: false },
+							},
+							replacement: { bold: true },
+						},
+					],
+				},
+				Date.now() + 10_000,
+			);
+			const output = commitDocx(archive, snapshot, plan);
+			expect(new TextDecoder().decode(PackageArchive.open(output).read("word/document.xml"))).toContain(
+				'<s:rPr><s:b s:val="1"/></s:rPr>',
+			);
+		}
+		for (const property of ["<w:b/><w:b/>", '<w:i custom="keep"/>']) {
+			const ambiguous = PackageArchive.open(
+				fixtureWithMain(
+					`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr>${property}</w:rPr><w:t>x</w:t></w:r></w:p></w:body></w:document>`,
+				),
+			);
+			expect(inspectDocx(ambiguous, `ambiguous-${property.length}`).paragraphs[0].runs[0]).toMatchObject({
+				editable: false,
+				blockedReason: "invalid-run-property",
+			});
+		}
+	});
+
 	it("rejects expired and conflicting plans", () => {
 		const archive = PackageArchive.open(fixture());
 		const snapshot = inspectDocx(archive, "doc-1");
@@ -189,6 +429,7 @@ describe("P1 DOCX transaction", () => {
 			"sourceSha256",
 			"semanticDiff",
 			"touchedRuns",
+			"touchedParagraphs",
 			"touchedParts",
 			"patchManifest",
 			"envelope",
@@ -202,6 +443,7 @@ describe("P1 DOCX transaction", () => {
 				sourceSha256: "0".repeat(64),
 				semanticDiff: [],
 				touchedRuns: [],
+				touchedParagraphs: ["p-x"],
 				touchedParts: [],
 				patchManifest: [],
 				envelope: { protocolVersion: 1, operations: [] },
@@ -212,6 +454,320 @@ describe("P1 DOCX transaction", () => {
 			expect(() => commitDocx(archive, snapshot, altered)).toThrow();
 		}
 		expect(() => commitDocx(archive, snapshot, { ...plan, planSha256: "0".repeat(64) })).toThrow();
+	});
+
+	it("replaces a range across runs and preserves the surrounding text and run styles", () => {
+		const styled =
+			'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>One😀</w:t></w:r><w:r><w:t>Middle</w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>Two</w:t></w:r></w:p></w:body></w:document>';
+		const archive = PackageArchive.open(fixtureWithMain(styled));
+		const snapshot = inspectDocx(archive, "range");
+		const runs = snapshot.paragraphs[0].runs;
+		const expectedText = "ne😀MiddleTw";
+		const plan = planDocx(
+			archive,
+			snapshot,
+			{
+				protocolVersion: 1,
+				operations: [
+					{
+						type: "replace_text_range",
+						target: {
+							part: "document",
+							paragraphId: "p-0",
+							start: { runId: runs[0].id, offset: 1 },
+							end: { runId: runs[2].id, offset: 2 },
+						},
+						precondition: {
+							documentRevision: 1,
+							expectedText,
+							expectedTextSha256: sha256Hex(new TextEncoder().encode(expectedText)),
+						},
+						replacement: " & ",
+					},
+				],
+			},
+			Date.now() + 10_000,
+		);
+		expect(plan.touchedRuns).toEqual(runs.map((run) => run.id));
+		expect(plan.patchManifest).toHaveLength(3);
+		expect(plan.patchManifest.every((patch) => patch.kind === "text_range")).toBe(true);
+		expect(plan.semanticDiff).toEqual([
+			{ runId: runs[0].id, before: "One😀", after: "O & " },
+			{ runId: runs[1].id, before: "Middle", after: "" },
+			{ runId: runs[2].id, before: "Two", after: "o" },
+		]);
+		const output = commitDocx(archive, snapshot, plan);
+		const reopened = inspectDocx(PackageArchive.open(output), "range", 2);
+		expect(reopened.paragraphs[0].runs.map((run) => run.text)).toEqual(["O & ", "", "o"]);
+		expect(reopened.paragraphs[0].runs.map((run) => run.properties)).toEqual([
+			{ bold: true, italic: false, styleId: undefined },
+			{ bold: false, italic: false, styleId: undefined },
+			{ bold: false, italic: true, styleId: undefined },
+		]);
+		const xml = new TextDecoder().decode(PackageArchive.open(output).read("word/document.xml"));
+		expect(xml).toContain("O &amp; ");
+	});
+
+	it("inserts and deletes direct body paragraphs with exact anchors", () => {
+		const document =
+			'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p><w:p><w:r><w:t>C</w:t></w:r></w:p><w:sectPr/></w:body></w:document>';
+		const archive = PackageArchive.open(fixtureWithMain(document));
+		const snapshot = inspectDocx(archive, "paragraphs");
+		const [first, second] = snapshot.paragraphs;
+		const plan = planDocx(
+			archive,
+			snapshot,
+			{
+				protocolVersion: 1,
+				operations: [
+					{
+						type: "insert_paragraph_after",
+						target: { part: "document", paragraphId: first.id },
+						precondition: {
+							documentRevision: 1,
+							expectedText: "A",
+							expectedTextSha256: first.anchor.textHash,
+						},
+						replacement: " 新 & 文本 ",
+					},
+					{
+						type: "delete_paragraph",
+						target: { part: "document", paragraphId: second.id },
+						precondition: {
+							documentRevision: 1,
+							expectedText: "B",
+							expectedTextSha256: second.anchor.textHash,
+						},
+					},
+				],
+			},
+			Date.now() + 10_000,
+		);
+		expect(plan.touchedParagraphs).toEqual([first.id, second.id]);
+		expect(plan.touchedRuns).toEqual(second.runs.map((run) => run.id));
+		expect(plan.patchManifest.map((patch) => patch.kind)).toEqual(["paragraph_insert", "paragraph_delete"]);
+		expect(plan.semanticDiff).toEqual([
+			{ type: "paragraph", paragraphId: first.id, change: "insert", before: "", after: " 新 & 文本 " },
+			{ type: "paragraph", paragraphId: second.id, change: "delete", before: "B", after: "" },
+		]);
+		const output = commitDocx(archive, snapshot, plan);
+		const reopened = inspectDocx(PackageArchive.open(output), "paragraphs", 2);
+		expect(reopened.paragraphs.map((paragraph) => paragraph.runs.map((run) => run.text).join(""))).toEqual([
+			"A",
+			" 新 & 文本 ",
+			"C",
+		]);
+		const xml = new TextDecoder().decode(PackageArchive.open(output).read("word/document.xml"));
+		expect(xml).toContain('<w:t xml:space="preserve"> 新 &amp; 文本 </w:t>');
+		expect(xml).not.toContain("<w:t>B</w:t>");
+	});
+
+	it("rejects stale, malformed, blocked, and conflicting paragraph operations", () => {
+		const archive = PackageArchive.open(fixtureWithMain(multiMain));
+		const snapshot = inspectDocx(archive, "paragraph-guards");
+		const paragraph = snapshot.paragraphs[0];
+		const insert = {
+			type: "insert_paragraph_after" as const,
+			target: { part: "document" as const, paragraphId: paragraph.id },
+			precondition: {
+				documentRevision: 1,
+				expectedText: "OneTwo",
+				expectedTextSha256: paragraph.anchor.textHash,
+			},
+			replacement: "new",
+		};
+		for (const invalid of [
+			{ ...insert, extra: true },
+			{ ...insert, target: { ...insert.target, extra: true } },
+			{ ...insert, precondition: { ...insert.precondition, expectedText: "stale" } },
+			{ ...insert, replacement: "\0" },
+			{
+				type: "delete_paragraph",
+				target: insert.target,
+				precondition: insert.precondition,
+				replacement: "not-allowed",
+			},
+		])
+			expect(() =>
+				planDocx(archive, snapshot, { protocolVersion: 1, operations: [invalid] }, Date.now() + 1_000),
+			).toThrow();
+		expect(() =>
+			planDocx(
+				archive,
+				snapshot,
+				{
+					protocolVersion: 1,
+					operations: [
+						insert,
+						{
+							type: "replace_text_run",
+							target: { part: "document", paragraphId: paragraph.id, runId: paragraph.runs[0].id },
+							precondition: {
+								documentRevision: 1,
+								expectedText: "One",
+								expectedTextSha256: paragraph.runs[0].anchor.textHash,
+							},
+							replacement: "changed",
+						},
+					],
+				},
+				Date.now() + 1_000,
+			),
+		).toThrow();
+		const blockedArchive = PackageArchive.open(
+			fixtureWithMain(
+				'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:hyperlink><w:r><w:t>x</w:t></w:r></w:hyperlink></w:p></w:body></w:document>',
+			),
+		);
+		const blocked = inspectDocx(blockedArchive, "blocked-paragraph");
+		expect(() =>
+			planDocx(
+				blockedArchive,
+				blocked,
+				{
+					protocolVersion: 1,
+					operations: [
+						{
+							type: "delete_paragraph",
+							target: { part: "document", paragraphId: blocked.paragraphs[0].id },
+							precondition: {
+								documentRevision: 1,
+								expectedText: "",
+								expectedTextSha256: blocked.paragraphs[0].anchor.textHash,
+							},
+						},
+					],
+				},
+				Date.now() + 1_000,
+			),
+		).toThrow();
+	});
+
+	it("rejects a cross-run range before expanding more than the touched-run budget", () => {
+		const runs = Array.from({ length: TRANSACTION_BUDGETS.maxTouchedRuns + 1 }, () => "<w:r><w:t>x</w:t></w:r>").join(
+			"",
+		);
+		const document = `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p>${runs}</w:p></w:body></w:document>`;
+		const archive = PackageArchive.open(fixtureWithMain(document));
+		const snapshot = inspectDocx(archive, "range-budget");
+		const paragraphRuns = snapshot.paragraphs[0].runs;
+		const expectedText = "x".repeat(paragraphRuns.length);
+		expectCode(
+			() =>
+				planDocx(
+					archive,
+					snapshot,
+					{
+						protocolVersion: 1,
+						operations: [
+							{
+								type: "replace_text_range",
+								target: {
+									part: "document",
+									paragraphId: "p-0",
+									start: { runId: paragraphRuns[0].id, offset: 0 },
+									end: { runId: paragraphRuns.at(-1)!.id, offset: 1 },
+								},
+								precondition: {
+									documentRevision: 1,
+									expectedText,
+									expectedTextSha256: sha256Hex(new TextEncoder().encode(expectedText)),
+								},
+								replacement: "bounded",
+							},
+						],
+					},
+					Date.now() + 1_000,
+				),
+			"VALIDATION_FAILED",
+		);
+	});
+
+	it("fails closed for invalid cross-run range boundaries and plan tampering", () => {
+		const archive = PackageArchive.open(fixtureWithMain(multiMain));
+		const snapshot = inspectDocx(archive, "range-boundary");
+		const [first, second] = snapshot.paragraphs[0].runs;
+		const operation = {
+			type: "replace_text_range" as const,
+			target: {
+				part: "document" as const,
+				paragraphId: "p-0",
+				start: { runId: first.id, offset: 1 },
+				end: { runId: second.id, offset: 2 },
+			},
+			precondition: {
+				documentRevision: 1,
+				expectedText: "neTw",
+				expectedTextSha256: sha256Hex(new TextEncoder().encode("neTw")),
+			},
+			replacement: "x",
+		};
+		const invalid = [
+			{ ...operation, target: { ...operation.target, start: { ...operation.target.start, offset: -1 } } },
+			{
+				...operation,
+				target: { ...operation.target, start: { ...operation.target.start, offset: first.text.length } },
+			},
+			{ ...operation, target: { ...operation.target, end: { ...operation.target.end, offset: 0 } } },
+			{ ...operation, target: { ...operation.target, start: { runId: second.id, offset: 0 } } },
+			{ ...operation, target: { ...operation.target, end: { runId: first.id, offset: 1 } } },
+			{ ...operation, target: { ...operation.target, extra: true } },
+			{ ...operation, target: { ...operation.target, start: { ...operation.target.start, extra: true } } },
+		];
+		for (const value of invalid)
+			expect(() =>
+				planDocx(archive, snapshot, { protocolVersion: 1, operations: [value] }, Date.now() + 1000),
+			).toThrow();
+		for (const target of [
+			{ ...operation.target, start: { ...operation.target.start, runId: "" } },
+			{ ...operation.target, end: { ...operation.target.end, runId: "" } },
+		])
+			expect(() =>
+				validateDocumentOperationEnvelope({
+					protocolVersion: 1,
+					operations: [{ ...operation, target }],
+				}),
+			).toThrow();
+		const emojiArchive = PackageArchive.open(fixtureWithMain(multiMain.replace("One", "A😀B")));
+		const emojiSnapshot = inspectDocx(emojiArchive, "surrogate");
+		const emojiRuns = emojiSnapshot.paragraphs[0].runs;
+		const splitSurrogate = {
+			...operation,
+			target: {
+				...operation.target,
+				start: { runId: emojiRuns[0].id, offset: 2 },
+				end: { runId: emojiRuns[1].id, offset: 1 },
+			},
+			precondition: {
+				...operation.precondition,
+				expectedText: "\ude00BT",
+				expectedTextSha256: sha256Hex(new TextEncoder().encode("\ude00BT")),
+			},
+		};
+		expect(() =>
+			planDocx(emojiArchive, emojiSnapshot, { protocolVersion: 1, operations: [splitSurrogate] }, Date.now() + 1000),
+		).toThrow();
+		const blockedDocument =
+			'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>One</w:t></w:r><w:bookmarkStart w:id="0" w:name="mark"/><w:r><w:t>Two</w:t></w:r></w:p></w:body></w:document>';
+		const blockedArchive = PackageArchive.open(fixtureWithMain(blockedDocument));
+		const blockedSnapshot = inspectDocx(blockedArchive, "blocked-range");
+		expectCode(
+			() =>
+				planDocx(
+					blockedArchive,
+					blockedSnapshot,
+					{ protocolVersion: 1, operations: [operation] },
+					Date.now() + 1000,
+				),
+			"OPERATION_BLOCKED",
+		);
+		const plan = planDocx(archive, snapshot, { protocolVersion: 1, operations: [operation] }, Date.now() + 1000);
+		expect(() =>
+			commitDocx(archive, snapshot, {
+				...plan,
+				patchManifest: plan.patchManifest.map((patch) => ({ ...patch, kind: "text_run" as const })),
+			}),
+		).toThrow();
 	});
 
 	it("rejects transaction schema boundaries and invalid snapshot identity", () => {
@@ -511,6 +1067,33 @@ describe("P1 DOCX transaction", () => {
 			PackageArchive.open(commitDocx(archive, snapshot, plan)).read("word/document.xml"),
 		);
 		expect(output).toContain('<w:r xml:space="preserve"><w:t xml:space="preserve"> new </w:t></w:r>');
+	});
+
+	it("accepts the optional document background and rejects other root child sequences", () => {
+		for (const namespace of [
+			"http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+			"http://purl.oclc.org/ooxml/wordprocessingml/main",
+		]) {
+			const document = `<w:document xmlns:w="${namespace}"><w:background w:color="FFFFFF"/><w:body><w:p><w:r><w:t>text</w:t></w:r></w:p></w:body></w:document>`;
+			const snapshot = inspectDocx(PackageArchive.open(fixtureWithMain(document)), "background");
+			expect(snapshot.paragraphs[0].runs[0].text).toBe("text");
+			expect(snapshot.paragraphs[0].editable).toBe(true);
+		}
+		const namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+		for (const children of [
+			"<w:body/><w:background/>",
+			"<w:background/><w:background/><w:body/>",
+			"<w:unknown/><w:body/>",
+		]) {
+			expectCode(
+				() =>
+					inspectDocx(
+						PackageArchive.open(fixtureWithMain(`<w:document xmlns:w="${namespace}">${children}</w:document>`)),
+						"invalid-root-child",
+					),
+				"XML_INVALID",
+			);
+		}
 	});
 
 	it("accepts strict OOXML namespace through the transaction API", () => {

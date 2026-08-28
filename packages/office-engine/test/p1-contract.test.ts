@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	assertCorpusAdmission,
+	loadCorpus,
+	validateCorpusDirectory,
+	validateCorpusManifest,
+} from "../scripts/corpus-admission.ts";
+import {
 	commitDocx,
 	inspectDocx,
 	OfficeEngineError,
@@ -10,7 +16,6 @@ import {
 	sha256Hex,
 	verifyReplacement,
 } from "../src/index.ts";
-import { assertCorpusAdmission, loadCorpus, validateCorpusDirectory, validateCorpusManifest } from "./corpus-helper.ts";
 
 const enc = new TextEncoder();
 
@@ -40,6 +45,14 @@ describe("P1 hash and corpus contracts", () => {
 					.find((p) => p.id === entry.expected.editableRun?.paragraphId)
 					?.runs.find((r) => r.id === entry.expected.editableRun?.runId);
 				expect(run?.text).toBe(entry.expected.editableRun.text);
+				expect(run?.editable).toBe(entry.expected.operation === "editable");
+			} else if (entry.expected.editableRelatedRun) {
+				const target = entry.expected.editableRelatedRun;
+				const run = snapshot.relatedParts
+					.find((part) => part.id === target.relatedPartId && part.kind === target.part)
+					?.paragraphs.find((paragraph) => paragraph.id === target.paragraphId)
+					?.runs.find((candidate) => candidate.id === target.runId);
+				expect(run?.text).toBe(target.text);
 				expect(run?.editable).toBe(entry.expected.operation === "editable");
 			} else expect(entry.expected.operation).toBe("blocked");
 		}
@@ -156,10 +169,76 @@ describe("P1 hash and corpus contracts", () => {
 			),
 		).toEqual(source);
 	});
+	it("roundtrips a cross-run range in a LibreOffice-produced corpus fixture", () => {
+		const { root, manifest } = assertCorpusAdmission();
+		const entry = manifest.fixtures.find((item) => item.filename === "open-as-read-only.docx")!;
+		const source = new Uint8Array(readFileSync(resolve(root, entry.filename)));
+		const archive = PackageArchive.open(source);
+		const snapshot = inspectDocx(archive, entry.filename);
+		const paragraph = snapshot.paragraphs.find((item) => item.id === "p-0")!;
+		const [first, middle, last] = paragraph.runs;
+		expect(paragraph.runs.map((run) => run.text)).toEqual([
+			"This document is ",
+			"opened as read-only, because ",
+			"marked as final in ",
+			"DOCX.",
+		]);
+		const expectedText = "document is opened as read-only, because marked";
+		const plan = planDocx(
+			archive,
+			snapshot,
+			{
+				protocolVersion: 1,
+				operations: [
+					{
+						type: "replace_text_range",
+						target: {
+							part: "document",
+							paragraphId: paragraph.id,
+							start: { runId: first.id, offset: 5 },
+							end: { runId: last.id, offset: 6 },
+						},
+						precondition: {
+							documentRevision: snapshot.revision,
+							expectedText,
+							expectedTextSha256: sha256Hex(enc.encode(expectedText)),
+						},
+						replacement: "file remains",
+					},
+				],
+			},
+			Date.now() + 10_000,
+		);
+		expect(plan.patchManifest).toHaveLength(3);
+		expect(plan.semanticDiff).toEqual([
+			{ runId: first.id, before: "This document is ", after: "This file remains" },
+			{ runId: middle.id, before: "opened as read-only, because ", after: "" },
+			{ runId: last.id, before: "marked as final in ", after: " as final in " },
+		]);
+		const markedAsFinal = archive.read("docProps/custom.xml");
+		const output = commitDocx(archive, snapshot, plan);
+		const reopenedArchive = PackageArchive.open(output);
+		const reopened = inspectDocx(reopenedArchive, entry.filename, plan.resultingRevision);
+		expect(reopened.paragraphs[0].runs.map((run) => run.text)).toEqual([
+			"This file remains",
+			"",
+			" as final in ",
+			"DOCX.",
+		]);
+		expect(reopenedArchive.read("docProps/custom.xml")).toEqual(markedAsFinal);
+		expect(
+			verifyReplacement(source, output, entry.format.mainPart, reopenedArchive.read(entry.format.mainPart))
+				.changedEntries,
+		).toEqual([entry.format.mainPart]);
+		for (const item of archive.entries())
+			if (item.path !== entry.format.mainPart)
+				expect(reopenedArchive.read(item.path)).toEqual(archive.read(item.path));
+	});
+
 	it("asserts real comments and footnotes warnings map to their non-main parts", () => {
 		const { root } = loadCorpus();
 		for (const [filename, expected] of [
-			["comments.docx", ["UNSUPPORTED_COMMENTS:word/comments.xml"]],
+			["comments.docx", ["BLOCKED_CONTENT:word/comments.xml"]],
 			["footnotes.docx", ["UNSUPPORTED_ENDNOTE:word/endnotes.xml", "UNSUPPORTED_FOOTNOTE:word/footnotes.xml"]],
 		] as const) {
 			const snapshot = inspectDocx(

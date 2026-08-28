@@ -1,6 +1,8 @@
 # P1 DOCX 实现说明
 
-当前实现提供纯 bytes DOCX 检查、结构化单 run 替换、计划和提交闭环。SHA-256 使用精确 pin 的 `@noble/hashes@2.3.0`；OOXML 事件解析使用 namespace-aware `saxes@6.0.0`，并通过一次性 UTF-16 到 UTF-8 偏移表产生 byte anchors。
+> P3 已在此基础上增加同段落跨运行范围替换，见 [p3-cross-run-range.md](./p3-cross-run-range.md)。本文件保留 P1 单运行能力的设计基线。
+
+P1 实现提供纯 bytes DOCX 检查、结构化单 run 替换、计划和提交闭环。SHA-256 使用精确 pin 的 `@noble/hashes@2.3.0`；OOXML 事件解析使用 namespace-aware `saxes@6.0.0`，并通过一次性 UTF-16 到 UTF-8 偏移表产生 byte anchors。
 
 可编辑范围严格限制为 main document body 的 direct paragraph、direct run、单个 direct `w:t` 纯文本叶节点。namespace 按 URI/localName 判定，Transitional 和 Strict 均支持。复杂子树、字段、超链接、修订、content control、批注/书签范围、drawing/table/textbox 以及 comment/CDATA/PI 均阻断并产生 warning；未知 Word namespace fail closed。
 

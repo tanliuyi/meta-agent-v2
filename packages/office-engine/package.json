@@ -15,8 +15,19 @@
   },
   "scripts": {
     "build": "tsgo -p tsconfig.build.json",
-    "typecheck": "tsgo --noEmit -p tsconfig.build.json",
-    "test": "vitest --run --coverage"
+    "typecheck": "tsgo --noEmit -p tsconfig.build.json && tsgo --noEmit -p scripts/tsconfig.json",
+    "test": "vitest --run --coverage",
+    "interop:generate": "tsx scripts/office-interop.ts generate",
+    "interop:validate": "tsx scripts/office-interop.ts validate",
+    "interop:verify": "tsx scripts/office-interop.ts verify",
+    "interop:libreoffice": "node scripts/run-libreoffice-interop.mjs",
+    "interop:word": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-word-interop.ps1",
+    "xlsx-interop:generate": "tsx scripts/xlsx-interop.ts generate",
+    "xlsx-interop:validate": "tsx scripts/xlsx-interop.ts validate",
+    "xlsx-interop:verify": "tsx scripts/xlsx-interop.ts verify",
+    "xlsx-interop:libreoffice": "node scripts/run-libreoffice-xlsx-interop.mjs",
+    "xlsx-interop:excel": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-excel-interop.ps1",
+    "performance:check": "node --expose-gc --import tsx scripts/performance-gate.ts"
   },
   "dependencies": {
     "@noble/hashes": "2.3.0",

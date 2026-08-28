@@ -388,6 +388,39 @@ describe("DOCX resolver", () => {
 		).toBe("word/document.xml");
 	});
 
+	it("exposes editable header, footer, and comments relationships from the main part", () => {
+		const relatedRelationships = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rFooter" Type="http://purl.oclc.org/ooxml/officeDocument/relationships/footer" Target="footer1.xml"/><Relationship Id="rComments" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>`;
+		const fixture = zip([
+			[
+				"[Content_Types].xml",
+				bytes(
+					`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`,
+				),
+			],
+			[
+				"_rels/.rels",
+				bytes(
+					`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${TRANSITIONAL_OFFICE_DOCUMENT_RELATIONSHIP}" Target="word/document.xml"/></Relationships>`,
+				),
+			],
+			[
+				"word/document.xml",
+				bytes(
+					'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>',
+				),
+			],
+			["word/_rels/document.xml.rels", bytes(relatedRelationships)],
+			["word/header1.xml", bytes("<header/>")],
+			["word/footer1.xml", bytes("<footer/>")],
+			["word/comments.xml", bytes("<comments/>")],
+		]);
+		expect(resolveDocx(PackageArchive.open(fixture)).relatedParts).toEqual([
+			{ relationshipId: "rComments", kind: "comments", path: "word/comments.xml" },
+			{ relationshipId: "rFooter", kind: "footer", path: "word/footer1.xml" },
+			{ relationshipId: "rHeader", kind: "header", path: "word/header1.xml" },
+		]);
+	});
+
 	it("rejects DTD, entity references, external and invalid relationship cases", () => {
 		const dtd = `<!DOCTYPE Types [<!ENTITY x "bad">]><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="${WORDPROCESSINGML_DOCUMENT_CONTENT_TYPE}"/></Types>`;
 		expectCode(() => resolveDocx(PackageArchive.open(docx({ contentTypesXml: dtd }))), "XML_DTD_FORBIDDEN");
