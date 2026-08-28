@@ -103,37 +103,18 @@ import type {
 } from "./memory-settings-contracts.ts";
 import type { ModelsConfigSnapshot, SaveModelsConfigInput, SaveModelsConfigResult } from "./models-config-contracts.ts";
 import type {
-  SessionCheckpointDiffInput,
-  SessionCheckpointDiffResult,
-  SessionCheckpointRestoreInput,
-  SessionCheckpointRestoreResult,
-} from "./pi-rewind-contracts.ts";
-import type {
-  PluginConfigurationSnapshot,
-  SavePluginConfigurationInput,
-  SavePluginConfigurationResult,
-} from "./plugin-configuration-contracts.ts";
-import type {
-  InstalledMarketplacePluginsSnapshot,
-  InstallMarketplacePluginInput,
-  InstallMarketplacePluginResult,
-  ListMarketplacePluginsInput,
-  MarketplaceEndpointSettingsSnapshot,
-  MarketplacePluginPage,
-  MarketplacePluginSummary,
-  SaveMarketplaceEndpointInput,
-  SaveMarketplaceEndpointResult,
-  SetMarketplacePluginEnabledInput,
-  SetMarketplacePluginEnabledResult,
-  SetMarketplacePluginScopeInput,
-  SetMarketplacePluginScopeResult,
-  TestMarketplaceEndpointInput,
-  TestMarketplaceEndpointResult,
-  UninstallMarketplacePluginInput,
-  UninstallMarketplacePluginResult,
-  UpdateMarketplacePluginInput,
-  UpdateMarketplacePluginResult,
-} from "./plugin-marketplace-contracts.ts";
+  CommitOfficeDocumentInput,
+  CommitOfficeDocumentResult,
+  DiscardOfficeDocumentPlanInput,
+  DocxEditorSource,
+  InspectOfficeDocumentInput,
+  OfficeDocumentInspection,
+  OfficeDocumentPlan,
+  OfficeDocumentPreview,
+  PlanOfficeDocumentInput,
+  SaveDocxEditorInput,
+  SaveDocxEditorResult,
+} from "./office-document-contracts.ts";
 import type { PreferencesSnapshot, SavePreferencesInput, SavePreferencesResult } from "./preferences-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
 import type {
@@ -319,9 +300,15 @@ export interface DesktopApi {
     list(projectId: string, path?: string, query?: string, requestGroup?: string): Promise<FileNode[]>;
     read(projectId: string, path: string): Promise<TextFile>;
     readImage(projectId: string, path: string): Promise<FileImage>;
-    previewPdf(projectId: string, path: string): Promise<PdfDocumentPreview>;
     previewOfficeDocument(projectId: string, path: string): Promise<OfficeDocumentPreview>;
+    getDocxEditorSource(documentId: string): Promise<DocxEditorSource>;
+    saveDocxEditor(input: SaveDocxEditorInput): Promise<SaveDocxEditorResult>;
+    inspectOfficeDocument(input: InspectOfficeDocumentInput): Promise<OfficeDocumentInspection>;
+    planOfficeDocument(input: PlanOfficeDocumentInput): Promise<OfficeDocumentPlan>;
+    discardOfficeDocumentPlan(input: DiscardOfficeDocumentPlanInput): Promise<void>;
+    commitOfficeDocument(input: CommitOfficeDocumentInput): Promise<CommitOfficeDocumentResult>;
     cancelOfficeDocumentPreview(): Promise<void>;
+    onOfficeDocumentPlanCreated(listener: (plan: OfficeDocumentPlan) => void): () => void;
     resolvePath(projectId: string, path: string): Promise<string>;
     open(projectId: string, path: string): Promise<void>;
     watch(projectId: string): Promise<void>;

@@ -1,7 +1,7 @@
 # Office 文档引擎规范
 
 状态：Draft
-最后更新：2026-08-26
+最后更新：2026-08-28
 适用范围：`packages/office-engine`、`packages/desktop`
 
 ## 1. 背景
@@ -18,7 +18,7 @@ Project file
 
 这是一条待替换的旧链路，不是新引擎的组成部分或长期回退方案。
 
-下一阶段需要用自有 Office 引擎完整承担解析、渲染、结构化编辑和保存，并支持 AI 执行可验证、可审计、可回滚的操作。该能力不能建立在 HTML 预览、模型生成完整 OOXML 或 renderer 直接修改 ZIP 的基础上。
+下一阶段需要用自有 Office 引擎完整承担解析、渲染、结构化编辑和保存，并支持 AI 执行可验证、可审计、可回滚的操作。Agent 能力不能建立在 HTML 预览、模型生成完整 OOXML 或直接修改 ZIP 的基础上；本地用户编辑器可以通过 owner-bound typed IPC 获取当前 DOCX bytes，但只能使用经审计的文档引擎生成候选文件，并由 main 完成 revision、SHA-256、格式重开和文件路径校验后保存。
 
 GenOffice 源码评估表明，以下设计具有参考价值：
 
@@ -36,8 +36,8 @@ GenOffice 源码评估表明，以下设计具有参考价值：
 1. 建立可独立测试、与 Electron 和 React 无关的 Office 文档引擎。
 2. 将原始 OPC/OOXML package 作为格式权威来源，不从渲染结果反向生成文档。
 3. 未修改保存必须返回原始 bytes；局部修改不得意外改变未声明的 package parts。
-4. Agent 编辑必须经过结构化 operation、前置条件、事务规划、diff 确认和原子提交。
-5. renderer、Agent 和插件不得直接访问原始 XML 或可变引擎对象。
+4. Agent 编辑必须经过结构化 operation、前置条件、事务规划、diff 确认和受控提交。
+5. renderer 和插件不得访问原始 XML；Agent 不得访问原始 package bytes 或可变引擎对象。本地 DOCX 编辑器仅能通过 owner-bound IPC 获取当前 revision 的 bytes，并提交完整候选 bytes 供 main 校验。
 6. 首个 DOCX 垂直切片形成“打开、检查、规划、确认、保存、重开”的完整闭环。
 7. 用真实 Office corpus 和自动门禁持续定义兼容性，而不是以功能列表代替正确性证据。
 8. 为后续 PPTX、XLSX 复用 package、安全、事务和 corpus 基础，不提前抽象格式专属语义。
@@ -47,8 +47,8 @@ GenOffice 源码评估表明，以下设计具有参考价值：
 
 首期明确不做：
 
-- 完整 Word、PowerPoint 或 Excel 替代品；
-- DOCX 分页排版编辑器或像素级 Word renderer；
+- Word、PowerPoint 或 Excel 的像素级完整替代品；
+- 与 Word 完全一致的分页、域计算、修订跟踪或高级排版；
 - PPTX、XLSX 写入；
 - 旧版 `.doc`、`.xls`、`.ppt`；
 - VBA、ActiveX、OLE、Power Query 或宏执行；
@@ -89,10 +89,11 @@ packages/office-engine/
 - 维护打开文档、revision 和 transaction registry；
 - 检测磁盘文件是否在事务期间被外部修改；
 - 请求用户确认 diff；
-- 临时文件、fsync、原子 rename 与失败清理；
+- 接受并验证本地编辑器提交的完整候选 DOCX bytes；
+- 同目录临时文件、rename、瞬时锁冲突重试与失败清理；
 - 保存后通知 file watcher，并使原生 RenderTree 和文档视图刷新。
 
-renderer 和 Agent 使用 typed contract；二者都不持有引擎内部对象。
+Agent 使用 typed contract，且不持有引擎内部对象或原始 package bytes。本地 DOCX 编辑器在 renderer 中持有短生命周期的解析模型；源 bytes 绑定 renderer owner、documentId、revision 和 source SHA-256，不能选择文件路径，也不能绕过 main 的输出验证与文件写入。
 
 ### D3：原始 package 是唯一格式真源
 
@@ -191,7 +192,7 @@ operations
   -> commit exact plan
   -> serialize bytes
   -> validate package
-  -> atomic file replace
+  -> guarded file replace
   -> reopen and verify
 ```
 
@@ -334,11 +335,14 @@ export interface DocumentRenderTree {
 }
 ```
 
-DOCX 首个切片实现连续流式文档视图，不承诺与 Word 相同的分页；分页差异必须明确记录在 `warnings`，不能伪装成格式保真。RenderTree 的节点引用复用 DocumentModel 的稳定 ID，使用户选择、diff 高亮和 Agent target 指向同一语义对象。
+DOCX 提供两个共享同一文件 registry、revision 和 stale 校验的正式展示面：
 
-renderer 进程只消费 structured-clone-safe RenderTree，并负责布局展示、选择、diff 和审批。它不解析 XML，不将 DOM 位置当成文档 target，也不从渲染 DOM 生成 operation。
+- Agent/审批视图消费 structured-clone-safe RenderTree，用于稳定 target、semantic diff 和精确 `planSha256` 审批；
+- 本地用户编辑器通过 owner-bound IPC 获取当前 revision 的源 bytes，在 renderer 内用经审计的 DOCX engine 转成 Tiptap/ProseMirror 模型，提供连续编辑、选择、history、Ribbon 和 dirty/save 状态；保存时提交完整候选 bytes，main 重开验证后落盘。
 
-格式切换到自有引擎后，预览、编辑和保存必须共享同一 DocumentModel；不得再生成 OfficeCLI HTML 或挂载 Office 文档 iframe。
+本地编辑器不能访问源文件绝对路径或原始 XML API，也不能提交 Agent transaction。Agent 不能调用本地编辑保存 API。两条路径并发时，本地 dirty 状态阻止 Agent plan 提交；任一路径保存后都提升 revision，使旧 editor source 或旧 plan 进入 stale。
+
+格式切换到自有引擎后，不得再生成 OfficeCLI HTML 或挂载 Office 文档 iframe。分页纸张画布是 Desktop 展示层，不承诺与 Word 相同的分页；差异不能伪装成格式保真。
 
 ### 5.6 `CompatibilityCorpus`
 
@@ -360,15 +364,20 @@ Corpus 分类：
 目标链路：
 
 ```text
+Local DOCX editor -> owner-bound source/save IPC -> OfficeDocumentService (main)
+                 -> audited DOCX engine in renderer -> candidate DOCX bytes
+
 Renderer diff/approval UI ─ typed IPC ┐
                                       v
 Agent office tools ─ typed host bridge -> OfficeDocumentService (main)
                                          -> packages/office-engine
                                          -> Project path guard
                                          -> transaction registry
-                                         -> atomic file writer
+                                         -> guarded file writer
                                          -> file watcher / native view refresh
 ```
+
+本地编辑与 Agent transaction 共用同一个 main registry、revision、源文件 fingerprint 和 guarded writer；不得各自维护独立文件会话。
 
 ### 6.1 Main service
 
@@ -381,6 +390,8 @@ packages/desktop/src/main/files/office-document-service.ts
 该 service 负责：
 
 - `open(projectId, path)`；
+- `getEditorSource(rendererOwner, documentId)`，返回绑定当前 revision 与 source SHA-256 的 DOCX bytes；
+- `saveEditor(rendererOwner, documentId, revision, sourceSha256, bytes)`，校验 owner、revision、源文件 stale、候选 package 与 DOCX reopen 后保存；
 - `inspect(documentId, query)`；
 - `plan(documentId, envelope)`；
 - `approveAndCommit(rendererOwner, transactionId, planSha256)`，仅供 renderer IPC adapter 调用；
@@ -454,8 +465,9 @@ DOCX 切换交付必须删除或收敛以下 DOCX 旧路径：
 - 编辑：一个或多个普通 text run 的完整文本替换、同一普通段落内的跨 run 连续范围替换、直属正文普通段落的插入/删除，以及普通 text run 的 bold/italic 样式；
 - 保留：run properties、paragraph properties、所有未触及 XML slice、其他 ZIP entries；
 - 输出：新的 `.docx`，保存后可由引擎重开；
-- UI：自有 RenderTree 文档视图、结构化 diff、明确批准和保存结果；
-- 渲染：首期连续流视图，展示普通 paragraph/text run，并对未支持结构给出明确占位与 warning。
+- UI：本地 Tiptap/ProseMirror 编辑器提供 GenOffice 风格 Ribbon、分页纸张画布、选择、undo/redo、dirty/save 状态；Agent 修改继续使用 RenderTree 结构化 diff 和明确批准；
+- 本地编辑：普通正文、标题和列表段落的连续文本编辑、段落增删、基础 run 格式、对齐和段落间距；未建模的表格、图片、公式、字段和复杂 inline 结构显示为 protected block 并原样保留；
+- 渲染：分页纸张画布是近似展示，不承诺 Word 分页或像素级一致性。
 
 ### 7.2 阻断范围
 
@@ -498,23 +510,20 @@ export interface SourceFingerprint {
 
 commit 前必须重新读取源文件 fingerprint。发生变化时 transaction 进入 `stale`，要求重新打开、重新规划和重新确认。`mtimeMs` 只用于快速拒绝，最终并发判断以 SHA-256 为准。
 
-原子保存必须使用可恢复的同文件系统替换原语，源文件在最终系统调用前始终存在。禁止先 `unlink`/删除源文件再 rename，也禁止在平台能力不足时退化为非原子覆盖。
+保存采用与 GenOffice 一致的同目录临时文件替换模型。写入完整临时文件后，提交前再次校验源文件 SHA-256，再 rename 到目标路径；不得先删除源文件。
+
+杀毒软件、索引器或 Office 进程可能短暂锁定目标文件，这在 Windows 上尤其常见。与 GenOffice 一致，对 `EPERM`、`EACCES`、`EBUSY` 使用最多 4 次指数退避重试，间隔为 `50 * 2 ** attempt` ms。重试耗尽后允许原地 `writeFile` 覆盖目标，这是文件锁场景的最终兜底，不具备崩溃原子性，也不承诺保留 ACL、owner、alternate data streams 或扩展 metadata。非上述错误直接失败。
 
 通用顺序：
 
-1. 读取并保存源文件安全相关 metadata，创建仅当前用户可访问的同目录随机临时文件；
-2. 写入全部输出 bytes，flush 并关闭临时文件；
-3. 重新打开临时文件，执行 package、actual delta 和 reopen 校验；
-4. 再次验证源文件 SHA-256，并持有平台允许的写入/删除排他保护直至替换结束；
-5. 执行保留可恢复 preimage 的平台原子替换；
-6. 校验目标内容、权限/ACL、owner、基础属性和平台支持的扩展 metadata；
-7. 同步父目录（平台支持时），再删除 recovery preimage；
-8. 更新 revision，关闭该 transaction，广播文件变化；
-9. 任一步失败都恢复或保留原文件，清理临时文件，并将 transaction 置为 `failed` 或 `stale`。
+1. commit 前校验源文件 SHA-256；
+2. 在目标文件同目录写入随机临时文件；
+3. 每次 rename 尝试前再次校验源文件 SHA-256；
+4. rename 成功后更新 revision，关闭 transaction 并广播文件变化；
+5. 瞬时锁错误按上述策略重试，耗尽后再次校验 SHA-256 并原地覆盖；
+6. stale、非瞬时 rename 错误或写入失败时将 transaction 置为 `failed` 或 `stale`，并尽力清理临时文件。
 
-POSIX 实现必须使用同一 mount 的临时文件，保留 mode/owner，按 `write -> fsync(temp) -> close -> recoverable atomic replace -> fsync(directory)` 排序；不得把 `rename` 失败降级为 copy-overwrite。Windows 实现必须使用提供 replace + recovery preimage 的系统原语，并在 fingerprint 校验到替换完成期间阻止其他进程写入/删除；必须验证 DACL、owner、文件属性和 alternate data streams 的保留策略。网络文件系统或平台无法满足这些条件时保存必须 fail closed。
-
-P2 开始前用故障注入分别证明 Windows 和 POSIX 在写入、flush、校验、替换和 metadata 恢复各阶段崩溃后，源文件或 recovery preimage 至少有一份完整有效。首期不创建长期备份；recovery preimage 只保留到 commit 验证完成。
+package、actual delta 和 reopen 校验在调用文件替换前完成。保存层不实现原生排他锁、recovery preimage、目录 `fsync` 或安全 metadata 完整性比对。进程在 rename 成功前崩溃时源文件保持不变，但可能遗留临时文件；进程在原地覆盖兜底期间崩溃时可能产生不完整目标文件。
 
 ## 9. 安全边界
 
@@ -525,9 +534,9 @@ P2 开始前用故障注入分别证明 Windows 和 POSIX 在写入、flush、�
 - ZIP 和 XML 均有独立资源预算；
 - operation 数量、文本长度、diff 大小和事务存活时间有限制；
 - Agent 不能控制临时目录、输出路径、package entry path 或资源限制；
-- renderer 不接收源文件绝对路径和原始 package bytes；
+- renderer 仅能通过 owner-bound typed IPC 获取本地 DOCX 编辑所需 bytes；不接收源文件绝对路径，不暴露原始 XML API；
 - 错误日志不得包含完整文档正文；
-- 进程崩溃、取消、超时和校验失败均不得留下半写源文件。
+- 校验失败不得进入文件替换；取消和超时必须在提交开始前完成处理；临时文件应尽力清理。
 
 若 fuzz 或 adversarial corpus 证明纯进程内解析会威胁 main 稳定性，再将引擎迁入受限 worker/utility process；首期不预先增加进程协议。
 
@@ -545,7 +554,9 @@ P2 开始前用故障注入分别证明 Windows 和 POSIX 在写入、flush、�
 - transaction 全有或全无；
 - Agent commit 缺席、renderer owner 校验、`planSha256` 不匹配、重复批准和过期批准拒绝；
 - touched-entry manifest；
-- stale fingerprint 和 atomic-save failure cleanup。
+- 本地 DOCX editor source/save 的 owner、revision、source SHA-256、候选 package reopen 和文件路径隔离；
+- Tiptap/ProseMirror 模型的未修改 byte-identical roundtrip、dirty paragraph 最小重建、protected block 原样保留；
+- stale fingerprint、临时文件清理、rename 锁重试和原地覆盖兜底。
 
 ### 10.2 Roundtrip 门禁
 
@@ -620,9 +631,11 @@ export interface OfficeTransactionAudit {
 
 ### 12.1 GenOffice
 
-参考基线为 `genspark-ai/genoffice` commit `7eb5d59b59cc0765741645584eab2e587e6597f2`。
+参考基线为 `genspark-ai/genoffice` commit `583a045212f871943afb8ca4503fcb5ddf99a23f`。
 
-默认策略是参考架构、重新实现，不直接复制源码。若选择性复制 Apache-2.0 区域代码，实施 PR 必须同时：
+当前采用两种明确区分的策略：Agent transaction 的安全 package/operation 基础继续在 `packages/office-engine` 独立实现；本地 DOCX 编辑器选择性 vendoring GenOffice 的 Apache-2.0 `packages/docx-engine/src`，因为该包未发布且完整 PM roundtrip 依赖其原始 block/patch 语义。vendor 来源、commit、许可证、嵌套组件和本地修改记录在 `packages/desktop/src/renderer/src/vendor/genoffice-docx-engine/SOURCE.md`。不整仓 fork GenOffice，也不复制 `ee/`。
+
+该 vendor 必须持续满足：
 
 - 记录原始文件、commit 和许可证；
 - 保留适用版权与 NOTICE；
@@ -668,7 +681,7 @@ GenOffice `ee/` 当前虽只有 LICENSE/README 且不进默认构建，其许可
 ### P2：Desktop 与 Agent 闭环
 
 - 新增 `OfficeDocumentService` 和 shared contracts；
-- 实现 stale detection 和 atomic save；
+- 实现 stale detection 和同目录临时文件保存；
 - 增加自有 DOCX RenderTree 与 renderer 文档视图；
 - 增加 diff/approval UI 与 renderer-only `approveAndCommit`；
 - 注册 inspect/plan Agent 工具；
@@ -709,6 +722,20 @@ P4 选择 **XLSX**。产品侧已有 `quarterly.xlsx`、`budget.xlsx` 等真实�
 
 不实现公式引擎、公式 cell 写入、sharedStrings 修改、样式编辑或结构增删。
 
+### P5：完整本地编辑体验
+
+DOCX 本地用户编辑不再复用逐 run 的 Agent transaction UI，而是对齐 GenOffice 的编辑数据流：
+
+- renderer 使用经审计的 DOCX engine 将源 bytes 转成 Tiptap/ProseMirror 文档；
+- 提供 Home Ribbon、文件操作、连续正文编辑、选择、undo/redo、基础字体与段落格式、分页纸张画布、状态栏和 dirty/save 状态；
+- 未建模结构以不可编辑 protected block 展示并在保存时复用原始 block；未修改 block 不重建；
+- 保存生成完整候选 DOCX bytes，由 main 校验 owner、revision、source SHA-256、package/DOCX reopen 和磁盘 stale 后使用统一 writer 提交；
+- 保存成功后重新读取并 rebase editor source；Agent plan 与 dirty local editor 不并发提交。
+
+后续按同一原则接入 XLSX Univer：viewport loading、mutation suppression、EditJournal、undo/redo 和 main session snapshot。XLSX 在该阶段完成前仍保留当前受限 grid/transaction 编辑面。
+
+验收：真实 DOCX 可在 Desktop 中连续编辑、撤销/重做、设置基础格式并显式保存；未修改保存 byte-identical，复杂未建模 block 保真；保存后重开显示新内容；owner、stale、无效候选和 Agent/local 并发路径均有定向测试。
+
 ## 14. 验收标准
 
 首个 DOCX 阶段完成必须同时满足：
@@ -717,9 +744,9 @@ P4 选择 **XLSX**。产品侧已有 `quarterly.xlsx`、`budget.xlsx` 等真实�
 2. 无修改保存对所有支持 fixture 返回原始 bytes。
 3. 单 run 修改只改变计划声明的 XML slice 和 package entry。
 4. 磁盘外部修改、precondition 失败和 transaction 过期均阻止提交。
-5. renderer 和 Agent 无法提交 XML 或绕过 operation schema。
+5. Agent 无法提交 XML、完整 package bytes 或绕过 operation schema；本地 renderer 只能通过 owner-bound source/save IPC 提交候选 DOCX bytes，且 main 必须验证 revision、source SHA-256、package/DOCX reopen 和磁盘 stale。
 6. Agent 只能生成 plan；用户在 renderer 对精确 `planSha256` 的批准由 main 验证并一次性提交，Agent 无 commit 能力。
-7. 保存失败、取消和崩溃不破坏源文件。
+7. 保存校验失败和非瞬时 rename 错误不改变源文件；锁冲突重试耗尽后的原地覆盖兜底明确不提供崩溃原子性。
 8. 保存结果通过引擎 reopen、LibreOffice lane 和已配置的 Office 互操作门禁。
 9. corpus 来源、许可证和特征 manifest 完整。
 10. 新增定点测试、coverage gate、Desktop typecheck 和根 `npm run check` 全部通过。
@@ -728,15 +755,13 @@ P4 选择 **XLSX**。产品侧已有 `quarterly.xlsx`、`budget.xlsx` 等真实�
 13. XLSX 公式、缺失 cell、结构增删、跨 worksheet transaction 与 sharedStrings 写入全部 fail-closed。
 14. XLSX 保存结果通过引擎 reopen、LibreOffice Calc lane 和已配置的 Microsoft Excel lane。
 
-## 15. 开放问题
+## 15. 已决事项
 
-以下问题必须在对应里程碑开始前解决，不阻塞 RFC 合入：
-
-1. 哪个 ZIP 库能够同时满足安全预算、raw entry copy、metadata preservation 和流式写入；
-2. diff panel 的交互形态与放置位置；
-3. Agent sidecar 到 main 的 typed host bridge 是否复用现有 Desktop host RPC；
-4. corpus 中真实客户文件的脱敏、授权和本地-only 测试策略；
-5. 首期是否需要内存内 undo，还是重新打开文件并生成反向 operation。
+1. ZIP 底座继续使用 `fflate` 读取，未触及 entry 由最小 OPC writer 原样复制压缩数据与 metadata；能力边界和测量记录在 `packages/office-engine/docs/p0-zip-spike.md`。
+2. diff 采用 Desktop 原生文档视图内的结构化审批面板，审批绑定精确 `planSha256`，不使用渲染 DOM 反推 operation。
+3. Agent sidecar 通过 `packages/desktop/src/main/office/office-document-host-server.ts` 的 loopback typed host bridge 复用 main `NativeOfficeDocumentService`；全局随机 token、per-session capability 与 Project/thread identity 同时校验，RPC 只暴露 list/inspect/plan，不暴露 commit。
+4. 仓库 corpus 只包含代码生成、来源明确且带 manifest 的确定性 fixture；真实客户文件保持 local-only，进入仓库前必须另行完成脱敏、授权和许可证审计。
+5. 当前不实现持久 undo。提交后如需撤销，必须基于新 revision 重新检查并生成反向 operation，再经过新的 plan、diff 和 renderer 批准；不复用旧 transaction。
 
 ## 16. 实施前检查
 
@@ -746,7 +771,7 @@ P4 选择 **XLSX**。产品侧已有 `quarterly.xlsx`、`budget.xlsx` 等真实�
 - 候选 XML parser 是否默认禁用 DTD/entity/network；
 - 候选库的许可证、维护状态、Node 22 支持和 bundle 影响；
 - 10 MiB/50 MiB 样本的内存与耗时；
-- Windows/POSIX 候选原子替换原语如何保留 recovery preimage、安全 metadata 并通过故障注入；
+- Windows/POSIX 同目录临时文件 rename 的行为，以及文件锁重试与原地覆盖兜底；
 - minimal DOCX 在 Word、LibreOffice 和自有 RenderTree 中的打开结果；
 - DOCX 切换后可删除的 OfficeCLI 调用、契约、配置和测试的完整依赖清单。
 
