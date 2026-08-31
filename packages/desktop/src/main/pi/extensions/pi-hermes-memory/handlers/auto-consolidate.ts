@@ -209,7 +209,6 @@ export function registerConsolidateCommand(
 ): void {
   pi.registerCommand("memory-consolidate", {
     description: "Manually trigger memory consolidation to free up space",
-    acceptsArguments: false,
     handler: async (_args, ctx) => {
       const manualTimeoutMs = Math.max(timeoutMs, 180000);
       const results: string[] = [];

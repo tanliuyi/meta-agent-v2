@@ -192,7 +192,11 @@ describe("PiThreadProjector", () => {
     const entries: SessionEntry[] = [];
     const batches: PiThreadEventBatch[] = [];
     const { session } = sessionHarness(entries);
-    const projector = new PiThreadProjector({ projectId: "project", session, publish: (batch) => batches.push(batch) });
+    const projector = new PiThreadProjector({
+      projectId: "project",
+      session,
+      publish: (batch) => batches.push(batch),
+    });
     const user = userMessage("hello", 1);
 
     projector.handle({ type: "agent_start" });
@@ -679,7 +683,11 @@ describe("PiThreadProjector", () => {
   it("fatal resync 丢弃未发布 patch，独占发布 branch snapshot 并保留 live overlay", () => {
     const batches: PiThreadEventBatch[] = [];
     const { session } = sessionHarness([]);
-    const projector = new PiThreadProjector({ projectId: "project", session, publish: (batch) => batches.push(batch) });
+    const projector = new PiThreadProjector({
+      projectId: "project",
+      session,
+      publish: (batch) => batches.push(batch),
+    });
     projector.handle({ type: "message_start", message: userMessage("live", 5) });
 
     projector.resync();
@@ -720,7 +728,11 @@ describe("PiThreadProjector", () => {
     const entries: SessionEntry[] = [slashResultEntry("slash-initial", null, "request-1", "running", true, 1)];
     const batches: PiThreadEventBatch[] = [];
     const { session } = sessionHarness(entries);
-    const projector = new PiThreadProjector({ projectId: "project", session, publish: (batch) => batches.push(batch) });
+    const projector = new PiThreadProjector({
+      projectId: "project",
+      session,
+      publish: (batch) => batches.push(batch),
+    });
 
     entries.push(slashResultEntry("slash-final", "slash-initial", "request-1", "failed", false, 2));
     projector.checkpoint();

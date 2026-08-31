@@ -17,7 +17,7 @@ import { readdir, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
-import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
+import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import {
 	type BashExecutionMessage,
@@ -516,11 +516,11 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	if (!existsSync(resolvedFilePath)) return [];
 
 	const entries: FileEntry[] = [];
+	let pending = "";
 	const fd = openSync(resolvedFilePath, "r");
 	try {
 		const decoder = new StringDecoder("utf8");
 		const buffer = Buffer.allocUnsafe(SESSION_READ_BUFFER_SIZE);
-		let pending = "";
 
 		while (true) {
 			const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
@@ -545,13 +545,14 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 		closeSync(fd);
 	}
 
-	// Validate session header
+	// Validate session header before repairing the file.
 	if (entries.length === 0) return entries;
 	const header = entries[0];
 	if (header.type !== "session" || typeof (header as { id?: unknown }).id !== "string") {
 		return [];
 	}
 
+	if (pending) appendFileSync(resolvedFilePath, "\n");
 	return entries;
 }
 
@@ -568,7 +569,7 @@ function parseSessionHeaderCandidate(line: string): SessionHeader | null | undef
 	return entry;
 }
 
-function readSessionHeaderBounded(filePath: string): SessionHeader | null {
+function readSessionHeader(filePath: string): SessionHeader | null {
 	const fd = openSync(filePath, "r");
 	try {
 		const decoder = new StringDecoder("utf8");
@@ -612,31 +613,9 @@ function readSessionHeaderBounded(filePath: string): SessionHeader | null {
 	}
 }
 
-function readSessionHeaderWithFallback(filePath: string): {
-	header: SessionHeader | null;
-	preloadedFileEntries?: FileEntry[];
-} {
-	try {
-		return { header: readSessionHeaderBounded(filePath) };
-	} catch (error) {
-		if (!(error instanceof SessionHeaderScanLimitError)) throw error;
-		const preloadedFileEntries = loadEntriesFromFile(filePath);
-		const firstEntry = preloadedFileEntries[0];
-		return {
-			header: firstEntry?.type === "session" ? firstEntry : null,
-			preloadedFileEntries,
-		};
-	}
-}
-
-/** Reads the authoritative session header using the same compatibility rules as SessionManager.open(). */
-export function readSessionHeader(filePath: string): SessionHeader | null {
-	return readSessionHeaderWithFallback(filePath).header;
-}
-
 function readSessionHeaderForDiscovery(filePath: string): SessionHeader | null {
 	try {
-		return readSessionHeaderBounded(filePath);
+		return readSessionHeader(filePath);
 	} catch {
 		// Discovery is best-effort: unreadable or oversized files are not sessions,
 		// and one corrupt file must not prevent other sessions from being found.
@@ -924,7 +903,7 @@ export class SessionManager {
 			if (this.fileEntries.length === 0) {
 				const explicitPath = this.sessionFile;
 				if (statSync(explicitPath).size > 0) {
-					throw new Error(`Session file is not a valid pi session: ${explicitPath}`);
+					throw new Error(`Session file is not a valid ${APP_NAME} session: ${explicitPath}`);
 				}
 				this.newSession();
 				this.sessionFile = explicitPath;
@@ -1410,13 +1389,14 @@ export class SessionManager {
 		if (branchFromId !== null && !this.byId.has(branchFromId)) {
 			throw new Error(`Entry ${branchFromId} not found`);
 		}
+		const fromId = this.leafId ?? "root";
 		this.leafId = branchFromId;
 		const entry: BranchSummaryEntry = {
 			type: "branch_summary",
 			id: generateId(this.byId),
 			parentId: branchFromId,
 			timestamp: new Date().toISOString(),
-			fromId: branchFromId ?? "root",
+			fromId,
 			summary,
 			details,
 			usage,
@@ -1554,9 +1534,16 @@ export class SessionManager {
 		let header: SessionHeader | null = null;
 		let preloadedFileEntries: FileEntry[] | undefined;
 		if (cwdOverride === undefined && existsSync(resolvedPath)) {
-			const resolvedHeader = readSessionHeaderWithFallback(resolvedPath);
-			header = resolvedHeader.header;
-			preloadedFileEntries = resolvedHeader.preloadedFileEntries;
+			try {
+				header = readSessionHeader(resolvedPath);
+			} catch (error) {
+				if (!(error instanceof SessionHeaderScanLimitError)) throw error;
+				// The bounded scan is only a discovery optimization. A full load remains
+				// authoritative for legacy files with very large headers or prefixes.
+				preloadedFileEntries = loadEntriesFromFile(resolvedPath);
+				const firstEntry = preloadedFileEntries[0];
+				header = firstEntry?.type === "session" ? firstEntry : null;
+			}
 		}
 		const cwd = cwdOverride ?? (header ? getSessionHeaderCwd(header) : undefined) ?? process.cwd();
 		// If no sessionDir provided, derive from file's parent directory
@@ -1687,7 +1674,9 @@ export class SessionManager {
 				return [];
 			}
 			const entries = await readdir(sessionsDir, { withFileTypes: true });
-			const dirs = entries.filter((e) => e.isDirectory()).map((e) => join(sessionsDir, e.name));
+			const dirs = entries
+				.filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+				.map((entry) => join(sessionsDir, entry.name));
 
 			// Count total files first for accurate progress
 			let totalFiles = 0;

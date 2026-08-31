@@ -11,7 +11,7 @@ export default defineConfig({
     },
     build: {
       rollupOptions: {
-        output: { format: "cjs" },
+        output: { format: "es", entryFileNames: "[name].js" },
         external: [
           /^@earendil-works\/pi-(?:ai|agent-core|coding-agent|tui)(?:\/.*)?$/,
           /^jiti(?:\/.*)?$/,

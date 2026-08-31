@@ -8,7 +8,7 @@
  * main agent turn.
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import { completeSimple, type Message } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleSettings } from "../../../../shared/auto-title-contracts.ts";
@@ -39,7 +39,7 @@ export interface AutoTitleGenerateInput {
 export interface ResolvedTitleModel {
   model: Model<Api>;
   apiKey: string;
-  headers?: Record<string, string>;
+  headers?: ProviderHeaders;
   env?: Record<string, string>;
 }
 

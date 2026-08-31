@@ -91,6 +91,7 @@ const OpenAICompletionsCompatSchema = Type.Object({
       Type.Literal("openai"),
       Type.Literal("openrouter"),
       Type.Literal("together"),
+      Type.Literal("baseten"),
       Type.Literal("deepseek"),
       Type.Literal("zai"),
       Type.Literal("qwen"),

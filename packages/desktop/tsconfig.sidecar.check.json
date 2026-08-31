@@ -3,12 +3,12 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "..",
-    "baseUrl": ".",
     "paths": {
       "@earendil-works/pi-ai": ["../ai/src/index.ts"],
       "@earendil-works/pi-ai/compat": ["../ai/src/compat.ts"],
       "@earendil-works/pi-ai/*": ["../ai/src/*.ts"],
       "@earendil-works/pi-agent-core": ["../agent/src/index.ts"],
+      "@earendil-works/pi-telemetry": ["../telemetry/src/index.ts"],
       "@earendil-works/pi-coding-agent": ["../coding-agent/src/index.ts"],
       "@earendil-works/pi-coding-agent/*": ["../coding-agent/src/*"],
       "@earendil-works/pi-tui": ["../tui/src/index.ts"]

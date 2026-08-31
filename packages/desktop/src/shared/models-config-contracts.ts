@@ -90,7 +90,8 @@ export interface ModelsCompatConfig {
     | "chat-template"
     | "qwen-chat-template"
     | "string-thinking"
-    | "ant-ling";
+    | "ant-ling"
+    | "baseten";
   cacheControlFormat?: "anthropic";
   openRouterRouting?: ModelsOpenRouterRouting;
   vercelGatewayRouting?: ModelsVercelGatewayRouting;

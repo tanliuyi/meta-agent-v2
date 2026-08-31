@@ -11,13 +11,9 @@ packages/*/dist-firefox/
 packages/ai/src/providers/data/
 packages/ai/src/providers/.model-generation-*/
 *.cpuprofile
-.playwright-cli/
-packages/desktop/out/
-packages/desktop/output/
 
 # Environment
 .env
-.env.production
 
 # Editor files
 .vscode/
@@ -46,10 +42,3 @@ plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh
-
-
-.pi-subagents/
-.pi/subagents/
-nul
-.tmp-npm*/
-.tmp*

@@ -1360,6 +1360,7 @@ function assistantStatus(message: AssistantMessage): PiAssistantStatus {
     case "stop":
       return { type: "complete", reason: "stop" };
     case "toolUse":
+    case "deferred":
       return { type: "complete", reason: "unknown" };
     case "length":
       return { type: "incomplete", reason: "length" };

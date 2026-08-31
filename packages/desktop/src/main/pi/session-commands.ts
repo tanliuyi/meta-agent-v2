@@ -27,7 +27,7 @@ export function getSessionCommands(session: CommandSession): SlashCommand[] {
       name: command.invocationName,
       description: command.description,
       source: "extension" as const,
-      acceptsArguments: command.acceptsArguments !== false,
+      acceptsArguments: true,
     }));
   const prompts = session.promptTemplates.map((prompt) => ({
     name: prompt.name,
@@ -71,7 +71,7 @@ export function getDraftCommands(resourceLoader: ResourceLoader): SlashCommand[]
       name,
       description: command.description,
       source: "extension" as const,
-      acceptsArguments: command.acceptsArguments !== false,
+      acceptsArguments: true,
     }));
   const prompts = resourceLoader.getPrompts().prompts.map((prompt) => ({
     name: prompt.name,

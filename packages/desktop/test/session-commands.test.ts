@@ -6,7 +6,7 @@ describe("session commands", () => {
   it("合并 Desktop 支持的 builtin 与 Pi public resource 命令", () => {
     const commands = getSessionCommands({
       extensionRunner: {
-        getRegisteredCommands: () => [{ invocationName: "review", description: "审查代码", acceptsArguments: false }],
+        getRegisteredCommands: () => [{ invocationName: "review", description: "审查代码" }],
       },
       promptTemplates: [{ name: "fix", description: "修复问题" }],
       resourceLoader: {
@@ -21,7 +21,7 @@ describe("session commands", () => {
         source: "builtin",
         acceptsArguments: false,
       },
-      { name: "review", description: "审查代码", source: "extension", acceptsArguments: false },
+      { name: "review", description: "审查代码", source: "extension", acceptsArguments: true },
       { name: "fix", description: "修复问题", source: "prompt", acceptsArguments: true },
       { name: "skill:frontend", description: "前端设计", source: "skill", acceptsArguments: true },
     ]);

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,12 +28,18 @@ import {
   type SidecarReady,
 } from "../src/shared/sidecar-contracts.ts";
 
-const codingAgentMocks = vi.hoisted(() => ({
-  readSessionHeader: vi.fn(),
-}));
-
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  readSessionHeader: codingAgentMocks.readSessionHeader,
+  parseSessionEntries: (content: string) => {
+    const entries: unknown[] = [];
+    for (const line of content.split("\n")) {
+      try {
+        entries.push(JSON.parse(line));
+      } catch {
+        // Match SessionManager compatibility: malformed lines are skipped.
+      }
+    }
+    return entries;
+  },
 }));
 
 describe("ThreadWorkerRegistry", () => {
@@ -41,18 +47,6 @@ describe("ThreadWorkerRegistry", () => {
 
   beforeEach(() => {
     userDataDir = mkdtempSync(join(tmpdir(), "thread-worker-registry-"));
-    codingAgentMocks.readSessionHeader.mockReset();
-    codingAgentMocks.readSessionHeader.mockImplementation((path: string) => {
-      for (const line of readFileSync(path, "utf8").split("\n")) {
-        try {
-          const entry = JSON.parse(line) as { type?: string };
-          if (entry.type === "session") return entry;
-        } catch {
-          // Match SessionManager compatibility: malformed prefix lines are skipped.
-        }
-      }
-      return null;
-    });
   });
 
   afterEach(() => {
@@ -223,7 +217,9 @@ describe("ThreadWorkerRegistry", () => {
     const harness = createHarness(userDataDir);
     const registry = new ThreadWorkerRegistry(harness.options);
 
-    await expect(registry.getDraftConfig("project")).resolves.toMatchObject({ readiness: { state: "missing-model" } });
+    await expect(registry.getDraftConfig("project")).resolves.toMatchObject({
+      readiness: { state: "missing-model" },
+    });
     expect(harness.options.metadata.getDraftConfig).toHaveBeenCalledWith(
       "project",
       "/workspace",

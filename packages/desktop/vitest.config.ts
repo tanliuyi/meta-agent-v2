@@ -16,6 +16,10 @@ export default defineConfig({
         replacement: resolve(packagesRoot, "ai/src/index.ts"),
       },
       {
+        find: "@earendil-works/pi-telemetry",
+        replacement: resolve(packagesRoot, "telemetry/src/index.ts"),
+      },
+      {
         find: "@earendil-works/pi-coding-agent",
         replacement: resolve(packagesRoot, "coding-agent/src/index.ts"),
       },

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,16 +13,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  readSessionHeader: (path: string) => {
-    for (const line of readFileSync(path, "utf8").split("\n")) {
+  parseSessionEntries: (content: string) => {
+    const entries: unknown[] = [];
+    for (const line of content.split("\n")) {
       try {
-        const entry = JSON.parse(line) as { type?: string };
-        if (entry.type === "session") return entry;
+        entries.push(JSON.parse(line));
       } catch {
-        // Match SessionManager compatibility: malformed prefix lines are skipped.
+        // Match SessionManager compatibility: malformed lines are skipped.
       }
     }
-    return null;
+    return entries;
   },
   SessionManager: {
     list: mocks.listSessions,
@@ -98,7 +98,7 @@ describe("ThreadWorkerService", () => {
       { emit: () => undefined, requestHost: async () => undefined, flushEvents: async () => undefined },
     );
 
-    expect(mocks.createSession).toHaveBeenCalledWith(cwd, join(agentDir, "sessions", "--general--"), {
+    expect(mocks.createSession).toHaveBeenCalledWith(realpathSync(cwd), join(agentDir, "sessions", "--general--"), {
       id: sessionId,
     });
     expect(result.readyResult).toBe(bootstrap);

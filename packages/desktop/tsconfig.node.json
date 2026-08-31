@@ -6,11 +6,11 @@
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "baseUrl": ".",
     "paths": {
       "@earendil-works/pi-ai": ["../ai/src/index.ts"],
       "@earendil-works/pi-ai/*": ["../ai/src/*"],
       "@earendil-works/pi-agent-core": ["../agent/src/index.ts"],
+      "@earendil-works/pi-telemetry": ["../telemetry/src/index.ts"],
       "@earendil-works/pi-coding-agent": ["../coding-agent/src/index.ts"],
       "@earendil-works/pi-coding-agent/*": ["../coding-agent/src/*"],
       "@earendil-works/pi-tui": ["../tui/src/index.ts"]
