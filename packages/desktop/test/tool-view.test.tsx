@@ -49,19 +49,18 @@ describe("ToolView TUI parity", () => {
     expect(markup).toContain('data-state="closed"');
   });
 
-  it("bash content 默认完全折叠，标题只展示 description", () => {
+  it("bash content 默认完全折叠，标题展示 command", () => {
     const partialResult = toolResult(Array.from({ length: 7 }, (_, index) => `line-${index + 1}`).join("\n"));
     const markup = renderToolView(
       toolCall({
         toolName: "bash",
-        args: { command: "generate output", description: "生成测试输出" },
+        args: { command: "generate output" },
         status: { type: "running" },
         artifact: { execution: "running", partialResult },
       }),
     );
 
-    expect(markup).toContain("生成测试输出");
-    expect(markup).not.toContain("generate output");
+    expect(markup).toContain("generate output");
     expect(markup).toContain("tool-running-cursor");
     expect(markup).not.toContain("tool-running-cursor-end");
     expect(markup).not.toContain("data-cursor-position");

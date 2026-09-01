@@ -82,6 +82,7 @@ export class PiMessageRepositoryConverter {
     const prefixCount = previous ? firstEntryEndingAfter(previous.entries, rebuildFrom) : 0;
     const entries = previous ? previous.entries.slice(0, prefixCount) : [];
     const messages = previous ? previous.messages.slice(0, prefixCount) : [];
+    const assignedMessageIds = new Set(messages.map(({ message }) => message.id));
     const displayIds = new Map(previous?.displayIds);
     if (previous) {
       for (let index = prefixCount; index < previous.entries.length; index += 1) {
@@ -106,7 +107,12 @@ export class PiMessageRepositoryConverter {
         }
       }
 
-      const projectedId = resolveProjectedId(previous, nodes, startIndex, node);
+      const projectedId = uniqueProjectedId(
+        resolveProjectedId(previous, nodes, startIndex, node),
+        node.id,
+        assignedMessageIds,
+      );
+      assignedMessageIds.add(projectedId);
       for (const member of members) displayIds.set(member.id, projectedId);
       const item = {
         message: this.convertGroup(members, projectedId),
@@ -251,6 +257,14 @@ function resolveProjectedId(
   if (previousNode.id === node.id) return previous.displayIds.get(node.id) ?? node.id;
   if (change.rekeyedFrom.get(index) !== previousNode.id || node.sourceEntryId !== node.id) return node.id;
   return previous.displayIds.get(previousNode.id) ?? node.id;
+}
+
+function uniqueProjectedId(preferredId: string, nodeId: string, assignedIds: ReadonlySet<string>): string {
+  if (!assignedIds.has(preferredId)) return preferredId;
+  if (!assignedIds.has(nodeId)) return nodeId;
+  let suffix = 2;
+  while (assignedIds.has(`${nodeId}:desktop:${suffix}`)) suffix += 1;
+  return `${nodeId}:desktop:${suffix}`;
 }
 
 function projectionRebuildStart(

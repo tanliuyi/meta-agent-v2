@@ -353,6 +353,43 @@ describe("PiMessageRepositoryConverter", () => {
     expect(new Set(repository.messages.map(({ message }) => message.id)).size).toBe(repository.messages.length);
   });
 
+  it("assistant group 拆分后不复用已占用的 display id", () => {
+    const initialUser = userNode("u-1", null);
+    const firstAssistant = assistantNode("a-1", "u-1");
+    const groupedAssistant = assistantNode("a-2", "a-1");
+    const secondUser = userNode("u-2", "a-2");
+    const finalAssistant = assistantNode("a-3", "u-2");
+    const store = new PiThreadStore(
+      snapshot([initialUser, firstAssistant, groupedAssistant, secondUser, finalAssistant], "a-3"),
+    );
+    const converter = new PiMessageRepositoryConverter();
+    const initial = converter.build(store.getSnapshot());
+    expect(initial.messages.map(({ message }) => message.id)).toEqual(["u-1", "a-1", "u-2", "a-3"]);
+
+    const replacement = snapshot(
+      [
+        { ...firstAssistant, parentId: null },
+        { ...initialUser, parentId: "a-1" },
+        { ...groupedAssistant, parentId: "u-1" },
+        { ...secondUser, parentId: "a-2" },
+        finalAssistant,
+      ],
+      "a-3",
+      1,
+    );
+    store.apply(batch(1, { type: "branch-replaced", snapshot: replacement }));
+
+    const repository = converter.build(store.getSnapshot());
+    expect(repository.messages.map(({ message, parentId }) => [message.id, parentId])).toEqual([
+      ["a-1", null],
+      ["u-1", "a-1"],
+      ["a-2", "u-1"],
+      ["u-2", "a-2"],
+      ["a-3", "u-2"],
+    ]);
+    expect(new Set(repository.messages.map(({ message }) => message.id)).size).toBe(repository.messages.length);
+  });
+
   it("将同一轮连续 assistant 节点合并，使两个 text 之间的 reasoning/tool 保持相邻", () => {
     const user = userNode("u", null);
     const first = {

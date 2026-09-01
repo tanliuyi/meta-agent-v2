@@ -3,6 +3,7 @@ import { updaterActions, useUpdaterState } from "@renderer/state/updater";
 import Download from "lucide-react/dist/esm/icons/download.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw.mjs";
+import appIcon from "../../../../../../build/icon.png";
 
 /** Displays product version and the complete manual update workflow. */
 export function AboutSettingsPage() {
@@ -13,9 +14,7 @@ export function AboutSettingsPage() {
   return (
     <div className="settings-content about-settings">
       <header className="about-product">
-        <div className="about-product-mark" aria-hidden="true">
-          MA
-        </div>
+        <img className="about-product-mark" src={appIcon} alt="" />
         <div>
           <h2>Meta Agent</h2>
           <p>你的桌面智能助手</p>

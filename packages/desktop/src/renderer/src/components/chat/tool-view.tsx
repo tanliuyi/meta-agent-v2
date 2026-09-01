@@ -130,7 +130,7 @@ function toolHeader(
   const rawPath = readToolStringArgument(args, "path", "file_path");
   const path = projectCwd ? projectDisplayToolPath(rawPath, projectCwd) : rawPath;
   if (name === "bash") {
-    return { label: "$", target: textTarget(readToolStringArgument(args, "description") || "…") };
+    return { label: "$", target: textTarget(readToolStringArgument(args, "command") || "…") };
   }
   if (name === "read") {
     return { label: "read", target: fileTarget(path), context: readLineRange(args) };
