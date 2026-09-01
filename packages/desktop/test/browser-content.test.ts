@@ -13,5 +13,8 @@ describe("asScreenshotSource", () => {
   it("rejects malformed screenshot values", () => {
     expect(asScreenshotSource({ dataUrl: { resourceId: "resource-1" } })).toBeUndefined();
     expect(asScreenshotSource(null)).toBeUndefined();
+    expect(asScreenshotSource("not-an-image")).toBeUndefined();
+    expect(asScreenshotSource("data:image/png;base64,")).toBeUndefined();
+    expect(asScreenshotSource({ dataUrl: "data:text/plain;base64,abc" })).toBeUndefined();
   });
 });

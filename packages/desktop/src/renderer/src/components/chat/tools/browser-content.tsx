@@ -41,10 +41,14 @@ function asImageResourceRef(value: unknown): SessionImageResourceRef | undefined
 
 /** 截图来源：内嵌 dataUrl 或历史 timeline 的图像资源引用。 */
 export function asScreenshotSource(value: unknown): string | SessionImageResourceRef | undefined {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return isImageDataUrl(value) ? value : undefined;
   if (!isRecord(value)) return undefined;
-  if (typeof value.dataUrl === "string") return value.dataUrl;
+  if (typeof value.dataUrl === "string") return isImageDataUrl(value.dataUrl) ? value.dataUrl : undefined;
   return asImageResourceRef(value.dataUrl) ?? asImageResourceRef(value);
+}
+
+function isImageDataUrl(value: string): boolean {
+  return /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/]+=*$/i.test(value);
 }
 
 /** 仅展示浏览器工具结果的组件。 */
@@ -53,7 +57,9 @@ export function BrowserContent({ result, error, expanded }: ToolResultContentPro
   const parsed = parseToolResult(result);
   const details = parsed?.details;
   const snapshot = asSnapshot(details?.snapshot);
-  const screenshot = asScreenshotSource(details?.screenshot) ?? snapshot?.screenshot ?? undefined;
+  const screenshot = !error
+    ? (asScreenshotSource(details?.screenshot) ?? asScreenshotSource(snapshot?.screenshot))
+    : undefined;
   const interactiveCount = countInteractiveNodes(snapshot?.tree);
   const hasText = Boolean(parsed?.text.trim() || (parsed?.images?.length ?? 0) > 0);
 
