@@ -1,7 +1,23 @@
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { InlineExtension, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
+import * as bundledPiAgentCore from "@earendil-works/pi-agent-core";
+import * as bundledPiAi from "@earendil-works/pi-ai";
+import * as bundledPiAiCompat from "@earendil-works/pi-ai/compat";
+import * as bundledPiAiOauth from "@earendil-works/pi-ai/oauth";
+import * as bundledPiAiProviders from "@earendil-works/pi-ai/providers/all";
+import type {
+  ExtensionAPI,
+  ExtensionFactory,
+  InlineExtension,
+  LoadExtensionsResult,
+} from "@earendil-works/pi-coding-agent";
+import * as bundledPiCodingAgent from "@earendil-works/pi-coding-agent";
+import * as bundledPiTui from "@earendil-works/pi-tui";
+import { createJiti } from "jiti/static";
+import * as bundledTypebox from "typebox";
+import * as bundledTypeboxCompile from "typebox/compile";
+import * as bundledTypeboxValue from "typebox/value";
 import {
   DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
   type DesktopExtensionDiagnostic,
@@ -9,6 +25,40 @@ import {
 } from "../../shared/desktop-extension-contracts.ts";
 
 const NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES = new Set(["DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT"]);
+
+type DesktopExtensionConfiguration = Readonly<Record<string, string | number | boolean>>;
+type DesktopExtensionAPI = ExtensionAPI & {
+  getConfig<T = DesktopExtensionConfiguration>(): Readonly<T>;
+};
+
+const DESKTOP_EXTENSION_VIRTUAL_MODULES: Record<string, unknown> = {
+  "@earendil-works/pi-agent-core": bundledPiAgentCore,
+  "@earendil-works/pi-ai": bundledPiAi,
+  "@earendil-works/pi-ai/compat": bundledPiAiCompat,
+  "@earendil-works/pi-ai/oauth": bundledPiAiOauth,
+  "@earendil-works/pi-ai/providers/all": bundledPiAiProviders,
+  "@earendil-works/pi-coding-agent": bundledPiCodingAgent,
+  "@earendil-works/pi-tui": bundledPiTui,
+  "@mariozechner/pi-agent-core": bundledPiAgentCore,
+  "@mariozechner/pi-ai": bundledPiAi,
+  "@mariozechner/pi-ai/compat": bundledPiAiCompat,
+  "@mariozechner/pi-ai/oauth": bundledPiAiOauth,
+  "@mariozechner/pi-ai/providers/all": bundledPiAiProviders,
+  "@mariozechner/pi-coding-agent": bundledPiCodingAgent,
+  "@mariozechner/pi-tui": bundledPiTui,
+  "@sinclair/typebox": bundledTypebox,
+  "@sinclair/typebox/compile": bundledTypeboxCompile,
+  "@sinclair/typebox/value": bundledTypeboxValue,
+  typebox: bundledTypebox,
+  "typebox/compile": bundledTypeboxCompile,
+  "typebox/value": bundledTypeboxValue,
+};
+
+const jiti = createJiti(import.meta.url, {
+  moduleCache: false,
+  tsconfigPaths: true,
+  virtualModules: DESKTOP_EXTENSION_VIRTUAL_MODULES,
+});
 
 export function isBlockingExtensionDiagnostic(diagnostic: Pick<DesktopExtensionDiagnostic, "code">): boolean {
   return !NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES.has(diagnostic.code);
@@ -74,17 +124,36 @@ export function controlledResourceLoaderOptions(
   extensionFactories: InlineExtension[],
   options: { includeBuiltinSkills?: boolean } = {},
 ) {
+  const pathBackedFactories = set.entries.flatMap((entry): InlineExtension[] => {
+    if (!entry.entryPath) return [];
+    const entryPath = entry.entryPath;
+    const configuration = Object.freeze({ ...(entry.configuration ?? {}) });
+    return [
+      {
+        name: entry.id,
+        factory: async (pi) => {
+          const factory = await jiti.import<ExtensionFactory>(entryPath, { default: true });
+          if (typeof factory !== "function") {
+            throw new Error(`Extension does not export a valid factory function: ${entry.displayName}`);
+          }
+          const desktopApi = new Proxy(pi, {
+            get(target, property, receiver) {
+              if (property === "getConfig")
+                return <T = DesktopExtensionConfiguration>() => configuration as Readonly<T>;
+              return Reflect.get(target, property, receiver);
+            },
+          }) as DesktopExtensionAPI;
+          await factory(desktopApi);
+        },
+      },
+    ];
+  });
   return {
     noExtensions: true,
-    additionalExtensionPaths: set.entries.flatMap((entry) => (entry.entryPath ? [entry.entryPath] : [])),
-    extensionConfigurations: Object.fromEntries(
-      set.entries.flatMap((entry) =>
-        entry.entryPath && entry.configuration ? [[resolve(entry.entryPath), { ...entry.configuration }]] : [],
-      ),
-    ),
+    additionalExtensionPaths: [],
     additionalSkillPaths:
       options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))],
-    extensionFactories,
+    extensionFactories: [...extensionFactories, ...pathBackedFactories],
     packageManagerOnMissing: async () => "error" as const,
   };
 }
@@ -127,7 +196,11 @@ export function extensionLoadDiagnostics(
   }));
   for (const error of result.errors ?? []) {
     const normalized = resolve(error.path);
-    const entry = set.entries.find((candidate) => candidate.entryPath && resolve(candidate.entryPath) === normalized);
+    const inlineId = error.path.match(/^<inline:(.+)>$/)?.[1];
+    const entry = set.entries.find(
+      (candidate) =>
+        candidate.id === inlineId || (candidate.entryPath !== undefined && resolve(candidate.entryPath) === normalized),
+    );
     diagnostics.push({
       extensionId: entry?.id ?? "unknown",
       source: entry?.source ?? "development",

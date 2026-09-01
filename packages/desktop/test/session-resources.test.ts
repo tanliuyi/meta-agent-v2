@@ -128,6 +128,85 @@ describe("desktop controlled Pi resources", () => {
     expect(isolatedServices.resourceLoader.getSkills().skills).toEqual([]);
   });
 
+  it("injects immutable Desktop configuration into approved path extensions", async () => {
+    const root = join(tmpdir(), `desktop-extension-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    const configuredPath = join(root, "configured.ts");
+    const emptyPath = join(root, "empty.ts");
+    tempDirs.push(root);
+    await mkdir(cwd, { recursive: true });
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(
+      configuredPath,
+      `import { StringEnum } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
+import { formatSize } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
+
+export default function (pi) {
+  if ([StringEnum, complete, formatSize, Text, Type.Object].some((value) => typeof value !== "function")) {
+    throw new Error("Desktop virtual module is unavailable");
+  }
+  const config = pi.getConfig();
+  if (!Object.isFrozen(config)) throw new Error("configuration must be frozen");
+  try { config.token = "mutated"; } catch {}
+  pi.registerCommand("configured-" + config.token, { handler() {} });
+}\n`,
+    );
+    await writeFile(
+      emptyPath,
+      `export default function (pi) {
+  const config = pi.getConfig();
+  if (!Object.isFrozen(config) || Object.keys(config).length !== 0) throw new Error("empty configuration expected");
+  pi.registerCommand("empty-config", { handler() {} });
+}\n`,
+    );
+
+    const extensionSet = {
+      generation: "configured",
+      projectId: "project",
+      entries: [
+        {
+          id: "development:configured",
+          displayName: "configured.ts",
+          source: "development" as const,
+          entryPath: configuredPath,
+          hostProfileVersion: 1 as const,
+          capabilities: [],
+          configuration: { token: "original", retries: 2, enabled: true },
+        },
+        {
+          id: "development:empty",
+          displayName: "empty.ts",
+          source: "development" as const,
+          entryPath: emptyPath,
+          hostProfileVersion: 1 as const,
+          capabilities: [],
+        },
+      ],
+      diagnostics: [],
+      resolvedAt: 0,
+    };
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      resourceLoaderOptions: controlledResourceLoaderOptions(extensionSet, []),
+    });
+
+    const extensions = services.resourceLoader.getExtensions();
+    expect(extensions.errors).toEqual([]);
+    expect(extensions.extensions.map(({ path }) => path)).toEqual([
+      "<inline:development:configured>",
+      "<inline:development:empty>",
+    ]);
+    expect(extensions.extensions.flatMap((extension) => [...extension.commands.keys()])).toEqual([
+      "configured-original",
+      "empty-config",
+    ]);
+  });
+
   it("accepts path-backed bytes changed after generation resolution", async () => {
     const root = join(tmpdir(), `desktop-extension-hash-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const entryPath = join(root, "approved.ts");
@@ -176,7 +255,7 @@ describe("desktop controlled Pi resources", () => {
         diagnostics: [],
         resolvedAt: 0,
       },
-      { extensions: [], errors: [{ path: "/approved/broken.ts", error: "syntax error" }] },
+      { extensions: [], errors: [{ path: "<inline:development:broken>", error: "syntax error" }] },
     );
 
     expect(diagnostics).toEqual([
