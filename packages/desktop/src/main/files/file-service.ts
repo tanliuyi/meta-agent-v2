@@ -1,5 +1,5 @@
-import { readdir, readFile, stat } from "node:fs/promises";
-import { extname, relative, resolve } from "node:path";
+import { copyFile, cp, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { extname, parse, relative, resolve, sep } from "node:path";
 import type { FileImage, FileNode, PdfDocumentPreview, TextFile } from "../../shared/contracts.ts";
 import { pdfPreviewUrl } from "../../shared/pdf-preview-contracts.ts";
 import type { ProjectStore } from "../store/project-store.ts";
@@ -13,6 +13,13 @@ const MAX_SEARCH_RESULTS = 200;
 /** 排序前放宽的候选收集上限，避免 DFS 顺序导致高分结果被截断。 */
 const MAX_SEARCH_CANDIDATES = 400;
 const SEARCH_YIELD_INTERVAL_MS = 8;
+const FILE_OPERATION_NAME_PATTERN = /^(?!\.\.?(?:$|[\\/]))[^\\x00\\/]+$/u;
+
+type FileClipboard = {
+  projectId: string;
+  paths: string[];
+  cut: boolean;
+};
 
 const IMAGE_MIME: Record<string, string> = {
   avif: "image/avif",
@@ -30,6 +37,7 @@ const IMAGE_MIME: Record<string, string> = {
 export class FileService {
   private readonly projects: ProjectStore;
   private readonly activeRequests = new Map<string, object>();
+  private clipboard: FileClipboard | undefined;
 
   constructor(projects: ProjectStore) {
     this.projects = projects;
@@ -84,6 +92,104 @@ export class FileService {
         this.activeRequests.delete(requestKey);
       }
     }
+  }
+
+  async copy(projectId: string, paths: string[]): Promise<void> {
+    this.clipboard = { projectId, paths: paths.map((path) => this.normalizeExistingPath(projectId, path)), cut: false };
+  }
+
+  async cut(projectId: string, paths: string[]): Promise<void> {
+    this.clipboard = { projectId, paths: paths.map((path) => this.normalizeExistingPath(projectId, path)), cut: true };
+  }
+
+  async paste(projectId: string, destinationPath: string): Promise<void> {
+    const clipboard = this.clipboard;
+    if (!clipboard) throw new Error("剪贴板为空");
+    if (clipboard.projectId !== projectId) throw new Error("只能在同一个 Project 中粘贴文件");
+    const cwd = this.projects.getCwd(projectId);
+    const destination = resolveProjectFilePath(cwd, destinationPath);
+    const destinationInfo = await stat(destination);
+    if (!destinationInfo.isDirectory()) throw new Error("粘贴目标不是目录");
+    for (const source of clipboard.paths) {
+      const sourceName = source.split(/[\\/]/u).filter(Boolean).at(-1);
+      if (!sourceName) throw new Error("无效的源文件路径");
+      let target = resolveProjectFilePath(
+        cwd,
+        normalizeProjectRelativePath(relative(cwd, resolve(destination, sourceName))),
+      );
+      const sourceInfo = await stat(source);
+      if (sourceInfo.isDirectory() && target.startsWith(`${source}${sep}`)) {
+        throw new Error("不能将目录粘贴到自身内部");
+      }
+      const targetExists = await stat(target).then(
+        () => true,
+        () => false,
+      );
+      if (targetExists) {
+        if (clipboard.cut) throw new Error(`目标已存在: ${sourceName}`);
+        target = await this.findAvailableCopyTarget(cwd, destination, sourceName);
+      }
+      if (clipboard.cut) await rename(source, target);
+      else if (sourceInfo.isDirectory()) await cp(source, target, { recursive: true });
+      else await copyFile(source, target);
+    }
+    if (clipboard.cut) this.clipboard = undefined;
+  }
+
+  async createFolder(projectId: string, parentPath: string, name: string): Promise<void> {
+    const target = this.resolveNamedChild(projectId, parentPath, name);
+    await mkdir(target);
+  }
+
+  async rename(projectId: string, path: string, name: string): Promise<void> {
+    const cwd = this.projects.getCwd(projectId);
+    const source = resolveProjectFilePath(cwd, path);
+    if (source === resolve(cwd)) throw new Error("不能重命名 Project 根目录");
+    const parent = relative(cwd, resolve(source, ".."));
+    const target = this.resolveNamedChild(projectId, normalizeProjectRelativePath(parent), name);
+    await stat(target).then(
+      () => {
+        throw new Error(`目标已存在: ${name}`);
+      },
+      () => rename(source, target),
+    );
+  }
+
+  async remove(projectId: string, path: string): Promise<void> {
+    const cwd = this.projects.getCwd(projectId);
+    const target = resolveProjectFilePath(cwd, path);
+    if (target === resolve(cwd)) throw new Error("不能删除 Project 根目录");
+    await rm(target, { recursive: true, force: false });
+  }
+
+  private async findAvailableCopyTarget(cwd: string, destination: string, sourceName: string): Promise<string> {
+    const parsed = parse(sourceName);
+    for (let index = 1; ; index += 1) {
+      const suffix = index === 1 ? " copy" : ` copy ${index}`;
+      const candidate = resolveProjectFilePath(
+        cwd,
+        normalizeProjectRelativePath(relative(cwd, resolve(destination, `${parsed.name}${suffix}${parsed.ext}`))),
+      );
+      const exists = await stat(candidate).then(
+        () => true,
+        () => false,
+      );
+      if (!exists) return candidate;
+    }
+  }
+
+  private normalizeExistingPath(projectId: string, path: string): string {
+    const cwd = this.projects.getCwd(projectId);
+    return resolveProjectFilePath(cwd, path);
+  }
+
+  private resolveNamedChild(projectId: string, parentPath: string, name: string): string {
+    if (!FILE_OPERATION_NAME_PATTERN.test(name.trim())) throw new Error("名称不能包含路径分隔符或目录穿越字符");
+    const cwd = this.projects.getCwd(projectId);
+    return resolveProjectFilePath(
+      cwd,
+      normalizeProjectRelativePath(relative(cwd, resolve(cwd, parentPath, name.trim()))),
+    );
   }
 
   /** 读取 Project 内的小型 UTF-8 文本文件。 */

@@ -30,8 +30,13 @@ interface FileTreeProps {
   onOpen(node: FileNode): void;
   /** 双击节点（固定预览 tab）；目录不触发。 */
   onPinOpen?(node: FileNode): void;
-  /** 节点右键菜单内容。 */
+  /** 节点右键菜单。 */
   renderContextMenu?(node: FileNode): ReactNode;
+  /** 键盘复制/剪切当前聚焦节点。 */
+  onCopy?(node: FileNode): void;
+  onCut?(node: FileNode): void;
+  /** 键盘粘贴到当前聚焦节点对应的目录。 */
+  onPaste?(node: FileNode): void;
   depth?: number;
 }
 
@@ -82,6 +87,9 @@ export function FileTree({
   onOpen,
   onPinOpen,
   renderContextMenu,
+  onCopy,
+  onCut,
+  onPaste,
   depth = 0,
 }: FileTreeProps) {
   const rows = useMemo(() => buildRows(nodes, children, expanded, depth), [children, depth, expanded, nodes]);
@@ -131,6 +139,27 @@ export function FileTree({
   const typeAheadStartIndex = useRef(0);
   const handleContainerKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const isModifier = event.ctrlKey || event.metaKey;
+      if (isModifier && !event.altKey && !event.shiftKey) {
+        const row = rows[focusIndex ?? rows.findIndex((item) => item.path === rovingPath)];
+        if (row?.kind === "node" && row.node) {
+          if (event.key.toLowerCase() === "c") {
+            event.preventDefault();
+            onCopy?.(row.node);
+            return;
+          }
+          if (event.key.toLowerCase() === "x") {
+            event.preventDefault();
+            onCut?.(row.node);
+            return;
+          }
+          if (event.key.toLowerCase() === "v") {
+            event.preventDefault();
+            onPaste?.(row.node);
+            return;
+          }
+        }
+      }
       if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
       const startIndex = typeAheadStartIndex.current;
       const prefix = (typeAhead + event.key).toLowerCase();
@@ -150,7 +179,7 @@ export function FileTree({
       typeAheadStartIndex.current = target;
       moveFocus(target);
     },
-    [moveFocus, rows, typeAhead],
+    [focusIndex, moveFocus, onCopy, onCut, onPaste, rovingPath, rows, typeAhead],
   );
 
   // autoReveal：活动文件切换或所在行从不可见变为可见时滚动到该行（对齐 VS Code explorer.autoReveal）。

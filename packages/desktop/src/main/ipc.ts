@@ -868,6 +868,18 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.filesOpen, async (_event, projectId: string, path: string) => {
     await openPath(await resolveFilePath(projectId, path, projects));
   });
+  ipcMain.handle(CHANNELS.filesCopy, (_event, projectId: string, paths: string[]) => files.copy(projectId, paths));
+  ipcMain.handle(CHANNELS.filesCut, (_event, projectId: string, paths: string[]) => files.cut(projectId, paths));
+  ipcMain.handle(CHANNELS.filesPaste, (_event, projectId: string, destinationPath: string) =>
+    files.paste(projectId, destinationPath),
+  );
+  ipcMain.handle(CHANNELS.filesCreateFolder, (_event, projectId: string, parentPath: string, name: string) =>
+    files.createFolder(projectId, parentPath, name),
+  );
+  ipcMain.handle(CHANNELS.filesRename, (_event, projectId: string, path: string, name: string) =>
+    files.rename(projectId, path, name),
+  );
+  ipcMain.handle(CHANNELS.filesRemove, (_event, projectId: string, path: string) => files.remove(projectId, path));
   ipcMain.handle(
     CHANNELS.terminalsOpen,
     (_event, projectId: string, threadId: string, terminalId: string, cols: number, rows: number) =>

@@ -64,6 +64,11 @@ describe("FilePreview", () => {
     expect(panelCss).not.toContain("--file-preview-scroll-left");
   });
 
+  it("只显示活动文件预览内容", () => {
+    expect(panelCss).toMatch(/\.file-preview-content\s*\{[^}]*display:\s*none;[^}]*\}/s);
+    expect(panelCss).toMatch(/\.file-preview-content\[data-state="active"\]\s*\{[^}]*display:\s*block;[^}]*\}/s);
+  });
+
   it("渲染代码缩略图容器", () => {
     const markup = render();
     expect(markup).toContain('class="file-minimap"');

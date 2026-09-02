@@ -383,6 +383,13 @@ const desktopApi: DesktopApi = {
     cancelOfficeDocumentPreview: () => ipcRenderer.invoke(CHANNELS.filesCancelOfficeDocumentPreview),
     resolvePath: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesResolvePath, projectId, path),
     open: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesOpen, projectId, path),
+    copy: (projectId, paths) => ipcRenderer.invoke(CHANNELS.filesCopy, projectId, paths),
+    cut: (projectId, paths) => ipcRenderer.invoke(CHANNELS.filesCut, projectId, paths),
+    paste: (projectId, destinationPath) => ipcRenderer.invoke(CHANNELS.filesPaste, projectId, destinationPath),
+    createFolder: (projectId, parentPath, name) =>
+      ipcRenderer.invoke(CHANNELS.filesCreateFolder, projectId, parentPath, name),
+    rename: (projectId, path, name) => ipcRenderer.invoke(CHANNELS.filesRename, projectId, path, name),
+    remove: (projectId, path) => ipcRenderer.invoke(CHANNELS.filesRemove, projectId, path),
     watch: (projectId) => ipcRenderer.invoke(CHANNELS.filesWatch, projectId),
     unwatch: (projectId) => ipcRenderer.invoke(CHANNELS.filesUnwatch, projectId),
     onChanged(projectId, listener) {

@@ -2,15 +2,30 @@ import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Tabs from "@radix-ui/react-tabs";
 import { TooltipIconButton } from "@renderer/components/assistant-ui/tooltip-icon-button";
 import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
+import { Button } from "@renderer/shared/ui/button";
+import { Dialog } from "@renderer/shared/ui/dialog";
+import { DialogClose } from "@renderer/shared/ui/dialog-close";
+import { DialogContent } from "@renderer/shared/ui/dialog-content";
+import { DialogDescription } from "@renderer/shared/ui/dialog-description";
+import { DialogTitle } from "@renderer/shared/ui/dialog-title";
+import { Input } from "@renderer/shared/ui/input";
 import type { HighlightResult } from "@streamdown/code";
+import Clipboard from "lucide-react/dist/esm/icons/clipboard.mjs";
+import ClipboardPaste from "lucide-react/dist/esm/icons/clipboard-paste.mjs";
+import Copy from "lucide-react/dist/esm/icons/copy.mjs";
 import Eye from "lucide-react/dist/esm/icons/eye.mjs";
 import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
+import FolderPlus from "lucide-react/dist/esm/icons/folder-plus.mjs";
+import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Pin from "lucide-react/dist/esm/icons/pin.mjs";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
+import Cut from "lucide-react/dist/esm/icons/scissors.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
+import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import WrapText from "lucide-react/dist/esm/icons/wrap-text.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
-import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
   FileImage,
   FileNode,
@@ -45,6 +60,7 @@ import {
   removeLoadedFileTreeDirectory,
   replaceFileTreeDirectory,
 } from "./file-tree-data.ts";
+import { InlineImagePreview } from "./inline-image-preview.tsx";
 import { OfficeDocumentPreview as OfficeDocumentPreviewFrame } from "./office-document-preview.tsx";
 import { PdfDocumentPreview as PdfDocumentPreviewFrame } from "./pdf-document-preview.tsx";
 
@@ -53,7 +69,6 @@ const FILE_SEARCH_DELAY = 180;
 const LARGE_FILE_HIGHLIGHT_CHARS = 128 * 1024;
 const FILE_TREE_DEFAULT_WIDTH = 240;
 const FILE_TREE_MIN_WIDTH = 180;
-const FILE_TREE_MAX_WIDTH = 360;
 const FILE_PREVIEW_MIN_WIDTH = 260;
 
 /** session 独立的文件预览和 Project cwd 文件树。 */
@@ -79,6 +94,11 @@ export function FilePanel() {
   const [treeError, setTreeError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [treeLoading, setTreeLoading] = useState(false);
+  const [nameDialog, setNameDialog] = useState<
+    { kind: "folder"; parentPath: string } | { kind: "rename"; path: string; parentPath: string } | null
+  >(null);
+  const [nameValue, setNameValue] = useState("");
+  const [nameDialogBusy, setNameDialogBusy] = useState(false);
   const [highlight, setHighlight] = useState<{
     file: TextFile;
     tokens: HighlightResult;
@@ -97,11 +117,7 @@ export function FilePanel() {
   const resize = useResizableRegion<HTMLElement>({
     value: fileTreeWidth,
     min: FILE_TREE_MIN_WIDTH,
-    getMaxSize: () =>
-      Math.min(
-        FILE_TREE_MAX_WIDTH,
-        (workspace.current?.clientWidth ?? FILE_TREE_MAX_WIDTH + FILE_PREVIEW_MIN_WIDTH) - FILE_PREVIEW_MIN_WIDTH,
-      ),
+    getMaxSize: () => (workspace.current?.clientWidth ?? FILE_PREVIEW_MIN_WIDTH * 2) - FILE_PREVIEW_MIN_WIDTH,
     direction: 1,
     orientation: "vertical",
     constraintRef: workspace,
@@ -219,7 +235,7 @@ export function FilePanel() {
     if ("dataUrl" in file) {
       return (
         <div className="file-preview-image-wrap">
-          <img className="file-preview-image" src={file.dataUrl} alt={file.path} />
+          <InlineImagePreview src={file.dataUrl} alt={file.path} />
         </div>
       );
     }
@@ -405,12 +421,116 @@ export function FilePanel() {
     [activeFile, expandedPaths, openFiles, previewFile, toggleDirectory, updateWorkbench],
   );
 
-  // 文件树右键菜单（对齐 VS Code explorer 上下文操作）。
+  const runFileOperation = useCallback(
+    (operation: () => Promise<void>, refreshPath: string) => {
+      void operation()
+        .then(() => loadDirectory(refreshPath, true))
+        .catch((error: unknown) => setTreeError(errorMessage(error)));
+    },
+    [loadDirectory],
+  );
+
+  const submitName = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = nameValue.trim();
+    if (!name || !nameDialog || nameDialogBusy) return;
+    setNameDialogBusy(true);
+    const operation =
+      nameDialog.kind === "folder"
+        ? window.desktop.files.createFolder(projectId, nameDialog.parentPath, name)
+        : window.desktop.files.rename(projectId, nameDialog.path, name);
+    void operation
+      .then(() => loadDirectory(nameDialog.parentPath, true))
+      .then(() => {
+        setNameDialog(null);
+        setNameValue("");
+      })
+      .catch((error: unknown) => setTreeError(errorMessage(error)))
+      .finally(() => setNameDialogBusy(false));
+  };
+
+  const handleFileCopy = useCallback(
+    (node: FileNode) =>
+      runFileOperation(
+        () => window.desktop.files.copy(projectId, [node.path]),
+        node.type === "directory" ? node.path : parentPath(node.path),
+      ),
+    [projectId, runFileOperation],
+  );
+  const handleFileCut = useCallback(
+    (node: FileNode) =>
+      runFileOperation(
+        () => window.desktop.files.cut(projectId, [node.path]),
+        node.type === "directory" ? node.path : parentPath(node.path),
+      ),
+    [projectId, runFileOperation],
+  );
+  const handleFilePaste = useCallback(
+    (node: FileNode) => {
+      const destinationPath = node.type === "directory" ? node.path : parentPath(node.path);
+      runFileOperation(() => window.desktop.files.paste(projectId, destinationPath), destinationPath);
+    },
+    [projectId, runFileOperation],
+  );
+
   const renderFileContextMenu = useCallback(
     (node: FileNode) => {
       const isDirectory = node.type === "directory";
+      const destinationPath = isDirectory ? node.path : parentPath(node.path);
+      const runOperation = (operation: () => Promise<void>, refreshPath = destinationPath) => {
+        void operation()
+          .then(() => loadDirectory(refreshPath, true))
+          .catch((error: unknown) => setTreeError(errorMessage(error)));
+      };
       return (
-        <ContextMenuContent className="min-w-44">
+        <ContextMenuContent className="min-w-52">
+          <ContextMenuItem onSelect={() => runOperation(() => window.desktop.files.copy(projectId, [node.path]))}>
+            <Copy size={14} aria-hidden="true" />
+            复制
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => runOperation(() => window.desktop.files.cut(projectId, [node.path]))}>
+            <Cut size={14} aria-hidden="true" />
+            剪切
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => runOperation(() => window.desktop.files.paste(projectId, destinationPath))}>
+            <ClipboardPaste size={14} aria-hidden="true" />
+            粘贴到此处
+          </ContextMenuItem>
+          <ContextMenu.Separator className="my-1 h-px bg-border" />
+          <ContextMenuItem
+            onSelect={() => {
+              setNameValue("新建文件夹");
+              setNameDialog({ kind: "folder", parentPath: destinationPath });
+            }}
+          >
+            <FolderPlus size={14} aria-hidden="true" />
+            新建文件夹
+          </ContextMenuItem>
+          <ContextMenuItem
+            onSelect={() => {
+              setNameValue(node.name);
+              setNameDialog({
+                kind: "rename",
+                path: node.path,
+                parentPath: destinationPath,
+              });
+            }}
+          >
+            <Pencil size={14} aria-hidden="true" />
+            重命名
+          </ContextMenuItem>
+          <ContextMenuItem
+            variant="destructive"
+            onSelect={() => {
+              if (window.confirm(`确定删除“${node.name}”吗？`)) {
+                runOperation(() => window.desktop.files.remove(projectId, node.path));
+              }
+            }}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            删除
+          </ContextMenuItem>
+          <ContextMenu.Separator className="my-1 h-px bg-border" />
           <ContextMenuItem
             onSelect={() => {
               void window.desktop.files.resolvePath(projectId, node.path).then((absolute) => {
@@ -418,12 +538,15 @@ export function FilePanel() {
               });
             }}
           >
+            <Clipboard size={14} aria-hidden="true" />
             复制路径
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => void window.desktop.files.open(projectId, node.path)}>
+            <FolderOpen size={14} aria-hidden="true" />
             在系统文件管理器中显示
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => void loadDirectory(isDirectory ? node.path : parentPath(node.path), true)}>
+          <ContextMenuItem onSelect={() => void loadDirectory(destinationPath, true)}>
+            <RefreshCw size={14} aria-hidden="true" />
             刷新
           </ContextMenuItem>
         </ContextMenuContent>
@@ -492,6 +615,9 @@ export function FilePanel() {
                 active={activeFile ?? undefined}
                 onOpen={openNode}
                 onPinOpen={pinNode}
+                onCopy={handleFileCopy}
+                onCut={handleFileCut}
+                onPaste={handleFilePaste}
                 renderContextMenu={renderFileContextMenu}
               />
             )}
@@ -616,6 +742,40 @@ export function FilePanel() {
           </div>
         ) : null}
       </Tabs.Root>
+      <Dialog
+        open={nameDialog !== null}
+        onOpenChange={(open) => {
+          if (!open && !nameDialogBusy) {
+            setNameDialog(null);
+            setNameValue("");
+          }
+        }}
+      >
+        <DialogContent className="gap-3 sm:max-w-md">
+          <DialogTitle>{nameDialog?.kind === "folder" ? "新建文件夹" : "重命名"}</DialogTitle>
+          <DialogDescription>{nameDialog?.kind === "folder" ? "输入文件夹名称。" : "输入新的名称。"}</DialogDescription>
+          <form className="mt-2 space-y-4" onSubmit={submitName}>
+            <Input
+              autoFocus
+              aria-label={nameDialog?.kind === "folder" ? "文件夹名称" : "文件名称"}
+              value={nameValue}
+              onChange={(event) => setNameValue(event.target.value)}
+              disabled={nameDialogBusy}
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            <div className="flex justify-end gap-2">
+              <DialogClose asChild>
+                <Button variant="ghost" disabled={nameDialogBusy}>
+                  取消
+                </Button>
+              </DialogClose>
+              <Button type="submit" disabled={!nameValue.trim() || nameDialogBusy}>
+                {nameDialogBusy ? "处理中..." : "确定"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

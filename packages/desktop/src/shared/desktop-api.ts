@@ -324,6 +324,12 @@ export interface DesktopApi {
     cancelOfficeDocumentPreview(): Promise<void>;
     resolvePath(projectId: string, path: string): Promise<string>;
     open(projectId: string, path: string): Promise<void>;
+    copy(projectId: string, paths: string[]): Promise<void>;
+    cut(projectId: string, paths: string[]): Promise<void>;
+    paste(projectId: string, destinationPath: string): Promise<void>;
+    createFolder(projectId: string, parentPath: string, name: string): Promise<void>;
+    rename(projectId: string, path: string, name: string): Promise<void>;
+    remove(projectId: string, path: string): Promise<void>;
     watch(projectId: string): Promise<void>;
     unwatch(projectId: string): Promise<void>;
     /** 订阅 Project 文件变化；返回取消订阅函数。 */
