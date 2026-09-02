@@ -49,6 +49,7 @@ import { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry
 import { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
+import { ScmService } from "./scm/scm-service.ts";
 import { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
 import { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
@@ -512,6 +513,7 @@ app.whenReady().then(async () => {
   registerIpc(
     projects,
     sessions,
+    new ScmService(projects),
     files,
     new OfficeDocumentPreviewService(projects, {
       cacheDir: join(userDataDir, "cache", "office-document-preview"),

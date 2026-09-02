@@ -1,0 +1,37 @@
+{
+  "name": "generate-eia-process-flow-diagrams",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "apps/server",
+    "apps/collaboration",
+    "packages/diagram-model",
+    "packages/diagram-cli"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev --",
+    "dev:server": "npm --workspace apps/server run dev",
+    "dev:collaboration": "npm --workspace apps/collaboration run dev",
+    "cli": "npm --workspace packages/diagram-cli run cli",
+    "build:web": "npm --workspace apps/web run build",
+    "build:skill": "node scripts/build-skill.mjs",
+    "validate:skill": "node scripts/validate-skill.mjs",
+    "check": "npm run validate:skill"
+  },
+  "dependencies": {
+    "@hocuspocus/provider": "4.6.0",
+    "@hocuspocus/server": "4.6.0",
+    "@xyflow/react": "12.11.5",
+    "d3-selection": "3.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tslib": "2.8.1",
+    "yjs": "13.6.32"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "5.1.4",
+    "vite": "7.3.6"
+  }
+}

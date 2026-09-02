@@ -2,6 +2,7 @@ import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region"
 import { Button } from "@renderer/shared/ui/button";
 import { Link, useMatchRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
+import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Settings from "lucide-react/dist/esm/icons/settings.mjs";
 import { type CSSProperties, memo, useCallback } from "react";
@@ -129,6 +130,14 @@ export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: 
                 >
                   <Plus size={16} />
                   <span className="whitespace-nowrap">新建任务</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  className={sidebarRowClass}
+                  onClick={() => window.dispatchEvent(new Event("desktop:open-scm"))}
+                >
+                  <GitBranch size={16} />
+                  <span className="whitespace-nowrap">审查</span>
                 </Button>
               </nav>
 

@@ -87,7 +87,6 @@ import type {
   UninstallMarketplacePluginInput,
   UpdateMarketplacePluginInput,
 } from "../shared/plugin-marketplace-contracts.ts";
-import type { SavePreferencesInput } from "../shared/preferences-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
@@ -106,6 +105,7 @@ import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-reg
 import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
 import type { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
+import type { ScmService } from "./scm/scm-service.ts";
 import type { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
 import type { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
@@ -135,6 +135,7 @@ function handleTrustedBrowserDataRequest<T>(event: IpcMainInvokeEvent, request: 
 export function registerIpc(
   projects: ProjectStore,
   sessions: SessionSupervisor,
+  scm: ScmService,
   files: FileService,
   officeDocuments: OfficeDocumentPreviewService,
   fileWatcher: ProjectFileWatcher,
@@ -836,6 +837,13 @@ export function registerIpc(
     }
     return sessions.readImageResource(event.sender.id, attachmentId, resourceId);
   });
+  ipcMain.handle(CHANNELS.scmGetSnapshot, (_event, projectId: string) => scm.getSnapshot(projectId));
+  ipcMain.handle(CHANNELS.scmGetDiff, (_event, projectId: string, path: string, staged?: boolean) =>
+    scm.getDiff(projectId, path, staged),
+  );
+  ipcMain.handle(CHANNELS.scmStage, (_event, projectId: string, path: string) => scm.stage(projectId, path));
+  ipcMain.handle(CHANNELS.scmUnstage, (_event, projectId: string, path: string) => scm.unstage(projectId, path));
+  ipcMain.handle(CHANNELS.scmDiscard, (_event, projectId: string, path: string) => scm.discard(projectId, path));
   ipcMain.handle(CHANNELS.filesList, (event, projectId: string, path?: string, query?: string, requestGroup?: string) =>
     files.list(projectId, path, query, `${event.sender.id}\0${requestGroup ?? "default"}`),
   );

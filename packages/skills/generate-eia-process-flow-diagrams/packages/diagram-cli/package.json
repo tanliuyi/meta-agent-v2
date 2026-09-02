@@ -1,0 +1,1 @@
+{"name":"@eia-flow/cli","private":true,"type":"module","scripts":{"cli":"node src/main.mjs"}}

@@ -44,3 +44,6 @@ plans/
 collect.sh
 out/
 output/
+.tmp*/
+dist-skill/
+.pi/subagents/

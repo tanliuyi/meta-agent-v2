@@ -1,0 +1,1513 @@
+{
+  "metadata": {
+    "title": "麦芽威士忌生产工艺流程及产污节点图",
+    "figure": "图 3.1-1",
+    "source": "用户提供的工艺流程参考图",
+    "status": "draft",
+    "note": "主工艺按参考图绘制；产污类别为工程分析待核项，具体源强、治理参数及去向均待确认"
+  },
+  "nodes": [
+    {
+      "id": "P01",
+      "label": "麦芽",
+      "type": "input",
+      "x": 650,
+      "y": 40,
+      "width": 220,
+      "height": 44
+    },
+    {
+      "id": "P02",
+      "label": "麦芽料仓",
+      "type": "process",
+      "x": 650,
+      "y": 130,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P03",
+      "label": "除石、除铁、称重",
+      "type": "process",
+      "x": 630,
+      "y": 225,
+      "width": 260,
+      "height": 54
+    },
+    {
+      "id": "P04",
+      "label": "辊磨机",
+      "type": "process",
+      "x": 650,
+      "y": 320,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P05",
+      "label": "麦芽粉仓",
+      "type": "process",
+      "x": 650,
+      "y": 415,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P06",
+      "label": "糖化锅",
+      "type": "process",
+      "x": 650,
+      "y": 510,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P07",
+      "label": "发酵罐",
+      "type": "process",
+      "x": 650,
+      "y": 605,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P08",
+      "label": "初蒸馏",
+      "type": "process",
+      "x": 650,
+      "y": 700,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P09",
+      "label": "烈酒蒸馏",
+      "type": "process",
+      "x": 650,
+      "y": 795,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P10",
+      "label": "装桶",
+      "type": "process",
+      "x": 650,
+      "y": 890,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "P11",
+      "label": "陈酿",
+      "type": "process",
+      "x": 650,
+      "y": 985,
+      "width": 220,
+      "height": 54
+    },
+    {
+      "id": "OUT",
+      "label": "成品酒\n产品方案及去向：待确认",
+      "type": "terminal",
+      "x": 635,
+      "y": 1080,
+      "width": 250,
+      "height": 66
+    },
+    {
+      "id": "W01",
+      "label": "W1 糖化及设备清洗废水\n水量、污染物：待确认",
+      "type": "pollution",
+      "x": 40,
+      "y": 485,
+      "width": 310,
+      "height": 76
+    },
+    {
+      "id": "W02",
+      "label": "W2 发酵罐清洗废水\n水量、污染物：待确认",
+      "type": "pollution",
+      "x": 40,
+      "y": 600,
+      "width": 310,
+      "height": 76
+    },
+    {
+      "id": "W03",
+      "label": "W3 初蒸馏废液/清洗废水\n性质、水量：待确认",
+      "type": "pollution",
+      "x": 40,
+      "y": 700,
+      "width": 310,
+      "height": 76
+    },
+    {
+      "id": "W04",
+      "label": "W4 烈酒蒸馏废液/清洗废水\n性质、水量：待确认",
+      "type": "pollution",
+      "x": 40,
+      "y": 800,
+      "width": 310,
+      "height": 76
+    },
+    {
+      "id": "W05",
+      "label": "W5 装桶及设备清洗废水\n水量、污染物：待确认",
+      "type": "pollution",
+      "x": 40,
+      "y": 900,
+      "width": 310,
+      "height": 76
+    },
+    {
+      "id": "WT",
+      "label": "废水收集及处理设施\n处理工艺、规模：待确认",
+      "type": "treatment",
+      "x": 40,
+      "y": 1040,
+      "width": 310,
+      "height": 70
+    },
+    {
+      "id": "WA",
+      "label": "达标排放或回用\n排放口、受纳去向：待确认",
+      "type": "terminal",
+      "x": 40,
+      "y": 1150,
+      "width": 310,
+      "height": 66
+    },
+    {
+      "id": "G01",
+      "label": "G1 麦芽料仓投料粉尘\n污染物、源强：待确认",
+      "type": "pollution",
+      "x": 970,
+      "y": 115,
+      "width": 270,
+      "height": 76
+    },
+    {
+      "id": "G02",
+      "label": "G2 辊磨粉尘\n污染物、源强：待确认",
+      "type": "pollution",
+      "x": 970,
+      "y": 300,
+      "width": 270,
+      "height": 76
+    },
+    {
+      "id": "G03",
+      "label": "G3 发酵废气\nCO₂、异味等：待确认",
+      "type": "pollution",
+      "x": 970,
+      "y": 585,
+      "width": 270,
+      "height": 76
+    },
+    {
+      "id": "G04",
+      "label": "G4 蒸馏不凝气/异味\n产生位置、组分：待确认",
+      "type": "pollution",
+      "x": 970,
+      "y": 770,
+      "width": 270,
+      "height": 76
+    },
+    {
+      "id": "GT",
+      "label": "废气收集及处理设施\n收集方式、治理工艺：待确认",
+      "type": "treatment",
+      "x": 1310,
+      "y": 465,
+      "width": 260,
+      "height": 76
+    },
+    {
+      "id": "GA",
+      "label": "有组织或无组织排放\n排放口及去向：待确认",
+      "type": "terminal",
+      "x": 1310,
+      "y": 580,
+      "width": 260,
+      "height": 66
+    },
+    {
+      "id": "S01",
+      "label": "S1 除石、除铁杂质\n属性、数量及去向：待确认",
+      "type": "pollution",
+      "x": 1600,
+      "y": 180,
+      "width": 280,
+      "height": 76
+    },
+    {
+      "id": "S02",
+      "label": "S2 麦糟\n分离环节、数量及去向：待确认",
+      "type": "pollution",
+      "x": 1600,
+      "y": 532,
+      "width": 280,
+      "height": 76
+    },
+    {
+      "id": "S03",
+      "label": "S3 废酵母\n数量、属性及去向：待确认",
+      "type": "pollution",
+      "x": 1600,
+      "y": 650,
+      "width": 280,
+      "height": 76
+    },
+    {
+      "id": "ST",
+      "label": "固体废物分类收集/暂存\n场所及管理要求：待确认",
+      "type": "treatment",
+      "x": 1600,
+      "y": 875,
+      "width": 280,
+      "height": 76
+    },
+    {
+      "id": "SA",
+      "label": "资源化、外售或委外处置\n接收单位及去向：待确认",
+      "type": "terminal",
+      "x": 1600,
+      "y": 990,
+      "width": 280,
+      "height": 66
+    },
+    {
+      "id": "N01",
+      "label": "N1 辊磨机、输送设备噪声\n设备声级：待确认",
+      "type": "pollution",
+      "x": 970,
+      "y": 395,
+      "width": 280,
+      "height": 76
+    },
+    {
+      "id": "N02",
+      "label": "N2 泵、蒸馏及辅助设备噪声\n设备清单、声级：待确认",
+      "type": "pollution",
+      "x": 970,
+      "y": 915,
+      "width": 280,
+      "height": 76
+    },
+    {
+      "id": "NT",
+      "label": "隔声、减振、消声及合理布局\n具体措施：待确认",
+      "type": "treatment",
+      "x": 970,
+      "y": 1040,
+      "width": 280,
+      "height": 76
+    },
+    {
+      "id": "NA",
+      "label": "厂界噪声\n预测值及达标情况：待确认",
+      "type": "terminal",
+      "x": 970,
+      "y": 1155,
+      "width": 280,
+      "height": 66
+    },
+    {
+      "id": "LEGEND",
+      "label": "图例\n□ 白底黑框：工艺/治理/去向节点\n→ 黑色实线：生产物料流\n⇢ 黑色虚线：产污、治理及排放路径\nG/W/S/N：废气/废水/固废/噪声",
+      "type": "legend",
+      "x": 1320,
+      "y": 1120,
+      "width": 560,
+      "height": 155,
+      "fontSize": 14
+    },
+    {
+      "id": "TITLE",
+      "label": "图 3.1-1  麦芽威士忌生产工艺流程及产污节点图",
+      "type": "caption",
+      "x": 555,
+      "y": 1320,
+      "width": 700,
+      "height": 42,
+      "fontSize": 18,
+      "fontWeight": 600
+    }
+  ],
+  "edges": [
+    {
+      "id": "E01",
+      "from": "P01",
+      "to": "P02",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top",
+      "label": "麦芽"
+    },
+    {
+      "id": "E02",
+      "from": "P02",
+      "to": "P03",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E03",
+      "from": "P03",
+      "to": "P04",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E04",
+      "from": "P04",
+      "to": "P05",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E05",
+      "from": "P05",
+      "to": "P06",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E06",
+      "from": "P06",
+      "to": "P07",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E07",
+      "from": "P07",
+      "to": "P08",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E08",
+      "from": "P08",
+      "to": "P09",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E09",
+      "from": "P09",
+      "to": "P10",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E10",
+      "from": "P10",
+      "to": "P11",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E11",
+      "from": "P11",
+      "to": "OUT",
+      "kind": "material",
+      "route": "straight",
+      "lineStyle": "solid",
+      "stroke": "#222222",
+      "strokeWidth": 1.4,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top",
+      "label": "成品"
+    },
+    {
+      "id": "E12",
+      "from": "P02",
+      "to": "G01",
+      "kind": "waste-gas",
+      "label": "G1 粉尘",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 920,
+          "y": 157
+        },
+        {
+          "x": 920,
+          "y": 153
+        }
+      ]
+    },
+    {
+      "id": "E13",
+      "from": "P04",
+      "to": "G02",
+      "kind": "waste-gas",
+      "label": "G2 粉尘",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 920,
+          "y": 347
+        },
+        {
+          "x": 920,
+          "y": 338
+        }
+      ]
+    },
+    {
+      "id": "E14",
+      "from": "P07",
+      "to": "G03",
+      "kind": "waste-gas",
+      "label": "G3 发酵废气",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 920,
+          "y": 632
+        },
+        {
+          "x": 920,
+          "y": 623
+        }
+      ]
+    },
+    {
+      "id": "E15",
+      "from": "P08",
+      "to": "G04",
+      "kind": "waste-gas",
+      "label": "G4 待确认",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 900,
+          "y": 727
+        },
+        {
+          "x": 900,
+          "y": 808
+        }
+      ]
+    },
+    {
+      "id": "E16",
+      "from": "P09",
+      "to": "G04",
+      "kind": "waste-gas",
+      "label": "G4 待确认",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 930,
+          "y": 822
+        },
+        {
+          "x": 930,
+          "y": 808
+        }
+      ]
+    },
+    {
+      "id": "E17",
+      "from": "G01",
+      "to": "GT",
+      "kind": "waste-gas",
+      "label": "收集",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-top",
+      "waypoints": [
+        {
+          "x": 1280,
+          "y": 153
+        },
+        {
+          "x": 1280,
+          "y": 435
+        },
+        {
+          "x": 1440,
+          "y": 435
+        }
+      ]
+    },
+    {
+      "id": "E18",
+      "from": "G02",
+      "to": "GT",
+      "kind": "waste-gas",
+      "label": "收集",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 1255,
+          "y": 338
+        },
+        {
+          "x": 1255,
+          "y": 503
+        }
+      ]
+    },
+    {
+      "id": "E19",
+      "from": "G03",
+      "to": "GT",
+      "kind": "waste-gas",
+      "label": "收集",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-bottom",
+      "waypoints": [
+        {
+          "x": 1280,
+          "y": 623
+        },
+        {
+          "x": 1280,
+          "y": 565
+        },
+        {
+          "x": 1440,
+          "y": 565
+        }
+      ]
+    },
+    {
+      "id": "E20",
+      "from": "G04",
+      "to": "GT",
+      "kind": "waste-gas",
+      "label": "收集",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 1590,
+          "y": 808
+        },
+        {
+          "x": 1590,
+          "y": 503
+        }
+      ]
+    },
+    {
+      "id": "E21",
+      "from": "GT",
+      "to": "GA",
+      "kind": "waste-gas",
+      "label": "处理后排放",
+      "route": "straight",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E22",
+      "from": "P06",
+      "to": "W01",
+      "kind": "waste-water",
+      "label": "W1 废水",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 560,
+          "y": 537
+        },
+        {
+          "x": 560,
+          "y": 523
+        }
+      ]
+    },
+    {
+      "id": "E23",
+      "from": "P07",
+      "to": "W02",
+      "kind": "waste-water",
+      "label": "W2 废水",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 530,
+          "y": 632
+        },
+        {
+          "x": 530,
+          "y": 638
+        }
+      ]
+    },
+    {
+      "id": "E24",
+      "from": "P08",
+      "to": "W03",
+      "kind": "waste-water",
+      "label": "W3 废液/废水",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 500,
+          "y": 727
+        },
+        {
+          "x": 500,
+          "y": 738
+        }
+      ]
+    },
+    {
+      "id": "E25",
+      "from": "P09",
+      "to": "W04",
+      "kind": "waste-water",
+      "label": "W4 废液/废水",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 470,
+          "y": 822
+        },
+        {
+          "x": 470,
+          "y": 838
+        }
+      ]
+    },
+    {
+      "id": "E26",
+      "from": "P10",
+      "to": "W05",
+      "kind": "waste-water",
+      "label": "W5 废水",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 440,
+          "y": 917
+        },
+        {
+          "x": 440,
+          "y": 938
+        }
+      ]
+    },
+    {
+      "id": "E27",
+      "from": "W01",
+      "to": "WT",
+      "kind": "waste-water",
+      "label": "汇入处理设施",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 10,
+          "y": 523
+        },
+        {
+          "x": 10,
+          "y": 1075
+        }
+      ]
+    },
+    {
+      "id": "E28",
+      "from": "W02",
+      "to": "WT",
+      "kind": "waste-water",
+      "label": "汇入处理设施",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-top",
+      "waypoints": [
+        {
+          "x": -20,
+          "y": 638
+        },
+        {
+          "x": -20,
+          "y": 1015
+        },
+        {
+          "x": 195,
+          "y": 1015
+        }
+      ]
+    },
+    {
+      "id": "E29",
+      "from": "W03",
+      "to": "WT",
+      "kind": "waste-water",
+      "label": "汇入处理设施",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 380,
+          "y": 738
+        },
+        {
+          "x": 380,
+          "y": 1075
+        }
+      ]
+    },
+    {
+      "id": "E30",
+      "from": "W04",
+      "to": "WT",
+      "kind": "waste-water",
+      "label": "汇入处理设施",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-bottom",
+      "waypoints": [
+        {
+          "x": 410,
+          "y": 838
+        },
+        {
+          "x": 410,
+          "y": 1135
+        },
+        {
+          "x": 195,
+          "y": 1135
+        }
+      ]
+    },
+    {
+      "id": "E31",
+      "from": "W05",
+      "to": "WT",
+      "kind": "waste-water",
+      "label": "汇入处理设施",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top",
+      "waypoints": [
+        {
+          "x": 195,
+          "y": 1015
+        }
+      ]
+    },
+    {
+      "id": "E32",
+      "from": "WT",
+      "to": "WA",
+      "kind": "waste-water",
+      "label": "达标排放/回用待确认",
+      "route": "straight",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E33",
+      "from": "P03",
+      "to": "S01",
+      "kind": "solid-waste",
+      "label": "S1 杂质",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-top",
+      "waypoints": [
+        {
+          "x": 910,
+          "y": 252
+        },
+        {
+          "x": 910,
+          "y": 20
+        },
+        {
+          "x": 1740,
+          "y": 20
+        }
+      ]
+    },
+    {
+      "id": "E34",
+      "from": "P06",
+      "to": "S02",
+      "kind": "solid-waste",
+      "label": "S2 麦糟（待确认）",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 930,
+          "y": 537
+        },
+        {
+          "x": 930,
+          "y": 560
+        },
+        {
+          "x": 1580,
+          "y": 560
+        },
+        {
+          "x": 1580,
+          "y": 538
+        }
+      ]
+    },
+    {
+      "id": "E35",
+      "from": "P07",
+      "to": "S03",
+      "kind": "solid-waste",
+      "label": "S3 废酵母",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 940,
+          "y": 632
+        },
+        {
+          "x": 940,
+          "y": 688
+        },
+        {
+          "x": 1600,
+          "y": 688
+        }
+      ]
+    },
+    {
+      "id": "E36",
+      "from": "S01",
+      "to": "ST",
+      "kind": "solid-waste",
+      "label": "分类暂存",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-right",
+      "waypoints": [
+        {
+          "x": 1910,
+          "y": 218
+        },
+        {
+          "x": 1910,
+          "y": 913
+        }
+      ]
+    },
+    {
+      "id": "E37",
+      "from": "S02",
+      "to": "ST",
+      "kind": "solid-waste",
+      "label": "分类暂存",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-top",
+      "waypoints": [
+        {
+          "x": 1940,
+          "y": 538
+        },
+        {
+          "x": 1940,
+          "y": 845
+        },
+        {
+          "x": 1740,
+          "y": 845
+        }
+      ]
+    },
+    {
+      "id": "E38",
+      "from": "S03",
+      "to": "ST",
+      "kind": "solid-waste",
+      "label": "分类暂存",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 1570,
+          "y": 688
+        },
+        {
+          "x": 1570,
+          "y": 913
+        }
+      ]
+    },
+    {
+      "id": "E39",
+      "from": "ST",
+      "to": "SA",
+      "kind": "solid-waste",
+      "label": "外运处置",
+      "route": "straight",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.2,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E40",
+      "from": "P04",
+      "to": "N01",
+      "kind": "utility",
+      "label": "N1 噪声",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.1,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 900,
+          "y": 347
+        },
+        {
+          "x": 900,
+          "y": 433
+        }
+      ]
+    },
+    {
+      "id": "E41",
+      "from": "P08",
+      "to": "N02",
+      "kind": "utility",
+      "label": "N2 噪声",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.1,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 890,
+          "y": 727
+        },
+        {
+          "x": 890,
+          "y": 953
+        }
+      ]
+    },
+    {
+      "id": "E42",
+      "from": "P09",
+      "to": "N02",
+      "kind": "utility",
+      "label": "N2 噪声",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.1,
+      "arrow": "closed",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 920,
+          "y": 822
+        },
+        {
+          "x": 920,
+          "y": 953
+        }
+      ]
+    },
+    {
+      "id": "E43",
+      "from": "N01",
+      "to": "NT",
+      "kind": "utility",
+      "label": "控制措施",
+      "route": "smoothstep",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.1,
+      "arrow": "closed",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-left",
+      "waypoints": [
+        {
+          "x": 940,
+          "y": 433
+        },
+        {
+          "x": 940,
+          "y": 1078
+        }
+      ]
+    },
+    {
+      "id": "E44",
+      "from": "N02",
+      "to": "NT",
+      "kind": "utility",
+      "label": "控制措施",
+      "route": "straight",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.1,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    },
+    {
+      "id": "E45",
+      "from": "NT",
+      "to": "NA",
+      "kind": "utility",
+      "label": "厂界影响",
+      "route": "straight",
+      "lineStyle": "dashed",
+      "stroke": "#222222",
+      "strokeWidth": 1.1,
+      "arrow": "closed",
+      "sourceHandle": "source-bottom",
+      "targetHandle": "target-top"
+    }
+  ],
+  "pollutionSources": [
+    {
+      "id": "G1",
+      "kind": "废气",
+      "processNodeIds": [
+        "P02"
+      ],
+      "nodeId": "G01",
+      "pollutants": [
+        "颗粒物（待确认）"
+      ],
+      "treatmentNodeId": "GT",
+      "destinationNodeId": "GA"
+    },
+    {
+      "id": "G2",
+      "kind": "废气",
+      "processNodeIds": [
+        "P04"
+      ],
+      "nodeId": "G02",
+      "pollutants": [
+        "颗粒物（待确认）"
+      ],
+      "treatmentNodeId": "GT",
+      "destinationNodeId": "GA"
+    },
+    {
+      "id": "G3",
+      "kind": "废气",
+      "processNodeIds": [
+        "P07"
+      ],
+      "nodeId": "G03",
+      "pollutants": [
+        "CO₂、异味等（待确认）"
+      ],
+      "treatmentNodeId": "GT",
+      "destinationNodeId": "GA"
+    },
+    {
+      "id": "G4",
+      "kind": "废气",
+      "processNodeIds": [
+        "P08",
+        "P09"
+      ],
+      "nodeId": "G04",
+      "pollutants": [
+        "不凝气、挥发性组分及异味（待确认）"
+      ],
+      "treatmentNodeId": "GT",
+      "destinationNodeId": "GA"
+    },
+    {
+      "id": "W1",
+      "kind": "废水",
+      "processNodeIds": [
+        "P06"
+      ],
+      "nodeId": "W01",
+      "pollutants": [
+        "水量及污染物（待确认）"
+      ],
+      "treatmentNodeId": "WT",
+      "destinationNodeId": "WA"
+    },
+    {
+      "id": "W2",
+      "kind": "废水",
+      "processNodeIds": [
+        "P07"
+      ],
+      "nodeId": "W02",
+      "pollutants": [
+        "水量及污染物（待确认）"
+      ],
+      "treatmentNodeId": "WT",
+      "destinationNodeId": "WA"
+    },
+    {
+      "id": "W3",
+      "kind": "废水",
+      "processNodeIds": [
+        "P08"
+      ],
+      "nodeId": "W03",
+      "pollutants": [
+        "废液性质、水量及污染物（待确认）"
+      ],
+      "treatmentNodeId": "WT",
+      "destinationNodeId": "WA"
+    },
+    {
+      "id": "W4",
+      "kind": "废水",
+      "processNodeIds": [
+        "P09"
+      ],
+      "nodeId": "W04",
+      "pollutants": [
+        "废液性质、水量及污染物（待确认）"
+      ],
+      "treatmentNodeId": "WT",
+      "destinationNodeId": "WA"
+    },
+    {
+      "id": "W5",
+      "kind": "废水",
+      "processNodeIds": [
+        "P10"
+      ],
+      "nodeId": "W05",
+      "pollutants": [
+        "水量及污染物（待确认）"
+      ],
+      "treatmentNodeId": "WT",
+      "destinationNodeId": "WA"
+    },
+    {
+      "id": "S1",
+      "kind": "固体废物",
+      "processNodeIds": [
+        "P03"
+      ],
+      "nodeId": "S01",
+      "pollutants": [
+        "除石、除铁杂质（待确认）"
+      ],
+      "treatmentNodeId": "ST",
+      "destinationNodeId": "SA"
+    },
+    {
+      "id": "S2",
+      "kind": "固体废物",
+      "processNodeIds": [
+        "P06"
+      ],
+      "nodeId": "S02",
+      "pollutants": [
+        "麦糟及其分离环节（待确认）"
+      ],
+      "treatmentNodeId": "ST",
+      "destinationNodeId": "SA"
+    },
+    {
+      "id": "S3",
+      "kind": "固体废物",
+      "processNodeIds": [
+        "P07"
+      ],
+      "nodeId": "S03",
+      "pollutants": [
+        "废酵母（待确认）"
+      ],
+      "treatmentNodeId": "ST",
+      "destinationNodeId": "SA"
+    },
+    {
+      "id": "N1",
+      "kind": "噪声",
+      "processNodeIds": [
+        "P04"
+      ],
+      "nodeId": "N01",
+      "pollutants": [
+        "设备噪声声级（待确认）"
+      ],
+      "treatmentNodeId": "NT",
+      "destinationNodeId": "NA"
+    },
+    {
+      "id": "N2",
+      "kind": "噪声",
+      "processNodeIds": [
+        "P08",
+        "P09"
+      ],
+      "nodeId": "N02",
+      "pollutants": [
+        "设备噪声声级（待确认）"
+      ],
+      "treatmentNodeId": "NT",
+      "destinationNodeId": "NA"
+    }
+  ],
+  "treatments": [
+    {
+      "id": "T-GAS",
+      "nodeId": "GT",
+      "name": "废气收集及处理设施",
+      "method": "待确认",
+      "destinationNodeId": "GA"
+    },
+    {
+      "id": "T-WATER",
+      "nodeId": "WT",
+      "name": "废水收集及处理设施",
+      "method": "待确认",
+      "destinationNodeId": "WA"
+    },
+    {
+      "id": "T-SOLID",
+      "nodeId": "ST",
+      "name": "固体废物分类收集/暂存",
+      "method": "待确认",
+      "destinationNodeId": "SA"
+    },
+    {
+      "id": "T-NOISE",
+      "nodeId": "NT",
+      "name": "噪声控制措施",
+      "method": "待确认",
+      "destinationNodeId": "NA"
+    }
+  ],
+  "legend": [
+    {
+      "label": "实线箭头",
+      "meaning": "生产物料流"
+    },
+    {
+      "label": "虚线箭头",
+      "meaning": "产污、治理及排放/处置路径"
+    },
+    {
+      "label": "G/W/S/N",
+      "meaning": "废气/废水/固体废物/噪声污染源"
+    }
+  ]
+}

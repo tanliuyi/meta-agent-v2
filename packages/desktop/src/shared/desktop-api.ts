@@ -136,6 +136,7 @@ import type {
 } from "./plugin-marketplace-contracts.ts";
 import type { PreferencesSnapshot, SavePreferencesInput, SavePreferencesResult } from "./preferences-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
+import type { ScmDiff, ScmSnapshot } from "./scm-contracts.ts";
 import type {
   SaveSettingsConfigInput,
   SaveSettingsConfigResult,
@@ -313,6 +314,13 @@ export interface DesktopApi {
     respond(projectId: string, threadId: string, response: HostResponse): Promise<void>;
     /** 按 attachment 租约读取 timeline 引用的图像资源主体；主体仅经此通道返回，不进 timeline。 */
     readImageResource(attachmentId: string, resourceId: string): Promise<SessionImageResource | undefined>;
+  };
+  scm: {
+    getSnapshot(projectId: string): Promise<ScmSnapshot>;
+    getDiff(projectId: string, path: string, staged?: boolean): Promise<ScmDiff>;
+    stage(projectId: string, path: string): Promise<void>;
+    unstage(projectId: string, path: string): Promise<void>;
+    discard(projectId: string, path: string): Promise<void>;
   };
   files: {
     getPath(file: File): string;

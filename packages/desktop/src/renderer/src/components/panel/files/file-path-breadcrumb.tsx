@@ -16,6 +16,8 @@ interface FilePathBreadcrumbProps {
   onDirectoryOpen(path: string): void;
   onOpen(node: FileNode): void;
   onPinOpen?(node: FileNode): void;
+  /** 只读模式仅显示路径，不打开目录弹层。 */
+  interactive?: boolean;
 }
 
 /** 文件路径导航；目录节点通过统一 Popover 展示可继续操作的文件树。 */
@@ -26,6 +28,7 @@ export function FilePathBreadcrumb({
   onDirectoryOpen,
   onOpen,
   onPinOpen,
+  interactive = true,
 }: FilePathBreadcrumbProps) {
   const [openDirectory, setOpenDirectory] = useState<string | null>(null);
   const segments = useMemo(() => filePathSegments(path), [path]);
@@ -41,7 +44,7 @@ export function FilePathBreadcrumb({
               </li>
             ) : null}
             <li>
-              {segment.directory ? (
+              {segment.directory && interactive ? (
                 <Popover
                   open={openDirectory === segment.path}
                   onOpenChange={(open) => {
@@ -78,8 +81,12 @@ export function FilePathBreadcrumb({
                   </PopoverContent>
                 </Popover>
               ) : (
-                <span className="file-breadcrumb-current" aria-current="page">
-                  <FileCode2 size={13} aria-hidden="true" />
+                <span className="file-breadcrumb-current" aria-current={segment.directory ? undefined : "page"}>
+                  {segment.directory ? (
+                    <Folder size={13} aria-hidden="true" />
+                  ) : (
+                    <FileCode2 size={13} aria-hidden="true" />
+                  )}
                   <span>{segment.label}</span>
                 </span>
               )}

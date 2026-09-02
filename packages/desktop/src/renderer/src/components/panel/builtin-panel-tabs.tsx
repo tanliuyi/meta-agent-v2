@@ -1,10 +1,12 @@
 import Files from "lucide-react/dist/esm/icons/files.mjs";
+import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
 import Globe from "lucide-react/dist/esm/icons/globe.mjs";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
 import { registerWorkbenchPanelTab } from "../../state/panel-tab-registry.ts";
 import { BrowserPanelTab } from "./browser/browser-panel-tab.tsx";
-import { BROWSER_PANEL_KIND, FILES_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
+import { BROWSER_PANEL_KIND, FILES_PANEL_KIND, NEW_SESSION_PANEL_KIND, SCM_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { FilePanel } from "./files/file-panel.tsx";
+import { ScmPanel } from "./scm/scm-panel.tsx";
 import { NewSessionDraft } from "./session/new-session-draft.tsx";
 
 let registered = false;
@@ -20,6 +22,13 @@ export function registerBuiltinPanelTabs(): void {
     icon: <MessageSquare size={14} />,
     component: NewSessionDraft,
     order: 0,
+  });
+  registerWorkbenchPanelTab({
+    kind: SCM_PANEL_KIND,
+    label: "审查",
+    icon: <GitBranch size={14} />,
+    component: ScmPanel,
+    order: 1,
   });
   registerWorkbenchPanelTab({
     kind: FILES_PANEL_KIND,

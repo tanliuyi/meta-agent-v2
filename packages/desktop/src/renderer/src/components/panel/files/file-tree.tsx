@@ -32,6 +32,8 @@ interface FileTreeProps {
   onPinOpen?(node: FileNode): void;
   /** 节点右键菜单。 */
   renderContextMenu?(node: FileNode): ReactNode;
+  /** 节点行尾附加内容，例如 SCM 状态。 */
+  renderTrailingContent?(node: FileNode): ReactNode;
   /** 键盘复制/剪切当前聚焦节点。 */
   onCopy?(node: FileNode): void;
   onCut?(node: FileNode): void;
@@ -87,6 +89,7 @@ export function FileTree({
   onOpen,
   onPinOpen,
   renderContextMenu,
+  renderTrailingContent,
   onCopy,
   onCut,
   onPaste,
@@ -281,6 +284,7 @@ export function FileTree({
                   onOpen={onOpen}
                   onPinOpen={onPinOpen}
                   renderContextMenu={renderContextMenu}
+                  renderTrailingContent={renderTrailingContent}
                   onKeyDown={handleKeyDown}
                 />
               </div>
@@ -321,6 +325,7 @@ export function FileTree({
                   onOpen={onOpen}
                   onPinOpen={onPinOpen}
                   renderContextMenu={renderContextMenu}
+                  renderTrailingContent={renderTrailingContent}
                   onKeyDown={handleKeyDown}
                 />
               </div>

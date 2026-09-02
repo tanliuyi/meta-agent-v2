@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 import {
   useSessionControlSelector,
@@ -22,6 +23,11 @@ export function WorkbenchPanel({
   const panelOpen = useSessionWorkbenchSelector((workbench) => workbench?.panelOpen === true);
   const panelWidth = useSessionWorkbenchSelector((workbench) => workbench?.panelWidth ?? 0);
   const tabs = useSessionWorkbenchTabs();
+  useEffect(() => {
+    const openScm = () => tabs.openPanelTab("scm");
+    window.addEventListener("desktop:open-scm", openScm);
+    return () => window.removeEventListener("desktop:open-scm", openScm);
+  }, [tabs]);
   if (!accessible) return null;
   return (
     <>

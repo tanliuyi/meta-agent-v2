@@ -371,6 +371,13 @@ const desktopApi: DesktopApi = {
     readImageResource: (attachmentId, resourceId) =>
       ipcRenderer.invoke(CHANNELS.sessionsReadImageResource, attachmentId, resourceId),
   },
+  scm: {
+    getSnapshot: (projectId) => ipcRenderer.invoke(CHANNELS.scmGetSnapshot, projectId),
+    getDiff: (projectId, path, staged) => ipcRenderer.invoke(CHANNELS.scmGetDiff, projectId, path, staged),
+    stage: (projectId, path) => ipcRenderer.invoke(CHANNELS.scmStage, projectId, path),
+    unstage: (projectId, path) => ipcRenderer.invoke(CHANNELS.scmUnstage, projectId, path),
+    discard: (projectId, path) => ipcRenderer.invoke(CHANNELS.scmDiscard, projectId, path),
+  },
   files: {
     getPath: (file) => webUtils.getPathForFile(file),
     list: (projectId, path, query, requestGroup) =>

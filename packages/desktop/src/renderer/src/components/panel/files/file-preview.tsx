@@ -4,7 +4,7 @@ import ArrowDown from "lucide-react/dist/esm/icons/arrow-down.mjs";
 import ArrowUp from "lucide-react/dist/esm/icons/arrow-up.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
-import type { CSSProperties, KeyboardEvent, UIEvent } from "react";
+import type { CSSProperties, KeyboardEvent, RefObject, UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { TextFile } from "../../../../../shared/contracts.ts";
 import { resolveTokenStyle } from "../../assistant-ui/streamdown/streamdown-code-line.tsx";
@@ -31,13 +31,29 @@ interface FilePreviewProps {
   degraded?: boolean;
   initialScrollTop?: number;
   onScrollChange(top: number): void;
+  /** 可选的逐行语义装饰，供 diff 等只读代码视图复用。 */
+  lineDecorations?: readonly ("added" | "removed" | undefined)[];
+  /** 默认显示代码 minimap；diff 双栏可关闭并使用共享 diff overview。 */
+  showMinimap?: boolean;
+  /** 暴露滚动容器，供 diff 编辑器同步两侧滚动。 */
+  scrollElementRef?: RefObject<HTMLPreElement | null>;
 }
 
 /**
  * 只读代码预览。行窗口化渲染（对齐 VS Code ViewLines：只创建可见行 DOM），
  * wrap 模式下按实际行高动态测量；内置文件内查找（对齐 find widget）。
  */
-export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop, onScrollChange }: FilePreviewProps) {
+export function FilePreview({
+  file,
+  highlight,
+  wrap,
+  degraded,
+  initialScrollTop,
+  onScrollChange,
+  lineDecorations,
+  showMinimap = true,
+  scrollElementRef,
+}: FilePreviewProps) {
   const preRef = useRef<HTMLPreElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
@@ -77,6 +93,14 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
     // 只在文件实例挂载时恢复一次。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const setPreElement = useCallback(
+    (element: HTMLPreElement | null) => {
+      preRef.current = element;
+      if (scrollElementRef) scrollElementRef.current = element;
+    },
+    [scrollElementRef],
+  );
 
   // 行高与横向滚动条占位随文件内容/换行模式变化重测：文件监听 revision 重读（同路径内容变化）时组件不重挂载，
   // 不能只依赖 ResizeObserver（body 盒尺寸不变、不触发回调），必须在此直接同步。
@@ -246,7 +270,7 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
       ) : null}
       <div ref={previewBodyRef} className="file-preview-body">
         <pre
-          ref={preRef}
+          ref={setPreElement}
           tabIndex={0}
           aria-label={`${file.path} 内容`}
           data-language={file.language}
@@ -284,6 +308,7 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
                   data-index={lineIndex}
                   ref={virtualizer.measureElement}
                   className="file-preview-row"
+                  data-diff={lineDecorations?.[lineIndex]}
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                 >
                   <span
@@ -332,12 +357,14 @@ export function FilePreview({ file, highlight, wrap, degraded, initialScrollTop,
             })}
           </div>
         </pre>
-        <FileMinimap
-          lines={lines}
-          tokenSegments={minimapTokens}
-          scrollElement={preRef}
-          onNavigate={handleMinimapNavigate}
-        />
+        {showMinimap ? (
+          <FileMinimap
+            lines={lines}
+            tokenSegments={minimapTokens}
+            scrollElement={preRef}
+            onNavigate={handleMinimapNavigate}
+          />
+        ) : null}
       </div>
     </div>
   );

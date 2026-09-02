@@ -17,6 +17,7 @@ interface FileTreeNodeRowProps {
   onOpen(node: FileNode): void;
   onPinOpen?(node: FileNode): void;
   renderContextMenu?(node: FileNode): ReactNode;
+  renderTrailingContent?(node: FileNode): ReactNode;
   onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number): void;
 }
 
@@ -29,6 +30,7 @@ export function FileTreeNodeRow({
   onOpen,
   onPinOpen,
   renderContextMenu,
+  renderTrailingContent,
   onKeyDown,
 }: FileTreeNodeRowProps) {
   const node = row.node;
@@ -77,7 +79,8 @@ export function FileTreeNodeRow({
       ) : (
         <FileTypeIcon name={node.name} />
       )}
-      <span>{node.name}</span>
+      <span className="file-row-label">{node.name}</span>
+      {renderTrailingContent?.(node)}
     </button>
   );
 
