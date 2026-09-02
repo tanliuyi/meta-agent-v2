@@ -11,6 +11,7 @@
 import {
   checkSiteAccess,
   defaultSiteApproval,
+  isLocalSiteUrl,
   normalizeSitePattern,
   type SitePolicySettings,
 } from "../../../../../shared/browser-site-policy.ts";
@@ -51,6 +52,7 @@ export class SiteAccessController {
       };
     }
     if (access === "allowed") return { allowed: true };
+    if (settings.allowLocalhostWithoutConfirmation === true && isLocalSiteUrl(url)) return { allowed: true };
 
     const host = displayHost(url);
     const approval = defaultSiteApproval(settings);

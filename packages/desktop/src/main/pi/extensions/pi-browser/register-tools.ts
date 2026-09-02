@@ -20,7 +20,7 @@ import type {
   BrowserTab,
 } from "../../../../shared/browser-contracts.ts";
 import type { BrowserConfirmMode, BrowserHistoryAccessMode } from "../../../../shared/browser-settings-contracts.ts";
-import { checkSiteAccess, type SitePolicySettings } from "../../../../shared/browser-site-policy.ts";
+import { checkSiteAccess, isLocalSiteUrl, type SitePolicySettings } from "../../../../shared/browser-site-policy.ts";
 import { BrowserClient } from "./lib/browser-client.ts";
 import { spillSnapshotText } from "./lib/render-snapshot.ts";
 import { SiteAccessController } from "./lib/site-access.ts";
@@ -1204,6 +1204,7 @@ function tabListDetails(tabs: BrowserTab[]): Array<{ tabId: number; title: strin
 
 type BrowserPolicySettings = SitePolicySettings & {
   confirmSensitiveActions?: BrowserConfirmMode;
+  allowLocalhostWithoutConfirmation?: boolean;
   historyAccess?: BrowserHistoryAccessMode;
   includeScreenshots?: boolean;
 };
@@ -1328,6 +1329,7 @@ async function confirmSensitiveAction(
   actionName: string,
   signal?: AbortSignal,
 ): Promise<boolean> {
+  if (settings.allowLocalhostWithoutConfirmation === true && isLocalSiteUrl(targetUrl)) return true;
   if (settings.confirmSensitiveActions === "unlisted-sites" && checkSiteAccess(settings, targetUrl) === "allowed") {
     return true;
   }

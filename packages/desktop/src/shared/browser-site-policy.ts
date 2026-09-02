@@ -17,6 +17,7 @@ export interface SitePolicySettings {
   blockSites: string[];
   siteApproval?: SiteApprovalMode;
   enabled?: boolean;
+  allowLocalhostWithoutConfirmation?: boolean;
 }
 
 /** pattern 是否为合法站点条目（非空、无协议、无路径/查询/哈希、host 可解析）。 */
@@ -60,6 +61,15 @@ export function checkSiteAccess(settings: SitePolicySettings, url: string): Site
     if (siteMatches(pattern, url)) return "allowed";
   }
   return "unlisted";
+}
+
+export function isLocalSiteUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
 }
 
 /** 应用未列入站点的默认策略；旧快照缺少该字段时保持原来的询问行为。 */

@@ -52,6 +52,8 @@ export interface BrowserSettings {
   cdpTimeoutMs: number;
   /** 启动时恢复上次 tab 列表。 */
   restoreTabsOnLaunch: boolean;
+  /** 本地站点（localhost/127.0.0.1/::1）是否免除 Agent 确认。 */
+  allowLocalhostWithoutConfirmation: boolean;
   /** 敏感操作确认粒度：all = 每次表单提交都确认；unlisted-sites = 仅未允许站点确认。 */
   confirmSensitiveActions: BrowserConfirmMode;
 }
@@ -86,6 +88,7 @@ export function defaultBrowserSettings(): BrowserSettings {
     maxSnapshotNodes: 200,
     cdpTimeoutMs: 10_000,
     restoreTabsOnLaunch: true,
+    allowLocalhostWithoutConfirmation: true,
     confirmSensitiveActions: "all",
   };
 }
@@ -110,6 +113,10 @@ export function normalizeBrowserSettings(data: unknown): BrowserSettings {
     cdpTimeoutMs: boundedIntOr(src.cdpTimeoutMs, base.cdpTimeoutMs, 1_000, 120_000),
     restoreTabsOnLaunch:
       typeof src.restoreTabsOnLaunch === "boolean" ? src.restoreTabsOnLaunch : base.restoreTabsOnLaunch,
+    allowLocalhostWithoutConfirmation:
+      typeof src.allowLocalhostWithoutConfirmation === "boolean"
+        ? src.allowLocalhostWithoutConfirmation
+        : base.allowLocalhostWithoutConfirmation,
     confirmSensitiveActions: src.confirmSensitiveActions === "unlisted-sites" ? "unlisted-sites" : "all",
   };
 }
@@ -158,6 +165,9 @@ export function validateBrowserSettings(settings: unknown): string[] {
     errors.push("下载目录无效");
   }
   if (typeof source.restoreTabsOnLaunch !== "boolean") errors.push("标签页恢复开关无效");
+  if (typeof source.allowLocalhostWithoutConfirmation !== "boolean") {
+    errors.push("本地站点确认豁免设置无效");
+  }
   if (source.confirmSensitiveActions !== "all" && source.confirmSensitiveActions !== "unlisted-sites") {
     errors.push("敏感操作确认策略无效");
   }

@@ -39,6 +39,7 @@ function settingsEqual(left: BrowserSettings, right: BrowserSettings): boolean {
     left.maxSnapshotNodes === right.maxSnapshotNodes &&
     left.cdpTimeoutMs === right.cdpTimeoutMs &&
     left.restoreTabsOnLaunch === right.restoreTabsOnLaunch &&
+    left.allowLocalhostWithoutConfirmation === right.allowLocalhostWithoutConfirmation &&
     left.confirmSensitiveActions === right.confirmSensitiveActions
   );
 }

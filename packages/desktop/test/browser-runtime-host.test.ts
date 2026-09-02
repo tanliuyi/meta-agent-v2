@@ -516,6 +516,20 @@ describe("browser runtime host 会话路由", () => {
     unsubscribeB();
   });
 
+  test("后台会话多个建 tab 请求在面板挂载时全部重放", () => {
+    desktop.attach.mockImplementation(() => new Promise(() => undefined));
+    ensureBrowserRuntime(SESSION_B);
+    const sessionKey = browserSessionKey(SESSION_A);
+    desktop.createHandler?.({ requestId: 61, url: "https://a-one.example/", sessionKey });
+    desktop.createHandler?.({ requestId: 62, url: "https://a-two.example/", sessionKey });
+
+    const opened: string[] = [];
+    const unsubscribe = subscribeBrowserCreateRequest(sessionKey, () => opened.push(sessionKey));
+
+    expect(opened).toEqual([sessionKey, sessionKey]);
+    unsubscribe();
+  });
+
   test("runtime 变更订阅：attach 完成后通知面板", async () => {
     const runtime = ensureBrowserRuntime(SESSION_A);
     const notifications: number[] = [];

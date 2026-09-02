@@ -267,12 +267,10 @@ function handleNativeCreateTabRequest(request: BrowserCreateTabRequest): void {
   if (internals && !internals.handledRequestIds.has(request.requestId)) {
     createViewForRequest(internals, request.requestId);
   }
-  if (!notifiedRequestIds.has(key)) {
+  const listeners = createRequestListeners.get(request.sessionKey);
+  if (!notifiedRequestIds.has(key) && listeners && listeners.size > 0) {
     notifiedRequestIds.add(key);
-    const listeners = createRequestListeners.get(request.sessionKey);
-    if (listeners) {
-      for (const listener of [...listeners]) listener();
-    }
+    for (const listener of [...listeners]) listener();
   }
 }
 
@@ -421,7 +419,6 @@ export function subscribeBrowserCreateRequest(sessionKey: string, listener: () =
       continue;
     notifiedRequestIds.add(createRequestKey(sessionKey, request.requestId));
     listener();
-    break;
   }
   return () => {
     listeners.delete(listener);

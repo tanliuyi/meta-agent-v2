@@ -351,6 +351,19 @@ export function BrowserSettingsPage() {
               }
             />
           </div>
+          <div className="settings-row">
+            <div className="settings-row-text">
+              <span>本地站点免确认</span>
+              <p className="settings-row-description">对 localhost、127.0.0.1 和 ::1 跳过访问及敏感操作确认</p>
+            </div>
+            <Switch
+              aria-label="本地站点免确认"
+              checked={draft.allowLocalhostWithoutConfirmation}
+              onCheckedChange={(allowLocalhostWithoutConfirmation) =>
+                controller.mutateSettings({ allowLocalhostWithoutConfirmation })
+              }
+            />
+          </div>
         </section>
 
         <section className="settings-section" aria-labelledby="browser-site-permissions-heading">

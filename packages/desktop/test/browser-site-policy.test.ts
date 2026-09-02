@@ -6,6 +6,7 @@ import { describe, expect, test, vi } from "vitest";
 import { SiteAccessController } from "../src/main/pi/extensions/pi-browser/lib/site-access.ts";
 import {
   checkSiteAccess,
+  isLocalSiteUrl,
   isSitePatternValid,
   normalizeSitePattern,
   parseSiteListInput,
@@ -29,6 +30,15 @@ describe("normalizeSitePattern / isSitePatternValid", () => {
     expect(isSitePatternValid("example.com:8080")).toBe(true);
     expect(isSitePatternValid("example.com:http")).toBe(false);
     expect(isSitePatternValid(":8080")).toBe(false);
+  });
+});
+
+describe("isLocalSiteUrl", () => {
+  test("识别 localhost 与 loopback 地址", () => {
+    expect(isLocalSiteUrl("http://localhost:3000/app")).toBe(true);
+    expect(isLocalSiteUrl("http://127.0.0.1:3000/app")).toBe(true);
+    expect(isLocalSiteUrl("http://[::1]:3000/app")).toBe(true);
+    expect(isLocalSiteUrl("https://example.com/")).toBe(false);
   });
 });
 
@@ -100,6 +110,36 @@ describe("SiteAccessController", () => {
     );
     expect(outcome).toMatchObject({ allowed: true });
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  test("本地站点默认免确认", async () => {
+    const controller = new SiteAccessController();
+    const confirm = vi.fn();
+    const outcome = await controller.check(
+      { allowSites: [], blockSites: [], allowLocalhostWithoutConfirmation: true },
+      "http://127.0.0.1:3000/",
+      confirm,
+    );
+    expect(outcome).toEqual({ allowed: true });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  test("关闭本地站点豁免后恢复确认，禁止列表仍优先", async () => {
+    const controller = new SiteAccessController();
+    const confirm = vi.fn().mockResolvedValue(true);
+    const outcome = await controller.check(
+      { allowSites: [], blockSites: [], allowLocalhostWithoutConfirmation: false },
+      "http://localhost:3000/",
+      confirm,
+    );
+    expect(outcome).toEqual({ allowed: true });
+    expect(confirm).toHaveBeenCalledOnce();
+    const blocked = await controller.check(
+      { allowSites: [], blockSites: ["127.0.0.1"], allowLocalhostWithoutConfirmation: true },
+      "http://127.0.0.1:3000/",
+      confirm,
+    );
+    expect(blocked).toMatchObject({ allowed: false, error: { kind: "blocked" } });
   });
 
   test("unlisted 首次确认通过后会话内记住 host，同 host 不再询问", async () => {
