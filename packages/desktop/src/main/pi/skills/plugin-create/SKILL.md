@@ -13,16 +13,41 @@ Treat a Desktop plugin as a standard Pi Extension. Do not invent a Desktop-only 
 1. Clarify the plugin's user-visible behavior, scope, external services, credentials, destructive actions, and whether it needs tools, commands, events, or a provider. Ask only for decisions that materially affect behavior or trust.
 2. Inspect the target directory, its package manager, existing extension patterns, TypeScript configuration, and installed Pi API types before writing code. Reuse local conventions and do not guess external API signatures.
 3. Choose the smallest viable structure:
-   - Use one `index.ts` for a small plugin without extra runtime dependencies.
-   - Use a directory with `index.ts` plus focused modules for shared state or multiple tools.
+   - Use a manifest-backed directory whenever the plugin exposes programmatic methods through `desktopPlugin`.
+   - Use one `index.ts` only for a small direct Pi extension without plugin methods.
    - Add `package.json` only when the plugin needs its own dependencies or is intended for distribution.
-4. Implement a default factory export that receives `ExtensionAPI`. Keep registration deterministic and move long-lived process, socket, watcher, and timer startup to `session_start` or the operation that needs it.
-5. Add an idempotent `session_shutdown` handler for every session-scoped resource. Pass `AbortSignal` through to cancellable work.
+4. Prefer a named `desktopPlugin` export for structured model-callable APIs. Give every method closed TypeBox parameter/result schemas and generate `plugin-api.json` plus `SKILL.md` API documentation from the same declaration source. Use a default `ExtensionAPI` factory only for intentional direct tools, commands, events, or providers; method-only plugins may omit it.
+5. Add an idempotent `session_shutdown` handler for every session-scoped resource used by a default Pi factory. Pass `AbortSignal` through to cancellable work.
 6. Validate parameter schemas, normalize paths against `ctx.cwd`, bound external input and output, and throw errors from tool execution when an operation fails.
 7. Run the narrowest available typecheck and focused tests. Test startup plus each registered tool, command, or event path without using paid provider calls.
 8. Explain how to load the exact entry through Desktop Settings > Extensions > Developer Mode > Add local extension. Changes affect new sessions immediately; run `/reload` in an existing session to reload its approved extensions.
 
-## Minimal Template
+## Programmatic Method Template
+
+Use this as the default shape for APIs that return structured JSON and do not require a separate top-level Pi tool lifecycle:
+
+```ts
+import { Type } from "typebox";
+
+export const desktopPlugin = {
+  schemaVersion: 1,
+  methods: [
+    {
+      name: "lookup",
+      description: "Look up one record by ID",
+      parameters: Type.Object({ id: Type.String() }, { additionalProperties: false }),
+      result: Type.Object({ title: Type.String() }, { additionalProperties: false }),
+      async execute(params, signal) {
+        return lookupRecord(params.id, signal);
+      },
+    },
+  ],
+};
+```
+
+The manifest must declare `plugin-methods.provide`, `pi.skills`, and `pi.pluginCall`; the catalog must exactly match this declaration. The primary skill must document canonical bracket syntax such as `plugin["com.example.records"].lookup(...)`, link `references/api.md`, and explain limits, side effects, errors, and workflows. Do not also register the same operation with `pi.registerTool()`.
+
+## Direct Tool Template
 
 Use the currently installed package exports. `typebox` is available for tool schemas, and `StringEnum` from `@earendil-works/pi-ai` should be used for string enums that must work across providers.
 
@@ -94,7 +119,7 @@ Marketplace accounts, publisher authorization, artifact assembly, upload, signin
 
 Before declaring completion:
 
-1. Confirm the entry is a regular `.ts`, `.js`, `.mjs`, or `.cjs` file with a default extension factory export.
+1. Confirm a method plugin is a manifest-backed directory with a stable `plugin.id`, primary `SKILL.md`, generated `references/api.md`, and `plugin-api.json`; a direct-only extension entry remains a regular `.ts`, `.js`, `.mjs`, or `.cjs` file.
 2. Typecheck against the installed Pi packages and fix all diagnostics.
 3. Exercise every new tool, command, and event handler with deterministic fixtures or fakes.
 4. Verify cleanup on `session_shutdown` for opened resources.

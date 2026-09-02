@@ -13,7 +13,7 @@ Use this skill as the Desktop-specific reference while implementing a standard P
 A Desktop plugin is a standard Pi Extension running as trusted Node.js code inside the Desktop sidecar. It is not an Electron renderer plugin and it is not sandboxed.
 
 - Import the public exports from the installed Pi packages. Do not import Desktop main-process, preload, renderer, or private sidecar modules.
-- Export a default factory that receives `ExtensionAPI`.
+- Export a named `desktopPlugin` declaration for structured programmatic methods; use a default factory only for intentional direct Pi tools, commands, events, or providers. Method-only plugins may omit the default factory.
 - Keep file, network, subprocess, environment-variable, credential, native-code, and destructive-operation risks visible to the user.
 - Declare capabilities from actual behavior. Capability declarations are compatibility and review metadata, not a sandbox.
 - Keep long-lived resources behind `session_start` and clean them in an idempotent `session_shutdown` handler.
@@ -72,7 +72,12 @@ A directory selected through Developer Mode may include `market-manifest.json`. 
   },
   "pi": {
     "entry": "index.ts",
-    "extensionApi": "v1"
+    "extensionApi": "v1",
+    "skills": ["skills/plugin-example/SKILL.md"],
+    "pluginCall": {
+      "skill": "plugin-example",
+      "catalog": "plugin-api.json"
+    }
   },
   "desktop": {
     "hostProfileVersion": 1
@@ -81,16 +86,19 @@ A directory selected through Developer Mode may include `market-manifest.json`. 
     "platform": "universal",
     "arch": "universal"
   },
-  "capabilities": ["tools.register"],
+  "capabilities": ["plugin-methods.provide"],
   "nativeModules": [],
   "executables": [],
   "files": {
-    "index.ts": { "mode": "0644" }
+    "index.ts": { "mode": "0644" },
+    "plugin-api.json": { "mode": "0644" },
+    "skills/plugin-example/SKILL.md": { "mode": "0644" },
+    "skills/plugin-example/references/api.md": { "mode": "0644" }
   }
 }
 ```
 
-For a local development directory, Desktop reads `plugin.name`, `plugin.id`, `pi.entry`, `desktop.hostProfileVersion`, `capabilities`, and the optional `configuration`. Marketplace artifacts additionally require the complete identity, target, native/executable declarations, and payload file metadata described in [loading-and-packaging.md](references/loading-and-packaging.md).
+For a local development directory, Desktop reads `plugin.name`, `plugin.id`, `pi.entry`, `pi.skills`, `pi.pluginCall`, `desktop.hostProfileVersion`, `capabilities`, and the optional `configuration`. `plugin-api.json` must be generated from the same declaration as the named `desktopPlugin` export and sorted by method name. The primary skill name must match `pi.pluginCall.skill`, document `plugin["canonical.id"].method(...)`, and reference generated `references/api.md`. Marketplace artifacts additionally require the complete identity, target, native/executable declarations, and payload file metadata described in [loading-and-packaging.md](references/loading-and-packaging.md).
 
 ## Configuration Quick Start
 
@@ -147,7 +155,7 @@ Desktop configuration is scoped to the approved extension entry. Values are immu
 
 Before declaring a plugin ready:
 
-1. The entry is a regular `.ts`, `.js`, `.mjs`, or `.cjs` file with a default factory export.
+1. A method plugin uses a manifest-backed directory with a stable `plugin.id`, `desktopPlugin` named export, catalog, and primary skill; a direct-only plugin may use a default factory entry.
 2. The manifest uses `desktop.hostProfileVersion: 1` and declares only supported capabilities.
 3. Every schema field passes the v1 configuration parser and every required field has a valid value before runtime use.
 4. Every tool, command, provider, and event path has deterministic focused coverage.

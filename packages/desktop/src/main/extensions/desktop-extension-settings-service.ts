@@ -8,6 +8,7 @@ import type {
   DesktopExtensionDiagnostic,
   DesktopExtensionSettingsSnapshot,
   ExtensionScope,
+  PluginApiCatalogV1,
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
 } from "../../shared/desktop-extension-contracts.ts";
@@ -33,6 +34,11 @@ export interface StoredDevelopmentExtension {
   projectIds?: string[];
   /** 插件声明的身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
   pluginId?: string;
+  skillPaths?: string[];
+  pluginCallSkill?: string;
+  pluginCallCatalogPath?: string;
+  pluginCallCatalogSha256?: string;
+  pluginCallCatalog?: PluginApiCatalogV1;
 }
 
 export interface InternalDesktopExtensionSettings {
@@ -194,6 +200,11 @@ export class DesktopExtensionSettingsService {
                   ...(resolved.configurationSchema
                     ? { configurationSchema: resolved.configurationSchema }
                     : { configurationSchema: undefined }),
+                  skillPaths: resolved.skillPaths,
+                  pluginCallSkill: resolved.pluginCallSkill,
+                  pluginCallCatalogPath: resolved.pluginCallCatalogPath,
+                  pluginCallCatalogSha256: resolved.pluginCallCatalogSha256,
+                  pluginCallCatalog: resolved.pluginCallCatalog,
                 }
               : entry,
           )
@@ -208,6 +219,13 @@ export class DesktopExtensionSettingsService {
               ...(resolved.displayPath ? { displayPath: resolved.displayPath } : {}),
               ...(resolved.pluginId ? { pluginId: resolved.pluginId } : {}),
               ...(resolved.configurationSchema ? { configurationSchema: resolved.configurationSchema } : {}),
+              ...(resolved.skillPaths ? { skillPaths: [...resolved.skillPaths] } : {}),
+              ...(resolved.pluginCallSkill ? { pluginCallSkill: resolved.pluginCallSkill } : {}),
+              ...(resolved.pluginCallCatalogPath ? { pluginCallCatalogPath: resolved.pluginCallCatalogPath } : {}),
+              ...(resolved.pluginCallCatalogSha256
+                ? { pluginCallCatalogSha256: resolved.pluginCallCatalogSha256 }
+                : {}),
+              ...(resolved.pluginCallCatalog ? { pluginCallCatalog: resolved.pluginCallCatalog } : {}),
             },
           ];
       await this.atomicWrite({
@@ -325,6 +343,7 @@ export class DesktopExtensionSettingsService {
         ...(entry.configurationSchema
           ? { configurationSchema: clonePluginConfigurationSchema(entry.configurationSchema) }
           : {}),
+        ...(entry.skillPaths ? { skillPaths: [...entry.skillPaths] } : {}),
       };
     });
     return {
@@ -373,7 +392,10 @@ function developmentApprovalMatches(existing: StoredDevelopmentExtension, resolv
     existing.pluginId === resolved.pluginId &&
     existing.capabilities.length === resolved.capabilities.length &&
     existing.capabilities.every((capability, index) => capability === resolved.capabilities[index]) &&
-    JSON.stringify(existing.configurationSchema) === JSON.stringify(resolved.configurationSchema)
+    JSON.stringify(existing.configurationSchema) === JSON.stringify(resolved.configurationSchema) &&
+    JSON.stringify(existing.skillPaths) === JSON.stringify(resolved.skillPaths) &&
+    existing.pluginCallSkill === resolved.pluginCallSkill &&
+    existing.pluginCallCatalogSha256 === resolved.pluginCallCatalogSha256
   );
 }
 

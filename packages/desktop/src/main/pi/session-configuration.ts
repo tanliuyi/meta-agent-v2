@@ -16,8 +16,10 @@ import {
   controlledResourceLoaderOptions,
   extensionLoadDiagnostics,
   extensionServiceDiagnostics,
+  validatePluginSkills,
 } from "./desktop-extension-runtime-policy.ts";
 import { resolveThinkingConfiguration, selectInitialModel } from "./model-selection-adapter.ts";
+import { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-registry.ts";
 import { getDraftCommands } from "./session-commands.ts";
 
 export interface SessionConfigurationServices {
@@ -39,22 +41,46 @@ export async function loadDraftSessionConfig(
   let models: ModelRuntime;
   let settings: SettingsManager;
   let resources: ResourceLoader | undefined;
+  let pluginRegistryBuilder: DesktopPluginRegistryBuilder | undefined;
   let serviceDiagnostics: Array<{ type: string; message: string }> = [];
   if (services) {
     ({ models, settings, resources } = services);
   } else {
+    pluginRegistryBuilder = new DesktopPluginRegistryBuilder();
     const runtimeServices = await createAgentSessionServices({
       cwd,
       agentDir,
       resourceLoaderOptions: controlledResourceLoaderOptions(
         extensionSet,
         DesktopBuiltinProviderRegistry.getExtensionFactories(),
+        { pluginRegistryBuilder },
       ),
     });
     models = runtimeServices.modelRuntime;
     settings = runtimeServices.settingsManager;
     resources = runtimeServices.resourceLoader;
     serviceDiagnostics = runtimeServices.diagnostics;
+  }
+  const extensionDiagnostics = [
+    ...(resources ? extensionLoadDiagnostics(extensionSet, resources.getExtensions()) : extensionSet.diagnostics),
+    ...extensionServiceDiagnostics(extensionSet, serviceDiagnostics),
+    ...(resources ? validatePluginSkills(extensionSet, resources.getSkills()) : []),
+  ];
+  if (pluginRegistryBuilder) {
+    try {
+      pluginRegistryBuilder.finalize();
+    } catch (error) {
+      pluginRegistryBuilder.discard();
+      extensionDiagnostics.push({
+        extensionId: "unknown",
+        source: "builtin",
+        extensionSetGeneration: extensionSet.generation,
+        projectId: extensionSet.projectId,
+        phase: "register",
+        code: "DESKTOP_PLUGIN_ADMISSION_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   const available = await models.getAvailable();
   const initial = selectInitialModel(models, available, {
@@ -80,10 +106,7 @@ export async function loadDraftSessionConfig(
     readiness: sessionReadiness(Boolean(initial.model), available.length, models.getModels().length),
     extensions: {
       extensionSetGeneration: extensionSet.generation,
-      diagnostics: [
-        ...(resources ? extensionLoadDiagnostics(extensionSet, resources.getExtensions()) : extensionSet.diagnostics),
-        ...extensionServiceDiagnostics(extensionSet, serviceDiagnostics),
-      ],
+      diagnostics: extensionDiagnostics,
       plugins: (allEntries ?? extensionSet.entries).flatMap((entry) =>
         entry.source === "marketplace" || entry.source === "development"
           ? [

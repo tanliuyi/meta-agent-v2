@@ -11,7 +11,11 @@ const GIT_MAX_BUFFER = 8 * 1024 * 1024;
 
 /** Git source-control provider. The UI consumes resources, not porcelain output. */
 export class ScmService {
-  constructor(private readonly projects: ProjectStore) {}
+  private readonly projects: ProjectStore;
+
+  constructor(projects: ProjectStore) {
+    this.projects = projects;
+  }
 
   async getSnapshot(projectId: string): Promise<ScmSnapshot> {
     const cwd = this.projects.getCwd(projectId);

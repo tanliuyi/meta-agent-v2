@@ -68,7 +68,11 @@ function getDefaultEntries(root) {
   for (const fileName of iconFiles) {
     const iconPath = path.join(root, "assets", fileName);
     try {
-      if (statSync(iconPath).isFile()) return [entry, "src", path.posix.join("assets", fileName)];
+      if (statSync(iconPath).isFile()) {
+        const skills = Array.isArray(manifest?.pi?.skills) ? manifest.pi.skills : [];
+        const catalog = manifest?.pi?.pluginCall?.catalog;
+        return [...new Set([entry, "src", path.posix.join("assets", fileName), ...skills, ...(catalog ? [catalog] : [])])];
+      }
     } catch {
       // Try the next supported icon format.
     }

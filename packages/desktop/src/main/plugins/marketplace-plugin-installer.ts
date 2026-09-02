@@ -201,6 +201,15 @@ export class MarketplacePluginInstaller {
         capabilities: verified.capabilities,
         containsNativeCode: verified.containsNativeCode || artifact.containsNativeCode,
         ...(verified.configurationSchema ? { configurationSchema: verified.configurationSchema } : {}),
+        ...(verified.skillPaths.length > 0
+          ? { skillPaths: verified.skillPaths.map((path) => path.replace(stagingPath, versionPath)) }
+          : {}),
+        ...(verified.pluginCallSkill ? { pluginCallSkill: verified.pluginCallSkill } : {}),
+        ...(verified.pluginCallCatalogPath
+          ? { pluginCallCatalogPath: verified.pluginCallCatalogPath.replace(stagingPath, versionPath) }
+          : {}),
+        ...(verified.pluginCallCatalogSha256 ? { pluginCallCatalogSha256: verified.pluginCallCatalogSha256 } : {}),
+        ...(verified.pluginCallCatalog ? { pluginCallCatalog: verified.pluginCallCatalog } : {}),
         state: "installed",
         installedAt: this.now(),
         scope: "global",
@@ -330,6 +339,13 @@ export class MarketplacePluginInstaller {
         capabilities: verified.capabilities,
         containsNativeCode: verified.containsNativeCode || artifact.containsNativeCode,
         configurationSchema: verified.configurationSchema,
+        skillPaths: verified.skillPaths.map((path) => path.replace(stagingPath, versionPath)),
+        ...(verified.pluginCallSkill ? { pluginCallSkill: verified.pluginCallSkill } : {}),
+        ...(verified.pluginCallCatalogPath
+          ? { pluginCallCatalogPath: verified.pluginCallCatalogPath.replace(stagingPath, versionPath) }
+          : {}),
+        ...(verified.pluginCallCatalogSha256 ? { pluginCallCatalogSha256: verified.pluginCallCatalogSha256 } : {}),
+        ...(verified.pluginCallCatalog ? { pluginCallCatalog: verified.pluginCallCatalog } : {}),
         state: "installed",
         enabled: true,
         installedAt: this.now(),

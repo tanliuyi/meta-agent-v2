@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { lstat } from "node:fs/promises";
 import type {
   AgentSession,
   AgentSessionEvent,
@@ -10,6 +12,8 @@ import {
   type PiAssistantMessage,
   type PiAssistantPart,
   type PiAssistantStatus,
+  type PiPluginCallArtifact,
+  type PiPluginSubCallRecord,
   type PiQueueItem,
   type PiQuote,
   type PiThreadEvent,
@@ -73,6 +77,10 @@ export class PiThreadProjector {
   private readonly imageResources = new Map<string, { mimeType: string; data: string }>();
   /** 同一图像在 live、持久化和 branch rebuild 间复用 resourceId，避免重复主体与孤儿引用。 */
   private readonly imageResourceIds = new Map<string, string>();
+  private readonly pluginArtifacts = new Map<
+    string,
+    { toolCallId: string; canonicalPath: string; size: number; sha256: string }
+  >();
   private readonly registerImage = (mimeType: string, data: string) => this.registerImageResource(mimeType, data);
   private nodeIds: string[] = [];
   private nodeSnapshot: PiTimelineNode[] | undefined;
@@ -281,7 +289,10 @@ export class PiThreadProjector {
         this.replaceTool(event.toolCallId, (part) => ({
           ...part,
           execution: "running",
-          partialResult: toJson(event.partialResult),
+          partialResult: this.projectToolResultJson(event.partialResult),
+          ...(this.projectPluginCallArtifact(event.toolCallId, event.partialResult)
+            ? { pluginCall: this.projectPluginCallArtifact(event.toolCallId, event.partialResult) }
+            : {}),
         }));
         return;
       case "tool_execution_end":
@@ -289,6 +300,9 @@ export class PiThreadProjector {
           ...part,
           execution: event.isError ? "error" : "complete",
           result: this.projectToolResultJson(event.result),
+          ...(this.projectPluginCallArtifact(event.toolCallId, event.result)
+            ? { pluginCall: this.projectPluginCallArtifact(event.toolCallId, event.result) }
+            : {}),
           isError: event.isError,
         }));
         return;
@@ -365,6 +379,7 @@ export class PiThreadProjector {
   dispose(): void {
     this.flush();
     this.imageResources.clear();
+    this.pluginArtifacts.clear();
     this.imageResourceIds.clear();
   }
 
@@ -869,6 +884,17 @@ export class PiThreadProjector {
         ...(message.addedToolNames ? { addedToolNames: message.addedToolNames } : {}),
         ...(message.usage ? { usage: message.usage } : {}),
       }),
+      ...(this.projectPluginCallArtifact(message.toolCallId, {
+        content: message.content,
+        details: message.details,
+      })
+        ? {
+            pluginCall: this.projectPluginCallArtifact(message.toolCallId, {
+              content: message.content,
+              details: message.details,
+            }),
+          }
+        : {}),
       isError: message.isError,
     });
     if (emit) {
@@ -1019,15 +1045,109 @@ export class PiThreadProjector {
     return resource ? { resourceId, ...resource } : undefined;
   }
 
+  async resolvePluginCallArtifact(toolCallId: string, artifactId: string): Promise<string | undefined> {
+    const artifact = this.pluginArtifacts.get(artifactId);
+    if (artifact?.toolCallId !== toolCallId) return undefined;
+    try {
+      const info = await lstat(artifact.canonicalPath);
+      if (!info.isFile() || info.isSymbolicLink() || info.size !== artifact.size) return undefined;
+      return (await hashPluginArtifact(artifact.canonicalPath)) === artifact.sha256
+        ? artifact.canonicalPath
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** 将 toolResult 载荷中的图像主体替换为资源引用：content image parts 与 details 截图。 */
   private projectToolResultJson(value: unknown): JsonValue {
     if (!value || typeof value !== "object" || Array.isArray(value)) return toJson(value);
     const record = value as Record<string, unknown>;
+    const { details: rawDetails, ...publicRecord } = record;
+    const details = isPlainRecord(rawDetails) ? rawDetails : undefined;
     return toJson({
-      ...record,
+      ...publicRecord,
       ...(Array.isArray(record.content) ? { content: this.projectContentImages(record.content) } : {}),
-      ...(isPlainRecord(record.details) ? { details: this.projectDetailsImages(record.details) } : {}),
+      ...(details && details.kind !== "plugin-call-details-v1" ? { details: this.projectDetailsImages(details) } : {}),
     });
+  }
+
+  private projectPluginCallArtifact(toolCallId: string, value: unknown): PiPluginCallArtifact | undefined {
+    if (!isPlainRecord(value) || !isPlainRecord(value.details)) return undefined;
+    const details = value.details;
+    if (
+      details.kind !== "plugin-call-details-v1" ||
+      typeof details.description !== "string" ||
+      typeof details.generation !== "string" ||
+      !Array.isArray(details.calls) ||
+      !Array.isArray(details.logs) ||
+      !Array.isArray(details.attachments)
+    ) {
+      return undefined;
+    }
+    const content = Array.isArray(value.content) ? value.content : [];
+    const attachments: PiPluginCallArtifact["attachments"] = [];
+    for (const candidate of details.attachments) {
+      if (!isPlainRecord(candidate)) continue;
+      if (candidate.type === "image" && typeof candidate.data === "string" && typeof candidate.mimeType === "string") {
+        attachments.push({
+          type: "image",
+          ...this.registerImageResource(candidate.mimeType, candidate.data),
+          ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
+        });
+      } else if (
+        candidate.type === "image" &&
+        typeof candidate.contentIndex === "number" &&
+        isPlainRecord(content[candidate.contentIndex]) &&
+        content[candidate.contentIndex].type === "image" &&
+        typeof content[candidate.contentIndex].data === "string" &&
+        typeof content[candidate.contentIndex].mimeType === "string"
+      ) {
+        const image = content[candidate.contentIndex];
+        attachments.push({
+          type: "image",
+          ...this.registerImageResource(image.mimeType as string, image.data as string),
+          ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
+        });
+      } else if (
+        candidate.type === "file" &&
+        typeof candidate.artifactId === "string" &&
+        typeof candidate.canonicalPath === "string" &&
+        typeof candidate.name === "string" &&
+        typeof candidate.size === "number" &&
+        typeof candidate.sha256 === "string"
+      ) {
+        this.pluginArtifacts.set(candidate.artifactId, {
+          toolCallId,
+          canonicalPath: candidate.canonicalPath,
+          size: candidate.size,
+          sha256: candidate.sha256,
+        });
+        attachments.push({
+          type: "file",
+          artifactId: candidate.artifactId,
+          name: candidate.name,
+          size: candidate.size,
+          displayPath: candidate.name,
+          ...(typeof candidate.mimeType === "string" ? { mimeType: candidate.mimeType } : {}),
+        });
+      }
+    }
+    return {
+      kind: "plugin-call",
+      description: details.description,
+      generation: details.generation,
+      calls: details.calls.filter(isPluginSubCallRecord) as PiPluginSubCallRecord[],
+      logs: details.logs.flatMap((log) =>
+        isPlainRecord(log) &&
+        typeof log.sequence === "number" &&
+        typeof log.level === "string" &&
+        typeof log.text === "string"
+          ? [{ sequence: log.sequence, level: log.level, text: log.text }]
+          : [],
+      ),
+      attachments,
+    };
   }
 
   /** 替换 content 数组中 {type:image,data,mimeType} 图像主体的 data 为资源引用。 */
@@ -1079,6 +1199,29 @@ export class ProjectionError extends Error {
     super(message);
     this.name = "ProjectionError";
   }
+}
+
+function isPluginSubCallRecord(value: unknown): value is PiPluginSubCallRecord {
+  return (
+    isPlainRecord(value) &&
+    typeof value.sequence === "number" &&
+    typeof value.callId === "string" &&
+    typeof value.pluginId === "string" &&
+    typeof value.method === "string" &&
+    ["builtin", "curated", "marketplace", "development"].includes(String(value.source)) &&
+    ["queued", "running", "complete", "error", "aborted"].includes(String(value.state))
+  );
+}
+
+async function hashPluginArtifact(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  await new Promise<void>((resolvePromise, reject) => {
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", resolvePromise);
+    stream.on("error", reject);
+  });
+  return hash.digest("hex");
 }
 
 function slashResultRequestId(entry: SessionEntry): string | undefined {

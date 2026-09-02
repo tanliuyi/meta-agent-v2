@@ -10,6 +10,7 @@ Supported registrations and their capability metadata:
 
 | Pi surface | Capability |
 | --- | --- |
+| Named `desktopPlugin.methods` export | `plugin-methods.provide` |
 | `pi.on(...)` | `events.subscribe` |
 | `pi.getConfig()` | `configuration.read` |
 | `pi.registerTool(...)` | `tools.register` |
@@ -22,7 +23,7 @@ Supported registrations and their capability metadata:
 | Compaction requests/hooks | `session.compact` |
 | Supported Desktop UI calls | The matching `ui.*` capability |
 
-Capability names are declared in `market-manifest.json` and are checked for manifest compatibility. They are not a process sandbox; an extension still executes with the sidecar process's account permissions.
+Programmatic methods are discovered by the Desktop wrapper before the optional default factory runs. They are exposed to the model only through one fixed `plugin_call` tool and do not run through nested Pi tool hooks. Their TypeBox schemas must use closed objects and JSON-compatible result types, and the manifest catalog and primary skill must match the declaration exactly.
 
 ## Supported UI
 
@@ -85,6 +86,6 @@ For local development:
 1. Enable Developer Mode in Desktop Settings > Extensions.
 2. Add the plugin directory when it contains `market-manifest.json`, or add the entry file for a minimal plugin.
 3. Confirm the manifest entry is a regular non-symlink file and the host profile is version 1.
-4. Start a new session, or run `/reload` in an existing session when the extension set is reloadable.
+4. Start a new session or apply the extension change so Desktop replaces the worker generation. Resource reload never mutates a live plugin method registry.
 5. Test every registered tool, command, event, and shutdown path with deterministic fixtures.
 6. Rebuild the sidecar before a real Electron smoke test so the test does not use stale copied resources.

@@ -11,6 +11,7 @@ import type {
   ExtensionFactory,
   InlineExtension,
   LoadExtensionsResult,
+  Skill,
 } from "@earendil-works/pi-coding-agent";
 import * as bundledPiCodingAgent from "@earendil-works/pi-coding-agent";
 import * as bundledPiTui from "@earendil-works/pi-tui";
@@ -23,6 +24,8 @@ import {
   type DesktopExtensionDiagnostic,
   type ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
+import { createPluginCallExtension, type PluginCallRegistryHolder } from "./plugin-call/plugin-call-tool.ts";
+import type { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-registry.ts";
 
 const NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES = new Set(["DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT"]);
 
@@ -122,7 +125,12 @@ export async function validateResolvedExtensionSet(
 export function controlledResourceLoaderOptions(
   set: ResolvedExtensionSet,
   extensionFactories: InlineExtension[],
-  options: { includeBuiltinSkills?: boolean } = {},
+  options: {
+    includeBuiltinSkills?: boolean;
+    pluginRegistry?: PluginCallRegistryHolder;
+    pluginRegistryBuilder?: DesktopPluginRegistryBuilder;
+    cwd?: string;
+  } = {},
 ) {
   const pathBackedFactories = set.entries.flatMap((entry): InlineExtension[] => {
     if (!entry.entryPath) return [];
@@ -132,18 +140,32 @@ export function controlledResourceLoaderOptions(
       {
         name: entry.id,
         factory: async (pi) => {
-          const factory = await jiti.import<ExtensionFactory>(entryPath, { default: true });
-          if (typeof factory !== "function") {
-            throw new Error(`Extension does not export a valid factory function: ${entry.displayName}`);
+          try {
+            const namespace = await jiti.import<Record<string, unknown>>(entryPath);
+            const declaration = Object.hasOwn(namespace, "desktopPlugin") ? namespace.desktopPlugin : undefined;
+            const hasDeclaration = declaration !== undefined;
+            if (hasDeclaration || entry.capabilities.includes("plugin-methods.provide")) {
+              if (!options.pluginRegistryBuilder) throw new Error("Plugin registry builder unavailable");
+              options.pluginRegistryBuilder.stage(entry, declaration);
+            }
+            const factory = namespace.default as ExtensionFactory | undefined;
+            if (typeof factory === "function") {
+              const desktopApi = new Proxy(pi, {
+                get(target, property, receiver) {
+                  if (property === "getConfig")
+                    return <T = DesktopExtensionConfiguration>() => configuration as Readonly<T>;
+                  return Reflect.get(target, property, receiver);
+                },
+              }) as DesktopExtensionAPI;
+              await factory(desktopApi);
+            } else if (!hasDeclaration) {
+              throw new Error(`Extension does not export a valid factory function: ${entry.displayName}`);
+            }
+            if (hasDeclaration) options.pluginRegistryBuilder?.commit(entry.id);
+          } catch (error) {
+            options.pluginRegistryBuilder?.rollback(entry.id);
+            throw error;
           }
-          const desktopApi = new Proxy(pi, {
-            get(target, property, receiver) {
-              if (property === "getConfig")
-                return <T = DesktopExtensionConfiguration>() => configuration as Readonly<T>;
-              return Reflect.get(target, property, receiver);
-            },
-          }) as DesktopExtensionAPI;
-          await factory(desktopApi);
         },
       },
     ];
@@ -151,11 +173,56 @@ export function controlledResourceLoaderOptions(
   return {
     noExtensions: true,
     additionalExtensionPaths: [],
-    additionalSkillPaths:
-      options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))],
-    extensionFactories: [...extensionFactories, ...pathBackedFactories],
+    additionalSkillPaths: [
+      ...(options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))]),
+      ...set.entries.flatMap((entry) => entry.skillPaths ?? []),
+    ],
+    extensionFactories: [
+      ...extensionFactories,
+      ...(options.pluginRegistry &&
+      options.pluginRegistryBuilder &&
+      set.entries.some(
+        (entry) =>
+          entry.capabilities.includes("plugin-methods.provide") &&
+          entry.pluginCallCatalog !== undefined &&
+          entry.pluginCallCatalog.methods.length > 0,
+      )
+        ? [createPluginCallExtension(options.pluginRegistry, options.cwd ?? process.cwd())]
+        : []),
+      ...pathBackedFactories,
+    ],
     packageManagerOnMissing: async () => "error" as const,
   };
+}
+
+export function validatePluginSkills(
+  set: ResolvedExtensionSet,
+  loaded: { skills: Skill[]; diagnostics: Array<{ type: string; message: string; path?: string }> },
+): DesktopExtensionDiagnostic[] {
+  const diagnostics: DesktopExtensionDiagnostic[] = [];
+  for (const entry of set.entries) {
+    if (!entry.capabilities.includes("plugin-methods.provide")) continue;
+    const primaryName = entry.pluginCallSkill;
+    const approvedPaths = new Set((entry.skillPaths ?? []).map((path) => resolve(path)));
+    const primary = loaded.skills.find(
+      (skill) => skill.name === primaryName && approvedPaths.has(resolve(skill.filePath)),
+    );
+    const pathDiagnostic = loaded.diagnostics.find(
+      (diagnostic) => diagnostic.path !== undefined && approvedPaths.has(resolve(diagnostic.path)),
+    );
+    if (!primary || !primary.description.trim() || primary.disableModelInvocation || pathDiagnostic) {
+      diagnostics.push({
+        extensionId: entry.id,
+        source: entry.source,
+        extensionSetGeneration: set.generation,
+        projectId: set.projectId,
+        phase: "load",
+        code: "DESKTOP_PLUGIN_SKILL_INVALID",
+        message: pathDiagnostic?.message ?? `Plugin ${entry.displayName} primary skill is missing or invalid`,
+      });
+    }
+  }
+  return diagnostics;
 }
 
 export function extensionServiceDiagnostics(

@@ -2,6 +2,7 @@ import { BrowserContent } from "./browser-content.tsx";
 import { CommandContent } from "./command-content.tsx";
 import { EditContent } from "./edit-content.tsx";
 import { MemoryContent } from "./memory-content.tsx";
+import { PluginCallContent } from "./plugin-call-content.tsx";
 import { ReadContent } from "./read-content.tsx";
 import { SearchContent } from "./search-content.tsx";
 import { SkillManageContent } from "./skill-manage-content.tsx";
@@ -13,7 +14,8 @@ import { ToolResult } from "./tool-result.tsx";
 import { WriteContent } from "./write-content.tsx";
 
 /** 为 Pi 常用工具复刻 TUI 的标题/预览信息密度，未知工具保留 JSON fallback。 */
-export function ToolContent({ name, args, result, error, expanded, argsComplete }: ToolContentProps) {
+export function ToolContent({ name, args, result, error, expanded, argsComplete, artifact }: ToolContentProps) {
+  if (name === "plugin_call") return <PluginCallContent args={args} artifact={artifact} />;
   if (name === "bash") {
     return <CommandContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />;
   }

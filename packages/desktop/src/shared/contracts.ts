@@ -8,7 +8,7 @@ import type {
 export type { DesktopExtensionHostState } from "./desktop-extension-contracts.ts";
 
 /** Desktop 与 renderer 之间使用的协议版本。 */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /** Desktop 内部通用对话工作区的稳定 ID。不出现在主界面项目列表，但参与设置页（子智能体/记忆）的项目作用域。 */
 export const GENERAL_WORKSPACE_ID = "__general__";
@@ -260,6 +260,47 @@ export interface PiAssistantUsage {
   };
 }
 
+export interface PiPluginSubCallRecord {
+  sequence: number;
+  callId: string;
+  pluginId: string;
+  method: string;
+  source: "builtin" | "curated" | "marketplace" | "development";
+  state: "queued" | "running" | "complete" | "error" | "aborted";
+  startedAt?: number;
+  completedAt?: number;
+  durationMs?: number;
+  errorCode?: string;
+  progress?: JsonValue;
+}
+
+export interface PiPluginCallArtifact {
+  kind: "plugin-call";
+  description: string;
+  generation: string;
+  calls: PiPluginSubCallRecord[];
+  logs: Array<{ sequence: number; level: string; text: string }>;
+  attachments: Array<
+    | ({ type: "image"; name?: string } & SessionImageResourceRef)
+    | {
+        type: "file";
+        artifactId: string;
+        name: string;
+        mimeType?: string;
+        size: number;
+        displayPath: string;
+      }
+  >;
+  truncation?: { logs?: true; calls?: true; attachments?: true };
+}
+
+export interface OpenPluginCallArtifactInput {
+  projectId: string;
+  threadId: string;
+  toolCallId: string;
+  artifactId: string;
+}
+
 export interface PiToolCallPart {
   id: string;
   type: "tool-call";
@@ -270,6 +311,7 @@ export interface PiToolCallPart {
   execution: "streaming-args" | "waiting" | "running" | "complete" | "error";
   partialResult?: JsonValue;
   result?: JsonValue;
+  pluginCall?: PiPluginCallArtifact;
   isError?: boolean;
 }
 

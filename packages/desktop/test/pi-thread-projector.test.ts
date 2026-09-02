@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentSession, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { PiThreadProjector, ProjectionError } from "../src/main/pi/pi-thread-projector.ts";
@@ -908,6 +912,87 @@ describe("PiThreadProjector", () => {
       provenance: expect.objectContaining({ thinkingLevel: "xhigh" }),
     });
     projector.dispose();
+  });
+
+  it("projects plugin details through an allowlist and verifies file artifacts before opening", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pi-plugin-artifact-"));
+    const file = join(root, "report.txt");
+    await writeFile(file, "safe", "utf8");
+    const sha256 = createHash("sha256").update("safe").digest("hex");
+    const { session } = sessionHarness([]);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const assistant = assistantMessage("toolUse", 1, [
+      {
+        type: "toolCall",
+        id: "plugin-1",
+        name: "plugin_call",
+        arguments: { code: "return 1", description: "Run plugin" },
+      },
+    ]);
+    projector.handle({ type: "message_start", message: assistant });
+    projector.handle({
+      type: "tool_execution_end",
+      toolCallId: "plugin-1",
+      toolName: "plugin_call",
+      isError: false,
+      result: {
+        content: [
+          { type: "text", text: "done" },
+          { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+        ],
+        details: {
+          kind: "plugin-call-details-v1",
+          description: "Run plugin",
+          runId: "plugin-1",
+          generation: "generation-1",
+          calls: [
+            {
+              sequence: 1,
+              callId: "sub-1",
+              pluginId: "com.example.plugin",
+              method: "run",
+              source: "marketplace",
+              state: "complete",
+            },
+          ],
+          logs: [{ sequence: 1, level: "info", text: "private log" }],
+          attachments: [
+            { type: "image", contentIndex: 1 },
+            {
+              type: "file",
+              artifactId: "artifact-1",
+              canonicalPath: file,
+              name: "report.txt",
+              size: 4,
+              sha256,
+            },
+          ],
+        },
+      },
+    });
+
+    const node = projector.snapshot().nodes[0];
+    expect(node?.kind).toBe("assistant");
+    if (node?.kind !== "assistant") throw new Error("assistant node missing");
+    const part = node.content[0];
+    expect(part?.type).toBe("tool-call");
+    if (part?.type !== "tool-call") throw new Error("tool part missing");
+    expect(part.pluginCall).toMatchObject({
+      kind: "plugin-call",
+      description: "Run plugin",
+      calls: [{ pluginId: "com.example.plugin", method: "run" }],
+      attachments: [
+        { type: "image", mimeType: "image/png" },
+        { type: "file", artifactId: "artifact-1", displayPath: "report.txt" },
+      ],
+    });
+    expect(JSON.stringify(part.result)).not.toContain(file);
+    expect(JSON.stringify(part.result)).not.toContain(sha256);
+    await expect(projector.resolvePluginCallArtifact("plugin-1", "artifact-1")).resolves.toBe(file);
+    await writeFile(file, "evil", "utf8");
+    await expect(projector.resolvePluginCallArtifact("plugin-1", "artifact-1")).resolves.toBeUndefined();
+    projector.dispose();
+    await rm(root, { recursive: true, force: true });
   });
 });
 

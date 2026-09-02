@@ -6,6 +6,7 @@ export interface ToolContentProps {
   error: boolean;
   expanded: boolean;
   argsComplete: boolean;
+  artifact?: unknown;
 }
 
 /** 仅展示工具结果的组件属性。 */

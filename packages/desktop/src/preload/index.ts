@@ -370,6 +370,7 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.sessionsRespond, projectId, threadId, response),
     readImageResource: (attachmentId, resourceId) =>
       ipcRenderer.invoke(CHANNELS.sessionsReadImageResource, attachmentId, resourceId),
+    openPluginCallArtifact: (input) => ipcRenderer.invoke(CHANNELS.sessionsOpenPluginCallArtifact, input),
   },
   scm: {
     getSnapshot: (projectId) => ipcRenderer.invoke(CHANNELS.scmGetSnapshot, projectId),

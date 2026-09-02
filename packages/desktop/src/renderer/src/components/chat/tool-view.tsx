@@ -161,9 +161,14 @@ function toolHeader(
       context: numberSuffix(args.limit, "limit", true).trimStart(),
     };
   }
-  if (name === "subagent" || name === "subagent_wait") {
-    return subagentToolHeader(name, args, result);
+  if (name === "plugin_call") {
+    return {
+      label: "plugin",
+      target: textTarget(readToolStringArgument(args, "description") || "…"),
+      context: result ? pluginCallContext(result) : undefined,
+    };
   }
+
   if (name === "memory") {
     const actionLabel = MEMORY_ACTION_LABELS[readToolStringArgument(args, "action")];
     const scopeLabel = MEMORY_SCOPE_LABELS[readToolStringArgument(args, "target")];
@@ -232,6 +237,12 @@ const SKILL_ACTION_LABELS: Readonly<Record<string, string>> = {
   delete: "删除技能",
 };
 
+function pluginCallContext(result: unknown): string {
+  const details = result && typeof result === "object" && "details" in result ? result.details : undefined;
+  if (!details || typeof details !== "object" || !("calls" in details) || !Array.isArray(details.calls)) return "";
+  const active = details.calls.filter((call) => call && typeof call === "object" && call.state === "running").length;
+  return active > 0 ? `${active} 个调用运行中` : `${details.calls.length} 个调用`;
+}
 function subagentToolHeader(name: string, args: Readonly<Record<string, unknown>>, result?: unknown): ToolHeader {
   const call = parseSubagentCall(name, args);
   const details = result === undefined ? undefined : parseSubagentDetails(parseToolResult(result)?.details);

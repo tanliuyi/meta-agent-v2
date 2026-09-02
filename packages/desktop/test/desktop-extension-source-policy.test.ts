@@ -203,7 +203,13 @@ describe("DesktopExtensionSourcePolicy", () => {
   it("loads enabled marketplace entries from the main-owned installed registry", async () => {
     const harness = await createHarness();
     const marketplaceRoot = join(harness.root, "marketplace", "publisher.plugin");
-    const marketplaceEntry = join(marketplaceRoot, ".versions", "hash", "payload", "index.ts");
+    const marketplaceEntry = join(
+      marketplaceRoot,
+      ".versions",
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "payload",
+      "index.ts",
+    );
     await mkdir(join(marketplaceEntry, ".."), { recursive: true });
     const marketplaceSource = "export default function () {}\n";
     await writeFile(marketplaceEntry, marketplaceSource, "utf8");
@@ -213,7 +219,7 @@ describe("DesktopExtensionSourcePolicy", () => {
       marketplaceId: "local.market",
       version: "1.0.0",
       artifactId: "linux-x64",
-      artifactHash: "hash",
+      artifactHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       enabled: true,
       capabilities: ["tools.register", "configuration.read"],
       containsNativeCode: false,
@@ -279,7 +285,7 @@ describe("DesktopExtensionSourcePolicy", () => {
       marketplaceId: "local.market",
       version: "1.0.0",
       artifactId: "universal",
-      artifactHash: "hash",
+      artifactHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       enabled: true,
       capabilities: [],
       containsNativeCode: false,
@@ -652,7 +658,13 @@ async function createMarketplacePlugins(
   return Promise.all(
     specs.map(async (spec) => {
       const pluginRoot = join(root, "marketplace", spec.id);
-      const entryPath = join(pluginRoot, ".versions", "hash", "payload", "index.ts");
+      const entryPath = join(
+        pluginRoot,
+        ".versions",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "payload",
+        "index.ts",
+      );
       await mkdir(join(entryPath, ".."), { recursive: true });
       await writeFile(entryPath, "export default function () {}\n", "utf8");
       const plugin: InstalledMarketplacePluginRecord = {
@@ -661,7 +673,7 @@ async function createMarketplacePlugins(
         marketplaceId: "local.market",
         version: "1.0.0",
         artifactId: "universal",
-        artifactHash: "hash",
+        artifactHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         enabled: true,
         capabilities: [],
         containsNativeCode: false,

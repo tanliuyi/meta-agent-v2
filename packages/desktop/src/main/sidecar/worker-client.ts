@@ -465,6 +465,7 @@ export function isMutationCommand(commandType: SidecarCommand["type"]): boolean 
     "bootstrap",
     "subagentBootstrap",
     "getImageResource",
+    "resolvePluginCallArtifact",
     "getSummary",
     "getCheckpointDiff",
     "listSessions",

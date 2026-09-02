@@ -3,6 +3,7 @@ import type {
   ClearedQueue,
   DraftSessionConfig,
   HostResponse,
+  OpenPluginCallArtifactInput,
   SessionAttachInput,
   SessionAttachment,
   SessionBootstrap,
@@ -327,6 +328,20 @@ export class SessionSupervisor {
     const subscription = this.subscriptionFor(ownerId, attachmentId);
     if (!subscription) throw new Error("Session attachment is not active");
     return this.workers.readImageResource(subscription.projectId, subscription.threadId, resourceId);
+  }
+
+  async resolvePluginCallArtifact(ownerId: number, input: OpenPluginCallArtifactInput): Promise<string> {
+    if (!this.findSubscription(ownerId, input.projectId, input.threadId)) {
+      throw new Error("Session attachment is not active");
+    }
+    const path = await this.workers.resolvePluginCallArtifact(
+      input.projectId,
+      input.threadId,
+      input.toolCallId,
+      input.artifactId,
+    );
+    if (!path) throw new Error("Plugin call artifact is unavailable");
+    return path;
   }
 
   detach(ownerId: number, attachmentId: string): void {

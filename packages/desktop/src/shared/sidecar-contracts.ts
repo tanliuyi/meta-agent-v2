@@ -253,6 +253,7 @@ export type ThreadSidecarCommand =
   | { type: "getSummary"; archived: boolean }
   | { type: "branch"; input: SessionBranchInput }
   | { type: "getImageResource"; resourceId: string }
+  | { type: "resolvePluginCallArtifact"; toolCallId: string; artifactId: string }
   | { type: "ping" };
 
 export interface CreationReservation {

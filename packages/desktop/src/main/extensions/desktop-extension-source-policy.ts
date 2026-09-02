@@ -1,13 +1,15 @@
-import { randomUUID } from "node:crypto";
-import { lstat, realpath } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type {
+  DesktopExtensionCapability,
   DesktopExtensionDefinition,
   DesktopExtensionDiagnostic,
   ResolvedExtensionEntry,
   ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
+import { parsePluginApiCatalog } from "../pi/plugin-call/plugin-method-registry.ts";
 import { validateInstalledMarketplacePlugin } from "../plugins/marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
@@ -108,6 +110,8 @@ export class DesktopExtensionSourcePolicy {
           fingerprintParts.push(
             `${plugin.id}:${plugin.scope}:${(plugin.projectIds ?? []).join(",")}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`,
           );
+          const pluginMetadata = await validatePluginMetadata(plugin);
+          fingerprintParts.push(await pluginMetadataFingerprint(pluginMetadata));
           const entry: ResolvedExtensionEntry = {
             id: plugin.id,
             displayName: plugin.displayName,
@@ -115,6 +119,15 @@ export class DesktopExtensionSourcePolicy {
             entryPath,
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [...plugin.capabilities],
+            ...(pluginMetadata.skillPaths ? { skillPaths: pluginMetadata.skillPaths } : {}),
+            ...(pluginMetadata.pluginCallSkill ? { pluginCallSkill: pluginMetadata.pluginCallSkill } : {}),
+            ...(pluginMetadata.pluginCallCatalogPath
+              ? { pluginCallCatalogPath: pluginMetadata.pluginCallCatalogPath }
+              : {}),
+            ...(pluginMetadata.pluginCallCatalogSha256
+              ? { pluginCallCatalogSha256: pluginMetadata.pluginCallCatalogSha256 }
+              : {}),
+            ...(pluginMetadata.pluginCallCatalog ? { pluginCallCatalog: pluginMetadata.pluginCallCatalog } : {}),
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
           };
           allEntries.push(entry);
@@ -151,6 +164,8 @@ export class DesktopExtensionSourcePolicy {
           fingerprintParts.push(
             `${entry.id}:${entry.scope ?? "global"}:${(entry.projectIds ?? []).join(",")}:${entry.pluginId ?? ""}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
           );
+          const pluginMetadata = await validatePluginMetadata(entry);
+          fingerprintParts.push(await pluginMetadataFingerprint(pluginMetadata));
           const resolved: ResolvedExtensionEntry = {
             id: entry.id,
             displayName: entry.displayName,
@@ -159,6 +174,15 @@ export class DesktopExtensionSourcePolicy {
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [...entry.capabilities],
             ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
+            ...(pluginMetadata.skillPaths ? { skillPaths: pluginMetadata.skillPaths } : {}),
+            ...(pluginMetadata.pluginCallSkill ? { pluginCallSkill: pluginMetadata.pluginCallSkill } : {}),
+            ...(pluginMetadata.pluginCallCatalogPath
+              ? { pluginCallCatalogPath: pluginMetadata.pluginCallCatalogPath }
+              : {}),
+            ...(pluginMetadata.pluginCallCatalogSha256
+              ? { pluginCallCatalogSha256: pluginMetadata.pluginCallCatalogSha256 }
+              : {}),
+            ...(pluginMetadata.pluginCallCatalog ? { pluginCallCatalog: pluginMetadata.pluginCallCatalog } : {}),
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
           };
           allEntries.push(resolved);
@@ -214,6 +238,79 @@ export class DesktopExtensionSourcePolicy {
   }
 }
 
+async function validatePluginMetadata(entry: {
+  id: string;
+  pluginId?: string;
+  source?: string;
+  rootPath?: string;
+  artifactHash?: string;
+  capabilities: DesktopExtensionCapability[];
+  skillPaths?: string[];
+  pluginCallSkill?: string;
+  pluginCallCatalogPath?: string;
+  pluginCallCatalogSha256?: string;
+}): Promise<
+  Pick<
+    ResolvedExtensionEntry,
+    "skillPaths" | "pluginCallSkill" | "pluginCallCatalogPath" | "pluginCallCatalogSha256" | "pluginCallCatalog"
+  >
+> {
+  const skillPaths = entry.skillPaths ? await Promise.all(entry.skillPaths.map((path) => realpath(path))) : undefined;
+  for (const path of skillPaths ?? []) {
+    const info = await lstat(path);
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error("Plugin skill is not a regular non-symlink file");
+  }
+  if (!entry.capabilities.includes("plugin-methods.provide")) return skillPaths ? { skillPaths } : {};
+  if (!skillPaths?.length || !entry.pluginCallSkill || !entry.pluginCallCatalogPath || !entry.pluginCallCatalogSha256) {
+    throw new Error("Plugin method metadata is incomplete");
+  }
+  const pluginCallCatalogPath = await realpath(entry.pluginCallCatalogPath);
+  const catalogInfo = await lstat(pluginCallCatalogPath);
+  if (!catalogInfo.isFile() || catalogInfo.isSymbolicLink()) throw new Error("Plugin catalog is not a regular file");
+  if (entry.rootPath && entry.artifactHash) {
+    const versionRoot = await realpath(resolve(entry.rootPath, ".versions", entry.artifactHash));
+    for (const path of [...skillPaths, pluginCallCatalogPath]) {
+      const withinRoot = relative(versionRoot, path);
+      if (!withinRoot || withinRoot.startsWith("..") || isAbsolute(withinRoot)) {
+        throw new Error("Plugin metadata escapes its immutable version root");
+      }
+    }
+  }
+  const bytes = await readFile(pluginCallCatalogPath);
+  if (bytes.byteLength > 256 * 1024) throw new Error("Plugin catalog exceeds 256 KiB");
+  if (createHash("sha256").update(bytes).digest("hex") !== entry.pluginCallCatalogSha256) {
+    throw new Error("Plugin catalog digest mismatch");
+  }
+  const pluginCallCatalog = parsePluginApiCatalog(
+    JSON.parse(bytes.toString("utf8")),
+  ) as unknown as ResolvedExtensionEntry["pluginCallCatalog"];
+  if (!pluginCallCatalog) throw new Error("Plugin catalog is missing");
+  const canonicalPluginId = entry.source === "development" ? entry.pluginId : entry.id;
+  if (!canonicalPluginId || pluginCallCatalog.pluginId !== canonicalPluginId) {
+    throw new Error("Plugin catalog identity mismatch");
+  }
+  return {
+    skillPaths,
+    pluginCallSkill: entry.pluginCallSkill,
+    pluginCallCatalogPath,
+    pluginCallCatalogSha256: entry.pluginCallCatalogSha256,
+    pluginCallCatalog,
+  };
+}
+
+async function pluginMetadataFingerprint(
+  metadata: Pick<ResolvedExtensionEntry, "skillPaths" | "pluginCallCatalogSha256">,
+): Promise<string> {
+  const skillHashes = await Promise.all(
+    (metadata.skillPaths ?? []).map(async (path) =>
+      createHash("sha256")
+        .update(await readFile(path))
+        .digest("hex"),
+    ),
+  );
+  return `plugin-metadata:${metadata.pluginCallCatalogSha256 ?? "none"}:${skillHashes.join(",")}`;
+}
+
 function collectLocalPluginIds(
   developmentEntries: StoredDevelopmentExtension[],
   projectId: string,
@@ -264,6 +361,14 @@ function cloneEntries(entries: ResolvedExtensionEntry[]): ResolvedExtensionEntry
   return entries.map((entry) => ({
     ...entry,
     capabilities: [...entry.capabilities],
+    ...(entry.skillPaths ? { skillPaths: [...entry.skillPaths] } : {}),
+    ...(entry.pluginCallCatalog
+      ? {
+          pluginCallCatalog: JSON.parse(JSON.stringify(entry.pluginCallCatalog)) as NonNullable<
+            ResolvedExtensionEntry["pluginCallCatalog"]
+          >,
+        }
+      : {}),
     ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
   }));
 }

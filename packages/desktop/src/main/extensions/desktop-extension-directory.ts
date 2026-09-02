@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
-import type { DesktopExtensionCapability } from "../../shared/desktop-extension-contracts.ts";
+import type { DesktopExtensionCapability, PluginApiCatalogV1 } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
 import type { PluginConfigurationSchema } from "../../shared/plugin-configuration-contracts.ts";
 import { parsePluginConfigurationSchema } from "../../shared/plugin-configuration-contracts.ts";
+import { parsePluginApiCatalog } from "../pi/plugin-call/plugin-method-registry.ts";
 import { CAPABILITIES } from "../plugins/marketplace-artifact-manifest.ts";
 
 export interface ResolvedDevelopmentEntry {
@@ -14,6 +16,11 @@ export interface ResolvedDevelopmentEntry {
   configurationSchema?: PluginConfigurationSchema;
   /** 插件声明的身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
   pluginId?: string;
+  skillPaths?: string[];
+  pluginCallSkill?: string;
+  pluginCallCatalogPath?: string;
+  pluginCallCatalogSha256?: string;
+  pluginCallCatalog?: PluginApiCatalogV1;
 }
 
 const ALLOWED_ENTRY_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts"]);
@@ -22,7 +29,11 @@ const MANIFEST_FILE_NAME = "market-manifest.json";
 
 interface DesktopDevelopmentManifest {
   plugin: { id?: string; name: string };
-  pi: { entry: string };
+  pi: {
+    entry: string;
+    skills?: string[];
+    pluginCall?: { skill: string; catalog: string };
+  };
   capabilities: DesktopExtensionCapability[];
   configuration?: PluginConfigurationSchema;
 }
@@ -52,6 +63,7 @@ async function resolveDevelopmentDirectory(directory: string): Promise<ResolvedD
   }
   if (manifest) {
     const entryPath = await resolveManifestEntry(directory, manifest.pi.entry);
+    const metadata = await resolvePluginCallMetadata(directory, manifest);
     return {
       entryPath,
       displayName: manifest.plugin.name,
@@ -59,6 +71,11 @@ async function resolveDevelopmentDirectory(directory: string): Promise<ResolvedD
       capabilities: [...manifest.capabilities],
       ...(manifest.plugin.id ? { pluginId: manifest.plugin.id } : {}),
       ...(manifest.configuration ? { configurationSchema: manifest.configuration } : {}),
+      ...(metadata.skillPaths.length > 0 ? { skillPaths: metadata.skillPaths } : {}),
+      ...(metadata.pluginCallSkill ? { pluginCallSkill: metadata.pluginCallSkill } : {}),
+      ...(metadata.pluginCallCatalogPath ? { pluginCallCatalogPath: metadata.pluginCallCatalogPath } : {}),
+      ...(metadata.pluginCallCatalogSha256 ? { pluginCallCatalogSha256: metadata.pluginCallCatalogSha256 } : {}),
+      ...(metadata.pluginCallCatalog ? { pluginCallCatalog: metadata.pluginCallCatalog } : {}),
     };
   }
   for (const candidate of CONVENTIONAL_ENTRY_NAMES) {
@@ -128,12 +145,90 @@ function parseDesktopManifest(value: unknown): DesktopDevelopmentManifest {
   if (configuration && !capabilities.includes("configuration.read")) {
     throw new Error("market-manifest.json configuration requires the configuration.read capability");
   }
+  const skills = parseRelativePaths(pi.skills, "pi.skills");
+  const pluginCall = parsePluginCall(pi.pluginCall);
+  if (capabilities.includes("plugin-methods.provide") && (!pluginCall || skills.length === 0 || !plugin.id)) {
+    throw new Error("market-manifest.json plugin methods require plugin.id, pi.skills and pi.pluginCall");
+  }
   return {
     plugin: { ...(plugin.id ? { id: plugin.id.trim() } : {}), name: plugin.name.trim() },
-    pi: { entry: pi.entry },
+    pi: { entry: pi.entry, ...(skills.length > 0 ? { skills } : {}), ...(pluginCall ? { pluginCall } : {}) },
     capabilities,
     ...(configuration ? { configuration } : {}),
   };
+}
+
+function parseRelativePaths(value: unknown, field: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length !== new Set(value).size) throw new Error(`${field} is invalid`);
+  for (const item of value) {
+    if (typeof item !== "string" || !item || isAbsolute(item) || item.split(/[\\/]/).includes("..")) {
+      throw new Error(`${field} contains an invalid path`);
+    }
+  }
+  return value as string[];
+}
+
+function parsePluginCall(value: unknown): { skill: string; catalog: string } | undefined {
+  if (value === undefined) return undefined;
+  if (
+    !isPlainObject(value) ||
+    typeof value.skill !== "string" ||
+    !value.skill ||
+    typeof value.catalog !== "string" ||
+    !value.catalog
+  ) {
+    throw new Error("market-manifest.json pi.pluginCall is invalid");
+  }
+  parseRelativePaths([value.catalog], "pi.pluginCall.catalog");
+  return { skill: value.skill, catalog: value.catalog };
+}
+
+async function resolvePluginCallMetadata(
+  directory: string,
+  manifest: DesktopDevelopmentManifest,
+): Promise<{
+  skillPaths: string[];
+  pluginCallSkill?: string;
+  pluginCallCatalogPath?: string;
+  pluginCallCatalogSha256?: string;
+  pluginCallCatalog?: PluginApiCatalogV1;
+}> {
+  const skillPaths: string[] = [];
+  for (const skill of manifest.pi.skills ?? []) {
+    if (!skill.endsWith("/SKILL.md") && skill !== "SKILL.md") throw new Error("pi.skills entries must name SKILL.md");
+    skillPaths.push(await resolveManifestResource(directory, skill));
+  }
+  if (!manifest.pi.pluginCall) return { skillPaths };
+  const pluginCallCatalogPath = await resolveManifestResource(directory, manifest.pi.pluginCall.catalog);
+  const bytes = await readFile(pluginCallCatalogPath);
+  if (bytes.byteLength > 256 * 1024) throw new Error("plugin-api.json exceeds 256 KiB");
+  let pluginCallCatalog: PluginApiCatalogV1;
+  try {
+    pluginCallCatalog = parsePluginApiCatalog(JSON.parse(bytes.toString("utf8"))) as unknown as PluginApiCatalogV1;
+  } catch {
+    throw new Error("plugin-api.json syntax is invalid");
+  }
+  if (pluginCallCatalog.pluginId !== manifest.plugin.id) {
+    throw new Error("plugin-api.json pluginId does not match manifest plugin.id");
+  }
+  return {
+    skillPaths,
+    pluginCallSkill: manifest.pi.pluginCall.skill,
+    pluginCallCatalogPath,
+    pluginCallCatalogSha256: createHash("sha256").update(bytes).digest("hex"),
+    pluginCallCatalog,
+  };
+}
+
+async function resolveManifestResource(directory: string, path: string): Promise<string> {
+  const resolved = resolve(directory, path);
+  const withinRoot = relative(directory, resolved);
+  if (withinRoot.startsWith("..") || isAbsolute(withinRoot))
+    throw new Error("manifest resource escapes plugin directory");
+  const info = await lstat(resolved);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error("manifest resource must be a regular non-symlink file");
+  return realpath(resolved);
 }
 
 function parseCapabilities(value: unknown): DesktopExtensionCapability[] {

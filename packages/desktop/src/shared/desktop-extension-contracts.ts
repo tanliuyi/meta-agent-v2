@@ -1,8 +1,53 @@
+import type { Static, TSchema } from "typebox";
+import type { JsonValue } from "./contracts.ts";
 import type { PluginConfigurationSchema, PluginConfigurationValue } from "./plugin-configuration-contracts.ts";
 
 export const DESKTOP_EXTENSION_HOST_PROFILE_VERSION = 1 as const;
 
 export type ExtensionScope = "global" | "project";
+
+export interface PluginApiCatalogV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  methods: Array<{
+    name: string;
+    description: string;
+    parameters: JsonObject;
+    result: JsonObject;
+    concurrency: "serial" | "parallel";
+  }>;
+}
+
+export interface PluginMethodExecutionContext {
+  readonly pluginId: string;
+  readonly methodName: string;
+  readonly callId: string;
+  readonly toolCallId: string;
+  readonly cwd: string;
+  readonly signal: AbortSignal;
+  attach(attachment: PluginMethodAttachment): void;
+  reportProgress(progress: JsonValue): void;
+}
+
+export type PluginMethodAttachment =
+  | { type: "image"; data: string; mimeType: string; name?: string }
+  | { type: "file"; path: string; mimeType?: string; name?: string };
+
+export interface DesktopPluginMethodDefinition<TParams extends TSchema = TSchema, TResult extends TSchema = TSchema> {
+  name: string;
+  description: string;
+  parameters: TParams;
+  result: TResult;
+  concurrency?: "serial" | "parallel";
+  execute(params: Static<TParams>, signal: AbortSignal, ctx: PluginMethodExecutionContext): Promise<Static<TResult>>;
+}
+
+export interface DesktopPluginModuleExport {
+  schemaVersion: 1;
+  methods: readonly DesktopPluginMethodDefinition[];
+}
+
+type JsonObject = { [key: string]: JsonValue };
 
 export type DesktopExtensionCapability =
   | "events.subscribe"
@@ -29,7 +74,8 @@ export type DesktopExtensionCapability =
   | "ui.tui.theme"
   | "ui.tui.chrome"
   | "ui.tui.editor"
-  | "ui.terminal.input";
+  | "ui.terminal.input"
+  | "plugin-methods.provide";
 
 export type DesktopExtensionSource = "builtin" | "curated" | "marketplace" | "development";
 
@@ -52,6 +98,11 @@ export interface DesktopExtensionDefinition {
   entryPath?: string;
   hostProfileVersion: typeof DESKTOP_EXTENSION_HOST_PROFILE_VERSION;
   capabilities: DesktopExtensionCapability[];
+  skillPaths?: string[];
+  pluginCallSkill?: string;
+  pluginCallCatalogPath?: string;
+  pluginCallCatalogSha256?: string;
+  pluginCallCatalog?: PluginApiCatalogV1;
 }
 
 export interface ResolvedExtensionEntry {
@@ -64,6 +115,11 @@ export interface ResolvedExtensionEntry {
   configuration?: Record<string, PluginConfigurationValue>;
   /** development 插件声明的插件身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
   pluginId?: string;
+  skillPaths?: string[];
+  pluginCallSkill?: string;
+  pluginCallCatalogPath?: string;
+  pluginCallCatalogSha256?: string;
+  pluginCallCatalog?: PluginApiCatalogV1;
 }
 
 export interface ResolvedExtensionSet {

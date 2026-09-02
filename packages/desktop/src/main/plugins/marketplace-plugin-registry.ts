@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
+import type { PluginApiCatalogV1 } from "../../shared/desktop-extension-contracts.ts";
 import {
   clonePluginConfigurationSchema,
   type PluginConfigurationSchema,
@@ -20,6 +21,11 @@ export interface InstalledMarketplacePluginRecord extends Omit<InstalledMarketpl
   entryPath: string;
   rootPath: string;
   configurationSchema?: PluginConfigurationSchema;
+  skillPaths?: string[];
+  pluginCallSkill?: string;
+  pluginCallCatalogPath?: string;
+  pluginCallCatalogSha256?: string;
+  pluginCallCatalog?: PluginApiCatalogV1;
 }
 
 interface RegistryFileData {
@@ -420,6 +426,10 @@ function cloneRecord(record: InstalledMarketplacePluginRecord): InstalledMarketp
     capabilities: [...record.capabilities],
     ...(record.configurationSchema
       ? { configurationSchema: clonePluginConfigurationSchema(record.configurationSchema) }
+      : {}),
+    ...(record.skillPaths ? { skillPaths: [...record.skillPaths] } : {}),
+    ...(record.pluginCallCatalog
+      ? { pluginCallCatalog: JSON.parse(JSON.stringify(record.pluginCallCatalog)) as PluginApiCatalogV1 }
       : {}),
   };
 }

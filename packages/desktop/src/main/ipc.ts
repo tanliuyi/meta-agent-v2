@@ -35,6 +35,7 @@ import { CHANNELS } from "../shared/channels.ts";
 import type {
   HostResponse,
   OpenLinkResult,
+  OpenPluginCallArtifactInput,
   SessionAttachInput,
   SessionBranchInput,
   SessionBranchResult,
@@ -87,6 +88,7 @@ import type {
   UninstallMarketplacePluginInput,
   UpdateMarketplacePluginInput,
 } from "../shared/plugin-marketplace-contracts.ts";
+import type { SavePreferencesInput } from "../shared/preferences-contracts.ts";
 import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
 import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
 import type { AuthConfigService } from "./auth/auth-config-service.ts";
@@ -154,7 +156,7 @@ export function registerIpc(
       use(path: string): Promise<ShellRuntimeStatus>;
       onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
     };
-  },
+  } = {},
   updater?: AutoUpdateService,
   extensions?: DesktopExtensionSettingsService,
   subagents?: SubagentSettingsConfigService,
@@ -792,6 +794,10 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.sessionsReloadResources, (_event, input: SessionResourceReloadInput) =>
     sessions.reloadResources(input),
   );
+  ipcMain.handle(CHANNELS.sessionsOpenPluginCallArtifact, async (event, input: OpenPluginCallArtifactInput) => {
+    const path = await sessions.resolvePluginCallArtifact(event.sender.id, input);
+    await openPath(path);
+  });
   ipcMain.handle(
     CHANNELS.sessionsGetCheckpointDiff,
     (_event, input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult> =>

@@ -110,6 +110,34 @@ async function main() {
     );
     if (mPluginId !== pluginId) throw new Error(`manifest pluginId ${mPluginId} != ${pluginId}`);
     if (mVersion !== version) throw new Error(`manifest version ${mVersion} != ${version}`);
+    const pluginCall = m.pi?.pluginCall;
+    if (m.capabilities?.includes("plugin-methods.provide")) {
+      if (!pluginCall || !Array.isArray(m.pi?.skills) || m.pi.skills.length === 0) {
+        throw new Error("method plugin manifest is missing pi.skills or pi.pluginCall");
+      }
+      if (!m.pi.skills.every((name) => typeof name === "string" && name.startsWith("payload/") && get(name))) {
+        throw new Error("method plugin manifest contains a missing skill");
+      }
+      const catalogBytes = get(pluginCall.catalog);
+      if (!catalogBytes) throw new Error("method plugin catalog is missing");
+      const catalog = JSON.parse(catalogBytes.toString("utf8"));
+      if (catalog.schemaVersion !== 1 || catalog.pluginId !== pluginId || !Array.isArray(catalog.methods)) {
+        throw new Error("method plugin catalog identity is invalid");
+      }
+      const methodNames = catalog.methods.map((method) => method?.name);
+      if (methodNames.some((name) => typeof name !== "string") || methodNames.join("\0") !== [...methodNames].sort().join("\0")) {
+        throw new Error("method plugin catalog methods are not sorted by name");
+      }
+      const primary = m.pi.skills.find((name) => {
+        const text = get(name)?.toString("utf8") ?? "";
+        return new RegExp(`^name:\\s*[\"']?${escapeRegExp(pluginCall.skill)}[\"']?\\s*$`, "m").test(text);
+      });
+      if (!primary) throw new Error("method plugin primary skill name does not match pi.pluginCall.skill");
+      const apiReference = path.posix.join(path.posix.dirname(primary), "references/api.md");
+      if (!get(apiReference) || !get(primary).toString("utf8").includes("references/api.md")) {
+        throw new Error("method plugin primary skill must reference its generated references/api.md");
+      }
+    }
     const expected = new Set(payloadNames);
     // Server manifests list files either as an array ("path" or string entries)
     // or as an object keyed by payload-relative path ("path": { "mode": ... }).
@@ -151,6 +179,10 @@ async function main() {
   }
 
   console.log("VERIFY_OK");
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 main().catch((err) => {

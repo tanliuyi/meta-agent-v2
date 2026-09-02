@@ -659,6 +659,17 @@ export class ThreadWorkerRegistry {
     );
   }
 
+  async resolvePluginCallArtifact(
+    projectId: string,
+    threadId: string,
+    toolCallId: string,
+    artifactId: string,
+  ): Promise<string | undefined> {
+    return this.use(projectId, threadId, (record) =>
+      record.client.request<string | undefined>({ type: "resolvePluginCallArtifact", toolCallId, artifactId }, 30_000),
+    );
+  }
+
   async reload(input: SessionReloadInput): Promise<SessionCommandResult> {
     return this.use(input.projectId, input.threadId, (record) =>
       record.client.request({ type: "reload", input }, null),

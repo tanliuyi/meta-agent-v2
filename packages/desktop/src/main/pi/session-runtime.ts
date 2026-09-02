@@ -41,11 +41,14 @@ import {
   extensionServiceDiagnostics,
   isBlockingExtensionDiagnostic,
   sanitizeExtensionMessage,
+  validatePluginSkills,
 } from "./desktop-extension-runtime-policy.ts";
 import { getDesktopCheckpointDiff, restoreDesktopCheckpoint } from "./extensions/pi-rewind/src/index.ts";
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 import { PiCompatibilityAdapter } from "./pi-compatibility-adapter.ts";
 import { PiThreadProjector } from "./pi-thread-projector.ts";
+import { PluginCallRegistryHolder } from "./plugin-call/plugin-call-tool.ts";
+import { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-registry.ts";
 import { getSessionCommands } from "./session-commands.ts";
 import {
   resolveSessionCreateSelection,
@@ -90,6 +93,7 @@ export class SessionRuntime {
   private readonly push: (update: SessionPushPayload) => void;
   private readonly onSummaryChanged: (runtime: SessionRuntime) => void;
   private readonly subagentRuntime?: SubagentRuntime;
+  private readonly pluginCallRegistry: PluginCallRegistryHolder;
 
   private constructor(
     projectId: string,
@@ -99,6 +103,7 @@ export class SessionRuntime {
     extensionSet: ResolvedExtensionSet,
     initialUpdatedAt: number | undefined,
     subagentRuntime: SubagentRuntime | undefined,
+    pluginCallRegistry: PluginCallRegistryHolder,
     push: (update: SessionPushPayload) => void,
     onSummaryChanged: (runtime: SessionRuntime) => void,
   ) {
@@ -109,6 +114,7 @@ export class SessionRuntime {
     this.push = push;
     this.onSummaryChanged = onSummaryChanged;
     this.subagentRuntime = subagentRuntime;
+    this.pluginCallRegistry = pluginCallRegistry;
     this.extensionSet = {
       ...extensionSet,
       entries: extensionSet.entries.map((entry) => ({
@@ -139,13 +145,21 @@ export class SessionRuntime {
     const extensionSet = options.extensionSet ?? builtinOnlyExtensionSet(options.projectId);
     const agentDir = options.agentDir ?? getAgentDir();
     const settingsManager = SettingsManager.create(options.cwd, agentDir);
-    if (options.shellPath && !settingsManager.getShellPath())
-      settingsManager.applyOverrides({ shellPath: options.shellPath });
+    if (options.shellPath) {
+      const settingsWithDefaults = settingsManager as unknown as {
+        applyDefaults?: (values: { shellPath: string }) => void;
+        applyOverrides?: (values: { shellPath: string }) => void;
+      };
+      if (settingsWithDefaults.applyDefaults) settingsWithDefaults.applyDefaults({ shellPath: options.shellPath });
+      else settingsWithDefaults.applyOverrides?.({ shellPath: options.shellPath });
+    }
     const modelRuntime = await ModelRuntime.create({
       credentials: new FileCredentialStore(join(agentDir, "auth.json")),
       modelsPath: join(agentDir, "models.json"),
       allowModelNetwork: false,
     });
+    const builder = new DesktopPluginRegistryBuilder();
+    const registryHolder = new PluginCallRegistryHolder(extensionSet.generation);
     const services = await createAgentSessionServices({
       cwd: options.cwd,
       agentDir,
@@ -154,15 +168,34 @@ export class SessionRuntime {
       resourceLoaderOptions: controlledResourceLoaderOptions(
         extensionSet,
         DesktopBuiltinProviderRegistry.getExtensionFactories({ subagentRuntime: options.subagentRuntime }),
+        { pluginRegistry: registryHolder, pluginRegistryBuilder: builder, cwd: options.cwd },
       ),
     });
     const extensionDiagnostics = [
       ...extensionLoadDiagnostics(extensionSet, services.resourceLoader.getExtensions()),
       ...extensionServiceDiagnostics(extensionSet, services.diagnostics),
+      ...validatePluginSkills(extensionSet, services.resourceLoader.getSkills()),
     ];
     const blockingExtensionDiagnostics = extensionDiagnostics.filter(isBlockingExtensionDiagnostic);
     if (blockingExtensionDiagnostics.length > 0) {
+      builder.discard();
       throw new DesktopExtensionStartupError(extensionSet.generation, blockingExtensionDiagnostics);
+    }
+    try {
+      registryHolder.bind(builder.finalize(), options.cwd);
+    } catch (error) {
+      builder.discard();
+      throw new DesktopExtensionStartupError(extensionSet.generation, [
+        {
+          extensionId: "unknown",
+          source: "builtin",
+          extensionSetGeneration: extensionSet.generation,
+          projectId: options.projectId,
+          phase: "register",
+          code: "DESKTOP_PLUGIN_ADMISSION_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ]);
     }
     const sessionManager = options.sessionManager ?? SessionManager.create(services.cwd);
     const isNewSession = options.createInput !== undefined || options.sessionManager === undefined;
@@ -187,6 +220,7 @@ export class SessionRuntime {
         extensionSet,
         options.initialUpdatedAt,
         options.subagentRuntime,
+        registryHolder,
         options.push,
         options.onSummaryChanged,
       );
@@ -400,6 +434,10 @@ export class SessionRuntime {
     await this.compatibility.compact();
   }
 
+  resolvePluginCallArtifact(toolCallId: string, artifactId: string): Promise<string | undefined> {
+    return this.projector.resolvePluginCallArtifact(toolCallId, artifactId);
+  }
+
   async reloadResources(): Promise<SessionCommandResult> {
     this.assertTimelineAvailable();
     const phase = this.projector.snapshot().phase;
@@ -491,6 +529,7 @@ export class SessionRuntime {
       }
     }
     this.extensionPhase = "dispose";
+    await this.pluginCallRegistry.dispose();
     if (this.session.extensionRunner.hasHandlers("session_shutdown")) {
       try {
         await this.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
