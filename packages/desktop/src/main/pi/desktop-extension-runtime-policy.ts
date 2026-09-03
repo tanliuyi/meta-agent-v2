@@ -36,12 +36,14 @@ type DesktopInlineExtension = {
   name: string;
   factory: ExtensionFactory;
   desktopPlugin?: unknown;
-  pluginMethodOnly?: boolean;
-  captureTool?: (tool: unknown) => void;
 };
 type DesktopExtensionAPI = ExtensionAPI & {
   getConfig<T = DesktopExtensionConfiguration>(): Readonly<T>;
 };
+
+function providesPluginTools(entry: ResolvedExtensionSet["entries"][number]): boolean {
+  return entry.capabilities.includes("plugin-methods.provide") || entry.capabilities.includes("tools.register");
+}
 
 const DESKTOP_EXTENSION_VIRTUAL_MODULES: Record<string, unknown> = {
   "@earendil-works/pi-agent-core": bundledPiAgentCore,
@@ -144,35 +146,51 @@ export function controlledResourceLoaderOptions(
 ) {
   const inlineFactories = extensionFactories as DesktopInlineExtension[];
 
-  if (options.pluginRegistryBuilder) {
-    for (const entry of set.entries) {
-      if (entry.source !== "builtin" || !entry.capabilities.includes("plugin-methods.provide")) continue;
-      const factory = inlineFactories.find(
-        (candidate): candidate is DesktopInlineExtension =>
-          typeof candidate === "object" && candidate.name === `desktop:${entry.id}`,
-      );
-      if (!factory?.desktopPlugin) throw new Error(`Builtin plugin declaration missing: ${entry.id}`);
-      options.pluginRegistryBuilder.stage(entry, factory.desktopPlugin);
-      options.pluginRegistryBuilder.commit(entry.id);
-    }
-  }
-
   const controlledInlineFactories = inlineFactories.map((extension) => {
-    if (typeof extension === "function" || !extension.pluginMethodOnly) return extension;
-    return {
-      ...extension,
-      factory: async (pi: ExtensionAPI) => {
-        const methodOnlyApi = new Proxy(pi, {
-          get(target, property, receiver) {
-            if (property === "registerTool") {
-              return (tool: unknown) => extension.captureTool?.(tool);
-            }
-            return Reflect.get(target, property, receiver);
-          },
-        }) as ExtensionAPI;
-        await extension.factory(methodOnlyApi);
-      },
-    } satisfies InlineExtension;
+    const extensionName = typeof extension === "function" ? "extension" : extension.name;
+    const originalFactory = typeof extension === "function" ? extension : extension.factory;
+    const entry = set.entries.find((candidate) => extensionName === `desktop:${candidate.id}`);
+    if (!entry) return extension;
+    const controlledFactory: ExtensionFactory = async (pi) => {
+      let capturedTools = 0;
+      let factoryComplete = false;
+      const captureTool = (tool: unknown): void => {
+        if (!providesPluginTools(entry) || !options.pluginRegistryBuilder) {
+          throw new Error(`Direct Pi tool registration is disabled for Desktop extension ${extensionName}`);
+        }
+        if (factoryComplete) {
+          const registry = options.pluginRegistryBuilder.registerRuntimeTool(entry, tool);
+          options.pluginRegistry?.bind(registry, options.cwd ?? process.cwd());
+        } else {
+          options.pluginRegistryBuilder.stageTool(entry, tool);
+          capturedTools += 1;
+        }
+      };
+      const methodOnlyApi = new Proxy(pi, {
+        get(target, property, receiver) {
+          if (property === "registerTool") return captureTool;
+          return Reflect.get(target, property, receiver);
+        },
+      }) as ExtensionAPI;
+      try {
+        await originalFactory(methodOnlyApi);
+        if (providesPluginTools(entry)) {
+          if (capturedTools === 0 && typeof extension !== "function" && extension.desktopPlugin) {
+            options.pluginRegistryBuilder?.stage(entry, extension.desktopPlugin);
+          }
+          options.pluginRegistryBuilder?.commit(entry.id);
+          if (options.pluginRegistryBuilder && options.pluginRegistry) {
+            options.pluginRegistry.bind(options.pluginRegistryBuilder.finalize(), options.cwd ?? process.cwd());
+          }
+          factoryComplete = true;
+        }
+      } catch (error) {
+        options.pluginRegistryBuilder?.rollback(entry.id);
+        throw error;
+      }
+    };
+    if (typeof extension === "function") return controlledFactory;
+    return { ...extension, factory: controlledFactory } satisfies InlineExtension;
   });
 
   const pathBackedFactories = set.entries.flatMap((entry): InlineExtension[] => {
@@ -186,25 +204,45 @@ export function controlledResourceLoaderOptions(
           try {
             const namespace = await jiti.import<Record<string, unknown>>(entryPath);
             const declaration = Object.hasOwn(namespace, "desktopPlugin") ? namespace.desktopPlugin : undefined;
-            const hasDeclaration = declaration !== undefined;
-            if (hasDeclaration) {
-              if (!options.pluginRegistryBuilder) throw new Error("Plugin registry builder unavailable");
-              options.pluginRegistryBuilder.stage(entry, declaration);
-            }
             const factory = namespace.default as ExtensionFactory | undefined;
+            let capturedTools = 0;
+            let factoryComplete = false;
+            const captureTool = (tool: unknown): void => {
+              if (!providesPluginTools(entry) || !options.pluginRegistryBuilder) {
+                throw new Error(`Direct Pi tool registration is disabled for Desktop extension ${entry.id}`);
+              }
+              if (factoryComplete) {
+                const registry = options.pluginRegistryBuilder.registerRuntimeTool(entry, tool);
+                options.pluginRegistry?.bind(registry, options.cwd ?? process.cwd());
+              } else {
+                options.pluginRegistryBuilder.stageTool(entry, tool);
+                capturedTools += 1;
+              }
+            };
             if (typeof factory === "function") {
               const desktopApi = new Proxy(pi, {
                 get(target, property, receiver) {
                   if (property === "getConfig")
                     return <T = DesktopExtensionConfiguration>() => configuration as Readonly<T>;
+                  if (property === "registerTool") return captureTool;
                   return Reflect.get(target, property, receiver);
                 },
               }) as DesktopExtensionAPI;
               await factory(desktopApi);
-            } else if (!hasDeclaration) {
+              factoryComplete = true;
+            } else if (declaration === undefined) {
               throw new Error(`Extension does not export a valid factory function: ${entry.displayName}`);
             }
-            if (hasDeclaration) options.pluginRegistryBuilder?.commit(entry.id);
+            if (providesPluginTools(entry)) {
+              if (capturedTools === 0 && declaration !== undefined) {
+                if (!options.pluginRegistryBuilder) throw new Error("Plugin registry builder unavailable");
+                options.pluginRegistryBuilder.stage(entry, declaration);
+              }
+              options.pluginRegistryBuilder?.commit(entry.id);
+              if (options.pluginRegistryBuilder && options.pluginRegistry) {
+                options.pluginRegistry.bind(options.pluginRegistryBuilder.finalize(), options.cwd ?? process.cwd());
+              }
+            }
           } catch (error) {
             options.pluginRegistryBuilder?.rollback(entry.id);
             throw error;
@@ -248,7 +286,7 @@ export function controlledResourceLoaderOptions(
       options.pluginRegistryBuilder &&
       set.entries.some(
         (entry) =>
-          entry.capabilities.includes("plugin-methods.provide") &&
+          providesPluginTools(entry) &&
           (entry.pluginCallCatalog === undefined || entry.pluginCallCatalog.methods.length > 0),
       )
         ? [createPluginCallExtension(options.pluginRegistry, options.cwd ?? process.cwd())]
@@ -334,7 +372,9 @@ export function extensionLoadDiagnostics(
     const inlineId = error.path.match(/^<inline:(.+)>$/)?.[1];
     const entry = set.entries.find(
       (candidate) =>
-        candidate.id === inlineId || (candidate.entryPath !== undefined && resolve(candidate.entryPath) === normalized),
+        candidate.id === inlineId ||
+        `desktop:${candidate.id}` === inlineId ||
+        (candidate.entryPath !== undefined && resolve(candidate.entryPath) === normalized),
     );
     diagnostics.push({
       extensionId: entry?.id ?? "unknown",

@@ -43,13 +43,11 @@ function userMsg(id: string, text: string) {
   return { type: "message", id, parentId: null, timestamp: "", message: { role: "user", content: text, timestamp: Date.now() } };
 }
 
-test("factory registers the compress tool and 4 flat commands", () => {
+test("factory keeps ACP tools private and registers 4 flat commands", () => {
   const { api, handlers } = captureApi();
   createAcpExtension()(api as any);
 
-  assert.ok(api.tools.some((t) => t.name === "compress"), "compress tool registered");
-  assert.ok(api.tools.some((t) => t.name === "acp_status"), "status tool registered");
-  assert.ok(!api.tools.some((t) => t.name.startsWith("acp_delegate")), "delegate tools are not registered");
+  assert.equal(api.tools.length, 0, "ACP tools are exposed through plugin_call, not Pi tools");
   assert.ok(handlers.has("context"), "context event wired");
   assert.ok(handlers.has("session_before_compact"), "compaction-disable wired");
   assert.ok(handlers.has("before_agent_start"), "system-prompt wired");

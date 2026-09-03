@@ -203,11 +203,18 @@ async function resolvePluginCallMetadata(
   const pluginCallCatalogPath = await resolveManifestResource(directory, manifest.pi.pluginCall.catalog);
   const bytes = await readFile(pluginCallCatalogPath);
   if (bytes.byteLength > 256 * 1024) throw new Error("plugin-api.json exceeds 256 KiB");
-  let pluginCallCatalog: PluginApiCatalogV1;
+  let parsedCatalog: unknown;
   try {
-    pluginCallCatalog = parsePluginApiCatalog(JSON.parse(bytes.toString("utf8"))) as unknown as PluginApiCatalogV1;
+    parsedCatalog = JSON.parse(bytes.toString("utf8"));
   } catch {
     throw new Error("plugin-api.json syntax is invalid");
+  }
+  let pluginCallCatalog: PluginApiCatalogV1;
+  try {
+    pluginCallCatalog = parsePluginApiCatalog(parsedCatalog) as unknown as PluginApiCatalogV1;
+  } catch (error) {
+    const reason = error instanceof Error ? `: ${error.message}` : "";
+    throw new Error(`plugin-api.json schema is invalid${reason}`);
   }
   if (pluginCallCatalog.pluginId !== manifest.plugin.id) {
     throw new Error("plugin-api.json pluginId does not match manifest plugin.id");

@@ -12,44 +12,16 @@ Treat a Desktop plugin as a standard Pi Extension. Do not invent a Desktop-only 
 
 1. Clarify the plugin's user-visible behavior, scope, external services, credentials, destructive actions, and whether it needs tools, commands, events, or a provider. Ask only for decisions that materially affect behavior or trust.
 2. Inspect the target directory, its package manager, existing extension patterns, TypeScript configuration, and installed Pi API types before writing code. Reuse local conventions and do not guess external API signatures.
-3. Choose the smallest viable structure:
-   - Use a manifest-backed directory whenever the plugin exposes programmatic methods through `desktopPlugin`.
-   - Use one `index.ts` only for a small direct Pi extension without plugin methods.
-   - Add `package.json` only when the plugin needs its own dependencies or is intended for distribution.
-4. Prefer a named `desktopPlugin` export for structured model-callable APIs. Give every method closed TypeBox parameter/result schemas and generate `plugin-api.json` plus `SKILL.md` API documentation from the same declaration source. Use a default `ExtensionAPI` factory only for intentional direct tools, commands, events, or providers; method-only plugins may omit it.
+3. Use a manifest-backed directory whenever the plugin exposes tools through `plugin_call`; the manifest supplies stable identity, skill, and catalog metadata. Add `package.json` only when the plugin needs its own dependencies or distribution metadata.
+4. Define every model-callable operation once with standard `pi.registerTool()`. Desktop captures those registrations and supplies the real execution context through `plugin_call`; do not add a parallel `desktopPlugin` handler.
 5. Add an idempotent `session_shutdown` handler for every session-scoped resource used by a default Pi factory. Pass `AbortSignal` through to cancellable work.
 6. Validate parameter schemas, normalize paths against `ctx.cwd`, bound external input and output, and throw errors from tool execution when an operation fails.
 7. Run the narrowest available typecheck and focused tests. Test startup plus each registered tool, command, or event path without using paid provider calls.
 8. Explain how to load the exact entry through Desktop Settings > Extensions > Developer Mode > Add local extension. Changes affect new sessions immediately; run `/reload` in an existing session to reload its approved extensions.
 
-## Programmatic Method Template
+## Programmatic Tool Template
 
-Use this as the default shape for APIs that return structured JSON and do not require a separate top-level Pi tool lifecycle:
-
-```ts
-import { Type } from "typebox";
-
-export const desktopPlugin = {
-  schemaVersion: 1,
-  methods: [
-    {
-      name: "lookup",
-      description: "Look up one record by ID",
-      parameters: Type.Object({ id: Type.String() }, { additionalProperties: false }),
-      result: Type.Object({ title: Type.String() }, { additionalProperties: false }),
-      async execute(params, signal) {
-        return lookupRecord(params.id, signal);
-      },
-    },
-  ],
-};
-```
-
-The manifest must declare `plugin-methods.provide`, `pi.skills`, and `pi.pluginCall`; the catalog must exactly match this declaration. The primary skill must document canonical bracket syntax such as `plugin["com.example.records"].lookup(...)`, link `references/api.md`, and explain limits, side effects, errors, and workflows. Do not also register the same operation with `pi.registerTool()`.
-
-## Direct Tool Template
-
-Use the currently installed package exports. `typebox` is available for tool schemas, and `StringEnum` from `@earendil-works/pi-ai` should be used for string enums that must work across providers.
+Use the standard Pi tool shape. Desktop intercepts this registration for manifest-backed plugins with `plugin-methods.provide`; the individual schema is not exposed to the model.
 
 ```ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -57,24 +29,26 @@ import { Type } from "typebox";
 
 export default function plugin(pi: ExtensionAPI) {
   pi.registerTool({
-    name: "example_action",
-    label: "Example Action",
-    description: "Describe exactly when the model should call this tool",
-    parameters: Type.Object({
-      input: Type.String({ description: "Input to process" }),
-    }),
-    async execute(_toolCallId, params, signal) {
-      if (signal?.aborted) throw new Error("Operation cancelled");
+    name: "lookup",
+    label: "Lookup",
+    description: "Look up one record by ID",
+    parameters: Type.Object({ id: Type.String() }, { additionalProperties: false }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const record = await lookupRecord(params.id, signal, onUpdate, ctx);
       return {
-        content: [{ type: "text", text: params.input }],
-        details: {},
+        content: [{ type: "text", text: JSON.stringify(record) }],
+        details: { recordId: params.id },
       };
     },
   });
 }
 ```
 
-Do not retain placeholder tools or comments in the finished plugin.
+The manifest must declare `plugin-methods.provide`, `pi.skills`, and `pi.pluginCall`. The catalog documents the registered names and schemas; it is not a second executable implementation. The primary skill must document canonical bracket syntax such as `plugin["com.example.records"].lookup(...)`, link `references/api.md`, and explain limits, side effects, errors, and workflows.
+
+## Host-Owned Native Tools
+
+Ordinary third-party plugin tools are always captured. A direct model-facing tool is a Desktop-owned infrastructure exception and is not selected by plugin code or manifest metadata.
 
 ## Desktop Host Profile
 
@@ -119,7 +93,7 @@ Marketplace accounts, publisher authorization, artifact assembly, upload, signin
 
 Before declaring completion:
 
-1. Confirm a method plugin is a manifest-backed directory with a stable `plugin.id`, primary `SKILL.md`, generated `references/api.md`, and `plugin-api.json`; a direct-only extension entry remains a regular `.ts`, `.js`, `.mjs`, or `.cjs` file.
+1. Confirm a tool plugin is a manifest-backed directory with a stable `plugin.id`, primary `SKILL.md`, generated `references/api.md`, and `plugin-api.json` covering every captured registration.
 2. Typecheck against the installed Pi packages and fix all diagnostics.
 3. Exercise every new tool, command, and event handler with deterministic fixtures or fakes.
 4. Verify cleanup on `session_shutdown` for opened resources.

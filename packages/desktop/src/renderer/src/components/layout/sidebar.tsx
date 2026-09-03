@@ -131,14 +131,6 @@ export const Sidebar = memo(function Sidebar({ floating = false }: { floating?: 
                   <Plus size={16} />
                   <span className="whitespace-nowrap">新建任务</span>
                 </Button>
-                <Button
-                  variant="ghost"
-                  className={sidebarRowClass}
-                  onClick={() => window.dispatchEvent(new Event("desktop:open-scm"))}
-                >
-                  <GitBranch size={16} />
-                  <span className="whitespace-nowrap">审查</span>
-                </Button>
               </nav>
 
               <div className="sidebar-navigation-scroll py-1">

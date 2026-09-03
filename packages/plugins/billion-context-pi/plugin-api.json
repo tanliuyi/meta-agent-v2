@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "pi.billion-context",
+  "methods": [
+    {
+      "name": "acp_status",
+      "description": "Context status: overview, compressed blocks, or uncompressed ranges/messages. No args = overview + totals + compressible ranges. scope:'uncompressed' + view:'messages' for per-message listing. scope:'compressed' for block drilldown.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "scope": { "anyOf": [{ "const": "compressed" }, { "const": "uncompressed" }] },
+          "view": { "anyOf": [{ "const": "ranges" }, { "const": "messages" }] },
+          "tool": { "type": "string" },
+          "sort": { "anyOf": [{ "const": "size" }, { "const": "time" }, { "const": "tool" }, { "const": "age" }] },
+          "limit": { "type": "number" }
+        },
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"], "additionalProperties": false },
+      "concurrency": "serial"
+    },
+    {
+      "name": "compress",
+      "description": "Replace older conversation ranges with detailed summaries you write. Single range: compress({ content: [{ startId, endId, summary }] }). Batch: compress({ content: [{ topic, startId, endId, summary }, ...] }) — each entry gets its own summary.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": { "type": "string" },
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "startId": { "type": "string" },
+                "endId": { "type": "string" },
+                "summary": { "type": "string" },
+                "topic": { "type": "string" }
+              },
+              "required": ["startId", "endId", "summary"],
+              "additionalProperties": false
+            }
+          },
+          "summaryMaxChars": { "type": "number" }
+        },
+        "required": ["content"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"], "additionalProperties": false },
+      "concurrency": "serial"
+    },
+    {
+      "name": "decompress",
+      "description": "Restore a previously compressed block's content, or a single message by its ref. The block/message stays compressed — context and cache prefix are not disrupted. BLOCK decompress (blockId b5) defaults to writing a file (blocks can be large); use the read tool to access it, or inline:true to return inline. MESSAGE decompress (blockId = a message UUID from search_context) returns that ONE message's original text — defaults to inline since a single message is usually small; oversized messages go to a file. full:true recurses through nested block tiers (block mode only). You can pass a block id (b5) OR a message ref (UUID) from search_context results.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "blockId": { "type": "string" },
+          "full": { "type": "boolean" },
+          "toFile": { "type": "string" },
+          "inline": { "type": "boolean" }
+        },
+        "required": ["blockId"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"], "additionalProperties": false },
+      "concurrency": "serial"
+    },
+    {
+      "name": "search_context",
+      "description": "Search compressed blocks AND historical messages by keyword. Use to cheaply locate detail before decompressing. Returns ranked results with ref, size, preview, and the decompress command to retrieve full content.",
+      "parameters": {
+        "type": "object",
+        "properties": { "query": { "type": "string" }, "limit": { "type": "number" } },
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "result": { "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"], "additionalProperties": false },
+      "concurrency": "serial"
+    }
+  ]
+}

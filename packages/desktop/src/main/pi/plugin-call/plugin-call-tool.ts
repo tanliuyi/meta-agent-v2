@@ -32,7 +32,7 @@ export class PluginCallRegistryHolder {
   }
 
   bind(registry: PluginMethodRegistry, cwd: string): void {
-    if (this.registry || this.stale) throw new Error("PLUGIN_GENERATION_STALE");
+    if (this.stale) throw new Error("PLUGIN_GENERATION_STALE");
     this.registry = registry;
     this.dispatcher = new PluginMethodDispatcher(registry, cwd);
   }

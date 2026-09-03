@@ -129,19 +129,13 @@ export function SubagentSettingsPage() {
       <Tabs className="subagent-scope-tabs" value={activeTab} onValueChange={selectTab}>
         <TabsList className="subagent-scope-tab-list" aria-label="子智能体配置作用域">
           <TabsTrigger value={USER_TAB}>个人</TabsTrigger>
-          {projects.map((project) => (
-            <TabsTrigger
-              key={project.id}
-              value={`${PROJECT_TAB_PREFIX}${project.id}`}
-              aria-disabled={!project.available}
-              aria-label={
-                project.available ? project.name : `${project.name}，不可用：${project.issue ?? "目录不可访问"}`
-              }
-              title={project.available ? project.cwd : project.issue}
-            >
-              {project.name}
-            </TabsTrigger>
-          ))}
+          {projects
+            .filter((project) => project.available)
+            .map((project) => (
+              <TabsTrigger key={project.id} value={`${PROJECT_TAB_PREFIX}${project.id}`} title={project.cwd}>
+                {project.name}
+              </TabsTrigger>
+            ))}
           <TabsTrigger value={SYSTEM_TAB}>系统</TabsTrigger>
         </TabsList>
 

@@ -160,7 +160,8 @@ export class PluginMethodDispatcher {
       try {
         let checkedArgs: JsonValue;
         try {
-          checkedArgs = snapshotJson(args, MAX_JSON_BYTES);
+          const preparedArgs = method.prepareArguments ? method.prepareArguments(args) : args;
+          checkedArgs = snapshotJson(preparedArgs, MAX_JSON_BYTES);
         } catch (error) {
           throw new PluginCallError(
             "PLUGIN_METHOD_INVALID_ARGUMENTS",

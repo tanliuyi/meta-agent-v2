@@ -2,12 +2,15 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   controlledResourceLoaderOptions,
   extensionLoadDiagnostics,
   validateResolvedExtensionSet,
 } from "../src/main/pi/desktop-extension-runtime-policy.ts";
+import { PluginCallRegistryHolder } from "../src/main/pi/plugin-call/plugin-call-tool.ts";
+import { DesktopPluginRegistryBuilder } from "../src/main/pi/plugin-call/plugin-method-registry.ts";
 
 const tempDirs: string[] = [];
 
@@ -66,6 +69,70 @@ describe("desktop controlled Pi resources", () => {
     expect(commands).not.toContain("unapproved");
     expect(services.resourceLoader.getSkills().skills.map(({ name }) => name)).toContain("global-review");
     expect(services.resourceLoader.getPrompts().prompts.map(({ name }) => name)).toContain("global-review");
+  });
+
+  it("captures plugin tools without exposing their schemas to Pi", async () => {
+    const parameters = Type.Object({ value: Type.String() }, { additionalProperties: false });
+    const entry = {
+      id: "captured-plugin",
+      displayName: "Captured plugin",
+      source: "builtin" as const,
+      hostProfileVersion: 1 as const,
+      capabilities: ["tools.register" as const],
+    };
+    const set = {
+      generation: "capture-tools",
+      projectId: "project",
+      entries: [entry],
+      diagnostics: [],
+      resolvedAt: 0,
+    };
+    const builder = new DesktopPluginRegistryBuilder();
+    const holder = new PluginCallRegistryHolder(set.generation);
+    const services = await createAgentSessionServices({
+      cwd: process.cwd(),
+      resourceLoaderOptions: controlledResourceLoaderOptions(
+        set,
+        [
+          {
+            name: "desktop:captured-plugin",
+            factory(pi) {
+              pi.registerTool({
+                name: "hidden_action",
+                label: "Hidden action",
+                description: "x".repeat(5_704),
+                parameters,
+                async execute() {
+                  return { content: [{ type: "text", text: "ok" }], details: {} };
+                },
+              });
+            },
+          },
+          {
+            name: "desktop:host-infrastructure",
+            factory(pi) {
+              pi.registerTool({
+                name: "native_helper",
+                label: "Native helper",
+                description: "Run host infrastructure",
+                parameters: Type.Object({}, { additionalProperties: false }),
+                async execute() {
+                  return { content: [{ type: "text", text: "ok" }], details: {} };
+                },
+              });
+            },
+          },
+        ],
+        { pluginRegistry: holder, pluginRegistryBuilder: builder },
+      ),
+    });
+
+    const registeredNames = services.resourceLoader
+      .getExtensions()
+      .extensions.flatMap((extension) => [...extension.tools.keys()]);
+    expect(registeredNames.sort()).toEqual(["native_helper", "plugin_call"]);
+    expect(builder.finalize().get("captured-plugin")?.has("hidden_action")).toBe(true);
+    await holder.dispose();
   });
 
   it("keeps built-in plugin lifecycle skills in root sessions while allowing subagent isolation", async () => {
@@ -235,6 +302,36 @@ export default function (pi) {
     await writeFile(entryPath, "export default function changed() {}\n");
 
     await expect(validateResolvedExtensionSet("project", set)).resolves.toMatchObject({ generation: "generation" });
+  });
+
+  it("attributes Desktop-prefixed inline factory failures to their approved entry", () => {
+    const diagnostics = extensionLoadDiagnostics(
+      {
+        generation: "generation",
+        projectId: "project",
+        entries: [
+          {
+            id: "pi-subagents",
+            displayName: "Subagents",
+            source: "builtin",
+            hostProfileVersion: 1,
+            capabilities: ["plugin-methods.provide"],
+          },
+        ],
+        diagnostics: [],
+        resolvedAt: 0,
+      },
+      { extensions: [], errors: [{ path: "<inline:desktop:pi-subagents>", error: "PLUGIN_DECLARATION_INVALID" }] },
+    );
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        extensionId: "pi-subagents",
+        source: "builtin",
+        code: "DESKTOP_EXTENSION_LOAD_FAILED",
+        message: "PLUGIN_DECLARATION_INVALID",
+      }),
+    ]);
   });
 
   it("keeps controlled source identity on Pi loader failures", () => {

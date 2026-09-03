@@ -13,7 +13,8 @@ Use this skill as the Desktop-specific reference while implementing a standard P
 A Desktop plugin is a standard Pi Extension running as trusted Node.js code inside the Desktop sidecar. It is not an Electron renderer plugin and it is not sandboxed.
 
 - Import the public exports from the installed Pi packages. Do not import Desktop main-process, preload, renderer, or private sidecar modules.
-- Export a named `desktopPlugin` declaration for structured programmatic methods; use a default factory only for intentional direct Pi tools, commands, events, or providers. Method-only plugins may omit the default factory.
+- Register model-callable operations with the standard `pi.registerTool(...)` API. Desktop captures those definitions at the approved per-entry boundary and exposes them only through `plugin_call`; do not maintain a second executable declaration.
+- Keep commands, events, providers, and other intentional host integrations in the same default factory.
 - Keep file, network, subprocess, environment-variable, credential, native-code, and destructive-operation risks visible to the user.
 - Declare capabilities from actual behavior. Capability declarations are compatibility and review metadata, not a sandbox.
 - Keep long-lived resources behind `session_start` and clean them in an idempotent `session_shutdown` handler.
@@ -98,7 +99,7 @@ A directory selected through Developer Mode may include `market-manifest.json`. 
 }
 ```
 
-For a local development directory, Desktop reads `plugin.name`, `plugin.id`, `pi.entry`, `pi.skills`, `pi.pluginCall`, `desktop.hostProfileVersion`, `capabilities`, and the optional `configuration`. `plugin-api.json` must be generated from the same declaration as the named `desktopPlugin` export and sorted by method name. The primary skill name must match `pi.pluginCall.skill`, document `plugin["canonical.id"].method(...)`, and reference generated `references/api.md`. Marketplace artifacts additionally require the complete identity, target, native/executable declarations, and payload file metadata described in [loading-and-packaging.md](references/loading-and-packaging.md).
+For a local development directory, Desktop reads `plugin.name`, `plugin.id`, `pi.entry`, `pi.skills`, `pi.pluginCall`, `desktop.hostProfileVersion`, `capabilities`, and the optional `configuration`. `plugin-api.json` documents the standard tools captured from `pi.registerTool()`. The primary skill name must match `pi.pluginCall.skill`, document `plugin["canonical.id"].method(...)`, and reference generated `references/api.md`. Marketplace artifacts additionally require the complete identity, target, native/executable declarations, and payload file metadata described in [loading-and-packaging.md](references/loading-and-packaging.md).
 
 ## Configuration Quick Start
 
@@ -131,7 +132,7 @@ Declare a schema in the manifest and include `configuration.read`:
       }
     ]
   },
-  "capabilities": ["configuration.read", "tools.register"]
+  "capabilities": ["configuration.read", "plugin-methods.provide"]
 }
 ```
 
@@ -155,7 +156,7 @@ Desktop configuration is scoped to the approved extension entry. Values are immu
 
 Before declaring a plugin ready:
 
-1. A method plugin uses a manifest-backed directory with a stable `plugin.id`, `desktopPlugin` named export, catalog, and primary skill; a direct-only plugin may use a default factory entry.
+1. A tool plugin uses a manifest-backed directory with a stable `plugin.id`, standard `pi.registerTool()` definitions, a catalog, and a primary skill; loose direct-only files are not admitted to `plugin_call`.
 2. The manifest uses `desktop.hostProfileVersion: 1` and declares only supported capabilities.
 3. Every schema field passes the v1 configuration parser and every required field has a valid value before runtime use.
 4. Every tool, command, provider, and event path has deterministic focused coverage.

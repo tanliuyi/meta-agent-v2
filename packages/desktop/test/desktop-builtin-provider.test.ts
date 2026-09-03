@@ -1,6 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { afterEach, describe, expect, it } from "vitest";
 import { DesktopControlledExtensionRegistry } from "../src/main/extensions/desktop-extension-registry.ts";
 import { DesktopBuiltinProviderRegistry } from "../src/main/pi/desktop-builtin-provider.ts";
+import { controlledResourceLoaderOptions } from "../src/main/pi/desktop-extension-runtime-policy.ts";
+import { PluginCallRegistryHolder } from "../src/main/pi/plugin-call/plugin-call-tool.ts";
+import { DesktopPluginRegistryBuilder } from "../src/main/pi/plugin-call/plugin-method-registry.ts";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+});
 
 describe("DesktopBuiltinProviderRegistry", () => {
   it("keeps main-owned metadata aligned with sidecar-only inline factories", () => {
@@ -12,7 +25,7 @@ describe("DesktopBuiltinProviderRegistry", () => {
       expect.objectContaining({
         id: "pi-hermes-memory",
         source: "builtin",
-        capabilities: expect.arrayContaining(["events.subscribe", "tools.register", "commands.register"]),
+        capabilities: expect.arrayContaining(["events.subscribe", "plugin-methods.provide", "commands.register"]),
       }),
     );
     expect(definitions).toContainEqual(
@@ -26,12 +39,55 @@ describe("DesktopBuiltinProviderRegistry", () => {
       expect.objectContaining({
         id: "pi-subagents",
         source: "builtin",
-        capabilities: expect.arrayContaining(["events.subscribe", "tools.register", "commands.register"]),
+        capabilities: expect.arrayContaining(["events.subscribe", "plugin-methods.provide", "commands.register"]),
       }),
     );
     expect(factories.map(({ name }) => name)).toEqual(
       expect.arrayContaining(["desktop:pi-hermes-memory", "desktop:pi-rewind", "desktop:pi-subagents"]),
     );
+  });
+
+  it("loads and captures every built-in plugin factory without exposing its tools", async () => {
+    const root = join(tmpdir(), `desktop-builtin-capture-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    tempDirs.push(root);
+    await Promise.all([mkdir(cwd, { recursive: true }), mkdir(agentDir, { recursive: true })]);
+
+    const definitions = DesktopBuiltinProviderRegistry.getExtensionDefinitions();
+    const set = {
+      generation: "builtin-capture",
+      projectId: "project",
+      entries: definitions.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+      diagnostics: [],
+      resolvedAt: 0,
+    };
+    const builder = new DesktopPluginRegistryBuilder();
+    const holder = new PluginCallRegistryHolder(set.generation);
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      resourceLoaderOptions: controlledResourceLoaderOptions(
+        set,
+        DesktopBuiltinProviderRegistry.getExtensionFactories(),
+        { pluginRegistry: holder, pluginRegistryBuilder: builder, cwd, agentDir },
+      ),
+    });
+
+    expect(services.resourceLoader.getExtensions().errors).toEqual([]);
+    const registry = builder.finalize();
+    expect(registry.get("pi-subagents")?.has("subagent")).toBe(true);
+    expect(registry.get("pi-subagents")?.has("subagent_wait")).toBe(true);
+    expect(registry.get("pi-hermes-memory")?.has("memory")).toBe(true);
+    expect(registry.get("pi-browser")?.has("browser_open")).toBe(true);
+    const exposedTools = services.resourceLoader
+      .getExtensions()
+      .extensions.flatMap((extension) => [...extension.tools.keys()]);
+    expect(exposedTools).toContain("plugin_call");
+    expect(exposedTools).not.toContain("subagent");
+    expect(exposedTools).not.toContain("memory");
+    expect(exposedTools).not.toContain("browser_open");
+    await holder.dispose();
   });
 
   it("exposes built-in connection defaults to the settings editor", () => {

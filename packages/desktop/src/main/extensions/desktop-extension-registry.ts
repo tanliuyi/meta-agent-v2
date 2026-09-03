@@ -51,6 +51,7 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
     pluginCallCatalog: piSubagentsCatalog,
     capabilities: [
       "plugin-methods.provide",
+      "events.subscribe",
       "commands.register",
       "messages.enqueue",
       "messages.custom",

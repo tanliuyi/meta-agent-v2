@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { activateWebAccessPlugin, desktopPlugin, pluginCallCatalog } from "./src/plugin-call.ts";
+import { activateWebAccessPlugin } from "./src/plugin-call.ts";
 import { applyDesktopConfig, type DesktopWebAccessConfig } from "./src/configuration.ts";
 
 interface DesktopExtensionAPI extends ExtensionAPI {
@@ -15,5 +15,3 @@ export default function piWebAccessDesktop(pi: ExtensionAPI): void {
   applyDesktopConfig(desktopApi.getConfig<DesktopWebAccessConfig>());
   activateWebAccessPlugin(pi);
 }
-
-export { desktopPlugin, pluginCallCatalog };

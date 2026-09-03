@@ -61,6 +61,7 @@ describe("plugin call runtime", () => {
   });
 
   test("plugin registry validates catalog and executes a program in a fresh worker", async () => {
+    const description = "D".repeat(655);
     const parameters = Type.Object({ value: Type.Number() }, { additionalProperties: false });
     const result = Type.Object({ doubled: Type.Number() }, { additionalProperties: false });
     const entry = {
@@ -78,7 +79,7 @@ describe("plugin call runtime", () => {
         methods: [
           {
             name: "double",
-            description: "Double a number",
+            description,
             parameters: parameters as never,
             result: result as never,
             concurrency: "serial" as const,
@@ -92,7 +93,7 @@ describe("plugin call runtime", () => {
       methods: [
         {
           name: "double",
-          description: "Double a number",
+          description,
           parameters,
           result,
           async execute(args) {
@@ -116,6 +117,73 @@ describe("plugin call runtime", () => {
     expect(value).toEqual({ doubled: 42 });
     expect(details.calls).toHaveLength(1);
     expect(details.calls[0].state).toBe("complete");
+  });
+
+  test("captures standard Pi tools with their execution context and adapters", async () => {
+    const parameters = Type.Object({ value: Type.Number() }, { additionalProperties: false });
+    const entry = {
+      id: "development:captured",
+      displayName: "Captured",
+      source: "development" as const,
+      entryPath: "/tmp/captured.ts",
+      hostProfileVersion: 1 as const,
+      capabilities: ["plugin-methods.provide" as const],
+      pluginId: "com.example.captured",
+      pluginCallSkill: "plugin-captured",
+      pluginCallCatalog: {
+        schemaVersion: 1 as const,
+        pluginId: "com.example.captured",
+        methods: [
+          {
+            name: "run",
+            description: "Run captured tool",
+            parameters: parameters as never,
+            result: Type.Object({ text: Type.String() }, { additionalProperties: false }) as never,
+            concurrency: "serial" as const,
+          },
+        ],
+      },
+    };
+    const extensionContext = { cwd: process.cwd() };
+    const builder = new DesktopPluginRegistryBuilder();
+    builder.stageTool(entry, {
+      name: "run",
+      label: "Run",
+      description: "Run captured tool",
+      parameters,
+      executionMode: "sequential",
+      prepareArguments(args) {
+        const input = args as { raw: number };
+        return { value: input.raw * 2 };
+      },
+      async execute(_id, params, signal, onUpdate, context) {
+        expect(context).toBe(extensionContext);
+        expect(signal?.aborted).toBe(false);
+        onUpdate?.({ content: [{ type: "text", text: "working" }], details: {} });
+        return {
+          content: [
+            { type: "text", text: `value:${params.value}` },
+            { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
+          ],
+          details: { private: true },
+        };
+      },
+    });
+    builder.commit(entry.id);
+    const details = { calls: [], logs: [], attachments: [], toolContext: extensionContext };
+    await expect(
+      executePluginProgram(
+        'return plugin["com.example.captured"].run({ raw: 21 });',
+        new PluginMethodDispatcher(builder.finalize(), process.cwd()),
+        "tool-captured",
+        undefined,
+        process.cwd(),
+        undefined,
+        details,
+      ),
+    ).resolves.toEqual({ text: "value:42\n[image attachment]" });
+    expect(details.calls[0]).toMatchObject({ state: "complete", progress: { text: "working" } });
+    expect(details.attachments).toMatchObject([{ type: "image", mimeType: "image/png" }]);
   });
 
   test("supports erasable TypeScript and dotted plugin namespaces", async () => {

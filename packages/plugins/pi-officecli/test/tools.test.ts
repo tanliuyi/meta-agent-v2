@@ -30,7 +30,6 @@ function createFakePi(config: Record<string, string | number | boolean>): FakePi
     registerTool: (tool: AnyTool) => {
       fake.tools.set(tool.name, tool);
     },
-    on: () => undefined,
     on: (event: string) => {
       fake.events.push(event);
     },
@@ -56,14 +55,17 @@ const EXPECTED_TOOLS = [
   "office_help",
 ];
 
-test("default factory does not register model-facing Office tools", () => {
+test("default factory registers Office tools through the host boundary", () => {
   const tools: unknown[] = [];
   piOfficeCli({
     getConfig: () => ({ binaryPath: FAKE_BIN, dataDir: tmpdir() }),
     registerTool: (tool: unknown) => tools.push(tool),
     on: () => undefined,
   } as unknown as ExtensionAPI);
-  assert.deepEqual(tools, []);
+  assert.deepEqual(
+    tools.map((tool) => (tool as { name: string }).name).sort(),
+    [...EXPECTED_TOOLS].sort(),
+  );
 });
 
 test("market manifest requires Desktop client 0.0.42 or newer", () => {

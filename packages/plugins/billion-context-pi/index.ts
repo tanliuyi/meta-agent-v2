@@ -12,4 +12,6 @@ export function createAcpExtension(adapter: AdapterConfig = {}) {
   });
 }
 
+export { desktopPlugin, pluginCallCatalog } from "./src/index.ts";
+
 export default createAcpExtension();

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import piWebAccessDesktop from "../index.ts";
 
-test("keeps Desktop commands and lifecycle handlers without registering model tools", () => {
+test("registers tools through the Desktop-owned registration boundary", () => {
   const tools: ToolDefinition[] = [];
   const commands: string[] = [];
   const events: string[] = [];
@@ -29,7 +29,7 @@ test("keeps Desktop commands and lifecycle handlers without registering model to
   piWebAccessDesktop(pi);
 
   const toolNames = tools.map((tool) => tool.name);
-  assert.deepEqual(toolNames, []);
+  assert.deepEqual(toolNames.sort(), ["fetch_content", "get_search_content", "source_check", "web_search"]);
   assert.deepEqual(commands.sort(), ["curator", "google-account", "search", "websearch"]);
   assert.deepEqual(events.sort(), ["resources_discover", "session_shutdown", "session_start", "session_tree"]);
   assert.equal(shortcutRegistrations, 0);

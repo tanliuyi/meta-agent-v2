@@ -10,7 +10,12 @@
   },
   "pi": {
     "entry": "index.ts",
-    "extensionApi": "v1"
+    "extensionApi": "v1",
+    "skills": ["skills/billion-context/SKILL.md"],
+    "pluginCall": {
+      "skill": "billion-context",
+      "catalog": "plugin-api.json"
+    }
   },
   "desktop": {
     "hostProfileVersion": 1
@@ -83,7 +88,7 @@
   "capabilities": [
     "configuration.read",
     "events.subscribe",
-    "tools.register",
+    "plugin-methods.provide",
     "commands.register",
     "session.read",
     "session.compact",
@@ -93,6 +98,15 @@
   "executables": [],
   "files": {
     "index.ts": {
+      "mode": "0644"
+    },
+    "plugin-api.json": {
+      "mode": "0644"
+    },
+    "skills/billion-context/SKILL.md": {
+      "mode": "0644"
+    },
+    "skills/billion-context/references/api.md": {
       "mode": "0644"
     },
     "assets/icon.png": {

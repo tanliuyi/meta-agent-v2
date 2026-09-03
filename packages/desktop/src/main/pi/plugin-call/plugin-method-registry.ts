@@ -1,4 +1,6 @@
+import type { AgentToolResult, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
+import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { JsonValue } from "../../../shared/contracts.ts";
 import type {
@@ -7,6 +9,7 @@ import type {
   PluginApiCatalogV1,
   ResolvedExtensionEntry,
 } from "../../../shared/desktop-extension-contracts.ts";
+import { normalizePluginSchema } from "../extensions/legacy-plugin-adapter.ts";
 import { canonicalJson, snapshotJson } from "./plugin-call-json.ts";
 
 const PLUGIN_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -42,6 +45,10 @@ const ALLOWED_SCHEMA_KEYS = new Set([
 ]);
 const MAX_SCHEMA_BYTES = 256 * 1024;
 const MAX_SCHEMA_DEPTH = 64;
+const MAX_METHOD_DESCRIPTION_LENGTH = 4_096;
+const CAPTURED_TOOL_RESULT_SCHEMA = Type.Object({ text: Type.String() }, { additionalProperties: false });
+
+type CapturedPluginTool = ToolDefinition<TSchema, unknown, unknown>;
 
 export interface RegisteredDesktopPluginMethod {
   readonly pluginId: string;
@@ -54,6 +61,7 @@ export interface RegisteredDesktopPluginMethod {
   readonly parameters: object;
   readonly result: object;
   readonly execute: DesktopPluginMethodDefinition["execute"];
+  readonly prepareArguments?: (args: unknown) => unknown;
   readonly validateParameters: (value: unknown) => boolean;
   readonly validateResult: (value: unknown) => boolean;
 }
@@ -61,27 +69,21 @@ export interface RegisteredDesktopPluginMethod {
 export type PluginMethodRegistry = ReadonlyMap<string, ReadonlyMap<string, RegisteredDesktopPluginMethod>>;
 
 interface StagedPlugin {
+  entryId: string;
   pluginId: string;
+  catalog?: PluginApiCatalogV1;
+  kind: "declaration" | "tools";
   methods: RegisteredDesktopPluginMethod[];
 }
 
 export class DesktopPluginRegistryBuilder {
-  private readonly committed = new Map<string, RegisteredDesktopPluginMethod[]>();
+  private readonly committed = new Map<string, StagedPlugin>();
   private readonly pending = new Map<string, StagedPlugin>();
-  private state: "open" | "frozen" | "discarded" = "open";
+  private state: "active" | "discarded" = "active";
 
   stage(entry: ResolvedExtensionEntry, declaration: unknown): void {
-    this.assertOpen();
-    const pluginId = entry.pluginId ?? (entry.source === "development" ? undefined : entry.id);
-    if (!pluginId || !PLUGIN_ID_PATTERN.test(pluginId)) throw new Error("PLUGIN_DECLARATION_UNAUTHORIZED");
-    if (
-      !entry.capabilities.includes("plugin-methods.provide") ||
-      !entry.pluginCallSkill ||
-      !entry.pluginCallCatalog ||
-      entry.pluginCallCatalog.methods.length === 0
-    ) {
-      throw new Error("PLUGIN_DECLARATION_UNAUTHORIZED");
-    }
+    this.assertActive();
+    const { pluginId, catalog } = this.requirePluginMetadata(entry);
     const root = readPlainObject(declaration, ["schemaVersion", "methods"]);
     if (root.schemaVersion !== 1 || !Array.isArray(root.methods) || root.methods.length === 0) {
       throw new Error("PLUGIN_DECLARATION_INVALID");
@@ -90,37 +92,45 @@ export class DesktopPluginRegistryBuilder {
     if (new Set(methods.map((method) => method.name)).size !== methods.length) {
       throw new Error("PLUGIN_DUPLICATE_METHOD");
     }
-    const catalog = parsePluginApiCatalog(entry.pluginCallCatalog);
-    const catalogMethods = catalog.methods.map((value) => normalizeCatalogMethod(value));
-    if (
-      catalog.schemaVersion !== 1 ||
-      catalog.pluginId !== pluginId ||
-      catalogMethods.length !== methods.length ||
-      canonicalJson([...catalogMethods].sort((left, right) => left.name.localeCompare(right.name))) !==
-        canonicalJson(
-          methods
-            .map(({ name, description, parameters, result, concurrency }) => ({
-              name,
-              description,
-              parameters,
-              result,
-              concurrency,
-            }))
-            .sort((left, right) => left.name.localeCompare(right.name)),
-        )
-    ) {
-      throw new Error("PLUGIN_CATALOG_DRIFT");
+    this.pending.set(entry.id, { entryId: entry.id, pluginId, catalog, kind: "declaration", methods });
+  }
+
+  stageTool(entry: ResolvedExtensionEntry, value: unknown): void {
+    this.assertActive();
+    const existing = this.pending.get(entry.id);
+    const { pluginId, catalog } = existing ?? this.requirePluginMetadata(entry);
+    const tool = validateCapturedTool(value);
+    const staged =
+      existing?.kind === "tools"
+        ? existing
+        : { entryId: entry.id, pluginId, catalog, kind: "tools" as const, methods: [] };
+    if (staged.pluginId !== pluginId || staged.methods.some((method) => method.name === tool.name)) {
+      throw new Error("PLUGIN_DUPLICATE_METHOD");
     }
-    this.pending.set(entry.id, { pluginId, methods });
+    staged.methods.push(this.stageCapturedTool(entry, pluginId, tool));
+    this.pending.set(entry.id, staged);
+  }
+
+  registerRuntimeTool(entry: ResolvedExtensionEntry, value: unknown): PluginMethodRegistry {
+    this.assertActive();
+    const { pluginId } = this.requirePluginMetadata(entry);
+    const committed = this.committed.get(pluginId);
+    if (!committed || committed.entryId !== entry.id) throw new Error("PLUGIN_GENERATION_STALE");
+    const tool = validateCapturedTool(value);
+    if (committed.methods.some((method) => method.name === tool.name)) throw new Error("PLUGIN_DUPLICATE_METHOD");
+    committed.methods.push(this.stageCapturedTool(entry, pluginId, tool));
+    return this.snapshot();
   }
 
   commit(entryId: string): void {
-    this.assertOpen();
+    this.assertActive();
     const staged = this.pending.get(entryId);
     if (!staged) return;
-    if (this.committed.has(staged.pluginId)) throw new Error("PLUGIN_DUPLICATE_ID");
+    const existing = this.committed.get(staged.pluginId);
+    if (existing && existing.entryId !== entryId) throw new Error("PLUGIN_DUPLICATE_ID");
+    this.validateCatalog(staged);
     this.pending.delete(entryId);
-    this.committed.set(staged.pluginId, staged.methods);
+    this.committed.set(staged.pluginId, staged);
   }
 
   rollback(entryId: string): void {
@@ -128,14 +138,9 @@ export class DesktopPluginRegistryBuilder {
   }
 
   finalize(): PluginMethodRegistry {
-    this.assertOpen();
+    this.assertActive();
     if (this.pending.size > 0) throw new Error("PLUGIN_DECLARATION_UNCOMMITTED");
-    const registry = new Map<string, ReadonlyMap<string, RegisteredDesktopPluginMethod>>();
-    for (const [pluginId, methods] of this.committed) {
-      registry.set(pluginId, new Map(methods.map((method) => [method.name, method])));
-    }
-    this.state = "frozen";
-    return registry;
+    return this.snapshot();
   }
 
   discard(): void {
@@ -153,7 +158,7 @@ export class DesktopPluginRegistryBuilder {
       FORBIDDEN_METHOD_NAMES.has(method.name) ||
       typeof method.description !== "string" ||
       method.description.length === 0 ||
-      method.description.length > 500 ||
+      method.description.length > MAX_METHOD_DESCRIPTION_LENGTH ||
       (method.concurrency !== undefined && method.concurrency !== "serial" && method.concurrency !== "parallel") ||
       typeof method.execute !== "function"
     ) {
@@ -165,7 +170,7 @@ export class DesktopPluginRegistryBuilder {
     const resultValidator = Compile(result as TSchema);
     return Object.freeze({
       pluginId,
-      primarySkill: entry.pluginCallSkill as string,
+      primarySkill: entry.pluginCallSkill ?? entry.id,
       entryId: entry.id,
       source: entry.source,
       name: method.name,
@@ -179,9 +184,134 @@ export class DesktopPluginRegistryBuilder {
     });
   }
 
-  private assertOpen(): void {
-    if (this.state !== "open") throw new Error("PLUGIN_GENERATION_STALE");
+  private stageCapturedTool(
+    entry: ResolvedExtensionEntry,
+    pluginId: string,
+    tool: CapturedPluginTool,
+  ): RegisteredDesktopPluginMethod {
+    const parameters = normalizePluginSchema(tool.parameters);
+    const result = validatePluginSchemaProfile(CAPTURED_TOOL_RESULT_SCHEMA, false);
+    const parametersValidator = Compile(tool.parameters);
+    const resultValidator = Compile(result as TSchema);
+    const execute: DesktopPluginMethodDefinition["execute"] = async (params, signal, context) => {
+      const extensionContext = context.toolContext as ExtensionContext | undefined;
+      if (!extensionContext) throw new Error("Plugin extension context is unavailable");
+      const toolResult = await tool.execute(
+        context.callId,
+        params,
+        signal,
+        (update: AgentToolResult<unknown>) => context.reportProgress({ text: toolResultText(update) }),
+        extensionContext,
+      );
+      const textParts: string[] = [];
+      for (const part of toolResult.content) {
+        if (part.type === "text") textParts.push(part.text);
+        else {
+          context.attach({ type: "image", data: part.data, mimeType: part.mimeType });
+          textParts.push("[image attachment]");
+        }
+      }
+      return { text: textParts.join("\n") };
+    };
+    return Object.freeze({
+      pluginId,
+      primarySkill: entry.pluginCallSkill ?? entry.id,
+      entryId: entry.id,
+      source: entry.source,
+      name: tool.name,
+      description: tool.description,
+      concurrency: tool.executionMode === "parallel" ? "parallel" : "serial",
+      parameters,
+      result,
+      ...(tool.prepareArguments ? { prepareArguments: tool.prepareArguments } : {}),
+      execute,
+      validateParameters: (candidate: unknown) => parametersValidator.Check(candidate),
+      validateResult: (candidate: unknown) => resultValidator.Check(candidate),
+    });
   }
+
+  private requirePluginMetadata(entry: ResolvedExtensionEntry): {
+    pluginId: string;
+    catalog?: PluginApiCatalogV1;
+  } {
+    const pluginId = entry.pluginId ?? entry.id;
+    if (
+      !pluginId ||
+      !PLUGIN_ID_PATTERN.test(pluginId) ||
+      (!entry.capabilities.includes("plugin-methods.provide") && !entry.capabilities.includes("tools.register"))
+    ) {
+      throw new Error("PLUGIN_DECLARATION_UNAUTHORIZED");
+    }
+    return {
+      pluginId,
+      ...(entry.pluginCallCatalog ? { catalog: parsePluginApiCatalog(entry.pluginCallCatalog) } : {}),
+    };
+  }
+
+  private validateCatalog(staged: StagedPlugin): void {
+    if (staged.methods.length === 0) throw new Error("PLUGIN_DECLARATION_INVALID");
+    if (!staged.catalog) return;
+    if (staged.catalog.pluginId !== staged.pluginId) {
+      throw new Error("PLUGIN_CATALOG_DRIFT");
+    }
+    const catalogMethods = staged.catalog.methods.map((value) => normalizeCatalogMethod(value));
+    if (staged.kind === "tools") {
+      const documentedNames = new Set(catalogMethods.map((method) => method.name));
+      if (staged.methods.some((method) => !documentedNames.has(method.name))) throw new Error("PLUGIN_CATALOG_DRIFT");
+      return;
+    }
+    const methods = staged.methods.map(({ name, description, parameters, result, concurrency }) => ({
+      name,
+      description,
+      parameters,
+      result,
+      concurrency,
+    }));
+    if (
+      catalogMethods.length !== methods.length ||
+      canonicalJson([...catalogMethods].sort((left, right) => left.name.localeCompare(right.name))) !==
+        canonicalJson([...methods].sort((left, right) => left.name.localeCompare(right.name)))
+    ) {
+      throw new Error("PLUGIN_CATALOG_DRIFT");
+    }
+  }
+
+  private snapshot(): PluginMethodRegistry {
+    const registry = new Map<string, ReadonlyMap<string, RegisteredDesktopPluginMethod>>();
+    for (const [pluginId, staged] of this.committed) {
+      registry.set(pluginId, new Map(staged.methods.map((method) => [method.name, method])));
+    }
+    return registry;
+  }
+
+  private assertActive(): void {
+    if (this.state !== "active") throw new Error("PLUGIN_GENERATION_STALE");
+  }
+}
+
+function validateCapturedTool(value: unknown): CapturedPluginTool {
+  if (!value || typeof value !== "object") throw new Error("PLUGIN_DECLARATION_INVALID");
+  const tool = value as Partial<CapturedPluginTool>;
+  if (
+    typeof tool.name !== "string" ||
+    tool.name.length > 64 ||
+    !METHOD_NAME_PATTERN.test(tool.name) ||
+    FORBIDDEN_METHOD_NAMES.has(tool.name) ||
+    typeof tool.description !== "string" ||
+    tool.description.length === 0 ||
+    !tool.parameters ||
+    typeof tool.parameters !== "object" ||
+    typeof tool.execute !== "function" ||
+    (tool.executionMode !== undefined && tool.executionMode !== "sequential" && tool.executionMode !== "parallel") ||
+    (tool.prepareArguments !== undefined && typeof tool.prepareArguments !== "function")
+  ) {
+    throw new Error("PLUGIN_DECLARATION_INVALID");
+  }
+  return tool as CapturedPluginTool;
+}
+
+function toolResultText(result: AgentToolResult<unknown>): string {
+  return result.content.map((part) => (part.type === "text" ? part.text : "[image attachment]")).join("\n");
 }
 
 export function validatePluginSchemaProfile(value: unknown, parametersRoot: boolean): object {
@@ -309,7 +439,7 @@ function normalizeCatalogMethod(value: unknown): {
     FORBIDDEN_METHOD_NAMES.has(method.name) ||
     typeof method.description !== "string" ||
     method.description.length === 0 ||
-    method.description.length > 500 ||
+    method.description.length > MAX_METHOD_DESCRIPTION_LENGTH ||
     (method.concurrency !== "serial" && method.concurrency !== "parallel")
   ) {
     throw new Error("PLUGIN_CATALOG_DRIFT");

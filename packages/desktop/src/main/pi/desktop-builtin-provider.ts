@@ -25,27 +25,14 @@ import { getBuiltinSkillPath } from "../extensions/desktop-builtin-resource-path
 import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
 import type { ModelsModelDefinition } from "../models/models-config-schema.ts";
 import piAutoTitleExtension from "./extensions/pi-auto-title/index.ts";
-import piBrowserExtension, {
-  pluginCallCatalog as piBrowserCatalog,
-  desktopPlugin as piBrowserPlugin,
-} from "./extensions/pi-browser/index.ts";
-import hermesMemoryExtension, {
-  captureHermesPluginTool,
-  pluginCallCatalog as piHermesCatalog,
-  desktopPlugin as piHermesPlugin,
-} from "./extensions/pi-hermes-memory/index.ts";
+import piBrowserExtension, { pluginCallCatalog as piBrowserCatalog } from "./extensions/pi-browser/index.ts";
+import hermesMemoryExtension, { pluginCallCatalog as piHermesCatalog } from "./extensions/pi-hermes-memory/index.ts";
 import piRewindExtension from "./extensions/pi-rewind/src/index.ts";
-import subagentsExtension, {
-  captureSubagentPluginTool,
-  pluginCallCatalog as piSubagentsCatalog,
-  desktopPlugin as piSubagentsPlugin,
-} from "./extensions/pi-subagents/index.ts";
+import subagentsExtension, { pluginCallCatalog as piSubagentsCatalog } from "./extensions/pi-subagents/index.ts";
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 
 type DesktopInlineExtension = InlineExtension & {
   desktopPlugin?: unknown;
-  pluginMethodOnly?: boolean;
-  captureTool?: (tool: unknown) => void;
 };
 
 interface DesktopProviderDefinition {
@@ -69,6 +56,7 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       pluginCallCatalog: piHermesCatalog,
       capabilities: [
         "plugin-methods.provide",
+        "events.subscribe",
         "commands.register",
         "messages.enqueue",
         "session.read",
@@ -79,10 +67,7 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
     },
     factory: {
       name: "desktop:pi-hermes-memory",
-      factory: (api: ExtensionAPI) => hermesMemoryExtension(api, { captureTool: captureHermesPluginTool }),
-      desktopPlugin: piHermesPlugin,
-      pluginMethodOnly: true,
-      captureTool: captureHermesPluginTool,
+      factory: hermesMemoryExtension,
     } as DesktopInlineExtension,
   },
   {
@@ -106,6 +91,7 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       pluginCallCatalog: piSubagentsCatalog,
       capabilities: [
         "plugin-methods.provide",
+        "events.subscribe",
         "commands.register",
         "messages.enqueue",
         "messages.custom",
@@ -120,10 +106,7 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
     },
     factory: {
       name: "desktop:pi-subagents",
-      factory: (api: ExtensionAPI) => subagentsExtension(api, undefined, captureSubagentPluginTool),
-      desktopPlugin: piSubagentsPlugin,
-      pluginMethodOnly: true,
-      captureTool: captureSubagentPluginTool,
+      factory: subagentsExtension,
     } as DesktopInlineExtension,
   },
   {
@@ -150,8 +133,6 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
     factory: {
       name: "desktop:pi-browser",
       factory: piBrowserExtension,
-      desktopPlugin: piBrowserPlugin,
-      pluginMethodOnly: true,
     } as DesktopInlineExtension,
   },
 ];
@@ -173,7 +154,7 @@ export const DesktopBuiltinProviderRegistry = {
           ? {
               ...factory,
               name: typeof factory === "function" ? `desktop:${definition.id}` : factory.name,
-              factory: (api: ExtensionAPI) => subagentsExtension(api, options.subagentRuntime, factory.captureTool),
+              factory: (api: ExtensionAPI) => subagentsExtension(api, options.subagentRuntime),
             }
           : factory,
       ),

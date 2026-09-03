@@ -1,10 +1,14 @@
 import { fileURLToPath } from "node:url";
 import type {
+  AgentToolResult,
   ExtensionAPI,
   ExtensionContext,
   ExtensionFactory,
   SessionMessageEntry,
+  ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
 import type { CoreMessage, NudgeDecision, CompressionBlock } from "acp-kernel";
 import { renderNudgeText } from "acp-kernel";
 import type { AdapterConfig } from "./config.ts";
@@ -24,6 +28,75 @@ import { checkForUpdate } from "./update.ts";
 import { loadUserConfig, applyUserConfig, type UserAcpConfig } from "./user-config.ts";
 
 type AgentMessage = SessionMessageEntry["message"];
+type DesktopPluginTool = ToolDefinition;
+type PluginMethodExecutionContext = {
+  readonly pluginId: string;
+  readonly methodName: string;
+  readonly callId: string;
+  readonly toolCallId: string;
+  readonly cwd: string;
+  readonly signal: AbortSignal;
+  readonly toolContext?: unknown;
+  attach(attachment: { type: "image" | "file"; data?: string; path?: string; mimeType?: string; name?: string }): void;
+  reportProgress(progress: unknown): void;
+};
+
+const declarationRuntime = createRuntime({});
+const declarationTools = [
+  makeCompressTool(declarationRuntime),
+  makeDecompressTool(declarationRuntime),
+  makeSearchTool(declarationRuntime),
+  makeStatusTool(declarationRuntime),
+];
+const pluginResultSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
+let activeRuntime: AcpRuntime | undefined;
+let activeTools = new Map<string, DesktopPluginTool>();
+
+export const desktopPlugin = {
+  schemaVersion: 1 as const,
+  methods: declarationTools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+    result: pluginResultSchema,
+    concurrency: "serial" as const,
+    async execute(
+      params: unknown,
+      signal: AbortSignal,
+      ctx: PluginMethodExecutionContext,
+    ): Promise<{ text: string }> {
+      const runtime = activeRuntime;
+      if (!runtime) throw new Error("Billion Context plugin is not active");
+      const extensionContext = ctx.toolContext as ExtensionContext | undefined;
+      if (!extensionContext) throw new Error("Plugin extension context is unavailable");
+      const currentTool = activeTools.get(ctx.methodName);
+      if (!currentTool) throw new Error(`Billion Context method ${ctx.methodName} is unavailable`);
+      const result = await currentTool.execute(
+        ctx.callId,
+        params,
+        signal,
+        undefined,
+        extensionContext,
+      ) as AgentToolResult<unknown>;
+      return { text: result.content.filter((part) => part.type === "text").map((part) => part.text).join("\n") };
+    },
+  })),
+};
+
+export const pluginCallCatalog = {
+  schemaVersion: 1 as const,
+  pluginId: "pi.billion-context",
+  methods: [...desktopPlugin.methods]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(({ name, description, parameters, result, concurrency }) => ({
+      name,
+      description,
+      parameters,
+      result,
+      concurrency,
+    })),
+};
+
 type DesktopAcpConfiguration = Pick<
   AdapterConfig,
   "debug" | "modelContextLimit" | "preserveRecentMessages" | "toolBashDefaultTimeout" | "toolOutputMaxBytes"
@@ -42,16 +115,22 @@ export function createAcpExtension(adapter: AdapterConfig = {}): ExtensionFactor
         : {};
     const hostConfigKeys = desktopHostConfigKeys(hostConfig);
     const runtime = createRuntime({ ...adapter, ...hostConfig });
+    activeRuntime = runtime;
+    activeTools = new Map([
+      makeCompressTool(runtime),
+      makeDecompressTool(runtime),
+      makeSearchTool(runtime),
+      makeStatusTool(runtime),
+    ].map((tool) => [tool.name, tool]));
     registerAcpChildExtension(adapter.childExtensionPath ?? fileURLToPath(import.meta.url));
     wireCompactionDisable(pi);
     wireSessionLifecycle(pi, runtime, hostConfigKeys);
     wireContextTransform(pi, runtime);
     wireSystemPrompt(pi);
     wireToolGuardrails(pi, runtime);
-    pi.registerTool(makeCompressTool(runtime));
-    pi.registerTool(makeDecompressTool(runtime));
-    pi.registerTool(makeSearchTool(runtime));
-    pi.registerTool(makeStatusTool(runtime));
+    pi.on("session_shutdown", async () => {
+      if (activeRuntime === runtime) activeRuntime = undefined;
+    });
     for (const { name, options } of makeCommands(runtime)) {
       pi.registerCommand(name, options);
     }

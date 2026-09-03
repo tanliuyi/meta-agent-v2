@@ -12,7 +12,7 @@ describe("Billion Context development manifest", () => {
     expect(entry.displayName).toBe("Billion Context");
     expect(entry.pluginId).toBe("pi.billion-context");
     expect(entry.capabilities).toEqual(
-      expect.arrayContaining(["configuration.read", "events.subscribe", "tools.register"]),
+      expect.arrayContaining(["configuration.read", "events.subscribe", "plugin-methods.provide"]),
     );
     expect(entry.configurationSchema?.version).toBe(1);
     expect(entry.configurationSchema?.fields.map(({ key }) => key)).toEqual([

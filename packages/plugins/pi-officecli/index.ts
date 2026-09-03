@@ -15,5 +15,3 @@ export default function piOfficeCli(pi: ExtensionAPI): void {
   }));
   activateOfficePlugin(pi);
 }
-
-export { desktopPlugin, pluginCallCatalog } from "./src/plugin-call.ts";
