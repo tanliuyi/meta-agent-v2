@@ -340,7 +340,7 @@ function workerSource(
     const invoke = (pluginId, method, args) => {
       const id = ++nextId;
       if (id > ${limits.maxCalls}) return Promise.reject(Object.assign(new Error("PLUGIN_CALL_LIMIT_EXCEEDED"), { code: "PLUGIN_CALL_LIMIT_EXCEEDED" }));
-      send({ type: "call", id, pluginId, method, args });
+      send({ type: "call", id, pluginId, method, args: args === undefined ? {} : args });
       return new Promise((resolve, reject) => calls.set(id, { resolve, reject }));
     };
     const namespace = (parts) => new Proxy(Object.create(null), {

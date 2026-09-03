@@ -44,7 +44,23 @@ class PiAttachmentAdapter extends SimpleImageAttachmentAdapter {
   }
 
   override async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
-    if (attachment.type === "image") return super.send(attachment);
+    if (attachment.type === "image") {
+      const completed = await super.send(attachment);
+      const path = attachment.file ? this.getFilePath(attachment.file) : "";
+      if (!path) return completed;
+      return {
+        ...completed,
+        content: [
+          ...completed.content,
+          {
+            type: "file",
+            filename: attachment.name,
+            data: path,
+            mimeType: attachment.contentType ?? "application/octet-stream",
+          },
+        ],
+      };
+    }
     if (!attachment.content?.some((part) => part.type === "file")) {
       throw new Error(`附件缺少文件路径: ${attachment.name}`);
     }

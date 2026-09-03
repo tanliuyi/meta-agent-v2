@@ -2,6 +2,10 @@ import {
   DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
   type DesktopExtensionDefinition,
 } from "../../shared/desktop-extension-contracts.ts";
+import { pluginCallCatalog as piBrowserCatalog } from "../pi/extensions/pi-browser/index.ts";
+import { pluginCallCatalog as piHermesCatalog } from "../pi/extensions/pi-hermes-memory/index.ts";
+import { pluginCallCatalog as piSubagentsCatalog } from "../pi/extensions/pi-subagents/index.ts";
+import { getBuiltinSkillPath } from "./desktop-builtin-resource-paths.ts";
 
 const builtinExtensions: DesktopExtensionDefinition[] = [
   {
@@ -16,9 +20,12 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
     displayName: "Hermes Memory",
     source: "builtin",
     hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+    skillPaths: [getBuiltinSkillPath(import.meta.url, "pi-hermes-memory")],
+    pluginCallSkill: "pi-hermes-memory",
+    pluginCallCatalog: piHermesCatalog,
     capabilities: [
+      "plugin-methods.provide",
       "events.subscribe",
-      "tools.register",
       "commands.register",
       "messages.enqueue",
       "session.read",
@@ -39,9 +46,11 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
     displayName: "Subagents",
     source: "builtin",
     hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+    skillPaths: [getBuiltinSkillPath(import.meta.url, "pi-subagents")],
+    pluginCallSkill: "pi-subagents",
+    pluginCallCatalog: piSubagentsCatalog,
     capabilities: [
-      "events.subscribe",
-      "tools.register",
+      "plugin-methods.provide",
       "commands.register",
       "messages.enqueue",
       "messages.custom",
@@ -66,7 +75,10 @@ const builtinExtensions: DesktopExtensionDefinition[] = [
     displayName: "内置浏览器",
     source: "builtin",
     hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-    capabilities: ["tools.register", "events.subscribe", "session.read", "ui.notify"],
+    skillPaths: [getBuiltinSkillPath(import.meta.url, "pi-browser")],
+    pluginCallSkill: "pi-browser",
+    pluginCallCatalog: piBrowserCatalog,
+    capabilities: ["plugin-methods.provide", "events.subscribe", "session.read", "ui.notify"],
   },
 ];
 const curatedExtensions: DesktopExtensionDefinition[] = [];
@@ -74,7 +86,11 @@ const curatedExtensions: DesktopExtensionDefinition[] = [];
 /** Static release-locked metadata. Executable inline factories remain sidecar-only. */
 export const DesktopControlledExtensionRegistry = {
   getBuiltinDefinitions(): DesktopExtensionDefinition[] {
-    return builtinExtensions.map((definition) => ({ ...definition, capabilities: [...definition.capabilities] }));
+    return builtinExtensions.map((definition) => ({
+      ...definition,
+      capabilities: [...definition.capabilities],
+      ...(definition.skillPaths ? { skillPaths: [...definition.skillPaths] } : {}),
+    }));
   },
 
   getCuratedDefinitions(): DesktopExtensionDefinition[] {

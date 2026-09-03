@@ -34,9 +34,11 @@
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
   },
+  "dependencies": {
+    "acp-kernel": "0.0.17"
+  },
   "devDependencies": {
     "@types/node": "26.1.2",
-    "acp-kernel": "0.0.17",
     "tsup": "8.5.1",
     "tsx": "4.23.1",
     "typescript": "7.0.2"

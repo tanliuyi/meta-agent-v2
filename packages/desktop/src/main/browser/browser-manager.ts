@@ -143,6 +143,19 @@ interface PendingCreateTab {
   onAbort?: () => void;
 }
 
+interface SessionDownloadRecord {
+  url: string;
+  filename: string;
+  path: string | null;
+}
+
+interface PendingDownload {
+  savePath: string;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 /** 单个会话的浏览器状态：profile（partition）、tabs、历史与标注全部按会话隔离。 */
 interface SessionState {
   identity: BrowserSessionIdentity;
@@ -160,7 +173,11 @@ interface SessionState {
   lastHistoryUrlByTab: Map<number, string>;
   /** tabId -> 标注列表（标注模式；仅内存态）。 */
   annotationsByTab: Map<number, BrowserAnnotation[]>;
-  onWillDownload: (event: Electron.Event, item: Electron.DownloadItem) => void;
+  /** tabId -> 下载记录。 */
+  downloadsByTabId: Map<number, SessionDownloadRecord[]>;
+  /** tabId -> 等待 Electron 接受下载的请求。 */
+  pendingDownloads: Map<number, PendingDownload>;
+  onWillDownload: (event: Electron.Event, item: Electron.DownloadItem, webContents: Electron.WebContents) => void;
 }
 
 /** 内置浏览器主进程服务（main service 入口；内部按 sessionKey 隔离）。 */
@@ -1242,8 +1259,8 @@ export class BrowserManager {
     const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     try {
-      const downloads = await entry.host.downloadEvents();
-      return { ok: true, downloads };
+      const downloads = state.downloadsByTabId.get(tabId) ?? [];
+      return { ok: true, downloads: downloads.map(({ url, filename, path }) => ({ url, filename, path })) };
     } catch (error) {
       return { ok: false, error: messageOf(error) };
     }
@@ -1287,8 +1304,25 @@ export class BrowserManager {
     const policyError = this.blockedAgentTabError(entry);
     if (policyError !== null) return { ok: false, error: policyError };
     this.activateAgentTab(state, tabId);
+    if (savePath.trim().length === 0) return { ok: false, error: "下载保存路径不能为空" };
     try {
-      await entry.host.downloadMedia(url, savePath);
+      if (state.pendingDownloads.has(tabId)) return { ok: false, error: "已有下载正在进行，请等待接受后重试" };
+      const accepted = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          state.pendingDownloads.delete(tabId);
+          reject(new Error("下载超时（120000ms）"));
+        }, 120_000);
+        state.pendingDownloads.set(tabId, { savePath, resolve, reject, timer });
+      });
+      try {
+        entry.host.downloadMedia(url);
+      } catch (error) {
+        const pending = state.pendingDownloads.get(tabId);
+        state.pendingDownloads.delete(tabId);
+        if (pending) clearTimeout(pending.timer);
+        throw error;
+      }
+      await accepted;
       return { ok: true };
     } catch (error) {
       return { ok: false, error: messageOf(error) };
@@ -1939,24 +1973,57 @@ export class BrowserManager {
       }
       callback(false);
     });
-    const onWillDownload = (_event: Electron.Event, item: Electron.DownloadItem): void => {
-      const directory = this.runtimeSettings.downloadDirectory;
+    const onWillDownload = (
+      _event: Electron.Event,
+      item: Electron.DownloadItem,
+      sourceWebContents: Electron.WebContents,
+    ): void => {
+      const tabId = state.byWebContentsId.get(sourceWebContents.id);
+      if (tabId === undefined) return;
+      const pending = state.pendingDownloads.get(tabId);
+      if (pending) {
+        try {
+          item.setSavePath(pending.savePath);
+        } catch (error) {
+          state.pendingDownloads.delete(tabId);
+          clearTimeout(pending.timer);
+          pending.reject(new Error(`下载保存路径无效：${messageOf(error)}`));
+          item.cancel();
+          return;
+        }
+        state.pendingDownloads.delete(tabId);
+        clearTimeout(pending.timer);
+        pending.resolve();
+      } else if (this.runtimeSettings.downloadDirectory) {
+        try {
+          item.setSavePath(join(this.runtimeSettings.downloadDirectory, basename(item.getFilename())));
+        } catch {
+          // 全局下载目录无效时保留 Electron 默认路径，不能让 session 事件抛出。
+        }
+      }
       const filename = basename(item.getFilename());
       if (filename.length === 0) return;
-      if (directory) item.setSavePath(join(directory, filename));
-      if (!this.options.data) return;
-      const url = item.getURL();
+      const record: SessionDownloadRecord = {
+        url: item.getURL(),
+        filename,
+        path: null,
+      };
+      const downloads = state.downloadsByTabId.get(tabId) ?? [];
+      downloads.push(record);
+      if (downloads.length > 50) downloads.splice(0, downloads.length - 50);
+      state.downloadsByTabId.set(tabId, downloads);
       const startedAt = Date.now();
-      item.once("done", (_event, state) => {
-        const savePath = item.getSavePath();
+      item.once("done", (_doneEvent, status) => {
+        record.path = status === "completed" ? item.getSavePath() : null;
+        if (!this.options.data) return;
         void this.options.data
-          ?.recordDownload({
-            url,
-            filename,
-            path: state === "completed" ? savePath : null,
+          .recordDownload({
+            url: record.url,
+            filename: record.filename,
+            path: record.path,
             totalBytes: item.getTotalBytes(),
             receivedBytes: item.getReceivedBytes(),
-            state: state === "completed" ? "completed" : state === "cancelled" ? "cancelled" : "interrupted",
+            state: status === "completed" ? "completed" : status === "cancelled" ? "cancelled" : "interrupted",
             startedAt,
             endedAt: Date.now(),
           })
@@ -1977,6 +2044,8 @@ export class BrowserManager {
       history: [],
       lastHistoryUrlByTab: new Map(),
       annotationsByTab: new Map(),
+      downloadsByTabId: new Map(),
+      pendingDownloads: new Map(),
       onWillDownload,
     };
     this.sessions.set(sessionKey, state);

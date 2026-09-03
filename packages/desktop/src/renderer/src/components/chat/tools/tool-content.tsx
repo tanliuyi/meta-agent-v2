@@ -15,7 +15,8 @@ import { WriteContent } from "./write-content.tsx";
 
 /** 为 Pi 常用工具复刻 TUI 的标题/预览信息密度，未知工具保留 JSON fallback。 */
 export function ToolContent({ name, args, result, error, expanded, argsComplete, artifact }: ToolContentProps) {
-  if (name === "plugin_call") return <PluginCallContent args={args} artifact={artifact} />;
+  if (name === "plugin_call")
+    return <PluginCallContent args={args} result={result} error={error} artifact={artifact} />;
   if (name === "bash") {
     return <CommandContent args={args} result={result} error={error} expanded={expanded} argsComplete={argsComplete} />;
   }

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  attachmentAdapter,
   createAttachmentAdapter,
   parsePiFileContexts,
   restoreComposerAttachments,
@@ -9,12 +8,16 @@ import {
 } from "../src/renderer/src/runtime/attachments.ts";
 
 describe("assistant-ui 附件", () => {
+  const testAttachmentAdapter = createAttachmentAdapter((file) => `C:\\images\\${file.name}`);
+
   it("将 pending 图片转换为 Pi IPC 输入", async () => {
     const file = new File([new Uint8Array([1, 2, 3])], "screen.png", { type: "image/png" });
-    const attachment = await attachmentAdapter.add({ file });
+    const attachment = await testAttachmentAdapter.add({ file });
 
-    await expect(toPiPromptAttachments("查看截图", [attachment])).resolves.toEqual({
-      text: "查看截图",
+    await expect(
+      toPiPromptAttachments("查看截图", [attachment], (pending) => testAttachmentAdapter.send(pending)),
+    ).resolves.toEqual({
+      text: expect.stringContaining('<file name="C:\\images\\screen.png">screen.png</file>'),
       images: [
         {
           name: "screen.png",
@@ -25,11 +28,37 @@ describe("assistant-ui 附件", () => {
     });
   });
 
+  it("图片同时保留源路径和当前请求的图像数据", async () => {
+    const adapter = createAttachmentAdapter(() => "C:\\images\\screen.png");
+    const file = new File([new Uint8Array([1, 2, 3])], "screen.png", { type: "image/png" });
+    const attachment = await adapter.add({ file });
+    const prompt = await toPiPromptAttachments("查看截图", [attachment], (pending) =>
+      testAttachmentAdapter.send(pending),
+    );
+
+    expect(prompt.images).toEqual([{ name: "screen.png", mimeType: "image/png", data: "AQID" }]);
+    expect(parsePiFileContexts(prompt.text)).toEqual({
+      text: "查看截图",
+      files: [{ path: "C:\\images\\screen.png", name: "screen.png" }],
+    });
+  });
+
+  it("剪贴板截图没有源路径时仍只发送图片数据", async () => {
+    const adapter = createAttachmentAdapter(() => "");
+    const file = new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
+    const attachment = await adapter.add({ file });
+
+    await expect(toPiPromptAttachments("分析截图", [attachment], (pending) => adapter.send(pending))).resolves.toEqual({
+      text: "分析截图",
+      images: [{ name: "image.png", mimeType: "image/png", data: "AQID" }],
+    });
+  });
+
   it("为同名剪贴板图片生成不同的附件 ID", async () => {
-    const first = await attachmentAdapter.add({
+    const first = await testAttachmentAdapter.add({
       file: new File([new Uint8Array([1])], "image.png", { type: "image/png" }),
     });
-    const second = await attachmentAdapter.add({
+    const second = await testAttachmentAdapter.add({
       file: new File([new Uint8Array([2])], "image.png", { type: "image/png" }),
     });
 
@@ -171,10 +200,10 @@ describe("assistant-ui 附件", () => {
   });
 
   it("并行完成 pending 附件，并按 Composer 顺序展开结果", async () => {
-    const first = await attachmentAdapter.add({
+    const first = await testAttachmentAdapter.add({
       file: new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
     });
-    const second = await attachmentAdapter.add({
+    const second = await testAttachmentAdapter.add({
       file: new File([new Uint8Array([2])], "second.png", { type: "image/png" }),
     });
     const releases = new Map<string, () => void>();

@@ -51,7 +51,7 @@ describe("draft session configuration", () => {
       expect.objectContaining({ provider: "plain", thinkingLevels: ["off"] }),
     ]);
     expect(config.commands).toEqual([
-      { name: "memory-insights", description: "Inspect memories", source: "extension" },
+      expect.objectContaining({ name: "memory-insights", description: "Inspect memories", source: "extension" }),
     ]);
   });
 

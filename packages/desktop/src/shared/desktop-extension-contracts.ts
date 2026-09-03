@@ -25,6 +25,7 @@ export interface PluginMethodExecutionContext {
   readonly toolCallId: string;
   readonly cwd: string;
   readonly signal: AbortSignal;
+  readonly toolContext?: unknown;
   attach(attachment: PluginMethodAttachment): void;
   reportProgress(progress: JsonValue): void;
 }
@@ -131,12 +132,12 @@ export interface ResolvedExtensionSet {
   resolvedAt: number;
 }
 
-/** 新会话草稿中可被用户按会话激活的插件（插件中心管理的来源）。 */
+/** Composer 中可按会话激活的 direct-tool 插件；plugin_call 插件不包含在此列表中。 */
 export interface DraftSelectablePlugin {
   id: string;
   displayName: string;
   source: "marketplace" | "development";
-  /** 是否对当前项目开放（项目级作用域允许）；false 表示需在本会话单独启用。 */
+  /** 启用状态由插件中心全局决定；此字段表示当前项目/扩展集是否可用。 */
   available: boolean;
 }
 

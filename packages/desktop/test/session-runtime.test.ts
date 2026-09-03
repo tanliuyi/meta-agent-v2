@@ -1,4 +1,5 @@
-import type { AgentSession, AgentSessionEvent, SessionManager } from "@earendil-works/pi-coding-agent";
+import { fileURLToPath } from "node:url";
+import type { AgentSession, AgentSessionEvent, SessionManager, Skill } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PiTimelineUnavailableError, SessionRuntime } from "../src/main/pi/session-runtime.ts";
 
@@ -812,6 +813,23 @@ describe("SessionRuntime Pi-native commands", () => {
 });
 
 function createServices() {
+  const builtinSkills: Skill[] = [
+    ["pi-hermes-memory", "Hermes Memory"],
+    ["pi-subagents", "Subagents"],
+    ["pi-browser", "内置浏览器"],
+  ].map(([name, description]) => {
+    const filePath = fileURLToPath(
+      new URL(`../src/main/pi/extensions/${name}/skills/${name}/SKILL.md`, import.meta.url),
+    );
+    return {
+      name,
+      description,
+      filePath,
+      baseDir: filePath.slice(0, filePath.lastIndexOf("/")),
+      sourceInfo: { path: filePath, source: "builtin", scope: "temporary", origin: "top-level" },
+      disableModelInvocation: false,
+    };
+  });
   return {
     cwd: "/workspace",
     modelRuntime: {
@@ -823,7 +841,7 @@ function createServices() {
     },
     resourceLoader: {
       getExtensions: () => ({ extensions: [], errors: [] }),
-      getSkills: () => ({ skills: [], diagnostics: [] }),
+      getSkills: () => ({ skills: builtinSkills, diagnostics: [] }),
     },
     diagnostics: [],
   };

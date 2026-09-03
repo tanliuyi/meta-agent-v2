@@ -148,10 +148,8 @@ export interface BrowserHostController {
   dblclickPoint(x: number, y: number): Promise<void>;
   /** 导出页面主文本（对齐 Codex ContentAPI.export；article/main/body innerText，截断）。 */
   contentExport(): Promise<string>;
-  /** 最近下载记录（监听 session will-download；最多保留 50 条）。 */
-  downloadEvents(): Promise<Array<{ url: string; filename: string; path: string | null }>>;
-  /** 触发下载并保存到指定路径（对齐 Codex downloadMedia）。 */
-  downloadMedia(url: string, savePath: string): Promise<void>;
+  /** 触发下载（保存路径与生命周期由 BrowserManager 统一管理）。 */
+  downloadMedia(url: string): void;
   /** 取视口 (x,y) 处元素：生成稳定 CSS 选择器并返回其 bounds（标注模式用）。 */
   pickElement(x: number, y: number): Promise<PickElementResult>;
   /** 按选择器解析元素当前 bounds；元素不存在时返回 null（标注导航后重定位）。 */
@@ -247,12 +245,9 @@ export class WebContentsHostController implements BrowserHostController {
   private consoleCaptureEnabled = false;
   /** CDP 事件缓冲（对齐 Codex cdp.readEvents：readCdpEvents 拉取即清空）。 */
   private cdpEventBuffer: Array<{ method: string; params?: Record<string, unknown> }> = [];
-  /** 下载记录缓冲（监听 session will-download；最多 50 条）。 */
-  private downloadEventsBuffer: Array<{ url: string; filename: string; path: string | null }> = [];
-  /** downloadMedia 指定的保存路径（下一次 will-download 消费）。 */
-  private pendingDownloadSavePath: string | null = null;
   /** 挂起的 JS 对话框（Page.javascriptDialogOpening 捕获）。 */
   private pendingDialog: BrowserPendingDialog | null = null;
+  /** 按选择器执行元素操作（对齐 Codex PlaywrightLocator 核心命令集）。 */
 
   constructor(webContents: WebContents, options: WebContentsHostControllerOptions = {}) {
     this.webContents = webContents;
@@ -265,48 +260,6 @@ export class WebContentsHostController implements BrowserHostController {
     this.onRuntimeBinding = options.onRuntimeBinding;
     this.bindEvents();
     this.bindWindowOpenHandler();
-    // 记录会话内下载（对齐 Codex downloadMedia；dispose 时清理）。
-    const recordDownload = (_event: Electron.Event, item: Electron.DownloadItem): void => {
-      if (this.pendingDownloadSavePath !== null) {
-        try {
-          item.setSavePath(this.pendingDownloadSavePath);
-        } catch {
-          // 路径非法时回退默认行为。
-        }
-        this.pendingDownloadSavePath = null;
-      }
-      const makeRecord = (): { url: string; filename: string; path: string | null } => {
-        let savePath: string | null = null;
-        try {
-          savePath = item.getSavePath();
-        } catch {
-          savePath = null;
-        }
-        return { url: item.getURL(), filename: item.getFilename(), path: savePath };
-      };
-      const pushRecord = (record: { url: string; filename: string; path: string | null }): void => {
-        this.downloadEventsBuffer.push(record);
-        if (this.downloadEventsBuffer.length > 50) {
-          this.downloadEventsBuffer.splice(0, this.downloadEventsBuffer.length - 50);
-        }
-      };
-      // 先记录初始状态；done 后用最终 savePath 更新同 url 的最后一条（不重复追加）。
-      item.once("done", () => {
-        const record = makeRecord();
-        const index = [...this.downloadEventsBuffer].reverse().findIndex((entry) => entry.url === record.url);
-        if (index >= 0) {
-          const at = this.downloadEventsBuffer.length - 1 - index;
-          this.downloadEventsBuffer[at] = record;
-        } else {
-          pushRecord(record);
-        }
-      });
-      pushRecord(makeRecord());
-    };
-    this.webContents.session?.on("will-download", recordDownload);
-    this.listeners.push(() => {
-      this.webContents.session?.off("will-download", recordDownload);
-    });
   }
 
   async navigate(url: string, options: { agent?: boolean; navigationApprovalUrl?: string } = {}): Promise<void> {
@@ -546,10 +499,9 @@ export class WebContentsHostController implements BrowserHostController {
     }
   }
 
-  /** 触发下载并保存到指定路径（对齐 Codex downloadMedia）。 */
-  async downloadMedia(url: string, savePath: string): Promise<void> {
+  /** 触发下载；下载事件由 BrowserManager 的 session 监听器统一处理。 */
+  downloadMedia(url: string): void {
     if (!/^https?:/i.test(url)) throw new Error("仅支持 http/https 下载链接");
-    this.pendingDownloadSavePath = savePath;
     this.webContents.downloadURL(url);
   }
 
@@ -855,11 +807,6 @@ export class WebContentsHostController implements BrowserHostController {
     return text.length > 100_000 ? `${text.slice(0, 100_000)}…（已截断）` : text;
   }
 
-  /** 最近下载记录（监听 session will-download；最多保留 50 条）。 */
-  async downloadEvents(): Promise<Array<{ url: string; filename: string; path: string | null }>> {
-    return [...this.downloadEventsBuffer];
-  }
-
   /** 文件上传（对齐 Codex PlaywrightFileChooser.setFiles；DOM.setFileInputFiles）。 */
   async uploadFile(selector: string, filePath: string): Promise<void> {
     const doc = (await this.sendCommand("DOM.getDocument", { depth: -1 })) as { root?: { nodeId?: number } };
@@ -1052,7 +999,6 @@ export class WebContentsHostController implements BrowserHostController {
     }
     this.eventListeners.clear();
     this.interactiveByIndex.clear();
-    this.downloadEventsBuffer.length = 0;
     this.detachDebugger();
   }
 

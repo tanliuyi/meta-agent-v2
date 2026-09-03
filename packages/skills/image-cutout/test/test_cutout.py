@@ -144,6 +144,14 @@ class CutoutTest(unittest.TestCase):
                     "30,20,65,65",
                     "--rect",
                     "40,30,10,10",
+                    "--foreground-region",
+                    "55,45,4,4",
+                    "--background-region",
+                    "45,40,5,5",
+                    "--foreground-polygon",
+                    "55,45;58,45;58,49;55,49",
+                    "--background-polygon",
+                    "46,41;49,41;49,44;46,44",
                     "--foreground-point",
                     "60,50",
                     "--background-point",
@@ -159,10 +167,16 @@ class CutoutTest(unittest.TestCase):
             self.assertEqual(result["status"], "review")
             self.assertEqual(result["subject"], "red rectangle")
             self.assertEqual(result["guidance"]["rectangleCount"], 2)
+            self.assertEqual(result["guidance"]["foregroundRegionCount"], 1)
+            self.assertEqual(result["guidance"]["backgroundRegionCount"], 1)
+            self.assertEqual(result["guidance"]["foregroundPolygonCount"], 1)
+            self.assertEqual(result["guidance"]["backgroundPolygonCount"], 1)
             self.assertEqual(result["guidance"]["foregroundPointCount"], 1)
             self.assertEqual(result["guidance"]["backgroundPointCount"], 1)
             self.assertIn("guided-result-requires-visual-review", result["warnings"])
             self.assertLess(int(actual[5, 5, 3]), 32)
+            self.assertEqual(int(actual[42, 47, 3]), 0)
+            self.assertEqual(int(actual[46, 56, 3]), 255)
             self.assertGreater(int(actual[50, 60, 3]), 224)
 
     def test_masks_initialize_grabcut_before_segmentation(self) -> None:

@@ -101,6 +101,30 @@ function ancestorUnderPrevious(
   return previousIndex === null ? currentIndex : null;
 }
 
+export interface FileTreeRenderRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** 固定行高 ListView 的可渲染区间；仅跨越行边界时结果才变化。 */
+export function fileTreeRenderRange(
+  itemCount: number,
+  scrollTop: number,
+  viewportHeight: number,
+  rowHeight: number,
+  overscan: number,
+): FileTreeRenderRange {
+  if (itemCount <= 0 || rowHeight <= 0) return { start: 0, end: 0 };
+  const top = Math.max(0, scrollTop);
+  const height = Math.max(rowHeight, viewportHeight);
+  const firstVisible = Math.min(itemCount - 1, Math.floor(top / rowHeight));
+  const afterVisible = Math.min(itemCount, Math.ceil((top + height) / rowHeight));
+  return {
+    start: Math.max(0, firstVisible - overscan),
+    end: Math.min(itemCount, afterVisible + overscan),
+  };
+}
+
 /** 将最近聚焦的 treeitem 设为唯一 Tab 停靠点，不触发 React render。 */
 export function setFileTreeRovingTabStop(event: FocusEvent<HTMLButtonElement>): void {
   const tree = event.currentTarget.closest<HTMLElement>('[role="tree"]');

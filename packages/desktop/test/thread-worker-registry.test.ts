@@ -696,7 +696,45 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
-  it("adds out-of-scope plugins to the binding when selected at session level", async () => {
+  it("keeps plugin-call extensions out of session selection and always loads them", async () => {
+    const harness = createHarness(userDataDir);
+    const set = fullExtensionSet();
+    const pluginCallEntry = {
+      id: "marketplace:plugin-call",
+      displayName: "Plugin Call",
+      source: "marketplace" as const,
+      entryPath: "/tmp/plugin-call.ts",
+      hostProfileVersion: 1 as const,
+      capabilities: ["plugin-methods.provide" as const],
+    };
+    const withPluginCall = { ...set, entries: [...set.entries, pluginCallEntry] };
+    harness.resolveExtensions.mockImplementation(async () => withPluginCall);
+    harness.resolveWithAll.mockImplementation(async () => ({
+      set: withPluginCall,
+      allEntries: [...withPluginCall.entries],
+    }));
+    const registry = new ThreadWorkerRegistry(harness.options);
+
+    await registry.create({
+      projectId: "project",
+      createRequestId: "create-request",
+      extensionSetGeneration: "extensions-generation",
+      model: { provider: "provider", id: "model" },
+      thinkingLevel: "off",
+      enabledPluginIds: ["marketplace:second"],
+    });
+    expect(harness.clients[0]?.bindingExtensionEntries.map(({ id }) => id)).toContain("marketplace:plugin-call");
+    await registry.dispose();
+
+    const optionsRegistry = new ThreadWorkerRegistry(harness.options);
+    await optionsRegistry.attach("project", "thread");
+    await expect(optionsRegistry.getSessionPluginOptions("project", "thread")).resolves.toMatchObject({
+      plugins: expect.not.arrayContaining([expect.objectContaining({ id: "marketplace:plugin-call" })]),
+    });
+    await optionsRegistry.dispose();
+  });
+
+  it("loads selected plugins globally regardless of legacy scope", async () => {
     const harness = createHarness(userDataDir);
     const set = fullExtensionSet();
     harness.resolveWithAll.mockImplementation(async () => ({

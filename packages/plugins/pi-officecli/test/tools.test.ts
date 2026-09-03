@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -6,6 +6,11 @@ import assert from "node:assert/strict";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import piOfficeCli from "../index.ts";
+import { createRunner } from "../src/cli.ts";
+import { resolveConfig } from "../src/config.ts";
+import { registerInspectTools } from "../src/tools/inspect.ts";
+import { registerReadTools } from "../src/tools/read.ts";
+import { registerWriteTools } from "../src/tools/write.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 const FAKE_BIN = path.join(import.meta.dirname, "fixtures", "fake-officecli.js");
@@ -25,11 +30,15 @@ function createFakePi(config: Record<string, string | number | boolean>): FakePi
     registerTool: (tool: AnyTool) => {
       fake.tools.set(tool.name, tool);
     },
+    on: () => undefined,
     on: (event: string) => {
       fake.events.push(event);
     },
   } as unknown as ExtensionAPI;
-  piOfficeCli(pi);
+  const runner = createRunner(resolveConfig(config));
+  registerReadTools(pi, runner);
+  registerWriteTools(pi, runner);
+  registerInspectTools(pi, runner);
   return fake;
 }
 
@@ -47,6 +56,20 @@ const EXPECTED_TOOLS = [
   "office_help",
 ];
 
+test("default factory does not register model-facing Office tools", () => {
+  const tools: unknown[] = [];
+  piOfficeCli({
+    getConfig: () => ({ binaryPath: FAKE_BIN, dataDir: tmpdir() }),
+    registerTool: (tool: unknown) => tools.push(tool),
+    on: () => undefined,
+  } as unknown as ExtensionAPI);
+  assert.deepEqual(tools, []);
+});
+
+test("market manifest requires Desktop client 0.0.42 or newer", () => {
+  const manifest = JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "market-manifest.json"), "utf8"));
+  assert.equal(manifest.desktop.minVersion, "0.0.42");
+});
 function toolCtx(cwd: string) {
   return { cwd } as unknown as Parameters<AnyTool["execute"]>[4];
 }

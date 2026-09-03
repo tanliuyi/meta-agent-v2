@@ -3,6 +3,7 @@ import {
   buildFileTreeStickyModel,
   type FileTreeRow,
   fileTreeKeyNavigation,
+  fileTreeRenderRange,
   fileTreeStickyRows,
 } from "../src/renderer/src/components/panel/files/file-tree-navigation.ts";
 
@@ -15,6 +16,20 @@ function rows(...specs: Array<[string, number, boolean, "file" | "directory"]>):
     node: { name: path.split("/").at(-1) ?? path, path, type },
   }));
 }
+
+describe("fileTreeRenderRange", () => {
+  it("changes only after the visible range crosses a fixed-height row boundary", () => {
+    const initial = fileTreeRenderRange(500, 280, 270, 28, 8);
+    expect(fileTreeRenderRange(500, 290, 270, 28, 8)).toEqual(initial);
+    expect(fileTreeRenderRange(500, 291, 270, 28, 8)).not.toEqual(initial);
+  });
+
+  it("clamps the range and preserves overscan at both ends", () => {
+    expect(fileTreeRenderRange(100, 0, 280, 28, 8)).toEqual({ start: 0, end: 18 });
+    expect(fileTreeRenderRange(100, 2_520, 280, 28, 8)).toEqual({ start: 82, end: 100 });
+    expect(fileTreeRenderRange(0, 0, 280, 28, 8)).toEqual({ start: 0, end: 0 });
+  });
+});
 
 describe("fileTreeKeyNavigation", () => {
   const tree = rows(

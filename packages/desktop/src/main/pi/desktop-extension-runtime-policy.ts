@@ -6,14 +6,16 @@ import * as bundledPiAi from "@earendil-works/pi-ai";
 import * as bundledPiAiCompat from "@earendil-works/pi-ai/compat";
 import * as bundledPiAiOauth from "@earendil-works/pi-ai/oauth";
 import * as bundledPiAiProviders from "@earendil-works/pi-ai/providers/all";
-import type {
-  ExtensionAPI,
-  ExtensionFactory,
-  InlineExtension,
-  LoadExtensionsResult,
-  Skill,
-} from "@earendil-works/pi-coding-agent";
 import * as bundledPiCodingAgent from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionFactory,
+  type InlineExtension,
+  type LoadExtensionsResult,
+  loadSkills,
+  type ResourceDiagnostic,
+  type Skill,
+} from "@earendil-works/pi-coding-agent";
 import * as bundledPiTui from "@earendil-works/pi-tui";
 import { createJiti } from "jiti/static";
 import * as bundledTypebox from "typebox";
@@ -30,6 +32,13 @@ import type { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-r
 const NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES = new Set(["DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT"]);
 
 type DesktopExtensionConfiguration = Readonly<Record<string, string | number | boolean>>;
+type DesktopInlineExtension = {
+  name: string;
+  factory: ExtensionFactory;
+  desktopPlugin?: unknown;
+  pluginMethodOnly?: boolean;
+  captureTool?: (tool: unknown) => void;
+};
 type DesktopExtensionAPI = ExtensionAPI & {
   getConfig<T = DesktopExtensionConfiguration>(): Readonly<T>;
 };
@@ -130,8 +139,42 @@ export function controlledResourceLoaderOptions(
     pluginRegistry?: PluginCallRegistryHolder;
     pluginRegistryBuilder?: DesktopPluginRegistryBuilder;
     cwd?: string;
+    agentDir?: string;
   } = {},
 ) {
+  const inlineFactories = extensionFactories as DesktopInlineExtension[];
+
+  if (options.pluginRegistryBuilder) {
+    for (const entry of set.entries) {
+      if (entry.source !== "builtin" || !entry.capabilities.includes("plugin-methods.provide")) continue;
+      const factory = inlineFactories.find(
+        (candidate): candidate is DesktopInlineExtension =>
+          typeof candidate === "object" && candidate.name === `desktop:${entry.id}`,
+      );
+      if (!factory?.desktopPlugin) throw new Error(`Builtin plugin declaration missing: ${entry.id}`);
+      options.pluginRegistryBuilder.stage(entry, factory.desktopPlugin);
+      options.pluginRegistryBuilder.commit(entry.id);
+    }
+  }
+
+  const controlledInlineFactories = inlineFactories.map((extension) => {
+    if (typeof extension === "function" || !extension.pluginMethodOnly) return extension;
+    return {
+      ...extension,
+      factory: async (pi: ExtensionAPI) => {
+        const methodOnlyApi = new Proxy(pi, {
+          get(target, property, receiver) {
+            if (property === "registerTool") {
+              return (tool: unknown) => extension.captureTool?.(tool);
+            }
+            return Reflect.get(target, property, receiver);
+          },
+        }) as ExtensionAPI;
+        await extension.factory(methodOnlyApi);
+      },
+    } satisfies InlineExtension;
+  });
+
   const pathBackedFactories = set.entries.flatMap((entry): InlineExtension[] => {
     if (!entry.entryPath) return [];
     const entryPath = entry.entryPath;
@@ -144,7 +187,7 @@ export function controlledResourceLoaderOptions(
             const namespace = await jiti.import<Record<string, unknown>>(entryPath);
             const declaration = Object.hasOwn(namespace, "desktopPlugin") ? namespace.desktopPlugin : undefined;
             const hasDeclaration = declaration !== undefined;
-            if (hasDeclaration || entry.capabilities.includes("plugin-methods.provide")) {
+            if (hasDeclaration) {
               if (!options.pluginRegistryBuilder) throw new Error("Plugin registry builder unavailable");
               options.pluginRegistryBuilder.stage(entry, declaration);
             }
@@ -173,19 +216,40 @@ export function controlledResourceLoaderOptions(
   return {
     noExtensions: true,
     additionalExtensionPaths: [],
-    additionalSkillPaths: [
-      ...(options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))]),
-      ...set.entries.flatMap((entry) => entry.skillPaths ?? []),
-    ],
+    additionalSkillPaths:
+      options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))],
+    skillsOverride: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
+      const builtinSkills = set.entries
+        .filter((entry) => entry.source === "builtin" && entry.pluginCallSkill)
+        .flatMap((entry) => entry.skillPaths ?? [])
+        .filter((path): path is string => typeof path === "string" && path.length > 0)
+        .flatMap(
+          (path) =>
+            loadSkills({
+              cwd: options.cwd ?? process.cwd(),
+              agentDir: options.agentDir ?? process.env.PI_CODING_AGENT_DIR ?? process.cwd(),
+              skillPaths: [path],
+              includeDefaults: false,
+            }).skills,
+        );
+      if (builtinSkills.length === 0) return base;
+      const builtinNames = new Set(builtinSkills.map((skill) => skill.name));
+      return {
+        skills: [...base.skills.filter((skill) => !builtinNames.has(skill.name)), ...builtinSkills],
+        diagnostics: base.diagnostics.filter(
+          (diagnostic) =>
+            !(diagnostic.type === "collision" && diagnostic.collision && builtinNames.has(diagnostic.collision.name)),
+        ),
+      };
+    },
     extensionFactories: [
-      ...extensionFactories,
+      ...controlledInlineFactories,
       ...(options.pluginRegistry &&
       options.pluginRegistryBuilder &&
       set.entries.some(
         (entry) =>
           entry.capabilities.includes("plugin-methods.provide") &&
-          entry.pluginCallCatalog !== undefined &&
-          entry.pluginCallCatalog.methods.length > 0,
+          (entry.pluginCallCatalog === undefined || entry.pluginCallCatalog.methods.length > 0),
       )
         ? [createPluginCallExtension(options.pluginRegistry, options.cwd ?? process.cwd())]
         : []),
@@ -203,7 +267,11 @@ export function validatePluginSkills(
   for (const entry of set.entries) {
     if (!entry.capabilities.includes("plugin-methods.provide")) continue;
     const primaryName = entry.pluginCallSkill;
-    const approvedPaths = new Set((entry.skillPaths ?? []).map((path) => resolve(path)));
+    const approvedPaths = new Set(
+      (entry.skillPaths ?? [])
+        .filter((path): path is string => typeof path === "string" && path.length > 0)
+        .map((path) => resolve(path)),
+    );
     const primary = loaded.skills.find(
       (skill) => skill.name === primaryName && approvedPaths.has(resolve(skill.filePath)),
     );

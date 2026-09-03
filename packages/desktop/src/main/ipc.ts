@@ -108,6 +108,7 @@ import type { PluginConfigurationService } from "./plugins/plugin-configuration-
 import type { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import type { ScmService } from "./scm/scm-service.ts";
+import type { ProjectScmWatcher } from "./scm/scm-watcher.ts";
 import type { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
 import type { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import type { SettingsConfigService } from "./settings/settings-config-service.ts";
@@ -138,6 +139,7 @@ export function registerIpc(
   projects: ProjectStore,
   sessions: SessionSupervisor,
   scm: ScmService,
+  scmWatcher: ProjectScmWatcher,
   files: FileService,
   officeDocuments: OfficeDocumentPreviewService,
   fileWatcher: ProjectFileWatcher,
@@ -850,6 +852,8 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.scmStage, (_event, projectId: string, path: string) => scm.stage(projectId, path));
   ipcMain.handle(CHANNELS.scmUnstage, (_event, projectId: string, path: string) => scm.unstage(projectId, path));
   ipcMain.handle(CHANNELS.scmDiscard, (_event, projectId: string, path: string) => scm.discard(projectId, path));
+  ipcMain.handle(CHANNELS.scmWatch, (_event, projectId: string) => scmWatcher.watch(projectId));
+  ipcMain.handle(CHANNELS.scmUnwatch, (_event, projectId: string) => scmWatcher.unwatch(projectId));
   ipcMain.handle(CHANNELS.filesList, (event, projectId: string, path?: string, query?: string, requestGroup?: string) =>
     files.list(projectId, path, query, `${event.sender.id}\0${requestGroup ?? "default"}`),
   );

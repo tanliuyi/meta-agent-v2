@@ -1,6 +1,6 @@
 {
   "name": "meta-agent",
-  "version": "0.0.41",
+  "version": "0.0.42",
   "private": true,
   "description": "Meta Agent desktop application",
   "homepage": "https://github.com/tanliuyi/meta-agent-harness",

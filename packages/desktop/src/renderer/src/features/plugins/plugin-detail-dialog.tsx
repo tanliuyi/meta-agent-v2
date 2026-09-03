@@ -4,10 +4,8 @@ import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogHeader } from "@renderer/shared/ui/dialog-header";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
-import type { Project } from "../../../../shared/contracts.ts";
 import type {
   InstalledMarketplacePluginSummary,
-  MarketplacePluginScope,
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
 import { PluginIcon } from "../../components/chat/plugin-icon.tsx";
@@ -21,7 +19,6 @@ interface PluginDetailDialogProps {
   plugin?: MarketplacePluginSummary;
   installed?: InstalledMarketplacePluginSummary;
   marketplaceId?: string;
-  projects: readonly Project[];
   open: boolean;
   mutationPending: boolean;
   installing: boolean;
@@ -32,7 +29,6 @@ interface PluginDetailDialogProps {
   onUpdate(plugin: MarketplacePluginSummary): void;
   onUninstall(id: string): void;
   onSetEnabled(id: string, enabled: boolean): void;
-  onSetScope(id: string, scope: MarketplacePluginScope, projectIds?: string[]): void;
 }
 
 /** Compatibility wrapper retained for callers that still render the legacy modal. */
@@ -40,7 +36,6 @@ export function PluginDetailDialog({
   plugin,
   installed,
   marketplaceId,
-  projects,
   open,
   mutationPending,
   installing,
@@ -51,7 +46,6 @@ export function PluginDetailDialog({
   onUpdate,
   onUninstall,
   onSetEnabled,
-  onSetScope,
 }: PluginDetailDialogProps) {
   if (!plugin && !installed) return null;
   const name = plugin?.name ?? installed!.displayName;
@@ -97,10 +91,8 @@ export function PluginDetailDialog({
           plugin={plugin}
           installed={installed}
           marketplaceId={marketplaceId}
-          projects={projects}
           mutationPending={mutationPending}
           onSetEnabled={onSetEnabled}
-          onSetScope={onSetScope}
         />
       </DialogContent>
     </Dialog>

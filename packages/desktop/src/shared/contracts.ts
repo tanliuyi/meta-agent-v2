@@ -683,6 +683,25 @@ export interface WorkbenchTerminalTab {
 /** workbench-panel 中注册的 tab：会话/面板/终端，均可关闭。 */
 export type WorkbenchTab = WorkbenchSessionTab | WorkbenchPanelTab | WorkbenchTerminalTab;
 
+export interface ScmResourceState {
+  path: string;
+  staged: boolean;
+}
+
+export interface ScmDiffViewState {
+  scrollTop: number;
+  horizontalScroll: number;
+  splitPercentage: number;
+}
+
+export interface ScmWorkbenchState {
+  openResources: ScmResourceState[];
+  activeResource?: ScmResourceState;
+  expandedPaths: string[];
+  treeScrollTop: number;
+  viewStates: Record<string, ScmDiffViewState>;
+}
+
 /** 每个 session 独立持有的 Workbench Panel 布局状态。 */
 export interface WorkbenchState {
   projectId: string;
@@ -703,6 +722,8 @@ export interface WorkbenchState {
   /** 处于“预览”状态的 tab（单击打开，可被下一次单击替换）；固定后为 undefined。 */
   previewFile?: string;
   expandedPaths: string[];
+  /** 审查面板的 tab、树和 diff 视图状态。 */
+  scm?: ScmWorkbenchState;
   /** 已打开的 workbench panel tab（会话/面板）；由渲染进程写入，跨刷新/重启持久化。 */
   tabs?: WorkbenchTab[];
   /** 当前选中的 tab 键；null 表示展示新建 Panel 缺省页。 */

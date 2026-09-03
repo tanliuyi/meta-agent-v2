@@ -134,7 +134,7 @@ describe("plugin marketplace cards", () => {
     const localMarkup = renderToStaticMarkup(<MarketplacePluginCard installed={installed} onOpen={vi.fn()} />);
 
     expect(updateMarkup).toContain("可更新");
-    expect(updateMarkup).toContain("全部项目");
+    expect(updateMarkup).not.toContain("全部项目");
     expect(updateMarkup.match(/<button/g)).toHaveLength(2);
     expect(updateMarkup).toContain('</button><span class="plugin-marketplace-card-footer">');
     expect(updateMarkup).toContain('role="switch"');
@@ -153,7 +153,7 @@ describe("plugin marketplace cards", () => {
     expect(markup).toContain('aria-checked="false"');
   });
 
-  it("marks project-scoped installed cards with the bound project scope", () => {
+  it("does not render legacy project scope on installed cards", () => {
     const markup = renderToStaticMarkup(
       <MarketplacePluginCard
         installed={{ ...installed, scope: "project", projectIds: ["project-a", "project-b"] }}
@@ -161,8 +161,8 @@ describe("plugin marketplace cards", () => {
       />,
     );
 
-    expect(markup).toContain("指定项目");
-    expect(markup).toContain("仅以下项目的会话可加载此插件：project-a、project-b");
+    expect(markup).not.toContain("指定项目");
+    expect(markup).not.toContain("仅以下项目的会话可加载此插件：project-a、project-b");
   });
 });
 

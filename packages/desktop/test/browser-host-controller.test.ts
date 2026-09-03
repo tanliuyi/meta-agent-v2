@@ -22,6 +22,7 @@ const AX_TREE = {
 const SCREENSHOT_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
 class FakeWebContents extends EventEmitter {
+  id = 1;
   destroyed = false;
   url = "https://example.com/";
   title = "Example";
@@ -55,7 +56,13 @@ class FakeWebContents extends EventEmitter {
     goBack: vi.fn(),
     goForward: vi.fn(),
   };
-  private readonly sessionEmitter = new EventEmitter();
+  private readonly sessionEmitter: EventEmitter;
+
+  constructor(sessionEmitter = new EventEmitter()) {
+    super();
+    this.sessionEmitter = sessionEmitter;
+  }
+
   get session(): EventEmitter {
     // 对齐 Electron：guest 销毁后访问 session 抛 "Object has been destroyed"。
     if (this.destroyed) throw new Error("Object has been destroyed");
@@ -463,44 +470,15 @@ describe("WebContentsHostController 新能力（对齐 Codex browser_use）", ()
     await expect(host.clipboardWriteText("failure")).rejects.toThrow("clipboard write failed");
   });
 
-  test("downloadEvents 记录 will-download（含 setSavePath 与 done 后最终路径）", async () => {
-    const webContents = new FakeWebContents();
-    const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
-    hosts.push(host);
-
-    const session = webContents.session as unknown as EventEmitter;
-    const item = new EventEmitter() as unknown as {
-      getURL: () => string;
-      getFilename: () => string;
-      getSavePath: () => string;
-      setSavePath: ReturnType<typeof vi.fn>;
-      once: (event: string, cb: () => void) => void;
-    };
-    Object.assign(item, {
-      getURL: () => "https://example.com/file.zip",
-      getFilename: () => "file.zip",
-      getSavePath: () => "/tmp/file.zip",
-      setSavePath: vi.fn(),
-    });
-
-    session.emit("will-download", {}, item);
-    (item as EventEmitter).emit("done");
-
-    const downloads = await host.downloadEvents();
-    expect(downloads).toHaveLength(1);
-    expect(downloads[0]).toMatchObject({ url: "https://example.com/file.zip", filename: "file.zip" });
-  });
-
-  test("downloadMedia 设置保存路径并触发 downloadURL", async () => {
+  test("downloadMedia 仅触发 downloadURL", () => {
     const webContents = new FakeWebContents();
     const host = new WebContentsHostController(webContents as unknown as WebContents, { cdpTimeoutMs: 200 });
     hosts.push(host);
     webContents.downloadURL = vi.fn();
 
-    await host.downloadMedia("https://example.com/file.zip", "/tmp/saved.zip");
-    expect(webContents.downloadURL).toHaveBeenCalledWith("https://example.com/file.zip");
+    host.downloadMedia("https://example.com/file.zip");
 
-    await expect(host.downloadMedia("file:///etc/passwd", "/tmp/x")).rejects.toThrow("仅支持 http/https");
+    expect(webContents.downloadURL).toHaveBeenCalledWith("https://example.com/file.zip");
   });
 
   test("waitFor timeout 分支抛错", async () => {

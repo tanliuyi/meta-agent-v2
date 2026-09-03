@@ -21,6 +21,13 @@ export function copyDesktopSidecarAssets(outputRoot = defaultOutputRoot) {
   }
   cpSync(join(subagentsSourceRoot, "docs"), join(subagentsOutputRoot, "docs"), { recursive: true });
 
+  for (const extensionId of ["pi-browser", "pi-hermes-memory"]) {
+    const sourceSkillsRoot = join(desktopSourceRoot, "extensions", extensionId, "skills");
+    const outputSkillsRoot = join(outputRoot, "main", "pi", "extensions", extensionId, "skills");
+    mkdirSync(outputSkillsRoot, { recursive: true });
+    cpSync(sourceSkillsRoot, outputSkillsRoot, { recursive: true });
+  }
+
   cpSync(join(desktopSourceRoot, "skills"), join(outputRoot, "main", "pi", "skills"), { recursive: true });
 }
 

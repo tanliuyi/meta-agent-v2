@@ -1,13 +1,10 @@
-import { PluginScopeSettings } from "@renderer/features/plugins/plugin-scope-settings";
 import { Switch } from "@renderer/shared/ui/switch";
 import { Tabs } from "@renderer/shared/ui/tabs";
 import { TabsContent } from "@renderer/shared/ui/tabs-content";
 import { TabsList } from "@renderer/shared/ui/tabs-list";
 import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
-import type { Project } from "../../../../shared/contracts.ts";
 import type {
   InstalledMarketplacePluginSummary,
-  MarketplacePluginScope,
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
 import { PluginConfigurationForm } from "./plugin-configuration-form.tsx";
@@ -19,12 +16,10 @@ interface PluginDetailContentProps {
   plugin?: MarketplacePluginSummary;
   installed?: InstalledMarketplacePluginSummary;
   marketplaceId?: string;
-  projects: readonly Project[];
   mutationPending: boolean;
   /** 覆盖该市场插件的本地插件显示名；存在时市场版本被禁用。 */
   supersededByLocalPlugin?: string;
   onSetEnabled(id: string, enabled: boolean): void;
-  onSetScope(id: string, scope: MarketplacePluginScope, projectIds?: string[]): void;
 }
 
 /** Detail content shared by the route page and the legacy dialog wrapper. */
@@ -32,11 +27,9 @@ export function PluginDetailContent({
   plugin,
   installed,
   marketplaceId,
-  projects,
   mutationPending,
   supersededByLocalPlugin,
   onSetEnabled,
-  onSetScope,
 }: PluginDetailContentProps) {
   if (!plugin && !installed) return null;
   const capabilities = plugin?.capabilities ?? installed?.capabilities ?? [];
@@ -159,17 +152,6 @@ export function PluginDetailContent({
                   />
                 </div>
               </section>
-            ) : null}
-
-            {installed ? (
-              <PluginScopeSettings
-                pluginId={installed.id}
-                scope={installed.scope}
-                projectIds={installed.projectIds ?? []}
-                projects={projects}
-                mutationPending={mutationPending}
-                onSetScope={(scope, projectIds) => onSetScope(installed.id, scope, projectIds)}
-              />
             ) : null}
           </div>
         </TabsContent>

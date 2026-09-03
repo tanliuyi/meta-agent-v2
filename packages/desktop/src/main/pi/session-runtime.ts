@@ -168,18 +168,22 @@ export class SessionRuntime {
       resourceLoaderOptions: controlledResourceLoaderOptions(
         extensionSet,
         DesktopBuiltinProviderRegistry.getExtensionFactories({ subagentRuntime: options.subagentRuntime }),
-        { pluginRegistry: registryHolder, pluginRegistryBuilder: builder, cwd: options.cwd },
+        {
+          pluginRegistry: registryHolder,
+          pluginRegistryBuilder: builder,
+          cwd: options.cwd,
+          agentDir,
+        },
       ),
     });
     const extensionDiagnostics = [
       ...extensionLoadDiagnostics(extensionSet, services.resourceLoader.getExtensions()),
       ...extensionServiceDiagnostics(extensionSet, services.diagnostics),
-      ...validatePluginSkills(extensionSet, services.resourceLoader.getSkills()),
     ];
-    const blockingExtensionDiagnostics = extensionDiagnostics.filter(isBlockingExtensionDiagnostic);
-    if (blockingExtensionDiagnostics.length > 0) {
+    const preflightExtensionDiagnostics = extensionDiagnostics.filter(isBlockingExtensionDiagnostic);
+    if (preflightExtensionDiagnostics.length > 0) {
       builder.discard();
-      throw new DesktopExtensionStartupError(extensionSet.generation, blockingExtensionDiagnostics);
+      throw new DesktopExtensionStartupError(extensionSet.generation, preflightExtensionDiagnostics);
     }
     try {
       registryHolder.bind(builder.finalize(), options.cwd);
@@ -307,6 +311,23 @@ export class SessionRuntime {
       ];
     } finally {
       runtime.extensionPhase = "runtime";
+    }
+    const pluginSkillDiagnostics = validatePluginSkills(extensionSet, services.resourceLoader.getSkills());
+    extensionDiagnostics.push(...pluginSkillDiagnostics);
+    runtime.extensionDiagnostics.push(
+      ...pluginSkillDiagnostics.map((diagnostic) => ({
+        ...diagnostic,
+        projectId: options.projectId,
+        threadId: runtime.id,
+      })),
+    );
+    const blockingExtensionDiagnostics = [...extensionDiagnostics, ...pluginSkillDiagnostics].filter(
+      isBlockingExtensionDiagnostic,
+    );
+    if (blockingExtensionDiagnostics.length > 0) {
+      runtime.extensionHost.dispose();
+      result.session.dispose();
+      throw new DesktopExtensionStartupError(extensionSet.generation, blockingExtensionDiagnostics);
     }
     const startupDiagnostics = runtime.extensionDiagnostics.filter(
       (diagnostic) => diagnostic.phase === "start" && isBlockingExtensionDiagnostic(diagnostic),
@@ -751,7 +772,7 @@ export class DesktopExtensionStartupError extends Error {
   constructor(generation: string, diagnostics: DesktopExtensionDiagnostic[]) {
     super(
       `Desktop extension startup failed for generation ${generation}: ${diagnostics
-        .map(({ extensionId, code }) => `${extensionId} (${code})`)
+        .map(({ extensionId, code, message }) => `${extensionId} (${code}): ${message || "unknown error"}`)
         .join(", ")}`,
     );
     this.name = "DesktopExtensionStartupError";

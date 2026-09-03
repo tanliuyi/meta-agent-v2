@@ -1,4 +1,3 @@
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -14,12 +13,13 @@ import {
   buildFileTreeStickyModel,
   type FileTreeRow,
   fileTreeKeyNavigation,
+  fileTreeRenderRange,
   fileTreeStickyRows,
 } from "./file-tree-navigation.ts";
 import { FileTreeNodeRow } from "./file-tree-node-row.tsx";
 
 const FILE_ROW_HEIGHT = 28;
-const FILE_TREE_OVERSCAN = 12;
+const FILE_TREE_OVERSCAN = 8;
 const FILE_TREE_STICKY_MAX_ITEMS = 7;
 
 interface FileTreeProps {
@@ -39,6 +39,8 @@ interface FileTreeProps {
   onCut?(node: FileNode): void;
   /** 键盘粘贴到当前聚焦节点对应的目录。 */
   onPaste?(node: FileNode): void;
+  initialScrollTop?: number;
+  onScrollTopChange?(scrollTop: number): void;
   depth?: number;
 }
 
@@ -93,19 +95,49 @@ export function FileTree({
   onCopy,
   onCut,
   onPaste,
+  initialScrollTop = 0,
+  onScrollTopChange,
   depth = 0,
 }: FileTreeProps) {
   const rows = useMemo(() => buildRows(nodes, children, expanded, depth), [children, depth, expanded, nodes]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restoredScroll = useRef(false);
+  const initialRange = fileTreeRenderRange(rows.length, 0, 600, FILE_ROW_HEIGHT, FILE_TREE_OVERSCAN);
+  const [renderWindow, setRenderWindow] = useState({ ...initialRange, itemCount: rows.length });
+  const renderWindowRef = useRef(renderWindow);
+  const syncRenderWindow = useCallback(
+    (element: HTMLDivElement) => {
+      const range = fileTreeRenderRange(
+        rows.length,
+        element.scrollTop,
+        element.clientHeight,
+        FILE_ROW_HEIGHT,
+        FILE_TREE_OVERSCAN,
+      );
+      const previous = renderWindowRef.current;
+      if (previous.itemCount === rows.length && previous.start === range.start && previous.end === range.end) return;
+      const next = { ...range, itemCount: rows.length };
+      renderWindowRef.current = next;
+      setRenderWindow(next);
+    },
+    [rows.length],
+  );
+  const scrollToIndex = useCallback(
+    (index: number) => {
+      const element = scrollRef.current;
+      if (!element) return;
+      const itemTop = index * FILE_ROW_HEIGHT;
+      const itemBottom = itemTop + FILE_ROW_HEIGHT;
+      if (itemTop < element.scrollTop) element.scrollTop = itemTop;
+      else if (itemBottom > element.scrollTop + element.clientHeight) {
+        element.scrollTop = Math.max(0, itemBottom - element.clientHeight);
+      }
+      syncRenderWindow(element);
+    },
+    [syncRenderWindow],
+  );
   const [focusIndex, setFocusIndex] = useState<number | null>(null);
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => FILE_ROW_HEIGHT,
-    overscan: FILE_TREE_OVERSCAN,
-    initialRect: { height: 600, width: 300 },
-    getItemKey: (index) => rows[index]?.path ?? index,
-  });
 
   const rovingPath = useMemo(() => {
     if (focusIndex !== null && rows[focusIndex]) return rows[focusIndex].path;
@@ -116,9 +148,9 @@ export function FileTree({
   const moveFocus = useCallback(
     (index: number) => {
       setFocusIndex(index);
-      virtualizer.scrollToIndex(index);
+      scrollToIndex(index);
     },
-    [virtualizer],
+    [scrollToIndex],
   );
 
   const handleKeyDown = useCallback(
@@ -192,11 +224,11 @@ export function FileTree({
     const index = active ? rows.findIndex((row) => row.kind === "node" && row.path === active) : -1;
     const visible = index !== -1;
     if (active && index !== -1 && (active !== lastRevealedActive.current || !lastActiveRowVisible.current)) {
-      virtualizer.scrollToIndex(index, { align: "auto" });
+      scrollToIndex(index);
     }
     lastRevealedActive.current = active ?? null;
     lastActiveRowVisible.current = visible;
-  }, [active, rows, virtualizer]);
+  }, [active, rows, scrollToIndex]);
 
   useEffect(() => {
     if (focusIndex === null) return;
@@ -204,9 +236,19 @@ export function FileTree({
     element?.focus();
   }, [focusIndex]);
 
-  const virtualItems = virtualizer.getVirtualItems();
-  const scrollTop = scrollRef.current?.scrollTop ?? virtualizer.scrollOffset ?? 0;
-  const viewportHeight = scrollRef.current?.clientHeight ?? virtualizer.scrollRect?.height ?? 600;
+  const scrollTop = scrollRef.current?.scrollTop ?? 0;
+  const viewportHeight = scrollRef.current?.clientHeight || 600;
+  const currentRange =
+    renderWindow.itemCount === rows.length
+      ? renderWindow
+      : {
+          ...fileTreeRenderRange(rows.length, scrollTop, viewportHeight, FILE_ROW_HEIGHT, FILE_TREE_OVERSCAN),
+          itemCount: rows.length,
+        };
+  const renderedIndices = Array.from(
+    { length: currentRange.end - currentRange.start },
+    (_, offset) => currentRange.start + offset,
+  );
   const stickyModel = useMemo(() => buildFileTreeStickyModel(rows), [rows]);
   const stickyRows = fileTreeStickyRows(
     rows,
@@ -239,14 +281,47 @@ export function FileTree({
           ?.style.setProperty("transform", `translate3d(0, ${stickyRow.position}px, 0)`);
         currentHeight = Math.max(currentHeight, stickyRow.position + FILE_ROW_HEIGHT);
       }
-      if (stickyContainerRef.current) stickyContainerRef.current.style.height = `${currentHeight}px`;
+      const stickyContainer = stickyContainerRef.current;
+      if (stickyContainer) {
+        stickyContainer.style.height = `${currentHeight}px`;
+        stickyContainer.style.right = `${Math.max(0, element.offsetWidth - element.clientWidth)}px`;
+      }
     },
     [rows, stickyModel],
   );
-  const rovingVisible = virtualItems.some(
-    (virtualRow) => rows[virtualRow.index]?.kind === "node" && rows[virtualRow.index]?.path === rovingPath,
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const update = () => {
+      syncRenderWindow(element);
+      syncStickyPositions(element);
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [syncRenderWindow, syncStickyPositions]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    if (!restoredScroll.current) {
+      restoredScroll.current = true;
+      element.scrollTop = initialScrollTop;
+      syncRenderWindow(element);
+      syncStickyPositions(element);
+    }
+    return () => {
+      if (scrollCommitTimer.current) clearTimeout(scrollCommitTimer.current);
+      onScrollTopChange?.(element.scrollTop);
+    };
+  }, [initialScrollTop, onScrollTopChange, syncRenderWindow, syncStickyPositions]);
+
+  const rovingVisible = renderedIndices.some(
+    (index) => rows[index]?.kind === "node" && rows[index]?.path === rovingPath,
   );
-  const fallbackIndex = virtualItems.find((virtualRow) => rows[virtualRow.index]?.kind === "node")?.index;
+  const fallbackIndex = renderedIndices.find((index) => rows[index]?.kind === "node");
 
   return (
     <div className="file-tree-viewport" role="tree" aria-label="项目文件" onKeyDown={handleContainerKeyDown}>
@@ -293,10 +368,22 @@ export function FileTree({
           <div className="file-tree-sticky-shadow" aria-hidden="true" />
         </div>
       ) : null}
-      <div ref={scrollRef} className="file-tree-virtual" onScroll={(event) => syncStickyPositions(event.currentTarget)}>
-        <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", minHeight: "100%" }}>
-          {virtualItems.map((virtualRow) => {
-            const row = rows[virtualRow.index];
+      <div
+        ref={scrollRef}
+        className="file-tree-virtual"
+        onScroll={(event) => {
+          syncRenderWindow(event.currentTarget);
+          syncStickyPositions(event.currentTarget);
+          if (onScrollTopChange) {
+            if (scrollCommitTimer.current) clearTimeout(scrollCommitTimer.current);
+            const element = event.currentTarget;
+            scrollCommitTimer.current = setTimeout(() => onScrollTopChange(element.scrollTop), 120);
+          }
+        }}
+      >
+        <div style={{ height: `${rows.length * FILE_ROW_HEIGHT}px`, position: "relative", minHeight: "100%" }}>
+          {renderedIndices.map((index) => {
+            const row = rows[index];
             if (!row) return null;
             const rowStyle = {
               position: "absolute",
@@ -304,7 +391,7 @@ export function FileTree({
               left: 0,
               width: "100%",
               height: `${FILE_ROW_HEIGHT}px`,
-              transform: `translateY(${virtualRow.start}px)`,
+              transform: `translateY(${index * FILE_ROW_HEIGHT}px)`,
               "--file-tree-depth": row.depth,
             } as CSSProperties;
             if (row.kind === "loading") {
@@ -314,12 +401,12 @@ export function FileTree({
                 </div>
               );
             }
-            const tabIndex = row.path === rovingPath || (!rovingVisible && virtualRow.index === fallbackIndex) ? 0 : -1;
+            const tabIndex = row.path === rovingPath || (!rovingVisible && index === fallbackIndex) ? 0 : -1;
             return (
               <div key={row.path} style={rowStyle}>
                 <FileTreeNodeRow
                   row={row}
-                  index={virtualRow.index}
+                  index={index}
                   active={active}
                   tabIndex={tabIndex}
                   onOpen={onOpen}

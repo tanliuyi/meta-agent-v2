@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   InstalledMarketplacePluginsSnapshot,
   MarketplacePluginPage,
-  MarketplacePluginScope,
   MarketplacePluginSummary,
 } from "../../../../shared/plugin-marketplace-contracts.ts";
 
@@ -15,7 +14,6 @@ export interface PluginMarketplaceController {
   updatingId?: string;
   uninstallingId?: string;
   settingEnabledId?: string;
-  settingScopeId?: string;
   error?: string;
   notice?: string;
   clearError(): void;
@@ -26,7 +24,6 @@ export interface PluginMarketplaceController {
   update(plugin: MarketplacePluginSummary): Promise<void>;
   uninstall(pluginId: string): Promise<void>;
   setEnabled(pluginId: string, enabled: boolean): Promise<void>;
-  setScope(pluginId: string, scope: MarketplacePluginScope, projectIds?: string[]): Promise<void>;
 }
 
 export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginMarketplaceController {
@@ -38,7 +35,7 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
   const [updatingId, setUpdatingId] = useState<string>();
   const [uninstallingId, setUninstallingId] = useState<string>();
   const [settingEnabledId, setSettingEnabledId] = useState<string>();
-  const [settingScopeId, setSettingScopeId] = useState<string>();
+
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const mounted = useRef(true);
@@ -193,7 +190,7 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
 
   const setEnabled = useCallback(
     async (pluginId: string, enabled: boolean) => {
-      if (!installed || installingId || updatingId || uninstallingId || settingEnabledId || settingScopeId) return;
+      if (!installed || installingId || updatingId || uninstallingId || settingEnabledId) return;
       installedSnapshotEpoch.current += 1;
       setSettingEnabledId(pluginId);
       setError(undefined);
@@ -220,40 +217,7 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
         if (mounted.current) setSettingEnabledId(undefined);
       }
     },
-    [installed, installingId, settingEnabledId, settingScopeId, uninstallingId, updatingId],
-  );
-
-  const setScope = useCallback(
-    async (pluginId: string, scope: MarketplacePluginScope, projectIds?: string[]) => {
-      if (!installed || installingId || updatingId || uninstallingId || settingScopeId) return;
-      if (scope === "project" && (!projectIds || projectIds.length === 0)) return;
-      installedSnapshotEpoch.current += 1;
-      setSettingScopeId(pluginId);
-      setError(undefined);
-      setNotice(undefined);
-      try {
-        const result = await window.desktop.marketplace.setPluginScope({
-          requestId: crypto.randomUUID(),
-          expectedRevision: installed.revision,
-          pluginId,
-          scope,
-          projectIds: scope === "project" ? projectIds : undefined,
-        });
-        if (!mounted.current) return;
-        installedSnapshotEpoch.current += 1;
-        setInstalled(result.status === "conflict" ? result.current : result.snapshot);
-        if (result.status === "conflict") setError("插件安装状态已变化，请重试");
-        else if (result.status === "not-installed") setNotice("插件已不在本机，已同步最新状态");
-        else if (result.status === "saved") {
-          setNotice(scope === "global" ? "插件已对所有项目生效" : "插件作用域已更新；当前会话可运行 /reload 重新加载");
-        }
-      } catch (reason) {
-        if (mounted.current) setError(marketplaceErrorMessage(reason));
-      } finally {
-        if (mounted.current) setSettingScopeId(undefined);
-      }
-    },
-    [installed, installingId, updatingId, uninstallingId, settingScopeId],
+    [installed, installingId, settingEnabledId, uninstallingId, updatingId],
   );
 
   return {
@@ -265,7 +229,6 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
     updatingId,
     uninstallingId,
     settingEnabledId,
-    settingScopeId,
     error,
     notice,
     clearError: () => setError(undefined),
@@ -276,7 +239,6 @@ export function usePluginMarketplace(enabled = true, initialQuery = ""): PluginM
     update,
     uninstall,
     setEnabled,
-    setScope,
   };
 }
 

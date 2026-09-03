@@ -1,4 +1,5 @@
-import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -191,6 +192,78 @@ describe("DesktopExtensionSourcePolicy", () => {
     expect(second.generation).toBe(resolved.generation);
   });
 
+  it("validates development plugin catalogs against the manifest plugin ID", async () => {
+    const harness = await createHarness();
+    const pluginRoot = join(harness.root, "method-plugin");
+    const skillPath = join(pluginRoot, "skills", "method-plugin", "SKILL.md");
+    const catalogPath = join(pluginRoot, "plugin-api.json");
+    await mkdir(join(skillPath, ".."), { recursive: true });
+    await writeFile(skillPath, "---\nname: method-plugin\ndescription: Test skill\n---\n", "utf8");
+    await writeFile(
+      catalogPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        pluginId: "pi.method-plugin",
+        methods: [
+          {
+            name: "run",
+            description: "Run the method.",
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+            result: {
+              type: "object",
+              required: ["text"],
+              properties: { text: { type: "string" } },
+              additionalProperties: false,
+            },
+            concurrency: "serial",
+          },
+        ],
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      join(pluginRoot, "market-manifest.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        plugin: { id: "pi.method-plugin", name: "Method Plugin" },
+        pi: {
+          entry: "index.ts",
+          skills: ["skills/method-plugin/SKILL.md"],
+          pluginCall: { skill: "method-plugin", catalog: "plugin-api.json" },
+        },
+        desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
+        capabilities: ["plugin-methods.provide"],
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(join(pluginRoot, "index.ts"), "export default function () {}\n", "utf8");
+
+    const initial = await harness.settings.getConfig();
+    const approved = await harness.settings.approveDevelopmentEntry(
+      { requestId: "approve-method-plugin", expectedRevision: initial.revision },
+      pluginRoot,
+    );
+    if (approved.status !== "saved") throw new Error("approval failed");
+    await harness.settings.saveConfig({
+      requestId: "enable-method-plugin",
+      expectedRevision: approved.snapshot.revision,
+      mutation: { type: "set-developer-mode", enabled: true },
+    });
+
+    const resolved = await harness.policy.resolve("project");
+    const entry = resolved.entries.find((candidate) => candidate.pluginId === "pi.method-plugin");
+    expect(entry).toEqual(
+      expect.objectContaining({
+        source: "development",
+        pluginId: "pi.method-plugin",
+        pluginCallSkill: "method-plugin",
+        pluginCallCatalog: expect.objectContaining({ pluginId: "pi.method-plugin" }),
+        pluginCallCatalogSha256: createHash("sha256")
+          .update(await readFile(catalogPath))
+          .digest("hex"),
+      }),
+    );
+  });
   it("rejects curated entries that escape the bundled resource root", async () => {
     const harness = await createHarness();
     const outside = join(harness.root, "outside.ts");
@@ -314,7 +387,7 @@ describe("DesktopExtensionSourcePolicy", () => {
     ]);
   });
 
-  it("loads project-scoped development entries only in the bound projects", async () => {
+  it("loads development entries globally regardless of legacy scope fields", async () => {
     const harness = await createHarness();
     const developmentPath = join(harness.root, "scoped-development.ts");
     await writeFile(developmentPath, "export default function () {}\n", "utf8");
@@ -349,11 +422,11 @@ describe("DesktopExtensionSourcePolicy", () => {
     expect(second.entries.map(({ id }) => id)).toEqual(["curated", "development:development", "builtin"]);
 
     const other = await harness.policy.resolve("other-project");
-    expect(other.entries.map(({ id }) => id)).toEqual(["curated", "builtin"]);
+    expect(other.entries.map(({ id }) => id)).toEqual(["curated", "development:development", "builtin"]);
     expect(other.diagnostics).toEqual([]);
   });
 
-  it("generates a new set generation when a development entry scope changes", async () => {
+  it("ignores legacy development scope changes", async () => {
     const harness = await createHarness();
     const developmentPath = join(harness.root, "re-scoped-development.ts");
     await writeFile(developmentPath, "export default function () {}\n", "utf8");
@@ -394,7 +467,7 @@ describe("DesktopExtensionSourcePolicy", () => {
     if (global.status !== "saved") throw new Error("global scope failed");
     const after = await harness.policy.resolve("bound-project");
 
-    expect(after.generation).not.toBe(generation);
+    expect(after.generation).toBe(generation);
   });
 
   it("rejects duplicate IDs across controlled sources", async () => {
@@ -402,7 +475,7 @@ describe("DesktopExtensionSourcePolicy", () => {
     await expect(harness.policy.resolve("project")).rejects.toThrow("Duplicate Desktop extension ID: curated");
   });
 
-  it("loads project-scoped marketplace entries only in the bound projects", async () => {
+  it("loads marketplace entries globally regardless of legacy scope fields", async () => {
     const harness = await createHarness();
     let scopeGeneration = 0;
     const [globalPlugin, projectPlugin] = await createMarketplacePlugins(harness.root, [
@@ -435,11 +508,11 @@ describe("DesktopExtensionSourcePolicy", () => {
     expect(second.entries.map(({ id }) => id)).toEqual(["curated", "publisher.global", "publisher.bound", "builtin"]);
 
     const other = await harness.policy.resolve("other-project");
-    expect(other.entries.map(({ id }) => id)).toEqual(["curated", "publisher.global", "builtin"]);
+    expect(other.entries.map(({ id }) => id)).toEqual(["curated", "publisher.global", "publisher.bound", "builtin"]);
     expect(other.diagnostics).toEqual([]);
   });
 
-  it("generates a new set generation when a plugin scope changes", async () => {
+  it("ignores legacy marketplace scope changes", async () => {
     const harness = await createHarness();
     const [plugin] = await createMarketplacePlugins(harness.root, [
       { id: "publisher.scoped", displayName: "Scoped Plugin", scope: "global" },
@@ -463,12 +536,12 @@ describe("DesktopExtensionSourcePolicy", () => {
     plugin.projectIds = ["bound-project"];
     const afterProject = await harness.policy.resolve("bound-project");
     expect(afterProject.entries.some(({ id }) => id === "publisher.scoped")).toBe(true);
-    expect(afterProject.generation).not.toBe(first.generation);
+    expect(afterProject.generation).toBe(first.generation);
 
     plugin.projectIds = ["other-project"];
     const rebound = await harness.policy.resolve("bound-project");
-    expect(rebound.entries.some(({ id }) => id === "publisher.scoped")).toBe(false);
-    expect(rebound.generation).not.toBe(afterProject.generation);
+    expect(rebound.entries.some(({ id }) => id === "publisher.scoped")).toBe(true);
+    expect(rebound.generation).toBe(afterProject.generation);
 
     const other = await harness.policy.resolve("other-project");
     expect(other.entries.some(({ id }) => id === "publisher.scoped")).toBe(true);

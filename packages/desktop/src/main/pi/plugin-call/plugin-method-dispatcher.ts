@@ -48,6 +48,7 @@ export interface PluginCallExecution {
   fileBytes?: number;
   imageBytes?: number;
   active?: boolean;
+  toolContext?: unknown;
 }
 
 export class PluginMethodDispatcher {
@@ -121,6 +122,7 @@ export class PluginMethodDispatcher {
         toolCallId,
         cwd: this.cwd,
         signal: controller.signal,
+        toolContext: details.toolContext,
         attach: (attachment) => {
           if (isInactive(details) || controller.signal.aborted) return;
           if ((details.attachments?.length ?? 0) + stagedAttachments.length >= limits.maxAttachments) {

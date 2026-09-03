@@ -66,8 +66,7 @@ export function PluginMarketplacePage({
     controller.installingId !== undefined ||
     controller.updatingId !== undefined ||
     controller.uninstallingId !== undefined ||
-    controller.settingEnabledId !== undefined ||
-    controller.settingScopeId !== undefined;
+    controller.settingEnabledId !== undefined;
 
   return (
     <>

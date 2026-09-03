@@ -705,6 +705,23 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("resync 时按 live 投影合并不同对象引用的 canonical assistant，避免重复消息", () => {
+    const entries: SessionEntry[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const live = assistantMessage("stop", 5, [{ type: "text", text: "重复内容" }]);
+
+    projector.handle({ type: "message_start", message: live });
+    entries.push(
+      messageEntry("assistant-canonical", null, assistantMessage("stop", 5, [{ type: "text", text: "重复内容" }])),
+    );
+    projector.resync();
+
+    expect(projector.snapshot().nodes).toHaveLength(1);
+    expect(projector.snapshot().nodes[0]).toMatchObject({ id: "assistant-canonical", kind: "assistant" });
+    projector.dispose();
+  });
+
   it("重建 branch 时将隐藏的 slash 最终结果合并到可见初始卡片", () => {
     const entries: SessionEntry[] = [
       slashResultEntry("slash-initial", null, "request-1", "running", true, 1),

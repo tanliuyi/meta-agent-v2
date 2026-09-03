@@ -1,9 +1,19 @@
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import piWebAccess from "pi-web-access/index.ts";
+import { activateWebAccessPlugin, desktopPlugin, pluginCallCatalog } from "./src/plugin-call.ts";
 import { applyDesktopConfig, type DesktopWebAccessConfig } from "./src/configuration.ts";
-import { createDesktopApi } from "./desktop-api.ts";
+
+interface DesktopExtensionAPI extends ExtensionAPI {
+  getConfig<T = Readonly<Record<string, string | number | boolean>>>(): Readonly<T>;
+}
 
 export default function piWebAccessDesktop(pi: ExtensionAPI): void {
-  applyDesktopConfig(pi.getConfig<DesktopWebAccessConfig>());
-  piWebAccess(createDesktopApi(pi));
+  pi.on("resources_discover", async () => ({
+    skillPaths: [fileURLToPath(new URL("./skills/pi-web-access/SKILL.md", import.meta.url))],
+  }));
+  const desktopApi = pi as DesktopExtensionAPI;
+  applyDesktopConfig(desktopApi.getConfig<DesktopWebAccessConfig>());
+  activateWebAccessPlugin(pi);
 }
+
+export { desktopPlugin, pluginCallCatalog };

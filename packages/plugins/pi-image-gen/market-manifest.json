@@ -10,10 +10,16 @@
   },
   "pi": {
     "entry": "index.ts",
-    "extensionApi": "v1"
+    "extensionApi": "v1",
+    "skills": ["skills/pi-image-gen/SKILL.md"],
+    "pluginCall": {
+      "skill": "pi-image-gen",
+      "catalog": "plugin-api.json"
+    }
   },
   "desktop": {
-    "hostProfileVersion": 1
+    "hostProfileVersion": 1,
+    "minVersion": "0.0.42"
   },
   "target": {
     "platform": "universal",
@@ -222,14 +228,22 @@
     ]
   },
   "capabilities": [
-    "events.subscribe",
     "configuration.read",
-    "tools.register"
+    "plugin-methods.provide"
   ],
   "nativeModules": [],
   "executables": [],
   "files": {
     "index.ts": {
+      "mode": "0644"
+    },
+    "plugin-api.json": {
+      "mode": "0644"
+    },
+    "skills/pi-image-gen/SKILL.md": {
+      "mode": "0644"
+    },
+    "skills/pi-image-gen/references/api.md": {
       "mode": "0644"
     },
     "assets/icon.png": {

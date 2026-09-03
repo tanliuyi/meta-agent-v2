@@ -96,10 +96,8 @@ describe("local plugin detail dialog", () => {
             message: "插件加载失败",
           },
         ]}
-        projects={[]}
         mutating={false}
         onToggleEnabled={vi.fn()}
-        onScopeChange={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
@@ -136,10 +134,8 @@ describe("local plugin detail dialog", () => {
       <LocalPluginDetailContent
         plugin={configurable}
         diagnostics={[]}
-        projects={[]}
         mutating={false}
         onToggleEnabled={vi.fn()}
-        onScopeChange={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
@@ -157,10 +153,8 @@ describe("local plugin detail dialog", () => {
       <LocalPluginDetailContent
         plugin={entry()}
         diagnostics={[]}
-        projects={[]}
         mutating={false}
         onToggleEnabled={vi.fn()}
-        onScopeChange={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
@@ -168,7 +162,7 @@ describe("local plugin detail dialog", () => {
     expect(markup).not.toContain("诊断");
   });
 
-  it("renders scope settings with the available projects", () => {
+  it("does not render project scope settings", () => {
     const scoped: DesktopExtensionListEntry = {
       ...entry(),
       scope: "project",
@@ -178,20 +172,13 @@ describe("local plugin detail dialog", () => {
       <LocalPluginDetailContent
         plugin={scoped}
         diagnostics={[]}
-        projects={[
-          { id: "project-a", kind: "project", name: "Alpha", cwd: "/alpha", lastOpenedAt: 1, available: true },
-        ]}
         mutating={false}
         onToggleEnabled={vi.fn()}
-        onScopeChange={vi.fn()}
         onRemove={vi.fn()}
       />,
     );
 
-    expect(markup).toContain("作用域");
-    expect(markup).toContain("全部项目");
-    expect(markup).toContain("指定项目");
-    expect(markup).toContain('type="checkbox"');
-    expect(markup).toContain("Alpha");
+    expect(markup).not.toContain("作用域");
+    expect(markup).not.toContain("指定项目");
   });
 });

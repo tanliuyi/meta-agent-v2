@@ -35,7 +35,7 @@ interface DesktopExtensionSourcePolicyOptions {
 interface CachedSet {
   fingerprint: string;
   set: ResolvedExtensionSet;
-  /** 所有构建成功的插件中心条目（marketplace/development，含项目作用域外），供会话级选择。 */
+  /** 所有构建成功的插件中心条目，供 direct-tool 会话级选择；plugin_call 条目由调用方过滤。 */
   allEntries: ResolvedExtensionEntry[];
 }
 
@@ -53,12 +53,12 @@ export class DesktopExtensionSourcePolicy {
     this.options = options;
   }
 
-  /** 项目作用域过滤后的扩展集（会话加载的默认全集）。 */
+  /** 插件中心全局启用状态下的扩展集（会话加载的默认全集）。 */
   async resolve(projectId: string): Promise<ResolvedExtensionSet> {
     return (await this.resolveInternal(projectId)).set;
   }
 
-  /** 项目作用域过滤后的扩展集 + 全部可构建的插件中心条目（含作用域外），供会话级选择。 */
+  /** 全局启用的插件中心扩展集 + 全部可构建条目，供 direct-tool 会话级选择。 */
   async resolveWithAll(projectId: string): Promise<ResolveResult> {
     return this.resolveInternal(projectId);
   }
@@ -69,7 +69,7 @@ export class DesktopExtensionSourcePolicy {
     const diagnostics: DesktopExtensionDiagnostic[] = [];
     const pathEntries: ResolvedExtensionEntry[] = [];
     const allEntries: ResolvedExtensionEntry[] = [];
-    const fingerprintParts = [settings.revision, projectId];
+    const fingerprintParts = [extensionSettingsFingerprint(settings)];
     const curatedDefinitions = this.options.getCuratedDefinitions();
     for (const definition of curatedDefinitions) {
       assertDefinition(definition, "curated");
@@ -82,10 +82,11 @@ export class DesktopExtensionSourcePolicy {
     if (this.options.getMarketplaceExtensions) {
       const marketplace = await this.options.getMarketplaceExtensions();
       fingerprintParts.push(marketplace.revision);
-      const localPluginIds = collectLocalPluginIds(settings.developmentEntries, projectId);
+      const localPluginIds = collectLocalPluginIds(settings.developmentEntries);
       for (const plugin of marketplace.plugins) {
         if (!plugin.enabled || plugin.state !== "installed") continue;
-        const inScope = !(plugin.scope === "project" && !(plugin.projectIds ?? []).includes(projectId));
+        // 插件中心状态是全局状态；插件不再按项目作用域筛选。
+        const inScope = true;
         const localPlugin = localPluginIds.get(plugin.id);
         if (localPlugin) {
           fingerprintParts.push(`${plugin.id}:superseded-by-local`);
@@ -107,9 +108,7 @@ export class DesktopExtensionSourcePolicy {
             plugin.configurationSchema && plugin.capabilities.includes("configuration.read")
               ? await this.options.pluginConfigurations?.getRuntimeConfiguration(plugin.id)
               : undefined;
-          fingerprintParts.push(
-            `${plugin.id}:${plugin.scope}:${(plugin.projectIds ?? []).join(",")}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`,
-          );
+          fingerprintParts.push(`${plugin.id}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`);
           const pluginMetadata = await validatePluginMetadata(plugin);
           fingerprintParts.push(await pluginMetadataFingerprint(pluginMetadata));
           const entry: ResolvedExtensionEntry = {
@@ -149,7 +148,8 @@ export class DesktopExtensionSourcePolicy {
     if (settings.developerMode) {
       for (const entry of settings.developmentEntries) {
         if (!entry.enabled) continue;
-        const inScope = !(entry.scope === "project" && !(entry.projectIds ?? []).includes(projectId));
+        // 插件中心状态是全局状态；插件不再按项目作用域筛选。
+        const inScope = true;
         try {
           const info = await lstat(entry.entryPath);
           if (!info.isFile() || info.isSymbolicLink()) throw new Error("entry is not a regular non-symlink file");
@@ -162,9 +162,9 @@ export class DesktopExtensionSourcePolicy {
                 )
               : undefined;
           fingerprintParts.push(
-            `${entry.id}:${entry.scope ?? "global"}:${(entry.projectIds ?? []).join(",")}:${entry.pluginId ?? ""}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
+            `${entry.id}:${entry.pluginId ?? ""}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
           );
-          const pluginMetadata = await validatePluginMetadata(entry);
+          const pluginMetadata = await validatePluginMetadata({ ...entry, source: "development" });
           fingerprintParts.push(await pluginMetadataFingerprint(pluginMetadata));
           const resolved: ResolvedExtensionEntry = {
             id: entry.id,
@@ -298,6 +298,24 @@ async function validatePluginMetadata(entry: {
   };
 }
 
+function extensionSettingsFingerprint(settings: {
+  developerMode: boolean;
+  curatedEnabled: Record<string, boolean>;
+  developmentEntries: StoredDevelopmentExtension[];
+}): string {
+  const developmentEntries = settings.developmentEntries.map((entry) => {
+    const scopeIndependentEntry = { ...entry };
+    delete scopeIndependentEntry.scope;
+    delete scopeIndependentEntry.projectIds;
+    return scopeIndependentEntry;
+  });
+  return JSON.stringify({
+    developerMode: settings.developerMode,
+    curatedEnabled: settings.curatedEnabled,
+    developmentEntries,
+  });
+}
+
 async function pluginMetadataFingerprint(
   metadata: Pick<ResolvedExtensionEntry, "skillPaths" | "pluginCallCatalogSha256">,
 ): Promise<string> {
@@ -311,14 +329,10 @@ async function pluginMetadataFingerprint(
   return `plugin-metadata:${metadata.pluginCallCatalogSha256 ?? "none"}:${skillHashes.join(",")}`;
 }
 
-function collectLocalPluginIds(
-  developmentEntries: StoredDevelopmentExtension[],
-  projectId: string,
-): Map<string, string> {
+function collectLocalPluginIds(developmentEntries: StoredDevelopmentExtension[]): Map<string, string> {
   const pluginIds = new Map<string, string>();
   for (const entry of developmentEntries) {
     if (!entry.pluginId) continue;
-    if (entry.scope === "project" && !(entry.projectIds ?? []).includes(projectId)) continue;
     pluginIds.set(entry.pluginId, entry.displayName);
   }
   return pluginIds;

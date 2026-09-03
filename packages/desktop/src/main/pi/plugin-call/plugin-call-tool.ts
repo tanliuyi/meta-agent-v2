@@ -1,5 +1,6 @@
 import type { AgentToolResult, ExtensionContext, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { normalizePluginError, type PluginCallError } from "./plugin-call-errors.ts";
 import { executePluginProgram, PluginCallRunManager } from "./plugin-call-runtime.ts";
 import { type PluginCallExecution, PluginMethodDispatcher } from "./plugin-method-dispatcher.ts";
 import type { PluginMethodRegistry } from "./plugin-method-registry.ts";
@@ -62,7 +63,7 @@ export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd:
         name: "plugin_call",
         label: "Plugin call",
         description:
-          "Execute an erasable TypeScript program using enabled Desktop plugin APIs. Read the relevant plugin skill before use. Return only the final value needed by the model.",
+          'Execute an erasable TypeScript program using enabled Desktop plugin APIs. Before calling, use the read tool to load the SKILL.md for the plugin relevant to the task. The skill defines the canonical plugin ID, method names, arguments, side effects, and workflow. Use the injected `plugin` namespace only: `await plugin["canonical-plugin-id"].method(args)`. Always use bracket syntax for plugin IDs that contain hyphens. Combine calls in one program when useful and explicitly `return` the final value. The host `pi` object is not injected; do not write `pi.memorySearch(...)` or guess plugin method names. Methods adapted from legacy Pi tools return `{ content: string[] }`; renderer-only details are unavailable. Return only the final value needed by the model.',
         parameters: pluginCallParameters,
         executionMode: "parallel",
         async execute(toolCallId, params, signal, onUpdate, _ctx: ExtensionContext): Promise<AgentToolResult<unknown>> {
@@ -81,6 +82,7 @@ export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd:
             attachments: [],
             active: true,
           };
+          Object.defineProperty(details, "toolContext", { value: _ctx });
           let updateTimer: ReturnType<typeof setTimeout> | undefined;
           const publishUpdate = () => {
             if (!onUpdate || updateTimer) return;
@@ -138,6 +140,23 @@ export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd:
             const result: AgentToolResult<unknown> = { content, details: persistedDetails };
             onUpdate?.(result);
             return result;
+          } catch (error) {
+            if (updateTimer) clearTimeout(updateTimer);
+            const normalized = normalizePluginError(error, "PLUGIN_METHOD_EXECUTION_FAILED");
+            const result: AgentToolResult<unknown> = {
+              content: [{ type: "text", text: formatPluginCallError(normalized) }],
+              details: {
+                ...details,
+                error: {
+                  code: normalized.code,
+                  message: normalized.message,
+                  ...(normalized.pluginId ? { pluginId: normalized.pluginId } : {}),
+                  ...(normalized.method ? { method: normalized.method } : {}),
+                },
+              },
+            };
+            onUpdate?.(result);
+            return result;
           } finally {
             if (updateTimer) clearTimeout(updateTimer);
           }
@@ -145,4 +164,15 @@ export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd:
       });
     },
   };
+}
+
+function formatPluginCallError(error: PluginCallError): string {
+  const location = [error.pluginId, error.method].filter(Boolean).join(".");
+  return [
+    "plugin_call failed.",
+    `code: ${error.code}`,
+    ...(location ? [`method: ${location}`] : []),
+    `message: ${error.message}`,
+    "Use this error as tool context and correct the next plugin_call.",
+  ].join("\n");
 }

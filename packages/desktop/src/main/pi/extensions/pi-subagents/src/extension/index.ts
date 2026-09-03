@@ -16,9 +16,11 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { keyText, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Spacer, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component } from "@earendil-works/pi-tui";
+import type { TSchema } from "typebox";
 import { discoverAgents } from "../agents/agents.ts";
 import { ensureAccessibleDir } from "../shared/accessible-dir.ts";
 import { cleanupAllArtifactDirs, cleanupOldArtifacts, getArtifactsDir } from "../shared/artifacts.ts";
@@ -27,7 +29,7 @@ import { cleanupOldChainDirs } from "../shared/settings.ts";
 import { clearLegacyResultAnimationTimer, renderSubagentResult, renderSubagentSummary } from "../tui/render.ts";
 import { openSubagentFleet } from "../tui/fleet.ts";
 import { SubagentFleetStatus, resolveFleetViewPlacement } from "../tui/fleet-status.ts";
-import { createSubagentParamsSchema } from "./schemas.ts";
+import { createSubagentParamsSchema, SubagentWaitParams } from "./schemas.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import type { SubagentRuntime } from "../runtime/subagent-runtime.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
@@ -45,6 +47,11 @@ import { inspectSubagentStatus } from "../runs/background/run-status.ts";
 import { resolveWaitToolConfig } from "../runs/background/subagent-wait.ts";
 import { registerWaitTool } from "../runs/background/wait-tool.ts";
 import { createWaitSubscriptionManager } from "../runs/background/wait-subscriptions.ts";
+import type {
+  DesktopPluginModuleExport,
+  PluginMethodExecutionContext,
+} from "../../../../../../shared/desktop-extension-contracts.ts";
+import { createLegacyPluginCatalog, normalizePluginSchema, type LegacyPluginTool } from "../../../legacy-plugin-adapter.ts";
 import { drainOutstandingWork } from "../runs/background/auto-drain.ts";
 import registerSubagentNotify, { parseSubagentNotifyContent, type SubagentNotifyDetails } from "../runs/background/notify.ts";
 import { formatSteeringNotice, handleSubagentSteeringNotice, SUBAGENT_STEERING_MESSAGE_TYPE, type SubagentSteeringMessageDetails } from "./steering-notices.ts";
@@ -80,6 +87,71 @@ import {
 
 export { loadConfig, resolveAsyncByDefault } from "./config.ts";
 
+const subagentTools = new Map<string, LegacyPluginTool>();
+
+export function captureSubagentPluginTool(tool: unknown): void {
+  if (!tool || typeof tool !== "object") return;
+  const candidate = tool as { name?: unknown; execute?: unknown };
+  if (typeof candidate.name === "string" && typeof candidate.execute === "function") {
+    subagentTools.set(candidate.name, tool as LegacyPluginTool);
+  }
+}
+
+async function executeSubagentPluginTool(
+  name: string,
+  params: unknown,
+  signal: AbortSignal,
+  ctx: PluginMethodExecutionContext,
+) {
+  const tool = subagentTools.get(name);
+  const extensionContext = ctx.toolContext as ExtensionContext | undefined;
+  if (!tool || !extensionContext) throw new Error(`Subagent method ${name} is not initialized`);
+  const result = await tool.execute(ctx.callId, params, signal, undefined, extensionContext);
+  return {
+    text: result.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\\n"),
+  };
+}
+
+const subagentPluginParameters = normalizePluginSchema(createSubagentParamsSchema(loadConfig()));
+const subagentPluginMethods = [
+  {
+    name: "subagent",
+    description: "Run the Desktop subagent workflow executor.",
+    parameters: subagentPluginParameters as TSchema,
+    result: normalizePluginSchema({
+      type: "object",
+      properties: { text: { type: "string" } },
+      additionalProperties: false,
+    }) as TSchema,
+    concurrency: "serial" as const,
+    async execute(params: unknown, signal: AbortSignal, ctx: PluginMethodExecutionContext) {
+      return executeSubagentPluginTool("subagent", params, signal, ctx);
+    },
+  },
+  {
+    name: "subagent_wait",
+    description: "Wait for a subagent run owned by the current Desktop session.",
+    parameters: normalizePluginSchema(SubagentWaitParams) as TSchema,
+    result: normalizePluginSchema({
+      type: "object",
+      properties: { text: { type: "string" } },
+      additionalProperties: false,
+    }) as TSchema,
+    concurrency: "serial" as const,
+    async execute(params: unknown, signal: AbortSignal, ctx: PluginMethodExecutionContext) {
+      return executeSubagentPluginTool("subagent_wait", params, signal, ctx);
+    },
+  },
+];
+
+export const desktopPlugin: DesktopPluginModuleExport = {
+  schemaVersion: 1,
+  methods: subagentPluginMethods,
+};
+export const pluginCallCatalog = createLegacyPluginCatalog("pi-subagents", subagentPluginMethods);
 function workflowLaneKeys(script: string): string[] {
 	const keys: string[] = [];
 	const seen = new Set<string>();
@@ -340,10 +412,25 @@ export function projectActiveHerdrRuns(state: SubagentState): HerdrStatusRun[] {
 		});
 }
 
-export default function registerSubagentExtension(pi: ExtensionAPI, subagentRuntime?: SubagentRuntime): void {
+export default function registerSubagentExtension(
+  pi: ExtensionAPI,
+  subagentRuntime?: SubagentRuntime,
+  captureTool?: (tool: unknown) => void,
+): void {
 	if (process.env[SUBAGENT_CHILD_ENV] === "1") {
 		return;
 	}
+	pi.on("resources_discover", async () => ({
+		skillPaths: [fileURLToPath(new URL("../../skills/pi-subagents/SKILL.md", import.meta.url))],
+	}));
+	const toolRegistrationApi = captureTool
+		? (new Proxy(pi, {
+				get(target, property, receiver) {
+					if (property === "registerTool") return captureTool;
+					return Reflect.get(target, property, receiver);
+				},
+			}) as ExtensionAPI)
+		: pi;
 	const globalStore = globalThis as Record<string, unknown>;
 	const runtimeCleanupStoreKey = "__piSubagentRuntimeCleanup";
 	const previousRuntimeCleanup = globalStore[runtimeCleanupStoreKey];
@@ -612,9 +699,9 @@ export default function registerSubagentExtension(pi: ExtensionAPI, subagentRunt
 
 	};
 
-	pi.registerTool(tool);
+	toolRegistrationApi.registerTool(tool);
 
-	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager);
+	registerWaitTool(toolRegistrationApi, state, waitToolConfig.enabled, waitSubscriptionManager);
 
 	pi.on("agent_end", async (_event, ctx) => {
 		if (!ctx.hasUI) await drainOutstandingWork({ state, events: pi.events });

@@ -91,7 +91,7 @@ interface WorkerRecord {
   createRequestId?: string;
   sessionFile?: string;
   extensionSet: ResolvedExtensionSet;
-  /** 会话级激活的插件子集；缺失表示继承项目级（全部激活）。 */
+  /** 会话级 direct-tool 插件激活子集；缺失表示全部可用 direct-tool 插件。plugin_call 始终随全局启用状态加载。 */
   enabledPluginIds?: string[];
   desiredExtensionGeneration: string;
   desiredExtensionDiagnostics: DesktopExtensionDiagnostic[];
@@ -293,19 +293,24 @@ export class ThreadWorkerRegistry {
     };
   }
 
-  /** 会话级插件选择：返回全量可构建插件（含项目作用域外）与当前会话激活子集。 */
+  /** 会话级 direct-tool 插件选择：返回可构建条目与当前会话激活子集；plugin_call 条目不参与选择。 */
   async getSessionPluginOptions(projectId: string, threadId: string): Promise<SessionPluginOptions> {
     this.assertProjectAvailable(projectId);
     const { set, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
     const record = this.records.get(workerKey(projectId, threadId));
     return {
-      plugins: allEntries.map((entry) => ({
-        id: entry.id,
-        displayName: entry.displayName,
-        source: entry.source === "development" ? ("development" as const) : ("marketplace" as const),
-        available: set.entries.some((active) => active.id === entry.id),
-      })),
-      enabledPluginIds: record?.enabledPluginIds ?? null,
+      plugins: allEntries
+        .filter((entry) => !entry.capabilities.includes("plugin-methods.provide"))
+        .map((entry) => ({
+          id: entry.id,
+          displayName: entry.displayName,
+          source: entry.source === "development" ? ("development" as const) : ("marketplace" as const),
+          available: set.entries.some((active) => active.id === entry.id),
+        })),
+      enabledPluginIds:
+        record?.enabledPluginIds?.filter((id) =>
+          allEntries.some((entry) => entry.id === id && !entry.capabilities.includes("plugin-methods.provide")),
+        ) ?? null,
     };
   }
 
@@ -1997,7 +2002,7 @@ function equalStringLists(left: string[] | undefined, right: string[] | undefine
   return left.every((id) => set.has(id));
 }
 
-/** 会话级激活子集过滤：builtin/curated 恒加载（来自项目扩展集），marketplace/development 按选中集从全量条目重建（含项目作用域外插件）；generation 不变。 */
+/** 按插件中心的全局启用状态构建扩展集；session 选择只过滤 direct-tool 插件，plugin_call 始终随全局启用状态加载。 */
 function buildSessionExtensionSet(
   set: ResolvedExtensionSet,
   allEntries: ResolvedExtensionEntry[],
@@ -2010,7 +2015,10 @@ function buildSessionExtensionSet(
   );
   const entries = [
     ...set.entries.filter((entry) => {
-      if (entry.source === "marketplace" || entry.source === "development") return selected.has(entry.id);
+      if (entry.source === "marketplace" || entry.source === "development") {
+        if (entry.capabilities.includes("plugin-methods.provide")) return true;
+        return selected.has(entry.id);
+      }
       return true;
     }),
     ...outOfScope,

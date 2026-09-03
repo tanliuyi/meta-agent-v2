@@ -221,7 +221,7 @@ function validateSchemaNode(schema: Record<string, JsonValue>, parametersRoot: b
   }
   if (typeof schema.format === "string" && !ALLOWED_FORMATS.has(schema.format))
     throw new Error("PLUGIN_SCHEMA_INVALID");
-  if (parametersRoot && (schema.type !== "object" || schema.additionalProperties !== false)) {
+  if (parametersRoot && schema.type !== "object") {
     throw new Error("PLUGIN_SCHEMA_INVALID");
   }
   const validKind =
@@ -236,11 +236,21 @@ function validateSchemaNode(schema: Record<string, JsonValue>, parametersRoot: b
     Array.isArray(schema.anyOf);
   if (!validKind) throw new Error("PLUGIN_SCHEMA_INVALID");
   if (schema.type === "object") {
-    if (!schema.properties || typeof schema.properties !== "object" || Array.isArray(schema.properties)) {
+    const properties = schema.properties;
+    if (
+      !properties ||
+      typeof properties !== "object" ||
+      Array.isArray(properties) ||
+      schema.additionalProperties === undefined ||
+      typeof schema.additionalProperties !== "boolean"
+    ) {
       throw new Error("PLUGIN_SCHEMA_INVALID");
     }
-    if (schema.additionalProperties !== false) throw new Error("PLUGIN_SCHEMA_INVALID");
-    for (const child of Object.values(schema.properties)) validateSchemaNode(child as Record<string, JsonValue>, false);
+    if (parametersRoot && schema.additionalProperties !== false) throw new Error("PLUGIN_SCHEMA_INVALID");
+    for (const child of Object.values(properties)) {
+      if (!child || typeof child !== "object" || Array.isArray(child)) throw new Error("PLUGIN_SCHEMA_INVALID");
+      validateSchemaNode(child as Record<string, JsonValue>, false);
+    }
   }
   if (schema.type === "array") {
     if (Array.isArray(schema.items)) {
@@ -252,9 +262,13 @@ function validateSchemaNode(schema: Record<string, JsonValue>, parametersRoot: b
     }
   }
   if (Array.isArray(schema.anyOf)) {
-    if (schema.anyOf.length === 0) throw new Error("PLUGIN_SCHEMA_INVALID");
-    for (const child of schema.anyOf) validateSchemaNode(child as Record<string, JsonValue>, false);
+    if (schema.anyOf.length < 2) throw new Error("PLUGIN_SCHEMA_INVALID");
+    for (const child of schema.anyOf) {
+      if (!child || typeof child !== "object" || Array.isArray(child)) throw new Error("PLUGIN_SCHEMA_INVALID");
+      validateSchemaNode(child as Record<string, JsonValue>, false);
+    }
   }
+  if (parametersRoot && schema.additionalProperties !== false) throw new Error("PLUGIN_SCHEMA_INVALID");
 }
 
 export function parsePluginApiCatalog(value: unknown): PluginApiCatalogV1 {

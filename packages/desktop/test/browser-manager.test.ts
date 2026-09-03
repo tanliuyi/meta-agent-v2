@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -299,9 +300,7 @@ class FakeHost implements BrowserHostController {
     return "";
   }
 
-  async downloadEvents(): Promise<Array<{ url: string; filename: string; path: string | null }>> {
-    return [];
-  }
+  downloadMedia(_url: string): void {}
 
   dispose(): void {
     this.disposed = true;
@@ -1511,11 +1510,25 @@ describe("BrowserManager 新能力透传（对齐 Codex browser_use）", () => {
     const { manager, hosts } = setup();
     await manager.attach(SESSION_A, 101);
     const host = hosts.get(101)!;
-    host.downloadMedia = vi.fn(async () => undefined);
+    host.downloadMedia = vi.fn();
 
-    const result = await manager.downloadMedia(SESSION_A, 1, "https://example.com/f.zip", "/tmp/f.zip");
-    expect(result).toEqual({ ok: true });
-    expect(host.downloadMedia).toHaveBeenCalledWith("https://example.com/f.zip", "/tmp/f.zip");
+    const resultPromise = manager.downloadMedia(SESSION_A, 1, "https://example.com/f.zip", "/tmp/f.zip");
+    expect(host.downloadMedia).toHaveBeenCalledWith("https://example.com/f.zip");
+    const browserSession = sessionFor(SESSION_A) as unknown as { on: { mock: { calls: unknown[][] } } };
+    const onWillDownload = browserSession.on.mock.calls.filter(([name]) => name === "will-download").at(-1)?.[1] as (
+      event: Electron.Event,
+      item: Electron.DownloadItem,
+      webContents: WebContents,
+    ) => void;
+    const item = new EventEmitter() as unknown as Electron.DownloadItem;
+    Object.assign(item, {
+      getURL: () => "https://cdn.example.com/f.zip",
+      getFilename: () => "f.zip",
+      getSavePath: () => "/tmp/f.zip",
+      setSavePath: vi.fn(),
+    });
+    onWillDownload({}, item, { id: 101 } as WebContents);
+    await expect(resultPromise).resolves.toEqual({ ok: true });
   });
 
   test("closeTab 广播 close 请求；未知 tab 报错", async () => {
@@ -1776,11 +1789,13 @@ describe("BrowserManager 用户数据", () => {
   test("默认下载目录下仍记录完成状态", async () => {
     const dataDir = join(tmpdir(), `desktop-browser-download-${Date.now()}`);
     const data = makeDataService(dataDir);
-    setup({ data });
+    const { manager } = setup({ data });
+    await manager.attach(SESSION_A, 101);
     const browserSession = sessionFor(SESSION_A) as unknown as { on: { mock: { calls: unknown[][] } } };
     const onWillDownload = browserSession.on.mock.calls.filter(([name]) => name === "will-download").at(-1)?.[1] as (
       event: Electron.Event,
       item: Electron.DownloadItem,
+      webContents: WebContents,
     ) => void;
     let onDone: ((event: Electron.Event, state: "completed") => void) | undefined;
     const setSavePath = vi.fn();
@@ -1796,7 +1811,7 @@ describe("BrowserManager 用户数据", () => {
       },
     } as unknown as Electron.DownloadItem;
 
-    onWillDownload({} as Electron.Event, item);
+    onWillDownload({} as Electron.Event, item, { id: 101 } as WebContents);
     expect(setSavePath).not.toHaveBeenCalled();
     onDone?.({} as Electron.Event, "completed");
     expect((await data.getSnapshot()).downloads).toMatchObject([

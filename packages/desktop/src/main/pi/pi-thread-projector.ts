@@ -741,6 +741,16 @@ export class PiThreadProjector {
           this.liveMessages.delete(message);
           continue;
         }
+        const canonical = this.nodes().findLast((candidate) => sameLiveProjection(candidate, node));
+        if (canonical) {
+          const merged = mergeCanonicalNode(node, canonical);
+          this.byId.set(canonical.id, merged);
+          this.nodeSnapshot = undefined;
+          this.messageNodeIds.set(message, canonical.id);
+          this.liveMessages.delete(message);
+          this.indexTools(merged);
+          continue;
+        }
         const restored = { ...node, parentId: this.nodeIds.at(-1) ?? null } as PiTimelineNode;
         this.nodeIds.push(restored.id);
         this.nodeSnapshot = undefined;

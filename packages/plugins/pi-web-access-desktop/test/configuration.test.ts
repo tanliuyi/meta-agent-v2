@@ -116,11 +116,11 @@ test("market manifest identifies the local plugin as pi.web-access", async () =>
   assert.equal(manifest.plugin.id, "pi.web-access");
   assert.equal(manifest.pi.entry, "index.ts");
   assert.equal(manifest.desktop.hostProfileVersion, 1);
+  assert.equal(manifest.desktop.minVersion, "0.0.42");
   assert.deepEqual(manifest.configuration, WEB_ACCESS_CONFIGURATION_SCHEMA);
   assert.deepEqual(manifest.capabilities, [
     "events.subscribe",
     "configuration.read",
-    "tools.register",
     "commands.register",
     "messages.enqueue",
     "messages.custom",
@@ -128,6 +128,7 @@ test("market manifest identifies the local plugin as pi.web-access", async () =>
     "ui.notify",
     "ui.dialog",
     "ui.widget.text",
+    "plugin-methods.provide",
   ]);
 });
 

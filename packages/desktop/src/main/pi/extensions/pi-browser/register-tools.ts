@@ -8,9 +8,8 @@
  * 交互工具按编号（elementIndex）定位；stale ref（编号失效）返回"重新 snapshot"
  * 提示；敏感动作（type submit）先经 ctx.ui.confirm 确认。
  */
-
-import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import type {
   BrowserActionTarget,
@@ -24,6 +23,13 @@ import { checkSiteAccess, isLocalSiteUrl, type SitePolicySettings } from "../../
 import { BrowserClient } from "./lib/browser-client.ts";
 import { spillSnapshotText } from "./lib/render-snapshot.ts";
 import { SiteAccessController } from "./lib/site-access.ts";
+
+const BrowserDirectionSchema = Type.Union([
+  Type.Literal("up"),
+  Type.Literal("down"),
+  Type.Literal("top"),
+  Type.Literal("bottom"),
+]);
 
 /** 工具结果中渲染端（ToolView browser 卡片）读取的 details 形状。 */
 export interface BrowserToolDetails {
@@ -327,7 +333,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
     description: BROWSER_TOOL_DESCRIPTIONS.scroll,
     parameters: Type.Object({
       tabId: Type.Optional(Type.Number({ description: "目标标签页；缺省为当前活跃标签页" })),
-      direction: StringEnum(["up", "down", "top", "bottom"] as const, { description: "滚动方向" }),
+      direction: BrowserDirectionSchema,
       amount: Type.Optional(Type.Number({ description: "滚动像素数（up/down 时，默认 400）" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -657,7 +663,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
       limit: Type.Optional(Type.Number({ description: "最多返回条数（默认 100，events 模式）" })),
       method: Type.Optional(Type.String({ description: "CDP 方法名（send 模式），如 Page.getNavigationHistory" })),
       params: Type.Optional(
-        Type.Record(Type.String(), Type.Unknown(), { description: "CDP 方法参数（send 模式，可选）" }),
+        Type.Object({}, { additionalProperties: true, description: "CDP 方法参数（send 模式，可选）" }),
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -669,7 +675,12 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
         if (params.method === undefined) {
           return toolResult("cdp", { ok: false, error: "send 模式需要提供 method" });
         }
-        const sent = await client.cdpSend(tabId, params.method, params.params, ...signalArgs(_signal));
+        const sent = await client.cdpSend(
+          tabId,
+          params.method,
+          params.params as Record<string, unknown> | undefined,
+          ...signalArgs(_signal),
+        );
         if (!sent.ok) return toolResult("cdp", { ok: false, error: sent.error });
         const rendered =
           typeof sent.result === "string" ? sent.result : (JSON.stringify(sent.result ?? null, null, 2) ?? "null");
@@ -972,7 +983,7 @@ export function registerBrowserTools(pi: ExtensionAPI, options: RegisterBrowserT
     name: "browser_download",
     label: "下载文件",
     description:
-      "触发下载指定 URL 并保存到本地路径（对齐 Codex downloadMedia）。url 为 http/https 下载链接，savePath 为本地绝对路径（含文件名）。下载完成后可用 browser_downloads 确认结果。",
+      "触发下载指定 URL 并保存到本地路径（对齐 Codex downloadMedia）。url 为 http/https 下载链接，savePath 为本地绝对路径（含文件名）。下载被 Electron 接受后返回，可用 browser_downloads 确认最终状态。",
     parameters: Type.Object({
       tabId: Type.Optional(Type.Number({ description: "目标标签页；缺省为当前活跃标签页" })),
       url: Type.String({ description: "下载链接（http/https）" }),
@@ -1280,6 +1291,21 @@ function makeActionTarget(node: BrowserSnapshotNode, pageUrl: string): BrowserAc
     ...(node.selector !== undefined ? { selector: node.selector } : {}),
     ...(node.attrs !== undefined ? { attrs: { ...node.attrs } } : {}),
   };
+}
+
+/**
+ * Returns the browser operations without registering them as model-facing Pi tools.
+ * The Desktop plugin adapter uses this to build its static method declaration.
+ */
+export function collectBrowserToolDefinitions(): Array<ToolDefinition<TSchema, unknown>> {
+  const definitions: Array<ToolDefinition<TSchema, unknown>> = [];
+  const registrationApi = {
+    registerTool(tool: ToolDefinition<TSchema, unknown>): void {
+      definitions.push(tool);
+    },
+  } as unknown as ExtensionAPI;
+  registerBrowserTools(registrationApi);
+  return definitions;
 }
 
 function isTextInputTarget(node: BrowserSnapshotNode): boolean {

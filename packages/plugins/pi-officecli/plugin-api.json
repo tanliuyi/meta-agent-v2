@@ -1,0 +1,534 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "pi.officecli",
+  "methods": [
+    {
+      "name": "office_batch",
+      "description": "在单次打开/保存周期内原子执行多条文档操作（JSON 数组）。任一条失败则整批回滚（默认）。每条: {\"command\"|\"op\": \"set|add|remove|move|swap\", \"path\"|\"parent\"|\"to\"..., \"type\"?, \"props\"?: {...}}。适合批量填充表格、逐项修改样式。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file",
+          "operations"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录。"
+          },
+          "operations": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2000000,
+            "description": "JSON 数组字符串，元素为 batch item（command/op/path/props 等）。"
+          },
+          "bestEffort": {
+            "type": "boolean",
+            "description": "true 时保留已成功的操作，即使部分失败（默认 false=整批回滚）。"
+          },
+          "stopOnError": {
+            "type": "boolean",
+            "description": "true 时遇到第一条失败即停止（配合 bestEffort）。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_create",
+      "description": "创建一个空白 .docx/.xlsx/.pptx 文档（类型由扩展名决定）。已存在的文件不会被覆盖，请换一个文件名。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "目标文档路径（.docx/.xlsx/.pptx），相对于会话工作目录。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_dump",
+      "description": "把整个文档或任意子树序列化为可重放的 batch JSON（office_batch 可直接回放），用于从现有文档学习模板或生成变体。输出写入文件并返回路径；不修改原文档。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录。"
+          },
+          "path": {
+            "type": "string",
+            "description": "子树路径，默认 / 表示整个文档。"
+          },
+          "output": {
+            "type": "string",
+            "description": "输出 JSON 文件路径；默认与文档同目录的 <文件名>.blueprint.json。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_edit",
+      "description": "修改文档 DOM：set=修改元素属性（文本/字体/颜色/样式等），add=添加元素（--type 指定元素类型，如 paragraph/slide/shape/sheet/cell），remove=删除，move=移动（--to 目标父节点，--index/--after/--before 定位），swap=交换两元素。修改立即生效并落盘。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file",
+          "op"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录。"
+          },
+          "op": {
+            "type": "string",
+            "anyOf": [
+              {
+                "const": "set"
+              },
+              {
+                "const": "add"
+              },
+              {
+                "const": "remove"
+              },
+              {
+                "const": "move"
+              },
+              {
+                "const": "swap"
+              }
+            ],
+            "description": "操作类型。"
+          },
+          "path": {
+            "type": "string",
+            "description": "目标元素路径（set/remove/move/swap 需要）。"
+          },
+          "path2": {
+            "type": "string",
+            "description": "swap 的第二个元素路径。"
+          },
+          "parent": {
+            "type": "string",
+            "description": "add 的父路径（如 /body、/Sheet1、/），默认 /。"
+          },
+          "type": {
+            "type": "string",
+            "description": "add 的元素类型（paragraph/slide/shape/sheet/cell 等）。"
+          },
+          "props": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true,
+            "description": "属性键值对（如 title、text、bold、color、size、style、value）。"
+          },
+          "to": {
+            "type": "string",
+            "description": "move 的目标父路径。"
+          },
+          "index": {
+            "type": "integer",
+            "description": "move 的目标位置（1-based），与 after/before 互斥。"
+          },
+          "after": {
+            "type": "string",
+            "description": "move 到某元素之后。"
+          },
+          "before": {
+            "type": "string",
+            "description": "move 到某元素之前。"
+          },
+          "selector": {
+            "type": "string",
+            "description": "CSS 风格选择器替代 path 定位目标。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_get",
+      "description": "按 DOM 路径读取文档元素及其子元素，输出 JSON。路径语法: /body/p[1]、/body/tbl[2]/tr[1]、/Sheet1/A1、/slide[1]/shape[2]，1-based。使用 --depth 展开子元素。只读，不会修改文档。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file",
+          "path"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录。"
+          },
+          "path": {
+            "type": "string",
+            "description": "DOM 路径，默认 / 表示整个文档。"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "递归展开深度。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_help",
+      "description": "查询 OfficeCLI 的命令/元素帮助：某格式的元素清单、某元素的属性与取值格式、某命令的用法。不确定属性名或取值格式时先查帮助，不要猜测。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "topic"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "帮助主题，如 \"docx set paragraph\"、\"xlsx set cell\"、\"pptx add shape\"、\"view\"。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_merge",
+      "description": "把模板文档（.docx/.xlsx/.pptx）中的 {{key}} 占位符替换为 JSON 数据并生成新文档。占位符可出现在段落、表格单元格、形状、页眉页脚、图表标题中。模板不被修改。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "template",
+          "output",
+          "data"
+        ],
+        "properties": {
+          "template": {
+            "type": "string",
+            "minLength": 1,
+            "description": "模板文档路径，相对于会话工作目录。"
+          },
+          "output": {
+            "type": "string",
+            "minLength": 1,
+            "description": "生成的目标文档路径（.docx/.xlsx/.pptx）。"
+          },
+          "data": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000000,
+            "description": "JSON 字符串（对象或数组），如 {\"client\":\"Acme\",\"total\":\"$5,200\"}。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_query",
+      "description": "CSS 风格选择器查询文档元素，输出 JSON 数组。支持 [attr=value]、:contains(\"text\")、:empty、:has(formula)、布尔 and/or，如 paragraph[style=Heading1]、cell[value>5000 or value<100]。只读。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file",
+          "selector"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录。"
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CSS 风格选择器，如 paragraph[style=Heading1]。",
+            "maxLength": 2000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_render",
+      "description": "把文档渲染为独立 HTML 文件（浏览器可打开）或按页 PNG 截图（多模态模型可读图检查排版），使用 OfficeCLI 内置高保真渲染引擎。不修改原文档。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file",
+          "format"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录。"
+          },
+          "format": {
+            "type": "string",
+            "anyOf": [
+              {
+                "const": "html"
+              },
+              {
+                "const": "png"
+              }
+            ],
+            "description": "html=独立 HTML 文件；png=按页截图。"
+          },
+          "output": {
+            "type": "string",
+            "description": "输出文件路径；默认与文档同目录的 <文件名>.<html|png>。"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "png 模式指定页码（默认第一页）。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_validate",
+      "description": "按 OpenXML 模式校验文档结构，输出校验结果与发现的问题。交付前检查用；只读，不修改文档。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "office_view",
+      "description": "读取 .docx/.xlsx/.pptx 文档的语义视图。mode: outline=结构大纲, text=纯文本, annotated=带格式注解的文本, stats=页/段/形状统计, issues=格式与结构问题列表。读取类操作，不会修改文档。",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file",
+          "mode",
+          "format"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文档路径，相对于会话工作目录，也接受绝对路径。"
+          },
+          "mode": {
+            "type": "string",
+            "anyOf": [
+              {
+                "const": "outline"
+              },
+              {
+                "const": "text"
+              },
+              {
+                "const": "annotated"
+              },
+              {
+                "const": "stats"
+              },
+              {
+                "const": "issues"
+              }
+            ],
+            "description": "查看模式。"
+          },
+          "format": {
+            "type": "string",
+            "anyOf": [
+              {
+                "const": "text"
+              },
+              {
+                "const": "json"
+              }
+            ],
+            "description": "text=可读文本；json=结构化数据（--json）。"
+          },
+          "maxLines": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "description": "text 模式最大输出行数（--max-lines）。"
+          },
+          "cols": {
+            "type": "string",
+            "minLength": 1,
+            "description": "text 模式限定列（逗号分隔，如 A,B,C），用于超大表格。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    }
+  ]
+}

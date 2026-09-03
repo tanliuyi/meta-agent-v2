@@ -25,6 +25,10 @@ export interface ScmDiffHunk {
   modifiedLines: number;
 }
 
+export interface ScmChangedEvent {
+  projectId: string;
+}
+
 export interface ScmDiff {
   path: string;
   original: TextFile | null;

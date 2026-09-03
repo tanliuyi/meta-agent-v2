@@ -50,6 +50,7 @@ import { PluginConfigurationService } from "./plugins/plugin-configuration-servi
 import { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
 import { ProvidersConfigService } from "./providers/providers-config-service.ts";
 import { ScmService } from "./scm/scm-service.ts";
+import { ProjectScmWatcher } from "./scm/scm-watcher.ts";
 import { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
 import { MemorySettingsService } from "./settings/memory-settings-service.ts";
 import { SettingsConfigService } from "./settings/settings-config-service.ts";
@@ -514,6 +515,11 @@ app.whenReady().then(async () => {
     projects,
     sessions,
     new ScmService(projects),
+    new ProjectScmWatcher(projects, (projectId) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(CHANNELS.scmChanged, { projectId });
+      }
+    }),
     files,
     new OfficeDocumentPreviewService(projects, {
       cacheDir: join(userDataDir, "cache", "office-document-preview"),

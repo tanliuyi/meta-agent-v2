@@ -3,7 +3,7 @@ import ChevronDown from "lucide-react/dist/esm/icons/chevron-down.mjs";
 import ChevronRight from "lucide-react/dist/esm/icons/chevron-right.mjs";
 import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { type CSSProperties, memo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import type { FileNode } from "../../../../../shared/contracts.ts";
 import { type FileTreeRow, setFileTreeRovingTabStop } from "./file-tree-navigation.ts";
 import { FileTypeIcon } from "./file-type-icon.tsx";
@@ -21,7 +21,7 @@ interface FileTreeNodeRowProps {
   onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number): void;
 }
 
-export function FileTreeNodeRow({
+export const FileTreeNodeRow = memo(function FileTreeNodeRow({
   row,
   index,
   active,
@@ -91,4 +91,4 @@ export function FileTreeNodeRow({
       {renderContextMenu(node)}
     </ContextMenu.Root>
   );
-}
+});

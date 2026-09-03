@@ -14,7 +14,7 @@ import { PluginIcon } from "./plugin-icon.tsx";
 
 interface PluginSelectProps {
   plugins: readonly DraftSelectablePlugin[] | null;
-  /** 会话级激活子集；null 表示继承项目级（仅项目开放的插件）。 */
+  /** 会话级 direct-tool 插件激活子集；null 表示全部可用 direct-tool 插件。 */
   value: string[] | null;
   disabled?: boolean;
   loading?: boolean;
@@ -54,7 +54,7 @@ function pluginIconUrl(plugin: DraftSelectablePlugin): string | undefined {
   return plugin.source === "marketplace" ? marketplacePluginIconUrl(plugin.id) : undefined;
 }
 
-/** 新会话草稿的插件激活选择：默认继承项目级作用域，项目未开放的插件也可在本会话单独启用。 */
+/** 新会话的 direct-tool 插件激活选择；plugin_call 插件由插件中心全局控制，不在此处显示。 */
 export function PluginSelect({ plugins, value, disabled = false, loading = false, onValueChange }: PluginSelectProps) {
   const [open, setOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -142,7 +142,7 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
                   htmlFor={`${checkboxGroupId}-all`}
                   className="cursor-default text-[10px] text-muted-foreground select-none"
                 >
-                  项目默认
+                  全部启用
                 </label>
               </div>
             </div>

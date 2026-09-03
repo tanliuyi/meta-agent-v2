@@ -20,8 +20,8 @@ export class ScmService {
   async getSnapshot(projectId: string): Promise<ScmSnapshot> {
     const cwd = this.projects.getCwd(projectId);
     const [status, branch, counts] = await Promise.all([
-      runGit(cwd, ["status", "--porcelain=v1", "-z"]),
-      runGit(cwd, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => ""),
+      runGitRead(cwd, ["status", "--porcelain=v1", "-z"]),
+      runGitRead(cwd, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => ""),
       this.getAheadBehind(cwd),
     ]);
     return { projectId, branch: branch.trim() || null, ...counts, changes: parseStatus(status), fetchedAt: Date.now() };
@@ -38,7 +38,7 @@ export class ScmService {
     const [original, modified, patch] = await Promise.all([
       this.readOriginal(cwd, originalPath, change, staged),
       this.readModified(cwd, path, change, staged),
-      runGit(cwd, ["diff", ...(staged ? ["--cached"] : []), "--no-ext-diff", "--unified=0", "--", path]).catch(
+      runGitRead(cwd, ["diff", ...(staged ? ["--cached"] : []), "--no-ext-diff", "--unified=0", "--", path]).catch(
         () => "",
       ),
     ]);
@@ -55,8 +55,8 @@ export class ScmService {
   private async readOriginal(cwd: string, path: string, change: ScmChange, staged: boolean): Promise<TextFile | null> {
     if (change.kind === "untracked" || (staged && change.kind === "added")) return null;
     const ref = staged ? `HEAD:${path}` : `:${path}`;
-    const content = await runGit(cwd, ["show", ref])
-      .catch(() => runGit(cwd, ["show", `HEAD:${path}`]))
+    const content = await runGitRead(cwd, ["show", ref])
+      .catch(() => runGitRead(cwd, ["show", `HEAD:${path}`]))
       .catch(() => null);
     return content === null ? null : textFile(path, content);
   }
@@ -64,7 +64,7 @@ export class ScmService {
   private async readModified(cwd: string, path: string, change: ScmChange, staged: boolean): Promise<TextFile | null> {
     if (change.kind === "deleted") return null;
     if (staged) {
-      const content = await runGit(cwd, ["show", `:${path}`]).catch(() => null);
+      const content = await runGitRead(cwd, ["show", `:${path}`]).catch(() => null);
       return content === null ? null : textFile(path, content);
     }
     const target = resolveProjectFilePath(cwd, path);
@@ -90,7 +90,7 @@ export class ScmService {
 
   private async getAheadBehind(cwd: string): Promise<{ ahead: number; behind: number }> {
     try {
-      const [behind, ahead] = (await runGit(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]))
+      const [behind, ahead] = (await runGitRead(cwd, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]))
         .trim()
         .split(/\s+/)
         .map(Number);
@@ -167,12 +167,22 @@ function changeKind(code: string, originalPath?: string): ScmChangeKind {
   return "modified";
 }
 
-function runGit(cwd: string, args: string[]): Promise<string> {
+function runGitRead(cwd: string, args: string[]): Promise<string> {
+  return runGit(cwd, args, false);
+}
+
+function runGit(cwd: string, args: string[], optionalLocks = true): Promise<string> {
   return new Promise((resolve, reject) =>
     execFile(
       "git",
       ["-C", cwd, ...args],
-      { encoding: "utf8", timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_MAX_BUFFER, windowsHide: true },
+      {
+        encoding: "utf8",
+        timeout: GIT_TIMEOUT_MS,
+        maxBuffer: GIT_MAX_BUFFER,
+        windowsHide: true,
+        env: optionalLocks ? undefined : { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      },
       (error, stdout) => (error ? reject(error) : resolve(stdout)),
     ),
   );

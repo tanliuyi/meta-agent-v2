@@ -52,7 +52,7 @@ const SKILL_ID_PARAM = Type.String({
     "Stable skill id for view/patch/update/delete. e.g., 'global:debug-typescript-errors' or 'project:my-repo:release-app'. Legacy alias 'edit' also accepts this field.",
 });
 
-const SKILL_TOOL_PARAMETERS = Type.Object(
+export const SKILL_TOOL_PARAMETERS = Type.Object(
   {
     action: StringEnum(["create", "view", "patch", "update", "edit", "delete"] as const, {
       description: "The skill action to perform.",

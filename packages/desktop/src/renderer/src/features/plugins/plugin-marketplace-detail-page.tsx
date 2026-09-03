@@ -1,7 +1,5 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Toast } from "@renderer/shared/ui/toast";
-import { useDesktopSelector } from "@renderer/state/desktop-context";
-import { selectProjects } from "@renderer/state/desktop-selectors";
 import { useNavigate } from "@tanstack/react-router";
 import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
@@ -33,7 +31,6 @@ export function PluginMarketplaceDetailPage({
 }) {
   const navigate = useNavigate();
   const controller = usePluginMarketplace(true, initialQuery);
-  const projects = useDesktopSelector(selectProjects);
   const localController = useLocalPlugins();
   const localOverrides = localPluginIdOverrides(
     (localController.snapshot?.entries ?? []).filter((entry) => entry.source === "development"),
@@ -52,8 +49,7 @@ export function PluginMarketplaceDetailPage({
     controller.installingId !== undefined ||
     controller.updatingId !== undefined ||
     controller.uninstallingId !== undefined ||
-    controller.settingEnabledId !== undefined ||
-    controller.settingScopeId !== undefined;
+    controller.settingEnabledId !== undefined;
 
   const refreshDetail = () => {
     setDetailLookup({ pluginId, status: "loading" });
@@ -199,11 +195,9 @@ export function PluginMarketplaceDetailPage({
                 plugin={plugin}
                 installed={installed}
                 marketplaceId={controller.page?.marketplaceId}
-                projects={projects}
                 mutationPending={mutationPending}
                 supersededByLocalPlugin={installed ? localOverrides.get(installed.id) : undefined}
                 onSetEnabled={(id, enabled) => void controller.setEnabled(id, enabled)}
-                onSetScope={(id, scope, projectIds) => void controller.setScope(id, scope, projectIds)}
               />
             </div>
           ) : detailStatus === "loading" || controller.loading ? (

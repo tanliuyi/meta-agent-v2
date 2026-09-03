@@ -9,6 +9,10 @@
   "subject": "士兵、武器和背包",
   "guidance": {
     "rectangleCount": 2,
+    "foregroundRegionCount": 1,
+    "backgroundRegionCount": 1,
+    "foregroundPolygonCount": 1,
+    "backgroundPolygonCount": 1,
     "foregroundPointCount": 1,
     "backgroundPointCount": 2,
     "foregroundMask": false,
@@ -46,7 +50,7 @@
 
 ## Semantic Responsibility
 
-`subject` records the invoking agent's visual decision about what the foreground means. It is required and must be non-empty whenever a new Alpha is generated. The CLI does not infer or verify that semantic decision. `guidance` records which spatial hints were supplied so a retry is reproducible. `--artifacts-dir` is also required for generated Alpha so the agent can complete the visual-review contract.
+`subject` records the invoking agent's visual decision about what the foreground means. It is required and must be non-empty whenever a new Alpha is generated. The CLI does not infer or verify that semantic decision. `guidance` records all spatial hints supplied by the invoking agent, including rectangle, region, polygon, point, and mask counts. Regions and polygons are hard constraints applied before GrabCut; masks provide pixel-level hard constraints for irregular corrections. `--artifacts-dir` is also required for generated Alpha so the agent can complete the visual-review contract.
 
 When an opaque input has no guidance, `--mode auto` fails with `error.code: "guidance-required"`. The invoking agent must inspect the image and explicitly select `background`, or supply guidance for `grabcut`.
 

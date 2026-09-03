@@ -378,6 +378,14 @@ const desktopApi: DesktopApi = {
     stage: (projectId, path) => ipcRenderer.invoke(CHANNELS.scmStage, projectId, path),
     unstage: (projectId, path) => ipcRenderer.invoke(CHANNELS.scmUnstage, projectId, path),
     discard: (projectId, path) => ipcRenderer.invoke(CHANNELS.scmDiscard, projectId, path),
+    watch: (projectId) => ipcRenderer.invoke(CHANNELS.scmWatch, projectId),
+    unwatch: (projectId) => ipcRenderer.invoke(CHANNELS.scmUnwatch, projectId),
+    onChanged: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof callback>[0]) =>
+        callback(payload);
+      ipcRenderer.on(CHANNELS.scmChanged, listener);
+      return () => ipcRenderer.removeListener(CHANNELS.scmChanged, listener);
+    },
   },
   files: {
     getPath: (file) => webUtils.getPathForFile(file),

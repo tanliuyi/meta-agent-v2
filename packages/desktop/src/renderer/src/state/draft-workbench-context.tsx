@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { WorkbenchState } from "../../../shared/contracts.ts";
+import type { ScmWorkbenchState, WorkbenchState } from "../../../shared/contracts.ts";
 import type { WorkbenchStore } from "../runtime/pi-session-store.ts";
 import { useDraftSession } from "./draft-session-context.tsx";
 import {
@@ -37,6 +37,7 @@ interface DraftWorkbenchLayout {
   activeFile?: string;
   previewFile?: string;
   expandedPaths: string[];
+  scm?: ScmWorkbenchState;
 }
 
 const INITIAL_LAYOUT: DraftWorkbenchLayout = {

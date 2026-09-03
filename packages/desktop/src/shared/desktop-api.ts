@@ -137,7 +137,7 @@ import type {
 } from "./plugin-marketplace-contracts.ts";
 import type { PreferencesSnapshot, SavePreferencesInput, SavePreferencesResult } from "./preferences-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
-import type { ScmDiff, ScmSnapshot } from "./scm-contracts.ts";
+import type { ScmChangedEvent, ScmDiff, ScmSnapshot } from "./scm-contracts.ts";
 import type {
   SaveSettingsConfigInput,
   SaveSettingsConfigResult,
@@ -323,6 +323,9 @@ export interface DesktopApi {
     stage(projectId: string, path: string): Promise<void>;
     unstage(projectId: string, path: string): Promise<void>;
     discard(projectId: string, path: string): Promise<void>;
+    watch(projectId: string): Promise<void>;
+    unwatch(projectId: string): Promise<void>;
+    onChanged(callback: (event: ScmChangedEvent) => void): () => void;
   };
   files: {
     getPath(file: File): string;

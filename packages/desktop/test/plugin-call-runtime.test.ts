@@ -2,14 +2,64 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { describe, expect, test } from "vitest";
+import {
+  pluginCallCatalog as browserCatalog,
+  desktopPlugin as browserPlugin,
+} from "../src/main/pi/extensions/pi-browser/index.ts";
+import {
+  pluginCallCatalog as hermesCatalog,
+  desktopPlugin as hermesPlugin,
+} from "../src/main/pi/extensions/pi-hermes-memory/index.ts";
+import {
+  pluginCallCatalog as subagentsCatalog,
+  desktopPlugin as subagentsPlugin,
+} from "../src/main/pi/extensions/pi-subagents/index.ts";
 import { DEFAULT_PLUGIN_CALL_LIMITS } from "../src/main/pi/plugin-call/plugin-call-limits.ts";
 import { executePluginProgram, PluginCallRunManager } from "../src/main/pi/plugin-call/plugin-call-runtime.ts";
 import { PluginMethodDispatcher } from "../src/main/pi/plugin-call/plugin-method-dispatcher.ts";
-import { DesktopPluginRegistryBuilder } from "../src/main/pi/plugin-call/plugin-method-registry.ts";
+import {
+  DesktopPluginRegistryBuilder,
+  validatePluginSchemaProfile,
+} from "../src/main/pi/plugin-call/plugin-method-registry.ts";
 import type { PluginMethodExecutionContext } from "../src/shared/desktop-extension-contracts.ts";
 
 describe("plugin call runtime", () => {
+  test("builtin plugin declarations pass the closed schema profile", () => {
+    const builtins = [
+      { id: "pi-browser", declaration: browserPlugin, catalog: browserCatalog },
+      { id: "pi-hermes-memory", declaration: hermesPlugin, catalog: hermesCatalog },
+      { id: "pi-subagents", declaration: subagentsPlugin, catalog: subagentsCatalog },
+    ];
+    for (const builtin of builtins) {
+      const builder = new DesktopPluginRegistryBuilder();
+      const entry = {
+        id: `builtin:${builtin.id}`,
+        displayName: builtin.id,
+        source: "builtin" as const,
+        hostProfileVersion: 1 as const,
+        capabilities: ["plugin-methods.provide" as const],
+        pluginId: builtin.id,
+        pluginCallSkill: builtin.id,
+        pluginCallCatalog: builtin.catalog,
+      };
+      builder.stage(entry, builtin.declaration);
+      builder.commit(entry.id);
+      expect(builder.finalize().get(builtin.id)?.size).toBe(builtin.declaration.methods.length);
+    }
+  });
+
+  test("session_search plugin-call schema accepts both configured variants", () => {
+    const method = hermesPlugin.methods.find((candidate) => candidate.name === "session_search");
+    expect(method).toBeDefined();
+    if (!method) return;
+
+    expect(Value.Check(method.parameters, { query: "desktop", limit: 10 })).toBe(true);
+    expect(Value.Check(method.parameters, { markdown: "# Session" })).toBe(true);
+    expect(Value.Check(method.parameters, { unexpected: true })).toBe(false);
+  });
+
   test("plugin registry validates catalog and executes a program in a fresh worker", async () => {
     const parameters = Type.Object({ value: Type.Number() }, { additionalProperties: false });
     const result = Type.Object({ doubled: Type.Number() }, { additionalProperties: false });
@@ -277,6 +327,31 @@ describe("plugin call runtime", () => {
         { ...DEFAULT_PLUGIN_CALL_LIMITS, maxImageBytes: 1 },
       ),
     ).rejects.toMatchObject({ code: "PLUGIN_ATTACHMENT_LIMIT_EXCEEDED" });
+  });
+
+  test("rejects enum and deprecated annotations", () => {
+    const parameters = Type.Object(
+      {
+        mode: Type.String({ enum: ["fast", "safe"], deprecated: true }),
+      },
+      { additionalProperties: false },
+    );
+    expect(() => validatePluginSchemaProfile(parameters, true)).toThrow("PLUGIN_SCHEMA_INVALID");
+  });
+
+  test("rejects record, unknown, and dynamic object schemas", () => {
+    expect(() => validatePluginSchemaProfile(Type.Record(Type.String(), Type.Unknown()), false)).toThrow(
+      "PLUGIN_SCHEMA_INVALID",
+    );
+    expect(() =>
+      validatePluginSchemaProfile(
+        Type.Object(
+          { schema: Type.Unsafe({ type: "object", additionalProperties: true }) },
+          { additionalProperties: false },
+        ),
+        true,
+      ),
+    ).toThrow("PLUGIN_SCHEMA_INVALID");
   });
 
   test("rejects schemas outside the closed profile", () => {

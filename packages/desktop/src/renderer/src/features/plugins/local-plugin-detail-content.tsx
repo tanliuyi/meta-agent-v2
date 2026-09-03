@@ -7,32 +7,25 @@ import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
 import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useState } from "react";
-import type { Project } from "../../../../shared/contracts.ts";
 import type {
   DesktopExtensionDiagnostic,
   DesktopExtensionListEntry,
-  ExtensionScope,
 } from "../../../../shared/desktop-extension-contracts.ts";
 import { PluginConfigurationForm } from "./plugin-configuration-form.tsx";
-import { PluginScopeSettings } from "./plugin-scope-settings.tsx";
 
 interface LocalPluginDetailContentProps {
   plugin: DesktopExtensionListEntry;
   diagnostics: DesktopExtensionDiagnostic[];
-  projects: readonly Project[];
   mutating: boolean;
   onToggleEnabled(enabled: boolean): void;
-  onScopeChange(scope: ExtensionScope, projectIds?: string[]): void;
   onRemove(): void;
 }
 
 export function LocalPluginDetailContent({
   plugin,
   diagnostics,
-  projects,
   mutating,
   onToggleEnabled,
-  onScopeChange,
   onRemove,
 }: LocalPluginDetailContentProps) {
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -146,15 +139,6 @@ export function LocalPluginDetailContent({
               <p>本地插件以当前账户权限运行，可读写文件、访问网络、读取环境变量并执行子进程，是受信任代码而非沙箱。</p>
               <span className="plugin-marketplace-detail-muted">未提供能力声明（本地插件不声明 Marketplace 能力）</span>
             </section>
-
-            <PluginScopeSettings
-              pluginId={plugin.id}
-              scope={plugin.scope}
-              projectIds={plugin.projectIds ?? []}
-              projects={projects}
-              mutationPending={mutating}
-              onSetScope={onScopeChange}
-            />
 
             {diagnostics.length ? (
               <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-diagnostics">

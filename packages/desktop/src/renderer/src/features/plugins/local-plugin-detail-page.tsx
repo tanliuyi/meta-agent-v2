@@ -1,7 +1,5 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Toast } from "@renderer/shared/ui/toast";
-import { useDesktopSelector } from "@renderer/state/desktop-context";
-import { selectProjects } from "@renderer/state/desktop-selectors";
 import { useNavigate } from "@tanstack/react-router";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import { useEffect, useState } from "react";
@@ -19,7 +17,6 @@ export function LocalPluginDetailPage({
   returnSession?: { projectId: string; threadId: string };
 }) {
   const controller = useLocalPlugins(returnSession?.projectId, returnSession?.threadId);
-  const projects = useDesktopSelector(selectProjects);
   const navigate = useNavigate();
   const [removing, setRemoving] = useState(false);
   const plugin = controller.snapshot?.entries.find((entry) => entry.source === "development" && entry.id === pluginId);
@@ -71,18 +68,9 @@ export function LocalPluginDetailPage({
               <LocalPluginDetailContent
                 plugin={plugin}
                 diagnostics={diagnostics}
-                projects={projects}
                 mutating={controller.mutating}
                 onToggleEnabled={(enabled) =>
                   void controller.mutate({ type: "set-development-enabled", extensionId: plugin.id, enabled })
-                }
-                onScopeChange={(scope, projectIds) =>
-                  void controller.mutate({
-                    type: "set-development-scope",
-                    extensionId: plugin.id,
-                    scope,
-                    projectIds,
-                  })
                 }
                 onRemove={() => {
                   setRemoving(true);

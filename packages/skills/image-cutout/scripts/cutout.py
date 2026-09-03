@@ -71,6 +71,13 @@ def parse_rect(value: str) -> tuple[int, int, int, int]:
     return parts
 
 
+def parse_polygon(value: str) -> list[tuple[int, int]]:
+    points = [parse_point(point) for point in value.split(";") if point.strip()]
+    if len(points) < 3:
+        raise argparse.ArgumentTypeError("polygon must contain at least three x,y points separated by semicolons")
+    return points
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = JsonArgumentParser(description="Extract a subject into an RGBA PNG")
     parser.add_argument("--input", required=True, type=Path)
@@ -87,6 +94,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-component-area", type=int)
     parser.add_argument("--subject", help="Short description of the foreground selected by the invoking agent")
     parser.add_argument("--rect", type=parse_rect, action="append", default=[])
+    parser.add_argument("--foreground-region", type=parse_rect, action="append", default=[])
+    parser.add_argument("--background-region", type=parse_rect, action="append", default=[])
+    parser.add_argument("--foreground-polygon", type=parse_polygon, action="append", default=[])
+    parser.add_argument("--background-polygon", type=parse_polygon, action="append", default=[])
     parser.add_argument("--foreground-point", type=parse_point, action="append", default=[])
     parser.add_argument("--background-point", type=parse_point, action="append", default=[])
     parser.add_argument("--point-radius", type=int, default=3)
@@ -226,10 +237,10 @@ def alpha_from_background(
     minimum_high = 32.0 if estimate.route == "solid-background" else 16.0
     automatic_high = min(64.0, max(minimum_high, low + float(np.std(border_distance)) * 4.0))
     high = automatic_high if tolerance is None else tolerance
-    if high <= low or high > 128.0:
+    if high <= low or high > 255.0:
         raise CutoutError(
             "invalid-background-tolerance",
-            f"--background-tolerance must be greater than {low:.3f} and at most 128",
+            f"--background-tolerance must be greater than {low:.3f} and at most 255",
         )
     reachable = connected_background(estimate.distance <= high)
     normalized = np.clip((estimate.distance - low) / max(1.0, high - low), 0.0, 1.0)
@@ -268,6 +279,10 @@ def alpha_from_grabcut(
     rects: list[tuple[int, int, int, int]],
     foreground_points: list[tuple[int, int]],
     background_points: list[tuple[int, int]],
+    foreground_regions: list[tuple[int, int, int, int]],
+    background_regions: list[tuple[int, int, int, int]],
+    foreground_polygons: list[list[tuple[int, int]]],
+    background_polygons: list[list[tuple[int, int]]],
     point_radius: int,
     foreground_mask: Path | None,
     background_mask: Path | None,
@@ -278,7 +293,7 @@ def alpha_from_grabcut(
         raise CutoutError("invalid-input", "GrabCut requires an image of at least 3x3 pixels")
     if point_radius <= 0:
         raise CutoutError("invalid-guidance", "--point-radius must be positive")
-    if not rects and not foreground_points and foreground_mask is None:
+    if not rects and not foreground_points and not foreground_regions and foreground_mask is None:
         raise CutoutError(
             "guidance-required",
             "GrabCut requires a rectangle, foreground point, or foreground mask selected by the invoking agent",
@@ -299,6 +314,23 @@ def alpha_from_grabcut(
         if background_mask
         else np.zeros((height, width), dtype=np.uint8)
     )
+    for name, regions, target in (
+        ("foreground", foreground_regions, foreground),
+        ("background", background_regions, background),
+    ):
+        for x, y, region_width, region_height in regions:
+            if x < 0 or y < 0 or x + region_width > width or y + region_height > height:
+                raise CutoutError("invalid-guidance", f"Every {name} region must be fully inside the normalized image")
+            target[y : y + region_height, x : x + region_width] = 1
+    for name, polygons, target in (
+        ("foreground", foreground_polygons, foreground),
+        ("background", background_polygons, background),
+    ):
+        for polygon in polygons:
+            points = np.asarray(polygon, dtype=np.int32)
+            if np.any(points[:, 0] < 0) or np.any(points[:, 1] < 0) or np.any(points[:, 0] >= width) or np.any(points[:, 1] >= height):
+                raise CutoutError("invalid-guidance", f"Every {name} polygon must be fully inside the normalized image")
+            cv2.fillPoly(target, [points], 1)
     for name, points, target in (
         ("foreground", foreground_points, foreground),
         ("background", background_points, background),
@@ -606,7 +638,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         raise CutoutError("invalid-input", "Input and output paths must be different")
     loaded = load_image(input_path, args.max_bytes, args.max_pixels)
     guidance_paths = [path.resolve() for path in (args.foreground_mask, args.background_mask) if path is not None]
-    has_spatial_guidance = bool(args.rect or args.foreground_point or args.background_point or guidance_paths)
+    has_spatial_guidance = bool(
+        args.rect
+        or args.foreground_region
+        or args.background_region
+        or args.foreground_polygon
+        or args.background_polygon
+        or args.foreground_point
+        or args.background_point
+        or guidance_paths
+    )
     artifacts_directory = args.artifacts_dir.resolve() if args.artifacts_dir else None
     artifact_destinations = list(artifact_paths(artifacts_directory).values()) if artifacts_directory else []
     ensure_distinct_paths([output_path, *artifact_destinations], [input_path, *guidance_paths])
@@ -620,8 +661,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     subject = args.subject.strip() if args.subject else None
     if args.background_tolerance is not None and args.mode != "background":
         raise CutoutError("invalid-arguments", "--background-tolerance can only be used with --mode background")
-    if args.opaque_subject and args.mode != "background":
-        raise CutoutError("invalid-arguments", "--opaque-subject can only be used with --mode background")
+    if args.opaque_subject and args.mode not in ("background", "grabcut", "auto"):
+        raise CutoutError(
+            "invalid-arguments",
+            "--opaque-subject can only be used when generating Alpha with background or GrabCut guidance",
+        )
     if args.min_component_area is not None and not args.opaque_subject:
         raise CutoutError("invalid-arguments", "--min-component-area requires --opaque-subject")
     if (args.foreground_threshold is not None or args.edge_inset is not None) and not args.opaque_subject:
@@ -656,6 +700,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             args.rect,
             args.foreground_point,
             args.background_point,
+            args.foreground_region,
+            args.background_region,
+            args.foreground_polygon,
+            args.background_polygon,
             args.point_radius,
             args.foreground_mask,
             args.background_mask,
@@ -721,6 +769,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "subject": subject,
         "guidance": {
             "rectangleCount": len(args.rect),
+            "foregroundRegionCount": len(args.foreground_region),
+            "backgroundRegionCount": len(args.background_region),
+            "foregroundPolygonCount": len(args.foreground_polygon),
+            "backgroundPolygonCount": len(args.background_polygon),
             "foregroundPointCount": len(args.foreground_point),
             "backgroundPointCount": len(args.background_point),
             "foregroundMask": args.foreground_mask is not None,

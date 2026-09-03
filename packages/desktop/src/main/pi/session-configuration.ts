@@ -16,7 +16,6 @@ import {
   controlledResourceLoaderOptions,
   extensionLoadDiagnostics,
   extensionServiceDiagnostics,
-  validatePluginSkills,
 } from "./desktop-extension-runtime-policy.ts";
 import { resolveThinkingConfiguration, selectInitialModel } from "./model-selection-adapter.ts";
 import { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-registry.ts";
@@ -53,7 +52,7 @@ export async function loadDraftSessionConfig(
       resourceLoaderOptions: controlledResourceLoaderOptions(
         extensionSet,
         DesktopBuiltinProviderRegistry.getExtensionFactories(),
-        { pluginRegistryBuilder },
+        { pluginRegistryBuilder, agentDir },
       ),
     });
     models = runtimeServices.modelRuntime;
@@ -64,7 +63,6 @@ export async function loadDraftSessionConfig(
   const extensionDiagnostics = [
     ...(resources ? extensionLoadDiagnostics(extensionSet, resources.getExtensions()) : extensionSet.diagnostics),
     ...extensionServiceDiagnostics(extensionSet, serviceDiagnostics),
-    ...(resources ? validatePluginSkills(extensionSet, resources.getSkills()) : []),
   ];
   if (pluginRegistryBuilder) {
     try {
@@ -109,14 +107,16 @@ export async function loadDraftSessionConfig(
       diagnostics: extensionDiagnostics,
       plugins: (allEntries ?? extensionSet.entries).flatMap((entry) =>
         entry.source === "marketplace" || entry.source === "development"
-          ? [
-              {
-                id: entry.id,
-                displayName: entry.displayName,
-                source: entry.source,
-                available: extensionSet.entries.some((active) => active.id === entry.id),
-              },
-            ]
+          ? entry.capabilities.includes("plugin-methods.provide")
+            ? []
+            : [
+                {
+                  id: entry.id,
+                  displayName: entry.displayName,
+                  source: entry.source,
+                  available: extensionSet.entries.some((active) => active.id === entry.id),
+                },
+              ]
           : [],
       ),
       enabledPluginIds: null,

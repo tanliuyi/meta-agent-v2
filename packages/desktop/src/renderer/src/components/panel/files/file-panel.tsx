@@ -1,7 +1,6 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as Tabs from "@radix-ui/react-tabs";
 import { TooltipIconButton } from "@renderer/components/assistant-ui/tooltip-icon-button";
-import { useResizableRegion } from "@renderer/shared/hooks/use-resizable-region";
 import { Button } from "@renderer/shared/ui/button";
 import { Dialog } from "@renderer/shared/ui/dialog";
 import { DialogClose } from "@renderer/shared/ui/dialog-close";
@@ -25,7 +24,7 @@ import Search from "lucide-react/dist/esm/icons/search.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import WrapText from "lucide-react/dist/esm/icons/wrap-text.mjs";
 import X from "lucide-react/dist/esm/icons/x.mjs";
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
   FileImage,
   FileNode,
@@ -38,7 +37,7 @@ import { ContextMenuContent } from "../../../shared/ui/context-menu-content.tsx"
 import { ContextMenuItem } from "../../../shared/ui/context-menu-item.tsx";
 import { SHIKI_THEMES } from "../../assistant-ui/streamdown/streamdown-config.ts";
 import { StreamdownMarkdown } from "../../assistant-ui/streamdown/streamdown-markdown.tsx";
-import { useSessionScope, useSessionWorkbench } from "../../session-context.tsx";
+import { useSessionScope, useSessionWorkbenchSelector } from "../../session-context.tsx";
 import {
   closeWorkbenchFile,
   isImagePath,
@@ -60,6 +59,7 @@ import {
   removeLoadedFileTreeDirectory,
   replaceFileTreeDirectory,
 } from "./file-tree-data.ts";
+import { FileWorkspaceLayout } from "./file-workspace-layout.tsx";
 import { InlineImagePreview } from "./inline-image-preview.tsx";
 import { OfficeDocumentPreview as OfficeDocumentPreviewFrame } from "./office-document-preview.tsx";
 import { PdfDocumentPreview as PdfDocumentPreviewFrame } from "./pdf-document-preview.tsx";
@@ -67,22 +67,19 @@ import { PdfDocumentPreview as PdfDocumentPreviewFrame } from "./pdf-document-pr
 const FILE_SEARCH_DELAY = 180;
 /** 超过该字符数的文件跳过语法高亮（对齐 VS Code largeFileOptimizations）。 */
 const LARGE_FILE_HIGHLIGHT_CHARS = 128 * 1024;
-const FILE_TREE_DEFAULT_WIDTH = 240;
-const FILE_TREE_MIN_WIDTH = 180;
-const FILE_PREVIEW_MIN_WIDTH = 260;
+const EMPTY_PATHS: string[] = [];
 
 /** session 独立的文件预览和 Project cwd 文件树。 */
 export function FilePanel() {
   const { record, updateWorkbench } = useSessionScope();
-  const workbench = useSessionWorkbench();
+  const workbenchAvailable = useSessionWorkbenchSelector((workbench) => workbench !== null);
+  const activeFile = useSessionWorkbenchSelector((workbench) => workbench?.activeFile ?? null);
+  const openFiles = useSessionWorkbenchSelector((workbench) => workbench?.openFiles ?? EMPTY_PATHS);
+  const previewFile = useSessionWorkbenchSelector((workbench) => workbench?.previewFile);
+  const expandedPaths = useSessionWorkbenchSelector((workbench) => workbench?.expandedPaths ?? EMPTY_PATHS);
+  const fileWrap = useSessionWorkbenchSelector((workbench) => workbench?.fileWrapMode ?? false);
+  const fileMarkdownPreview = useSessionWorkbenchSelector((workbench) => workbench?.fileMarkdownPreview ?? false);
   const projectId = record.identity.projectId;
-  const activeFile = workbench?.activeFile ?? null;
-  const openFiles = workbench?.openFiles ?? [];
-  const previewFile = workbench?.previewFile;
-  const expandedPaths = workbench?.expandedPaths ?? [];
-  const fileTreeWidth = workbench?.fileTreeWidth ?? FILE_TREE_DEFAULT_WIDTH;
-  const fileWrap = workbench?.fileWrapMode ?? false;
-  const fileMarkdownPreview = workbench?.fileMarkdownPreview ?? false;
   const isMarkdown = /\.(md|markdown)$/iu.test(activeFile ?? "");
   const isOfficeDocument = isOfficeDocumentPath(activeFile ?? "");
   const isPdfDocument = isPdfPath(activeFile ?? "");
@@ -107,24 +104,12 @@ export function FilePanel() {
   const treeGeneration = useRef(0);
   const fileGeneration = useRef(0);
   const highlightGeneration = useRef(0);
-  const workspace = useRef<HTMLDivElement>(null);
   const tabsListRef = useRef<HTMLDivElement>(null);
   const activeProjectId = useRef(projectId);
   const queryRef = useRef(query);
   const directoryRequests = useRef(new Map<string, Promise<FileNode[]>>());
   const childrenRef = useRef<Record<string, FileNode[]>>({});
   const activeFileRef = useRef<string | null>(null);
-  const resize = useResizableRegion<HTMLElement>({
-    value: fileTreeWidth,
-    min: FILE_TREE_MIN_WIDTH,
-    getMaxSize: () => (workspace.current?.clientWidth ?? FILE_PREVIEW_MIN_WIDTH * 2) - FILE_PREVIEW_MIN_WIDTH,
-    direction: 1,
-    orientation: "vertical",
-    constraintRef: workspace,
-    onCommit: (nextFileTreeWidth) => {
-      if (nextFileTreeWidth !== fileTreeWidth) updateWorkbench({ fileTreeWidth: nextFileTreeWidth });
-    },
-  });
   activeProjectId.current = projectId;
   queryRef.current = query;
 
@@ -374,11 +359,12 @@ export function FilePanel() {
         void toggleDirectory(node);
         return;
       }
+      const workbench = record.stores.workbench.getSnapshot();
       if (!workbench) return;
       // 预览打开 + 父目录链展开合并为一次写入。
       updateWorkbench(openWorkbenchFilePatch(workbench, node.path));
     },
-    [toggleDirectory, updateWorkbench, workbench],
+    [record, toggleDirectory, updateWorkbench],
   );
 
   const pinNode = useCallback(
@@ -555,193 +541,176 @@ export function FilePanel() {
     [loadDirectory, projectId],
   );
 
-  if (!workbench) return null;
+  if (!workbenchAvailable) return null;
 
   return (
-    <div ref={workspace} className="file-workspace">
-      <aside
-        ref={resize.regionRef}
-        className="file-tree-panel"
-        style={
-          {
-            "--resizable-region-size": `${resize.initialSize}px`,
-          } as CSSProperties
-        }
-        aria-label="项目文件"
-      >
-        <div
-          ref={resize.separatorRef}
-          className="resize-handle resize-handle-file-tree"
-          role="separator"
-          tabIndex={0}
-          aria-label="调整文件树宽度"
-          aria-controls={fileTreeContentId}
-          aria-orientation="vertical"
-          aria-valuemin={FILE_TREE_MIN_WIDTH}
-          aria-valuemax={resize.initialMax}
-          aria-valuenow={resize.initialSize}
-          aria-valuetext={`${resize.initialSize} 像素`}
-          onPointerDown={resize.onPointerDown}
-          onKeyDown={resize.onKeyDown}
-        />
-        <div id={fileTreeContentId} className="file-tree-surface">
-          <div className="file-tree-toolbar">
-            <label className="file-search">
-              <Search size={14} aria-hidden="true" />
-              <span className="sr-only">筛选文件</span>
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="筛选文件..."
-              />
-            </label>
-          </div>
-          {treeError ? (
-            <p className="panel-error" role="alert">
-              {treeError}
-            </p>
-          ) : null}
-          <div className="file-tree" aria-busy={treeLoading}>
-            {treeLoading && roots.length === 0 ? (
-              <p className="file-tree-status" role="status">
-                正在加载文件
+    <>
+      <FileWorkspaceLayout
+        treeContentId={fileTreeContentId}
+        treeAriaLabel="项目文件"
+        resizeAriaLabel="调整文件树宽度"
+        tree={
+          <>
+            <div className="file-tree-toolbar">
+              <label className="file-search">
+                <Search size={14} aria-hidden="true" />
+                <span className="sr-only">筛选文件</span>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="筛选文件..."
+                />
+              </label>
+            </div>
+            {treeError ? (
+              <p className="panel-error" role="alert">
+                {treeError}
               </p>
-            ) : (
-              <FileTree
-                nodes={roots}
-                children={children}
-                expanded={expanded}
-                active={activeFile ?? undefined}
-                onOpen={openNode}
-                onPinOpen={pinNode}
-                onCopy={handleFileCopy}
-                onCut={handleFileCut}
-                onPaste={handleFilePaste}
-                renderContextMenu={renderFileContextMenu}
-              />
-            )}
-          </div>
-        </div>
-      </aside>
-      <Tabs.Root
-        className="file-preview"
-        value={activeFile ?? ""}
-        orientation="horizontal"
-        aria-label="打开的文件"
-        onValueChange={(path) => updateWorkbench({ activeFile: path })}
-      >
-        {openFiles.length > 0 ? (
-          <Tabs.List ref={tabsListRef} className="file-tabs" aria-label="打开的文件">
-            {openFiles.map((path) => {
-              const label = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
-              const isPreview = path === previewFile;
-              return (
-                <div
-                  key={path}
-                  className="file-tab-item"
-                  data-active={activeFile === path || undefined}
-                  data-preview={isPreview || undefined}
-                >
-                  <Tabs.Trigger
-                    className="file-tab-trigger"
-                    value={path}
-                    title={path}
-                    onDoubleClick={() => {
-                      const patch = pinWorkbenchFile(previewFile, path);
-                      if (patch) updateWorkbench(patch);
-                    }}
-                  >
-                    <FileCode2 size={14} aria-hidden="true" />
-                    <span>{label}</span>
-                  </Tabs.Trigger>
-                  {isPreview ? (
-                    <button
-                      type="button"
-                      className="file-tab-pin"
-                      aria-label={`固定 ${label}`}
-                      title="固定标签页"
-                      onClick={() => updateWorkbench({ previewFile: undefined })}
-                    >
-                      <Pin size={12} aria-hidden="true" />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="file-tab-close"
-                    aria-label={`关闭 ${label}`}
-                    onClick={() => closeFile(path)}
-                  >
-                    <X size={13} aria-hidden="true" />
-                  </button>
-                </div>
-              );
-            })}
-            <div className="file-tabs-actions">
-              {isMarkdown ? (
-                <TooltipIconButton
-                  className="file-markdown-preview-toggle"
-                  tooltip={fileMarkdownPreview ? "查看源码" : "预览 Markdown"}
-                  aria-label={fileMarkdownPreview ? "查看源码" : "预览 Markdown"}
-                  aria-pressed={fileMarkdownPreview}
-                  data-active={fileMarkdownPreview || undefined}
-                  onClick={() =>
-                    updateWorkbench({
-                      fileMarkdownPreview: !fileMarkdownPreview,
-                    })
-                  }
-                >
-                  <Eye size={14} aria-hidden="true" />
-                </TooltipIconButton>
-              ) : null}
-              {isOfficeDocument || isPdfDocument || (isMarkdown && fileMarkdownPreview) ? null : (
-                <TooltipIconButton
-                  className="file-wrap-toggle"
-                  tooltip={fileWrap ? "关闭换行" : "开启换行"}
-                  aria-label={fileWrap ? "关闭换行" : "开启换行"}
-                  aria-pressed={fileWrap}
-                  data-active={fileWrap || undefined}
-                  onClick={() => updateWorkbench({ fileWrapMode: !fileWrap })}
-                >
-                  <WrapText size={14} aria-hidden="true" />
-                </TooltipIconButton>
+            ) : null}
+            <div className="file-tree" aria-busy={treeLoading}>
+              {treeLoading && roots.length === 0 ? (
+                <p className="file-tree-status" role="status">
+                  正在加载文件
+                </p>
+              ) : (
+                <FileTree
+                  nodes={roots}
+                  children={children}
+                  expanded={expanded}
+                  active={activeFile ?? undefined}
+                  onOpen={openNode}
+                  onPinOpen={pinNode}
+                  onCopy={handleFileCopy}
+                  onCut={handleFileCut}
+                  onPaste={handleFilePaste}
+                  renderContextMenu={renderFileContextMenu}
+                />
               )}
             </div>
-          </Tabs.List>
-        ) : null}
-        {activeFile ? (
-          <FilePathBreadcrumb
-            path={activeFile}
-            children={children}
-            expanded={expanded}
-            onDirectoryOpen={(path) => void loadDirectory(path)}
-            onOpen={openBreadcrumbNode}
-            onPinOpen={pinNode}
-          />
-        ) : null}
-        {openFiles.map((path) => (
-          <Tabs.Content key={path} className="file-preview-content" value={path}>
-            {fileError ? (
-              <p className="panel-error" role="alert">
-                {fileError}
-              </p>
-            ) : file?.path === path ? (
-              preview
-            ) : (
-              <div className="file-preview-loading" aria-busy="true">
-                正在读取文件
+          </>
+        }
+        preview={
+          <Tabs.Root
+            className="file-preview"
+            value={activeFile ?? ""}
+            orientation="horizontal"
+            aria-label="打开的文件"
+            onValueChange={(path) => updateWorkbench({ activeFile: path })}
+          >
+            {openFiles.length > 0 ? (
+              <Tabs.List ref={tabsListRef} className="file-tabs" aria-label="打开的文件">
+                {openFiles.map((path) => {
+                  const label = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
+                  const isPreview = path === previewFile;
+                  return (
+                    <div
+                      key={path}
+                      className="file-tab-item"
+                      data-active={activeFile === path || undefined}
+                      data-preview={isPreview || undefined}
+                    >
+                      <Tabs.Trigger
+                        className="file-tab-trigger"
+                        value={path}
+                        title={path}
+                        onDoubleClick={() => {
+                          const patch = pinWorkbenchFile(previewFile, path);
+                          if (patch) updateWorkbench(patch);
+                        }}
+                      >
+                        <FileCode2 size={14} aria-hidden="true" />
+                        <span>{label}</span>
+                      </Tabs.Trigger>
+                      {isPreview ? (
+                        <button
+                          type="button"
+                          className="file-tab-pin"
+                          aria-label={`固定 ${label}`}
+                          title="固定标签页"
+                          onClick={() => updateWorkbench({ previewFile: undefined })}
+                        >
+                          <Pin size={12} aria-hidden="true" />
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="file-tab-close"
+                        aria-label={`关闭 ${label}`}
+                        onClick={() => closeFile(path)}
+                      >
+                        <X size={13} aria-hidden="true" />
+                      </button>
+                    </div>
+                  );
+                })}
+                <div className="file-tabs-actions">
+                  {isMarkdown ? (
+                    <TooltipIconButton
+                      className="file-markdown-preview-toggle"
+                      tooltip={fileMarkdownPreview ? "查看源码" : "预览 Markdown"}
+                      aria-label={fileMarkdownPreview ? "查看源码" : "预览 Markdown"}
+                      aria-pressed={fileMarkdownPreview}
+                      data-active={fileMarkdownPreview || undefined}
+                      onClick={() =>
+                        updateWorkbench({
+                          fileMarkdownPreview: !fileMarkdownPreview,
+                        })
+                      }
+                    >
+                      <Eye size={14} aria-hidden="true" />
+                    </TooltipIconButton>
+                  ) : null}
+                  {isOfficeDocument || isPdfDocument || (isMarkdown && fileMarkdownPreview) ? null : (
+                    <TooltipIconButton
+                      className="file-wrap-toggle"
+                      tooltip={fileWrap ? "关闭换行" : "开启换行"}
+                      aria-label={fileWrap ? "关闭换行" : "开启换行"}
+                      aria-pressed={fileWrap}
+                      data-active={fileWrap || undefined}
+                      onClick={() => updateWorkbench({ fileWrapMode: !fileWrap })}
+                    >
+                      <WrapText size={14} aria-hidden="true" />
+                    </TooltipIconButton>
+                  )}
+                </div>
+              </Tabs.List>
+            ) : null}
+            {activeFile ? (
+              <FilePathBreadcrumb
+                path={activeFile}
+                children={children}
+                expanded={expanded}
+                onDirectoryOpen={(path) => void loadDirectory(path)}
+                onOpen={openBreadcrumbNode}
+                onPinOpen={pinNode}
+              />
+            ) : null}
+            {openFiles.map((path) => (
+              <Tabs.Content key={path} className="file-preview-content" value={path}>
+                {fileError ? (
+                  <p className="panel-error" role="alert">
+                    {fileError}
+                  </p>
+                ) : file?.path === path ? (
+                  preview
+                ) : (
+                  <div className="file-preview-loading" aria-busy="true">
+                    正在读取文件
+                  </div>
+                )}
+              </Tabs.Content>
+            ))}
+            {openFiles.length === 0 ? (
+              <div className="file-empty">
+                <FolderOpen size={28} aria-hidden="true" />
+                <strong>打开文件</strong>
+                <span>从工作区目录树中选择文件</span>
               </div>
-            )}
-          </Tabs.Content>
-        ))}
-        {openFiles.length === 0 ? (
-          <div className="file-empty">
-            <FolderOpen size={28} aria-hidden="true" />
-            <strong>打开文件</strong>
-            <span>从工作区目录树中选择文件</span>
-          </div>
-        ) : null}
-      </Tabs.Root>
+            ) : null}
+          </Tabs.Root>
+        }
+      />
       <Dialog
         open={nameDialog !== null}
         onOpenChange={(open) => {
@@ -776,6 +745,6 @@ export function FilePanel() {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

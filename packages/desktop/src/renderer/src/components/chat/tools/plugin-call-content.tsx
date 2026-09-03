@@ -3,16 +3,27 @@ import type { PiPluginCallArtifact } from "../../../../../shared/contracts.ts";
 import { useSessionScope } from "../../session-context.tsx";
 import { ToolCode } from "./tool-code.tsx";
 import { formatToolValue } from "./tool-format.ts";
+import { ToolResult } from "./tool-result.tsx";
 
 interface PluginCallContentProps {
   args: Readonly<Record<string, unknown>>;
+  result: unknown;
+  error: boolean;
   artifact: unknown;
 }
 
-export function PluginCallContent({ args, artifact }: PluginCallContentProps) {
+export function PluginCallContent({ args, result, error, artifact }: PluginCallContentProps) {
   const { record } = useSessionScope();
+  const code = pluginCallCode(args);
   const parsed = parseArtifact(artifact);
-  if (!parsed) return <ToolCode value={formatToolValue(args)} expanded />;
+  if (!parsed) {
+    return (
+      <>
+        <ToolCode value={code} expanded />
+        <ToolResult result={result} error={error} expanded />
+      </>
+    );
+  }
   const { pluginCall, toolCallId } = parsed;
   return (
     <div className="plugin-call-details">
@@ -70,9 +81,14 @@ export function PluginCallContent({ args, artifact }: PluginCallContentProps) {
           )}
         </div>
       ) : null}
-      <ToolCode value={formatToolValue(args)} expanded />
+      <ToolResult result={result} error={error} expanded />
+      <ToolCode value={code} expanded />
     </div>
   );
+}
+
+function pluginCallCode(args: Readonly<Record<string, unknown>>): string {
+  return typeof args.code === "string" && args.code.length > 0 ? args.code : "(plugin code unavailable)";
 }
 
 function parseArtifact(value: unknown): { pluginCall: PiPluginCallArtifact; toolCallId: string } | undefined {
