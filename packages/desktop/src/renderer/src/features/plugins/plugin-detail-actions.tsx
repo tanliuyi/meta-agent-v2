@@ -1,6 +1,7 @@
 import { Button } from "@renderer/shared/ui/button";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import type {
   InstalledMarketplacePluginSummary,
@@ -21,6 +22,7 @@ interface PluginDetailActionsProps {
   onInstall(plugin: MarketplacePluginSummary): void;
   onUpdate(plugin: MarketplacePluginSummary): void;
   onUninstall(id: string): void;
+  headerAction?: ReactNode;
   placement?: "header" | "inline";
 }
 
@@ -34,6 +36,7 @@ export function PluginDetailActions({
   onInstall,
   onUpdate,
   onUninstall,
+  headerAction,
   placement = "inline",
 }: PluginDetailActionsProps) {
   const [pendingAction, setPendingAction] = useState<PendingAction>();
@@ -80,6 +83,7 @@ export function PluginDetailActions({
         </div>
       ) : (
         <>
+          {headerAction}
           {installed ? (
             <Button variant="outline" disabled={mutationPending} onClick={() => setPendingAction("uninstall")}>
               <Trash2 />

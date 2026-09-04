@@ -12,10 +12,10 @@ import {
   type PiAssistantMessage,
   type PiAssistantPart,
   type PiAssistantStatus,
-  type PiPluginCallArtifact,
   type PiPluginSubCallRecord,
   type PiQueueItem,
   type PiQuote,
+  type PiRunCodeArtifact,
   type PiThreadEvent,
   type PiThreadEventBatch,
   type PiThreadEventEnvelope,
@@ -290,8 +290,8 @@ export class PiThreadProjector {
           ...part,
           execution: "running",
           partialResult: this.projectToolResultJson(event.partialResult),
-          ...(this.projectPluginCallArtifact(event.toolCallId, event.partialResult)
-            ? { pluginCall: this.projectPluginCallArtifact(event.toolCallId, event.partialResult) }
+          ...(this.projectRunCodeArtifact(event.toolCallId, event.partialResult)
+            ? { runCode: this.projectRunCodeArtifact(event.toolCallId, event.partialResult) }
             : {}),
         }));
         return;
@@ -300,8 +300,8 @@ export class PiThreadProjector {
           ...part,
           execution: event.isError ? "error" : "complete",
           result: this.projectToolResultJson(event.result),
-          ...(this.projectPluginCallArtifact(event.toolCallId, event.result)
-            ? { pluginCall: this.projectPluginCallArtifact(event.toolCallId, event.result) }
+          ...(this.projectRunCodeArtifact(event.toolCallId, event.result)
+            ? { runCode: this.projectRunCodeArtifact(event.toolCallId, event.result) }
             : {}),
           isError: event.isError,
         }));
@@ -894,12 +894,12 @@ export class PiThreadProjector {
         ...(message.addedToolNames ? { addedToolNames: message.addedToolNames } : {}),
         ...(message.usage ? { usage: message.usage } : {}),
       }),
-      ...(this.projectPluginCallArtifact(message.toolCallId, {
+      ...(this.projectRunCodeArtifact(message.toolCallId, {
         content: message.content,
         details: message.details,
       })
         ? {
-            pluginCall: this.projectPluginCallArtifact(message.toolCallId, {
+            runCode: this.projectRunCodeArtifact(message.toolCallId, {
               content: message.content,
               details: message.details,
             }),
@@ -934,7 +934,9 @@ export class PiThreadProjector {
       const candidates = [...this.liveMessages].flatMap((message) => {
         const id = this.messageNodeIds.get(message);
         const node = id ? this.byId.get(id) : undefined;
-        return node && node.parentId === projected.parentId && sameLiveProjection(node, projected) ? [node] : [];
+        return node && this.hasCanonicalParent(node.parentId, projected.parentId) && sameLiveProjection(node, projected)
+          ? [node]
+          : [];
       });
       return uniqueNodeMatch(candidates, `message entry ${entry.id}`)?.id;
     }
@@ -950,6 +952,19 @@ export class PiThreadProjector {
         sameJson(node.content.details, entry.details),
     );
     return uniqueNodeMatch(candidates, `custom entry ${entry.id}`)?.id;
+  }
+
+  private hasCanonicalParent(liveParentId: string | null, canonicalParentId: string | null): boolean {
+    let parentId = liveParentId;
+    while (parentId !== canonicalParentId) {
+      if (parentId === null) return false;
+      const parent = this.byId.get(parentId);
+      if (parent?.kind !== "notice" || parent.noticeType !== "notification" || parent.sourceEntryId !== undefined) {
+        return false;
+      }
+      parentId = parent.parentId;
+    }
+    return true;
   }
 
   private findMatchingCustomNode(message: CustomMessage): PiTimelineNode | undefined {
@@ -1055,7 +1070,7 @@ export class PiThreadProjector {
     return resource ? { resourceId, ...resource } : undefined;
   }
 
-  async resolvePluginCallArtifact(toolCallId: string, artifactId: string): Promise<string | undefined> {
+  async resolveRunCodeArtifact(toolCallId: string, artifactId: string): Promise<string | undefined> {
     const artifact = this.pluginArtifacts.get(artifactId);
     if (artifact?.toolCallId !== toolCallId) return undefined;
     try {
@@ -1078,15 +1093,15 @@ export class PiThreadProjector {
     return toJson({
       ...publicRecord,
       ...(Array.isArray(record.content) ? { content: this.projectContentImages(record.content) } : {}),
-      ...(details && details.kind !== "plugin-call-details-v1" ? { details: this.projectDetailsImages(details) } : {}),
+      ...(details && details.kind !== "run-code-details-v1" ? { details: this.projectDetailsImages(details) } : {}),
     });
   }
 
-  private projectPluginCallArtifact(toolCallId: string, value: unknown): PiPluginCallArtifact | undefined {
+  private projectRunCodeArtifact(toolCallId: string, value: unknown): PiRunCodeArtifact | undefined {
     if (!isPlainRecord(value) || !isPlainRecord(value.details)) return undefined;
     const details = value.details;
     if (
-      details.kind !== "plugin-call-details-v1" ||
+      details.kind !== "run-code-details-v1" ||
       typeof details.description !== "string" ||
       typeof details.generation !== "string" ||
       !Array.isArray(details.calls) ||
@@ -1096,7 +1111,7 @@ export class PiThreadProjector {
       return undefined;
     }
     const content = Array.isArray(value.content) ? value.content : [];
-    const attachments: PiPluginCallArtifact["attachments"] = [];
+    const attachments: PiRunCodeArtifact["attachments"] = [];
     for (const candidate of details.attachments) {
       if (!isPlainRecord(candidate)) continue;
       if (candidate.type === "image" && typeof candidate.data === "string" && typeof candidate.mimeType === "string") {
@@ -1144,7 +1159,7 @@ export class PiThreadProjector {
       }
     }
     return {
-      kind: "plugin-call",
+      kind: "run-code",
       description: details.description,
       generation: details.generation,
       calls: details.calls.filter(isPluginSubCallRecord) as PiPluginSubCallRecord[],

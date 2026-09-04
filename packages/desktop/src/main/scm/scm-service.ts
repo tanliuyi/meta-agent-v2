@@ -20,7 +20,7 @@ export class ScmService {
   async getSnapshot(projectId: string): Promise<ScmSnapshot> {
     const cwd = this.projects.getCwd(projectId);
     const [status, branch, counts] = await Promise.all([
-      runGitRead(cwd, ["status", "--porcelain=v1", "-z"]),
+      runGitRead(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
       runGitRead(cwd, ["symbolic-ref", "--short", "-q", "HEAD"]).catch(() => ""),
       this.getAheadBehind(cwd),
     ]);

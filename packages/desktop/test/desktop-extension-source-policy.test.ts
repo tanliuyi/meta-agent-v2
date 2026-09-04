@@ -229,7 +229,7 @@ describe("DesktopExtensionSourcePolicy", () => {
         pi: {
           entry: "index.ts",
           skills: ["skills/method-plugin/SKILL.md"],
-          pluginCall: { skill: "method-plugin", catalog: "plugin-api.json" },
+          runCode: { skill: "method-plugin", catalog: "plugin-api.json" },
         },
         desktop: { hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION },
         capabilities: ["plugin-methods.provide"],
@@ -256,9 +256,9 @@ describe("DesktopExtensionSourcePolicy", () => {
       expect.objectContaining({
         source: "development",
         pluginId: "pi.method-plugin",
-        pluginCallSkill: "method-plugin",
-        pluginCallCatalog: expect.objectContaining({ pluginId: "pi.method-plugin" }),
-        pluginCallCatalogSha256: createHash("sha256")
+        runCodeSkill: "method-plugin",
+        runCodeCatalog: expect.objectContaining({ pluginId: "pi.method-plugin" }),
+        runCodeCatalogSha256: createHash("sha256")
           .update(await readFile(catalogPath))
           .digest("hex"),
       }),

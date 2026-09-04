@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { rm, readFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAcpExtension, desktopPlugin } from "../src/index.ts";
+import { createAcpExtension } from "../src/index.ts";
 
 function captureApi() {
   const handlers = new Map<string, ((event: any, ctx: any) => any)[]>();
@@ -30,25 +30,10 @@ async function cleanState(sessionFile: string) {
   await rm(`${sessionFile}.acp.json`, { force: true });
 }
 
-async function callPluginMethod(name: string, params: unknown, ctx: unknown, toolCallId: string) {
-  const method = desktopPlugin.methods.find((candidate) => candidate.name === name);
-  assert.ok(method, `plugin method ${name} exists`);
-  const result = await method.execute(params as never, new AbortController().signal, {
-    pluginId: "pi.billion-context",
-    methodName: name,
-    callId: toolCallId,
-    toolCallId,
-    cwd: process.cwd(),
-    signal: new AbortController().signal,
-    toolContext: ctx,
-    attach: () => {},
-    reportProgress: () => {},
-  });
-  return { content: [{ type: "text", text: result.text }] };
-}
-
 function fakeCtx(entries: any[], stateFile: string) {
   return {
+    mode: "rpc",
+    hasUI: false,
     ui: { notify: () => {}, confirm: async () => true, select: async () => undefined, input: async () => "", setStatus: () => {} },
     model: { contextWindow: 200_000 },
     sessionManager: {
@@ -79,19 +64,20 @@ async function setupWithCompressedBlock() {
 
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
 
-  await callPluginMethod(
-    "compress",
-    { content: [{ startId: "m00001", endId: "m00001", summary: "Detailed initial context message for the decompress-tool tests." }] },
-    ctx,
+  const compressTool = api.tools.find((t: any) => t.name === "compress")!;
+  await compressTool.execute(
     "tc1",
+    { content: [{ startId: "m00001", endId: "m00001", summary: "Detailed initial context message for the decompress-tool tests." }] },
+    undefined, undefined, ctx,
   );
 
-  return { ctx };
+  const decompressTool = api.tools.find((t: any) => t.name === "decompress")!;
+  return { decompressTool, ctx };
 }
 
 test("decompress default writes content to an auto-generated file (no context bloat)", async () => {
-  const { ctx } = await setupWithCompressedBlock();
-  const res = await callPluginMethod("decompress", { blockId: "b1" }, ctx, "tc2");
+  const { decompressTool, ctx } = await setupWithCompressedBlock();
+  const res = await decompressTool.execute("tc2", { blockId: "b1" }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, /written to/, "result reports a file path");
@@ -107,8 +93,8 @@ test("decompress default writes content to an auto-generated file (no context bl
 });
 
 test("decompress inline:true returns the full content in the tool result", async () => {
-  const { ctx } = await setupWithCompressedBlock();
-  const res = await callPluginMethod("decompress", { blockId: "b1", inline: true }, ctx, "tc3");
+  const { decompressTool, ctx } = await setupWithCompressedBlock();
+  const res = await decompressTool.execute("tc3", { blockId: "b1", inline: true }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, /inline:/, "result signals inline mode");
@@ -117,10 +103,10 @@ test("decompress inline:true returns the full content in the tool result", async
 });
 
 test("decompress toFile writes to the specified path", async () => {
-  const { ctx } = await setupWithCompressedBlock();
+  const { decompressTool, ctx } = await setupWithCompressedBlock();
   const dir = await mkdtemp(join(tmpdir(), "pai-acp-decompress-"));
   const target = join(dir, "custom.txt");
-  const res = await callPluginMethod("decompress", { blockId: "b1", toFile: target }, ctx, "tc4");
+  const res = await decompressTool.execute("tc4", { blockId: "b1", toFile: target }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
 
   assert.match(text, new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "result mentions the custom path");
@@ -130,20 +116,20 @@ test("decompress toFile writes to the specified path", async () => {
 });
 
 test("decompress toFile rejects paths outside allowed roots", async () => {
-  const { ctx } = await setupWithCompressedBlock();
-  const res = await callPluginMethod("decompress", { blockId: "b1", toFile: "/etc/passwd" }, ctx, "tc5");
+  const { decompressTool, ctx } = await setupWithCompressedBlock();
+  const res = await decompressTool.execute("tc5", { blockId: "b1", toFile: "/etc/passwd" }, undefined, undefined, ctx);
   const text = (res.content[0] as any).text as string;
   assert.match(text, /must be under/i, "rejects arbitrary filesystem path");
 });
 
 test("decompress keeps the block active after a file-mode call", async () => {
-  const { ctx } = await setupWithCompressedBlock();
-  await callPluginMethod("decompress", { blockId: "b1" }, ctx, "tc6");
+  const { decompressTool, ctx } = await setupWithCompressedBlock();
+  await decompressTool.execute("tc6", { blockId: "b1" }, undefined, undefined, ctx);
   // Run the status tool to confirm b1 is still folded (active).
   const { api } = captureApi();
   // re-query via the same ctx's persisted state: simpler to just call decompress
   // again — a second file-mode call should succeed identically (block still there).
-  const res2 = await callPluginMethod("decompress", { blockId: "b1" }, ctx, "tc7");
+  const res2 = await decompressTool.execute("tc7", { blockId: "b1" }, undefined, undefined, ctx);
   const text2 = (res2.content[0] as any).text as string;
   assert.doesNotMatch(text2, /not found/i, "block still present after first decompress");
 });

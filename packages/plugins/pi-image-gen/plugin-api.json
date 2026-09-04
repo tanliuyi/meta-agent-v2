@@ -4,7 +4,7 @@
   "methods": [
     {
       "name": "image_generate",
-      "description": "Generate or edit raster images with the configured image model. Pass local file paths or http(s) URLs in image for edits or reference conditioning. The method writes new image files without overwriting existing files and returns absolute paths.",
+      "description": "Generate or edit raster images with the image model configured for this Desktop plugin. Pass local file paths or http(s) URLs in image for edits or reference conditioning. The tool writes new image files without overwriting existing files and returns absolute paths. It does not accept base64 or data: URI inputs.",
       "parameters": {
         "type": "object",
         "required": [
@@ -40,25 +40,22 @@
             "description": "Provider-specific image size such as \"1024x1024\"."
           },
           "quality": {
+            "type": "string",
             "anyOf": [
               {
-                "type": "string",
                 "const": "low"
               },
               {
-                "type": "string",
                 "const": "medium"
               },
               {
-                "type": "string",
                 "const": "high"
               },
               {
-                "type": "string",
                 "const": "auto"
               }
             ],
-            "description": "Image quality: low, medium, high, or auto."
+            "description": "OpenAI gpt-image quality: low, medium, high, or auto."
           },
           "filename": {
             "type": "string",
@@ -77,14 +74,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"

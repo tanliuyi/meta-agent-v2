@@ -110,15 +110,15 @@ async function main() {
     );
     if (mPluginId !== pluginId) throw new Error(`manifest pluginId ${mPluginId} != ${pluginId}`);
     if (mVersion !== version) throw new Error(`manifest version ${mVersion} != ${version}`);
-    const pluginCall = m.pi?.pluginCall;
+    const runCode = m.pi?.runCode;
     if (m.capabilities?.includes("plugin-methods.provide")) {
-      if (!pluginCall || !Array.isArray(m.pi?.skills) || m.pi.skills.length === 0) {
-        throw new Error("method plugin manifest is missing pi.skills or pi.pluginCall");
+      if (!runCode || !Array.isArray(m.pi?.skills) || m.pi.skills.length === 0) {
+        throw new Error("method plugin manifest is missing pi.skills or pi.runCode");
       }
       if (!m.pi.skills.every((name) => typeof name === "string" && name.startsWith("payload/") && get(name))) {
         throw new Error("method plugin manifest contains a missing skill");
       }
-      const catalogBytes = get(pluginCall.catalog);
+      const catalogBytes = get(runCode.catalog);
       if (!catalogBytes) throw new Error("method plugin catalog is missing");
       const catalog = JSON.parse(catalogBytes.toString("utf8"));
       if (catalog.schemaVersion !== 1 || catalog.pluginId !== pluginId || !Array.isArray(catalog.methods)) {
@@ -130,9 +130,9 @@ async function main() {
       }
       const primary = m.pi.skills.find((name) => {
         const text = get(name)?.toString("utf8") ?? "";
-        return new RegExp(`^name:\\s*[\"']?${escapeRegExp(pluginCall.skill)}[\"']?\\s*$`, "m").test(text);
+        return new RegExp(`^name:\\s*[\"']?${escapeRegExp(runCode.skill)}[\"']?\\s*$`, "m").test(text);
       });
-      if (!primary) throw new Error("method plugin primary skill name does not match pi.pluginCall.skill");
+      if (!primary) throw new Error("method plugin primary skill name does not match pi.runCode.skill");
       const apiReference = path.posix.join(path.posix.dirname(primary), "references/api.md");
       if (!get(apiReference) || !get(primary).toString("utf8").includes("references/api.md")) {
         throw new Error("method plugin primary skill must reference its generated references/api.md");

@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Message } from "@earendil-works/pi-ai";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
+import { isActiveAsyncState, updateActiveRunIndex } from "./active-run-index.ts";
 import { createChildTranscriptWriter, type ChildTranscriptWriter } from "../../shared/child-transcript.ts";
 import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliverInterruptRequest, deliverStopRequest, deliverTimeoutRequest, enqueueStepSteer, steerAcksDir, steerCapabilityPath, stepSteerInboxDir, watchAsyncControlInbox, type SteerAck, type SteerCapability, type SteerRequest } from "./control-channel.ts";
 import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
@@ -2180,6 +2181,7 @@ async function runSubagent(
 
 	fs.mkdirSync(asyncDir, { recursive: true });
 	writeAtomicJson(statusPath, statusPayload);
+	updateActiveRunIndex(asyncDir, statusPayload.state);
 	let pendingParallelUsageCost: CostSummary = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
 	const currentUsageTotals = (): CostSummary => {
 		const cost = results.reduce<CostSummary>((sum, result) => ({
@@ -2252,9 +2254,15 @@ async function runSubagent(
 		for (const node of graph.nodes) updateNode(node);
 		statusPayload.workflowGraph = graph;
 	};
+	let lastIndexedActiveState = isActiveAsyncState(statusPayload.state);
 	const writeStatusPayload = (): void => {
 		refreshWorkflowGraph();
 		writeAtomicJson(statusPath, statusPayload);
+		const activeState = isActiveAsyncState(statusPayload.state);
+		if (activeState !== lastIndexedActiveState) {
+			updateActiveRunIndex(asyncDir, statusPayload.state);
+			lastIndexedActiveState = activeState;
+		}
 		emitNestedSelfEvent(statusPayload.state === "running" || statusPayload.state === "queued" ? "subagent.nested.updated" : "subagent.nested.completed");
 	};
 	const updateExternalProcess = (index: number, process: ExternalProcessStatus): void => {

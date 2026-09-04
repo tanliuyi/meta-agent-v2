@@ -8,6 +8,7 @@ import { useRef } from "react";
 import type { WorkbenchTab } from "../../../../shared/contracts.ts";
 import { getWorkbenchPanelTabDefinition, useWorkbenchPanelTabs } from "../../state/panel-tab-registry.ts";
 import { workbenchTabKey } from "../../state/workbench-tab-context.tsx";
+import { FILES_PANEL_KIND, SCM_PANEL_KIND } from "./builtin-panel-kinds.ts";
 
 interface WorkbenchTabListProps {
   tabs: readonly WorkbenchTab[];
@@ -63,7 +64,14 @@ export function WorkbenchTabList({ tabs, activeKey, runningThreadIds, onActivate
         const key = workbenchTabKey(tab);
         const definition = tab.kind === "panel" ? getWorkbenchPanelTabDefinition(tab.panel) : undefined;
         // 未注册的面板回退到注册键本身，保证已打开 tab 始终可见可关闭。
-        const label = tab.kind === "panel" ? (definition?.label ?? tab.panel) : tab.displayName;
+        const label =
+          tab.kind === "panel"
+            ? tab.panel === FILES_PANEL_KIND
+              ? "资源管理"
+              : tab.panel === SCM_PANEL_KIND
+                ? "审查"
+                : (definition?.label ?? tab.panel)
+            : tab.displayName;
         const agentRunning = tab.kind === "session" && Boolean(tab.agentName) && runningThreadIds.has(tab.threadId);
         const icon: ReactNode =
           tab.kind === "panel" ? (

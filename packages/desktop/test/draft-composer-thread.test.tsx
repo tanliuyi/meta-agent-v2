@@ -114,6 +114,9 @@ describe("DraftComposerThread", () => {
     expect(markup).not.toContain("本地插件优先");
     expect(markup).toContain("本地插件“Web Access”已覆盖市场插件“Web Access”");
     expect(markup).toContain("当前使用本地版本");
+    expect(markup).not.toContain("停用或移除本地插件后，市场版本将自动恢复");
+    expect(markup).toContain('href="/plugins"');
+    expect(markup).toContain(">查看</a>");
     expect(markup).toContain('role="status"');
     expect(markup).toContain('aria-live="polite"');
     expect(markup).not.toContain("composer-feedback-title");

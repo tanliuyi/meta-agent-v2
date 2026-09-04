@@ -1,4 +1,4 @@
-export interface PluginCallLimits {
+export interface RunCodeLimits {
   maxCalls: number;
   maxConcurrentCalls: number;
   timeoutMs: number;
@@ -17,7 +17,7 @@ export interface PluginCallLimits {
   maxOldGenerationSizeMb: number;
 }
 
-export const DEFAULT_PLUGIN_CALL_LIMITS: PluginCallLimits = Object.freeze({
+export const DEFAULT_RUN_CODE_LIMITS: RunCodeLimits = Object.freeze({
   maxCalls: 64,
   maxConcurrentCalls: 8,
   timeoutMs: 120_000,

@@ -10,10 +10,10 @@ Supported registrations and their capability metadata:
 
 | Pi surface | Capability |
 | --- | --- |
-| `pi.registerTool(...)` captured for `plugin_call` | `plugin-methods.provide` |
+| `pi.registerTool(...)` captured for `run_code` | `plugin-methods.provide` |
 | `pi.on(...)` | `events.subscribe` |
 | `pi.getConfig()` | `configuration.read` |
-| Legacy `pi.registerTool(...)` capture without plugin-call metadata | `tools.register` |
+| Native `pi.registerTool(...)` exposed directly | `tools.register` |
 | `pi.registerCommand(...)` | `commands.register` |
 | `pi.registerProvider(...)` | `providers.register` |
 | `pi.sendMessage(...)` | `messages.enqueue` |
@@ -23,7 +23,7 @@ Supported registrations and their capability metadata:
 | Compaction requests/hooks | `session.compact` |
 | Supported Desktop UI calls | The matching `ui.*` capability |
 
-Programmatic methods are captured from standard `pi.registerTool()` calls by the Desktop wrapper while the approved factory runs. Both preferred `plugin-methods.provide` packages and legacy `tools.register` packages use this hidden path; the latter can run without plugin-call catalog metadata while they migrate. They are exposed to the model only through one fixed `plugin_call` tool and do not run through nested Pi tool hooks. Desktop preserves `prepareArguments`, the actual TypeBox validator, execution mode, abort, updates, and the real `ExtensionContext`. The manifest catalog and primary skill document the captured API but do not define a second executable implementation.
+Programmatic methods are captured from standard `pi.registerTool()` calls by the Desktop wrapper while the approved factory runs. Only entries declaring `plugin-methods.provide` use this path; entries declaring `tools.register` remain native Pi tools. Captured methods are exposed through the fixed `run_code` tool and do not run through nested Pi tool hooks. Desktop preserves `prepareArguments`, the TypeBox validator, execution mode, abort, updates, and the real `ExtensionContext`. The manifest catalog and primary skill document the captured API but do not define a second executable implementation.
 
 ## Supported UI
 

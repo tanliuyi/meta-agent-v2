@@ -195,7 +195,7 @@ export class DesktopApplication {
         this.factories.createPluginServices(context, { desktopVersion: this.options.app.getVersion() }),
         this.options.installDevTools(),
       ]);
-      if (this.state === "stopping") throw new Error("Desktop application initialization was stopped");
+      if (this.isStopping()) throw new Error("Desktop application initialization was stopped");
       handlePdfPreviewRequests(core.projects);
       const workspaceMutation = new WorkspaceMutationPort();
       const browserCapability = new BrowserCapabilityPort();
@@ -279,6 +279,10 @@ export class DesktopApplication {
     }
     this.state = "stopped";
     throw startupError;
+  }
+
+  private isStopping(): boolean {
+    return this.state === "stopping";
   }
 }
 

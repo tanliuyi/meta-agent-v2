@@ -12,14 +12,13 @@
     "entry": "index.ts",
     "extensionApi": "v1",
     "skills": ["skills/pi-web-access/SKILL.md"],
-    "pluginCall": {
+    "runCode": {
       "skill": "pi-web-access",
       "catalog": "plugin-api.json"
     }
   },
   "desktop": {
-    "hostProfileVersion": 1,
-    "minVersion": "0.0.42"
+    "hostProfileVersion": 1
   },
   "target": {
     "platform": "universal",
@@ -781,14 +780,14 @@
   "capabilities": [
     "events.subscribe",
     "configuration.read",
+    "plugin-methods.provide",
     "commands.register",
     "messages.enqueue",
     "messages.custom",
     "session.read",
     "ui.notify",
     "ui.dialog",
-    "ui.widget.text",
-    "plugin-methods.provide"
+    "ui.widget.text"
   ],
   "nativeModules": [],
   "executables": [],

@@ -3,7 +3,7 @@ import type {
   ClearedQueue,
   DraftSessionConfig,
   HostResponse,
-  OpenPluginCallArtifactInput,
+  OpenRunCodeArtifactInput,
   SessionAttachInput,
   SessionAttachment,
   SessionBootstrap,
@@ -330,17 +330,17 @@ export class SessionSupervisor {
     return this.workers.readImageResource(subscription.projectId, subscription.threadId, resourceId);
   }
 
-  async resolvePluginCallArtifact(ownerId: number, input: OpenPluginCallArtifactInput): Promise<string> {
+  async resolveRunCodeArtifact(ownerId: number, input: OpenRunCodeArtifactInput): Promise<string> {
     if (!this.findSubscription(ownerId, input.projectId, input.threadId)) {
       throw new Error("Session attachment is not active");
     }
-    const path = await this.workers.resolvePluginCallArtifact(
+    const path = await this.workers.resolveRunCodeArtifact(
       input.projectId,
       input.threadId,
       input.toolCallId,
       input.artifactId,
     );
-    if (!path) throw new Error("Plugin call artifact is unavailable");
+    if (!path) throw new Error("run_code artifact is unavailable");
     return path;
   }
 

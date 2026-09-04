@@ -192,6 +192,54 @@ describe("PiThreadProjector", () => {
     projector.dispose();
   });
 
+  it("独立 transient notification 不阻止后续 live assistant 与 canonical entry 合并", () => {
+    const entries: SessionEntry[] = [];
+    const { session } = sessionHarness(entries);
+    const projector = new PiThreadProjector({ projectId: "project", session, publish: () => {} });
+    const live = assistantMessage("toolUse", 2, [
+      { type: "thinking", thinking: "分析", redacted: false },
+      toolCall("call-1"),
+    ]);
+
+    projector.notify("记忆已自动审查并更新", "info");
+    projector.handle({ type: "message_start", message: live });
+    projector.handle({
+      type: "tool_execution_start",
+      toolCallId: "call-1",
+      toolName: "read",
+      args: { path: "a" },
+    });
+    entries.push(messageEntry("canonical-assistant", null, structuredClone(live)));
+    projector.handle({
+      type: "tool_execution_end",
+      toolCallId: "call-1",
+      toolName: "read",
+      result: { content: [{ type: "text", text: "failed" }] },
+      isError: true,
+    });
+
+    const snapshot = projector.snapshot();
+    expect(snapshot.nodes.filter((node) => node.kind === "assistant")).toHaveLength(1);
+    expect(snapshot.nodes).toEqual([
+      expect.objectContaining({ kind: "notice", noticeType: "notification" }),
+      expect.objectContaining({
+        id: "canonical-assistant",
+        parentId: null,
+        kind: "assistant",
+        content: [
+          expect.objectContaining({ type: "reasoning", text: "分析" }),
+          expect.objectContaining({
+            type: "tool-call",
+            toolCallId: "call-1",
+            execution: "error",
+            isError: true,
+          }),
+        ],
+      }),
+    ]);
+    projector.dispose();
+  });
+
   it("message_end 后通过公开 branch checkpoint 将 transient ID rekey 为 SessionEntry.id", async () => {
     const entries: SessionEntry[] = [];
     const batches: PiThreadEventBatch[] = [];
@@ -942,7 +990,7 @@ describe("PiThreadProjector", () => {
       {
         type: "toolCall",
         id: "plugin-1",
-        name: "plugin_call",
+        name: "run_code",
         arguments: { code: "return 1", description: "Run plugin" },
       },
     ]);
@@ -950,7 +998,7 @@ describe("PiThreadProjector", () => {
     projector.handle({
       type: "tool_execution_end",
       toolCallId: "plugin-1",
-      toolName: "plugin_call",
+      toolName: "run_code",
       isError: false,
       result: {
         content: [
@@ -958,7 +1006,7 @@ describe("PiThreadProjector", () => {
           { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
         ],
         details: {
-          kind: "plugin-call-details-v1",
+          kind: "run-code-details-v1",
           description: "Run plugin",
           runId: "plugin-1",
           generation: "generation-1",
@@ -994,8 +1042,8 @@ describe("PiThreadProjector", () => {
     const part = node.content[0];
     expect(part?.type).toBe("tool-call");
     if (part?.type !== "tool-call") throw new Error("tool part missing");
-    expect(part.pluginCall).toMatchObject({
-      kind: "plugin-call",
+    expect(part.runCode).toMatchObject({
+      kind: "run-code",
       description: "Run plugin",
       calls: [{ pluginId: "com.example.plugin", method: "run" }],
       attachments: [
@@ -1005,9 +1053,9 @@ describe("PiThreadProjector", () => {
     });
     expect(JSON.stringify(part.result)).not.toContain(file);
     expect(JSON.stringify(part.result)).not.toContain(sha256);
-    await expect(projector.resolvePluginCallArtifact("plugin-1", "artifact-1")).resolves.toBe(file);
+    await expect(projector.resolveRunCodeArtifact("plugin-1", "artifact-1")).resolves.toBe(file);
     await writeFile(file, "evil", "utf8");
-    await expect(projector.resolvePluginCallArtifact("plugin-1", "artifact-1")).resolves.toBeUndefined();
+    await expect(projector.resolveRunCodeArtifact("plugin-1", "artifact-1")).resolves.toBeUndefined();
     projector.dispose();
     await rm(root, { recursive: true, force: true });
   });

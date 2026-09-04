@@ -42,6 +42,20 @@ test("removes TUI renderers and ignores TUI shortcuts", () => {
   assert.equal(shortcutRegistrations, 0);
 });
 
+test("maps configured upstream tool names to stable run_code method names", () => {
+  const registered: ToolDefinition[] = [];
+  const pi = {
+    registerTool(definition: ToolDefinition) {
+      registered.push(definition);
+    },
+  } as unknown as ExtensionAPI;
+  const desktopApi = createDesktopApi(pi, { toolNameAliases: { custom_search: "web_search" } });
+
+  desktopApi.registerTool({ ...tool, name: "custom_search" });
+
+  assert.equal(registered[0].name, "web_search");
+});
+
 test("routes browser open commands to Desktop's embedded browser when configured", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-web-access-desktop-browser-"));
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;

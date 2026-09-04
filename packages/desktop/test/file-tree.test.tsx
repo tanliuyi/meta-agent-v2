@@ -20,6 +20,7 @@ describe("FileTree", () => {
     expect(markup).toContain("package.json");
     expect(markup).toContain('aria-selected="true"');
     expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('draggable="true"');
   });
 
   it("展开目录时递归渲染子节点，未加载时显示加载行", () => {
@@ -29,6 +30,24 @@ describe("FileTree", () => {
     );
     expect(markup).toContain("index.ts");
     expect(markup).toContain("正在加载");
+    expect(markup).toContain('aria-level="2"');
+  });
+
+  it("把连续的单子目录链收敛为一行", () => {
+    const markup = renderToStaticMarkup(
+      <FileTree
+        nodes={[{ name: "src", path: "src", type: "directory", hasChildren: true }]}
+        children={{
+          src: [{ name: "extension", path: "src/extension", type: "directory", hasChildren: true }],
+          "src/extension": [{ name: "index.ts", path: "src/extension/index.ts", type: "file" }],
+        }}
+        expanded={new Set(["src", "src/extension"])}
+        onOpen={() => {}}
+      />,
+    );
+    expect(markup.match(/role="treeitem"/gu)).toHaveLength(2);
+    expect(markup).toContain("file-row-label-separator");
+    expect(markup).toContain("extension");
     expect(markup).toContain('aria-level="2"');
   });
 

@@ -391,7 +391,7 @@ export function Composer(props: ComposerProps) {
                       <ModelSelect
                         availableModels={props.models}
                         model={props.model}
-                        disabled={disabled || props.phase !== "idle"}
+                        disabled={disabled || (props.phase !== "idle" && props.phase !== "running")}
                         loading={props.modelsLoading}
                         onOpen={() => {
                           setError(null);
@@ -405,7 +405,7 @@ export function Composer(props: ComposerProps) {
                       <ThinkingSelect
                         value={props.thinkingLevel}
                         levels={props.thinkingLevels}
-                        disabled={disabled || props.phase !== "idle"}
+                        disabled={disabled || (props.phase !== "idle" && props.phase !== "running")}
                         onValueChange={(level) => {
                           setError(null);
                           void props.onSetThinking(level).catch(reportError);

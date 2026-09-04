@@ -18,7 +18,14 @@ import type { WorkbenchTabState } from "../../state/workbench-tab-context.tsx";
 import { workbenchPanelTabKey, workbenchTabKey } from "../../state/workbench-tab-context.tsx";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { useSessionScope, useSessionWorkbenchTabs } from "../session-context.tsx";
-import { BROWSER_PANEL_KIND, NEW_SESSION_PANEL_KIND } from "./builtin-panel-kinds.ts";
+import {
+  BROWSER_PANEL_KIND,
+  FILES_PANEL_KIND,
+  NEW_SESSION_PANEL_KIND,
+  PROJECT_PANEL_KIND,
+  SCM_PANEL_KIND,
+} from "./builtin-panel-kinds.ts";
+
 import { registerBuiltinPanelTabs } from "./builtin-panel-tabs.tsx";
 import { WorkbenchTabList } from "./panel-tab.tsx";
 import { SessionContent } from "./session/session-content.tsx";
@@ -97,7 +104,14 @@ export function OpenWorkbenchPanel({
     onCommit: (panelWidth) => updateWorkbench({ panelWidth }),
   });
   const activeTab = tabs.find((tab) => workbenchTabKey(tab) === activeKey) ?? null;
-  const activeDefinition = activeTab?.kind === "panel" ? getWorkbenchPanelTabDefinition(activeTab.panel) : undefined;
+  const activeDefinition =
+    activeTab?.kind === "panel"
+      ? getWorkbenchPanelTabDefinition(
+          activeTab.panel === FILES_PANEL_KIND || activeTab.panel === SCM_PANEL_KIND
+            ? PROJECT_PANEL_KIND
+            : activeTab.panel,
+        )
+      : undefined;
   const sessionWorkbenchTabs = useSessionWorkbenchTabs();
 
   /** 新建终端 tab：编号取 workbench state 的单调计数器（跨刷新持久化），id 与主进程 PTY 槽位对齐。 */
@@ -227,7 +241,7 @@ export function OpenWorkbenchPanel({
               size="icon"
               tooltip="新建 Panel"
               aria-label="新建 Panel"
-              className="size-6 text-muted-foreground"
+              className="panel-add size-6 text-muted-foreground"
               data-active={activeKey === null || undefined}
               aria-pressed={activeKey === null}
               onClick={onOpenNewPanel}
@@ -240,7 +254,7 @@ export function OpenWorkbenchPanel({
                 size="icon"
                 tooltip={fullscreen ? "退出全屏" : "全屏"}
                 aria-label={fullscreen ? "退出全屏" : "进入全屏"}
-                className="size-6 text-muted-foreground"
+                className="panel-fullscreen size-6 text-muted-foreground"
                 aria-pressed={fullscreen}
                 onClick={onToggleFullscreen}
               >

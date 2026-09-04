@@ -60,6 +60,7 @@ import { ChainOutputValidationError, validateChainOutputBindingsWithContext } fr
 import { normalizeGateAcceptance, validateExecutionAcceptance } from "../shared/acceptance.ts";
 import { createForkContextResolver, forkedChildRequiresThinkingOff } from "../../shared/fork-context.ts";
 import { resolveCurrentSessionId } from "../../shared/session-identity.ts";
+import { isActiveAsyncState, updateActiveRunIndex } from "../background/active-run-index.ts";
 import { applyIntercomBridgeToAgent, INTERCOM_BRIDGE_MARKER, resolveIntercomBridge, resolveIntercomSessionTarget, resolveSubagentIntercomTarget, type IntercomBridgeState } from "../../intercom/intercom-bridge.ts";
 import { formatControlIntercomMessage, formatControlNoticeMessage, resolveControlConfig, shouldNotifyControlEvent } from "../shared/subagent-control.ts";
 import { resolveTurnBudgetConfig } from "../shared/turn-budget.ts";
@@ -4478,6 +4479,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				const currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
 				fs.mkdirSync(asyncDir, { recursive: true });
 				fs.mkdirSync(DIRS.results, { recursive: true });
+				updateActiveRunIndex(asyncDir, "running");
 				const controller = new AbortController();
 				deps.state.workflowControllers ??= new Map();
 				deps.state.workflowControllers.set(workflowRunId, controller);
@@ -4496,9 +4498,15 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					workflow: { trace: [], emits: [], console: [] },
 				};
 				const appendWorkflowEvent = (event: Record<string, unknown>) => fs.appendFileSync(eventsPath, `${JSON.stringify({ ts: Date.now(), runId: workflowRunId, ...event })}\n`, "utf-8");
+				let lastIndexedActiveState = true;
 				const persist = () => {
 					status.lastUpdate = Date.now();
 					writeAtomicJson(statusPath, status);
+					const activeState = isActiveAsyncState(status.state);
+					if (activeState !== lastIndexedActiveState) {
+						updateActiveRunIndex(asyncDir, status.state);
+						lastIndexedActiveState = activeState;
+					}
 					const job = deps.state.asyncJobs.get(workflowRunId);
 					if (job) {
 						job.status = status.state;

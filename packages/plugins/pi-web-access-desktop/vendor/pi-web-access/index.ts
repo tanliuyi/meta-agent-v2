@@ -853,8 +853,8 @@ function handleSessionChange(ctx: ExtensionContext): void {
 	}
 }
 
-export default function (pi: ExtensionAPI, configOverride?: Partial<WebSearchConfig>) {
-	const initConfig = configOverride ? { ...loadConfigForExtensionInit(), ...configOverride } : loadConfigForExtensionInit();
+export default function (pi: ExtensionAPI) {
+	const initConfig = loadConfigForExtensionInit();
 	const toolNames = resolveToolNames(initConfig);
 	const storedContentSources = initConfig.webSearch?.enabled === false
 		? toolNames.fetchContent

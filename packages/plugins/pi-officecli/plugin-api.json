@@ -36,14 +36,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -67,14 +67,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -106,14 +106,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -201,14 +201,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -243,14 +243,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -275,14 +275,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -319,14 +319,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -357,14 +357,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -410,14 +410,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -441,14 +441,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"
@@ -518,14 +518,14 @@
       },
       "result": {
         "type": "object",
-        "required": [
-          "text"
-        ],
         "properties": {
           "text": {
             "type": "string"
           }
         },
+        "required": [
+          "text"
+        ],
         "additionalProperties": false
       },
       "concurrency": "serial"

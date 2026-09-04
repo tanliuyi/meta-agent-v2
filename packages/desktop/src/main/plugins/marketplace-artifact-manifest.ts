@@ -10,7 +10,7 @@ import {
   parsePluginConfigurationSchema,
 } from "../../shared/plugin-configuration-contracts.ts";
 import type { RuntimeCompatibility } from "../../shared/sidecar-contracts.ts";
-import { parsePluginApiCatalog } from "../pi/plugin-call/plugin-method-registry.ts";
+import { parsePluginApiCatalog } from "../pi/run-code/plugin-method-registry.ts";
 import type { ExtractedMarketplaceArchive } from "./marketplace-artifact-archive.ts";
 
 export interface MarketplaceArtifactTarget {
@@ -33,10 +33,10 @@ export interface MarketplaceArtifactManifestResult {
   containsNativeCode: boolean;
   configurationSchema?: PluginConfigurationSchema;
   skillPaths: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
-  pluginCallCatalog?: PluginApiCatalogV1;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
+  runCodeCatalog?: PluginApiCatalogV1;
 }
 
 interface Manifest {
@@ -48,7 +48,7 @@ interface Manifest {
     entry: string;
     extensionApi: string;
     skills?: string[];
-    pluginCall?: { skill: string; catalog: string };
+    runCode?: { skill: string; catalog: string };
   };
   desktop: { hostProfileVersion: number; minVersion?: string; maxVersionExclusive?: string };
   target: MarketplaceArtifactTarget;
@@ -150,17 +150,17 @@ export async function readMarketplaceArtifactManifest(input: {
       await chmod(join(input.stagingRoot, ...path.split("/")), 0o755);
     }
   }
-  const pluginCall = await validatePluginCallMetadata(manifest, input.stagingRoot, input.archive);
+  const runCode = await validateRunCodeMetadata(manifest, input.stagingRoot, input.archive);
   return {
     displayName: manifest.plugin.name,
     entryPath: resolve(input.stagingRoot, ...manifest.pi.entry.split("/")),
     capabilities: [...manifest.capabilities],
     containsNativeCode: manifest.nativeModules.length > 0 || manifest.executables.length > 0,
-    skillPaths: pluginCall.skillPaths,
-    ...(pluginCall.skill ? { pluginCallSkill: pluginCall.skill } : {}),
-    ...(pluginCall.catalogPath ? { pluginCallCatalogPath: pluginCall.catalogPath } : {}),
-    ...(pluginCall.catalogSha256 ? { pluginCallCatalogSha256: pluginCall.catalogSha256 } : {}),
-    ...(pluginCall.catalog ? { pluginCallCatalog: pluginCall.catalog } : {}),
+    skillPaths: runCode.skillPaths,
+    ...(runCode.skill ? { runCodeSkill: runCode.skill } : {}),
+    ...(runCode.catalogPath ? { runCodeCatalogPath: runCode.catalogPath } : {}),
+    ...(runCode.catalogSha256 ? { runCodeCatalogSha256: runCode.catalogSha256 } : {}),
+    ...(runCode.catalog ? { runCodeCatalog: runCode.catalog } : {}),
     ...(manifest.configuration ? { configurationSchema: clonePluginConfigurationSchema(manifest.configuration) } : {}),
   };
 }
@@ -201,7 +201,7 @@ function parseManifest(bytes: Buffer): Manifest {
     typeof value.pi.entry !== "string" ||
     typeof value.pi.extensionApi !== "string" ||
     !optionalStringArray(value.pi.skills) ||
-    !optionalPluginCall(value.pi.pluginCall) ||
+    !optionalRunCode(value.pi.runCode) ||
     !isObject(value.desktop) ||
     typeof value.desktop.hostProfileVersion !== "number" ||
     !optionalString(value.desktop.minVersion) ||
@@ -244,7 +244,7 @@ function optionalStringArray(value: unknown): value is string[] | undefined {
   );
 }
 
-function optionalPluginCall(value: unknown): value is { skill: string; catalog: string } | undefined {
+function optionalRunCode(value: unknown): value is { skill: string; catalog: string } | undefined {
   return (
     value === undefined ||
     (isObject(value) &&
@@ -255,7 +255,7 @@ function optionalPluginCall(value: unknown): value is { skill: string; catalog: 
   );
 }
 
-async function validatePluginCallMetadata(
+async function validateRunCodeMetadata(
   manifest: Manifest,
   stagingRoot: string,
   archive: ExtractedMarketplaceArchive,
@@ -267,9 +267,9 @@ async function validatePluginCallMetadata(
   catalog?: PluginApiCatalogV1;
 }> {
   const skills = manifest.pi.skills ?? [];
-  const pluginCall = manifest.pi.pluginCall;
-  if (manifest.capabilities.includes("plugin-methods.provide") && (!pluginCall || skills.length === 0)) {
-    throw new Error("Marketplace plugin-methods.provide requires skills and primary pluginCall skill/catalog");
+  const runCode = manifest.pi.runCode;
+  if (manifest.capabilities.includes("plugin-methods.provide") && (!runCode || skills.length === 0)) {
+    throw new Error("Marketplace plugin-methods.provide requires skills and primary runCode skill/catalog");
   }
   const skillPaths: string[] = [];
   for (const skill of skills) {
@@ -280,10 +280,10 @@ async function validatePluginCallMetadata(
     if (!info.isFile() || info.isSymbolicLink()) throw new Error(`Marketplace skill is not a regular file: ${skill}`);
     skillPaths.push(path);
   }
-  if (!pluginCall) return { skillPaths };
-  if (!pluginCall.catalog.startsWith("payload/") || !archive.files.has(pluginCall.catalog))
+  if (!runCode) return { skillPaths };
+  if (!runCode.catalog.startsWith("payload/") || !archive.files.has(runCode.catalog))
     throw new Error("Marketplace plugin catalog is invalid");
-  const catalogPath = await realpath(resolve(stagingRoot, ...pluginCall.catalog.split("/")));
+  const catalogPath = await realpath(resolve(stagingRoot, ...runCode.catalog.split("/")));
   const info = await lstat(catalogPath);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error("Marketplace plugin catalog is not a regular file");
   let catalog: PluginApiCatalogV1;
@@ -297,7 +297,7 @@ async function validatePluginCallMetadata(
   }
   if (catalog.pluginId !== manifest.plugin.id) throw new Error("Marketplace plugin catalog identity does not match");
   const catalogSha256 = createHash("sha256").update(catalogBytes).digest("hex");
-  return { skillPaths, skill: pluginCall.skill, catalogPath, catalogSha256, catalog } as {
+  return { skillPaths, skill: runCode.skill, catalogPath, catalogSha256, catalog } as {
     skillPaths: string[];
     skill?: string;
     catalogPath?: string;

@@ -70,7 +70,7 @@ function getDefaultEntries(root) {
     try {
       if (statSync(iconPath).isFile()) {
         const skills = Array.isArray(manifest?.pi?.skills) ? manifest.pi.skills : [];
-        const catalog = manifest?.pi?.pluginCall?.catalog;
+        const catalog = manifest?.pi?.runCode?.catalog;
         return [...new Set([entry, "src", path.posix.join("assets", fileName), ...skills, ...(catalog ? [catalog] : [])])];
       }
     } catch {

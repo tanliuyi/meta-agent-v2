@@ -1,15 +1,100 @@
 import { describe, expect, it } from "vitest";
 import {
+  activateProjectDocumentTab,
+  closeProjectDocumentTab,
   closeWorkbenchFile,
   filePathSegments,
   isImagePath,
   isOfficeDocumentPath,
   isPdfPath,
+  moveProjectDocumentTab,
+  openPinnedWorkbenchFile,
+  openProjectDocumentTab,
   openWorkbenchFileAsPreview,
   openWorkbenchFilePatch,
   pinWorkbenchFile,
+  reconcileProjectDocumentTabs,
   replaceActiveWorkbenchFile,
 } from "../src/renderer/src/components/panel/panel-model.ts";
+
+describe("project document tabs", () => {
+  const tabs = ["file:a.ts", "diff:false:b.ts", "file:c.ts"];
+
+  it("保留持久化顺序并追加新打开的编辑器", () => {
+    expect(reconcileProjectDocumentTabs(tabs, ["file:c.ts", "stale", "file:a.ts"])).toEqual([
+      "file:c.ts",
+      "file:a.ts",
+      "diff:false:b.ts",
+    ]);
+  });
+
+  it("激活 tab 后更新 MRU、补齐组内 tab 并清理无效项", () => {
+    expect(activateProjectDocumentTab(["file:a.ts", "stale", "file:a.ts"], tabs, "diff:false:b.ts")).toEqual([
+      "diff:false:b.ts",
+      "file:a.ts",
+      "file:c.ts",
+    ]);
+  });
+
+  it("连续切换后关闭活动 tab 会恢复上一个最近使用项", () => {
+    let mru: string[] = [];
+    for (const key of ["file:a.ts", "diff:false:b.ts", "file:c.ts", "file:a.ts"]) {
+      mru = activateProjectDocumentTab(mru, tabs, key);
+    }
+    expect(closeProjectDocumentTab(tabs, mru, "file:a.ts", "file:a.ts")?.activeTab).toBe("file:c.ts");
+  });
+
+  it("关闭活动 tab 后选择最近使用的编辑器", () => {
+    expect(
+      closeProjectDocumentTab(
+        tabs,
+        ["diff:false:b.ts", "file:a.ts", "file:c.ts"],
+        "diff:false:b.ts",
+        "diff:false:b.ts",
+      ),
+    ).toEqual({
+      tabs: ["file:a.ts", "file:c.ts"],
+      mru: ["file:a.ts", "file:c.ts"],
+      activeTab: "file:a.ts",
+    });
+  });
+
+  it("MRU 不可用时选择原位置的相邻编辑器", () => {
+    expect(closeProjectDocumentTab(tabs, [], "diff:false:b.ts", "diff:false:b.ts")?.activeTab).toBe("file:c.ts");
+  });
+
+  it("关闭非活动 tab 时保持当前编辑器", () => {
+    expect(closeProjectDocumentTab(tabs, ["file:c.ts"], "file:c.ts", "file:a.ts")?.activeTab).toBe("file:c.ts");
+  });
+
+  it("预览编辑器被新文件原位替换", () => {
+    expect(openProjectDocumentTab(tabs, "file:d.ts", "diff:false:b.ts")).toEqual([
+      "file:a.ts",
+      "file:d.ts",
+      "file:c.ts",
+    ]);
+  });
+
+  it("打开固定编辑器时追加到末尾", () => {
+    expect(openProjectDocumentTab(tabs, "file:d.ts")).toEqual([...tabs, "file:d.ts"]);
+  });
+
+  it("向右拖拽时插入目标 tab 之前", () => {
+    expect(moveProjectDocumentTab(tabs, "file:a.ts", "file:c.ts")).toEqual([
+      "diff:false:b.ts",
+      "file:a.ts",
+      "file:c.ts",
+    ]);
+  });
+
+  it("向左拖拽时插入目标 tab 之前", () => {
+    expect(moveProjectDocumentTab(tabs, "file:c.ts", "file:a.ts")).toEqual([
+      "file:c.ts",
+      "file:a.ts",
+      "diff:false:b.ts",
+    ]);
+  });
+});
 
 describe("closeWorkbenchFile", () => {
   const openFiles = ["a.ts", "b.ts", "c.ts"];
@@ -58,6 +143,24 @@ describe("filePathSegments", () => {
   });
 });
 
+describe("openPinnedWorkbenchFile", () => {
+  it("拖拽新文件时固定打开且保留已有预览", () => {
+    expect(openPinnedWorkbenchFile(["preview.ts"], "preview.ts", "src/new.ts")).toEqual({
+      openFiles: ["preview.ts", "src/new.ts"],
+      activeFile: "src/new.ts",
+      previewFile: "preview.ts",
+    });
+  });
+
+  it("拖拽当前预览文件时将其固定且不重复", () => {
+    expect(openPinnedWorkbenchFile(["a.ts", "preview.ts"], "preview.ts", "preview.ts")).toEqual({
+      openFiles: ["a.ts", "preview.ts"],
+      activeFile: "preview.ts",
+      previewFile: undefined,
+    });
+  });
+});
+
 describe("openWorkbenchFileAsPreview", () => {
   it("无预览 tab 时追加为新预览 tab", () => {
     expect(openWorkbenchFileAsPreview(["a.ts"], undefined, "b.ts")).toEqual({
@@ -75,11 +178,27 @@ describe("openWorkbenchFileAsPreview", () => {
     });
   });
 
+  it("目标已固定打开时关闭旧预览且不生成重复 tab", () => {
+    expect(openWorkbenchFileAsPreview(["preview.ts", "middle.ts", "target.ts"], "preview.ts", "target.ts")).toEqual({
+      openFiles: ["middle.ts", "target.ts"],
+      activeFile: "target.ts",
+      previewFile: undefined,
+    });
+  });
+
   it("再次点击同一预览 tab 只切换激活", () => {
     expect(openWorkbenchFileAsPreview(["a.ts", "b.ts"], "b.ts", "b.ts")).toEqual({
       openFiles: ["a.ts", "b.ts"],
       activeFile: "b.ts",
       previewFile: "b.ts",
+    });
+  });
+
+  it("单击已固定 tab 时保持固定状态", () => {
+    expect(openWorkbenchFileAsPreview(["a.ts", "b.ts"], undefined, "b.ts")).toEqual({
+      openFiles: ["a.ts", "b.ts"],
+      activeFile: "b.ts",
+      previewFile: undefined,
     });
   });
 

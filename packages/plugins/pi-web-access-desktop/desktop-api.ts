@@ -7,6 +7,7 @@ const ignoreDesktopShortcut: ExtensionAPI["registerShortcut"] = () => {};
 
 export interface DesktopApiOptions {
   openBrowser?: (url: string, options?: ExecOptions) => Promise<ExecResult>;
+  toolNameAliases?: Readonly<Record<string, string>>;
 }
 
 export function createDesktopApi(pi: ExtensionAPI, options: DesktopApiOptions = {}): ExtensionAPI {
@@ -14,7 +15,7 @@ export function createDesktopApi(pi: ExtensionAPI, options: DesktopApiOptions = 
   return new Proxy(pi, {
     get(target, property, receiver) {
       if (property === "registerShortcut") return ignoreDesktopShortcut;
-      if (property === "registerTool") return registerDesktopTool(pi);
+      if (property === "registerTool") return registerDesktopTool(pi, options.toolNameAliases ?? {});
       if (property === "exec") {
         const exec = Reflect.get(target, property, receiver) as ExtensionAPI["exec"];
         if (typeof exec !== "function") return exec;
@@ -29,9 +30,12 @@ export function createDesktopApi(pi: ExtensionAPI, options: DesktopApiOptions = 
   });
 }
 
-function registerDesktopTool(pi: ExtensionAPI): ExtensionAPI["registerTool"] {
+function registerDesktopTool(
+  pi: ExtensionAPI,
+  toolNameAliases: Readonly<Record<string, string>>,
+): ExtensionAPI["registerTool"] {
   return (tool) => {
-    const desktopTool = { ...tool };
+    const desktopTool = { ...tool, name: toolNameAliases[tool.name] ?? tool.name };
     delete desktopTool.renderCall;
     delete desktopTool.renderResult;
     pi.registerTool(desktopTool);

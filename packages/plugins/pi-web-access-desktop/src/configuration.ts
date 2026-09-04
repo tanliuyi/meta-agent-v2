@@ -6,6 +6,13 @@ export type PluginConfigurationValue = string | number | boolean;
 
 export type BrowserOpenTarget = "builtin" | "system";
 
+const RUN_CODE_TOOL_NAMES = {
+  webSearch: "web_search",
+  sourceCheck: "source_check",
+  fetchContent: "fetch_content",
+  getSearchContent: "get_search_content",
+} as const;
+
 interface PluginConfigurationFieldBase {
   key: string;
   label: string;
@@ -797,6 +804,19 @@ function readExisting(path: string): JsonObject {
   } catch {
     return {};
   }
+}
+
+export function getRunCodeToolNameAliases(): Readonly<Record<string, string>> {
+  const toolNames = readExisting(getWebSearchConfigPath()).toolNames;
+  if (!toolNames || typeof toolNames !== "object" || Array.isArray(toolNames)) return {};
+  const aliases: Record<string, string> = {};
+  for (const [key, canonicalName] of Object.entries(RUN_CODE_TOOL_NAMES)) {
+    const configuredName = (toolNames as JsonObject)[key];
+    if (typeof configuredName === "string" && configuredName !== canonicalName) {
+      aliases[configuredName] = canonicalName;
+    }
+  }
+  return aliases;
 }
 
 export function getBrowserOpenTarget(): BrowserOpenTarget {

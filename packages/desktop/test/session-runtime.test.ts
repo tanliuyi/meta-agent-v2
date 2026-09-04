@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import type { AgentSession, AgentSessionEvent, SessionManager, Skill } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RunCodeRegistryHolder } from "../src/main/pi/run-code/run-code-tool.ts";
 import { PiTimelineUnavailableError, SessionRuntime } from "../src/main/pi/session-runtime.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -720,6 +721,72 @@ describe("SessionRuntime Pi-native commands", () => {
       }),
     );
     await runtime.dispose();
+  });
+
+  it("reloadResources 重新绑定 run_code registry 到重载后的插件实例", async () => {
+    const session = createSession();
+    const services = createServices();
+    services.resourceLoader.getExtensions = () => ({ extensions: [], errors: [] });
+    mocks.createAgentSessionServices.mockResolvedValue(services);
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const bind = vi.spyOn(RunCodeRegistryHolder.prototype, "bind");
+    try {
+      const runtime = await SessionRuntime.create({
+        projectId: "project",
+        cwd: "/workspace",
+        extensionSet: {
+          generation: "reload-registry",
+          projectId: "project",
+          entries: [],
+          diagnostics: [],
+          resolvedAt: 0,
+        },
+        push: () => {},
+        onSummaryChanged: () => {},
+      });
+
+      await expect(runtime.reloadResources()).resolves.toEqual({ accepted: true, queued: false });
+      expect(session.reload).toHaveBeenCalledOnce();
+      expect(bind).toHaveBeenCalledTimes(3);
+      await runtime.dispose();
+    } finally {
+      bind.mockRestore();
+    }
+  });
+
+  it("reloadResources 失败时不会继续使用旧的 run_code registry", async () => {
+    const session = createSession();
+    session.reload.mockRejectedValueOnce(new Error("reload failed"));
+    mocks.createAgentSessionFromServices.mockResolvedValue({ session });
+
+    const bind = vi.spyOn(RunCodeRegistryHolder.prototype, "bind");
+    try {
+      const runtime = await SessionRuntime.create({
+        projectId: "project",
+        cwd: "/workspace",
+        extensionSet: {
+          generation: "reload-failure",
+          projectId: "project",
+          entries: [],
+          diagnostics: [],
+          resolvedAt: 0,
+        },
+        push: () => {},
+        onSummaryChanged: () => {},
+      });
+
+      await expect(runtime.reloadResources()).resolves.toEqual({
+        accepted: false,
+        queued: false,
+        error: "reload failed",
+      });
+      expect(bind).toHaveBeenCalledTimes(2);
+      expect(bind.mock.calls[1]?.[0]).toEqual(new Map());
+      await runtime.dispose();
+    } finally {
+      bind.mockRestore();
+    }
   });
 
   it("reloadResources 将 skill diagnostics 返回为失败结果", async () => {

@@ -1,4 +1,3 @@
-import type { Static, TSchema } from "typebox";
 import type { JsonValue } from "./contracts.ts";
 import type { PluginConfigurationSchema, PluginConfigurationValue } from "./plugin-configuration-contracts.ts";
 
@@ -33,20 +32,6 @@ export interface PluginMethodExecutionContext {
 export type PluginMethodAttachment =
   | { type: "image"; data: string; mimeType: string; name?: string }
   | { type: "file"; path: string; mimeType?: string; name?: string };
-
-export interface DesktopPluginMethodDefinition<TParams extends TSchema = TSchema, TResult extends TSchema = TSchema> {
-  name: string;
-  description: string;
-  parameters: TParams;
-  result: TResult;
-  concurrency?: "serial" | "parallel";
-  execute(params: Static<TParams>, signal: AbortSignal, ctx: PluginMethodExecutionContext): Promise<Static<TResult>>;
-}
-
-export interface DesktopPluginModuleExport {
-  schemaVersion: 1;
-  methods: readonly DesktopPluginMethodDefinition[];
-}
 
 type JsonObject = { [key: string]: JsonValue };
 
@@ -100,10 +85,10 @@ export interface DesktopExtensionDefinition {
   hostProfileVersion: typeof DESKTOP_EXTENSION_HOST_PROFILE_VERSION;
   capabilities: DesktopExtensionCapability[];
   skillPaths?: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
-  pluginCallCatalog?: PluginApiCatalogV1;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
+  runCodeCatalog?: PluginApiCatalogV1;
 }
 
 export interface ResolvedExtensionEntry {
@@ -117,10 +102,10 @@ export interface ResolvedExtensionEntry {
   /** development 插件声明的插件身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
   pluginId?: string;
   skillPaths?: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
-  pluginCallCatalog?: PluginApiCatalogV1;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
+  runCodeCatalog?: PluginApiCatalogV1;
 }
 
 export interface ResolvedExtensionSet {
@@ -132,7 +117,7 @@ export interface ResolvedExtensionSet {
   resolvedAt: number;
 }
 
-/** Composer 中可按会话激活的 direct-tool 插件；plugin_call 插件不包含在此列表中。 */
+/** Composer 中可按会话激活的 direct-tool 插件；run_code 插件不包含在此列表中。 */
 export interface DraftSelectablePlugin {
   id: string;
   displayName: string;

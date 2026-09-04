@@ -54,7 +54,7 @@ function pluginIconUrl(plugin: DraftSelectablePlugin): string | undefined {
   return plugin.source === "marketplace" ? marketplacePluginIconUrl(plugin.id) : undefined;
 }
 
-/** 新会话的 direct-tool 插件激活选择；plugin_call 插件由插件中心全局控制，不在此处显示。 */
+/** 新会话的 direct-tool 插件激活选择；run_code 插件由插件中心全局控制，不在此处显示。 */
 export function PluginSelect({ plugins, value, disabled = false, loading = false, onValueChange }: PluginSelectProps) {
   const [open, setOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -95,28 +95,28 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
           >
             {loading && plugins === null ? (
               <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+            ) : enabledCount === 0 ? (
+              <span>插件</span>
             ) : (
-              <>
-                <span className="isolate flex -space-x-1" aria-hidden="true">
-                  {selectedPlugins.slice(0, enabledCount > 3 ? 2 : 3).map((plugin, index) => (
-                    <span
-                      key={plugin.id}
-                      className={cn(
-                        "relative flex size-[22px] aspect-square shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted/95 shadow-sm",
-                        enabledCount > 1 ? "ring-2 ring-(--composer-background)" : undefined,
-                        index === 0 ? "z-10" : index === 1 ? "z-20" : "z-30",
-                      )}
-                    >
-                      <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} className="size-5" />
-                    </span>
-                  ))}
-                  {enabledCount > 3 ? (
-                    <span className="relative z-30 flex size-[22px] aspect-square shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground shadow-sm ring-2 ring-(--composer-background)">
-                      {enabledCount}
-                    </span>
-                  ) : null}
-                </span>
-              </>
+              <span className="isolate flex -space-x-1" aria-hidden="true">
+                {selectedPlugins.slice(0, enabledCount > 3 ? 2 : 3).map((plugin, index) => (
+                  <span
+                    key={plugin.id}
+                    className={cn(
+                      "relative flex size-[22px] aspect-square shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted/95 shadow-sm",
+                      enabledCount > 1 ? "ring-2 ring-(--composer-background)" : undefined,
+                      index === 0 ? "z-10" : index === 1 ? "z-20" : "z-30",
+                    )}
+                  >
+                    <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} className="size-5" />
+                  </span>
+                ))}
+                {enabledCount > 3 ? (
+                  <span className="relative z-30 flex size-[22px] aspect-square shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums text-muted-foreground shadow-sm ring-2 ring-(--composer-background)">
+                    {enabledCount}
+                  </span>
+                ) : null}
+              </span>
             )}
           </PopoverTrigger>
         </TooltipTrigger>

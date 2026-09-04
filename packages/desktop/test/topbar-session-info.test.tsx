@@ -58,6 +58,13 @@ describe("Topbar session info toggle", () => {
     );
   });
 
+  it("keeps the new-panel action beside the workbench tabs", () => {
+    expect(panelCss).toMatch(/\.panel-tabs > \.panel-tab-list\s*\{[^}]*flex:\s*0 1 auto;/s);
+    expect(panelCss).toMatch(/\.panel-add\s*\{[^}]*flex:\s*0 0 auto;/s);
+    expect(panelCss).not.toMatch(/\.panel-add\s*\{[^}]*margin-left:\s*auto;/s);
+    expect(panelCss).toMatch(/\.panel-fullscreen\s*\{[^}]*margin-left:\s*auto;/s);
+  });
+
   it("uses the shared panel action spacing on every desktop platform", () => {
     expect(panelCss).toMatch(/\.panel-tabs\s*\{[^}]*padding:\s*0 66px 0 8px;/s);
     expect(panelCss).toMatch(/\.panel-tabs-safe-area\s*\{[^}]*width:\s*66px;/s);

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
-import { createAcpExtension, desktopPlugin } from "../src/index.ts";
+import { createAcpExtension } from "../src/index.ts";
 
 function captureApi() {
   const handlers = new Map<string, ((event: any, ctx: any) => any)[]>();
@@ -32,28 +32,6 @@ function userMsg(id: string, text: string) {
 async function cleanState(sessionFile: string) {
   await rm(`${sessionFile}.acp.json`, { force: true });
 }
-
-function pluginMethod(name: string) {
-  const method = desktopPlugin.methods.find((candidate) => candidate.name === name);
-  assert.ok(method, `plugin method ${name} exists`);
-  return method;
-}
-
-async function callPluginMethod(name: string, params: unknown, ctx: unknown, toolCallId: string) {
-  const result = await pluginMethod(name).execute(params as never, new AbortController().signal, {
-    pluginId: "pi.billion-context",
-    methodName: name,
-    callId: toolCallId,
-    toolCallId,
-    cwd: process.cwd(),
-    signal: new AbortController().signal,
-    toolContext: ctx,
-    attach: () => {},
-    reportProgress: () => {},
-  });
-  return { content: [{ type: "text", text: result.text }] };
-}
-
 
 function fakeCtx(entries: any[], stateFile: string, notifies: string[]) {
   return {
@@ -96,11 +74,13 @@ test("/acp-decompress returns a block's content and stays repeatable (append mod
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
 
   // 2) Compress the target message (m00001) to create an active block (b1).
-  const compressRes = await callPluginMethod(
-    "compress",
-    { content: [{ startId: "m00001", endId: "m00001", summary: "This range contained a detailed user message discussing the initial context for the session." }] },
-    ctx,
+  const compressTool = api.tools.find((t: any) => t.name === "compress")!;
+  const compressRes = await compressTool.execute(
     "tc1",
+    { content: [{ startId: "m00001", endId: "m00001", summary: "This range contained a detailed user message discussing the initial context for the session." }] },
+    undefined,
+    undefined,
+    ctx,
   );
   const compressText = (compressRes.content[0] as any).text as string;
   assert.match(compressText, /1 block/, "compress created a block");

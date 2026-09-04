@@ -8,6 +8,7 @@ import {
   useWorkbenchAccessible,
 } from "../session-context.tsx";
 import { BrowserRequestListener } from "./browser/browser-request-listener.tsx";
+import { PROJECT_PANEL_KIND } from "./builtin-panel-kinds.ts";
 import { OpenWorkbenchPanel } from "./open-workbench-panel.tsx";
 
 /** Workbench state is stored with the cached session record. */
@@ -18,16 +19,19 @@ export function WorkbenchPanel({
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }) {
-  const { record } = useSessionScope();
+  const { record, updateWorkbench } = useSessionScope();
   const accessible = useWorkbenchAccessible();
   const panelOpen = useSessionWorkbenchSelector((workbench) => workbench?.panelOpen === true);
   const panelWidth = useSessionWorkbenchSelector((workbench) => workbench?.panelWidth ?? 0);
   const tabs = useSessionWorkbenchTabs();
   useEffect(() => {
-    const openScm = () => tabs.openPanelTab("scm");
+    const openScm = () => {
+      updateWorkbench({ projectPanelView: "scm" });
+      tabs.openPanelTab(PROJECT_PANEL_KIND);
+    };
     window.addEventListener("desktop:open-scm", openScm);
     return () => window.removeEventListener("desktop:open-scm", openScm);
-  }, [tabs]);
+  }, [tabs, updateWorkbench]);
   if (!accessible) return null;
   return (
     <>

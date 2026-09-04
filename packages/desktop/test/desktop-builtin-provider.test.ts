@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DesktopControlledExtensionRegistry } from "../src/main/extensions/desktop-extension-registry.ts";
 import { DesktopBuiltinProviderRegistry } from "../src/main/pi/desktop-builtin-provider.ts";
 import { controlledResourceLoaderOptions } from "../src/main/pi/desktop-extension-runtime-policy.ts";
-import { PluginCallRegistryHolder } from "../src/main/pi/plugin-call/plugin-call-tool.ts";
-import { DesktopPluginRegistryBuilder } from "../src/main/pi/plugin-call/plugin-method-registry.ts";
+import { DesktopPluginRegistryBuilder } from "../src/main/pi/run-code/plugin-method-registry.ts";
+import { RunCodeRegistryHolder } from "../src/main/pi/run-code/run-code-tool.ts";
 
 const tempDirs: string[] = [];
 
@@ -25,7 +25,7 @@ describe("DesktopBuiltinProviderRegistry", () => {
       expect.objectContaining({
         id: "pi-hermes-memory",
         source: "builtin",
-        capabilities: expect.arrayContaining(["events.subscribe", "plugin-methods.provide", "commands.register"]),
+        capabilities: expect.arrayContaining(["events.subscribe", "tools.register", "commands.register"]),
       }),
     );
     expect(definitions).toContainEqual(
@@ -39,7 +39,7 @@ describe("DesktopBuiltinProviderRegistry", () => {
       expect.objectContaining({
         id: "pi-subagents",
         source: "builtin",
-        capabilities: expect.arrayContaining(["events.subscribe", "plugin-methods.provide", "commands.register"]),
+        capabilities: expect.arrayContaining(["events.subscribe", "tools.register", "commands.register"]),
       }),
     );
     expect(factories.map(({ name }) => name)).toEqual(
@@ -63,7 +63,7 @@ describe("DesktopBuiltinProviderRegistry", () => {
       resolvedAt: 0,
     };
     const builder = new DesktopPluginRegistryBuilder();
-    const holder = new PluginCallRegistryHolder(set.generation);
+    const holder = new RunCodeRegistryHolder(set.generation);
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -75,18 +75,15 @@ describe("DesktopBuiltinProviderRegistry", () => {
     });
 
     expect(services.resourceLoader.getExtensions().errors).toEqual([]);
-    const registry = builder.finalize();
-    expect(registry.get("pi-subagents")?.has("subagent")).toBe(true);
-    expect(registry.get("pi-subagents")?.has("subagent_wait")).toBe(true);
-    expect(registry.get("pi-hermes-memory")?.has("memory")).toBe(true);
-    expect(registry.get("pi-browser")?.has("browser_open")).toBe(true);
     const exposedTools = services.resourceLoader
       .getExtensions()
       .extensions.flatMap((extension) => [...extension.tools.keys()]);
-    expect(exposedTools).toContain("plugin_call");
-    expect(exposedTools).not.toContain("subagent");
-    expect(exposedTools).not.toContain("memory");
+    expect(exposedTools).toContain("subagent");
+    expect(exposedTools).toContain("memory");
+    expect(exposedTools).toContain("run_code");
     expect(exposedTools).not.toContain("browser_open");
+    expect(services.resourceLoader.getSkills().skills.map(({ name }) => name)).toContain("pi-subagents");
+    expect(builder.finalize().get("pi-browser")?.has("browser_open")).toBe(true);
     await holder.dispose();
   });
 

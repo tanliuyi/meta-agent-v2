@@ -1,17 +1,15 @@
-import Files from "lucide-react/dist/esm/icons/files.mjs";
 import GitBranch from "lucide-react/dist/esm/icons/git-branch.mjs";
 import Globe from "lucide-react/dist/esm/icons/globe.mjs";
 import MessageSquare from "lucide-react/dist/esm/icons/message-square.mjs";
 import { registerWorkbenchPanelTab } from "../../state/panel-tab-registry.ts";
 import { BrowserPanelTab } from "./browser/browser-panel-tab.tsx";
-import { BROWSER_PANEL_KIND, FILES_PANEL_KIND, NEW_SESSION_PANEL_KIND, SCM_PANEL_KIND } from "./builtin-panel-kinds.ts";
-import { FilePanel } from "./files/file-panel.tsx";
-import { ScmPanel } from "./scm/scm-panel.tsx";
+import { BROWSER_PANEL_KIND, NEW_SESSION_PANEL_KIND, PROJECT_PANEL_KIND } from "./builtin-panel-kinds.ts";
+import { ProjectPanel } from "./project-panel.tsx";
 import { NewSessionDraft } from "./session/new-session-draft.tsx";
 
 let registered = false;
 
-/** 注册桌面内置面板 tab（新会话草稿/资源管理）；幂等，可重复调用。
+/** 注册桌面内置面板 tab（新会话草稿/审查与资源管理）；幂等，可重复调用。
  * 终端不在此注册：终端是"一 tab 一终端"的多开 tab（见 open-workbench-panel 的 terminalOption）。 */
 export function registerBuiltinPanelTabs(): void {
   if (registered) return;
@@ -24,18 +22,11 @@ export function registerBuiltinPanelTabs(): void {
     order: 0,
   });
   registerWorkbenchPanelTab({
-    kind: SCM_PANEL_KIND,
-    label: "审查",
+    kind: PROJECT_PANEL_KIND,
+    label: "审查与资源管理",
     icon: <GitBranch size={14} />,
-    component: ScmPanel,
+    component: ProjectPanel,
     order: 1,
-  });
-  registerWorkbenchPanelTab({
-    kind: FILES_PANEL_KIND,
-    label: "资源管理",
-    icon: <Files size={14} />,
-    component: FilePanel,
-    order: 2,
   });
   registerWorkbenchPanelTab({
     kind: BROWSER_PANEL_KIND,

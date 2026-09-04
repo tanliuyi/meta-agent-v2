@@ -7,11 +7,11 @@ import type {
   PluginMethodAttachment,
   PluginMethodExecutionContext,
 } from "../../../shared/desktop-extension-contracts.ts";
-import { normalizePluginError, PluginCallError } from "./plugin-call-errors.ts";
-import { MAX_JSON_BYTES, snapshotJson } from "./plugin-call-json.ts";
-import type { PluginCallLimits } from "./plugin-call-limits.ts";
-import { DEFAULT_PLUGIN_CALL_LIMITS } from "./plugin-call-limits.ts";
 import type { PluginMethodRegistry } from "./plugin-method-registry.ts";
+import { normalizePluginError, RunCodeError } from "./run-code-errors.ts";
+import { MAX_JSON_BYTES, snapshotJson } from "./run-code-json.ts";
+import type { RunCodeLimits } from "./run-code-limits.ts";
+import { DEFAULT_RUN_CODE_LIMITS } from "./run-code-limits.ts";
 
 export interface PluginSubCallRecord {
   sequence: number;
@@ -27,7 +27,7 @@ export interface PluginSubCallRecord {
   progress?: JsonValue;
 }
 
-export type PluginCallAttachment =
+export type RunCodeAttachment =
   | { type: "image"; data: string; mimeType: string; name?: string }
   | {
       type: "file";
@@ -39,10 +39,10 @@ export type PluginCallAttachment =
       sha256: string;
     };
 
-export interface PluginCallExecution {
+export interface RunCodeExecution {
   readonly calls: PluginSubCallRecord[];
   readonly logs: Array<{ sequence: number; level: string; text: string }>;
-  readonly attachments?: PluginCallAttachment[];
+  readonly attachments?: RunCodeAttachment[];
   progressBytes?: number;
   responseBytes?: number;
   fileBytes?: number;
@@ -51,6 +51,7 @@ export interface PluginCallExecution {
   toolContext?: unknown;
 }
 
+/** 将 run_code 内的 plugin.namespace.method 调用映射到已批准的方法表。 */
 export class PluginMethodDispatcher {
   private readonly lanes = new Map<string, Promise<void>>();
   private readonly registry: PluginMethodRegistry;
@@ -75,13 +76,13 @@ export class PluginMethodDispatcher {
     args: unknown,
     signal: AbortSignal,
     toolCallId: string,
-    details: PluginCallExecution,
-    limits: PluginCallLimits = DEFAULT_PLUGIN_CALL_LIMITS,
+    details: RunCodeExecution,
+    limits: RunCodeLimits = DEFAULT_RUN_CODE_LIMITS,
     onUpdate?: () => void,
   ): Promise<JsonValue> {
     const method = this.registry.get(pluginId)?.get(methodName);
     if (!method) {
-      throw new PluginCallError(
+      throw new RunCodeError(
         this.registry.has(pluginId) ? "PLUGIN_METHOD_NOT_FOUND" : "PLUGIN_NOT_FOUND",
         undefined,
         pluginId,
@@ -89,7 +90,7 @@ export class PluginMethodDispatcher {
       );
     }
     if (signal.aborted || details.active === false) {
-      throw new PluginCallError("PLUGIN_CALL_ABORTED", undefined, pluginId, methodName);
+      throw new RunCodeError("PLUGIN_CALL_ABORTED", undefined, pluginId, methodName);
     }
     const callId = randomUUID();
     const record: PluginSubCallRecord = {
@@ -109,7 +110,7 @@ export class PluginMethodDispatcher {
     const invoke = async (): Promise<JsonValue> => {
       if (signal.aborted || isInactive(details)) {
         record.state = "aborted";
-        throw new PluginCallError("PLUGIN_CALL_ABORTED", undefined, pluginId, methodName);
+        throw new RunCodeError("PLUGIN_CALL_ABORTED", undefined, pluginId, methodName);
       }
       record.state = "running";
       record.startedAt = Date.now();
@@ -126,7 +127,7 @@ export class PluginMethodDispatcher {
         attach: (attachment) => {
           if (isInactive(details) || controller.signal.aborted) return;
           if ((details.attachments?.length ?? 0) + stagedAttachments.length >= limits.maxAttachments) {
-            throw new PluginCallError(
+            throw new RunCodeError(
               "PLUGIN_RESPONSE_LIMIT_EXCEEDED",
               "Attachment count limit exceeded",
               pluginId,
@@ -141,7 +142,7 @@ export class PluginMethodDispatcher {
           try {
             value = snapshotJson(progress, limits.maxProgressBytes);
           } catch (error) {
-            throw new PluginCallError(
+            throw new RunCodeError(
               "PLUGIN_PROGRESS_LIMIT_EXCEEDED",
               error instanceof Error ? error.message : undefined,
               pluginId,
@@ -151,7 +152,7 @@ export class PluginMethodDispatcher {
           const bytes = Buffer.byteLength(JSON.stringify(value), "utf8");
           details.progressBytes = (details.progressBytes ?? 0) + bytes;
           if (details.progressBytes > limits.maxCumulativeProgressBytes) {
-            throw new PluginCallError("PLUGIN_PROGRESS_LIMIT_EXCEEDED", undefined, pluginId, methodName);
+            throw new RunCodeError("PLUGIN_PROGRESS_LIMIT_EXCEEDED", undefined, pluginId, methodName);
           }
           record.progress = value;
           onUpdate?.();
@@ -163,7 +164,7 @@ export class PluginMethodDispatcher {
           const preparedArgs = method.prepareArguments ? method.prepareArguments(args) : args;
           checkedArgs = snapshotJson(preparedArgs, MAX_JSON_BYTES);
         } catch (error) {
-          throw new PluginCallError(
+          throw new RunCodeError(
             "PLUGIN_METHOD_INVALID_ARGUMENTS",
             error instanceof Error ? error.message : undefined,
             pluginId,
@@ -171,17 +172,17 @@ export class PluginMethodDispatcher {
           );
         }
         if (!method.validateParameters(checkedArgs)) {
-          throw new PluginCallError("PLUGIN_METHOD_INVALID_ARGUMENTS", undefined, pluginId, methodName);
+          throw new RunCodeError("PLUGIN_METHOD_INVALID_ARGUMENTS", undefined, pluginId, methodName);
         }
         const result = await method.execute(checkedArgs as never, controller.signal, context);
         if (isInactive(details) || signal.aborted) {
-          throw new PluginCallError("PLUGIN_CALL_ABORTED", undefined, pluginId, methodName);
+          throw new RunCodeError("PLUGIN_CALL_ABORTED", undefined, pluginId, methodName);
         }
         let value: JsonValue;
         try {
           value = snapshotJson(result, limits.maxMethodResponseBytes);
         } catch (error) {
-          throw new PluginCallError(
+          throw new RunCodeError(
             "PLUGIN_METHOD_INVALID_RESULT",
             error instanceof Error ? error.message : undefined,
             pluginId,
@@ -189,12 +190,12 @@ export class PluginMethodDispatcher {
           );
         }
         if (!method.validateResult(value)) {
-          throw new PluginCallError("PLUGIN_METHOD_INVALID_RESULT", undefined, pluginId, methodName);
+          throw new RunCodeError("PLUGIN_METHOD_INVALID_RESULT", undefined, pluginId, methodName);
         }
         const responseBytes = Buffer.byteLength(JSON.stringify(value), "utf8");
         details.responseBytes = (details.responseBytes ?? 0) + responseBytes;
         if (details.responseBytes > limits.maxCumulativeResponseBytes) {
-          throw new PluginCallError("PLUGIN_RESPONSE_LIMIT_EXCEEDED", undefined, pluginId, methodName);
+          throw new RunCodeError("PLUGIN_RESPONSE_LIMIT_EXCEEDED", undefined, pluginId, methodName);
         }
         const committedAttachments = await Promise.all(
           stagedAttachments.map((attachment) => materializeAttachment(attachment, this.cwd, limits)),
@@ -229,27 +230,27 @@ export class PluginMethodDispatcher {
   }
 }
 
-function isInactive(details: PluginCallExecution): boolean {
+function isInactive(details: RunCodeExecution): boolean {
   return details.active === false;
 }
 
 function snapshotAttachment(
   attachment: PluginMethodAttachment,
   cwd: string,
-  details: PluginCallExecution,
-  limits: PluginCallLimits,
+  details: RunCodeExecution,
+  limits: RunCodeLimits,
 ): PluginMethodAttachment {
-  if (!attachment || typeof attachment !== "object") throw new PluginCallError("PLUGIN_INVALID_JSON");
+  if (!attachment || typeof attachment !== "object") throw new RunCodeError("PLUGIN_INVALID_JSON");
   if (attachment.type === "image") {
     if (typeof attachment.data !== "string" || !/^image\/(png|jpeg|gif|webp)$/.test(attachment.mimeType)) {
-      throw new PluginCallError("PLUGIN_INVALID_JSON");
+      throw new RunCodeError("PLUGIN_INVALID_JSON");
     }
     const decoded = Buffer.from(attachment.data, "base64");
     if (decoded.toString("base64").replace(/=+$/, "") !== attachment.data.replace(/=+$/, "")) {
-      throw new PluginCallError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED", "Image attachment is not valid base64");
+      throw new RunCodeError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED", "Image attachment is not valid base64");
     }
     details.imageBytes = (details.imageBytes ?? 0) + decoded.byteLength;
-    if (details.imageBytes > limits.maxImageBytes) throw new PluginCallError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED");
+    if (details.imageBytes > limits.maxImageBytes) throw new RunCodeError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED");
     return {
       type: "image",
       data: attachment.data,
@@ -262,11 +263,11 @@ function snapshotAttachment(
     const canonicalPath = realpathSync(requested);
     const info = lstatSync(canonicalPath);
     if (!info.isFile() || info.isSymbolicLink() || info.size > limits.maxFileBytes) {
-      throw new PluginCallError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED");
+      throw new RunCodeError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED");
     }
     details.fileBytes = (details.fileBytes ?? 0) + info.size;
     if (details.fileBytes > limits.maxCumulativeFileBytes) {
-      throw new PluginCallError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED");
+      throw new RunCodeError("PLUGIN_ATTACHMENT_LIMIT_EXCEEDED");
     }
     return {
       type: "file",
@@ -275,24 +276,24 @@ function snapshotAttachment(
       ...(attachment.name ? { name: attachment.name } : {}),
     };
   }
-  throw new PluginCallError("PLUGIN_INVALID_JSON");
+  throw new RunCodeError("PLUGIN_INVALID_JSON");
 }
 
 async function materializeAttachment(
   attachment: PluginMethodAttachment,
   cwd: string,
-  limits: PluginCallLimits,
-): Promise<PluginCallAttachment> {
+  limits: RunCodeLimits,
+): Promise<RunCodeAttachment> {
   if (attachment.type === "image") {
     const decoded = Buffer.from(attachment.data, "base64");
-    if (decoded.byteLength > limits.maxImageBytes) throw new PluginCallError("PLUGIN_RESPONSE_LIMIT_EXCEEDED");
+    if (decoded.byteLength > limits.maxImageBytes) throw new RunCodeError("PLUGIN_RESPONSE_LIMIT_EXCEEDED");
     return attachment;
   }
   const requested = isAbsolute(attachment.path) ? attachment.path : resolve(cwd, attachment.path);
   const canonicalPath = await realpath(requested);
   const info = await lstat(canonicalPath);
   if (!info.isFile() || info.isSymbolicLink() || info.size > limits.maxFileBytes) {
-    throw new PluginCallError("PLUGIN_RESPONSE_LIMIT_EXCEEDED");
+    throw new RunCodeError("PLUGIN_RESPONSE_LIMIT_EXCEEDED");
   }
   return {
     type: "file",

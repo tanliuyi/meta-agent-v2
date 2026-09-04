@@ -5,6 +5,7 @@ import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
 import { type CSSProperties, memo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import type { FileNode } from "../../../../../shared/contracts.ts";
+import { PROJECT_FILE_DRAG_MIME } from "../panel-model.ts";
 import { type FileTreeRow, setFileTreeRovingTabStop } from "./file-tree-navigation.ts";
 import { FileTypeIcon } from "./file-type-icon.tsx";
 
@@ -45,6 +46,7 @@ export const FileTreeNodeRow = memo(function FileTreeNodeRow({
       data-node-type={node.type}
       data-active={active === node.path || undefined}
       data-sticky={sticky || undefined}
+      draggable={node.type === "file"}
       tabIndex={tabIndex}
       aria-expanded={node.type === "directory" ? row.open : undefined}
       aria-level={row.depth + 1}
@@ -52,6 +54,11 @@ export const FileTreeNodeRow = memo(function FileTreeNodeRow({
       onClick={() => onOpen(node)}
       onDoubleClick={onPinOpen ? () => onPinOpen(node) : undefined}
       onFocus={setFileTreeRovingTabStop}
+      onDragStart={(event) => {
+        if (node.type !== "file") return;
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData(PROJECT_FILE_DRAG_MIME, node.path);
+      }}
       onKeyDown={(event) => onKeyDown(event, index)}
     >
       <span className="file-tree-indent-guides" aria-hidden="true">
@@ -79,7 +86,14 @@ export const FileTreeNodeRow = memo(function FileTreeNodeRow({
       ) : (
         <FileTypeIcon name={node.name} />
       )}
-      <span className="file-row-label">{node.name}</span>
+      <span className="file-row-label">
+        {(row.compressedNodes ?? [node]).map((item, itemIndex) => (
+          <span key={item.path} className="file-row-label-segment">
+            {itemIndex > 0 ? <span className="file-row-label-separator">\</span> : null}
+            {item.name}
+          </span>
+        ))}
+      </span>
       {renderTrailingContent?.(node)}
     </button>
   );

@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   applyDesktopConfig,
   getBrowserOpenTarget,
+  getRunCodeToolNameAliases,
   getWebSearchConfigPath,
   WEB_ACCESS_CONFIGURATION_SCHEMA,
 } from "../src/configuration.ts";
@@ -116,11 +117,11 @@ test("market manifest identifies the local plugin as pi.web-access", async () =>
   assert.equal(manifest.plugin.id, "pi.web-access");
   assert.equal(manifest.pi.entry, "index.ts");
   assert.equal(manifest.desktop.hostProfileVersion, 1);
-  assert.equal(manifest.desktop.minVersion, "0.0.42");
   assert.deepEqual(manifest.configuration, WEB_ACCESS_CONFIGURATION_SCHEMA);
   assert.deepEqual(manifest.capabilities, [
     "events.subscribe",
     "configuration.read",
+    "plugin-methods.provide",
     "commands.register",
     "messages.enqueue",
     "messages.custom",
@@ -128,7 +129,6 @@ test("market manifest identifies the local plugin as pi.web-access", async () =>
     "ui.notify",
     "ui.dialog",
     "ui.widget.text",
-    "plugin-methods.provide",
   ]);
 });
 
@@ -176,6 +176,22 @@ test("getBrowserOpenTarget reads the configured browser target", () => {
   withTempHome();
   applyDesktopConfig({ "browser.openTarget": "builtin" });
   assert.equal(getBrowserOpenTarget(), "builtin");
+});
+
+test("getRunCodeToolNameAliases maps configured names to the stable plugin API", () => {
+  withTempHome();
+  prewriteConfig({
+    toolNames: {
+      webSearch: "custom_search",
+      sourceCheck: "custom_check",
+      fetchContent: "fetch_content",
+    },
+  });
+
+  assert.deepEqual(getRunCodeToolNameAliases(), {
+    custom_search: "web_search",
+    custom_check: "source_check",
+  });
 });
 
 test("applyDesktopConfig serializes structured upstream settings", () => {

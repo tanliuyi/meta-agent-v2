@@ -9,7 +9,7 @@ import type {
   ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
-import { parsePluginApiCatalog } from "../pi/plugin-call/plugin-method-registry.ts";
+import { parsePluginApiCatalog } from "../pi/run-code/plugin-method-registry.ts";
 import { validateInstalledMarketplacePlugin } from "../plugins/marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
@@ -35,7 +35,7 @@ interface DesktopExtensionSourcePolicyOptions {
 interface CachedSet {
   fingerprint: string;
   set: ResolvedExtensionSet;
-  /** 所有构建成功的插件中心条目，供 direct-tool 会话级选择；plugin_call 条目由调用方过滤。 */
+  /** 所有构建成功的插件中心条目，供 direct-tool 会话级选择；run_code 条目由调用方过滤。 */
   allEntries: ResolvedExtensionEntry[];
 }
 
@@ -96,7 +96,7 @@ export class DesktopExtensionSourcePolicy {
               source: "marketplace",
               phase: "resolve",
               code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
-              message: `本地插件“${localPlugin}”已覆盖市场插件“${plugin.displayName}”，当前使用本地版本。停用或移除本地插件后，市场版本将自动恢复。`,
+              message: `本地插件“${localPlugin}”已覆盖市场插件“${plugin.displayName}”，当前使用本地版本。`,
             });
           }
           continue;
@@ -119,14 +119,12 @@ export class DesktopExtensionSourcePolicy {
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
             capabilities: [...plugin.capabilities],
             ...(pluginMetadata.skillPaths ? { skillPaths: pluginMetadata.skillPaths } : {}),
-            ...(pluginMetadata.pluginCallSkill ? { pluginCallSkill: pluginMetadata.pluginCallSkill } : {}),
-            ...(pluginMetadata.pluginCallCatalogPath
-              ? { pluginCallCatalogPath: pluginMetadata.pluginCallCatalogPath }
+            ...(pluginMetadata.runCodeSkill ? { runCodeSkill: pluginMetadata.runCodeSkill } : {}),
+            ...(pluginMetadata.runCodeCatalogPath ? { runCodeCatalogPath: pluginMetadata.runCodeCatalogPath } : {}),
+            ...(pluginMetadata.runCodeCatalogSha256
+              ? { runCodeCatalogSha256: pluginMetadata.runCodeCatalogSha256 }
               : {}),
-            ...(pluginMetadata.pluginCallCatalogSha256
-              ? { pluginCallCatalogSha256: pluginMetadata.pluginCallCatalogSha256 }
-              : {}),
-            ...(pluginMetadata.pluginCallCatalog ? { pluginCallCatalog: pluginMetadata.pluginCallCatalog } : {}),
+            ...(pluginMetadata.runCodeCatalog ? { runCodeCatalog: pluginMetadata.runCodeCatalog } : {}),
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
           };
           allEntries.push(entry);
@@ -175,14 +173,12 @@ export class DesktopExtensionSourcePolicy {
             capabilities: [...entry.capabilities],
             ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
             ...(pluginMetadata.skillPaths ? { skillPaths: pluginMetadata.skillPaths } : {}),
-            ...(pluginMetadata.pluginCallSkill ? { pluginCallSkill: pluginMetadata.pluginCallSkill } : {}),
-            ...(pluginMetadata.pluginCallCatalogPath
-              ? { pluginCallCatalogPath: pluginMetadata.pluginCallCatalogPath }
+            ...(pluginMetadata.runCodeSkill ? { runCodeSkill: pluginMetadata.runCodeSkill } : {}),
+            ...(pluginMetadata.runCodeCatalogPath ? { runCodeCatalogPath: pluginMetadata.runCodeCatalogPath } : {}),
+            ...(pluginMetadata.runCodeCatalogSha256
+              ? { runCodeCatalogSha256: pluginMetadata.runCodeCatalogSha256 }
               : {}),
-            ...(pluginMetadata.pluginCallCatalogSha256
-              ? { pluginCallCatalogSha256: pluginMetadata.pluginCallCatalogSha256 }
-              : {}),
-            ...(pluginMetadata.pluginCallCatalog ? { pluginCallCatalog: pluginMetadata.pluginCallCatalog } : {}),
+            ...(pluginMetadata.runCodeCatalog ? { runCodeCatalog: pluginMetadata.runCodeCatalog } : {}),
             ...(configuration ? { configuration: { ...configuration.values } } : {}),
           };
           allEntries.push(resolved);
@@ -246,13 +242,13 @@ async function validatePluginMetadata(entry: {
   artifactHash?: string;
   capabilities: DesktopExtensionCapability[];
   skillPaths?: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
 }): Promise<
   Pick<
     ResolvedExtensionEntry,
-    "skillPaths" | "pluginCallSkill" | "pluginCallCatalogPath" | "pluginCallCatalogSha256" | "pluginCallCatalog"
+    "skillPaths" | "runCodeSkill" | "runCodeCatalogPath" | "runCodeCatalogSha256" | "runCodeCatalog"
   >
 > {
   const skillPaths = entry.skillPaths ? await Promise.all(entry.skillPaths.map((path) => realpath(path))) : undefined;
@@ -261,40 +257,40 @@ async function validatePluginMetadata(entry: {
     if (!info.isFile() || info.isSymbolicLink()) throw new Error("Plugin skill is not a regular non-symlink file");
   }
   if (!entry.capabilities.includes("plugin-methods.provide")) return skillPaths ? { skillPaths } : {};
-  if (!skillPaths?.length || !entry.pluginCallSkill || !entry.pluginCallCatalogPath || !entry.pluginCallCatalogSha256) {
+  if (!skillPaths?.length || !entry.runCodeSkill || !entry.runCodeCatalogPath || !entry.runCodeCatalogSha256) {
     throw new Error("Plugin method metadata is incomplete");
   }
-  const pluginCallCatalogPath = await realpath(entry.pluginCallCatalogPath);
-  const catalogInfo = await lstat(pluginCallCatalogPath);
+  const runCodeCatalogPath = await realpath(entry.runCodeCatalogPath);
+  const catalogInfo = await lstat(runCodeCatalogPath);
   if (!catalogInfo.isFile() || catalogInfo.isSymbolicLink()) throw new Error("Plugin catalog is not a regular file");
   if (entry.rootPath && entry.artifactHash) {
     const versionRoot = await realpath(resolve(entry.rootPath, ".versions", entry.artifactHash));
-    for (const path of [...skillPaths, pluginCallCatalogPath]) {
+    for (const path of [...skillPaths, runCodeCatalogPath]) {
       const withinRoot = relative(versionRoot, path);
       if (!withinRoot || withinRoot.startsWith("..") || isAbsolute(withinRoot)) {
         throw new Error("Plugin metadata escapes its immutable version root");
       }
     }
   }
-  const bytes = await readFile(pluginCallCatalogPath);
+  const bytes = await readFile(runCodeCatalogPath);
   if (bytes.byteLength > 256 * 1024) throw new Error("Plugin catalog exceeds 256 KiB");
-  if (createHash("sha256").update(bytes).digest("hex") !== entry.pluginCallCatalogSha256) {
+  if (createHash("sha256").update(bytes).digest("hex") !== entry.runCodeCatalogSha256) {
     throw new Error("Plugin catalog digest mismatch");
   }
-  const pluginCallCatalog = parsePluginApiCatalog(
+  const runCodeCatalog = parsePluginApiCatalog(
     JSON.parse(bytes.toString("utf8")),
-  ) as unknown as ResolvedExtensionEntry["pluginCallCatalog"];
-  if (!pluginCallCatalog) throw new Error("Plugin catalog is missing");
+  ) as unknown as ResolvedExtensionEntry["runCodeCatalog"];
+  if (!runCodeCatalog) throw new Error("Plugin catalog is missing");
   const canonicalPluginId = entry.source === "development" ? entry.pluginId : entry.id;
-  if (!canonicalPluginId || pluginCallCatalog.pluginId !== canonicalPluginId) {
+  if (!canonicalPluginId || runCodeCatalog.pluginId !== canonicalPluginId) {
     throw new Error("Plugin catalog identity mismatch");
   }
   return {
     skillPaths,
-    pluginCallSkill: entry.pluginCallSkill,
-    pluginCallCatalogPath,
-    pluginCallCatalogSha256: entry.pluginCallCatalogSha256,
-    pluginCallCatalog,
+    runCodeSkill: entry.runCodeSkill,
+    runCodeCatalogPath,
+    runCodeCatalogSha256: entry.runCodeCatalogSha256,
+    runCodeCatalog,
   };
 }
 
@@ -317,7 +313,7 @@ function extensionSettingsFingerprint(settings: {
 }
 
 async function pluginMetadataFingerprint(
-  metadata: Pick<ResolvedExtensionEntry, "skillPaths" | "pluginCallCatalogSha256">,
+  metadata: Pick<ResolvedExtensionEntry, "skillPaths" | "runCodeCatalogSha256">,
 ): Promise<string> {
   const skillHashes = await Promise.all(
     (metadata.skillPaths ?? []).map(async (path) =>
@@ -326,7 +322,7 @@ async function pluginMetadataFingerprint(
         .digest("hex"),
     ),
   );
-  return `plugin-metadata:${metadata.pluginCallCatalogSha256 ?? "none"}:${skillHashes.join(",")}`;
+  return `plugin-metadata:${metadata.runCodeCatalogSha256 ?? "none"}:${skillHashes.join(",")}`;
 }
 
 function collectLocalPluginIds(developmentEntries: StoredDevelopmentExtension[]): Map<string, string> {
@@ -376,10 +372,10 @@ function cloneEntries(entries: ResolvedExtensionEntry[]): ResolvedExtensionEntry
     ...entry,
     capabilities: [...entry.capabilities],
     ...(entry.skillPaths ? { skillPaths: [...entry.skillPaths] } : {}),
-    ...(entry.pluginCallCatalog
+    ...(entry.runCodeCatalog
       ? {
-          pluginCallCatalog: JSON.parse(JSON.stringify(entry.pluginCallCatalog)) as NonNullable<
-            ResolvedExtensionEntry["pluginCallCatalog"]
+          runCodeCatalog: JSON.parse(JSON.stringify(entry.runCodeCatalog)) as NonNullable<
+            ResolvedExtensionEntry["runCodeCatalog"]
           >,
         }
       : {}),

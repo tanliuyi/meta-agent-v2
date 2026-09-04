@@ -22,10 +22,10 @@ export interface InstalledMarketplacePluginRecord extends Omit<InstalledMarketpl
   rootPath: string;
   configurationSchema?: PluginConfigurationSchema;
   skillPaths?: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
-  pluginCallCatalog?: PluginApiCatalogV1;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
+  runCodeCatalog?: PluginApiCatalogV1;
 }
 
 interface RegistryFileData {
@@ -428,8 +428,8 @@ function cloneRecord(record: InstalledMarketplacePluginRecord): InstalledMarketp
       ? { configurationSchema: clonePluginConfigurationSchema(record.configurationSchema) }
       : {}),
     ...(record.skillPaths ? { skillPaths: [...record.skillPaths] } : {}),
-    ...(record.pluginCallCatalog
-      ? { pluginCallCatalog: JSON.parse(JSON.stringify(record.pluginCallCatalog)) as PluginApiCatalogV1 }
+    ...(record.runCodeCatalog
+      ? { runCodeCatalog: JSON.parse(JSON.stringify(record.runCodeCatalog)) as PluginApiCatalogV1 }
       : {}),
   };
 }

@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from "electron";
+import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions, shell } from "electron";
 import type {
   AuthOauthLoginInput,
   AuthOauthLoginResponse,

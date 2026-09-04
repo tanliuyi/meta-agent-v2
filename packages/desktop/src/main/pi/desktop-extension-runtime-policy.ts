@@ -26,8 +26,8 @@ import {
   type DesktopExtensionDiagnostic,
   type ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
-import { createPluginCallExtension, type PluginCallRegistryHolder } from "./plugin-call/plugin-call-tool.ts";
-import type { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-registry.ts";
+import type { DesktopPluginRegistryBuilder } from "./run-code/plugin-method-registry.ts";
+import { createRunCodeExtension, type RunCodeRegistryHolder } from "./run-code/run-code-tool.ts";
 
 const NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES = new Set(["DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT"]);
 
@@ -35,14 +35,13 @@ type DesktopExtensionConfiguration = Readonly<Record<string, string | number | b
 type DesktopInlineExtension = {
   name: string;
   factory: ExtensionFactory;
-  desktopPlugin?: unknown;
 };
 type DesktopExtensionAPI = ExtensionAPI & {
   getConfig<T = DesktopExtensionConfiguration>(): Readonly<T>;
 };
 
 function providesPluginTools(entry: ResolvedExtensionSet["entries"][number]): boolean {
-  return entry.capabilities.includes("plugin-methods.provide") || entry.capabilities.includes("tools.register");
+  return entry.capabilities.includes("plugin-methods.provide");
 }
 
 const DESKTOP_EXTENSION_VIRTUAL_MODULES: Record<string, unknown> = {
@@ -138,7 +137,7 @@ export function controlledResourceLoaderOptions(
   extensionFactories: InlineExtension[],
   options: {
     includeBuiltinSkills?: boolean;
-    pluginRegistry?: PluginCallRegistryHolder;
+    pluginRegistry?: RunCodeRegistryHolder;
     pluginRegistryBuilder?: DesktopPluginRegistryBuilder;
     cwd?: string;
     agentDir?: string;
@@ -152,37 +151,29 @@ export function controlledResourceLoaderOptions(
     const entry = set.entries.find((candidate) => extensionName === `desktop:${candidate.id}`);
     if (!entry) return extension;
     const controlledFactory: ExtensionFactory = async (pi) => {
-      let capturedTools = 0;
       let factoryComplete = false;
       const captureTool = (tool: unknown): void => {
         if (!providesPluginTools(entry) || !options.pluginRegistryBuilder) {
           throw new Error(`Direct Pi tool registration is disabled for Desktop extension ${extensionName}`);
         }
         if (factoryComplete) {
-          const registry = options.pluginRegistryBuilder.registerRuntimeTool(entry, tool);
-          options.pluginRegistry?.bind(registry, options.cwd ?? process.cwd());
-        } else {
-          options.pluginRegistryBuilder.stageTool(entry, tool);
-          capturedTools += 1;
+          throw new Error(`Plugin ${entry.displayName} registered a tool after its factory completed`);
         }
+        options.pluginRegistryBuilder.stageTool(entry, tool);
       };
       const methodOnlyApi = new Proxy(pi, {
         get(target, property, receiver) {
-          if (property === "registerTool") return captureTool;
+          if (property === "registerTool") {
+            return providesPluginTools(entry) ? captureTool : Reflect.get(target, property, receiver);
+          }
           return Reflect.get(target, property, receiver);
         },
       }) as ExtensionAPI;
       try {
         await originalFactory(methodOnlyApi);
+        factoryComplete = true;
         if (providesPluginTools(entry)) {
-          if (capturedTools === 0 && typeof extension !== "function" && extension.desktopPlugin) {
-            options.pluginRegistryBuilder?.stage(entry, extension.desktopPlugin);
-          }
           options.pluginRegistryBuilder?.commit(entry.id);
-          if (options.pluginRegistryBuilder && options.pluginRegistry) {
-            options.pluginRegistry.bind(options.pluginRegistryBuilder.finalize(), options.cwd ?? process.cwd());
-          }
-          factoryComplete = true;
         }
       } catch (error) {
         options.pluginRegistryBuilder?.rollback(entry.id);
@@ -203,45 +194,35 @@ export function controlledResourceLoaderOptions(
         factory: async (pi) => {
           try {
             const namespace = await jiti.import<Record<string, unknown>>(entryPath);
-            const declaration = Object.hasOwn(namespace, "desktopPlugin") ? namespace.desktopPlugin : undefined;
             const factory = namespace.default as ExtensionFactory | undefined;
-            let capturedTools = 0;
             let factoryComplete = false;
             const captureTool = (tool: unknown): void => {
               if (!providesPluginTools(entry) || !options.pluginRegistryBuilder) {
                 throw new Error(`Direct Pi tool registration is disabled for Desktop extension ${entry.id}`);
               }
               if (factoryComplete) {
-                const registry = options.pluginRegistryBuilder.registerRuntimeTool(entry, tool);
-                options.pluginRegistry?.bind(registry, options.cwd ?? process.cwd());
-              } else {
-                options.pluginRegistryBuilder.stageTool(entry, tool);
-                capturedTools += 1;
+                throw new Error(`Plugin ${entry.displayName} registered a tool after its factory completed`);
               }
+              options.pluginRegistryBuilder.stageTool(entry, tool);
             };
             if (typeof factory === "function") {
               const desktopApi = new Proxy(pi, {
                 get(target, property, receiver) {
                   if (property === "getConfig")
                     return <T = DesktopExtensionConfiguration>() => configuration as Readonly<T>;
-                  if (property === "registerTool") return captureTool;
+                  if (property === "registerTool") {
+                    return providesPluginTools(entry) ? captureTool : Reflect.get(target, property, receiver);
+                  }
                   return Reflect.get(target, property, receiver);
                 },
               }) as DesktopExtensionAPI;
               await factory(desktopApi);
               factoryComplete = true;
-            } else if (declaration === undefined) {
+            } else {
               throw new Error(`Extension does not export a valid factory function: ${entry.displayName}`);
             }
             if (providesPluginTools(entry)) {
-              if (capturedTools === 0 && declaration !== undefined) {
-                if (!options.pluginRegistryBuilder) throw new Error("Plugin registry builder unavailable");
-                options.pluginRegistryBuilder.stage(entry, declaration);
-              }
               options.pluginRegistryBuilder?.commit(entry.id);
-              if (options.pluginRegistryBuilder && options.pluginRegistry) {
-                options.pluginRegistry.bind(options.pluginRegistryBuilder.finalize(), options.cwd ?? process.cwd());
-              }
             }
           } catch (error) {
             options.pluginRegistryBuilder?.rollback(entry.id);
@@ -254,11 +235,20 @@ export function controlledResourceLoaderOptions(
   return {
     noExtensions: true,
     additionalExtensionPaths: [],
-    additionalSkillPaths:
-      options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))],
+    additionalSkillPaths: [
+      ...(options.includeBuiltinSkills === false ? [] : [fileURLToPath(new URL("./skills", import.meta.url))]),
+      ...set.entries
+        .filter((entry) => entry.source === "builtin" && !entry.runCodeSkill)
+        .flatMap((entry) => entry.skillPaths ?? [])
+        .filter((path): path is string => typeof path === "string" && path.length > 0),
+      ...set.entries
+        .filter((entry) => entry.source !== "builtin" && providesPluginTools(entry))
+        .flatMap((entry) => entry.skillPaths ?? [])
+        .filter((path): path is string => typeof path === "string" && path.length > 0),
+    ],
     skillsOverride: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
       const builtinSkills = set.entries
-        .filter((entry) => entry.source === "builtin" && entry.pluginCallSkill)
+        .filter((entry) => entry.source === "builtin" && entry.runCodeSkill)
         .flatMap((entry) => entry.skillPaths ?? [])
         .filter((path): path is string => typeof path === "string" && path.length > 0)
         .flatMap(
@@ -284,12 +274,8 @@ export function controlledResourceLoaderOptions(
       ...controlledInlineFactories,
       ...(options.pluginRegistry &&
       options.pluginRegistryBuilder &&
-      set.entries.some(
-        (entry) =>
-          providesPluginTools(entry) &&
-          (entry.pluginCallCatalog === undefined || entry.pluginCallCatalog.methods.length > 0),
-      )
-        ? [createPluginCallExtension(options.pluginRegistry, options.cwd ?? process.cwd())]
+      set.entries.some((entry) => providesPluginTools(entry))
+        ? [createRunCodeExtension(options.pluginRegistry, options.cwd ?? process.cwd())]
         : []),
       ...pathBackedFactories,
     ],
@@ -304,7 +290,7 @@ export function validatePluginSkills(
   const diagnostics: DesktopExtensionDiagnostic[] = [];
   for (const entry of set.entries) {
     if (!entry.capabilities.includes("plugin-methods.provide")) continue;
-    const primaryName = entry.pluginCallSkill;
+    const primaryName = entry.runCodeSkill;
     const approvedPaths = new Set(
       (entry.skillPaths ?? [])
         .filter((path): path is string => typeof path === "string" && path.length > 0)

@@ -106,6 +106,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
               error={error}
               expanded
               argsComplete={execution !== "streaming-args"}
+              artifact={artifact}
             />
           </div>
         </div>
@@ -161,11 +162,11 @@ function toolHeader(
       context: numberSuffix(args.limit, "limit", true).trimStart(),
     };
   }
-  if (name === "plugin_call") {
+  if (name === "run_code") {
     return {
       label: "plugin",
       target: textTarget(readToolStringArgument(args, "description") || "…"),
-      context: result ? pluginCallContext(result) : undefined,
+      context: result ? RunCodeContext(result) : undefined,
     };
   }
 
@@ -237,7 +238,7 @@ const SKILL_ACTION_LABELS: Readonly<Record<string, string>> = {
   delete: "删除技能",
 };
 
-function pluginCallContext(result: unknown): string {
+function RunCodeContext(result: unknown): string {
   const details = result && typeof result === "object" && "details" in result ? result.details : undefined;
   if (!details || typeof details !== "object" || !("calls" in details) || !Array.isArray(details.calls)) return "";
   const active = details.calls.filter((call) => call && typeof call === "object" && call.state === "running").length;

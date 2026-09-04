@@ -1,15 +1,92 @@
-# pi-image-gen API
+# pi.image-gen API
 
-`image_generate` returns `{ text: string }`. The text contains markdown links to saved image files.
+These schemas are generated from the plugin's registered Pi tools.
 
-Parameters:
+## image_generate
 
-- `prompt`: required generation or edit prompt.
-- `image`: optional local paths or `http(s)` reference images.
-- `n`: optional variant count, from 1 through 8.
-- `size`: optional provider-specific size such as `1024x1024`.
-- `quality`: optional `low`, `medium`, `high`, or `auto`.
-- `filename`: optional output filename prefix.
-- `outputDir`: optional output directory relative to the session cwd or an absolute path.
+Generate or edit raster images with the image model configured for this Desktop plugin. Pass local file paths or http(s) URLs in image for edits or reference conditioning. The tool writes new image files without overwriting existing files and returns absolute paths. It does not accept base64 or data: URI inputs.
 
-The configured model and provider determine the available backend. See `plugin-api.json` for the canonical schema.
+```json
+{
+  "parameters": {
+    "type": "object",
+    "required": [
+      "prompt"
+    ],
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32000,
+        "description": "Generation or edit prompt."
+      },
+      "image": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "maxItems": 8,
+        "description": "Reference image file paths or http(s) URLs."
+      },
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8,
+        "description": "Variants of one prompt. Maximum 8 for the active provider."
+      },
+      "size": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 64,
+        "description": "Provider-specific image size such as \"1024x1024\"."
+      },
+      "quality": {
+        "type": "string",
+        "anyOf": [
+          {
+            "const": "low"
+          },
+          {
+            "const": "medium"
+          },
+          {
+            "const": "high"
+          },
+          {
+            "const": "auto"
+          }
+        ],
+        "description": "OpenAI gpt-image quality: low, medium, high, or auto."
+      },
+      "filename": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "Filename prefix without extension."
+      },
+      "outputDir": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096,
+        "description": "Output directory, relative to cwd or absolute."
+      }
+    },
+    "additionalProperties": false
+  },
+  "result": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "additionalProperties": false
+  },
+  "concurrency": "serial"
+}
+```

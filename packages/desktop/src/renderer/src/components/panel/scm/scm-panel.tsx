@@ -1,12 +1,10 @@
-import * as Tabs from "@radix-ui/react-tabs";
 import { Button } from "@renderer/shared/ui/button";
 import type { HighlightResult } from "@streamdown/code";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import FileCode2 from "lucide-react/dist/esm/icons/file-code-corner.mjs";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
-import X from "lucide-react/dist/esm/icons/x.mjs";
 import {
   type CSSProperties,
+  forwardRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -14,6 +12,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -33,8 +32,10 @@ import { highlightFileCode } from "../files/file-highlight-client.ts";
 import { FilePathBreadcrumb } from "../files/file-path-breadcrumb.tsx";
 import { FilePreview } from "../files/file-preview.tsx";
 import { FileTree } from "../files/file-tree.tsx";
-import { FileWorkspaceLayout } from "../files/file-workspace-layout.tsx";
-import { type AlignedDiffRow, alignedDiffRows } from "./scm-diff-model.ts";
+import { FileWorkspaceLayout, type FileWorkspacePortalTargets } from "../files/file-workspace-layout.tsx";
+import { openProjectDocumentTab } from "../panel-model.ts";
+
+import { type AlignedDiffRow, prepareAlignedDiff } from "./scm-diff-model.ts";
 
 const GROUPS: Array<{ key: ScmChange["kind"] | "staged"; label: string }> = [
   { key: "staged", label: "暂存的更改" },
@@ -123,6 +124,7 @@ function ScmDiffOverview({
   syncRef: RefObject<(() => void) | null>;
 }) {
   const overview = useRef<HTMLDivElement>(null);
+  const markerCanvas = useRef<HTMLCanvasElement>(null);
   const viewport = useRef<HTMLSpanElement>(null);
   const dragOffset = useRef<number | null>(null);
 
@@ -173,12 +175,48 @@ function ScmDiffOverview({
     };
   }, [rows, scrollElement, syncRef]);
 
+  useEffect(() => {
+    const canvas = markerCanvas.current;
+    const track = overview.current;
+    if (!canvas || !track) return;
+    const draw = () => {
+      const width = track.clientWidth;
+      const height = track.clientHeight;
+      const scale = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.scale(scale, scale);
+      const styles = getComputedStyle(canvas);
+      const lineCount = Math.max(rows.length, 1);
+      const markerHeight = Math.max(2, height / lineCount);
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index];
+        const top = (index / lineCount) * height;
+        if (row.originalKind) {
+          context.fillStyle = `hsl(${styles.getPropertyValue("--destructive")} / 0.8)`;
+          context.fillRect(0, top, width / 2, markerHeight);
+        }
+        if (row.modifiedKind) {
+          context.fillStyle = `hsl(${styles.getPropertyValue("--success")} / 0.8)`;
+          context.fillRect(width / 2, top, width / 2, markerHeight);
+        }
+      }
+    };
+    draw();
+    const observer = new ResizeObserver(draw);
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [rows]);
+
   const stopDragging = useCallback((target: HTMLDivElement, pointerId: number) => {
     dragOffset.current = null;
     target.removeAttribute("data-dragging");
     if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
   }, []);
-  const lineCount = Math.max(rows.length, 1);
   return (
     <div
       ref={overview}
@@ -229,24 +267,7 @@ function ScmDiffOverview({
         event.preventDefault();
       }}
     >
-      {rows.flatMap((row, index) => [
-        row.originalKind ? (
-          <span
-            className="scm-diff-overview-marker"
-            data-kind="removed"
-            key={`removed:${index}`}
-            style={{ top: `${(index / lineCount) * 100}%`, height: `${Math.max(0.35, 100 / lineCount)}%` }}
-          />
-        ) : null,
-        row.modifiedKind ? (
-          <span
-            className="scm-diff-overview-marker"
-            data-kind="added"
-            key={`added:${index}`}
-            style={{ top: `${(index / lineCount) * 100}%`, height: `${Math.max(0.35, 100 / lineCount)}%` }}
-          />
-        ) : null,
-      ])}
+      <canvas ref={markerCanvas} className="scm-diff-overview-markers" aria-hidden="true" />
       <span ref={viewport} className="scm-diff-overview-viewport" />
     </div>
   );
@@ -254,16 +275,14 @@ function ScmDiffOverview({
 
 function ScmBreadcrumb({ path }: { path: string }) {
   return (
-    <div className="scm-code-breadcrumb">
-      <FilePathBreadcrumb
-        path={path}
-        children={{}}
-        expanded={new Set()}
-        onDirectoryOpen={() => {}}
-        onOpen={() => {}}
-        interactive={false}
-      />
-    </div>
+    <FilePathBreadcrumb
+      path={path}
+      children={{}}
+      expanded={new Set()}
+      onDirectoryOpen={() => {}}
+      onOpen={() => {}}
+      interactive={false}
+    />
   );
 }
 
@@ -391,9 +410,8 @@ function ScmAlignedDiffPreview({
     original: null,
     modified: null,
   });
-  const rows = useMemo(() => alignedDiffRows(diff), [diff]);
-  const originalLines = useMemo(() => diff.original.content.split("\n"), [diff.original.content]);
-  const modifiedLines = useMemo(() => diff.modified.content.split("\n"), [diff.modified.content]);
+  const prepared = useMemo(() => prepareAlignedDiff(diff), [diff]);
+  const { rows, originalLines, modifiedLines } = prepared;
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollElement.current,
@@ -401,11 +419,7 @@ function ScmAlignedDiffPreview({
     overscan: DIFF_OVERSCAN,
     initialRect: { height: 600, width: 1200 },
   });
-  const contentWidths = useMemo(() => {
-    const width = (lines: readonly string[]) =>
-      Math.max(480, lines.reduce((result, line) => Math.max(result, line.length), 0) * 7 + 72);
-    return { original: width(originalLines), modified: width(modifiedLines) };
-  }, [modifiedLines, originalLines]);
+  const contentWidths = { original: prepared.originalWidth, modified: prepared.modifiedWidth };
   const updateHorizontalOffsets = useCallback(() => {
     const root = rootElement.current;
     if (!root) return;
@@ -593,10 +607,7 @@ function ScmAlignedDiffPreview({
           onWheel={handleCodeWheel}
           style={
             {
-              "--file-preview-line-number-width": `${Math.max(
-                2,
-                String(Math.max(originalLines.length, modifiedLines.length)).length,
-              )}ch`,
+              "--file-preview-line-number-width": `${prepared.lineNumberCharacters}ch`,
             } as CSSProperties
           }
         >
@@ -748,7 +759,19 @@ function status(change: ScmChange): string {
   return "M";
 }
 
-export function ScmPanel() {
+export interface ScmPanelHandle {
+  closeResource(staged: boolean, path: string): void;
+}
+
+interface ScmPanelProps {
+  activeResourceKey?: string;
+  portalTargets?: FileWorkspacePortalTargets;
+}
+
+export const ScmPanel = forwardRef<ScmPanelHandle, ScmPanelProps>(function ScmPanel(
+  { activeResourceKey, portalTargets },
+  ref,
+) {
   const { record, updateWorkbench } = useSessionScope();
   const initialScmState = useRef<ScmWorkbenchState | undefined>(record.stores.workbench.getSnapshot()?.scm).current;
   const workbenchAvailable = useSessionWorkbenchSelector((workbench) => workbench !== null);
@@ -806,15 +829,24 @@ export function ScmPanel() {
     [record, selected, updatePersistedScm],
   );
 
-  const selectChange = useCallback((path: string, change: ScmChange) => {
-    setActiveTreePath(path);
-    setSelected(change);
-    setOpenDiffs((current) =>
-      current.some((item) => item.path === change.path && item.staged === change.staged)
-        ? current
-        : [...current, change],
-    );
-  }, []);
+  const selectChange = useCallback(
+    (path: string, change: ScmChange) => {
+      const key = `diff:${resourceKey(change)}`;
+      const workbench = record.stores.workbench.getSnapshot();
+      setActiveTreePath(path);
+      setSelected(change);
+      updateWorkbench({
+        projectPanelActiveTab: key,
+        projectPanelTabs: openProjectDocumentTab(workbench?.projectPanelTabs ?? [], key),
+      });
+      setOpenDiffs((current) =>
+        current.some((item) => item.path === change.path && item.staged === change.staged)
+          ? current
+          : [...current, change],
+      );
+    },
+    [record, updateWorkbench],
+  );
 
   const closeDiff = useCallback(
     (change: ScmChange) => {
@@ -830,6 +862,17 @@ export function ScmPanel() {
       }
     },
     [openDiffs, selected, tree.changes],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      closeResource(staged: boolean, path: string) {
+        const change = openDiffs.find((item) => item.staged === staged && item.path === path);
+        if (change) closeDiff(change);
+      },
+    }),
+    [closeDiff, openDiffs],
   );
 
   const refresh = useCallback(
@@ -917,6 +960,14 @@ export function ScmPanel() {
     });
   }, [expanded, hydrated, openDiffs, selected, treeScrollTop, updateWorkbench, viewStates]);
   useEffect(() => {
+    if (!activeResourceKey || !snapshot) return;
+    const next = snapshot.changes.find((change) => resourceKey(change) === activeResourceKey);
+    if (next && (!selected || resourceKey(selected) !== activeResourceKey)) {
+      setSelected(next);
+      setActiveTreePath(findTreePath(tree.changes, next));
+    }
+  }, [activeResourceKey, selected, snapshot, tree.changes]);
+  useEffect(() => {
     const generation = diffGeneration.current + 1;
     diffGeneration.current = generation;
     if (!projectId || !selected) {
@@ -947,6 +998,7 @@ export function ScmPanel() {
       treeContentId={treeContentId}
       treeAriaLabel="源代码管理资源"
       resizeAriaLabel="调整源代码管理文件树宽度"
+      portalTargets={portalTargets}
       tree={
         <>
           <div className="file-tree-toolbar">
@@ -968,6 +1020,7 @@ export function ScmPanel() {
             <FileTree
               nodes={tree.roots}
               children={tree.children}
+              compactRoot={false}
               expanded={expanded}
               active={activeTreePath}
               initialScrollTop={treeScrollTop}
@@ -995,62 +1048,24 @@ export function ScmPanel() {
       }
       preview={
         <main className="file-preview scm-diff">
-          <Tabs.Root
-            className="scm-diff-tabs"
-            value={selected ? `${selected.staged}:${selected.path}` : ""}
-            onValueChange={(value) => {
-              const item = openDiffs.find((change) => `${change.staged}:${change.path}` === value);
-              if (item) {
-                setSelected(item);
-                setActiveTreePath(findTreePath(tree.changes, item));
-              }
-            }}
-          >
-            <Tabs.List className="file-tabs scm-diff-tab-list">
-              {openDiffs.map((change) => {
-                const value = `${change.staged}:${change.path}`;
-                const label = change.path.split(/[\\/]/u).at(-1) ?? change.path;
-                return (
-                  <div
-                    className="file-tab-item"
-                    data-active={selected ? `${selected.staged}:${selected.path}` === value : undefined}
-                    key={value}
-                  >
-                    <Tabs.Trigger className="file-tab-trigger" value={value} title={change.path}>
-                      <FileCode2 size={14} aria-hidden="true" />
-                      <span>{label}</span>
-                    </Tabs.Trigger>
-                    <button
-                      type="button"
-                      className="file-tab-close"
-                      aria-label={`关闭 ${label}`}
-                      onClick={() => closeDiff(change)}
-                    >
-                      <X size={13} aria-hidden="true" />
-                    </button>
-                  </div>
-                );
-              })}
-            </Tabs.List>
-            <div className="scm-diff-view">
-              {selected ? (
-                diff ? (
-                  <ScmDiffPreview
-                    key={resourceKey(selected)}
-                    diff={diff}
-                    initialViewState={viewStates[resourceKey(selected)]}
-                    onViewStateChange={handleViewStateChange}
-                  />
-                ) : (
-                  <div className="file-preview-loading">正在加载差异</div>
-                )
+          <div className="scm-diff-view">
+            {selected ? (
+              diff ? (
+                <ScmDiffPreview
+                  key={resourceKey(selected)}
+                  diff={diff}
+                  initialViewState={viewStates[resourceKey(selected)]}
+                  onViewStateChange={handleViewStateChange}
+                />
               ) : (
-                <div className="scm-empty">从资源列表中选择文件以查看差异。</div>
-              )}
-            </div>
-          </Tabs.Root>
+                <div className="file-preview-loading">正在加载差异</div>
+              )
+            ) : (
+              <div className="scm-empty">从资源列表中选择文件以查看差异。</div>
+            )}
+          </div>
         </main>
       }
     />
   );
-}
+});

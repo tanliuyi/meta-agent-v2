@@ -114,7 +114,7 @@ describe("local plugin detail dialog", () => {
     expect(markup).toContain(">基本信息</button>");
     expect(markup).toContain(">配置</button>");
     expect(markup).not.toContain("本地插件没有声明配置 Schema");
-    expect(markup).toContain("启用此插件");
+    expect(markup).toContain(">启用</span>");
     expect(markup).toContain(">移除</button>");
   });
 

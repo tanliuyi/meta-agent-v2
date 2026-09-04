@@ -1,4 +1,3 @@
-import { Switch } from "@renderer/shared/ui/switch";
 import { Tabs } from "@renderer/shared/ui/tabs";
 import { TabsContent } from "@renderer/shared/ui/tabs-content";
 import { TabsList } from "@renderer/shared/ui/tabs-list";
@@ -16,21 +15,10 @@ interface PluginDetailContentProps {
   plugin?: MarketplacePluginSummary;
   installed?: InstalledMarketplacePluginSummary;
   marketplaceId?: string;
-  mutationPending: boolean;
-  /** 覆盖该市场插件的本地插件显示名；存在时市场版本被禁用。 */
-  supersededByLocalPlugin?: string;
-  onSetEnabled(id: string, enabled: boolean): void;
 }
 
 /** Detail content shared by the route page and the legacy dialog wrapper. */
-export function PluginDetailContent({
-  plugin,
-  installed,
-  marketplaceId,
-  mutationPending,
-  supersededByLocalPlugin,
-  onSetEnabled,
-}: PluginDetailContentProps) {
+export function PluginDetailContent({ plugin, installed, marketplaceId }: PluginDetailContentProps) {
   if (!plugin && !installed) return null;
   const capabilities = plugin?.capabilities ?? installed?.capabilities ?? [];
 
@@ -119,40 +107,6 @@ export function PluginDetailContent({
                 <span className="plugin-marketplace-detail-muted">未提供能力声明</span>
               )}
             </section>
-
-            {installed ? (
-              <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-detail-local-state">
-                <h3 id="plugin-detail-local-state">本地状态</h3>
-                {supersededByLocalPlugin ? (
-                  <div className="plugin-marketplace-notice" data-tone="info" role="status">
-                    本地插件 <strong>{supersededByLocalPlugin}</strong> 声明了相同的插件 ID，此市场版本已禁用。
-                    移除或停用本地插件后此市场版本恢复可用。
-                  </div>
-                ) : null}
-                <dl className="plugin-marketplace-detail-metadata">
-                  <div>
-                    <dt>安装状态</dt>
-                    <dd>{installed.state === "broken" ? "已损坏" : "正常"}</dd>
-                  </div>
-                  <div>
-                    <dt>已启用</dt>
-                    <dd>{installed.enabled ? "是" : "否"}</dd>
-                  </div>
-                </dl>
-                <div className="plugin-local-detail-toggle">
-                  <div>
-                    <strong>启用此插件</strong>
-                    <span>仅影响新会话；当前会话需运行 /reload 重新加载。</span>
-                  </div>
-                  <Switch
-                    checked={installed.enabled}
-                    disabled={mutationPending || installed.state === "broken" || Boolean(supersededByLocalPlugin)}
-                    aria-label={`${installed.displayName} 启用状态`}
-                    onCheckedChange={(enabled) => onSetEnabled(installed.id, enabled)}
-                  />
-                </div>
-              </section>
-            ) : null}
           </div>
         </TabsContent>
 

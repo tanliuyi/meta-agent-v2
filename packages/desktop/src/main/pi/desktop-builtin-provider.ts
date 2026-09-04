@@ -25,15 +25,13 @@ import { getBuiltinSkillPath } from "../extensions/desktop-builtin-resource-path
 import { getModelsConfigMetadata } from "../models/models-config-metadata.ts";
 import type { ModelsModelDefinition } from "../models/models-config-schema.ts";
 import piAutoTitleExtension from "./extensions/pi-auto-title/index.ts";
-import piBrowserExtension, { pluginCallCatalog as piBrowserCatalog } from "./extensions/pi-browser/index.ts";
-import hermesMemoryExtension, { pluginCallCatalog as piHermesCatalog } from "./extensions/pi-hermes-memory/index.ts";
+import piBrowserExtension, { runCodeCatalog as piBrowserCatalog } from "./extensions/pi-browser/index.ts";
+import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
 import piRewindExtension from "./extensions/pi-rewind/src/index.ts";
-import subagentsExtension, { pluginCallCatalog as piSubagentsCatalog } from "./extensions/pi-subagents/index.ts";
+import subagentsExtension from "./extensions/pi-subagents/index.ts";
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 
-type DesktopInlineExtension = InlineExtension & {
-  desktopPlugin?: unknown;
-};
+type DesktopInlineExtension = InlineExtension;
 
 interface DesktopProviderDefinition {
   displayName: string;
@@ -51,11 +49,8 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       displayName: "Hermes Memory",
       source: "builtin",
       hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      skillPaths: [getBuiltinSkillPath(import.meta.url, "pi-hermes-memory")],
-      pluginCallSkill: "pi-hermes-memory",
-      pluginCallCatalog: piHermesCatalog,
       capabilities: [
-        "plugin-methods.provide",
+        "tools.register",
         "events.subscribe",
         "commands.register",
         "messages.enqueue",
@@ -86,11 +81,8 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       displayName: "Subagents",
       source: "builtin",
       hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-      skillPaths: [getBuiltinSkillPath(import.meta.url, "pi-subagents")],
-      pluginCallSkill: "pi-subagents",
-      pluginCallCatalog: piSubagentsCatalog,
       capabilities: [
-        "plugin-methods.provide",
+        "tools.register",
         "events.subscribe",
         "commands.register",
         "messages.enqueue",
@@ -103,6 +95,7 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
         "ui.dialog",
         "ui.status",
       ],
+      skillPaths: [getBuiltinSkillPath(import.meta.url, "pi-subagents")],
     },
     factory: {
       name: "desktop:pi-subagents",
@@ -126,8 +119,8 @@ const builtinExtensions: Array<{ definition: DesktopExtensionDefinition; factory
       source: "builtin",
       hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
       skillPaths: [getBuiltinSkillPath(import.meta.url, "pi-browser")],
-      pluginCallSkill: "pi-browser",
-      pluginCallCatalog: piBrowserCatalog,
+      runCodeSkill: "pi-browser",
+      runCodeCatalog: piBrowserCatalog,
       capabilities: ["plugin-methods.provide", "events.subscribe", "session.read", "ui.notify"],
     },
     factory: {

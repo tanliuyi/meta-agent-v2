@@ -35,10 +35,10 @@ export interface StoredDevelopmentExtension {
   /** 插件声明的身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
   pluginId?: string;
   skillPaths?: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
-  pluginCallCatalog?: PluginApiCatalogV1;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
+  runCodeCatalog?: PluginApiCatalogV1;
 }
 
 export interface InternalDesktopExtensionSettings {
@@ -201,10 +201,10 @@ export class DesktopExtensionSettingsService {
                     ? { configurationSchema: resolved.configurationSchema }
                     : { configurationSchema: undefined }),
                   skillPaths: resolved.skillPaths,
-                  pluginCallSkill: resolved.pluginCallSkill,
-                  pluginCallCatalogPath: resolved.pluginCallCatalogPath,
-                  pluginCallCatalogSha256: resolved.pluginCallCatalogSha256,
-                  pluginCallCatalog: resolved.pluginCallCatalog,
+                  runCodeSkill: resolved.runCodeSkill,
+                  runCodeCatalogPath: resolved.runCodeCatalogPath,
+                  runCodeCatalogSha256: resolved.runCodeCatalogSha256,
+                  runCodeCatalog: resolved.runCodeCatalog,
                 }
               : entry,
           )
@@ -220,12 +220,10 @@ export class DesktopExtensionSettingsService {
               ...(resolved.pluginId ? { pluginId: resolved.pluginId } : {}),
               ...(resolved.configurationSchema ? { configurationSchema: resolved.configurationSchema } : {}),
               ...(resolved.skillPaths ? { skillPaths: [...resolved.skillPaths] } : {}),
-              ...(resolved.pluginCallSkill ? { pluginCallSkill: resolved.pluginCallSkill } : {}),
-              ...(resolved.pluginCallCatalogPath ? { pluginCallCatalogPath: resolved.pluginCallCatalogPath } : {}),
-              ...(resolved.pluginCallCatalogSha256
-                ? { pluginCallCatalogSha256: resolved.pluginCallCatalogSha256 }
-                : {}),
-              ...(resolved.pluginCallCatalog ? { pluginCallCatalog: resolved.pluginCallCatalog } : {}),
+              ...(resolved.runCodeSkill ? { runCodeSkill: resolved.runCodeSkill } : {}),
+              ...(resolved.runCodeCatalogPath ? { runCodeCatalogPath: resolved.runCodeCatalogPath } : {}),
+              ...(resolved.runCodeCatalogSha256 ? { runCodeCatalogSha256: resolved.runCodeCatalogSha256 } : {}),
+              ...(resolved.runCodeCatalog ? { runCodeCatalog: resolved.runCodeCatalog } : {}),
             },
           ];
       await this.atomicWrite({
@@ -394,8 +392,8 @@ function developmentApprovalMatches(existing: StoredDevelopmentExtension, resolv
     existing.capabilities.every((capability, index) => capability === resolved.capabilities[index]) &&
     JSON.stringify(existing.configurationSchema) === JSON.stringify(resolved.configurationSchema) &&
     JSON.stringify(existing.skillPaths) === JSON.stringify(resolved.skillPaths) &&
-    existing.pluginCallSkill === resolved.pluginCallSkill &&
-    existing.pluginCallCatalogSha256 === resolved.pluginCallCatalogSha256
+    existing.runCodeSkill === resolved.runCodeSkill &&
+    existing.runCodeCatalogSha256 === resolved.runCodeCatalogSha256
   );
 }
 

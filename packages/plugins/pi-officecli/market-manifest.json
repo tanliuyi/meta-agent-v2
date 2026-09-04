@@ -12,14 +12,13 @@
     "entry": "index.ts",
     "extensionApi": "v1",
     "skills": ["skills/pi-officecli/SKILL.md"],
-    "pluginCall": {
+    "runCode": {
       "skill": "pi-officecli",
       "catalog": "plugin-api.json"
     }
   },
   "desktop": {
-    "hostProfileVersion": 1,
-    "minVersion": "0.0.42"
+    "hostProfileVersion": 1
   },
   "target": {
     "platform": "universal",

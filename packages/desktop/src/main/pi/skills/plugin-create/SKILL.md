@@ -12,8 +12,8 @@ Treat a Desktop plugin as a standard Pi Extension. Do not invent a Desktop-only 
 
 1. Clarify the plugin's user-visible behavior, scope, external services, credentials, destructive actions, and whether it needs tools, commands, events, or a provider. Ask only for decisions that materially affect behavior or trust.
 2. Inspect the target directory, its package manager, existing extension patterns, TypeScript configuration, and installed Pi API types before writing code. Reuse local conventions and do not guess external API signatures.
-3. Use a manifest-backed directory whenever the plugin exposes tools through `plugin_call`; the manifest supplies stable identity, skill, and catalog metadata. Add `package.json` only when the plugin needs its own dependencies or distribution metadata.
-4. Define every model-callable operation once with standard `pi.registerTool()`. Desktop captures those registrations and supplies the real execution context through `plugin_call`; do not add a parallel `desktopPlugin` handler.
+3. Use a manifest-backed directory whenever the plugin exposes composed operations through `run_code`; the manifest supplies stable identity, skill, and catalog metadata. Add `package.json` only when the plugin needs its own dependencies or distribution metadata.
+4. Define every model-callable operation once with standard `pi.registerTool()`. Native tools stay direct; Desktop captures registrations only for entries opting into `run_code`. Do not add a parallel `desktopPlugin` handler.
 5. Add an idempotent `session_shutdown` handler for every session-scoped resource used by a default Pi factory. Pass `AbortSignal` through to cancellable work.
 6. Validate parameter schemas, normalize paths against `ctx.cwd`, bound external input and output, and throw errors from tool execution when an operation fails.
 7. Run the narrowest available typecheck and focused tests. Test startup plus each registered tool, command, or event path without using paid provider calls.
@@ -44,7 +44,7 @@ export default function plugin(pi: ExtensionAPI) {
 }
 ```
 
-The manifest must declare `plugin-methods.provide`, `pi.skills`, and `pi.pluginCall`. The catalog documents the registered names and schemas; it is not a second executable implementation. The primary skill must document canonical bracket syntax such as `plugin["com.example.records"].lookup(...)`, link `references/api.md`, and explain limits, side effects, errors, and workflows.
+The manifest must declare `plugin-methods.provide`, `pi.skills`, and `pi.runCode` for `run_code` composition. The catalog documents the registered names and schemas; it is not a second executable implementation. The primary skill must document canonical bracket syntax such as `plugin["com.example.records"].lookup(...)`, link `references/api.md`, and explain limits, side effects, errors, and workflows.
 
 ## Host-Owned Native Tools
 

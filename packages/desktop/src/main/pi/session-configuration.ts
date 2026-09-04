@@ -18,7 +18,7 @@ import {
   extensionServiceDiagnostics,
 } from "./desktop-extension-runtime-policy.ts";
 import { resolveThinkingConfiguration, selectInitialModel } from "./model-selection-adapter.ts";
-import { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-registry.ts";
+import { DesktopPluginRegistryBuilder } from "./run-code/plugin-method-registry.ts";
 import { getDraftCommands } from "./session-commands.ts";
 
 export interface SessionConfigurationServices {

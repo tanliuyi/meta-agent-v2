@@ -38,6 +38,17 @@ describe("ScmService", () => {
     expect(workingTree.hunks).toEqual([{ originalStart: 2, originalLines: 0, modifiedStart: 3, modifiedLines: 1 }]);
   });
 
+  it("expands untracked directories into file resources", async () => {
+    const { cwd, projectId, service } = await createRepository();
+    await mkdir(join(cwd, "scripts"));
+    await writeFile(join(cwd, "scripts", "task.mjs"), "console.log('task');\n");
+
+    const snapshot = await service.getSnapshot(projectId);
+
+    expect(snapshot.changes).toContainEqual({ path: "scripts/task.mjs", kind: "untracked", staged: false });
+    expect(snapshot.changes.some((change) => change.path === "scripts")).toBe(false);
+  });
+
   it("returns an untracked file as a regular single-document preview", async () => {
     const { cwd, projectId, service } = await createRepository();
     await writeFile(join(cwd, "new-file.ts"), "export const value = 1;\n");

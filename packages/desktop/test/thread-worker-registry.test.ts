@@ -696,22 +696,22 @@ describe("ThreadWorkerRegistry", () => {
     await registry.dispose();
   });
 
-  it("keeps plugin-call extensions out of session selection and always loads them", async () => {
+  it("keeps run-code extensions out of session selection and always loads them", async () => {
     const harness = createHarness(userDataDir);
     const set = fullExtensionSet();
-    const pluginCallEntry = {
-      id: "marketplace:plugin-call",
+    const RunCodeEntry = {
+      id: "marketplace:run-code",
       displayName: "Plugin Call",
       source: "marketplace" as const,
-      entryPath: "/tmp/plugin-call.ts",
+      entryPath: "/tmp/run-code.ts",
       hostProfileVersion: 1 as const,
       capabilities: ["plugin-methods.provide" as const],
     };
-    const withPluginCall = { ...set, entries: [...set.entries, pluginCallEntry] };
-    harness.resolveExtensions.mockImplementation(async () => withPluginCall);
+    const withRunCode = { ...set, entries: [...set.entries, RunCodeEntry] };
+    harness.resolveExtensions.mockImplementation(async () => withRunCode);
     harness.resolveWithAll.mockImplementation(async () => ({
-      set: withPluginCall,
-      allEntries: [...withPluginCall.entries],
+      set: withRunCode,
+      allEntries: [...withRunCode.entries],
     }));
     const registry = new ThreadWorkerRegistry(harness.options);
 
@@ -723,13 +723,13 @@ describe("ThreadWorkerRegistry", () => {
       thinkingLevel: "off",
       enabledPluginIds: ["marketplace:second"],
     });
-    expect(harness.clients[0]?.bindingExtensionEntries.map(({ id }) => id)).toContain("marketplace:plugin-call");
+    expect(harness.clients[0]?.bindingExtensionEntries.map(({ id }) => id)).toContain("marketplace:run-code");
     await registry.dispose();
 
     const optionsRegistry = new ThreadWorkerRegistry(harness.options);
     await optionsRegistry.attach("project", "thread");
     await expect(optionsRegistry.getSessionPluginOptions("project", "thread")).resolves.toMatchObject({
-      plugins: expect.not.arrayContaining([expect.objectContaining({ id: "marketplace:plugin-call" })]),
+      plugins: expect.not.arrayContaining([expect.objectContaining({ id: "marketplace:run-code" })]),
     });
     await optionsRegistry.dispose();
   });

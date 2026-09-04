@@ -77,6 +77,15 @@ export function LocalPluginDetailContent({
                 移除
               </Button>
             )}
+            <div className="plugin-marketplace-detail-enable-toggle">
+              <span>启用</span>
+              <Switch
+                checked={plugin.configuredEnabled}
+                disabled={mutating}
+                aria-label={`${plugin.displayName} 启用状态`}
+                onCheckedChange={onToggleEnabled}
+              />
+            </div>
           </div>
         </div>
         <span className="plugin-marketplace-detail-muted">{plugin.displayPath ?? "本地扩展入口"}</span>
@@ -120,18 +129,6 @@ export function LocalPluginDetailContent({
                   <dd>{plugin.configuredEnabled ? "是" : "否"}</dd>
                 </div>
               </dl>
-              <div className="plugin-local-detail-toggle">
-                <div>
-                  <strong>启用此插件</strong>
-                  <span>停用后新会话不再加载此插件。</span>
-                </div>
-                <Switch
-                  checked={plugin.configuredEnabled}
-                  disabled={mutating}
-                  aria-label={`${plugin.displayName} 启用状态`}
-                  onCheckedChange={onToggleEnabled}
-                />
-              </div>
             </section>
 
             <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-risks">

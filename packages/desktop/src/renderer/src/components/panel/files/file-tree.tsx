@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { FileNode } from "../../../../../shared/contracts.ts";
 import {
+  buildFileTreeRows,
   buildFileTreeStickyModel,
   type FileTreeRow,
   fileTreeKeyNavigation,
@@ -39,6 +40,10 @@ interface FileTreeProps {
   onCut?(node: FileNode): void;
   /** 键盘粘贴到当前聚焦节点对应的目录。 */
   onPaste?(node: FileNode): void;
+  /** Resolve visible directory children so compact folder chains are available before expansion. */
+  onResolveDirectory?(node: FileNode): void;
+  /** Keep semantic group roots separate while still compacting descendant directory chains. */
+  compactRoot?: boolean;
   initialScrollTop?: number;
   onScrollTopChange?(scrollTop: number): void;
   depth?: number;
@@ -59,29 +64,6 @@ function hasVisiblePath(
   return false;
 }
 
-/** 把递归树展开成虚拟滚动用的扁平行（目录懒加载时插入 loading 占位行）。 */
-function buildRows(
-  nodes: readonly FileNode[],
-  children: Readonly<Record<string, readonly FileNode[]>>,
-  expanded: ReadonlySet<string>,
-  depth = 0,
-): FileTreeRow[] {
-  const rows: FileTreeRow[] = [];
-  for (const node of nodes) {
-    const open = node.type === "directory" && expanded.has(node.path);
-    rows.push({ kind: "node", path: node.path, depth, open, node });
-    if (node.type === "directory" && open) {
-      const kids = children[node.path];
-      if (kids) {
-        rows.push(...buildRows(kids, children, expanded, depth + 1));
-      } else if (node.hasChildren) {
-        rows.push({ kind: "loading", path: `${node.path}:loading`, depth: depth + 1, open: false });
-      }
-    }
-  }
-  return rows;
-}
-
 /** 虚拟滚动 + 平铺 ARIA tree 的文件树；行高固定，与 VS Code VirtualizedTree 思路一致。 */
 export function FileTree({
   nodes,
@@ -95,11 +77,22 @@ export function FileTree({
   onCopy,
   onCut,
   onPaste,
+  onResolveDirectory,
+  compactRoot = true,
   initialScrollTop = 0,
   onScrollTopChange,
   depth = 0,
 }: FileTreeProps) {
-  const rows = useMemo(() => buildRows(nodes, children, expanded, depth), [children, depth, expanded, nodes]);
+  const rows = useMemo(
+    () => buildFileTreeRows(nodes, children, expanded, depth, compactRoot),
+    [children, compactRoot, depth, expanded, nodes],
+  );
+  useEffect(() => {
+    if (!onResolveDirectory) return;
+    for (const row of rows) {
+      if (row.node?.type === "directory" && children[row.node.path] === undefined) onResolveDirectory(row.node);
+    }
+  }, [children, onResolveDirectory, rows]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoredScroll = useRef(false);
@@ -202,7 +195,12 @@ export function FileTree({
       for (let offset = 1; offset <= rows.length; offset++) {
         const index = (startIndex + offset) % rows.length;
         const row = rows[index];
-        if (row?.kind === "node" && row.node?.name.toLowerCase().startsWith(prefix)) {
+        if (row?.kind !== "node" || !row.node) continue;
+        const label = (row.compressedNodes ?? [row.node])
+          .map((node) => node.name)
+          .join("/")
+          .toLowerCase();
+        if (label.startsWith(prefix)) {
           target = index;
           break;
         }

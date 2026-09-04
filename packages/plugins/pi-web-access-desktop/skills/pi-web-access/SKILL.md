@@ -5,7 +5,7 @@ description: Search, verify, fetch, and retrieve web content through the Desktop
 
 # Web Access Plugin
 
-Use the `pi.web-access` plugin through `plugin_call`. Read `references/api.md` for the complete method schemas.
+Use the `pi.web-access` plugin through `run_code`. Read `references/api.md` for the complete method schemas.
 
 ```ts
 const result = await plugin["pi.web-access"].web_search({

@@ -6,6 +6,7 @@ import type {
   WorkbenchTab,
   WorkbenchTerminalTab,
 } from "../../../shared/contracts.ts";
+import { FILES_PANEL_KIND, PROJECT_PANEL_KIND, SCM_PANEL_KIND } from "../components/panel/builtin-panel-kinds.ts";
 import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useSessionCacheRecords } from "./session-cache-context.tsx";
 
@@ -54,6 +55,27 @@ export type WorkbenchTabAction =
 export type WorkbenchTabStatesAction =
   | { type: "session"; sessionKey: string; action: WorkbenchTabAction }
   | { type: "prune"; keep: ReadonlySet<string> };
+
+function normalizePanelKind(panel: string): string {
+  return panel === FILES_PANEL_KIND || panel === SCM_PANEL_KIND ? PROJECT_PANEL_KIND : panel;
+}
+
+function normalizeRestoredTabs(tabs: readonly WorkbenchTab[], activeKey: string | null): WorkbenchTabState {
+  const normalized: WorkbenchTab[] = [];
+  const seen = new Set<string>();
+  for (const tab of tabs) {
+    const next =
+      tab.kind === "panel" && normalizePanelKind(tab.panel) !== tab.panel ? { ...tab, panel: PROJECT_PANEL_KIND } : tab;
+    const key = workbenchTabKey(next);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(next);
+  }
+  const normalizedActiveKey = activeKey?.startsWith("panel:")
+    ? workbenchPanelTabKey(normalizePanelKind(activeKey.slice("panel:".length)))
+    : activeKey;
+  return { tabs: normalized, activeKey: normalizedActiveKey };
+}
 
 export const WORKBENCH_TAB_INITIAL_STATE: WorkbenchTabState = {
   tabs: [],
@@ -111,7 +133,7 @@ export function reduceWorkbenchTabState(state: WorkbenchTabState, action: Workbe
         state.tabs.length === action.tabs.length &&
         state.tabs.every((tab, index) => workbenchTabKey(tab) === workbenchTabKey(action.tabs[index]!));
       if (same) return state;
-      return { tabs: [...action.tabs], activeKey: action.activeKey };
+      return normalizeRestoredTabs(action.tabs, action.activeKey);
     }
   }
 }
@@ -206,6 +228,16 @@ export function WorkbenchTabProvider({ children }: { children: ReactNode }) {
       const tryHydrate = () => {
         const workbench = record.stores.workbench.getSnapshot();
         if (!workbench) return;
+        const activePanel = workbench.activeTabKey?.startsWith("panel:")
+          ? workbench.activeTabKey.slice("panel:".length)
+          : null;
+        if (!workbench.projectPanelView && activePanel === SCM_PANEL_KIND) {
+          const next = { ...workbench, projectPanelView: "scm" as const };
+          record.stores.workbench.replace(next);
+          void window.desktop.workbench.update(next).catch((error: unknown) => {
+            console.error("Workbench project panel migration failed", error);
+          });
+        }
         const local = statesRef.current[record.key];
         if (local) {
           // store 已被其他写入方（如 attach 重灌）改回旧值且与本地不一致时回写；

@@ -274,8 +274,8 @@ export interface PiPluginSubCallRecord {
   progress?: JsonValue;
 }
 
-export interface PiPluginCallArtifact {
-  kind: "plugin-call";
+export interface PiRunCodeArtifact {
+  kind: "run-code";
   description: string;
   generation: string;
   calls: PiPluginSubCallRecord[];
@@ -294,7 +294,7 @@ export interface PiPluginCallArtifact {
   truncation?: { logs?: true; calls?: true; attachments?: true };
 }
 
-export interface OpenPluginCallArtifactInput {
+export interface OpenRunCodeArtifactInput {
   projectId: string;
   threadId: string;
   toolCallId: string;
@@ -311,7 +311,7 @@ export interface PiToolCallPart {
   execution: "streaming-args" | "waiting" | "running" | "complete" | "error";
   partialResult?: JsonValue;
   result?: JsonValue;
-  pluginCall?: PiPluginCallArtifact;
+  runCode?: PiRunCodeArtifact;
   isError?: boolean;
 }
 
@@ -724,6 +724,16 @@ export interface WorkbenchState {
   expandedPaths: string[];
   /** 审查面板的 tab、树和 diff 视图状态。 */
   scm?: ScmWorkbenchState;
+  /** 左侧项目视图容器当前显示的视图。 */
+  projectPanelView?: "files" | "scm";
+  /** 左侧项目文件树或审查树是否展开。 */
+  projectPanelSidebarOpen?: boolean;
+  /** 共享文档 tab 当前激活项（file:path 或 diff:staged:path）。 */
+  projectPanelActiveTab?: string;
+  /** 共享 Editor Group 中 tab 的显示顺序。 */
+  projectPanelTabs?: string[];
+  /** 共享 Editor Group 中 tab 的最近使用顺序，首项为最近激活项。 */
+  projectPanelMru?: string[];
   /** 已打开的 workbench panel tab（会话/面板）；由渲染进程写入，跨刷新/重启持久化。 */
   tabs?: WorkbenchTab[];
   /** 当前选中的 tab 键；null 表示展示新建 Panel 缺省页。 */

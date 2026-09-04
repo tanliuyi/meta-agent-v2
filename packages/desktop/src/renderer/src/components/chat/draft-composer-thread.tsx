@@ -55,6 +55,7 @@ export function DraftComposerThread({ compact = false, error, diagnostics = [], 
                     key={`${diagnostic.extensionId}:${diagnostic.phase}:${diagnostic.code}`}
                     tone={feedback.tone}
                     message={diagnostic.message}
+                    action={feedback.showPluginCenter ? <a href="/plugins">查看</a> : undefined}
                   />
                 );
               })}
@@ -68,9 +69,10 @@ export function DraftComposerThread({ compact = false, error, diagnostics = [], 
 
 function extensionDiagnosticFeedback(diagnostic: DesktopExtensionDiagnostic): {
   tone: ComposerFeedbackTone;
+  showPluginCenter?: boolean;
 } {
   if (diagnostic.code === "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT") {
-    return { tone: "info" };
+    return { tone: "info", showPluginCenter: true };
   }
   if (diagnostic.code === "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE") {
     return { tone: "error" };

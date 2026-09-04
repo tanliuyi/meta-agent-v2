@@ -5,12 +5,12 @@ import { Compile } from "typebox/compile";
 import type { JsonValue } from "../../../shared/contracts.ts";
 import type {
   DesktopExtensionSource,
-  DesktopPluginMethodDefinition,
   PluginApiCatalogV1,
+  PluginMethodExecutionContext,
   ResolvedExtensionEntry,
 } from "../../../shared/desktop-extension-contracts.ts";
-import { normalizePluginSchema } from "../extensions/legacy-plugin-adapter.ts";
-import { canonicalJson, snapshotJson } from "./plugin-call-json.ts";
+import { normalizePluginSchema } from "./plugin-schema.ts";
+import { canonicalJson, snapshotJson } from "./run-code-json.ts";
 
 const PLUGIN_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const METHOD_NAME_PATTERN = /^[a-z][A-Za-z0-9_]*$/;
@@ -49,6 +49,11 @@ const MAX_METHOD_DESCRIPTION_LENGTH = 4_096;
 const CAPTURED_TOOL_RESULT_SCHEMA = Type.Object({ text: Type.String() }, { additionalProperties: false });
 
 type CapturedPluginTool = ToolDefinition<TSchema, unknown, unknown>;
+type PluginMethodExecute = (
+  params: JsonValue,
+  signal: AbortSignal,
+  context: PluginMethodExecutionContext,
+) => Promise<unknown>;
 
 export interface RegisteredDesktopPluginMethod {
   readonly pluginId: string;
@@ -60,7 +65,7 @@ export interface RegisteredDesktopPluginMethod {
   readonly concurrency: "serial" | "parallel";
   readonly parameters: object;
   readonly result: object;
-  readonly execute: DesktopPluginMethodDefinition["execute"];
+  readonly execute: PluginMethodExecute;
   readonly prepareArguments?: (args: unknown) => unknown;
   readonly validateParameters: (value: unknown) => boolean;
   readonly validateResult: (value: unknown) => boolean;
@@ -71,8 +76,7 @@ export type PluginMethodRegistry = ReadonlyMap<string, ReadonlyMap<string, Regis
 interface StagedPlugin {
   entryId: string;
   pluginId: string;
-  catalog?: PluginApiCatalogV1;
-  kind: "declaration" | "tools";
+  catalog: PluginApiCatalogV1;
   methods: RegisteredDesktopPluginMethod[];
 }
 
@@ -81,29 +85,12 @@ export class DesktopPluginRegistryBuilder {
   private readonly pending = new Map<string, StagedPlugin>();
   private state: "active" | "discarded" = "active";
 
-  stage(entry: ResolvedExtensionEntry, declaration: unknown): void {
-    this.assertActive();
-    const { pluginId, catalog } = this.requirePluginMetadata(entry);
-    const root = readPlainObject(declaration, ["schemaVersion", "methods"]);
-    if (root.schemaVersion !== 1 || !Array.isArray(root.methods) || root.methods.length === 0) {
-      throw new Error("PLUGIN_DECLARATION_INVALID");
-    }
-    const methods = root.methods.map((value) => this.stageMethod(entry, pluginId, value));
-    if (new Set(methods.map((method) => method.name)).size !== methods.length) {
-      throw new Error("PLUGIN_DUPLICATE_METHOD");
-    }
-    this.pending.set(entry.id, { entryId: entry.id, pluginId, catalog, kind: "declaration", methods });
-  }
-
   stageTool(entry: ResolvedExtensionEntry, value: unknown): void {
     this.assertActive();
     const existing = this.pending.get(entry.id);
     const { pluginId, catalog } = existing ?? this.requirePluginMetadata(entry);
     const tool = validateCapturedTool(value);
-    const staged =
-      existing?.kind === "tools"
-        ? existing
-        : { entryId: entry.id, pluginId, catalog, kind: "tools" as const, methods: [] };
+    const staged = existing ?? { entryId: entry.id, pluginId, catalog, methods: [] };
     if (staged.pluginId !== pluginId || staged.methods.some((method) => method.name === tool.name)) {
       throw new Error("PLUGIN_DUPLICATE_METHOD");
     }
@@ -111,21 +98,10 @@ export class DesktopPluginRegistryBuilder {
     this.pending.set(entry.id, staged);
   }
 
-  registerRuntimeTool(entry: ResolvedExtensionEntry, value: unknown): PluginMethodRegistry {
-    this.assertActive();
-    const { pluginId } = this.requirePluginMetadata(entry);
-    const committed = this.committed.get(pluginId);
-    if (!committed || committed.entryId !== entry.id) throw new Error("PLUGIN_GENERATION_STALE");
-    const tool = validateCapturedTool(value);
-    if (committed.methods.some((method) => method.name === tool.name)) throw new Error("PLUGIN_DUPLICATE_METHOD");
-    committed.methods.push(this.stageCapturedTool(entry, pluginId, tool));
-    return this.snapshot();
-  }
-
   commit(entryId: string): void {
     this.assertActive();
     const staged = this.pending.get(entryId);
-    if (!staged) return;
+    if (!staged) throw new Error("PLUGIN_DECLARATION_INVALID");
     const existing = this.committed.get(staged.pluginId);
     if (existing && existing.entryId !== entryId) throw new Error("PLUGIN_DUPLICATE_ID");
     this.validateCatalog(staged);
@@ -135,6 +111,13 @@ export class DesktopPluginRegistryBuilder {
 
   rollback(entryId: string): void {
     this.pending.delete(entryId);
+  }
+
+  /** 为资源重载开始新的插件捕获批次，避免复用上一批闭包。 */
+  clear(): void {
+    this.assertActive();
+    this.pending.clear();
+    this.committed.clear();
   }
 
   finalize(): PluginMethodRegistry {
@@ -149,41 +132,6 @@ export class DesktopPluginRegistryBuilder {
     this.state = "discarded";
   }
 
-  private stageMethod(entry: ResolvedExtensionEntry, pluginId: string, value: unknown): RegisteredDesktopPluginMethod {
-    const method = readPlainObject(value, ["name", "description", "parameters", "result", "concurrency", "execute"]);
-    if (
-      typeof method.name !== "string" ||
-      method.name.length > 64 ||
-      !METHOD_NAME_PATTERN.test(method.name) ||
-      FORBIDDEN_METHOD_NAMES.has(method.name) ||
-      typeof method.description !== "string" ||
-      method.description.length === 0 ||
-      method.description.length > MAX_METHOD_DESCRIPTION_LENGTH ||
-      (method.concurrency !== undefined && method.concurrency !== "serial" && method.concurrency !== "parallel") ||
-      typeof method.execute !== "function"
-    ) {
-      throw new Error("PLUGIN_DECLARATION_INVALID");
-    }
-    const parameters = validatePluginSchemaProfile(method.parameters, true);
-    const result = validatePluginSchemaProfile(method.result, false);
-    const parametersValidator = Compile(parameters as TSchema);
-    const resultValidator = Compile(result as TSchema);
-    return Object.freeze({
-      pluginId,
-      primarySkill: entry.pluginCallSkill ?? entry.id,
-      entryId: entry.id,
-      source: entry.source,
-      name: method.name,
-      description: method.description,
-      concurrency: method.concurrency ?? "serial",
-      parameters,
-      result,
-      execute: method.execute as DesktopPluginMethodDefinition["execute"],
-      validateParameters: (candidate: unknown) => parametersValidator.Check(candidate),
-      validateResult: (candidate: unknown) => resultValidator.Check(candidate),
-    });
-  }
-
   private stageCapturedTool(
     entry: ResolvedExtensionEntry,
     pluginId: string,
@@ -193,7 +141,7 @@ export class DesktopPluginRegistryBuilder {
     const result = validatePluginSchemaProfile(CAPTURED_TOOL_RESULT_SCHEMA, false);
     const parametersValidator = Compile(tool.parameters);
     const resultValidator = Compile(result as TSchema);
-    const execute: DesktopPluginMethodDefinition["execute"] = async (params, signal, context) => {
+    const execute: PluginMethodExecute = async (params, signal, context) => {
       const extensionContext = context.toolContext as ExtensionContext | undefined;
       if (!extensionContext) throw new Error("Plugin extension context is unavailable");
       const toolResult = await tool.execute(
@@ -215,7 +163,7 @@ export class DesktopPluginRegistryBuilder {
     };
     return Object.freeze({
       pluginId,
-      primarySkill: entry.pluginCallSkill ?? entry.id,
+      primarySkill: entry.runCodeSkill ?? entry.id,
       entryId: entry.id,
       source: entry.source,
       name: tool.name,
@@ -232,47 +180,48 @@ export class DesktopPluginRegistryBuilder {
 
   private requirePluginMetadata(entry: ResolvedExtensionEntry): {
     pluginId: string;
-    catalog?: PluginApiCatalogV1;
+    catalog: PluginApiCatalogV1;
   } {
     const pluginId = entry.pluginId ?? entry.id;
     if (
       !pluginId ||
       !PLUGIN_ID_PATTERN.test(pluginId) ||
-      (!entry.capabilities.includes("plugin-methods.provide") && !entry.capabilities.includes("tools.register"))
+      !entry.capabilities.includes("plugin-methods.provide") ||
+      !entry.runCodeSkill ||
+      !entry.runCodeCatalog
     ) {
       throw new Error("PLUGIN_DECLARATION_UNAUTHORIZED");
     }
     return {
       pluginId,
-      ...(entry.pluginCallCatalog ? { catalog: parsePluginApiCatalog(entry.pluginCallCatalog) } : {}),
+      catalog: parsePluginApiCatalog(entry.runCodeCatalog),
     };
   }
 
   private validateCatalog(staged: StagedPlugin): void {
     if (staged.methods.length === 0) throw new Error("PLUGIN_DECLARATION_INVALID");
-    if (!staged.catalog) return;
     if (staged.catalog.pluginId !== staged.pluginId) {
       throw new Error("PLUGIN_CATALOG_DRIFT");
     }
-    const catalogMethods = staged.catalog.methods.map((value) => normalizeCatalogMethod(value));
-    if (staged.kind === "tools") {
-      const documentedNames = new Set(catalogMethods.map((method) => method.name));
-      if (staged.methods.some((method) => !documentedNames.has(method.name))) throw new Error("PLUGIN_CATALOG_DRIFT");
-      return;
-    }
-    const methods = staged.methods.map(({ name, description, parameters, result, concurrency }) => ({
-      name,
-      description,
-      parameters,
-      result,
-      concurrency,
-    }));
-    if (
-      catalogMethods.length !== methods.length ||
-      canonicalJson([...catalogMethods].sort((left, right) => left.name.localeCompare(right.name))) !==
-        canonicalJson([...methods].sort((left, right) => left.name.localeCompare(right.name)))
-    ) {
-      throw new Error("PLUGIN_CATALOG_DRIFT");
+    const catalogMethods = new Map(
+      staged.catalog.methods.map((value) => {
+        const method = normalizeCatalogMethod(value);
+        return [
+          method.name,
+          {
+            name: method.name,
+            parameters: method.parameters,
+            result: method.result,
+            concurrency: method.concurrency,
+          },
+        ] as const;
+      }),
+    );
+    for (const { name, parameters, result, concurrency } of staged.methods) {
+      const catalogMethod = catalogMethods.get(name);
+      if (!catalogMethod || canonicalJson(catalogMethod) !== canonicalJson({ name, parameters, result, concurrency })) {
+        throw new Error("PLUGIN_CATALOG_DRIFT");
+      }
     }
   }
 

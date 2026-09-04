@@ -56,7 +56,7 @@ import type {
   HostResponse,
   OfficeDocumentPreview,
   OpenLinkResult,
-  OpenPluginCallArtifactInput,
+  OpenRunCodeArtifactInput,
   PdfDocumentPreview,
   Project,
   SessionAttachInput,
@@ -315,7 +315,7 @@ export interface DesktopApi {
     respond(projectId: string, threadId: string, response: HostResponse): Promise<void>;
     /** 按 attachment 租约读取 timeline 引用的图像资源主体；主体仅经此通道返回，不进 timeline。 */
     readImageResource(attachmentId: string, resourceId: string): Promise<SessionImageResource | undefined>;
-    openPluginCallArtifact(input: OpenPluginCallArtifactInput): Promise<void>;
+    openRunCodeArtifact(input: OpenRunCodeArtifactInput): Promise<void>;
   };
   scm: {
     getSnapshot(projectId: string): Promise<ScmSnapshot>;

@@ -9,8 +9,8 @@ import {
   extensionLoadDiagnostics,
   validateResolvedExtensionSet,
 } from "../src/main/pi/desktop-extension-runtime-policy.ts";
-import { PluginCallRegistryHolder } from "../src/main/pi/plugin-call/plugin-call-tool.ts";
-import { DesktopPluginRegistryBuilder } from "../src/main/pi/plugin-call/plugin-method-registry.ts";
+import { DesktopPluginRegistryBuilder } from "../src/main/pi/run-code/plugin-method-registry.ts";
+import { RunCodeRegistryHolder } from "../src/main/pi/run-code/run-code-tool.ts";
 
 const tempDirs: string[] = [];
 
@@ -78,7 +78,21 @@ describe("desktop controlled Pi resources", () => {
       displayName: "Captured plugin",
       source: "builtin" as const,
       hostProfileVersion: 1 as const,
-      capabilities: ["tools.register" as const],
+      capabilities: ["plugin-methods.provide" as const],
+      runCodeSkill: "captured-plugin",
+      runCodeCatalog: {
+        schemaVersion: 1 as const,
+        pluginId: "captured-plugin",
+        methods: [
+          {
+            name: "hidden_action",
+            description: "x".repeat(4_000),
+            parameters: parameters as never,
+            result: Type.Object({ text: Type.String() }, { additionalProperties: false }) as never,
+            concurrency: "serial" as const,
+          },
+        ],
+      },
     };
     const set = {
       generation: "capture-tools",
@@ -88,7 +102,7 @@ describe("desktop controlled Pi resources", () => {
       resolvedAt: 0,
     };
     const builder = new DesktopPluginRegistryBuilder();
-    const holder = new PluginCallRegistryHolder(set.generation);
+    const holder = new RunCodeRegistryHolder(set.generation);
     const services = await createAgentSessionServices({
       cwd: process.cwd(),
       resourceLoaderOptions: controlledResourceLoaderOptions(
@@ -100,7 +114,7 @@ describe("desktop controlled Pi resources", () => {
               pi.registerTool({
                 name: "hidden_action",
                 label: "Hidden action",
-                description: "x".repeat(5_704),
+                description: "x".repeat(4_000),
                 parameters,
                 async execute() {
                   return { content: [{ type: "text", text: "ok" }], details: {} };
@@ -130,8 +144,79 @@ describe("desktop controlled Pi resources", () => {
     const registeredNames = services.resourceLoader
       .getExtensions()
       .extensions.flatMap((extension) => [...extension.tools.keys()]);
-    expect(registeredNames.sort()).toEqual(["native_helper", "plugin_call"]);
+    expect(registeredNames.sort()).toEqual(["native_helper", "run_code"]);
     expect(builder.finalize().get("captured-plugin")?.has("hidden_action")).toBe(true);
+    await holder.dispose();
+  });
+
+  it("rejects tool registration after a plugin factory completes", async () => {
+    let registerLater: (() => void) | undefined;
+    const entry = {
+      id: "late-plugin",
+      displayName: "Late plugin",
+      source: "builtin" as const,
+      hostProfileVersion: 1 as const,
+      capabilities: ["plugin-methods.provide" as const],
+      runCodeSkill: "late-plugin",
+      runCodeCatalog: {
+        schemaVersion: 1 as const,
+        pluginId: "late-plugin",
+        methods: [
+          {
+            name: "initial",
+            description: "Initial method",
+            parameters: Type.Object({}, { additionalProperties: false }) as never,
+            result: Type.Object({ text: Type.String() }, { additionalProperties: false }) as never,
+            concurrency: "serial" as const,
+          },
+        ],
+      },
+    };
+    const builder = new DesktopPluginRegistryBuilder();
+    const holder = new RunCodeRegistryHolder("late-generation");
+    await createAgentSessionServices({
+      cwd: process.cwd(),
+      resourceLoaderOptions: controlledResourceLoaderOptions(
+        {
+          generation: "late-generation",
+          projectId: "project",
+          entries: [entry],
+          diagnostics: [],
+          resolvedAt: 0,
+        },
+        [
+          {
+            name: "desktop:late-plugin",
+            factory(pi) {
+              pi.registerTool({
+                name: "initial",
+                label: "Initial",
+                description: "Initial method",
+                parameters: Type.Object({}, { additionalProperties: false }),
+                async execute() {
+                  return { content: [{ type: "text", text: "ok" }] };
+                },
+              });
+              registerLater = () =>
+                pi.registerTool({
+                  name: "late",
+                  label: "Late",
+                  description: "Late method",
+                  parameters: Type.Object({}, { additionalProperties: false }),
+                  async execute() {
+                    return { content: [{ type: "text", text: "late" }] };
+                  },
+                });
+            },
+          },
+        ],
+        { pluginRegistry: holder, pluginRegistryBuilder: builder },
+      ),
+    });
+
+    expect(registerLater).toBeTypeOf("function");
+    expect(registerLater).toThrow("registered a tool after its factory completed");
+    expect(builder.finalize().get("late-plugin")?.has("late")).toBe(false);
     await holder.dispose();
   });
 

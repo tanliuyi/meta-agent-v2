@@ -20,15 +20,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { TSchema } from "typebox";
-import { Type } from "typebox";
-import type {
-  DesktopPluginModuleExport,
-  PluginMethodExecutionContext,
-} from "../../../../shared/desktop-extension-contracts.ts";
-import { createLegacyPluginCatalog, type LegacyPluginTool, normalizePluginSchema } from "../legacy-plugin-adapter.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
 import { isDatabaseMigrationPending } from "./extension-root-migration.ts";
 import { registerConsolidateCommand, triggerConsolidation } from "./handlers/auto-consolidate.ts";
@@ -60,7 +52,7 @@ import { SkillStore } from "./store/skill-store.ts";
 import { registerMemorySearchTool } from "./tools/memory-search-tool.ts";
 import { registerMemoryTool } from "./tools/memory-tool.ts";
 import { registerSessionSearchTool } from "./tools/session-search-tool.ts";
-import { registerSkillTool, SKILL_TOOL_PARAMETERS } from "./tools/skill-tool.ts";
+import { registerSkillTool } from "./tools/skill-tool.ts";
 
 export function resolveProjectSkillDiscovery(
   skillStore: SkillStore,
@@ -89,140 +81,9 @@ export function registerProjectSkillDiscoveryHandler(
 export interface HermesMemoryExtensionOptions {
   disableChildProcesses?: boolean;
   programmaticSubagent?: boolean;
-  captureTool?: (tool: unknown) => void;
 }
-
-const hermesTools = new Map<string, LegacyPluginTool>();
-
-export function captureHermesPluginTool(tool: unknown): void {
-  if (!tool || typeof tool !== "object") return;
-  const candidate = tool as { name?: unknown; execute?: unknown };
-  if (typeof candidate.name === "string" && typeof candidate.execute === "function") {
-    hermesTools.set(candidate.name, tool as LegacyPluginTool);
-  }
-}
-
-const hermesResultSchema = Type.Object({ text: Type.String() }, { additionalProperties: false });
-const memoryParameters = Type.Object(
-  {
-    action: Type.Union([Type.Literal("add"), Type.Literal("replace"), Type.Literal("remove")]),
-    target: Type.Union([
-      Type.Literal("memory"),
-      Type.Literal("user"),
-      Type.Literal("project"),
-      Type.Literal("failure"),
-    ]),
-    content: Type.Optional(Type.String()),
-    old_text: Type.Optional(Type.String()),
-    category: Type.Optional(
-      Type.Union([
-        Type.Literal("failure"),
-        Type.Literal("correction"),
-        Type.Literal("insight"),
-        Type.Literal("preference"),
-        Type.Literal("convention"),
-        Type.Literal("tool-quirk"),
-      ]),
-    ),
-    failure_reason: Type.Optional(Type.String()),
-  },
-  { additionalProperties: false },
-);
-const memorySearchParameters = Type.Object(
-  {
-    query: Type.String({ minLength: 1 }),
-    project: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
-    target: Type.Optional(Type.Union([Type.Literal("memory"), Type.Literal("user"), Type.Literal("failure")])),
-    category: Type.Optional(
-      Type.Union([
-        Type.Literal("failure"),
-        Type.Literal("correction"),
-        Type.Literal("insight"),
-        Type.Literal("preference"),
-        Type.Literal("convention"),
-        Type.Literal("tool-quirk"),
-      ]),
-    ),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-  },
-  { additionalProperties: false },
-);
-const sessionSearchParameters = Type.Object(
-  {
-    query: Type.Optional(Type.String({ minLength: 1 })),
-    project: Type.Optional(Type.String()),
-    role: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("assistant")])),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-    snippetChars: Type.Optional(Type.Integer({ minimum: 100, maximum: 20_000 })),
-    markdown: Type.Optional(Type.String({ minLength: 1 })),
-  },
-  { additionalProperties: false, minProperties: 1 },
-);
-
-async function executeHermesTool(
-  name: string,
-  params: unknown,
-  signal: AbortSignal,
-  ctx: PluginMethodExecutionContext,
-) {
-  const tool = hermesTools.get(name);
-  const extensionContext = ctx.toolContext as ExtensionContext | undefined;
-  if (!tool || !extensionContext) throw new Error(`Hermes method ${name} is not initialized`);
-  const result = await tool.execute(ctx.callId, params, signal, undefined, extensionContext);
-  return {
-    text: result.content
-      .filter((part) => part.type === "text")
-      .map((part) => part.text)
-      .join("\\n"),
-  };
-}
-
-const hermesPluginMethods = [
-  {
-    name: "memory",
-    description: "Save or manage persistent memory.",
-    parameters: memoryParameters,
-    result: hermesResultSchema,
-    concurrency: "serial" as const,
-    execute: (params: unknown, signal: AbortSignal, ctx: PluginMethodExecutionContext) =>
-      executeHermesTool("memory", params, signal, ctx),
-  },
-  {
-    name: "memory_search",
-    description: "Search persistent memory.",
-    parameters: memorySearchParameters,
-    result: hermesResultSchema,
-    concurrency: "serial" as const,
-    execute: (params: unknown, signal: AbortSignal, ctx: PluginMethodExecutionContext) =>
-      executeHermesTool("memory_search", params, signal, ctx),
-  },
-  {
-    name: "session_search",
-    description: "Search prior session records.",
-    parameters: sessionSearchParameters,
-    result: hermesResultSchema,
-    concurrency: "serial" as const,
-    execute: (params: unknown, signal: AbortSignal, ctx: PluginMethodExecutionContext) =>
-      executeHermesTool("session_search", params, signal, ctx),
-  },
-  {
-    name: "skill_manage",
-    description: "Create, inspect, update, or delete reusable skills.",
-    parameters: normalizePluginSchema(SKILL_TOOL_PARAMETERS) as TSchema,
-    result: hermesResultSchema,
-    concurrency: "serial" as const,
-    execute: (params: unknown, signal: AbortSignal, ctx: PluginMethodExecutionContext) =>
-      executeHermesTool("skill_manage", params, signal, ctx),
-  },
-];
-
-export const desktopPlugin: DesktopPluginModuleExport = { schemaVersion: 1, methods: hermesPluginMethods };
-export const pluginCallCatalog = createLegacyPluginCatalog("pi-hermes-memory", hermesPluginMethods);
 
 export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions = {}) {
-  pi.on("resources_discover", async () => ({
-    skillPaths: [fileURLToPath(new URL("./skills/pi-hermes-memory/SKILL.md", import.meta.url))],
-  }));
   const config = {
     ...loadConfig(),
     ...(options.disableChildProcesses || options.programmaticSubagent ? { childProcessDisabled: true } : {}),
@@ -235,15 +96,6 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
         }
       : {}),
   };
-
-  const toolRegistrationApi = options.captureTool
-    ? (new Proxy(pi, {
-        get(target, property, receiver) {
-          if (property === "registerTool") return options.captureTool;
-          return Reflect.get(target, property, receiver);
-        },
-      }) as ExtensionAPI)
-    : pi;
 
   const agentRoot = AGENT_ROOT;
   const { globalDir, legacyGlobalDir, shouldMigrateLegacyRoot } = resolveGlobalMemoryRoot(config.memoryDir, agentRoot);
@@ -349,10 +201,10 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
   });
 
   // ── 3. Register the memory tool (with project store + SQLite sync) ──
-  registerMemoryTool(toolRegistrationApi, store, projectStore, dbManager, projectName);
+  registerMemoryTool(pi, store, projectStore, dbManager, projectName);
 
   // ── 4. Register the skill tool ──
-  registerSkillTool(toolRegistrationApi, skillStore);
+  registerSkillTool(pi, skillStore);
 
   // ── 5. Setup background learning loop (with tool-call-aware nudge) ──
   setupBackgroundReview(pi, store, projectStore, config, {
@@ -391,8 +243,8 @@ export default function (pi: ExtensionAPI, options: HermesMemoryExtensionOptions
   });
 
   // ── 10. SQLite session search + extended memory ──
-  registerSessionSearchTool(toolRegistrationApi, dbManager, config.sessionSearch ?? { variant: "legacy" });
-  registerMemorySearchTool(toolRegistrationApi, dbManager);
+  registerSessionSearchTool(pi, dbManager, config.sessionSearch ?? { variant: "legacy" });
+  registerMemorySearchTool(pi, dbManager);
 
   // ── 11. Auto-index session on shutdown ──
   // Registered last, so this runs after the session-flush shutdown handler and

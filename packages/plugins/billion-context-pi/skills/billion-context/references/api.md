@@ -1,11 +1,11 @@
 # Billion Context API
 
-All methods are called inside one `plugin_call` program through `plugin["pi.billion-context"]`.
+All methods are native Pi tools and are called directly by name.
 
 ## `compress`
 
 ```ts
-await plugin["pi.billion-context"].compress({
+await compress({
   topic?: string,
   content: Array<{
     startId: string,
@@ -20,7 +20,7 @@ await plugin["pi.billion-context"].compress({
 ## `decompress`
 
 ```ts
-await plugin["pi.billion-context"].decompress({
+await decompress({
   blockId: string,
   full?: boolean,
   toFile?: string,
@@ -31,7 +31,7 @@ await plugin["pi.billion-context"].decompress({
 ## `search_context`
 
 ```ts
-await plugin["pi.billion-context"].search_context({
+await search_context({
   query: string,
   limit?: number,
 });
@@ -40,7 +40,7 @@ await plugin["pi.billion-context"].search_context({
 ## `acp_status`
 
 ```ts
-await plugin["pi.billion-context"].acp_status({
+await acp_status({
   scope?: "compressed" | "uncompressed",
   view?: "ranges" | "messages",
   tool?: string,

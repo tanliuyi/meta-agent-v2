@@ -2,68 +2,125 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
-import { Value } from "typebox/value";
 import { describe, expect, test } from "vitest";
-import {
-  pluginCallCatalog as browserCatalog,
-  desktopPlugin as browserPlugin,
-} from "../src/main/pi/extensions/pi-browser/index.ts";
-import {
-  pluginCallCatalog as hermesCatalog,
-  desktopPlugin as hermesPlugin,
-} from "../src/main/pi/extensions/pi-hermes-memory/index.ts";
-import {
-  pluginCallCatalog as subagentsCatalog,
-  desktopPlugin as subagentsPlugin,
-} from "../src/main/pi/extensions/pi-subagents/index.ts";
-import { DEFAULT_PLUGIN_CALL_LIMITS } from "../src/main/pi/plugin-call/plugin-call-limits.ts";
-import { executePluginProgram, PluginCallRunManager } from "../src/main/pi/plugin-call/plugin-call-runtime.ts";
-import { PluginMethodDispatcher } from "../src/main/pi/plugin-call/plugin-method-dispatcher.ts";
+import { PluginMethodDispatcher } from "../src/main/pi/run-code/plugin-method-dispatcher.ts";
 import {
   DesktopPluginRegistryBuilder,
+  type RegisteredDesktopPluginMethod,
   validatePluginSchemaProfile,
-} from "../src/main/pi/plugin-call/plugin-method-registry.ts";
+} from "../src/main/pi/run-code/plugin-method-registry.ts";
+import { normalizePluginError } from "../src/main/pi/run-code/run-code-errors.ts";
+import { DEFAULT_RUN_CODE_LIMITS } from "../src/main/pi/run-code/run-code-limits.ts";
+import { executePluginProgram, RunCodeRunManager } from "../src/main/pi/run-code/run-code-runtime.ts";
 import type { PluginMethodExecutionContext } from "../src/shared/desktop-extension-contracts.ts";
 
-describe("plugin call runtime", () => {
-  test("builtin plugin declarations pass the closed schema profile", () => {
-    const builtins = [
-      { id: "pi-browser", declaration: browserPlugin, catalog: browserCatalog },
-      { id: "pi-hermes-memory", declaration: hermesPlugin, catalog: hermesCatalog },
-      { id: "pi-subagents", declaration: subagentsPlugin, catalog: subagentsCatalog },
-    ];
-    for (const builtin of builtins) {
-      const builder = new DesktopPluginRegistryBuilder();
-      const entry = {
-        id: `builtin:${builtin.id}`,
-        displayName: builtin.id,
-        source: "builtin" as const,
-        hostProfileVersion: 1 as const,
-        capabilities: ["plugin-methods.provide" as const],
-        pluginId: builtin.id,
-        pluginCallSkill: builtin.id,
-        pluginCallCatalog: builtin.catalog,
-      };
-      builder.stage(entry, builtin.declaration);
-      builder.commit(entry.id);
-      expect(builder.finalize().get(builtin.id)?.size).toBe(builtin.declaration.methods.length);
-    }
+describe("run_code runtime", () => {
+  test("rejects a plugin generation that captures no methods", () => {
+    expect(() => new DesktopPluginRegistryBuilder().commit("empty-plugin")).toThrow("PLUGIN_DECLARATION_INVALID");
   });
 
-  test("session_search plugin-call schema accepts both configured variants", () => {
-    const method = hermesPlugin.methods.find((candidate) => candidate.name === "session_search");
-    expect(method).toBeDefined();
-    if (!method) return;
+  test("accepts a configured catalog subset and rejects methods outside the catalog", () => {
+    const parameters = Type.Object({}, { additionalProperties: false });
+    const result = Type.Object({ text: Type.String() }, { additionalProperties: false });
+    const entry = {
+      id: "development:configurable",
+      displayName: "Configurable",
+      source: "development" as const,
+      hostProfileVersion: 1 as const,
+      capabilities: ["plugin-methods.provide" as const],
+      pluginId: "com.example.configurable",
+      runCodeSkill: "plugin-configurable",
+      runCodeCatalog: {
+        schemaVersion: 1 as const,
+        pluginId: "com.example.configurable",
+        methods: [
+          { name: "active", description: "Static description", parameters, result, concurrency: "serial" as const },
+          { name: "optional", description: "Optional method", parameters, result, concurrency: "serial" as const },
+        ],
+      },
+    };
+    const builder = new DesktopPluginRegistryBuilder();
+    builder.stageTool(entry, {
+      name: "active",
+      label: "Active",
+      description: "Description adjusted by runtime configuration",
+      parameters,
+      async execute() {
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    });
+    builder.commit(entry.id);
+    expect([...builder.finalize().get(entry.pluginId)!.keys()]).toEqual(["active"]);
 
-    expect(Value.Check(method.parameters, { query: "desktop", limit: 10 })).toBe(true);
-    expect(Value.Check(method.parameters, { markdown: "# Session" })).toBe(true);
-    expect(Value.Check(method.parameters, { unexpected: true })).toBe(false);
+    const invalid = new DesktopPluginRegistryBuilder();
+    invalid.stageTool(entry, {
+      name: "unknown",
+      label: "Unknown",
+      description: "Unknown method",
+      parameters,
+      async execute() {
+        return { content: [{ type: "text", text: "no" }] };
+      },
+    });
+    expect(() => invalid.commit(entry.id)).toThrow("PLUGIN_CATALOG_DRIFT");
+  });
+
+  test("clears committed methods before a new capture batch", () => {
+    const parameters = Type.Object({}, { additionalProperties: false });
+    const entry = {
+      id: "development:reloadable",
+      pluginId: "com.example.reloadable",
+      displayName: "Reloadable",
+      source: "development" as const,
+      entryPath: "/tmp/reloadable.ts",
+      hostProfileVersion: 1 as const,
+      capabilities: ["plugin-methods.provide" as const],
+      runCodeSkill: "reloadable",
+      runCodeCatalog: {
+        schemaVersion: 1 as const,
+        pluginId: "com.example.reloadable",
+        methods: [
+          {
+            name: "run",
+            description: "Run",
+            parameters,
+            result: Type.Object({ text: Type.String() }, { additionalProperties: false }),
+            concurrency: "serial" as const,
+          },
+        ],
+      },
+    };
+    const builder = new DesktopPluginRegistryBuilder();
+    builder.stageTool(entry, {
+      name: "run",
+      label: "Run",
+      description: "Run",
+      parameters,
+      async execute() {
+        return { content: [{ type: "text", text: "old" }] };
+      },
+    });
+    builder.commit(entry.id);
+    expect(builder.finalize().get(entry.pluginId)).toBeDefined();
+
+    builder.clear();
+
+    expect(builder.finalize()).toEqual(new Map());
+  });
+
+  test("normalizes unknown plugin error codes to the supplied fallback", () => {
+    const normalized = normalizePluginError(
+      Object.assign(new Error("unexpected"), { code: "PLUGIN_UNKNOWN" }),
+      "PLUGIN_CODE_EXCEPTION",
+    );
+    expect(normalized.code).toBe("PLUGIN_CODE_EXCEPTION");
+    expect(normalized.message).toBe("unexpected");
   });
 
   test("plugin registry validates catalog and executes a program in a fresh worker", async () => {
     const description = "D".repeat(655);
     const parameters = Type.Object({ value: Type.Number() }, { additionalProperties: false });
-    const result = Type.Object({ doubled: Type.Number() }, { additionalProperties: false });
+    const result = Type.Object({ text: Type.String() }, { additionalProperties: false });
     const entry = {
       id: "development:example",
       displayName: "Example",
@@ -72,8 +129,8 @@ describe("plugin call runtime", () => {
       hostProfileVersion: 1 as const,
       capabilities: ["plugin-methods.provide" as const],
       pluginId: "com.example.math",
-      pluginCallSkill: "plugin-example-math",
-      pluginCallCatalog: {
+      runCodeSkill: "plugin-example-math",
+      runCodeCatalog: {
         schemaVersion: 1 as const,
         pluginId: "com.example.math",
         methods: [
@@ -88,25 +145,20 @@ describe("plugin call runtime", () => {
       },
     };
     const builder = new DesktopPluginRegistryBuilder();
-    builder.stage(entry, {
-      schemaVersion: 1,
-      methods: [
-        {
-          name: "double",
-          description,
-          parameters,
-          result,
-          async execute(args) {
-            return { doubled: args.value * 2 };
-          },
-        },
-      ],
+    builder.stageTool(entry, {
+      name: "double",
+      label: "Double",
+      description,
+      parameters,
+      async execute(_id, args) {
+        return { content: [{ type: "text", text: String(args.value * 2) }] };
+      },
     });
     builder.commit(entry.id);
     const registry = builder.finalize();
-    const details = { calls: [], logs: [] };
+    const details = { calls: [], logs: [], toolContext: { cwd: process.cwd() } };
     const value = await executePluginProgram(
-      'const first = await plugin["com.example.math"].double({ value: 21 }); return { doubled: first.doubled };',
+      'const first = await plugin["com.example.math"].double({ value: 21 }); return { doubled: Number(first.text) };',
       new PluginMethodDispatcher(registry, process.cwd()),
       "tool-1",
       undefined,
@@ -129,8 +181,8 @@ describe("plugin call runtime", () => {
       hostProfileVersion: 1 as const,
       capabilities: ["plugin-methods.provide" as const],
       pluginId: "com.example.captured",
-      pluginCallSkill: "plugin-captured",
-      pluginCallCatalog: {
+      runCodeSkill: "plugin-captured",
+      runCodeCatalog: {
         schemaVersion: 1 as const,
         pluginId: "com.example.captured",
         methods: [
@@ -212,7 +264,7 @@ describe("plugin call runtime", () => {
   });
 
   test("distinguishes timeout, pre-abort, and invalid outer output", async () => {
-    const limits = { ...DEFAULT_PLUGIN_CALL_LIMITS, timeoutMs: 200, computeTimeoutMs: 75 };
+    const limits = { ...DEFAULT_RUN_CODE_LIMITS, timeoutMs: 200, computeTimeoutMs: 75 };
     await expect(
       executePluginProgram("while (true) {}", createMathDispatcher(), "tool-timeout", undefined, process.cwd(), limits),
     ).rejects.toMatchObject({ code: "PLUGIN_CALL_TIMEOUT" });
@@ -229,14 +281,14 @@ describe("plugin call runtime", () => {
   });
 
   test("generation disposal aborts and awaits a live worker", async () => {
-    const manager = new PluginCallRunManager();
+    const manager = new RunCodeRunManager();
     const execution = executePluginProgram(
       "await new Promise(() => {});",
       createMathDispatcher(),
       "tool-dispose",
       undefined,
       process.cwd(),
-      { ...DEFAULT_PLUGIN_CALL_LIMITS, timeoutMs: 5_000 },
+      { ...DEFAULT_RUN_CODE_LIMITS, timeoutMs: 5_000 },
       { calls: [], logs: [], attachments: [] },
       manager,
     );
@@ -342,13 +394,63 @@ describe("plugin call runtime", () => {
         "tool-child-timeout",
         undefined,
         process.cwd(),
-        { ...DEFAULT_PLUGIN_CALL_LIMITS, timeoutMs: 250, computeTimeoutMs: 2_000 },
+        { ...DEFAULT_RUN_CODE_LIMITS, timeoutMs: 250, computeTimeoutMs: 2_000 },
         details,
       ),
     ).rejects.toMatchObject({ code: "PLUGIN_CALL_TIMEOUT" });
     const pid = Number(details.logs[0]?.text);
     expect(Number.isSafeInteger(pid)).toBe(true);
     expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  test("cleans tracked subprocesses when generated code blocks the worker event loop", async () => {
+    const details = { calls: [], logs: [], attachments: [] };
+    await expect(
+      executePluginProgram(
+        `
+          const { spawn } = await import("node:child_process");
+          const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"]);
+          console.log(String(child.pid));
+          while (true) {}
+        `,
+        createMathDispatcher(),
+        "tool-blocked-child-timeout",
+        undefined,
+        process.cwd(),
+        { ...DEFAULT_RUN_CODE_LIMITS, timeoutMs: 250, computeTimeoutMs: 2_000 },
+        details,
+      ),
+    ).rejects.toMatchObject({ code: "PLUGIN_CALL_TIMEOUT" });
+    const pid = Number(details.logs[0]?.text);
+    expect(Number.isSafeInteger(pid)).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  test("aborts and settles in-flight plugin methods before returning", async () => {
+    let aborted = false;
+    const dispatcher = createMathDispatcher(
+      (_args, signal) =>
+        new Promise<{ doubled: number }>((_, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted = true;
+              reject(new Error("aborted"));
+            },
+            { once: true },
+          );
+        }),
+    );
+    await expect(
+      executePluginProgram(
+        'void plugin["com.example.math"].double({ value: 1 }); await new Promise((resolve) => setTimeout(resolve, 50)); return "done";',
+        dispatcher,
+        "tool-in-flight",
+        undefined,
+        process.cwd(),
+      ),
+    ).resolves.toBe("done");
+    expect(aborted).toBe(true);
   });
 
   test("enforces call, progress, and attachment budgets", async () => {
@@ -362,7 +464,7 @@ describe("plugin call runtime", () => {
         "tool-call-limit",
         undefined,
         process.cwd(),
-        { ...DEFAULT_PLUGIN_CALL_LIMITS, maxCalls: 2 },
+        { ...DEFAULT_RUN_CODE_LIMITS, maxCalls: 2 },
       ),
     ).rejects.toMatchObject({ code: "PLUGIN_CALL_LIMIT_EXCEEDED" });
 
@@ -377,7 +479,7 @@ describe("plugin call runtime", () => {
         "tool-progress-limit",
         undefined,
         process.cwd(),
-        { ...DEFAULT_PLUGIN_CALL_LIMITS, maxProgressBytes: 4 },
+        { ...DEFAULT_RUN_CODE_LIMITS, maxProgressBytes: 4 },
       ),
     ).rejects.toMatchObject({ code: "PLUGIN_PROGRESS_LIMIT_EXCEEDED" });
 
@@ -392,7 +494,7 @@ describe("plugin call runtime", () => {
         "tool-attachment-limit",
         undefined,
         process.cwd(),
-        { ...DEFAULT_PLUGIN_CALL_LIMITS, maxImageBytes: 1 },
+        { ...DEFAULT_RUN_CODE_LIMITS, maxImageBytes: 1 },
       ),
     ).rejects.toMatchObject({ code: "PLUGIN_ATTACHMENT_LIMIT_EXCEEDED" });
   });
@@ -426,7 +528,7 @@ describe("plugin call runtime", () => {
     const parameters = Type.Object({ value: Type.String({ default: "unsafe" }) }, { additionalProperties: false });
     const builder = new DesktopPluginRegistryBuilder();
     expect(() =>
-      builder.stage(
+      builder.stageTool(
         {
           id: "development:invalid-schema",
           displayName: "Invalid schema",
@@ -435,8 +537,8 @@ describe("plugin call runtime", () => {
           hostProfileVersion: 1,
           capabilities: ["plugin-methods.provide"],
           pluginId: "com.example.invalid",
-          pluginCallSkill: "plugin-invalid",
-          pluginCallCatalog: {
+          runCodeSkill: "plugin-invalid",
+          runCodeCatalog: {
             schemaVersion: 1,
             pluginId: "com.example.invalid",
             methods: [
@@ -451,18 +553,13 @@ describe("plugin call runtime", () => {
           },
         },
         {
-          schemaVersion: 1,
-          methods: [
-            {
-              name: "run",
-              description: "Run invalid schema",
-              parameters,
-              result: Type.Null(),
-              async execute() {
-                return null;
-              },
-            },
-          ],
+          name: "run",
+          label: "Run",
+          description: "Run invalid schema",
+          parameters,
+          async execute() {
+            return { content: [{ type: "text", text: "ok" }] };
+          },
         },
       ),
     ).toThrow("PLUGIN_SCHEMA_INVALID");
@@ -471,7 +568,7 @@ describe("plugin call runtime", () => {
   test("plugin dispatcher rejects invalid arguments", async () => {
     const parameters = Type.Object({ value: Type.Number() }, { additionalProperties: false });
     const builder = new DesktopPluginRegistryBuilder();
-    builder.stage(
+    builder.stageTool(
       {
         id: "development:math",
         displayName: "Math",
@@ -480,8 +577,8 @@ describe("plugin call runtime", () => {
         hostProfileVersion: 1,
         capabilities: ["plugin-methods.provide"],
         pluginId: "math",
-        pluginCallSkill: "plugin-math",
-        pluginCallCatalog: {
+        runCodeSkill: "plugin-math",
+        runCodeCatalog: {
           schemaVersion: 1,
           pluginId: "math",
           methods: [
@@ -489,25 +586,20 @@ describe("plugin call runtime", () => {
               name: "double",
               description: "Double",
               parameters: parameters as never,
-              result: Type.Number() as never,
+              result: Type.Object({ text: Type.String() }, { additionalProperties: false }) as never,
               concurrency: "serial",
             },
           ],
         },
       },
       {
-        schemaVersion: 1,
-        methods: [
-          {
-            name: "double",
-            description: "Double",
-            parameters,
-            result: Type.Number(),
-            async execute() {
-              return 1;
-            },
-          },
-        ],
+        name: "double",
+        label: "Double",
+        description: "Double",
+        parameters,
+        async execute() {
+          return { content: [{ type: "text", text: "1" }] };
+        },
       },
     );
     builder.commit("development:math");
@@ -532,45 +624,21 @@ function createMathDispatcher(
   cwd = process.cwd(),
 ): PluginMethodDispatcher {
   const parameters = Type.Object({ value: Type.Number() }, { additionalProperties: false });
-  const result = Type.Object({ doubled: Type.Number() }, { additionalProperties: false });
-  const entry = {
-    id: "development:math-helper",
-    displayName: "Math helper",
-    source: "development" as const,
-    entryPath: "/tmp/math-helper.ts",
-    hostProfileVersion: 1 as const,
-    capabilities: ["plugin-methods.provide" as const],
+  const method: RegisteredDesktopPluginMethod = {
     pluginId: "com.example.math",
-    pluginCallSkill: "plugin-math-helper",
-    pluginCallCatalog: {
-      schemaVersion: 1 as const,
-      pluginId: "com.example.math",
-      methods: [
-        {
-          name: "double",
-          description: "Double a number",
-          parameters: parameters as never,
-          result: result as never,
-          concurrency: "serial" as const,
-        },
-      ],
-    },
+    primarySkill: "plugin-math-helper",
+    entryId: "development:math-helper",
+    source: "development",
+    name: "double",
+    description: "Double a number",
+    concurrency: "serial",
+    parameters,
+    result: Type.Object({ doubled: Type.Number() }, { additionalProperties: false }),
+    execute: (params, signal, context) => execute(params as { value: number }, signal, context),
+    validateParameters: (value) =>
+      !!value && typeof value === "object" && typeof (value as { value?: unknown }).value === "number",
+    validateResult: (value) =>
+      !!value && typeof value === "object" && typeof (value as { doubled?: unknown }).doubled === "number",
   };
-  const builder = new DesktopPluginRegistryBuilder();
-  builder.stage(entry, {
-    schemaVersion: 1,
-    methods: [
-      {
-        name: "double",
-        description: "Double a number",
-        parameters,
-        result,
-        async execute(args: { value: number }, signal: AbortSignal, context: PluginMethodExecutionContext) {
-          return execute(args, signal, context);
-        },
-      },
-    ],
-  });
-  builder.commit(entry.id);
-  return new PluginMethodDispatcher(builder.finalize(), cwd);
+  return new PluginMethodDispatcher(new Map([[method.pluginId, new Map([[method.name, method]])]]), cwd);
 }

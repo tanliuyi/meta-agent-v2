@@ -184,7 +184,11 @@ export class PiMessageRepositoryConverter {
         toolName: part.toolName,
         args: part.args,
         argsText: part.argsText,
-        artifact: { execution: part.execution, partialResult: part.partialResult },
+        artifact: {
+          execution: part.execution,
+          partialResult: part.partialResult,
+          ...(part.runCode ? { runCode: part.runCode, runCodeToolCallId: part.id } : {}),
+        },
         ...(part.result !== undefined ? { result: part.result } : {}),
         ...(part.isError !== undefined ? { isError: part.isError } : {}),
       };

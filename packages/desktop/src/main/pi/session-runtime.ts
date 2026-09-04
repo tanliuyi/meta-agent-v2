@@ -47,8 +47,8 @@ import { getDesktopCheckpointDiff, restoreDesktopCheckpoint } from "./extensions
 import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 import { PiCompatibilityAdapter } from "./pi-compatibility-adapter.ts";
 import { PiThreadProjector } from "./pi-thread-projector.ts";
-import { PluginCallRegistryHolder } from "./plugin-call/plugin-call-tool.ts";
-import { DesktopPluginRegistryBuilder } from "./plugin-call/plugin-method-registry.ts";
+import { DesktopPluginRegistryBuilder } from "./run-code/plugin-method-registry.ts";
+import { RunCodeRegistryHolder } from "./run-code/run-code-tool.ts";
 import { getSessionCommands } from "./session-commands.ts";
 import {
   resolveSessionCreateSelection,
@@ -93,7 +93,8 @@ export class SessionRuntime {
   private readonly push: (update: SessionPushPayload) => void;
   private readonly onSummaryChanged: (runtime: SessionRuntime) => void;
   private readonly subagentRuntime?: SubagentRuntime;
-  private readonly pluginCallRegistry: PluginCallRegistryHolder;
+  private readonly runCodeRegistry: RunCodeRegistryHolder;
+  private readonly runCodeRegistryBuilder: DesktopPluginRegistryBuilder;
 
   private constructor(
     projectId: string,
@@ -103,7 +104,8 @@ export class SessionRuntime {
     extensionSet: ResolvedExtensionSet,
     initialUpdatedAt: number | undefined,
     subagentRuntime: SubagentRuntime | undefined,
-    pluginCallRegistry: PluginCallRegistryHolder,
+    runCodeRegistry: RunCodeRegistryHolder,
+    runCodeRegistryBuilder: DesktopPluginRegistryBuilder,
     push: (update: SessionPushPayload) => void,
     onSummaryChanged: (runtime: SessionRuntime) => void,
   ) {
@@ -114,7 +116,8 @@ export class SessionRuntime {
     this.push = push;
     this.onSummaryChanged = onSummaryChanged;
     this.subagentRuntime = subagentRuntime;
-    this.pluginCallRegistry = pluginCallRegistry;
+    this.runCodeRegistry = runCodeRegistry;
+    this.runCodeRegistryBuilder = runCodeRegistryBuilder;
     this.extensionSet = {
       ...extensionSet,
       entries: extensionSet.entries.map((entry) => ({
@@ -159,7 +162,7 @@ export class SessionRuntime {
       allowModelNetwork: false,
     });
     const builder = new DesktopPluginRegistryBuilder();
-    const registryHolder = new PluginCallRegistryHolder(extensionSet.generation);
+    const registryHolder = new RunCodeRegistryHolder(extensionSet.generation);
     const services = await createAgentSessionServices({
       cwd: options.cwd,
       agentDir,
@@ -225,6 +228,7 @@ export class SessionRuntime {
         options.initialUpdatedAt,
         options.subagentRuntime,
         registryHolder,
+        builder,
         options.push,
         options.onSummaryChanged,
       );
@@ -455,8 +459,8 @@ export class SessionRuntime {
     await this.compatibility.compact();
   }
 
-  resolvePluginCallArtifact(toolCallId: string, artifactId: string): Promise<string | undefined> {
-    return this.projector.resolvePluginCallArtifact(toolCallId, artifactId);
+  resolveRunCodeArtifact(toolCallId: string, artifactId: string): Promise<string | undefined> {
+    return this.projector.resolveRunCodeArtifact(toolCallId, artifactId);
   }
 
   async reloadResources(): Promise<SessionCommandResult> {
@@ -470,8 +474,11 @@ export class SessionRuntime {
     this.extensionPhase = "start";
     this.lastError = undefined;
     this.extensionHost.reset();
+    this.runCodeRegistryBuilder.clear();
+    this.runCodeRegistry.bind(new Map(), this.cwd);
     try {
       await this.session.reload();
+      this.runCodeRegistry.bind(this.runCodeRegistryBuilder.finalize(), this.cwd);
       const lifecycleDiagnostics = this.extensionDiagnostics;
       this.extensionDiagnostics = [
         ...extensionLoadDiagnostics(this.extensionSet, this.session.resourceLoader.getExtensions()).map(
@@ -491,6 +498,7 @@ export class SessionRuntime {
         ? { accepted: false, queued: false, error: this.lastError }
         : { accepted: true, queued: false };
     } catch (error) {
+      this.runCodeRegistryBuilder.clear();
       this.lastError = errorMessage(error);
       return { accepted: false, queued: false, error: this.lastError };
     } finally {
@@ -550,7 +558,7 @@ export class SessionRuntime {
       }
     }
     this.extensionPhase = "dispose";
-    await this.pluginCallRegistry.dispose();
+    await this.runCodeRegistry.dispose();
     if (this.session.extensionRunner.hasHandlers("session_shutdown")) {
       try {
         await this.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });

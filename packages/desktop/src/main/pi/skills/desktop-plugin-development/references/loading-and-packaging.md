@@ -10,7 +10,7 @@ A selected path may be:
 - A directory with `market-manifest.json` and the manifest's relative `pi.entry` file.
 - A directory without a manifest that contains a conventional `index.ts`, `index.js`, `index.mjs`, or `index.cjs` entry.
 
-Manifest-backed development entries are required for tools exposed through `plugin_call` because admission needs a canonical `plugin.id`, approved skill paths, a primary skill name, and a catalog digest. The plugin itself still uses ordinary `pi.registerTool()` calls; Desktop captures them instead of registering them as model-visible Pi tools. Loose single-file entries do not have the metadata required for this aggregation path. The entry and every declared skill/catalog path must remain inside the selected directory; symlink resources are rejected.
+Manifest-backed development entries are required for tools exposed through `run_code` because admission needs a canonical `plugin.id`, approved skill paths, a primary skill name, and a catalog digest. The plugin itself still uses ordinary `pi.registerTool()` calls; Desktop captures them instead of registering them as model-visible Pi tools. Loose single-file entries do not have the metadata required for this aggregation path. The entry and every declared skill/catalog path must remain inside the selected directory; symlink resources are rejected.
 
 After approval, Desktop stores the development entry in its extension settings. The main process resolves an approved extension set for each project and passes only that set to the sidecar worker. A plugin with the same declared `plugin.id` as an installed marketplace plugin supersedes the marketplace version while the local entry is enabled.
 
@@ -23,8 +23,8 @@ Configuration and extension-set mutations invalidate the resolved generation. Th
 A marketplace artifact is a signed archive with a `market-manifest.json` and a payload. The manifest must declare:
 
 - A complete plugin identity and semver version.
-- `pi.entry`, every `pi.skills` path, and `pi.pluginCall.catalog` under `payload/` and present in the archive.
-- `pi.pluginCall.skill` matching the primary `SKILL.md` frontmatter name when `plugin-methods.provide` is declared.
+- `pi.entry`, every `pi.skills` path, and `pi.runCode.catalog` under `payload/` and present in the archive.
+- `pi.runCode.skill` matching the primary `SKILL.md` frontmatter name when `plugin-methods.provide` is declared.
 - `desktop.hostProfileVersion: 1`.
 - A compatible `target`.
 - Every `configuration` field validated by the Desktop parser.

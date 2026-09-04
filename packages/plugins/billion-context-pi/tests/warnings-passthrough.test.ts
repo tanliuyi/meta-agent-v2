@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
-import { createAcpExtension, desktopPlugin } from "../src/index.ts";
+import { createAcpExtension } from "../src/index.ts";
 
 const STATE_FILE = "/tmp/pai-acp-warnings-it.session.json";
 
@@ -44,29 +44,13 @@ function fakeCtx(entries: any[]) {
   };
 }
 
-async function callPluginMethod(params: unknown, ctx: unknown) {
-  const method = desktopPlugin.methods.find((candidate) => candidate.name === "compress");
-  assert.ok(method, "compress plugin method exists");
-  const result = await method.execute(params as never, new AbortController().signal, {
-    pluginId: "pi.billion-context",
-    methodName: "compress",
-    callId: "tc1",
-    toolCallId: "tc1",
-    cwd: process.cwd(),
-    signal: new AbortController().signal,
-    toolContext: ctx,
-    attach: () => {},
-    reportProgress: () => {},
-  });
-  return { content: [{ type: "text", text: result.text }] };
-}
-
 async function setup(entries: any[]) {
   const { api, handlers } = captureApi();
   createAcpExtension({ modelContextLimit: 200_000 })(api as any);
   const ctx = fakeCtx(entries);
   await handlers.get("context")![0]!({ type: "context", messages: [] }, ctx);
-  return { ctx };
+  const compressTool = api.tools.find((t: any) => t.name === "compress")!;
+  return { compressTool, ctx };
 }
 
 const longText = "This is a detailed message that needs to be compressed. ".repeat(130);
@@ -80,10 +64,11 @@ test("软保护区排除消息 → kernel warnings 透出到结果行", async ()
     userMsg("e4", filler("four")), userMsg("e5", filler("five")),
     userMsg("e6", filler("six")), userMsg("e7", filler("seven")),
   ];
-  const { ctx } = await setup(entries);
-  const res = await callPluginMethod(
+  const { compressTool, ctx } = await setup(entries);
+  const res = await compressTool.execute(
+    "tc1",
     { content: [{ startId: "m00001", endId: "m00007", summary: "Compressed the early session content including all setup messages." }] },
-    ctx,
+    undefined, undefined, ctx,
   );
   const text = (res.content[0] as any).text as string;
   assert.match(text, /⚠️/, "warning line should be surfaced in the result");

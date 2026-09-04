@@ -91,7 +91,7 @@ interface WorkerRecord {
   createRequestId?: string;
   sessionFile?: string;
   extensionSet: ResolvedExtensionSet;
-  /** 会话级 direct-tool 插件激活子集；缺失表示全部可用 direct-tool 插件。plugin_call 始终随全局启用状态加载。 */
+  /** 会话级 direct-tool 插件激活子集；缺失表示全部可用 direct-tool 插件。run_code 始终随全局启用状态加载。 */
   enabledPluginIds?: string[];
   desiredExtensionGeneration: string;
   desiredExtensionDiagnostics: DesktopExtensionDiagnostic[];
@@ -293,7 +293,7 @@ export class ThreadWorkerRegistry {
     };
   }
 
-  /** 会话级 direct-tool 插件选择：返回可构建条目与当前会话激活子集；plugin_call 条目不参与选择。 */
+  /** 会话级 direct-tool 插件选择：返回可构建条目与当前会话激活子集；run_code 条目不参与选择。 */
   async getSessionPluginOptions(projectId: string, threadId: string): Promise<SessionPluginOptions> {
     this.assertProjectAvailable(projectId);
     const { set, allEntries } = await this.options.extensionSourcePolicy.resolveWithAll(projectId);
@@ -664,14 +664,14 @@ export class ThreadWorkerRegistry {
     );
   }
 
-  async resolvePluginCallArtifact(
+  async resolveRunCodeArtifact(
     projectId: string,
     threadId: string,
     toolCallId: string,
     artifactId: string,
   ): Promise<string | undefined> {
     return this.use(projectId, threadId, (record) =>
-      record.client.request<string | undefined>({ type: "resolvePluginCallArtifact", toolCallId, artifactId }, 30_000),
+      record.client.request<string | undefined>({ type: "resolveRunCodeArtifact", toolCallId, artifactId }, 30_000),
     );
   }
 
@@ -2002,7 +2002,7 @@ function equalStringLists(left: string[] | undefined, right: string[] | undefine
   return left.every((id) => set.has(id));
 }
 
-/** 按插件中心的全局启用状态构建扩展集；session 选择只过滤 direct-tool 插件，plugin_call 始终随全局启用状态加载。 */
+/** 按插件中心的全局启用状态构建扩展集；session 选择只过滤 direct-tool 插件，run_code 始终随全局启用状态加载。 */
 function buildSessionExtensionSet(
   set: ResolvedExtensionSet,
   allEntries: ResolvedExtensionEntry[],

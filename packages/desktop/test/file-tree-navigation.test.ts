@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFileTreeRows,
   buildFileTreeStickyModel,
   type FileTreeRow,
   fileTreeKeyNavigation,
@@ -16,6 +17,71 @@ function rows(...specs: Array<[string, number, boolean, "file" | "directory"]>):
     node: { name: path.split("/").at(-1) ?? path, path, type },
   }));
 }
+
+describe("buildFileTreeRows", () => {
+  it("compresses consecutive single-directory branches into one row", () => {
+    const roots = [{ name: "src", path: "src", type: "directory", hasChildren: true }] as const;
+    const children = {
+      src: [{ name: "extension", path: "src/extension", type: "directory", hasChildren: true }],
+      "src/extension": [{ name: "commands", path: "src/extension/commands", type: "directory", hasChildren: true }],
+      "src/extension/commands": [{ name: "index.ts", path: "src/extension/commands/index.ts", type: "file" }],
+    } as const;
+
+    const result = buildFileTreeRows(roots, children, new Set(["src", "src/extension", "src/extension/commands"]));
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ path: "src/extension/commands", depth: 0, open: true });
+    expect(result[0]?.compressedNodes?.map((node) => node.name)).toEqual(["src", "extension", "commands"]);
+    expect(result[1]).toMatchObject({ path: "src/extension/commands/index.ts", depth: 1 });
+  });
+
+  it("keeps semantic roots separate while compacting descendant directory chains", () => {
+    const roots = [{ name: "未跟踪", path: "group:untracked", type: "directory", hasChildren: true }] as const;
+    const children = {
+      "group:untracked": [{ name: "packages", path: "packages", type: "directory", hasChildren: true }],
+      packages: [{ name: "desktop", path: "packages/desktop", type: "directory", hasChildren: true }],
+      "packages/desktop": [{ name: "scripts", path: "packages/desktop/scripts", type: "directory", hasChildren: true }],
+      "packages/desktop/scripts": [
+        { name: "generate.mjs", path: "packages/desktop/scripts/generate.mjs", type: "file" },
+      ],
+    } as const;
+
+    const result = buildFileTreeRows(
+      roots,
+      children,
+      new Set(["group:untracked", "packages", "packages/desktop", "packages/desktop/scripts"]),
+      0,
+      false,
+    );
+
+    expect(result[0]).toMatchObject({ path: "group:untracked", depth: 0 });
+    expect(result[0]?.compressedNodes).toBeUndefined();
+    expect(result[1]?.compressedNodes?.map((node) => node.name)).toEqual(["packages", "desktop", "scripts"]);
+    expect(result[2]).toMatchObject({ path: "packages/desktop/scripts/generate.mjs", depth: 2 });
+  });
+
+  it("stops compression at files, empty directories, unloaded directories, and branches", () => {
+    const roots = [
+      { name: "file-parent", path: "file-parent", type: "directory", hasChildren: true },
+      { name: "empty", path: "empty", type: "directory", hasChildren: false },
+      { name: "unloaded", path: "unloaded", type: "directory", hasChildren: true },
+      { name: "branch", path: "branch", type: "directory", hasChildren: true },
+    ] as const;
+    const children = {
+      "file-parent": [{ name: "index.ts", path: "file-parent/index.ts", type: "file" }],
+      empty: [],
+      branch: [
+        { name: "a", path: "branch/a", type: "directory" },
+        { name: "b", path: "branch/b", type: "directory" },
+      ],
+    } as const;
+
+    const result = buildFileTreeRows(roots, children, new Set());
+
+    expect(result.map((row) => row.path)).toEqual(["file-parent", "empty", "unloaded", "branch"]);
+    expect(result.every((row) => row.compressedNodes === undefined)).toBe(true);
+  });
+});
 
 describe("fileTreeRenderRange", () => {
   it("changes only after the visible range crosses a fixed-height row boundary", () => {

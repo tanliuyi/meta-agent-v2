@@ -1,19 +1,11 @@
 ---
 name: pi-image-gen
-description: Generate and edit raster images through configured image providers.
+description: Generate or edit bitmap assets through the image model.
 ---
 
-# Image Generation Plugin
+# Image Generation
 
-Use the `pi.image-gen` plugin through `plugin_call`:
-
-```ts
-return await plugin["pi.image-gen"].image_generate({
-  prompt: "A clean product illustration",
-  n: 1,
-});
-```
-
-Read `references/api.md` for the complete schema. Image inputs may be local file paths or `http(s)` URLs. Generated files are written below the session working directory or the configured output directory; existing files are not overwritten. Provider credentials are read from Desktop secret configuration or the corresponding environment variable and are never returned in results.
-
-The method returns markdown image paths. Preserve those paths in the final response so the generated images can be rendered. Errors returned in tool context should guide the next corrected call.
+Use `run_code` with `plugin["pi.image-gen"].image_generate(...)` for image work.
+Read `references/api.md` for the exact parameter schema and result shape.
+Pass a concise prompt and return the generated file paths. Use `image` for local
+reference files or URLs when editing, and use separate calls for distinct assets.

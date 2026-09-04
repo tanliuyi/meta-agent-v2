@@ -1,0 +1,1029 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "pi-stef.figma",
+  "methods": [
+    {
+      "name": "figma_auth_status",
+      "description": "Check Figma token configuration without printing token values.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fileKey": {
+            "type": "string",
+            "description": "Optional file key to verify access with a minimal request."
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_context",
+      "description": "Fetch screen-level design context or overview multi-screen Figma flows without MCP.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Figma browser URL containing a node-id query parameter."
+          },
+          "mode": {
+            "type": "string",
+            "anyOf": [
+              {
+                "const": "screen"
+              },
+              {
+                "const": "overview"
+              }
+            ],
+            "description": "Use screen for a focused frame. Use overview for a page, canvas, worksheet, or multi-screen flow."
+          },
+          "format": {
+            "type": "string",
+            "anyOf": [
+              {
+                "const": "json"
+              },
+              {
+                "const": "markdown"
+              }
+            ],
+            "description": "Output format. Use markdown for compact summaries."
+          },
+          "includeRaw": {
+            "type": "boolean",
+            "description": "Include raw Figma node payload."
+          },
+          "includeHidden": {
+            "type": "boolean",
+            "description": "Include hidden nodes."
+          },
+          "includeStyles": {
+            "type": "boolean",
+            "description": "Include style metadata in parsed nodes."
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Max depth to traverse when parsing the node tree."
+          },
+          "maxScreens": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Max screens to include in overview mode."
+          },
+          "maxTextPerScreen": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Max key text snippets per screen in overview mode."
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_extract_assets",
+      "description": "Return image-fill and renderable asset manifest without writing by default.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_extract_text",
+      "description": "Extract visible text nodes from a file or focused node.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_find_nodes_by_name",
+      "description": "Find nodes by layer/name text.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input",
+          "query"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "query": {
+            "type": "string",
+            "description": "Name or text query."
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_find_nodes_by_text",
+      "description": "Find visible text nodes by text content.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input",
+          "query"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "query": {
+            "type": "string",
+            "description": "Name or text query."
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_comments",
+      "description": "Fetch compact comments data from the Figma REST API.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_component_sets",
+      "description": "Fetch compact componentSets data from the Figma REST API.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_components",
+      "description": "Fetch compact components data from the Figma REST API.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_design_context",
+      "description": "Return compact file/page/frame context for design understanding.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_file_raw",
+      "description": "Debugging escape hatch for capped raw file JSON.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_image_fills",
+      "description": "Return expiring image-fill URLs from Figma. Results are not cached.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_implementation_context",
+      "description": "Return coding-ready layout, text, typography, and asset hints.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_node_summary",
+      "description": "Return compact structured summary for a focused node.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_nodes_raw",
+      "description": "Debugging escape hatch for capped raw node JSON.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_styles",
+      "description": "Fetch compact styles data from the Figma REST API.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_get_variables",
+      "description": "Fetch compact variables data from the Figma REST API.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_parse_url",
+      "description": "Parse Figma URLs, bare file keys, and node IDs without calling Figma.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_render_nodes",
+      "description": "Return expiring Figma image render URLs for nodes. When outputDir is provided, downloads files under the current working directory with safe-path checks and private file permissions.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "format": {
+            "type": "string",
+            "anyOf": [
+              {
+                "const": "jpg"
+              },
+              {
+                "const": "png"
+              },
+              {
+                "const": "svg"
+              },
+              {
+                "const": "pdf"
+              }
+            ]
+          },
+          "nodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Optional node IDs in 1:2 or 1-2 format."
+            }
+          },
+          "scale": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 4
+          },
+          "outputDir": {
+            "type": "string",
+            "description": "Optional safe output directory under the current working directory."
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    },
+    {
+      "name": "figma_search_components",
+      "description": "Search compact component metadata by component name.",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "input",
+          "query"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "Figma URL or bare file key."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Optional node ID in 1:2 or 1-2 format."
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "includeHidden": {
+            "type": "boolean"
+          },
+          "maxResponseChars": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "query": {
+            "type": "string",
+            "description": "Name or text query."
+          }
+        },
+        "additionalProperties": false
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "concurrency": "serial"
+    }
+  ]
+}

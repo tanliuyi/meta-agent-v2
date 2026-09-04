@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import imageGenPlugin, { desktopPlugin } from "../index.ts";
+import imageGenPlugin from "../index.ts";
 import { createImageGenSettings, resolveModel } from "../src/config.ts";
 import {
   IMAGE_GEN_CONFIGURATION_SCHEMA,
@@ -134,7 +134,6 @@ describe("configuration schema", () => {
     const manifest = JSON.parse(await readFile(join(import.meta.dirname, "..", "market-manifest.json"), "utf8"));
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.desktop.hostProfileVersion).toBe(1);
-    expect(manifest.desktop.minVersion).toBe("0.0.42");
     expect(manifest.pi.entry).toBe("index.ts");
     expect(manifest.capabilities).toContain("configuration.read");
     expect(manifest.configuration).toEqual(IMAGE_GEN_CONFIGURATION_SCHEMA);
@@ -255,17 +254,20 @@ describe("provider adapters", () => {
 });
 
 describe("extension contract", () => {
-  it("exposes image generation through plugin_call and throws on execution failure", async () => {
+  it("registers one Desktop-compatible tool and throws on execution failure", async () => {
+    let registeredTool:
+      | { name: string; execute: (...args: unknown[]) => Promise<unknown> }
+      | undefined;
     const mockApi = {
       getConfig: () => ({ openaiApiKey: "bad-key" }),
       on: vi.fn(),
-      registerTool: vi.fn(),
+      registerTool: (tool: unknown) => {
+        registeredTool = tool as { name: string; execute: (...args: unknown[]) => Promise<unknown> };
+      },
     } as unknown as ExtensionAPI;
     imageGenPlugin(mockApi);
 
-    expect(mockApi.registerTool).not.toHaveBeenCalled();
-    expect(mockApi.on).toHaveBeenCalledWith("resources_discover", expect.any(Function));
-    expect(desktopPlugin.methods.map((method) => method.name)).toEqual(["image_generate"]);
+    expect(registeredTool?.name).toBe("image_generate");
 
     vi.stubGlobal(
       "fetch",
@@ -276,9 +278,11 @@ describe("extension contract", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       await expect(
-        desktopPlugin.methods[0].execute(
+        registeredTool?.execute(
+          "call-1",
           { prompt: "fixture" },
-          new AbortController().signal,
+          undefined,
+          undefined,
           { cwd },
         ),
       ).rejects.toThrow(/rejected the API key/i);

@@ -1,6 +1,1 @@
-export {
-  default,
-  captureSubagentPluginTool,
-  desktopPlugin,
-  pluginCallCatalog,
-} from "./src/extension/index.ts";
+export { default } from "./src/extension/index.ts";

@@ -10,7 +10,12 @@
   },
   "pi": {
     "entry": "extensions/figma.ts",
-    "extensionApi": "v1"
+    "extensionApi": "v1",
+    "skills": ["skills/pi-stef-figma/SKILL.md"],
+    "runCode": {
+      "skill": "pi-stef-figma",
+      "catalog": "plugin-api.json"
+    }
   },
   "desktop": {
     "hostProfileVersion": 1
@@ -46,12 +51,15 @@
   },
   "capabilities": [
     "configuration.read",
-    "tools.register"
+    "plugin-methods.provide"
   ],
   "nativeModules": [],
   "executables": [],
   "files": {
     "extensions/figma.ts": { "mode": "0644" },
+    "plugin-api.json": { "mode": "0644" },
+    "skills/pi-stef-figma/SKILL.md": { "mode": "0644" },
+    "skills/pi-stef-figma/references/api.md": { "mode": "0644" },
     "src/index.ts": { "mode": "0644" },
     "src/auth/FigmaAuthorization.ts": { "mode": "0644" },
     "src/cache/FigmaCache.ts": { "mode": "0644" },

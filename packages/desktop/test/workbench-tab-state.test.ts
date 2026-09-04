@@ -205,11 +205,11 @@ describe("reduceWorkbenchTabState", () => {
       tabs: [{ kind: "panel", panel: "files" }, sessionTab("t1")],
       activeKey: "t1",
     });
-    expect(state).toEqual({ tabs: [{ kind: "panel", panel: "files" }, sessionTab("t1")], activeKey: "t1" });
+    expect(state).toEqual({ tabs: [{ kind: "panel", panel: "project" }, sessionTab("t1")], activeKey: "t1" });
   });
 
   it("restore 内容一致时保持原引用", () => {
-    const tabs = [{ kind: "panel", panel: "files" }, sessionTab("t1")];
+    const tabs = [{ kind: "panel", panel: "project" }, sessionTab("t1")];
     const state = reduceWorkbenchTabState(WORKBENCH_TAB_INITIAL_STATE, { type: "restore", tabs, activeKey: "t1" });
     expect(reduceWorkbenchTabState(state, { type: "restore", tabs, activeKey: "t1" })).toBe(state);
   });

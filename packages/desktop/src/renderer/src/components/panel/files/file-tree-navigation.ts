@@ -10,6 +10,49 @@ export interface FileTreeRow {
   depth: number;
   open: boolean;
   node?: FileNode;
+  compressedNodes?: readonly FileNode[];
+}
+
+/**
+ * Compress consecutive single-directory branches into one row, matching VS Code's Compact Folders model.
+ * Files, empty directories, unloaded directories, and branches terminate the compressed chain.
+ */
+export function buildFileTreeRows(
+  nodes: readonly FileNode[],
+  children: Readonly<Record<string, readonly FileNode[]>>,
+  expanded: ReadonlySet<string>,
+  depth = 0,
+  compact = true,
+): FileTreeRow[] {
+  const rows: FileTreeRow[] = [];
+  for (const firstNode of nodes) {
+    const compressedNodes = [firstNode];
+    let node = firstNode;
+    while (compact && node.type === "directory") {
+      const items = children[node.path];
+      const onlyChild = items?.length === 1 ? items[0] : undefined;
+      if (onlyChild?.type !== "directory") break;
+      compressedNodes.push(onlyChild);
+      node = onlyChild;
+    }
+
+    const open = node.type === "directory" && expanded.has(node.path);
+    rows.push({
+      kind: "node",
+      path: node.path,
+      depth,
+      open,
+      node,
+      compressedNodes: compressedNodes.length > 1 ? compressedNodes : undefined,
+    });
+    if (node.type !== "directory" || !open) continue;
+    const items = children[node.path];
+    if (items) rows.push(...buildFileTreeRows(items, children, expanded, depth + 1, true));
+    else if (node.hasChildren) {
+      rows.push({ kind: "loading", path: `${node.path}:loading`, depth: depth + 1, open: false });
+    }
+  }
+  return rows;
 }
 
 export interface FileTreeStickyModel {

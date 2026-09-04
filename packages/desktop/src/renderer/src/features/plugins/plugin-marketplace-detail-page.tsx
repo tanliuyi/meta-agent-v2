@@ -1,4 +1,5 @@
 import { Button } from "@renderer/shared/ui/button";
+import { Switch } from "@renderer/shared/ui/switch";
 import { Toast } from "@renderer/shared/ui/toast";
 import { useNavigate } from "@tanstack/react-router";
 import BadgeCheck from "lucide-react/dist/esm/icons/badge-check.mjs";
@@ -180,6 +181,23 @@ export function PluginMarketplaceDetailPage({
                     installing={controller.installingId === pluginId}
                     updating={controller.updatingId === pluginId}
                     uninstalling={controller.uninstallingId === pluginId}
+                    headerAction={
+                      installed ? (
+                        <div className="plugin-marketplace-detail-enable-toggle">
+                          <span>启用</span>
+                          <Switch
+                            checked={installed.enabled}
+                            disabled={
+                              mutationPending ||
+                              installed.state === "broken" ||
+                              Boolean(localOverrides.get(installed.id))
+                            }
+                            aria-label={`${installed.displayName} 启用状态`}
+                            onCheckedChange={(enabled) => void controller.setEnabled(installed.id, enabled)}
+                          />
+                        </div>
+                      ) : null
+                    }
                     onInstall={(entry) => void controller.install(entry)}
                     onUpdate={(entry) => void controller.update(entry)}
                     onUninstall={(id) => {
@@ -195,9 +213,6 @@ export function PluginMarketplaceDetailPage({
                 plugin={plugin}
                 installed={installed}
                 marketplaceId={controller.page?.marketplaceId}
-                mutationPending={mutationPending}
-                supersededByLocalPlugin={installed ? localOverrides.get(installed.id) : undefined}
-                onSetEnabled={(id, enabled) => void controller.setEnabled(id, enabled)}
               />
             </div>
           ) : detailStatus === "loading" || controller.loading ? (

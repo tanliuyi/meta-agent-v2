@@ -12,8 +12,8 @@ import type { CachedSessionRecord } from "../runtime/pi-session-store.ts";
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
 import type { SessionWorkbenchTabs } from "../state/workbench-tab-context.tsx";
 import { useWorkbenchTabs } from "../state/workbench-tab-context.tsx";
-import { FILES_PANEL_KIND } from "./panel/builtin-panel-kinds.ts";
-import { openWorkbenchFilePatch } from "./panel/panel-model.ts";
+import { PROJECT_PANEL_KIND } from "./panel/builtin-panel-kinds.ts";
+import { openProjectDocumentTab, openWorkbenchFilePatch } from "./panel/panel-model.ts";
 
 export interface SessionScope {
   record: CachedSessionRecord;
@@ -126,8 +126,19 @@ export function useOpenWorkbenchFileInPanel(): (path: string) => boolean {
     (path: string) => {
       const workbench = record.stores.workbench.getSnapshot();
       if (!workbench) return false;
-      updateWorkbench({ ...openWorkbenchFilePatch(workbench, path), panelOpen: true });
-      tabs.openPanelTab(FILES_PANEL_KIND);
+      const key = `file:${path}`;
+      updateWorkbench({
+        ...openWorkbenchFilePatch(workbench, path),
+        panelOpen: true,
+        projectPanelView: "files",
+        projectPanelActiveTab: key,
+        projectPanelTabs: openProjectDocumentTab(
+          workbench.projectPanelTabs ?? [],
+          key,
+          workbench.previewFile ? `file:${workbench.previewFile}` : undefined,
+        ),
+      });
+      tabs.openPanelTab(PROJECT_PANEL_KIND);
       return true;
     },
     [record, tabs, updateWorkbench],

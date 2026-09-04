@@ -1,11 +1,11 @@
 import type { AgentToolResult, ExtensionContext, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { normalizePluginError, type PluginCallError } from "./plugin-call-errors.ts";
-import { executePluginProgram, PluginCallRunManager } from "./plugin-call-runtime.ts";
-import { type PluginCallExecution, PluginMethodDispatcher } from "./plugin-method-dispatcher.ts";
+import { PluginMethodDispatcher, type RunCodeExecution } from "./plugin-method-dispatcher.ts";
 import type { PluginMethodRegistry } from "./plugin-method-registry.ts";
+import { normalizePluginError, type RunCodeError } from "./run-code-errors.ts";
+import { executePluginProgram, RunCodeRunManager } from "./run-code-runtime.ts";
 
-export const pluginCallParameters = Type.Object(
+export const RunCodeParameters = Type.Object(
   {
     code: Type.String({
       description: "The body of an async TypeScript function. Top-level await and return are available.",
@@ -20,12 +20,13 @@ export const pluginCallParameters = Type.Object(
   { additionalProperties: false },
 );
 
-export class PluginCallRegistryHolder {
+/** 保存当前 worker generation 的 run_code 方法表和运行中的 worker。 */
+export class RunCodeRegistryHolder {
   readonly generation: string;
   private registry?: PluginMethodRegistry;
   private dispatcher?: PluginMethodDispatcher;
   private stale = false;
-  private readonly manager = new PluginCallRunManager();
+  private readonly manager = new RunCodeRunManager();
 
   constructor(generation: string) {
     this.generation = generation;
@@ -49,31 +50,39 @@ export class PluginCallRegistryHolder {
     return this.dispatcher;
   }
 
-  getRunManager(): PluginCallRunManager {
+  getRunManager(): RunCodeRunManager {
     if (this.stale) throw new Error("PLUGIN_GENERATION_STALE");
     return this.manager;
   }
 }
 
-export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd: string): InlineExtension {
+/** 注册唯一的 run_code 外层工具；插件方法仍由 direct/native 工具独立注册。 */
+export function createRunCodeExtension(holder: RunCodeRegistryHolder, cwd: string): InlineExtension {
   return {
-    name: "<inline:desktop-plugin-call>",
+    name: "<inline:desktop-run-code>",
     factory: async (pi) => {
       pi.registerTool({
-        name: "plugin_call",
-        label: "Plugin call",
+        name: "run_code",
+        label: "Run code",
         description:
-          'Execute an erasable TypeScript program using enabled Desktop plugin APIs. Before calling, use the read tool to load the SKILL.md for the plugin relevant to the task. The skill defines the canonical plugin ID, method names, arguments, side effects, and workflow. Use the injected `plugin` namespace only: `await plugin["canonical-plugin-id"].method(args)`. Always use bracket syntax for plugin IDs that contain hyphens. Combine calls in one program when useful and explicitly `return` the final value. The host `pi` object is not injected; do not write `pi.memorySearch(...)` or guess plugin method names. Methods adapted from legacy Pi tools return `{ content: string[] }`; renderer-only details are unavailable. Return only the final value needed by the model.',
-        parameters: pluginCallParameters,
+          'Run an async TypeScript program that combines enabled Desktop plugin APIs. Use `await plugin["canonical-plugin-id"].method(args)` with the plugin ID and method documented by its skill. Combine independent calls with `Promise.all`, await dependent calls in order, and explicitly return only the result needed by the model. Direct Pi tools remain available for simple one-step operations; use run_code for multi-step, batch, conditional, or composed plugin work. The host `pi` object is not injected, so do not guess methods or write `pi.someTool(...)`.',
+        promptSnippet: 'run_code({ code: "return await plugin[\\"plugin.id\\"].method(args)", description: "..." })',
+        promptGuidelines: [
+          "Use direct native tools for one simple action; use run_code when several plugin actions belong to one decision.",
+          "Use Promise.all for independent read-only calls and await when one call depends on another.",
+          "Read the plugin skill for the exact plugin ID, method names, and argument shape before composing calls.",
+          "Return only the data needed for the next reasoning step.",
+        ],
+        parameters: RunCodeParameters,
         executionMode: "parallel",
         async execute(toolCallId, params, signal, onUpdate, _ctx: ExtensionContext): Promise<AgentToolResult<unknown>> {
-          const details: PluginCallExecution & {
-            kind: "plugin-call-details-v1";
+          const details: RunCodeExecution & {
+            kind: "run-code-details-v1";
             description: string;
             runId: string;
             generation: string;
           } = {
-            kind: "plugin-call-details-v1",
+            kind: "run-code-details-v1",
             description: params.description,
             runId: toolCallId,
             generation: holder.generation,
@@ -109,7 +118,7 @@ export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd:
                 type: "text",
                 text:
                   value === undefined
-                    ? "(plugin_call completed with no output)"
+                    ? "(run_code completed with no output)"
                     : typeof value === "string"
                       ? value
                       : JSON.stringify(value, null, 2),
@@ -144,7 +153,7 @@ export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd:
             if (updateTimer) clearTimeout(updateTimer);
             const normalized = normalizePluginError(error, "PLUGIN_METHOD_EXECUTION_FAILED");
             const result: AgentToolResult<unknown> = {
-              content: [{ type: "text", text: formatPluginCallError(normalized) }],
+              content: [{ type: "text", text: formatRunCodeError(normalized) }],
               details: {
                 ...details,
                 error: {
@@ -166,13 +175,13 @@ export function createPluginCallExtension(holder: PluginCallRegistryHolder, cwd:
   };
 }
 
-function formatPluginCallError(error: PluginCallError): string {
+function formatRunCodeError(error: RunCodeError): string {
   const location = [error.pluginId, error.method].filter(Boolean).join(".");
   return [
-    "plugin_call failed.",
+    "run_code failed.",
     `code: ${error.code}`,
     ...(location ? [`method: ${location}`] : []),
     `message: ${error.message}`,
-    "Use this error as tool context and correct the next plugin_call.",
+    "Use this error as tool context and correct the next run_code call.",
   ].join("\n");
 }

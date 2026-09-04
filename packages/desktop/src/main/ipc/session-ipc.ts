@@ -2,7 +2,7 @@ import { ipcMain } from "electron";
 import { CHANNELS } from "../../shared/channels.ts";
 import type {
   HostResponse,
-  OpenPluginCallArtifactInput,
+  OpenRunCodeArtifactInput,
   SessionAttachInput,
   SessionBranchInput,
   SessionBranchResult,
@@ -52,7 +52,7 @@ export const SESSION_IPC_CHANNELS = [
   CHANNELS.sessionsEdit,
   CHANNELS.sessionsReload,
   CHANNELS.sessionsReloadResources,
-  CHANNELS.sessionsOpenPluginCallArtifact,
+  CHANNELS.sessionsOpenRunCodeArtifact,
   CHANNELS.sessionsGetCheckpointDiff,
   CHANNELS.sessionsRestoreCheckpoint,
   CHANNELS.sessionsBranch,
@@ -137,8 +137,8 @@ export function registerSessionIpc({ sessions, terminals }: SessionIpcDependenci
   ipcMain.handle(CHANNELS.sessionsReloadResources, (_event, input: SessionResourceReloadInput) =>
     sessions.reloadResources(input),
   );
-  ipcMain.handle(CHANNELS.sessionsOpenPluginCallArtifact, async (event, input: OpenPluginCallArtifactInput) => {
-    await openPath(await sessions.resolvePluginCallArtifact(event.sender.id, input));
+  ipcMain.handle(CHANNELS.sessionsOpenRunCodeArtifact, async (event, input: OpenRunCodeArtifactInput) => {
+    await openPath(await sessions.resolveRunCodeArtifact(event.sender.id, input));
   });
   ipcMain.handle(
     CHANNELS.sessionsGetCheckpointDiff,

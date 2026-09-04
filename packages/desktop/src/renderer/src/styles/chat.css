@@ -1134,7 +1134,7 @@
   max-width: 100%;
 }
 .composer-suggestions .composer-file-item {
-  grid-template-columns: 16px fit-content(30%) minmax(0, 1fr);
+  grid-template-columns: 16px auto minmax(0, 1fr);
 }
 .composer-command-item strong,
 .composer-file-item strong {
@@ -1358,6 +1358,17 @@
   min-width: 0;
   margin: 0;
   white-space: pre-wrap;
+}
+.composer-feedback-action {
+  flex: 0 0 auto;
+}
+.composer-feedback-action a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.composer-feedback-action a:hover {
+  color: hsl(var(--foreground));
 }
 .draft-composer-feedback {
   width: 100%;

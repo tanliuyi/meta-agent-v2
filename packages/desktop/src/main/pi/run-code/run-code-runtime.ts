@@ -2,32 +2,43 @@ import { randomUUID } from "node:crypto";
 import { stripTypeScriptTypes } from "node:module";
 import { Worker } from "node:worker_threads";
 import type { JsonValue } from "../../../shared/contracts.ts";
-import { normalizePluginError, PluginCallError, type PluginCallErrorCode } from "./plugin-call-errors.ts";
-import { snapshotJson } from "./plugin-call-json.ts";
-import { DEFAULT_PLUGIN_CALL_LIMITS, type PluginCallLimits } from "./plugin-call-limits.ts";
-import type { PluginCallExecution, PluginMethodDispatcher } from "./plugin-method-dispatcher.ts";
+import type { PluginMethodDispatcher, RunCodeExecution } from "./plugin-method-dispatcher.ts";
+import { isRunCodeErrorCode, normalizePluginError, RunCodeError, type RunCodeErrorCode } from "./run-code-errors.ts";
+import { snapshotJson } from "./run-code-json.ts";
+import { DEFAULT_RUN_CODE_LIMITS, type RunCodeLimits } from "./run-code-limits.ts";
+
+const CLEANUP_GRACE_MS = 350;
 
 interface ActiveRun {
   controller: AbortController;
-  worker: Worker;
+  finished: Promise<void>;
 }
 
-export class PluginCallRunManager {
+export class RunCodeRunManager {
   private readonly runs = new Set<ActiveRun>();
   private stale = false;
 
-  register(controller: AbortController, worker: Worker): () => void {
-    if (this.stale) throw new PluginCallError("PLUGIN_GENERATION_STALE");
-    const run = { controller, worker };
+  register(controller: AbortController): () => void {
+    if (this.stale) throw new RunCodeError("PLUGIN_GENERATION_STALE");
+    let resolveFinished: (() => void) | undefined;
+    const run: ActiveRun = {
+      controller,
+      finished: new Promise<void>((resolvePromise) => {
+        resolveFinished = resolvePromise;
+      }),
+    };
     this.runs.add(run);
-    return () => this.runs.delete(run);
+    return () => {
+      this.runs.delete(run);
+      resolveFinished?.();
+    };
   }
 
   async dispose(): Promise<void> {
     this.stale = true;
     const runs = [...this.runs];
     for (const run of runs) run.controller.abort("PLUGIN_GENERATION_STALE");
-    await Promise.allSettled(runs.map((run) => run.worker.terminate()));
+    await Promise.allSettled(runs.map((run) => run.finished));
     this.runs.clear();
   }
 }
@@ -63,40 +74,48 @@ type WorkerMessage =
   | { type: "cleanup-complete"; runId: string }
   | { type: "child-start" | "child-end"; runId: string; pid: number };
 
+/** 在独立 worker 中执行模型生成的程序，并把插件调用回送到 Desktop dispatcher。 */
 export async function executePluginProgram(
   code: string,
   dispatcher: PluginMethodDispatcher,
   toolCallId: string,
   signal: AbortSignal | undefined,
   _cwd: string,
-  limits: PluginCallLimits = DEFAULT_PLUGIN_CALL_LIMITS,
-  details: PluginCallExecution = { calls: [], logs: [], attachments: [] },
-  manager?: PluginCallRunManager,
+  limits: RunCodeLimits = DEFAULT_RUN_CODE_LIMITS,
+  details: RunCodeExecution = { calls: [], logs: [], attachments: [] },
+  manager?: RunCodeRunManager,
   onUpdate?: () => void,
 ): Promise<JsonValue | undefined> {
   if (Buffer.byteLength(code, "utf8") > limits.maxCodeBytes) {
-    throw new PluginCallError("PLUGIN_OUTPUT_LIMIT_EXCEEDED", "Plugin code exceeds the byte limit");
+    throw new RunCodeError("PLUGIN_OUTPUT_LIMIT_EXCEEDED", "Plugin code exceeds the byte limit");
   }
-  if (signal?.aborted) throw new PluginCallError("PLUGIN_CALL_ABORTED");
+  if (signal?.aborted) throw new RunCodeError("PLUGIN_CALL_ABORTED");
   let stripped: string;
   try {
     stripped = stripPluginBody(code);
   } catch (error) {
-    throw new PluginCallError("PLUGIN_CODE_SYNTAX_ERROR", error instanceof Error ? error.message : String(error));
+    throw new RunCodeError("PLUGIN_CODE_SYNTAX_ERROR", error instanceof Error ? error.message : String(error));
   }
   const runId = randomUUID();
   const root = new AbortController();
   details.active = true;
   const abortFromPi = () => root.abort("PLUGIN_CALL_ABORTED");
   signal?.addEventListener("abort", abortFromPi, { once: true });
-  const worker = new Worker(workerSource(runId, stripped, dispatcher.pluginMethods(), limits), {
-    eval: true,
-    resourceLimits: { maxOldGenerationSizeMb: limits.maxOldGenerationSizeMb },
-  });
+  let worker: Worker;
+  try {
+    worker = new Worker(workerSource(runId, stripped, dispatcher.pluginMethods(), limits), {
+      eval: true,
+      resourceLimits: { maxOldGenerationSizeMb: limits.maxOldGenerationSizeMb },
+    });
+  } catch (error) {
+    signal?.removeEventListener("abort", abortFromPi);
+    throw new RunCodeError("PLUGIN_CODE_EXCEPTION", error instanceof Error ? error.message : String(error));
+  }
   let unregister: (() => void) | undefined;
   try {
-    unregister = manager?.register(root, worker);
+    unregister = manager?.register(root);
   } catch (error) {
+    signal?.removeEventListener("abort", abortFromPi);
     await worker.terminate();
     throw error;
   }
@@ -108,6 +127,7 @@ export async function executePluginProgram(
     let logBytes = 0;
     let nextCallId = 1;
     const childPids = new Set<number>();
+    const inFlightCalls = new Set<Promise<void>>();
     let resolveCleanup: (() => void) | undefined;
 
     const cleanupComplete = new Promise<void>((resolvePromise) => {
@@ -115,7 +135,7 @@ export async function executePluginProgram(
     });
     const queued: WorkerCallMessage[] = [];
 
-    const finish = async (error?: PluginCallError, value?: JsonValue): Promise<void> => {
+    const finish = async (error?: RunCodeError, value?: JsonValue): Promise<void> => {
       if (settled) return;
       settled = true;
       if (!root.signal.aborted) root.abort(error?.code ?? "PLUGIN_CALL_ABORTED");
@@ -129,13 +149,21 @@ export async function executePluginProgram(
         worker.postMessage({
           type: "abort",
           runId,
-          error: serializeError(error ?? new PluginCallError("PLUGIN_CALL_ABORTED")),
+          error: serializeError(error ?? new RunCodeError("PLUGIN_CALL_ABORTED")),
         });
       } catch {
         // Worker may already have exited.
       }
-      await Promise.race([cleanupComplete, new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 350))]);
+      await Promise.race([
+        cleanupComplete,
+        new Promise<void>((resolvePromise) => setTimeout(resolvePromise, CLEANUP_GRACE_MS)),
+      ]);
       await worker.terminate();
+      await Promise.race([
+        Promise.allSettled(inFlightCalls),
+        new Promise<void>((resolvePromise) => setTimeout(resolvePromise, CLEANUP_GRACE_MS)),
+      ]);
+      await terminateDescendants(childPids);
       unregister?.();
       onUpdate?.();
       if (error) reject(error);
@@ -144,9 +172,9 @@ export async function executePluginProgram(
 
     const abortRun = () => {
       const reason = root.signal.reason;
-      const code: PluginCallErrorCode =
-        typeof reason === "string" && isPluginCallErrorCode(reason) ? reason : "PLUGIN_CALL_ABORTED";
-      void finish(new PluginCallError(code));
+      const code: RunCodeErrorCode =
+        typeof reason === "string" && isRunCodeErrorCode(reason) ? reason : "PLUGIN_CALL_ABORTED";
+      void finish(new RunCodeError(code));
     };
     root.signal.addEventListener("abort", abortRun, { once: true });
 
@@ -165,7 +193,7 @@ export async function executePluginProgram(
         const message = queued.shift();
         if (!message) return;
         activeCalls += 1;
-        void dispatcher
+        const pending = dispatcher
           .call(message.pluginId, message.method, message.args, root.signal, toolCallId, details, limits, onUpdate)
           .then(
             (value) => post({ type: "resolve", runId, id: message.id, value }),
@@ -178,9 +206,11 @@ export async function executePluginProgram(
               }),
           )
           .finally(() => {
+            inFlightCalls.delete(pending);
             activeCalls -= 1;
             pump();
           });
+        inFlightCalls.add(pending);
       }
     };
 
@@ -194,15 +224,15 @@ export async function executePluginProgram(
         resolveCleanup?.();
         return;
       }
+      if (raw.type === "child-start" || raw.type === "child-end") {
+        if (raw.type === "child-start") childPids.add(raw.pid);
+        else childPids.delete(raw.pid);
+        return;
+      }
       if (settled) return;
       if (raw.type === "heartbeat") {
         lastHeartbeat = Date.now();
         if ((raw.busyMs ?? 0) > limits.computeTimeoutMs) root.abort("PLUGIN_CALL_TIMEOUT");
-        return;
-      }
-      if (raw.type === "child-start" || raw.type === "child-end") {
-        if (raw.type === "child-start") childPids.add(raw.pid);
-        else childPids.delete(raw.pid);
         return;
       }
       if (raw.type === "log") {
@@ -226,8 +256,8 @@ export async function executePluginProgram(
       }
       if (raw.type === "failed") {
         const wire = raw.error;
-        const code = isPluginCallErrorCode(wire?.code) ? wire.code : "PLUGIN_CODE_EXCEPTION";
-        void finish(new PluginCallError(code, wire?.message ?? code, wire?.pluginId, wire?.method));
+        const code = isRunCodeErrorCode(wire?.code) ? wire.code : "PLUGIN_CODE_EXCEPTION";
+        void finish(new RunCodeError(code, wire?.message ?? code, wire?.pluginId, wire?.method));
         return;
       }
       if (raw.type !== "done") return;
@@ -237,7 +267,7 @@ export async function executePluginProgram(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         void finish(
-          new PluginCallError(
+          new RunCodeError(
             message.includes("PLUGIN_INVALID_JSON") || message.includes("PLUGIN_JSON_DEPTH_EXCEEDED")
               ? "PLUGIN_CODE_INVALID_OUTPUT"
               : "PLUGIN_OUTPUT_LIMIT_EXCEEDED",
@@ -247,19 +277,19 @@ export async function executePluginProgram(
       }
     });
     worker.on("error", (error) => {
-      const code: PluginCallErrorCode =
+      const code: RunCodeErrorCode =
         error instanceof SyntaxError ? "PLUGIN_CODE_SYNTAX_ERROR" : "PLUGIN_CODE_EXCEPTION";
       root.abort(code);
-      void finish(new PluginCallError(code, error.message));
+      void finish(new RunCodeError(code, error.message));
     });
     worker.on("exit", () => {
-      if (!settled) void finish(new PluginCallError("PLUGIN_CODE_WORKER_EXIT"));
+      if (!settled) void finish(new RunCodeError("PLUGIN_CODE_WORKER_EXIT"));
     });
   });
 }
 
 function stripPluginBody(code: string): string {
-  const prefix = "async function __desktopPluginCall__() {\n";
+  const prefix = "async function __desktopRunCode__() {\n";
   const suffix = "\n}";
   const stripped = stripTypeScriptTypes(`${prefix}${code}${suffix}`, { mode: "strip", sourceMap: false });
   if (!stripped.startsWith(prefix) || !stripped.endsWith(suffix))
@@ -267,12 +297,7 @@ function stripPluginBody(code: string): string {
   return stripped.slice(prefix.length, -suffix.length);
 }
 
-function workerSource(
-  runId: string,
-  code: string,
-  methods: Record<string, string[]>,
-  limits: PluginCallLimits,
-): string {
+function workerSource(runId: string, code: string, methods: Record<string, string[]>, limits: RunCodeLimits): string {
   return `
     const { parentPort } = require("node:worker_threads");
     const { performance } = require("node:perf_hooks");
@@ -415,7 +440,7 @@ function isWorkerMessage(value: unknown): value is WorkerMessage {
   return record.type === "failed" && !!record.error && typeof record.error === "object";
 }
 
-function serializeError(error: PluginCallError): { code: string; message: string; pluginId?: string; method?: string } {
+function serializeError(error: RunCodeError): { code: string; message: string; pluginId?: string; method?: string } {
   return {
     code: error.code,
     message: error.message,
@@ -424,11 +449,7 @@ function serializeError(error: PluginCallError): { code: string; message: string
   };
 }
 
-function isPluginCallErrorCode(value: string | undefined): value is PluginCallErrorCode {
-  return typeof value === "string" && value.startsWith("PLUGIN_");
-}
-
-async function _terminateDescendants(pids: ReadonlySet<number>): Promise<void> {
+async function terminateDescendants(pids: ReadonlySet<number>): Promise<void> {
   for (const pid of pids) {
     try {
       process.kill(pid, "SIGTERM");

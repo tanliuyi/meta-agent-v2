@@ -1,14 +1,23 @@
 import type { WorkbenchState } from "../../../../shared/contracts.ts";
 
+export const PROJECT_EDITOR_TAB_DRAG_MIME = "application/x-meta-agent-editor-tab";
+export const PROJECT_FILE_DRAG_MIME = "application/x-meta-agent-project-file";
+
 interface ClosedWorkbenchFileState {
   openFiles: string[];
   activeFile: string | undefined;
 }
 
+export interface ClosedProjectDocumentTabs {
+  tabs: string[];
+  mru: string[];
+  activeTab: string | undefined;
+}
+
 export interface WorkbenchFileOpenState {
   openFiles: string[];
   activeFile: string;
-  previewFile: string;
+  previewFile: string | undefined;
 }
 
 export interface FilePathSegment {
@@ -89,6 +98,87 @@ export function closeWorkbenchFile(
   };
 }
 
+/** Filter stale keys, preserve stored order, then append newly opened editors. */
+export function reconcileProjectDocumentTabs(available: readonly string[], stored: readonly string[]): string[] {
+  const availableSet = new Set(available);
+  const seen = new Set<string>();
+  const tabs: string[] = [];
+  for (const key of [...stored, ...available]) {
+    if (!availableSet.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    tabs.push(key);
+  }
+  return tabs;
+}
+
+/** Record an editor as most recently active while dropping stale and duplicate keys. */
+export function activateProjectDocumentTab(mru: readonly string[], tabs: readonly string[], key: string): string[] {
+  const tabSet = new Set(tabs);
+  return [key, ...mru, ...tabs].filter(
+    (candidate, index, values) => tabSet.has(candidate) && values.indexOf(candidate) === index,
+  );
+}
+
+/** Close an editor using VS Code's default recent-editor selection policy. */
+export function closeProjectDocumentTab(
+  tabs: readonly string[],
+  mru: readonly string[],
+  activeTab: string | undefined,
+  key: string,
+): ClosedProjectDocumentTabs | null {
+  const closedIndex = tabs.indexOf(key);
+  if (closedIndex === -1) return null;
+  const nextTabs = tabs.filter((candidate) => candidate !== key);
+  const nextMru = mru.filter((candidate) => candidate !== key && nextTabs.includes(candidate));
+  if (activeTab !== key) return { tabs: nextTabs, mru: nextMru, activeTab };
+  return {
+    tabs: nextTabs,
+    mru: nextMru,
+    activeTab: nextMru[0] ?? nextTabs[Math.min(closedIndex, nextTabs.length - 1)],
+  };
+}
+
+/** Open an editor at the end or replace a preview editor in place. */
+export function openProjectDocumentTab(tabs: readonly string[], key: string, replaceKey?: string): string[] {
+  if (tabs.includes(key))
+    return replaceKey && replaceKey !== key ? tabs.filter((tab) => tab !== replaceKey) : [...tabs];
+  const replaceIndex = replaceKey ? tabs.indexOf(replaceKey) : -1;
+  if (replaceIndex === -1) return [...tabs, key];
+  const next = [...tabs];
+  next.splice(replaceIndex, 1, key);
+  return next;
+}
+
+/** Move one editor tab before another, preserving all other positions. */
+export function moveProjectDocumentTab(tabs: readonly string[], source: string, target: string): string[] {
+  const sourceIndex = tabs.indexOf(source);
+  const targetIndex = tabs.indexOf(target);
+  if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) return [...tabs];
+  const next = [...tabs];
+  next.splice(sourceIndex, 1);
+  next.splice(sourceIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, source);
+  return next;
+}
+
+export interface OpenPinnedWorkbenchFileState {
+  openFiles: string[];
+  activeFile: string;
+  previewFile: string | undefined;
+}
+
+/** Open a file as a pinned editor without replacing an existing preview editor. */
+export function openPinnedWorkbenchFile(
+  openFiles: readonly string[],
+  previewFile: string | undefined,
+  path: string,
+): OpenPinnedWorkbenchFileState {
+  return {
+    openFiles: openFiles.includes(path) ? [...openFiles] : [...openFiles, path],
+    activeFile: path,
+    previewFile: previewFile === path ? undefined : previewFile,
+  };
+}
+
 /**
  * 单击打开文件（VS Code 预览 tab 行为）：
  * 已有预览 tab 且目标不同时原地替换；否则追加为新预览 tab。
@@ -99,17 +189,32 @@ export function openWorkbenchFileAsPreview(
   path: string,
 ): WorkbenchFileOpenState {
   if (previewFile && previewFile !== path) {
-    const replaced = openFiles.map((openPath) => (openPath === previewFile ? path : openPath));
+    if (openFiles.includes(path)) {
+      return {
+        openFiles: openFiles.filter((openPath) => openPath !== previewFile),
+        activeFile: path,
+        previewFile: undefined,
+      };
+    }
+    const previewIndex = openFiles.indexOf(previewFile);
+    if (previewIndex === -1) {
+      return {
+        openFiles: [...openFiles, path],
+        activeFile: path,
+        previewFile: path,
+      };
+    }
     return {
-      openFiles: replaced.includes(path) ? replaced : [...replaced, path],
+      openFiles: openFiles.map((openPath) => (openPath === previewFile ? path : openPath)),
       activeFile: path,
       previewFile: path,
     };
   }
+  const alreadyOpen = openFiles.includes(path);
   return {
-    openFiles: openFiles.includes(path) ? [...openFiles] : [...openFiles, path],
+    openFiles: alreadyOpen ? [...openFiles] : [...openFiles, path],
     activeFile: path,
-    previewFile: path,
+    previewFile: alreadyOpen ? previewFile : path,
   };
 }
 

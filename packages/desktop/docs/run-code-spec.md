@@ -1,4 +1,4 @@
-# Meta Agent Desktop Plugin Call 规范
+# Meta Agent Desktop run_code 规范
 
 > 状态：Draft（registerTool capture 架构已确定）
 >
@@ -6,11 +6,11 @@
 >
 > 目标版本：Desktop Extension Host Profile v1 的增量能力
 >
-> 设计目的：减少模型初始可见 tool schema 的数量和 token，占用一个固定 `plugin_call` tool 承载 Desktop 插件方法；Pi 内建工具保持原样。
+> 设计目的：减少模型初始可见 tool schema 的数量和 token，占用一个固定 `run_code` tool 承载 Desktop 插件方法；Pi 内建工具保持原样。
 
 ## 1. 摘要
 
-Desktop 在受控插件 factory 执行期间代理 `ExtensionAPI.registerTool()`。插件仍按标准 Pi Extension API 注册工具，不需要增加 `desktopPlugin` named export，也不需要维护另一套 execute/schema/result adapter。Desktop 捕获完整 `ToolDefinition`，将其放入当前 thread worker generation 的 session-scoped registry，但不把这些定义交给 Pi 的模型 tool registry。模型只看到 Desktop inline extension 注册的一个固定 `plugin_call` tool，并通过 TypeScript 程序调用：
+Desktop 在受控插件 factory 执行期间代理 `ExtensionAPI.registerTool()`。插件仍按标准 Pi Extension API 注册工具，不需要增加 `desktopPlugin` named export，也不需要维护另一套 execute/schema/result adapter。Desktop 捕获完整 `ToolDefinition`，将其放入当前 thread worker generation 的 session-scoped registry，但不把这些定义交给 Pi 的模型 tool registry。模型只看到 Desktop inline extension 注册的一个固定 `run_code` tool，并通过 TypeScript 程序调用：
 
 ```ts
 const page = await plugin.browser.get({
@@ -34,11 +34,11 @@ Pi built-in tools
 PluginMethodRegistry
     = 当前 extension generation 中捕获的标准 Pi ToolDefinition
 
-plugin_call
+run_code
     = 唯一的 Desktop 插件工具模型入口
 
 plugin.<pluginId>.<toolName>(args)
-    = plugin_call worker 中的动态异步 API
+    = run_code worker 中的动态异步 API
 
 Plugin SKILL.md
     = 按需披露的方法签名、语义和工作流
@@ -55,9 +55,9 @@ Plugin SKILL.md
 - [`node-sidecar-per-thread-spec.md`](./node-sidecar-per-thread-spec.md) 继续负责 Electron embedded Node、thread single writer、worker replacement、sidecar protocol 和进程生命周期；
 - [`pi-native-assistant-ui-runtime-spec.md`](./pi-native-assistant-ui-runtime-spec.md) 继续负责 Pi message/tool lifecycle 到 Desktop timeline 和 assistant-ui 的投影；
 - Pi `AgentSession`、extension API、extension runner、agent loop、tool validation、session JSONL 和 compaction 语义保持权威且不作任何修改；
-- 本规范只新增 hidden plugin methods、插件 skill admission、`plugin_call` runtime 和对应 UI details。
+- 本规范只新增 hidden plugin methods、插件 skill admission、`run_code` runtime 和对应 UI details。
 
-当本规范进入 Accepted 时，Marketplace 规范中的 `tools.register` 表示旧制品的标准工具注册能力，Desktop 同样在受控边界捕获；新制品使用 `plugin-methods.provide` 携带 primary skill/catalog metadata。两者都不把单个插件工具直接暴露给模型。其余运行模型不变。
+`tools.register` 保持标准 Pi direct tool 语义。只有声明 `plugin-methods.provide` 并携带 primary skill/catalog metadata 的插件才由 Desktop 捕获。
 
 本规范同时对 sidecar no-orphan 条款作一个窄化：host-owned descendants、插件经 Host API 启动的 descendants，以及生成代码通过受支持 `node:child_process` wrapper 启动的 descendants 仍必须在 outer run/dispose 时清理；拥有完整 Node authority 并故意绕过 wrapper、daemonize 或重新脱离进程组的代码不在可强制保证范围。该例外必须在产品全信任说明中明确，不能把 worker thread 描述成安全边界。
 
@@ -65,7 +65,7 @@ Plugin SKILL.md
 
 ### 3.1 产品目标
 
-1. 无论启用多少个 Desktop 插件、每个插件注册多少工具，模型最多新增一个 `plugin_call` tool schema。
+1. 无论启用多少个 Desktop 插件、每个插件注册多少工具，模型最多新增一个 `run_code` tool schema。
 2. 单个插件工具的名称、参数 schema 和结果不进入初始模型 tool list。
 3. 模型根据任务选择并读取相关 plugin skill，不预加载所有插件 API 文档。
 4. Pi 内建工具继续直接可见、直接执行，不改变现有提示词和交互习惯。
@@ -79,7 +79,7 @@ Plugin SKILL.md
 3. 参数和结果分别经过 TypeBox schema 校验及 lossless JSON 校验。
 4. abort、wall/compute timeout、worker termination、heap cap、调用数限制和输出限制有明确语义。
 5. 中间 method result 只在 code worker 与 sidecar dispatcher 之间流动，不追加为 Pi tool result 或 conversation message。
-6. 一个 `plugin_call` 只产生一个 Pi tool lifecycle；内部方法调用作为 UI/audit details，不伪造成嵌套 Pi tools。
+6. 一个 `run_code` 只产生一个 Pi tool lifecycle；内部方法调用作为 UI/audit details，不伪造成嵌套 Pi tools。
 7. reload、replacement 和 worker crash 后不复用旧 generation 的 registry、handler、signal 或结果。
 
 ## 4. 非目标
@@ -88,7 +88,7 @@ Plugin SKILL.md
 
 - 修改 `packages/ai`、`packages/agent`、`packages/coding-agent`、`packages/tui` 或任何 Pi public/private API；
 - 通过 `pi.registerPluginMethod()`、扩展 `ExtensionAPI`、修改 `ExtensionRunner` 或增加 `ResourceLoader` hook 来保存 plugin methods；
-- 把 Pi built-in tools 聚合进 `plugin_call`；
+- 把 Pi built-in tools 聚合进 `run_code`；
 - 要求插件作者为已有 `registerTool()` 工具维护第二套 executable declaration；
 - 兼容 DeepSeek Harness PTC 的 `run_code` schema、SDK 或调度协议；
 - 在 renderer、preload 或 Electron main 中执行插件或模型生成代码；
@@ -104,12 +104,12 @@ Plugin SKILL.md
 
 实现必须保持以下不变量：
 
-1. `plugin_call` 之外的 Pi active tool set 与本功能启用前一致。
+1. `run_code` 之外的 Pi active tool set 与本功能启用前一致。
 2. method-based 插件数量从 1 增加到 N 时，模型 tool schema 数量不随 N 增加。
 3. `DesktopPluginMethodDefinition.parameters`、`result`、method description 和 generated catalog 不进入初始 system prompt。
 4. 初始 prompt 对每个 admitted skill 只使用 Pi 现有 skill metadata 格式。
 5. registry key 使用 Desktop 批准的 canonical plugin ID；插件代码不能自报或覆盖 plugin ID。
-6. `plugin_call` 是 Desktop 保留 tool name。Desktop 只向现有 Pi loader 注入一个同名 inline factory；不修改 Pi 去追踪 tool owner。若现有 Pi loader 因同名 tool 冲突返回 load error，Desktop 将其作为 blocking startup diagnostic，不覆盖、first-win 或静默替换其他 tool。
+6. `run_code` 是 Desktop 保留 tool name。Desktop 只向现有 Pi loader 注入一个同名 inline factory；不修改 Pi 去追踪 tool owner。若现有 Pi loader 因同名 tool 冲突返回 load error，Desktop 将其作为 blocking startup diagnostic，不覆盖、first-win 或静默替换其他 tool。
 7. 相同 canonical plugin ID 下的 method name 唯一；冲突是 Desktop admission failure，不使用 first-wins。
 8. 生成代码不能调用当前 generation 中未接纳的方法，即使磁盘上存在另一个版本的插件或 skill。
 9. method 输入和输出都必须是 lossless JSON；`undefined`、`bigint`、function、symbol、循环引用、`NaN` 和 infinity 被拒绝。
@@ -146,7 +146,7 @@ Development override 与被覆盖 Marketplace 插件共享 canonical plugin ID�
 
 ### 6.5 Outer run
 
-一次模型对 `plugin_call` 的调用及其 fresh code worker。
+一次模型对 `run_code` 的调用及其 fresh code worker。
 
 ### 6.6 Sub-call
 
@@ -156,12 +156,12 @@ outer run 内一次 `plugin.<pluginId>.<method>(args)` 调用。sub-call 不成�
 
 ### 7.1 固定 tool schema
 
-`plugin_call` 由 Desktop 自有 inline extension factory 使用现有 `pi.registerTool()` 注册。该 factory 使用固定 internal identity，例如 `<inline:desktop-plugin-call>`。`controlledResourceLoaderOptions()` 只在 approved resolved set 中至少有一个可贡献工具的插件时加入该 factory。插件注册同名 `plugin_call` 会在 per-entry capture 时因保留名称而 admission 失败；Desktop 不覆盖或静默替换。若 factory、captured tool、catalog 或 skill validation 失败，Desktop 在任何 provider request 之前终止 session startup。
+`run_code` 由 Desktop 自有 inline extension factory 使用现有 `pi.registerTool()` 注册。该 factory 使用固定 internal identity，例如 `<inline:desktop-run-code>`。`controlledResourceLoaderOptions()` 只在 approved resolved set 中至少有一个可贡献工具的插件时加入该 factory。插件注册同名 `run_code` 会在 per-entry capture 时因保留名称而 admission 失败；Desktop 不覆盖或静默替换。若 factory、captured tool、catalog 或 skill validation 失败，Desktop 在任何 provider request 之前终止 session startup。
 
 固定 schema 如下：
 
 ```ts
-const PluginCallParameters = Type.Object(
+const RunCodeParameters = Type.Object(
   {
     code: Type.String({
       description:
@@ -182,17 +182,17 @@ const PluginCallParameters = Type.Object(
 
 ```ts
 {
-  name: "plugin_call",
-  label: "Plugin call",
+  name: "run_code",
+  label: "Run code",
   description:
     "Execute an erasable TypeScript program using enabled Desktop plugin APIs. " +
     "Read the relevant plugin skill before use. Return only the final value needed by the model.",
-  parameters: PluginCallParameters,
+  parameters: RunCodeParameters,
   executionMode: "parallel",
 }
 ```
 
-`plugin_call` description 不列出插件、method、参数或 result schema。Pi 的普通 tool argument validation 继续校验 `code` 和 `description`。
+`run_code` description 不列出插件、method、参数或 result schema。Pi 的普通 tool argument validation 继续校验 `code` 和 `description`。
 
 ### 7.2 Tool list
 
@@ -200,7 +200,7 @@ const PluginCallParameters = Type.Object(
 
 ```text
 existing Pi built-in tools
-+ plugin_call (only when at least one Desktop plugin tool is admitted)
++ run_code (only when at least one Desktop plugin tool is admitted)
 ```
 
 Desktop 托管插件调用 `registerTool()` 表示声明完整原生工具能力，不表示要求直接暴露给模型。per-entry wrapper 捕获定义后必须保留 `prepareArguments`、`executionMode` 和 `execute`，并在执行时传入 outer call 的真实 `ExtensionContext`、abort signal 与 update callback。只有 Desktop 自有基础设施明确列入 native allowlist 的工具可以绕过该捕获边界；普通 Marketplace、Development、curated 和 builtin 插件没有自行选择 direct exposure 的入口。
@@ -216,7 +216,7 @@ user task
   -> model sees plugin skill summary
   -> model reads the matching SKILL.md
   -> skill optionally points to references/api.md
-  -> model writes one plugin_call program
+  -> model writes one run_code program
   -> intermediate method values stay in the program
   -> outer return becomes the model-facing result
 ```
@@ -233,7 +233,7 @@ user task
     "entry": "payload/index.js",
     "extensionApi": "1",
     "skills": ["payload/skills/plugin-browser/SKILL.md"],
-    "pluginCall": {
+    "runCode": {
       "skill": "plugin-browser",
       "catalog": "payload/plugin-api.json"
     }
@@ -247,9 +247,9 @@ user task
 1. `pi.skills` 可省略；存在时是无重复、非空的相对路径数组。
 2. Marketplace skill/catalog path 必须以 `payload/` 开头并存在于 archive file table。
 3. 每个 skill path 必须指向名为 `SKILL.md` 的 regular non-symlink file；catalog 必须是 regular non-symlink JSON file；canonical paths 必须位于 immutable version root 内。
-4. `pi.pluginCall.skill` 是 enhanced plugin-call 制品的 primary skill name；它必须与一个 admitted `SKILL.md` frontmatter `name` 精确相等。
-5. 新制品声明 `plugin-methods.provide` 时，`skills`、`pluginCall.skill` 和 `pluginCall.catalog` 必填；default factory 必须实际调用 `registerTool()`。
-6. 旧制品声明 `tools.register` 时可以没有 `pi.pluginCall` metadata；Desktop 仍捕获其 tools，但只使用插件自身发现到的 skills，不生成虚假 API 文档。
+4. `pi.runCode.skill` 是 enhanced run-code 制品的 primary skill name；它必须与一个 admitted `SKILL.md` frontmatter `name` 精确相等。
+5. 新制品声明 `plugin-methods.provide` 时，`skills`、`runCode.skill` 和 `runCode.catalog` 必填；default factory 必须实际调用 `registerTool()`。
+6. 声明 `tools.register` 的插件继续作为 native direct tools，不进入 `run_code` registry。
 7. manifest parser 校验 bounded catalog，返回 canonical skill/catalog paths、catalog digest 和 parsed catalog。catalog 是文档/admission metadata，不承载 execute closure。
 8. artifact 的现有全信任模型不因这些文件改变；路径校验是版本一致性和运行稳定性要求。
 
@@ -269,7 +269,7 @@ interface PluginApiCatalogV1 {
 }
 ```
 
-catalog 由 packaging command 从标准 tool registration fixture 或静态 extraction 生成，methods 按 name 排序。runtime 不从 catalog 构造 handler；实际 captured tool name 必须被 catalog 覆盖，catalog 中因配置而未注册的方法允许保留。插件 ID 不一致或 captured name 未记录时 admission 失败。参数 runtime validation 始终使用实际 ToolDefinition schema，避免 normalization 改变插件行为。
+catalog 和 `references/api.md` 由生成命令从标准 tool registrations 生成，methods 按 name 排序。runtime 不从 catalog 构造 handler；每个 captured tool 的名称、参数、结果及并发模式必须匹配 catalog。catalog 可以包含因运行时配置未注册的可选方法，运行时描述也可以包含配置化内容。插件 ID、实际注册的方法名或调用 schema 不一致时 admission 失败。参数 runtime validation 使用实际 ToolDefinition schema。
 
 Plugin method schema 是 closed profile，不接受任意 TypeBox runtime feature：
 
@@ -278,8 +278,8 @@ Plugin method schema 是 closed profile，不接受任意 TypeBox runtime featur
 - 禁止 `$ref`、`$id`、recursive/self reference、`Transform`、`Unsafe`、custom kind、symbol metadata、default/coercion 和 executable validator；
 - 允许的 string formats 固定为 `uri`、`date-time`、`email`、`uuid`、`hostname`、`ipv4`、`ipv6`，由 packaging/runtime 共用 format registry；其他 format registration 不参与 methods；
 - schema 自身必须是最大 64 层、256 KiB 的 lossless JSON object；
-- `canonicalizePluginSchema()` 保留 array order，并严格使用 RFC 8785 JSON Canonicalization Scheme 的 UTF-16 code-unit property ordering 和 number/string serialization 输出 UTF-8 bytes；不另加 Unicode code-point 排序；
-- packaging 和 runtime 必须调用同一 `validatePluginSchemaProfile()`、`canonicalizePluginSchema()` 和 `compilePluginSchema()` 实现，catalog equality 比较 canonical bytes，不比较对象 identity。
+- schema 比较使用 Desktop 现有 JSON snapshot/canonical JSON helper，保留 array order，并按稳定的 property order 比较；不比较对象 identity；
+- packaging 只负责生成和解析 catalog，runtime 使用捕获的 TypeBox schema 编译 validator；两侧不共享不存在的 executable schema compiler。
 
 runtime validation 只检查，不填 default、不 coerce、不删除 unknown fields。
 
@@ -293,9 +293,9 @@ catalog 不代表授权，不发送给 provider，也不要求模型读取。`SK
 
 ### 8.4 Curated 和 builtin plugin
 
-`DesktopExtensionDefinition` 增加可选的 `skillPaths`、`pluginCallSkill`、`pluginCallCatalogPath` 和 `pluginCallCatalogSha256`。curated resources 必须位于 `curatedRoot`；builtin resources 必须是随 Desktop sidecar 打包的静态路径。main source policy 读取 path、核对或生成 digest，并产出与 Marketplace 相同的 parsed `pluginCallCatalog`。两者仍经过相同的 catalog、frontmatter 和 name collision 校验。
+`DesktopExtensionDefinition` 增加可选的 `skillPaths`、`runCodeSkill`、`runCodeCatalogPath` 和 `runCodeCatalogSha256`。curated resources 必须位于 `curatedRoot`；builtin resources 必须是随 Desktop sidecar 打包的静态路径。main source policy 读取 path、核对或生成 digest，并产出与 Marketplace 相同的 parsed `runCodeCatalog`。两者仍经过相同的 catalog、frontmatter 和 name collision 校验。
 
-不是所有 inline factory 都是 plugin namespace。Desktop provider 等没有 plugin-call metadata 的 builtin inline extension 不得贡献 methods。
+不是所有 inline factory 都是 plugin namespace。Desktop provider 等没有 run-code metadata 的 builtin inline extension 不得贡献 methods。
 
 ### 8.5 Resolved contracts
 
@@ -303,18 +303,18 @@ catalog 不代表授权，不发送给 provider，也不要求模型读取。`SK
 interface ResolvedExtensionEntry {
   // existing fields
   skillPaths?: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
-  pluginCallCatalog?: PluginApiCatalogV1;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
+  runCodeCatalog?: PluginApiCatalogV1;
 }
 
 interface InstalledMarketplacePluginRecord {
   // existing fields
   skillPaths?: string[];
-  pluginCallSkill?: string;
-  pluginCallCatalogPath?: string;
-  pluginCallCatalogSha256?: string;
+  runCodeSkill?: string;
+  runCodeCatalogPath?: string;
+  runCodeCatalogSha256?: string;
 }
 ```
 
@@ -328,17 +328,15 @@ interface InstalledMarketplacePluginRecord {
 2. `SessionRuntime.create()` 创建 generation-local `DesktopPluginRegistryBuilder`，并把它传给 `controlledResourceLoaderOptions()`；
 3. 对每个 path-backed entry，Desktop 继续生成 identity-bound inline wrapper，并用 `jiti` 导入 module namespace；
 4. wrapper 调用 standard default factory，并代理 `registerTool()`：每个 ToolDefinition 进入 entry-local staging，其他 Host API 原样转发；factory throw 时 rollback；
-5. 对迁移期 method-only module，如果没有捕获任何 tool，可读取 legacy `desktopPlugin` named export；一旦捕获到 tool，named export 被忽略；
+5. factory 返回后再次调用 `registerTool()` 是 registration error；
 6. `ResourceLoader` 按现有行为加载普通 skills、Desktop builtin skills 和 approved plugin skills；
-7. services 创建完成后，Desktop 检查 extension diagnostics、captured definitions、catalog coverage 和 primary skill（若声明）；
-8. 所有检查成功后 builder freeze 为 immutable registry，再创建 AgentSession；
-9. metadata/draft worker执行相同 factory capture/admission，但不注入 executable `plugin_call`，验证后丢弃 registry。
+7. services 创建完成后，Desktop 检查 extension diagnostics、captured definitions、catalog compatibility 和 primary skill；
+8. 所有检查成功后 builder finalize 为本代 registry snapshot，再创建 AgentSession；
+9. metadata/draft worker执行相同 factory capture/admission，但不注入 executable `run_code`，验证后丢弃 registry。
 
-`SessionRuntime.create()` 的顺序必须可直接实现为：先创建 holder/builder；用它构造 `controlledResourceLoaderOptions()`；await `createAgentSessionServices()` 完成 extension/resource loading；执行 Desktop finalization；把 frozen registry bind 到 holder exactly once；最后调用现有的 `createAgentSessionFromServices()`。Pi services 对象在此阶段已完成 loader work，但尚未创建 `AgentSession`；finalization 失败时先 `builder.discard()`，dispose 已创建的 services resources，再抛出 `DesktopExtensionStartupError`。不得先创建 AgentSession 再补 registry。
+`SessionRuntime.create()` 的顺序必须可直接实现为：先创建 holder/builder；用它构造 `controlledResourceLoaderOptions()`；await `createAgentSessionServices()` 完成 extension/resource loading；执行 Desktop finalization；把 registry snapshot bind 到 holder；最后调用现有的 `createAgentSessionFromServices()`。Pi services 对象在此阶段已完成 loader work，但尚未创建 `AgentSession`；finalization 失败时先 `builder.discard()`，dispose 已创建的 services resources，再抛出 `DesktopExtensionStartupError`。不得先创建 AgentSession 再补 registry。reload 成功后重新 finalize 并 bind 当前 snapshot。
 
-`controlledResourceLoaderOptions()` 只在 resolved set 至少包含一个已批准、catalog 非空的 method-based plugin 时加入 Desktop `plugin_call` inline factory。该 factory 只调用现有 `pi.registerTool()` 一次，tool 的 `execute` closure 捕获 generation-local registry holder；holder 未 freeze、startup 已失败或 generation stale 时拒绝执行。因为 AgentSession 在 holder freeze 后才创建，正常 provider 路径永远看不到未就绪 tool。
-
-`controlledResourceLoaderOptions()` 只在 resolved set 至少包含一个已批准、catalog 非空的 method-based plugin 时加入 Desktop `plugin_call` inline factory。该 factory 只调用现有 `pi.registerTool()` 一次，tool 的 `execute` closure 捕获 generation-local registry holder；holder 未 freeze、startup 已失败或 generation stale 时拒绝执行。因为 AgentSession 在 holder freeze 后才创建，正常 provider 路径永远看不到未就绪 tool。
+`controlledResourceLoaderOptions()` 只在 resolved set 至少包含一个已批准、catalog 非空的 method-based plugin 时加入 Desktop `run_code` inline factory。该 factory 只调用现有 `pi.registerTool()` 一次，tool 的 `execute` closure 捕获 generation-local registry holder；holder 未绑定、startup 已失败或 generation stale 时拒绝执行。因为 AgentSession 在 registry 绑定后才创建，正常 provider 路径永远看不到未就绪 tool。
 
 plugin primary skill 必须满足：frontmatter 显式包含合法 `name` 和非空 `description`；name/description 通过 Pi Agent Skills validation；`disable-model-invocation` 必须不存在或为 `false`；loaded `filePath` 等于 approved canonical path；name 未与任何 earlier ordinary/plugin skill 冲突；该 path 没有任何 read/frontmatter/name/description diagnostic。对 plugin-owned primary skill，Desktop 把 Pi 原本 lenient 的这些 warnings 提升为 blocking startup error；unknown frontmatter fields 和非 primary supplemental skill warnings仍沿用 Pi 行为。
 
@@ -382,7 +380,7 @@ export default function setupPiExtension(pi: ExtensionAPI) {
 }
 ```
 
-插件不导入 Desktop private types，不导出第二套 execute function。`desktopPlugin` named export 是迁移期兼容输入；有 default factory 且捕获到至少一个 tool 时，捕获结果优先，Desktop 不加载该 named export。
+插件不导入 Desktop private types，不导出第二套 execute function。default factory 中的标准 `pi.registerTool()` 是唯一 executable source。
 
 ### 9.2 Capture and attribution
 
@@ -393,7 +391,7 @@ export default function setupPiExtension(pi: ExtensionAPI) {
 3. 每次注册同步校验 tool name、description、parameters、`prepareArguments`、`executionMode` 和 execute function，并 stage 到 entry-local builder；
 4. default factory 成功完成后才 commit；throw、重复名称或 catalog admission 失败全部 rollback；
 5. captured definitions 不传给 Pi `registerTool()`，因此不会进入 active tools、provider schema、snippets 或 guidelines；
-6. factory 后续 mutation 不改变 frozen registry。
+6. commit 后的 registry snapshot 不再接受该插件的新方法；资源重载会重新捕获并绑定新的 snapshot。
 
 不得使用可变全局 `currentPluginId`、`AsyncLocalStorage`、调用栈推断或插件自报 ID 做 attribution。
 
@@ -414,7 +412,7 @@ dispatcher 调用 captured tool 时必须按 Pi `ToolDefinition` 语义提供：
 
 ### 9.4 Catalog and skill
 
-catalog 和 skill 是制品文档/admission metadata，不是第二份 executable source。runtime method set 来自实际 captured registrations。对于 `plugin-methods.provide` 制品，catalog 至少覆盖所有捕获名称；因配置而未注册的 documented method 可以保留。参数验证使用实际 ToolDefinition schema，避免 normalization 改变插件行为。旧 `tools.register` 制品在迁移期间可以没有 plugin-call catalog/primary skill；Desktop 仍捕获并执行其工具，但不会伪造不存在的领域工作流文档。
+catalog 和 skill 是制品文档/admission metadata，不是第二份 executable source。runtime method set 来自实际 captured registrations。对于 `plugin-methods.provide` 制品，每个捕获定义必须属于 catalog 并匹配调用 schema；catalog 可保留因配置未启用的方法。参数验证使用实际 ToolDefinition schema。`tools.register` 制品继续作为 native direct tools。
 
 primary skill 继续提供语义、工作流、副作用和 canonical namespace。generated API reference 可以从捕获定义或 packaging 时的标准 tool registration fixture 生成，但插件作者不维护另一套 handler。
 
@@ -447,7 +445,7 @@ registry owner 是 `SessionRuntime`，生命周期等于一个 thread worker gen
 
 ### 10.2 Build order
 
-registry 按 `ResolvedExtensionSet.entries` 的 approved order 构建，但 plugin/tool identity 不使用 first-wins。任何重复 canonical plugin ID 或 tool name 都产生 blocking diagnostic。只有 factory、capture 以及已声明的 catalog/primary skill checks 成功后，registry 才 freeze 并交给 `plugin_call`。
+registry 按 `ResolvedExtensionSet.entries` 的 approved order 构建，但 plugin/tool identity 不使用 first-wins。任何重复 canonical plugin ID 或 tool name 都产生 blocking diagnostic。只有 factory、capture 以及已声明的 catalog/primary skill checks 成功后，registry snapshot 才交给 `run_code`。
 
 ### 10.3 Identity syntax
 
@@ -464,16 +462,16 @@ await plugin["com.acme.web-tools"].get({ url });
 await plugin.browser.get({ url });
 ```
 
-bracket form 是所有合法 ID 的无歧义 canonical syntax，plugin skill 必须至少展示一次。运行时用 null-prototype objects 和 own-property lookup 构建 namespace，不沿原型链解析。点分层级与完整 bracket key 指向同一个 frozen plugin namespace。
+bracket form 是所有合法 ID 的无歧义 canonical syntax，plugin skill 必须至少展示一次。运行时用 null-prototype objects 和 own-property lookup 构建 namespace，不沿原型链解析。点分层级与完整 bracket key 指向同一个稳定 plugin namespace。
 
-## 11. `plugin_call` code runtime
+## 11. `run_code` code runtime
 
 ### 11.1 Topology
 
 ```text
 model tool call
-  -> Pi agent loop validates plugin_call args and runs outer tool hooks
-  -> thread sidecar PluginCallTool.execute()
+  -> Pi agent loop validates run_code args and runs outer tool hooks
+  -> thread sidecar RunCodeTool.execute()
   -> fresh node:worker_threads Worker
        -> strip erasable TypeScript
        -> execute as strict async function body
@@ -491,7 +489,7 @@ model tool call
 
 ### 11.2 与 Pi tool pipeline 的关系
 
-外层 `plugin_call` 是普通 `ToolDefinition`，完整经过 Pi 现有 argument preparation/schema validation、`tool_call` hooks、execution events、`tool_result` hooks、result normalization 和 transcript persistence。
+外层 `run_code` 是普通 `ToolDefinition`，完整经过 Pi 现有 argument preparation/schema validation、`tool_call` hooks、execution events、`tool_result` hooks、result normalization 和 transcript persistence。
 
 内部 plugin method 不是 `ToolDefinition`，故意不经过以下 Pi tool-only 语义：
 
@@ -504,7 +502,7 @@ model tool call
 
 原因是 provider transcript 中不存在对应的 nested tool call；伪造这些事件会造成 unmatched tool lifecycle。method dispatcher 必须独立实现本规范要求的 validation、source attribution、cancellation、concurrency、progress、attachments 和 audit，不复制 Pi tool wrapper 并声称两者语义相同。
 
-需要 cross-cutting policy 的扩展应拦截外层 `plugin_call`，或未来使用专门的 `plugin_method_call/result` hook；首期不新增该 hook。插件方法本身的权限继续由 Desktop approved plugin 和全信任模型决定。
+需要 cross-cutting policy 的扩展应拦截外层 `run_code`，或未来使用专门的 `plugin_method_call/result` hook；首期不新增该 hook。插件方法本身的权限继续由 Desktop approved plugin 和全信任模型决定。
 
 ### 11.3 TypeScript execution contract
 
@@ -545,7 +543,7 @@ host 在 spawn 前用与真实 async function body 相同的 wrapper 执行 type
 
 schema、handler、plugin configuration、secret 和 method result 不进入 boot data。worker 通过 async function constructor 注入 `plugin` 和 bounded `console`。namespace member 始终是 async function。
 
-worker 发送的所有消息即使来自本机代码也按 untrusted wire data 校验：检查 message type、run token、integer call ID、plugin ID、method、JSON payload、深度、size 和 state transition；malformed、duplicate 或 terminal 后 message 被丢弃并记录 bounded diagnostic，不能让 message listener throw 导致 sidecar crash。
+worker 发送的消息按 wire shape 校验：检查 message type、run token、integer call ID、plugin ID 和 method；malformed、duplicate 或 terminal 后 message 被丢弃，不能让 message listener throw 导致 sidecar crash。
 
 由于生成代码拥有完整 Node authority，它可以访问 worker primitives 并故意伪造消息；wire validation 只防止 accidental corruption，不构成对恶意代码的安全保证。
 
@@ -620,7 +618,7 @@ type PluginHostMessage =
 
 程序可以用 `Promise.all()` 表达并行。结果按各 Promise 正常 settlement 返回；audit records 使用 submission sequence 保持确定性展示，不以完成顺序重排代码语义。console/log records 使用独立 monotonic sequence 保留 host 收到的顺序。
 
-同一 agent turn 中多个顶层 `plugin_call` 由 Pi 现有 tool execution scheduler 决定是否并行。每个 outer run 有独立 worker 和预算，但共享 session registry 的 plugin serial lanes，因而同一插件的默认 serial 约束跨 outer runs 生效。
+同一 agent turn 中多个顶层 `run_code` 由 Pi 现有 tool execution scheduler 决定是否并行。每个 outer run 有独立 worker 和预算，但共享 session registry 的 plugin serial lanes，因而同一插件的默认 serial 约束跨 outer runs 生效。
 
 Plugin serial lanes 不与 native Pi tool scheduler 合并，因为 methods 不属于 native tool registry。需要与某个 native tool 全局互斥的插件必须在自己的 handler 中使用共享资源锁；Desktop 不根据名称猜测互斥关系。
 
@@ -640,7 +638,7 @@ Pi tool signal abort（如存在）/ timeout / worker failure / runtime dispose
   -> terminate code worker
   -> clean tracked descendants
   -> wait for worker exit and cleanup
-  -> settle plugin_call with the originating stable error code
+  -> settle run_code with the originating stable error code
 ```
 
 Pi abort 使用 `PLUGIN_CALL_ABORTED`；wall/compute budget 使用 `PLUGIN_CALL_TIMEOUT`；worker failure 保留对应 code。worker parse failure、uncaught exception、output limit 或 unexpected exit 也必须通过 root abort 所有 sub-call controllers。outer settle 后移除 Pi signal listener。
@@ -720,13 +718,13 @@ successful outer program 的 return value 必须是 lossless JSON 或 `undefined
 
 - string：作为单个 text content 原样返回；
 - 其他 JSON：稳定 two-space JSON text；
-- `undefined`：返回 `(plugin_call completed with no output)`；
+- `undefined`：返回 `(run_code completed with no output)`；
 - image attachments：在 text content 后追加 Pi `ImageContent`；
 UI-only logs、sub-call audit 和 private file records 使用以下 exact `details` contract，不加入 model text：
 
 ```ts
-interface PluginCallDetails {
-  kind: "plugin-call-details-v1";
+interface RunCodeDetails {
+  kind: "run-code-details-v1";
   description: string;
   runId: string;
   generation: string;
@@ -748,7 +746,7 @@ interface PluginCallDetails {
 }
 ```
 
-`canonicalPath` 和 `sha256` 只存在于 sidecar-private details 和本地 JSONL。第 21 节 projector allowlist 必须把它转换为不含 path/hash 的 `PiPluginCallArtifact`；任何通用 JsonValue projector 都不得透传该 details object。
+`canonicalPath` 和 `sha256` 只存在于 sidecar-private details 和本地 JSONL。第 21 节 projector allowlist 必须把它转换为不含 path/hash 的 `PiRunCodeArtifact`；任何通用 JsonValue projector 都不得透传该 details object。
 
 外层 JSON 在 stringify 前再次 schema-independent lossless snapshot，并按 UTF-8 JSON byte size 限制。超限是 explicit failure，不能静默截断成看似有效的 JSON。
 
@@ -760,7 +758,7 @@ worker 注入只含 `log`、`info`、`warn`、`error`、`debug` 的 bounded cons
 
 ### 16.1 Collection
 
-plugin handler 使用 `ctx.attach()`，附件不混入 JSON result。这样 code 可以继续处理纯 JSON，而 outer `plugin_call` 聚合调用链产生的 media。
+plugin handler 使用 `ctx.attach()`，附件不混入 JSON result。这样 code 可以继续处理纯 JSON，而 outer `run_code` 聚合调用链产生的 media。
 
 每次 `attach()` 必须同步完成 shape、MIME、path、当前 regular-file stat 和声明 size budget admission；失败立即 throw，不到 handler 返回后再静默丢弃。附件先存入 sub-call-local staging。method result validation 成功后，dispatcher 异步完成 file hash/identity validation；全部成功才原子提交该 sub-call 的附件，否则 sub-call 以 attachment error 失败。failed/aborted sub-call 的附件全部丢弃。
 
@@ -772,20 +770,20 @@ plugin handler 使用 `ctx.attach()`，附件不混入 JSON result。这样 code
 - admitted image 进入 final `AgentToolResult.content`，因此会作为 outer result 的附件进入模型上下文；
 - Pi JSONL 按普通 toolResult image content 持久化 base64；
 - projector 为每张图建立 `SessionImageResourceRef`，timeline 只保留 `resourceId` 和 MIME，body 继续通过 `sessions.readImageResource` 按需读取；
-- `PiToolCallPart.pluginCall.attachments` 包含同一个 image ref，不复制 base64；
+- `PiToolCallPart.runCode.attachments` 包含同一个 image ref，不复制 base64；
 - outer run 失败或 abort 时不发布已收集 image。
 
 ### 16.3 Files
 
 - relative path 按 session `cwd` 解析；absolute path 保留；
-- `attach()` 同步 canonicalize、确认 regular file、记录 initial stat 并执行 file size budgets；method 成功后的 dispatcher commit phase 以 non-following file handle 异步流式计算 SHA-256，比较 handle 的 before/after stat 及 canonical path 当前 identity，任一 identity/size 变化都使 sub-call 以 attachment error 失败；
+- `attach()` 同步解析路径、确认 regular file、记录初始 stat 并执行 file size budgets；method 成功后的 dispatcher commit phase 异步重新检查文件并计算 SHA-256，文件不存在、类型变化或大小超限时该 sub-call 失败；
 - Pi toolResult `details` 中的 sidecar-private record 保存 canonical path、display name、MIME、size、SHA-256 和 artifact ID；它进入本地 session JSONL，但 projector 必须剥离 canonical path/hash，不能把原始 details 直接投影；
 - artifact ID 使用 host 生成并持久化的随机 UUID；同一 tool result 内必须唯一，不能编码或泄露 path、session ID 或 generation；
-- timeline/renderer 只得到 artifact ID、name、MIME、size 和 safe display path；
-- project root 内路径的 safe display path 是 project-relative path；project root 外一律只显示 basename，不显示 parent directories；`agentDir`、Desktop `userData` 和 Marketplace/curated install roots 中的文件不得 attach，返回 `PLUGIN_ATTACHMENT_PATH_PRIVATE`；
+- timeline/renderer 只得到 artifact ID、name、MIME 和 size；
+- 当前 renderer 只显示附件名称，不显示 canonical path；文件内容不进入模型上下文；
 - file bytes 不进入 model context。模型若需要内容，程序应由插件返回摘要，或使用现有 Pi `read` tool；
-- renderer 通过 `sessions.openPluginCallArtifact({ projectId, threadId, toolCallId, artifactId })` 请求打开；main 把 opaque IDs 发给 owning thread sidecar，sidecar 从当前/replayed private details exact resolve canonical path，重新检查 regular file/size 并流式重算 SHA-256；只有 size/hash 都相等才把 path 返回 main执行受信任 open；renderer 永不接收 canonical path/hash；
-- replay 时 projector 从 persisted private details 重建 artifact lookup。文件已移动、删除、同路径替换、size/hash 不匹配时返回 `PLUGIN_ARTIFACT_UNAVAILABLE`，UI 显示 unavailable；
+- renderer 通过 `sessions.openRunCodeArtifact({ projectId, threadId, toolCallId, artifactId })` 请求打开；main 把 opaque IDs 发给 owning thread sidecar，sidecar 从当前/replayed private details exact resolve canonical path，重新检查 regular file/size 并流式重算 SHA-256；只有 size/hash 都相等才把 path 返回 main执行受信任 open；renderer 永不接收 canonical path/hash；
+- replay 时 projector 从持久化 details 重建 artifact lookup。文件已移动、删除、同路径替换或 size/hash 不匹配时，打开请求失败并显示 unavailable；
 - outer run 失败或 abort 时不发布 file attachment。
 
 ## 17. Error contract
@@ -793,7 +791,7 @@ plugin handler 使用 `ctx.attach()`，附件不混入 JSON result。这样 code
 ### 17.1 Stable codes
 
 ```ts
-type PluginCallErrorCode =
+type RunCodeErrorCode =
   | "PLUGIN_NOT_FOUND"
   | "PLUGIN_METHOD_NOT_FOUND"
   | "PLUGIN_METHOD_INVALID_ARGUMENTS"
@@ -803,8 +801,6 @@ type PluginCallErrorCode =
   | "PLUGIN_RESPONSE_LIMIT_EXCEEDED"
   | "PLUGIN_PROGRESS_LIMIT_EXCEEDED"
   | "PLUGIN_ATTACHMENT_LIMIT_EXCEEDED"
-  | "PLUGIN_ATTACHMENT_PATH_PRIVATE"
-  | "PLUGIN_ARTIFACT_UNAVAILABLE"
   | "PLUGIN_CODE_SYNTAX_ERROR"
   | "PLUGIN_CODE_EXCEPTION"
   | "PLUGIN_CODE_INVALID_OUTPUT"
@@ -852,7 +848,7 @@ interface PluginSubCallRecord {
   startedAt?: number;
   completedAt?: number;
   durationMs?: number;
-  errorCode?: PluginCallErrorCode;
+  errorCode?: RunCodeErrorCode;
   progress?: JsonValue;
 }
 ```
@@ -864,9 +860,9 @@ interface PluginSubCallRecord {
 外层仍只有：
 
 ```text
-tool_execution_start(plugin_call)
-tool_execution_update(plugin_call, PluginCallDetails summary)
-tool_execution_end(plugin_call, AgentToolResult)
+tool_execution_start(run_code)
+tool_execution_update(run_code, RunCodeDetails summary)
+tool_execution_end(run_code, AgentToolResult)
 toolResult message fold
 ```
 
@@ -874,7 +870,7 @@ toolResult message fold
 
 ### 18.3 Desktop renderer
 
-`ToolView` 对 `plugin_call` 使用：
+`ToolView` 对 `run_code` 使用：
 
 - label：`plugin`；
 - target：模型提供的 `description`；
@@ -887,7 +883,7 @@ renderer 只展示 backend execution，不注册或执行 frontend tool implemen
 
 ### 18.4 Persistence
 
-outer `plugin_call` 的 args、final result 和 bounded details 随普通 Pi toolResult 持久化。sub-call records 不是独立 timeline nodes，也没有独立 provider messages。重连/resync 从同一个 outer tool part 重建详情。
+outer `run_code` 的 args、final result 和 bounded details 随普通 Pi toolResult 持久化。sub-call records 不是独立 timeline nodes，也没有独立 provider messages。重连/resync 从同一个 outer tool part 重建详情。
 
 ## 19. Capability model
 
@@ -902,15 +898,14 @@ type DesktopExtensionCapability =
 Desktop per-entry wrapper 必须 gate tool capture：
 
 - `plugin-methods.provide` entry 必须有 canonical plugin ID、primary skill 和 parsed catalog；
-- legacy `tools.register` entry 必须有 canonical plugin ID，skill/catalog metadata 可省略；
 - factory 的所有同步 `registerTool()` 调用按 approved entry attribution 并进入 staging；
-- capture、factory 或 catalog coverage 失败时 rollback 整个 entry；
+- capture、factory 或 catalog equality 失败时 rollback 整个 entry；
 - tool execution 不逐次向 main/renderer 请求授权；
 - capability 只表示工具可由模型生成程序调用，不表示 OS 权限限制。
 
 这里不依赖 Pi shared Host UI context 的 caller attribution。Desktop wrapper 由 `ResolvedExtensionEntry` 创建并闭包绑定 identity，在调用 factory 时代理 `registerTool()`。Host Profile 中“共享 Pi host 无 per-caller isolation”的限制保持不变，也无需修改 Pi。
 
-`tools.register` 不再表示 Desktop 中的 direct model exposure，只是旧 manifest 的捕获能力声明。新插件应使用 `plugin-methods.provide` 并携带 skill/catalog；host-owned native infrastructure 不属于 Marketplace plugin entry，继续按明确内建路径注册。
+`tools.register` 表示 native direct model exposure。需要组合调用的插件使用 `plugin-methods.provide` 并携带 skill/catalog；host-owned native infrastructure 继续按明确内建路径注册。
 
 ## 20. Session、draft、reload 和 persistence
 
@@ -918,7 +913,7 @@ Desktop per-entry wrapper 必须 gate tool capture：
 
 thread worker bootstrap 中的 `ResolvedExtensionSet` 决定 methods、catalog 和 skills。open existing session 时使用当前批准 generation 和该 session 的 `enabledPluginIds` 选择结果；session JSONL 不保存 method definitions 或 schemas。
 
-new-session draft 和 live thread 必须从同一 main-owned source policy 解析 plugin metadata。metadata worker 可以验证/display manifests 和 skill summaries，但不创建 executable method registry，不暴露 `plugin_call`，也不运行模型代码。
+new-session draft 和 live thread 必须从同一 main-owned source policy 解析 plugin metadata。metadata worker 可以验证/display manifests 和 skill summaries，但不创建 executable method registry，不暴露 `run_code`，也不运行模型代码。
 
 ### 20.2 Reload
 
@@ -928,11 +923,11 @@ new-session draft 和 live thread 必须从同一 main-owned source policy 解�
 
 ### 20.3 Replay
 
-历史 `plugin_call` 作为普通 Pi tool call/result replay。重放只显示持久化的 outer args/result 和 bounded details，不重新执行 code，不要求当前仍安装相同插件，也不从当前 registry 反推历史 method metadata。
+历史 `run_code` 作为普通 Pi tool call/result replay。重放只显示持久化的 outer args/result 和 bounded details，不重新执行 code，不要求当前仍安装相同插件，也不从当前 registry 反推历史 method metadata。
 
 ### 20.4 Child/subagent policy
 
-首期 `plugin_call` 只注册在 Desktop live thread `SessionRuntime`。metadata workers、subagent workers和 standalone Pi CLI 不继承 parent registry。skill 可以按现有 subagent skill policy作为知识传入，但没有 matching `plugin_call` 时必须明确视为不可执行；默认不向 subagent 注入 plugin skills，避免广告不可用 API。
+首期 `run_code` 只注册在 Desktop live thread `SessionRuntime`。metadata workers、subagent workers和 standalone Pi CLI 不继承 parent registry。skill 可以按现有 subagent skill policy作为知识传入，但没有 matching `run_code` 时必须明确视为不可执行；默认不向 subagent 注入 plugin skills，避免广告不可用 API。
 
 未来若 subagent 需要插件能力，必须把 approved extension generation、registry ownership、worker lifecycle 和 audit 回传作为独立设计，不能通过访问 parent thread singleton 绕过 single-writer/generation 边界。
 
@@ -945,11 +940,11 @@ code worker bridge 是 thread sidecar 内部协议，不加入 Electron main wir
 ```ts
 interface PiToolCallPart {
   // existing fields
-  pluginCall?: PiPluginCallArtifact;
+  runCode?: PiRunCodeArtifact;
 }
 
-interface PiPluginCallArtifact {
-  kind: "plugin-call";
+interface PiRunCodeArtifact {
+  kind: "run-code";
   description: string;
   generation: string;
   calls: PluginSubCallRecord[];
@@ -969,12 +964,12 @@ interface PiPluginCallArtifact {
 }
 ```
 
-`pluginCall` 是 projector 从 persisted `AgentToolResult.details` 和 image content 生成的 allowlisted renderer DTO。bootstrap 和 live `tool-call-replaced` 必须调用同一个 pure converter。partial execution 时它进入 assistant-ui 的 UI-only `artifact`；terminal 时仍保留在 `artifact`，而正式 `result` 继续是现有 outer `AgentToolResult` projection。renderer 不得从 `result.details` 自行解析 private records。
+`runCode` 是 projector 从 persisted `AgentToolResult.details` 和 image content 生成的 allowlisted renderer DTO。bootstrap 和 live `tool-call-replaced` 必须调用同一个 pure converter。partial execution 时它进入 assistant-ui 的 UI-only `artifact`；terminal 时仍保留在 `artifact`，而正式 `result` 继续是现有 outer `AgentToolResult` projection。renderer 不得从 `result.details` 自行解析 private records。
 
 新增 Desktop request：
 
 ```ts
-interface OpenPluginCallArtifactInput {
+interface OpenRunCodeArtifactInput {
   projectId: string;
   threadId: string;
   toolCallId: string;
@@ -982,14 +977,14 @@ interface OpenPluginCallArtifactInput {
 }
 ```
 
-main 只接受当前 attachment lease 对应 thread 的请求，并向 owning thread worker 发 `resolvePluginCallArtifact` command；sidecar 返回 canonical path 给 main，不返回 renderer。该 command 和 result 改变 main/sidecar wire，因此 bump `SIDECAR_PROTOCOL_VERSION`；`PiToolCallPart`/renderer DTO 改变 renderer wire，因此同时 bump Desktop `PROTOCOL_VERSION`。不创建独立 plugin progress push channel，大型 image body继续走 `SessionImageResource`。
+main 只接受当前 attachment lease 对应 thread 的请求，并向 owning thread worker 发 `resolveRunCodeArtifact` command；sidecar 返回 canonical path 给 main，不返回 renderer。该 command 和 result 改变 main/sidecar wire，因此 bump `SIDECAR_PROTOCOL_VERSION`；`PiToolCallPart`/renderer DTO 改变 renderer wire，因此同时 bump Desktop `PROTOCOL_VERSION`。不创建独立 plugin progress push channel，大型 image body继续走 `SessionImageResource`。
 
 ## 22. Compatibility 和迁移
 
 ### 22.1 Existing extensions
 
-- existing `registerTool()` 插件代码无需修改；Desktop 捕获其 ToolDefinition，不再把单个工具直接暴露给模型；
-- `tools.register` manifest 可在没有 plugin-call catalog/primary skill 时继续运行，后续可迁移为 `plugin-methods.provide` 以获得完整 progressive disclosure；
+- existing `registerTool()` 插件代码无需修改；声明 `plugin-methods.provide` 时 Desktop 捕获其 ToolDefinition；
+- `tools.register` manifest 继续作为 native direct tool 运行，可显式迁移为 `plugin-methods.provide`；
 - existing plugin 的 commands、events、providers、configuration 和 Host UI 能力保持原样；
 - loose development files 若没有稳定 canonical plugin ID，不能进入 namespaced registry；
 - 捕获工具的 text/image result 由通用 adapter 投影，private details 不进入模型上下文；
@@ -1004,7 +999,7 @@ main 只接受当前 attachment lease 对应 thread 的请求，并向 owning th
 3. manifest 从 `tools.register` 迁到 `plugin-methods.provide`；
 4. 增加 primary `SKILL.md`，说明 canonical namespace、参数、结果、副作用和工作流；
 5. 从标准 tool registrations 生成 catalog 与 API reference；
-6. 验证 Desktop provider request 只包含一个 `plugin_call` schema。
+6. 验证 Desktop provider request 只包含一个 `run_code` schema。
 
 迁移前后的 executable source 都是同一份 ToolDefinition，不存在双注册兼容层。
 
@@ -1021,7 +1016,7 @@ method rename、参数变化和 result shape 变化由插件版本、catalog 及
 - 不新增或扩展 Pi public/private types；
 - 不修改 `ExtensionAPI`、extension loader/runner、`DefaultResourceLoader`、`AgentSession` 或 agent loop；
 - 不向 Pi extension/load result 保存 hidden methods；
-- 只由 Desktop inline extension 使用当前公开 `pi.registerTool()` 注册一个普通 `plugin_call`；
+- 只由 Desktop inline extension 使用当前公开 `pi.registerTool()` 注册一个普通 `run_code`；
 - Pi 升级仍只通过现有 public compatibility characterization 验证。
 
 任何实现阶段发现必须修改 Pi 才能继续时，应停止并回到本规范重新设计，不能把该修改作为隐含前置补丁。
@@ -1042,16 +1037,16 @@ method rename、参数变化和 result shape 变化由插件版本、catalog 及
 新增建议：
 
 ```text
-packages/desktop/src/main/pi/plugin-call/
+packages/desktop/src/main/pi/run-code/
   plugin-method-registry.ts
   plugin-method-dispatcher.ts
-  plugin-call-tool.ts
-  plugin-call-runtime.ts
-  plugin-call-worker.ts
-  plugin-call-protocol.ts
-  plugin-call-json.ts
-  plugin-call-limits.ts
-  plugin-call-errors.ts
+  run-code-tool.ts
+  run-code-runtime.ts
+  run-code-worker.ts
+  run-code-protocol.ts
+  run-code-json.ts
+  run-code-limits.ts
+  run-code-errors.ts
 ```
 
 修改：
@@ -1066,7 +1061,7 @@ packages/desktop/src/main/pi/plugin-call/
 
 ### 23.4 Renderer
 
-修改 `tool-view.tsx` 和 focused tool components，为 `plugin_call` 增加专用 header、sub-call list、logs 和 attachments。不要增加 renderer-side dispatcher 或 executable tool。
+修改 `tool-view.tsx` 和 focused tool components，为 `run_code` 增加专用 header、sub-call list、logs 和 attachments。不要增加 renderer-side dispatcher 或 executable tool。
 
 ## 24. Test plan
 
@@ -1074,12 +1069,12 @@ packages/desktop/src/main/pi/plugin-call/
 
 - captured `registerTool()` definitions 不出现在 Pi registered tools、active tools、system prompt tool schemas、snippets、guidelines 或 deferred definitions；
 - module import + default factory + capture 都成功才 commit staged tools；任一步失败都 discard；
-- duplicate method、invalid name、missing parameters/execute、unsupported execution mode 和 reserved `plugin_call` name；
+- duplicate method、invalid name、missing parameters/execute、unsupported execution mode 和 reserved `run_code` name；
 - `prepareArguments`、actual TypeBox validation、AbortSignal、onUpdate 和 real ExtensionContext 均被保留；
-- `tools.register` legacy entry 无 catalog时可捕获，`plugin-methods.provide` entry 检查 catalog coverage；
+- `tools.register` entry 保持 direct exposure，`plugin-methods.provide` entry 检查 catalog compatibility；
 - two plugins can use same method name；
 - Development override 使用 manifest plugin ID；
-- zero candidate 不注入 tool factory；candidate startup 成功后 provider request 保持 native tools 并只新增一个 `plugin_call`；
+- zero candidate 不注入 tool factory；candidate startup 成功后 provider request 保持 native tools 并只新增一个 `run_code`；
 - host-owned inline infrastructure 没有 plugin entry 时不被误拦截；
 - repository diff 证明 Pi packages 零修改。
 
@@ -1090,7 +1085,7 @@ packages/desktop/src/main/pi/plugin-call/
 - primary skill missing/name mismatch/name collision/source mismatch/`disable-model-invocation: true`；
 - primary skill 的 read/frontmatter/name/description warnings 全部 blocking，supplemental warnings 保持 lenient；
 - Desktop finalizer 对 exact plugin skill path 做 blocking startup gate，但不修改 ordinary skills 或既有 `skillsOverride` 结果；
-- catalog parse、stable order、captured-name coverage；
+- catalog parse、stable order、captured-definition compatibility；
 - extension load failure 阻止 live AgentSession 创建，不能暴露 methods 或 skills 给 provider；
 - disabled/out-of-scope plugin 不贡献 skill；
 - global/project skill precedence不 shadow plugin primary skill；
@@ -1111,8 +1106,7 @@ packages/desktop/src/main/pi/plugin-call/
 ### 24.4 Validation 和 JSON
 
 - valid params/result 和 closed schema profile 每个允许 kind；
-- 禁止 ref/transform/unsafe/default/coercion/custom format，并以包含 astral/BMP property keys 的 fixture 锁定 RFC 8785 UTF-16 ordering；
-- packaging/runtime shared canonicalizer 产生相同 catalog bytes；
+- 禁止 ref/transform/unsafe/default/coercion/custom format，并验证 catalog 与运行时使用相同的 schema normalization；
 - additional property、required、format、nested diagnostic；
 - result schema failure；
 - `undefined` fields、BigInt、NaN、Infinity、cycle、deep object、accessor/proxy、Date、typed arrays、class instance；
@@ -1158,7 +1152,7 @@ packages/desktop/src/main/pi/plugin-call/
 
 - image validation、MIME、base64、per-run total；
 - image appears once in model content and once as timeline resource ref；
-- file opaque artifact ID、private-root rejection、renderer path/hash redaction、sidecar resolve command、same-path replacement 和 missing-after-replay；
+- file opaque artifact ID、renderer 不暴露 canonical path/hash、sidecar resolve command、same-path replacement 和 missing-after-replay；
 - renderer never receives canonical path；
 - attachment count/size failure；
 - failed/aborted sub-call attachments discarded；
@@ -1166,13 +1160,13 @@ packages/desktop/src/main/pi/plugin-call/
 
 ### 24.8 Pi/Desktop integration
 
-- zero methods 时没有 `plugin_call`；N plugins 时恰好一个；
+- zero methods 时没有 `run_code`；N plugins 时恰好一个；
 - Pi built-in tool list and behavior unchanged；
 - outer hooks run once，nested method 不生成伪 Pi hooks/events；
 - one outer Pi tool lifecycle with nested details；
 - partial details do not complete assistant-ui tool part；
 - terminal success/error replay；
-- bootstrap/live `PiToolCallPart.pluginCall` projection equivalence；
+- bootstrap/live `PiToolCallPart.runCode` projection equivalence；
 - renderer/sidecar protocol version bumps 和 artifact open routing；
 - reconnect/resync；
 - cancel、reload、branch、compaction 和 session reopen；
@@ -1186,7 +1180,7 @@ packages/desktop/src/main/pi/plugin-call/
 
 - add per-entry `registerTool()` proxy、generation-local registry builder 和 ToolDefinition adapter；
 - preserve prepareArguments、schema validation、execution context、abort、updates and result media；
-- add staging/commit/discard、legacy `tools.register` 和 no-exposure tests。
+- add staging/commit/discard 和 no-exposure tests。
 
 Exit：methods 可被 Desktop registry 枚举，模型 tool list 完全不变，Pi packages 没有文件变更。
 
@@ -1201,7 +1195,7 @@ Exit：enabled plugin 的 skill summary 可见，disabled/failed/drifted plugin 
 ### Phase 3: Runtime and dispatcher
 
 - worker protocol、type stripping、dynamic namespace、validation、limits、abort、concurrency；
-- fixed `plugin_call` tool；
+- fixed `run_code` tool；
 - structured errors and audit details。
 
 Exit：example plugin 能完成多次中间调用，只把 outer return 写入 tool result。
@@ -1219,17 +1213,17 @@ Exit：image、file、progress、error 和 replay 行为通过 integration tests
 - migrate selected Marketplace/curated plugins；
 - compare initial schema token count、task success rate、call latency 和 self-correction rate；
 - document author migration；
-- remove legacy `desktopPlugin` compatibility after all method-only plugins register standard tools；
+- remove legacy `desktopPlugin` compatibility；
 
 ## 26. Acceptance criteria
 
 本规范实现完成必须同时满足：
 
-1. 启用至少一个 method-based plugin 时，provider request 中只新增 `plugin_call` 一个 tool schema。
+1. 启用至少一个 method-based plugin 时，provider request 中只新增 `run_code` 一个 tool schema。
 2. 任意 plugin method schema、description 和 catalog 均不在初始 provider request/system prompt 中。
 3. 相关 plugin skill 的 name/description 在初始 skill metadata 中，完整正文只在模型读取后进入上下文。
-4. `plugin_call` 可使用真实 canonical plugin ID 调用方法，并支持 Marketplace dotted/hyphenated ID。
-5. 参数验证使用 captured ToolDefinition schema，结果/附件经过 Desktop adapter 和 lossless JSON 边界；catalog 存在时覆盖所有 captured names。
+4. `run_code` 可使用真实 canonical plugin ID 调用方法，并支持 Marketplace dotted/hyphenated ID。
+5. 参数验证使用 captured ToolDefinition schema，结果/附件经过 Desktop adapter 和 lossless JSON 边界；captured definitions 是 catalog 中与当前配置对应的合法子集。
 6. 中间 method values、logs 和 audit records 不进入 model transcript。
 7. outer return、stable errors 和允许的 images 按本规范进入一个 Pi tool result。
 8. timeout、abort、heap、depth、call、response、output 和 attachment limits 有 focused tests。
