@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { registerIpc } from "../src/main/ipc.ts";
 import { CHANNELS } from "../src/shared/channels.ts";
+import { createIpcTestDependencies } from "./ipc-test-dependencies.ts";
 
 const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
@@ -47,25 +48,18 @@ describe("models IPC", () => {
     electron.openPath.mockReset().mockResolvedValue("");
     vi.clearAllMocks();
     registerIpc(
-      {
-        list: vi.fn(),
-        getActive: vi.fn(),
-      } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
-      models as never,
-      {} as never,
-      providers as never,
-      {} as never,
-      dirtyGuard as never,
-      {
-        getStatus: vi.fn(),
-        install: vi.fn(),
-        onProgress: vi.fn(),
-        refreshActiveModelRuntimes,
-      },
+      createIpcTestDependencies({
+        projects: {
+          list: vi.fn(),
+          getActive: vi.fn(),
+        } as never,
+        models: models as never,
+        providers: providers as never,
+        dirtyGuard: dirtyGuard as never,
+        runtime: {
+          refreshActiveModelRuntimes,
+        },
+      }),
     );
   });
 

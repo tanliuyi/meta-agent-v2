@@ -1,10 +1,10 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MarketplaceGenerationReferenceTracker } from "../src/main/plugins/marketplace-generation-reference-tracker.ts";
 import type { ResolvedExtensionSet } from "../src/shared/desktop-extension-contracts.ts";
 
 const artifactHash = "a".repeat(64);
-const versionRoot = join("/tmp", "agent", "extensions", "plugin.one", ".versions", artifactHash);
+const versionRoot = resolve(join("/tmp", "agent", "extensions", "plugin.one", ".versions", artifactHash));
 
 describe("MarketplaceGenerationReferenceTracker", () => {
   it("retains immutable version roots per worker owner until release", () => {

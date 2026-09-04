@@ -1,185 +1,116 @@
-import { statSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  type IpcMainInvokeEvent,
-  ipcMain,
-  type OpenDialogOptions,
-  shell,
-  webContents,
-} from "electron";
-import type {
-  AuthOauthLoginInput,
-  AuthOauthLoginResponse,
-  SaveAuthConfigInput,
-} from "../shared/auth-config-contracts.ts";
-import type { SaveAutoTitleSettingsInput } from "../shared/auto-title-contracts.ts";
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions, webContents } from "electron";
 import type {
   BrowserCloseTabRequest,
   BrowserCreateTabRequest,
-  BrowserSessionIdentity,
   BrowserStateEvent,
 } from "../shared/browser-contracts.ts";
-import type {
-  BrowserContactInput,
-  BrowserPasswordInput,
-  BrowserPasswordOffer,
-  BrowserSitePermissionInput,
-} from "../shared/browser-data-contracts.ts";
-import { parseBrowserInternalPage } from "../shared/browser-internal-contracts.ts";
-import type { SaveBrowserSettingsInput } from "../shared/browser-settings-contracts.ts";
+import type { BrowserPasswordOffer } from "../shared/browser-data-contracts.ts";
 import { CHANNELS } from "../shared/channels.ts";
-import type {
-  HostResponse,
-  OpenLinkResult,
-  OpenPluginCallArtifactInput,
-  SessionAttachInput,
-  SessionBranchInput,
-  SessionBranchResult,
-  SessionControlState,
-  SessionCreateInput,
-  SessionCreateIpcResult,
-  SessionEditInput,
-  SessionPromptInput,
-  SessionReloadInput,
-  SessionRemovePolicy,
-  SessionResourceReloadInput,
-  TerminalEvent,
-  Thread,
-  WorkbenchState,
-} from "../shared/contracts.ts";
+import type { TerminalEvent, Thread } from "../shared/contracts.ts";
 import type { ShellRuntimeProgress, ShellRuntimeStatus } from "../shared/desktop-api.ts";
-import type {
-  ApplyDesktopExtensionSetInput,
-  ApplyDesktopExtensionSetResult,
-  ApplySessionPluginSelectionInput,
-  ApproveDevelopmentExtensionInput,
-  SaveDesktopExtensionSettingsInput,
-} from "../shared/desktop-extension-contracts.ts";
-import { filePathWithoutLocation } from "../shared/file-location.ts";
-import type {
-  MutateMemoryEntryInput,
-  RunMemoryMaintenanceInput,
-  SaveMemorySettingsInput,
-} from "../shared/memory-settings-contracts.ts";
-import type { SaveModelsConfigInput } from "../shared/models-config-contracts.ts";
-import type {
-  SessionCheckpointDiffInput,
-  SessionCheckpointDiffResult,
-  SessionCheckpointRestoreInput,
-  SessionCheckpointRestoreResult,
-} from "../shared/pi-rewind-contracts.ts";
-import type {
-  SavePluginConfigurationInput,
-  SavePluginConfigurationResult,
-} from "../shared/plugin-configuration-contracts.ts";
-import type {
-  InstallMarketplacePluginInput,
-  ListMarketplacePluginsInput,
-  SaveMarketplaceEndpointInput,
-  SetMarketplacePluginEnabledInput,
-  SetMarketplacePluginEnabledResult,
-  SetMarketplacePluginScopeInput,
-  SetMarketplacePluginScopeResult,
-  TestMarketplaceEndpointInput,
-  UninstallMarketplacePluginInput,
-  UpdateMarketplacePluginInput,
-} from "../shared/plugin-marketplace-contracts.ts";
-import type { SavePreferencesInput } from "../shared/preferences-contracts.ts";
-import type { SaveSettingsConfigInput } from "../shared/settings-config-contracts.ts";
-import type { GetSubagentSettingsInput, SaveSubagentSettingsInput } from "../shared/subagent-contracts.ts";
-import type { AuthConfigService } from "./auth/auth-config-service.ts";
-import { OauthLoginCoordinator } from "./auth/oauth-login-coordinator.ts";
-import type { BrowserManager } from "./browser/browser-manager.ts";
-import type { DesktopExtensionSettingsService } from "./extensions/desktop-extension-settings-service.ts";
-import type { FileService } from "./files/file-service.ts";
-import type { ProjectFileWatcher } from "./files/file-watcher.ts";
-import type { OfficeDocumentPreviewService } from "./files/office-document-preview-service.ts";
-import type { ModelsConfigService } from "./models/models-config-service.ts";
-import type { SessionSupervisor } from "./pi/session-supervisor.ts";
-import type { MarketplaceCatalogService } from "./plugins/marketplace-catalog-service.ts";
-import type { MarketplaceEndpointSettingsService } from "./plugins/marketplace-endpoint-settings-service.ts";
-import type { MarketplacePluginInstaller } from "./plugins/marketplace-plugin-installer.ts";
-import type { MarketplacePluginRegistry } from "./plugins/marketplace-plugin-registry.ts";
-import type { PluginConfigurationService } from "./plugins/plugin-configuration-service.ts";
-import type { PreferencesConfigService } from "./preferences/preferences-config-service.ts";
-import type { ProvidersConfigService } from "./providers/providers-config-service.ts";
-import type { ScmService } from "./scm/scm-service.ts";
-import type { ProjectScmWatcher } from "./scm/scm-watcher.ts";
-import type { AutoTitleSettingsService } from "./settings/auto-title-settings-service.ts";
-import type { MemorySettingsService } from "./settings/memory-settings-service.ts";
-import type { SettingsConfigService } from "./settings/settings-config-service.ts";
-import type { ProjectStore } from "./store/project-store.ts";
-import type { SubagentSettingsConfigService } from "./subagents/subagent-settings-config-service.ts";
-import type { TerminalSupervisor } from "./terminal/terminal-supervisor.ts";
+import { BROWSER_IPC_CHANNELS, type BrowserIpcDependencies, registerBrowserIpc } from "./ipc/browser-ipc.ts";
+import { PLUGIN_IPC_CHANNELS, type PluginIpcDependencies, registerPluginIpc } from "./ipc/plugin-ipc.ts";
+import { registerSessionIpc, SESSION_IPC_CHANNELS, type SessionIpcDependencies } from "./ipc/session-ipc.ts";
+import { registerSettingsIpc, SETTINGS_IPC_CHANNELS, type SettingsIpcDependencies } from "./ipc/settings-ipc.ts";
+import { registerWorkspaceIpc, WORKSPACE_IPC_CHANNELS, type WorkspaceIpcDependencies } from "./ipc/workspace-ipc.ts";
 import type { AutoUpdateService } from "./updater.ts";
-import type { WindowDirtyGuard } from "./window-dirty-guard.ts";
 
-/** 注册 Desktop 的 Project、Pi session、文件和 Workbench IPC。 */
-const authEditorWebContents = new Set<number>();
-const providerEditorWebContents = new Set<number>();
-const memoryEditorWebContents = new Set<number>();
-const autoTitleEditorWebContents = new Set<number>();
-const browserEditorWebContents = new Set<number>();
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function handleTrustedBrowserDataRequest<T>(event: IpcMainInvokeEvent, request: () => T): T {
-  const isMainRenderer =
-    Boolean(BrowserWindow.fromWebContents(event.sender)) && event.senderFrame === event.sender.mainFrame;
-  const isInternalPage = parseBrowserInternalPage(event.senderFrame?.url) !== null;
-  if (!isMainRenderer && !isInternalPage) throw new Error("拒绝非受信页面访问浏览器内部数据");
-  return request();
+interface RuntimeIpcDependencies {
+  readonly refreshActiveModelRuntimes?: () => Promise<void>;
+  readonly refreshMemoryConfiguration?: () => Promise<void>;
+  readonly shell?: {
+    getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
+    install(): Promise<ShellRuntimeStatus>;
+    use(path: string): Promise<ShellRuntimeStatus>;
+    onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
+  };
 }
 
-export function registerIpc(
-  projects: ProjectStore,
-  sessions: SessionSupervisor,
-  scm: ScmService,
-  scmWatcher: ProjectScmWatcher,
-  files: FileService,
-  officeDocuments: OfficeDocumentPreviewService,
-  fileWatcher: ProjectFileWatcher,
-  terminals: TerminalSupervisor,
-  models: ModelsConfigService,
-  auth: AuthConfigService,
-  providers: ProvidersConfigService,
-  settings: SettingsConfigService,
-  dirtyGuard: WindowDirtyGuard,
-  runtimeDependencies: {
-    refreshActiveModelRuntimes?(): Promise<void>;
-    refreshMemoryConfiguration?(): Promise<void>;
-    shell?: {
-      getStatus(): Promise<ShellRuntimeStatus> | ShellRuntimeStatus;
-      install(): Promise<ShellRuntimeStatus>;
-      use(path: string): Promise<ShellRuntimeStatus>;
-      onProgress(listener: (progress: ShellRuntimeProgress) => void): () => void;
-    };
-  } = {},
-  updater?: AutoUpdateService,
-  extensions?: DesktopExtensionSettingsService,
-  subagents?: SubagentSettingsConfigService,
-  marketplaceEndpoints?: MarketplaceEndpointSettingsService,
-  marketplaceCatalog?: MarketplaceCatalogService,
-  marketplaceRegistry?: MarketplacePluginRegistry,
-  marketplaceInstaller?: MarketplacePluginInstaller,
-  pluginConfigurations?: PluginConfigurationService,
-  memorySettings?: MemorySettingsService,
-  autoTitle?: AutoTitleSettingsService,
-  preferences?: PreferencesConfigService,
-  browser?: BrowserManager,
-): void {
-  const subscribedWebContents = new Set<number>();
-  const modelEditorWebContents = new Set<number>();
-  const oauthWebContents = new Set<number>();
-  const browserSessionOwnerWebContents = new Set<number>();
-  const officePreviewWebContents = new Set<number>();
-  const oauth = new OauthLoginCoordinator({
-    login: (providerId, callbacks) => auth.loginOauth(providerId, callbacks),
-  });
+/** 主进程 IPC 各领域 registrar 所需的命名依赖集合。 */
+export interface ApplicationIpcDependencies
+  extends WorkspaceIpcDependencies,
+    SessionIpcDependencies,
+    SettingsIpcDependencies,
+    PluginIpcDependencies,
+    BrowserIpcDependencies {
+  readonly runtime?: RuntimeIpcDependencies;
+  readonly updater?: AutoUpdateService;
+}
+
+/** 已注册 IPC 资源的幂等释放句柄。 */
+export interface IpcRegistration {
+  dispose(): void;
+}
+
+const WINDOW_IPC_CHANNELS = [
+  CHANNELS.windowMinimize,
+  CHANNELS.windowToggleMaximize,
+  CHANNELS.runtimeRestart,
+  CHANNELS.windowClose,
+] as const;
+const SHELL_IPC_CHANNELS = [
+  CHANNELS.shellRuntimeStatus,
+  CHANNELS.shellRuntimeInstall,
+  CHANNELS.shellRuntimeChoose,
+] as const;
+const UPDATER_IPC_CHANNELS = [
+  CHANNELS.updaterGetState,
+  CHANNELS.updaterCheck,
+  CHANNELS.updaterDownload,
+  CHANNELS.updaterInstall,
+] as const;
+
+/** 注册完成后的服务图；失败会撤销已注册的 handler 和 listener。 */
+/** 按领域注册 IPC，并在失败或退出时只清理本次注册内容。 */
+export function registerIpc(dependencies: ApplicationIpcDependencies): IpcRegistration {
+  const subscriptions: Array<() => void> = [];
+  const registeredChannels = new Set<string>();
+  const track = (channels: readonly string[]): void => {
+    for (const channel of channels) registeredChannels.add(channel);
+  };
+  const registerDomain = (allChannels: readonly string[], register: () => readonly string[]): void => {
+    try {
+      track(register());
+    } catch (error) {
+      track(allChannels);
+      throw error;
+    }
+  };
+  try {
+    track(WINDOW_IPC_CHANNELS);
+    registerWindowIpc(dependencies);
+    registerDomain(WORKSPACE_IPC_CHANNELS, () => registerWorkspaceIpc(dependencies));
+    registerDomain(SESSION_IPC_CHANNELS, () => registerSessionIpc(dependencies));
+    registerDomain(SETTINGS_IPC_CHANNELS, () =>
+      registerSettingsIpc({
+        ...dependencies,
+        refreshActiveModelRuntimes: dependencies.runtime?.refreshActiveModelRuntimes,
+        refreshMemoryConfiguration: dependencies.runtime?.refreshMemoryConfiguration,
+      }),
+    );
+    registerDomain(PLUGIN_IPC_CHANNELS, () => registerPluginIpc(dependencies));
+    registerDomain(BROWSER_IPC_CHANNELS, () => registerBrowserIpc(dependencies));
+    registerRuntimeIpc(dependencies, registeredChannels, subscriptions);
+  } catch (error) {
+    try {
+      disposeRegistration(registeredChannels, subscriptions);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "IPC registration and rollback failed");
+    }
+    throw error;
+  }
+
+  let disposed = false;
+  return {
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      disposeRegistration(registeredChannels, subscriptions);
+    },
+  };
+}
+
+function registerWindowIpc(dependencies: ApplicationIpcDependencies): void {
   ipcMain.on(CHANNELS.windowMinimize, (event) => BrowserWindow.fromWebContents(event.sender)?.minimize());
   ipcMain.on(CHANNELS.windowToggleMaximize, (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
@@ -193,741 +124,20 @@ export function registerIpc(
   });
   ipcMain.on(CHANNELS.windowClose, (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
-    if (owner) void dirtyGuard.requestClose(owner);
+    if (owner) void dependencies.dirtyGuard.requestClose(owner);
   });
-  ipcMain.handle(CHANNELS.linksOpen, (_event, projectId: string, target: string) =>
-    openLink(projectId, target, projects),
-  );
-  ipcMain.handle(CHANNELS.modelsGetConfig, () => models.getConfig());
-  ipcMain.handle(CHANNELS.modelsGetConfigRevision, () => models.getConfigRevision());
-  ipcMain.handle(CHANNELS.modelsSaveConfig, async (_event, input: SaveModelsConfigInput) => {
-    const result = await models.saveConfig(input);
-    if (result.status !== "saved" || !runtimeDependencies.refreshActiveModelRuntimes) return result;
-    const activeSessionsRefreshed = await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
-    return { ...result, snapshot: { ...result.snapshot, activeSessionsRefreshed } };
-  });
-  ipcMain.handle(CHANNELS.modelsOpenConfigExternally, async () => openPath(await models.getExternalOpenTarget()));
-  ipcMain.handle(CHANNELS.authGetConfig, () => auth.getConfig());
-  ipcMain.handle(CHANNELS.authGetConfigRevision, () => auth.getConfigRevision());
-  ipcMain.handle(CHANNELS.authSaveConfig, async (_event, input: SaveAuthConfigInput) => {
-    const result = await auth.saveConfig(input);
-    if (result.status === "saved" && runtimeDependencies.refreshActiveModelRuntimes) {
-      await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
-    }
-    return result;
-  });
-  ipcMain.handle(CHANNELS.authOpenConfigExternally, async () => openPath(await auth.getExternalOpenTarget()));
-  ipcMain.handle(CHANNELS.authOauthLogin, (event, input: AuthOauthLoginInput) => {
-    const ownerId = event.sender.id;
-    if (!oauthWebContents.has(ownerId)) {
-      oauthWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        oauthWebContents.delete(ownerId);
-        oauth.cancelOwner(ownerId);
-      });
-    }
-    return oauth
-      .start(
-        ownerId,
-        input,
-        (oauthEvent) => {
-          if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.authOauthEvent, oauthEvent);
-        },
-        openOauthUrl,
-      )
-      .then(async (snapshot) => {
-        if (runtimeDependencies.refreshActiveModelRuntimes) {
-          await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
-        }
-        return snapshot;
-      });
-  });
-  ipcMain.handle(CHANNELS.authOauthRespond, (event, response: AuthOauthLoginResponse) => {
-    oauth.respond(event.sender.id, response);
-  });
-  ipcMain.handle(CHANNELS.authOauthCancel, (event, loginId: string) => {
-    oauth.cancel(event.sender.id, loginId);
-  });
-  ipcMain.handle(CHANNELS.providersGetConfig, () => providers.getConfig());
-  ipcMain.handle(CHANNELS.providersSaveConfig, async (_event, input) => {
-    const result = await providers.saveConfig(input);
-    if (result.status === "saved" && runtimeDependencies.refreshActiveModelRuntimes) {
-      await refreshActiveModelRuntimes(runtimeDependencies.refreshActiveModelRuntimes);
-    }
-    return result;
-  });
-  ipcMain.handle(CHANNELS.providersOpenConfigExternally, async () => openPath(await providers.getExternalOpenTarget()));
-  ipcMain.handle(CHANNELS.settingsGetConfig, () => settings.getConfig());
-  ipcMain.handle(CHANNELS.settingsSaveConfig, (_event, input: SaveSettingsConfigInput) => settings.saveConfig(input));
-  if (preferences) {
-    ipcMain.on(CHANNELS.preferencesGetInitial, (event) => {
-      event.returnValue = preferences.getInitial();
-    });
-    ipcMain.handle(CHANNELS.preferencesSave, (_event, input: SavePreferencesInput) => preferences.save(input));
-  }
-  if (browser) {
-    ipcMain.handle(
-      CHANNELS.browserAttach,
-      (_event, identity: BrowserSessionIdentity, webContentsId: number, requestId?: number) =>
-        browser.attach(identity, webContentsId, requestId),
-    );
-    ipcMain.handle(CHANNELS.browserDetach, (_event, identity: BrowserSessionIdentity, webContentsId: number) =>
-      browser.detach(identity, webContentsId),
-    );
-    ipcMain.handle(CHANNELS.browserTabSelect, (_event, identity: BrowserSessionIdentity, tabId: number) =>
-      browser.selectTab(identity, tabId),
-    );
-    ipcMain.handle(CHANNELS.browserNavigate, (_event, identity: BrowserSessionIdentity, tabId: number, url: string) =>
-      browser.navigate(identity, tabId, url),
-    );
-    ipcMain.handle(CHANNELS.browserScreenshot, (_event, identity: BrowserSessionIdentity, tabId: number) =>
-      browser.screenshot(identity, tabId),
-    );
-    ipcMain.handle(CHANNELS.browserCopyScreenshot, (_event, identity: BrowserSessionIdentity, tabId: number) =>
-      browser.copyScreenshot(identity, tabId),
-    );
-    ipcMain.handle(
-      CHANNELS.browserSnapshot,
-      (_event, identity: BrowserSessionIdentity, tabId: number, opts?: { withScreenshot?: boolean }) =>
-        browser.snapshot(identity, tabId, opts),
-    );
-    ipcMain.handle(CHANNELS.browserAction, (_event, identity: BrowserSessionIdentity, tabId: number, action) =>
-      browser.action(identity, tabId, action),
-    );
-    ipcMain.handle(CHANNELS.browserTabsList, (_event, identity: BrowserSessionIdentity) => browser.tabsList(identity));
-    ipcMain.handle(CHANNELS.browserSettingsGet, () => browser.getSettingsSnapshot());
-    ipcMain.handle(CHANNELS.browserSettingsSave, (_event, input: SaveBrowserSettingsInput) =>
-      browser.saveSettings(input),
-    );
-    ipcMain.handle(CHANNELS.browserSessionRetire, (event, identity: BrowserSessionIdentity) =>
-      browser.retireSession(identity, event.sender.id),
-    );
-    ipcMain.handle(CHANNELS.browserSessionAcquire, (event, identity: BrowserSessionIdentity) => {
-      const ownerId = event.sender.id;
-      if (!browserSessionOwnerWebContents.has(ownerId)) {
-        browserSessionOwnerWebContents.add(ownerId);
-        event.sender.once("destroyed", () => {
-          browserSessionOwnerWebContents.delete(ownerId);
-          browser.releaseOwner(ownerId);
-        });
-      }
-      browser.acquireSession(identity, ownerId);
-    });
-    ipcMain.handle(CHANNELS.browserClearData, (_event, identity: BrowserSessionIdentity) =>
-      browser.clearSessionData(identity),
-    );
-    ipcMain.handle(CHANNELS.browserClearAllData, () => browser.clearAllData());
-    ipcMain.handle(CHANNELS.browserHistory, (_event, identity: BrowserSessionIdentity) =>
-      browser.browserHistory(identity),
-    );
-    ipcMain.handle(CHANNELS.browserOpenDownloads, async () => {
-      const error = await shell.openPath(app.getPath("downloads"));
-      return error ? { ok: false as const, error } : { ok: true as const };
-    });
-    ipcMain.handle(
-      CHANNELS.browserAnnotationPick,
-      (_event, identity: BrowserSessionIdentity, tabId: number, x: number, y: number) =>
-        browser.pickAnnotationTarget(identity, tabId, x, y),
-    );
-    ipcMain.handle(CHANNELS.browserAnnotationAdd, (_event, identity: BrowserSessionIdentity, tabId: number, input) =>
-      browser.addAnnotation(identity, tabId, input),
-    );
-    ipcMain.handle(CHANNELS.browserAnnotationList, (_event, identity: BrowserSessionIdentity, tabId: number) =>
-      browser.listAnnotations(identity, tabId),
-    );
-    ipcMain.handle(
-      CHANNELS.browserAnnotationRemove,
-      (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
-        browser.removeAnnotation(identity, tabId, id),
-    );
-    ipcMain.handle(CHANNELS.browserAnnotationRemoveMany, (_event, identity: BrowserSessionIdentity, ids: string[]) =>
-      browser.removeAnnotations(identity, ids),
-    );
-    ipcMain.handle(
-      CHANNELS.browserAnnotationUpdate,
-      (_event, identity: BrowserSessionIdentity, tabId: number, id: string, input) =>
-        browser.updateAnnotation(identity, tabId, id, input),
-    );
-    ipcMain.handle(
-      CHANNELS.browserAnnotationResolve,
-      (_event, identity: BrowserSessionIdentity, tabId: number, id: string) =>
-        browser.resolveAnnotationBounds(identity, tabId, id),
-    );
-    ipcMain.handle(CHANNELS.browserDataGet, (event, includePasswords?: boolean) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserDataGet(includePasswords === true)),
-    );
-    ipcMain.handle(CHANNELS.browserHistoryDelete, (event, url: string, timestamp: number) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserHistoryDelete(url, timestamp)),
-    );
-    ipcMain.handle(CHANNELS.browserHistoryClear, (event) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserHistoryClear()),
-    );
-    ipcMain.handle(CHANNELS.browserDownloadsClear, (event) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserDownloadsClear()),
-    );
-    ipcMain.handle(CHANNELS.browserDownloadReveal, (event, path: string) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserDownloadReveal(path)),
-    );
-    ipcMain.handle(CHANNELS.browserDownloadOpen, (event, path: string) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserDownloadOpen(path)),
-    );
-    ipcMain.handle(
-      CHANNELS.browserContactSave,
-      (event, input: { contactId: string | null; contact: BrowserContactInput }) =>
-        handleTrustedBrowserDataRequest(event, () => browser.browserContactSave(input)),
-    );
-    ipcMain.handle(CHANNELS.browserContactDelete, (event, id: string) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserContactDelete(id)),
-    );
-    ipcMain.handle(
-      CHANNELS.browserPasswordSave,
-      (event, input: { passwordId: string | null; password: BrowserPasswordInput }) =>
-        handleTrustedBrowserDataRequest(event, () => browser.browserPasswordSave(input)),
-    );
-    ipcMain.handle(CHANNELS.browserPasswordDelete, (event, id: string) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserPasswordDelete(id)),
-    );
-    ipcMain.handle(CHANNELS.browserSitePermissionSave, (event, input: BrowserSitePermissionInput) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserSitePermissionSave(input)),
-    );
-    ipcMain.handle(CHANNELS.browserSitePermissionDelete, (event, id: string) =>
-      handleTrustedBrowserDataRequest(event, () => browser.browserSitePermissionDelete(id)),
-    );
-    ipcMain.handle(
-      CHANNELS.browserPasswordOfferResolve,
-      (event, identity: BrowserSessionIdentity, offerId: string, save: boolean) =>
-        browser.browserPasswordOfferResolve(identity, offerId, save, event.sender.id),
-    );
-  }
-  ipcMain.handle(CHANNELS.settingsChooseUserAvatar, async (event) => {
-    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const options: OpenDialogOptions = {
-      title: "选择用户头像",
-      properties: ["openFile"],
-      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
-    };
-    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  });
-  if (memorySettings) {
-    ipcMain.handle(CHANNELS.memorySettingsGetSnapshot, () => memorySettings.getSnapshot());
-    ipcMain.handle(CHANNELS.memorySettingsSaveConfig, async (_event, input: SaveMemorySettingsInput) => {
-      const result = await memorySettings.saveConfig(input);
-      if (result.status !== "saved" || !runtimeDependencies.refreshMemoryConfiguration) return result;
-      try {
-        await runtimeDependencies.refreshMemoryConfiguration();
-        return result;
-      } catch (error) {
-        console.error("Memory settings were saved, but active sessions failed to refresh:", error);
-        const refreshWarning = "设置已保存，但活动会话刷新失败；新会话将使用最新配置。";
-        return {
-          ...result,
-          warning: result.warning ? `${result.warning} ${refreshWarning}` : refreshWarning,
-        };
-      }
-    });
-    ipcMain.handle(CHANNELS.memorySettingsMutateEntry, (_event, input: MutateMemoryEntryInput) =>
-      memorySettings.mutateEntry(input),
-    );
-    ipcMain.handle(CHANNELS.memorySettingsRunMaintenance, (_event, input: RunMemoryMaintenanceInput) =>
-      memorySettings.runMaintenance(input),
-    );
-  }
-  if (autoTitle) {
-    ipcMain.handle(CHANNELS.autoTitleGetSnapshot, () => autoTitle.getSnapshot());
-    ipcMain.handle(CHANNELS.autoTitleSaveConfig, (_event, input: SaveAutoTitleSettingsInput) =>
-      autoTitle.saveConfig(input),
-    );
-    ipcMain.handle(CHANNELS.autoTitleGetModelOptions, () => autoTitle.getModelOptions());
-  }
-  if (subagents) {
-    ipcMain.handle(CHANNELS.subagentsGetSnapshot, (_event, input?: GetSubagentSettingsInput) =>
-      subagents.getSnapshot(input),
-    );
-    ipcMain.handle(CHANNELS.subagentsSaveConfig, (_event, input: SaveSubagentSettingsInput) =>
-      subagents.saveConfig(input),
-    );
-  }
-  if (marketplaceEndpoints && marketplaceCatalog) {
-    ipcMain.handle(CHANNELS.marketplaceGetEndpointSettings, () => marketplaceEndpoints.getSettings());
-    ipcMain.handle(CHANNELS.marketplaceTestEndpoint, (_event, input: TestMarketplaceEndpointInput) =>
-      marketplaceEndpoints.testEndpoint(input),
-    );
-    ipcMain.handle(CHANNELS.marketplaceSaveEndpoint, (_event, input: SaveMarketplaceEndpointInput) =>
-      marketplaceEndpoints.saveEndpoint(input),
-    );
-    ipcMain.handle(CHANNELS.marketplaceListPlugins, (_event, input: ListMarketplacePluginsInput = {}) =>
-      marketplaceCatalog.list(input),
-    );
-    ipcMain.handle(CHANNELS.marketplaceGetPlugin, (_event, pluginId: string) => marketplaceCatalog.getPlugin(pluginId));
-    if (marketplaceRegistry && marketplaceInstaller) {
-      ipcMain.handle(CHANNELS.marketplaceGetInstalled, () => marketplaceRegistry.getSnapshot());
-      ipcMain.handle(CHANNELS.marketplaceGetPluginConfiguration, (_event, pluginId: string) => {
-        if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
-        return pluginConfigurations.getConfig(pluginId);
-      });
-      ipcMain.handle(
-        CHANNELS.marketplaceSavePluginConfiguration,
-        async (_event, input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult> => {
-          if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
-          const result = await pluginConfigurations.saveConfig(input);
-          if (result.status === "saved") await sessions.extensionSettingsChanged();
-          return result;
-        },
-      );
-      ipcMain.handle(CHANNELS.marketplaceInstallPlugin, async (_event, input: InstallMarketplacePluginInput) => {
-        const result = await marketplaceInstaller.install(input);
-        if (result.status !== "installed") return result;
-        await sessions.extensionSettingsChanged();
-        const application = await applyMarketplaceMutation(
-          sessions,
-          input.applyToCurrentSession,
-          result.recoveryPending,
-        );
-        return { ...result, ...application };
-      });
-      ipcMain.handle(CHANNELS.marketplaceUpdatePlugin, async (_event, input: UpdateMarketplacePluginInput) => {
-        const result = await marketplaceInstaller.update(input);
-        if (result.status !== "updated") return result;
-        await sessions.extensionSettingsChanged();
-        const application = await applyMarketplaceMutation(
-          sessions,
-          input.applyToCurrentSession,
-          result.recoveryPending,
-        );
-        return { ...result, ...application };
-      });
-      ipcMain.handle(CHANNELS.marketplaceUninstallPlugin, async (_event, input: UninstallMarketplacePluginInput) => {
-        const result = await marketplaceInstaller.uninstall(input);
-        if (result.status !== "uninstalled") return result;
-        await sessions.extensionSettingsChanged();
-        const application = await applyMarketplaceMutation(
-          sessions,
-          input.applyToCurrentSession,
-          result.recoveryPending,
-        );
-        return { ...result, ...application };
-      });
-      ipcMain.handle(
-        CHANNELS.marketplaceSetPluginEnabled,
-        async (_event, input: SetMarketplacePluginEnabledInput): Promise<SetMarketplacePluginEnabledResult> => {
-          const result = await marketplaceRegistry.commitEnabled(input.expectedRevision, input.pluginId, input.enabled);
-          if (result.status === "conflict") return { status: "conflict", current: result.snapshot };
-          if (result.status === "not-installed") return { status: "not-installed", snapshot: result.snapshot };
-          if (result.status === "broken") return { status: "broken", snapshot: result.snapshot };
-          await sessions.extensionSettingsChanged();
-          return { status: "saved", snapshot: result.snapshot };
-        },
-      );
-      ipcMain.handle(
-        CHANNELS.marketplaceSetPluginScope,
-        async (_event, input: SetMarketplacePluginScopeInput): Promise<SetMarketplacePluginScopeResult> => {
-          const result = await marketplaceRegistry.commitScope(
-            input.expectedRevision,
-            input.pluginId,
-            input.scope,
-            input.scope === "project" ? input.projectIds : undefined,
-          );
-          if (result.status === "conflict") return { status: "conflict", current: result.snapshot };
-          if (result.status !== "saved") return { status: "not-installed", snapshot: result.snapshot };
-          await sessions.extensionSettingsChanged();
-          const application = await applyMarketplaceMutation(sessions, input.applyToCurrentSession, undefined);
-          return { status: "saved", snapshot: result.snapshot, ...application };
-        },
-      );
-    }
-  }
-  if (extensions) {
-    ipcMain.handle(CHANNELS.extensionsGetConfig, async (_event, projectId?: string, threadId?: string) => {
-      const snapshot = await extensions.getConfig();
-      if (!projectId || !threadId) return snapshot;
-      const state = await sessions.getExtensionState(projectId, threadId);
-      return {
-        ...snapshot,
-        reloadRequired: state.reloadRequired,
-        appliedGeneration: state.appliedGeneration,
-        desiredGeneration: state.desiredGeneration,
-        diagnostics: state.diagnostics,
-      };
-    });
-    ipcMain.handle(CHANNELS.extensionsSaveConfig, async (_event, input: SaveDesktopExtensionSettingsInput) => {
-      const result = await extensions.saveConfig(input);
-      if (result.status === "saved") await sessions.extensionSettingsChanged();
-      return result;
-    });
-    ipcMain.handle(
-      CHANNELS.extensionsChooseDevelopmentEntry,
-      async (event, input: ApproveDevelopmentExtensionInput) => {
-        const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-        const dialogOptions: Electron.OpenDialogOptions = {
-          properties: ["openFile", "openDirectory"],
-          filters: [{ name: "Pi extension", extensions: ["ts", "js", "mjs", "cjs"] }],
-        };
-        const result = owner
-          ? await dialog.showOpenDialog(owner, dialogOptions)
-          : await dialog.showOpenDialog(dialogOptions);
-        const saved = await extensions.approveDevelopmentEntry(
-          input,
-          result.canceled ? undefined : result.filePaths[0],
-        );
-        if (saved.status === "saved") await sessions.extensionSettingsChanged();
-        return saved;
-      },
-    );
-    ipcMain.handle(CHANNELS.extensionsApply, (_event, input: ApplyDesktopExtensionSetInput) =>
-      sessions.applyExtensionSet(input.projectId, input.threadId, input.expectedDesiredGeneration, input.abortRunning),
-    );
-    ipcMain.handle(CHANNELS.extensionsGetSessionPlugins, (_event, projectId: string, threadId: string) =>
-      sessions.getSessionPluginOptions(projectId, threadId),
-    );
-    ipcMain.handle(CHANNELS.extensionsApplySessionPlugins, (_event, input: ApplySessionPluginSelectionInput) =>
-      sessions.applySessionPluginSelection(input.projectId, input.threadId, input.enabledPluginIds, input.abortRunning),
-    );
-    ipcMain.handle(CHANNELS.extensionsGetPluginConfiguration, async (_event, pluginId: string) => {
-      if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
-      const schema = await extensions.getDevelopmentConfigurationSchema(pluginId);
-      if (!schema) throw new Error(`Development plugin is not configurable: ${pluginId}`);
-      return pluginConfigurations.getDevelopmentConfig(pluginId, schema);
-    });
-    ipcMain.handle(
-      CHANNELS.extensionsSavePluginConfiguration,
-      async (_event, input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult> => {
-        if (!pluginConfigurations) throw new Error("Plugin configuration service is unavailable");
-        const schema = await extensions.getDevelopmentConfigurationSchema(input.pluginId);
-        if (!schema) throw new Error(`Development plugin is not configurable: ${input.pluginId}`);
-        const result = await pluginConfigurations.saveDevelopmentConfig(input, schema);
-        if (result.status === "saved") await sessions.extensionSettingsChanged();
-        return result;
-      },
-    );
-  }
-  ipcMain.on(CHANNELS.memorySettingsSetEditorDirty, (event, dirty: unknown) => {
-    if (typeof dirty !== "boolean") {
-      event.returnValue = false;
-      return;
-    }
-    const ownerId = event.sender.id;
-    dirtyGuard.setDirty(ownerId, dirty);
-    if (!memoryEditorWebContents.has(ownerId)) {
-      memoryEditorWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        memoryEditorWebContents.delete(ownerId);
-        dirtyGuard.remove(ownerId);
-      });
-    }
-    event.returnValue = true;
-  });
+}
 
-  ipcMain.on(CHANNELS.browserSetEditorDirty, (event, dirty: unknown) => {
-    if (typeof dirty !== "boolean") {
-      event.returnValue = false;
-      return;
-    }
-    const ownerId = event.sender.id;
-    dirtyGuard.setDirty(ownerId, dirty);
-    if (!browserEditorWebContents.has(ownerId)) {
-      browserEditorWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        browserEditorWebContents.delete(ownerId);
-        dirtyGuard.remove(ownerId);
-      });
-    }
-    event.returnValue = true;
-  });
-
-  ipcMain.on(CHANNELS.autoTitleSetEditorDirty, (event, dirty: unknown) => {
-    if (typeof dirty !== "boolean") {
-      event.returnValue = false;
-      return;
-    }
-    const ownerId = event.sender.id;
-    dirtyGuard.setDirty(ownerId, dirty);
-    if (!autoTitleEditorWebContents.has(ownerId)) {
-      autoTitleEditorWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        autoTitleEditorWebContents.delete(ownerId);
-        dirtyGuard.remove(ownerId);
-      });
-    }
-    event.returnValue = true;
-  });
-
-  ipcMain.on(CHANNELS.authSetEditorDirty, (event, dirty: unknown) => {
-    if (typeof dirty !== "boolean") {
-      event.returnValue = false;
-      return;
-    }
-    const ownerId = event.sender.id;
-    dirtyGuard.setDirty(ownerId, dirty);
-    if (!authEditorWebContents.has(ownerId)) {
-      authEditorWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        authEditorWebContents.delete(ownerId);
-        dirtyGuard.remove(ownerId);
-      });
-    }
-    event.returnValue = true;
-  });
-
-  ipcMain.on(CHANNELS.modelsSetEditorDirty, (event, dirty: unknown) => {
-    if (typeof dirty !== "boolean") {
-      event.returnValue = false;
-      return;
-    }
-    const ownerId = event.sender.id;
-    dirtyGuard.setDirty(ownerId, dirty);
-    if (!modelEditorWebContents.has(ownerId)) {
-      modelEditorWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        modelEditorWebContents.delete(ownerId);
-        dirtyGuard.remove(ownerId);
-      });
-    }
-    event.returnValue = true;
-  });
-
-  ipcMain.on(CHANNELS.providersSetEditorDirty, (event, dirty: unknown) => {
-    if (typeof dirty !== "boolean") {
-      event.returnValue = false;
-      return;
-    }
-    const ownerId = event.sender.id;
-    dirtyGuard.setDirty(ownerId, dirty);
-    if (!providerEditorWebContents.has(ownerId)) {
-      providerEditorWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        providerEditorWebContents.delete(ownerId);
-        dirtyGuard.remove(ownerId);
-      });
-    }
-    event.returnValue = true;
-  });
-  ipcMain.handle(CHANNELS.projectsList, () => projects.list());
-  ipcMain.handle(CHANNELS.projectsActive, () => projects.getActive());
-  ipcMain.handle(CHANNELS.projectsChoose, async (event) => {
-    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const result = owner
-      ? await dialog.showOpenDialog(owner, {
-          properties: ["openDirectory", "createDirectory"],
-        })
-      : await dialog.showOpenDialog({
-          properties: ["openDirectory", "createDirectory"],
-        });
-    return result.canceled || !result.filePaths[0] ? null : projects.add(result.filePaths[0]);
-  });
-  ipcMain.handle(CHANNELS.projectsOpen, (_event, projectId: string) => projects.open(projectId));
-  ipcMain.handle(CHANNELS.projectsRename, (_event, projectId: string, name: string) =>
-    projects.rename(projectId, name),
-  );
-  ipcMain.handle(CHANNELS.projectsOpenExternally, async (_event, projectId: string) => {
-    await openPath(projects.getCwd(projectId));
-  });
-  ipcMain.handle(CHANNELS.projectsRemove, async (_event, projectId: string) => {
-    terminals.disposeProject(projectId);
-    return projects.remove(projectId);
-  });
-  ipcMain.handle(CHANNELS.projectsWorktrees, (_event, projectId: string) => projects.listWorktrees(projectId));
-
-  ipcMain.handle(CHANNELS.sessionsList, (_event, projectId: string, includeArchived?: boolean) =>
-    sessions.list(projectId, includeArchived),
-  );
-  ipcMain.handle(CHANNELS.sessionsListWithPaths, (_event, projectId: string) => sessions.listWithPaths(projectId));
-  ipcMain.handle(CHANNELS.sessionsDraftConfig, (_event, projectId: string, worktreePath?: string) =>
-    sessions.getDraftConfig(projectId, worktreePath),
-  );
-  ipcMain.handle(
-    CHANNELS.sessionsCreate,
-    async (_event, input: SessionCreateInput): Promise<SessionCreateIpcResult> => {
-      try {
-        return { ok: true, bootstrap: await sessions.create(input) };
-      } catch (error) {
-        if (isStaleDraftExtensionSetError(error)) {
-          return { ok: false, error: { code: error.code, message: error.message, details: error.details } };
-        }
-        throw error;
-      }
-    },
-  );
-  ipcMain.handle(CHANNELS.sessionsAttach, (event, input: SessionAttachInput) => {
-    const ownerId = event.sender.id;
-    if (!subscribedWebContents.has(ownerId)) {
-      subscribedWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        subscribedWebContents.delete(ownerId);
-        sessions.detachAll(ownerId);
-      });
-    }
-    return sessions.attach(ownerId, input, (update) => {
-      if (!event.sender.isDestroyed()) event.sender.send(CHANNELS.sessionsPush, update);
-    });
-  });
-  ipcMain.handle(CHANNELS.sessionsPrewarm, (_event, projectId: string, threadId: string) =>
-    sessions.prewarm(projectId, threadId),
-  );
-  ipcMain.on(CHANNELS.sessionsDetach, (event, attachmentId: string) => sessions.detach(event.sender.id, attachmentId));
-  ipcMain.handle(CHANNELS.sessionsClose, (event, projectId: string, threadId: string) =>
-    sessions.close(event.sender.id, projectId, threadId),
-  );
-  ipcMain.on(CHANNELS.sessionsAck, (event, attachmentId: string, workerInstanceId: string, sidecarSequence: number) => {
-    if (!Number.isSafeInteger(sidecarSequence) || sidecarSequence < 1) return;
-    sessions.acknowledge(event.sender.id, attachmentId, workerInstanceId, sidecarSequence);
-  });
-  ipcMain.handle(CHANNELS.sessionsRename, (_event, projectId: string, threadId: string, title: string) =>
-    sessions.rename(projectId, threadId, title),
-  );
-  ipcMain.handle(CHANNELS.sessionsArchive, (_event, projectId: string, threadId: string, archived: boolean) =>
-    sessions.archive(projectId, threadId, archived),
-  );
-  ipcMain.handle(
-    CHANNELS.sessionsRemove,
-    async (_event, projectId: string, threadId: string, policy: SessionRemovePolicy) => {
-      if (policy !== "subtree" && policy !== "reparent") throw new Error(`Invalid session removal policy: ${policy}`);
-      const result = await sessions.remove(projectId, threadId, policy);
-      for (const removedThreadId of result.removedThreadIds) terminals.disposeSession(projectId, removedThreadId);
-      return result;
-    },
-  );
-  ipcMain.handle(CHANNELS.sessionsPromote, (_event, projectId: string, threadId: string) =>
-    sessions.promote(projectId, threadId),
-  );
-  ipcMain.handle(CHANNELS.sessionsPrompt, (_event, input: SessionPromptInput) => sessions.prompt(input));
-  ipcMain.handle(CHANNELS.sessionsEdit, (_event, input: SessionEditInput) => sessions.edit(input));
-  ipcMain.handle(CHANNELS.sessionsReload, (_event, input: SessionReloadInput) => sessions.reload(input));
-  ipcMain.handle(CHANNELS.sessionsReloadResources, (_event, input: SessionResourceReloadInput) =>
-    sessions.reloadResources(input),
-  );
-  ipcMain.handle(CHANNELS.sessionsOpenPluginCallArtifact, async (event, input: OpenPluginCallArtifactInput) => {
-    const path = await sessions.resolvePluginCallArtifact(event.sender.id, input);
-    await openPath(path);
-  });
-  ipcMain.handle(
-    CHANNELS.sessionsGetCheckpointDiff,
-    (_event, input: SessionCheckpointDiffInput): Promise<SessionCheckpointDiffResult> =>
-      sessions.getCheckpointDiff(input),
-  );
-  ipcMain.handle(
-    CHANNELS.sessionsRestoreCheckpoint,
-    (_event, input: SessionCheckpointRestoreInput): Promise<SessionCheckpointRestoreResult> =>
-      sessions.restoreCheckpoint(input),
-  );
-  ipcMain.handle(
-    CHANNELS.sessionsBranch,
-    (_event, input: SessionBranchInput): Promise<SessionBranchResult> => sessions.branch(input),
-  );
-  ipcMain.handle(CHANNELS.sessionsCancel, (_event, projectId: string, threadId: string) =>
-    sessions.cancel(projectId, threadId),
-  );
-  ipcMain.handle(CHANNELS.sessionsClearQueue, (_event, projectId: string, threadId: string) =>
-    sessions.clearQueue(projectId, threadId),
-  );
-  ipcMain.handle(CHANNELS.sessionsCompact, (_event, projectId: string, threadId: string) =>
-    sessions.compact(projectId, threadId),
-  );
-  ipcMain.handle(CHANNELS.sessionsRefreshModels, (_event, projectId: string, threadId: string) =>
-    sessions.refreshModels(projectId, threadId),
-  );
-  ipcMain.handle(
-    CHANNELS.sessionsSetModel,
-    (_event, projectId: string, threadId: string, provider: string, modelId: string) =>
-      sessions.setModel(projectId, threadId, provider, modelId),
-  );
-  ipcMain.handle(
-    CHANNELS.sessionsSetThinking,
-    (_event, projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]) =>
-      sessions.setThinking(projectId, threadId, level),
-  );
-  ipcMain.handle(CHANNELS.sessionsRespond, (_event, projectId: string, threadId: string, response: HostResponse) =>
-    sessions.respond(projectId, threadId, response),
-  );
-  ipcMain.handle(CHANNELS.sessionsReadImageResource, (event, attachmentId: string, resourceId: string) => {
-    if (typeof attachmentId !== "string" || typeof resourceId !== "string" || !UUID_PATTERN.test(resourceId)) {
-      throw new Error("Invalid image resource request");
-    }
-    return sessions.readImageResource(event.sender.id, attachmentId, resourceId);
-  });
-  ipcMain.handle(CHANNELS.scmGetSnapshot, (_event, projectId: string) => scm.getSnapshot(projectId));
-  ipcMain.handle(CHANNELS.scmGetDiff, (_event, projectId: string, path: string, staged?: boolean) =>
-    scm.getDiff(projectId, path, staged),
-  );
-  ipcMain.handle(CHANNELS.scmStage, (_event, projectId: string, path: string) => scm.stage(projectId, path));
-  ipcMain.handle(CHANNELS.scmUnstage, (_event, projectId: string, path: string) => scm.unstage(projectId, path));
-  ipcMain.handle(CHANNELS.scmDiscard, (_event, projectId: string, path: string) => scm.discard(projectId, path));
-  ipcMain.handle(CHANNELS.scmWatch, (_event, projectId: string) => scmWatcher.watch(projectId));
-  ipcMain.handle(CHANNELS.scmUnwatch, (_event, projectId: string) => scmWatcher.unwatch(projectId));
-  ipcMain.handle(CHANNELS.filesList, (event, projectId: string, path?: string, query?: string, requestGroup?: string) =>
-    files.list(projectId, path, query, `${event.sender.id}\0${requestGroup ?? "default"}`),
-  );
-  ipcMain.handle(CHANNELS.filesRead, (_event, projectId: string, path: string) => files.read(projectId, path));
-  ipcMain.handle(CHANNELS.filesReadImage, (_event, projectId: string, path: string) =>
-    files.readImage(projectId, path),
-  );
-  ipcMain.handle(CHANNELS.filesPreviewPdf, (_event, projectId: string, path: string) =>
-    files.previewPdf(projectId, path),
-  );
-  ipcMain.handle(CHANNELS.filesPreviewOfficeDocument, (event, projectId: string, path: string) => {
-    const ownerId = event.sender.id;
-    if (!officePreviewWebContents.has(ownerId)) {
-      officePreviewWebContents.add(ownerId);
-      event.sender.once("destroyed", () => {
-        officePreviewWebContents.delete(ownerId);
-        officeDocuments.cancelOwner(ownerId);
-      });
-    }
-    return officeDocuments.preview(ownerId, projectId, path);
-  });
-  ipcMain.handle(CHANNELS.filesCancelOfficeDocumentPreview, (event) => {
-    officeDocuments.cancelOwner(event.sender.id);
-  });
-  ipcMain.handle(CHANNELS.filesWatch, (_event, projectId: string) => fileWatcher.watch(projectId));
-  ipcMain.handle(CHANNELS.filesUnwatch, (_event, projectId: string) => fileWatcher.unwatch(projectId));
-  ipcMain.handle(CHANNELS.filesResolvePath, (_event, projectId: string, path: string) =>
-    resolveFilePath(projectId, path, projects),
-  );
-  ipcMain.handle(CHANNELS.filesOpen, async (_event, projectId: string, path: string) => {
-    await openPath(await resolveFilePath(projectId, path, projects));
-  });
-  ipcMain.handle(CHANNELS.filesCopy, (_event, projectId: string, paths: string[]) => files.copy(projectId, paths));
-  ipcMain.handle(CHANNELS.filesCut, (_event, projectId: string, paths: string[]) => files.cut(projectId, paths));
-  ipcMain.handle(CHANNELS.filesPaste, (_event, projectId: string, destinationPath: string) =>
-    files.paste(projectId, destinationPath),
-  );
-  ipcMain.handle(CHANNELS.filesCreateFolder, (_event, projectId: string, parentPath: string, name: string) =>
-    files.createFolder(projectId, parentPath, name),
-  );
-  ipcMain.handle(CHANNELS.filesRename, (_event, projectId: string, path: string, name: string) =>
-    files.rename(projectId, path, name),
-  );
-  ipcMain.handle(CHANNELS.filesRemove, (_event, projectId: string, path: string) => files.remove(projectId, path));
-  ipcMain.handle(
-    CHANNELS.terminalsOpen,
-    (_event, projectId: string, threadId: string, terminalId: string, cols: number, rows: number) =>
-      terminals.open(projectId, threadId, terminalId, cols, rows),
-  );
-  ipcMain.handle(
-    CHANNELS.terminalsWrite,
-    (_event, projectId: string, threadId: string, terminalId: string, data: string) =>
-      terminals.write(projectId, threadId, terminalId, data),
-  );
-  ipcMain.handle(
-    CHANNELS.terminalsResize,
-    (_event, projectId: string, threadId: string, terminalId: string, cols: number, rows: number) =>
-      terminals.resize(projectId, threadId, terminalId, cols, rows),
-  );
-  ipcMain.handle(
-    CHANNELS.terminalsRestart,
-    (_event, projectId: string, threadId: string, terminalId: string, cols: number, rows: number) =>
-      terminals.restart(projectId, threadId, terminalId, cols, rows),
-  );
-  ipcMain.handle(CHANNELS.terminalsDispose, (_event, projectId: string, threadId: string, terminalId: string) =>
-    terminals.disposeTerminal(projectId, threadId, terminalId),
-  );
-  ipcMain.handle(CHANNELS.workbenchGet, (_event, projectId: string, threadId: string) =>
-    projects.getWorkbench(projectId, threadId),
-  );
-  ipcMain.handle(CHANNELS.workbenchUpdate, (_event, state: WorkbenchState) => projects.setWorkbench(state));
-  if (runtimeDependencies.shell) {
-    ipcMain.handle(CHANNELS.shellRuntimeStatus, () => runtimeDependencies.shell?.getStatus());
-    ipcMain.handle(CHANNELS.shellRuntimeInstall, () => runtimeDependencies.shell?.install());
+function registerRuntimeIpc(
+  dependencies: ApplicationIpcDependencies,
+  registeredChannels: Set<string>,
+  subscriptions: Array<() => void>,
+): void {
+  const shell = dependencies.runtime?.shell;
+  if (shell) {
+    for (const channel of SHELL_IPC_CHANNELS) registeredChannels.add(channel);
+    ipcMain.handle(CHANNELS.shellRuntimeStatus, () => shell.getStatus());
+    ipcMain.handle(CHANNELS.shellRuntimeInstall, () => shell.install());
     ipcMain.handle(CHANNELS.shellRuntimeChoose, async (event) => {
       const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
       const options: OpenDialogOptions = {
@@ -937,168 +147,59 @@ export function registerIpc(
       };
       const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
       const path = result.filePaths[0];
-      return result.canceled || !path ? null : runtimeDependencies.shell?.use(path);
+      return result.canceled || !path ? null : shell.use(path);
     });
+    subscriptions.push(
+      shell.onProgress((progress) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) window.webContents.send(CHANNELS.shellRuntimeProgress, progress);
+        }
+      }),
+    );
   }
-  if (updater) {
-    ipcMain.handle(CHANNELS.updaterGetState, () => updater.getState());
-    ipcMain.handle(CHANNELS.updaterCheck, () => updater.check());
-    ipcMain.handle(CHANNELS.updaterDownload, () => updater.download());
-    ipcMain.handle(CHANNELS.updaterInstall, async () => {
-      const confirmed = await dirtyGuard.confirmApplicationQuit(BrowserWindow.getAllWindows());
-      if (confirmed) updater.install();
-    });
+  const updater = dependencies.updater;
+  if (!updater) return;
+  for (const channel of UPDATER_IPC_CHANNELS) registeredChannels.add(channel);
+  ipcMain.handle(CHANNELS.updaterGetState, () => updater.getState());
+  ipcMain.handle(CHANNELS.updaterCheck, () => updater.check());
+  ipcMain.handle(CHANNELS.updaterDownload, () => updater.download());
+  ipcMain.handle(CHANNELS.updaterInstall, async () => {
+    const confirmed = await dependencies.dirtyGuard.confirmApplicationQuit(BrowserWindow.getAllWindows());
+    if (confirmed) updater.install();
+  });
+  subscriptions.push(
     updater.subscribe((state) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
           window.webContents.send(CHANNELS.updaterStateChanged, state);
         }
       }
-    });
-  }
-  runtimeDependencies.shell?.onProgress((progress) => {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send(CHANNELS.shellRuntimeProgress, progress);
-    }
-  });
-}
-
-async function applyMarketplaceMutation(
-  sessions: SessionSupervisor,
-  target: { projectId: string; threadId: string; abortRunning?: boolean } | undefined,
-  recoveryPending: boolean | undefined,
-): Promise<{ application?: ApplyDesktopExtensionSetResult; applicationError?: string }> {
-  if (!target || recoveryPending) return {};
-  try {
-    const state = await sessions.getExtensionState(target.projectId, target.threadId);
-    const application = await sessions.applyExtensionSet(
-      target.projectId,
-      target.threadId,
-      state.desiredGeneration,
-      target.abortRunning,
-    );
-    return { application: publicMarketplaceApplication(application) };
-  } catch (error) {
-    return { applicationError: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-async function refreshActiveModelRuntimes(refresh: () => Promise<void>): Promise<boolean> {
-  try {
-    await refresh();
-    return true;
-  } catch (error) {
-    console.error("Model configuration was saved, but one or more active runtimes failed to refresh:", error);
-    return false;
-  }
-}
-
-function publicMarketplaceApplication(application: ApplyDesktopExtensionSetResult): ApplyDesktopExtensionSetResult {
-  return application.status === "rolled-back"
-    ? { ...application, error: "插件 worker 启动失败，当前会话已恢复之前的扩展集合" }
-    : application;
-}
-
-async function openLink(projectId: string, target: string, projects: ProjectStore): Promise<OpenLinkResult> {
-  const value = target.trim();
-  if (!value) throw new Error("Cannot open an empty link");
-
-  const localTarget = value.split(/[?#]/, 1)[0];
-  if (!localTarget) throw new Error("Cannot open a link without a file path");
-  if (isAbsolute(localTarget)) {
-    return openLocalPath(projectId, decodeURIComponent(localTarget), projects);
-  }
-
-  let url: URL | undefined;
-  try {
-    url = new URL(value);
-  } catch {
-    return openLocalPath(projectId, resolve(projects.getCwd(projectId), decodeURIComponent(localTarget)), projects);
-  }
-
-  if (url.protocol === "file:") {
-    return openLocalPath(projectId, fileURLToPath(url), projects);
-  }
-
-  if (url.protocol === "http:" || url.protocol === "https:" || url.protocol === "mailto:" || url.protocol === "tel:") {
-    await shell.openExternal(url.href);
-    return { openInApp: false };
-  }
-
-  throw new Error(`Unsupported link protocol: ${url.protocol}`);
-}
-
-/** 打开项目内文件链接时，兼容 `path:line` 这类源代码位置标记。 */
-function normalizeLocalFilePath(path: string): string {
-  const pathWithoutLocation = filePathWithoutLocation(path);
-  if (pathWithoutLocation === path) return path;
-
-  // 真实文件名可能包含冒号；只有完整路径不存在而去掉后缀的文件存在时才解析位置标记。
-  try {
-    if (statSync(path).isFile()) return path;
-  } catch {
-    // 继续检查去掉位置标记后的候选路径。
-  }
-  try {
-    if (statSync(pathWithoutLocation).isFile()) return pathWithoutLocation;
-  } catch {
-    // 保留原路径，让调用方报告真实的文件错误。
-  }
-  return path;
-}
-
-/** 打开本地文件路径：位于项目 cwd 内时交回应用内打开，否则交给系统默认程序。 */
-async function openLocalPath(projectId: string, absolutePath: string, projects: ProjectStore): Promise<OpenLinkResult> {
-  const normalizedPath = normalizeLocalFilePath(absolutePath);
-  const cwd = projects.getCwd(projectId);
-  const rel = relative(cwd, normalizedPath);
-  if (rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
-    // 目录链接应用内无法打开（文件面板仅支持文件），交回系统文件管理器。
-    let isDirectory = false;
-    try {
-      isDirectory = statSync(resolve(cwd, rel)).isDirectory();
-    } catch {
-      // 路径不存在或不可访问：保持应用内打开，由读取侧报错。
-    }
-    if (!isDirectory) return { openInApp: true, path: rel.split(sep).join("/") };
-  }
-  await openPath(normalizedPath);
-  return { openInApp: false };
-}
-
-async function resolveFilePath(projectId: string, path: string, projects: ProjectStore): Promise<string> {
-  const value = path.trim();
-  if (!value) throw new Error("Cannot resolve an empty file path");
-  if (isAbsolute(value)) return value;
-  return resolve(projects.getCwd(projectId), value);
-}
-
-async function openPath(path: string): Promise<void> {
-  const error = await shell.openPath(path);
-  if (error) throw new Error(error);
-}
-
-async function openOauthUrl(target: string): Promise<void> {
-  const url = new URL(target);
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Unsupported OAuth URL protocol");
-  await shell.openExternal(url.href);
-}
-
-function isStaleDraftExtensionSetError(error: unknown): error is Error & {
-  code: "STALE_DRAFT_EXTENSION_SET";
-  details: { code: "STALE_DRAFT_EXTENSION_SET"; requestedGeneration: string; currentGeneration: string };
-} {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    error.code === "STALE_DRAFT_EXTENSION_SET" &&
-    "details" in error &&
-    typeof error.details === "object" &&
-    error.details !== null
+    }),
   );
 }
 
+function disposeRegistration(channels: ReadonlySet<string>, subscriptions: Array<() => void>): void {
+  const errors: unknown[] = [];
+  for (const unsubscribe of subscriptions.splice(0)) {
+    try {
+      unsubscribe();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  for (const channel of channels) {
+    try {
+      ipcMain.removeHandler(channel);
+      ipcMain.removeAllListeners(channel);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, "Failed to dispose IPC registration");
+}
+
 /** 向所有 renderer 广播低频 thread catalog 更新。 */
+/** 广播 session catalog 更新给所有 renderer。 */
 export function broadcastThreadCatalogUpdate(thread: Thread): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.sessionsCatalogChanged, thread);
@@ -1106,34 +207,36 @@ export function broadcastThreadCatalogUpdate(thread: Thread): void {
 }
 
 /** 向所有 renderer 广播 PTY 增量事件。 */
+/** 广播 terminal 增量事件给所有 renderer。 */
 export function broadcastTerminalEvent(event: TerminalEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.terminalsEvent, event);
   }
 }
 
-/** 向所有 renderer 广播内置浏览器状态（会话 + tabs/活跃 tab）。 */
+/** 向所有 renderer 广播内置浏览器状态。 */
+/** 广播浏览器状态变化给所有 renderer。 */
 export function broadcastBrowserEvent(event: BrowserStateEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserStateChanged, event);
   }
 }
 
-/** 向所有 renderer 广播建 tab 请求（工具 browser.open 等触发；携带会话身份）。 */
+/** 广播由工具触发的浏览器建 tab 请求。 */
 export function broadcastBrowserCreateTabRequest(request: BrowserCreateTabRequest): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCreateTabRequest, request);
   }
 }
 
-/** 向所有 renderer 广播关闭 tab 请求（工具 browser.close 触发；renderer 负责删除视图）。 */
+/** 广播由工具触发的浏览器关 tab 请求。 */
 export function broadcastBrowserCloseTabRequest(request: BrowserCloseTabRequest): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.webContents.send(CHANNELS.browserCloseTabRequest, request);
   }
 }
 
-/** 只向提交表单所属的 renderer 发送无密码正文的保存请求。 */
+/** 将密码保存提示发送给提交表单的 renderer。 */
 export function sendBrowserPasswordOffer(offer: BrowserPasswordOffer, ownerWebContentsId: number): void {
   const owner = webContents.fromId(ownerWebContentsId);
   if (owner && !owner.isDestroyed()) owner.send(CHANNELS.browserPasswordOffer, offer);

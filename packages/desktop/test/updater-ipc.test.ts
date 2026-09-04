@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { registerIpc } from "../src/main/ipc.ts";
 import { CHANNELS } from "../src/shared/channels.ts";
 import type { UpdaterState } from "../src/shared/updater-contracts.ts";
+import { createIpcTestDependencies } from "./ipc-test-dependencies.ts";
 
 const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
@@ -46,18 +47,12 @@ describe("updater IPC", () => {
     electron.windows = [{ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: electron.send } }];
     vi.clearAllMocks();
     registerIpc(
-      { list: vi.fn(), getActive: vi.fn() } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      { getConfig: vi.fn(), saveConfig: vi.fn() } as never,
-      dirtyGuard as never,
-      { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
-      updater as never,
+      createIpcTestDependencies({
+        projects: { list: vi.fn(), getActive: vi.fn() } as never,
+        settings: { getConfig: vi.fn(), saveConfig: vi.fn() } as never,
+        dirtyGuard: dirtyGuard as never,
+        updater: updater as never,
+      }),
     );
   });
 

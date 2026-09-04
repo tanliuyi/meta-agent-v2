@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerIpc } from "../src/main/ipc.ts";
 import { CHANNELS } from "../src/shared/channels.ts";
+import { createIpcTestDependencies } from "./ipc-test-dependencies.ts";
 
 const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
@@ -42,25 +43,16 @@ describe("plugin marketplace IPC", () => {
     electron.listeners.clear();
     vi.clearAllMocks();
     registerIpc(
-      { list: vi.fn(), getActive: vi.fn() } as never,
-      sessions as never,
-      {} as never,
-      {} as never,
-      { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      { requestClose: vi.fn(), setDirty: vi.fn(), remove: vi.fn() } as never,
-      { getStatus: vi.fn(), install: vi.fn(), onProgress: vi.fn() },
-      undefined,
-      undefined,
-      undefined,
-      endpoints as never,
-      catalog as never,
-      registry as never,
-      installer as never,
-      pluginConfigurations as never,
+      createIpcTestDependencies({
+        projects: { list: vi.fn(), getActive: vi.fn() } as never,
+        sessions: sessions as never,
+        dirtyGuard: { requestClose: vi.fn(), setDirty: vi.fn(), remove: vi.fn() } as never,
+        marketplaceEndpoints: endpoints as never,
+        marketplaceCatalog: catalog as never,
+        marketplaceRegistry: registry as never,
+        marketplaceInstaller: installer as never,
+        pluginConfigurations: pluginConfigurations as never,
+      }),
     );
   });
 

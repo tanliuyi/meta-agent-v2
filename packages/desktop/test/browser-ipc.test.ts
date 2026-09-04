@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { registerIpc, sendBrowserPasswordOffer } from "../src/main/ipc.ts";
 import type { BrowserSessionIdentity } from "../src/shared/browser-contracts.ts";
 import { CHANNELS } from "../src/shared/channels.ts";
+import { createIpcTestDependencies } from "./ipc-test-dependencies.ts";
 
 const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
@@ -73,29 +74,11 @@ describe("browser IPC", () => {
     vi.clearAllMocks();
     electron.send.mockClear();
     registerIpc(
-      { list: vi.fn(), getActive: vi.fn() } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      { disposeProject: vi.fn(), disposeSession: vi.fn() } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      dirtyGuard as never,
-      {},
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      browser as never,
+      createIpcTestDependencies({
+        projects: { list: vi.fn(), getActive: vi.fn() } as never,
+        dirtyGuard: dirtyGuard as never,
+        browser: browser as never,
+      }),
     );
   });
 

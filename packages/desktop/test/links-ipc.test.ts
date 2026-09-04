@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerIpc } from "../src/main/ipc.ts";
 import { CHANNELS } from "../src/shared/channels.ts";
+import { createIpcTestDependencies } from "./ipc-test-dependencies.ts";
 
 const electron = vi.hoisted(() => ({
   handles: new Map<string, (...args: unknown[]) => unknown>(),
@@ -41,19 +42,7 @@ describe("links IPC", () => {
     await mkdir(join(cwd, "src"), { recursive: true });
     await writeFile(filePath, "export {}\n");
 
-    registerIpc(
-      { getCwd: () => cwd } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {},
-    );
+    registerIpc(createIpcTestDependencies({ projects: { getCwd: () => cwd } as never }));
     const handler = electron.handles.get(CHANNELS.linksOpen);
     expect(handler).toBeDefined();
 
@@ -75,19 +64,7 @@ describe("links IPC", () => {
     await mkdir(cwd, { recursive: true });
     await writeFile(filePath, "content\n");
 
-    registerIpc(
-      { getCwd: () => cwd } as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      {},
-    );
+    registerIpc(createIpcTestDependencies({ projects: { getCwd: () => cwd } as never }));
     const handler = electron.handles.get(CHANNELS.linksOpen);
     expect(handler).toBeDefined();
 

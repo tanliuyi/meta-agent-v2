@@ -1,7 +1,7 @@
 import { type ChildProcess, fork, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { posix } from "node:path";
 import type { JsonValue } from "../../shared/contracts.ts";
 import {
   type ParentToSidecarMessage,
@@ -36,6 +36,7 @@ interface PendingRequest {
   timer?: ReturnType<typeof setTimeout>;
 }
 
+/** sidecar 请求失败时携带协议错误码和结构化详情的异常。 */
 export class SidecarRequestError extends Error {
   readonly code?: string;
   readonly details?: JsonValue;
@@ -48,6 +49,7 @@ export class SidecarRequestError extends Error {
   }
 }
 
+/** SidecarWorkerClient 的进程绑定、事件回调和启动参数。 */
 export interface WorkerClientOptions {
   manifest: SidecarRuntimeManifest;
   binding: SidecarBinding;
@@ -154,6 +156,7 @@ export class SidecarWorkerClient {
     return !this.closed && !this.terminating;
   }
 
+  /** 等待 sidecar 完成握手并返回 ready 消息。 */
   ready(): Promise<SidecarReady> {
     return this.readyPromise;
   }
@@ -459,6 +462,7 @@ export class SidecarWorkerClient {
   }
 }
 
+/** 判断 sidecar command 是否可能产生需要未知结果保护的变更。 */
 export function isMutationCommand(commandType: SidecarCommand["type"]): boolean {
   return ![
     "ping",
@@ -505,16 +509,17 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
+/** 按目标平台解析 Electron sidecar 应使用的可执行文件。 */
 export function resolveSidecarExecutable(
   executable = process.execPath,
   platform = process.platform,
   fileExists: (path: string) => boolean = existsSync,
 ): string {
   if (platform !== "darwin") return executable;
-  const executableName = basename(executable);
+  const executableName = posix.basename(executable);
   const helperName = `${executableName} Helper`;
-  const helperExecutable = join(
-    dirname(dirname(executable)),
+  const helperExecutable = posix.join(
+    posix.dirname(posix.dirname(executable)),
     "Frameworks",
     `${helperName}.app`,
     "Contents",
@@ -524,6 +529,7 @@ export function resolveSidecarExecutable(
   return fileExists(helperExecutable) ? helperExecutable : executable;
 }
 
+/** 构造经过白名单过滤并注入桌面 runtime 标识的 sidecar 环境。 */
 export function createSidecarEnvironment(
   runtimeCompatibilityId: string,
   agentDir: string,
@@ -549,6 +555,7 @@ export function createSidecarEnvironment(
  * PI_BROWSER_SESSION_* 环境变量（create 模式用新会话 sessionId，open 模式用 threadId）。
  * 非 thread worker（metadata/subagent）不注入：subagent 不直接使用浏览器工具。
  */
+/** 从 thread binding 派生浏览器 session 身份环境变量。 */
 export function threadBrowserSessionEnvironment(
   binding: SidecarBinding,
   browserSessionToken?: string,
