@@ -31,6 +31,7 @@ import {
 import type {
   ApplyDesktopExtensionSetResult,
   DesktopExtensionDiagnostic,
+  DesktopWidgetViewport,
   ResolvedExtensionEntry,
   ResolvedExtensionSet,
   SessionPluginOptions,
@@ -938,6 +939,13 @@ export class ThreadWorkerRegistry {
       if (this.extensionApplyCompletions.get(key) === completion) this.extensionApplyCompletions.delete(key);
       completeApply();
     }
+  }
+
+  async configureWidget(projectId: string, threadId: string, viewport: DesktopWidgetViewport): Promise<void> {
+    // Presentation updates must never cold-start a closed or replaced worker.
+    const record = this.records.get(workerKey(projectId, threadId));
+    if (!record || record.retired || record.client.available === false) return;
+    await record.client.request({ type: "configureWidget", viewport });
   }
 
   async respond(projectId: string, threadId: string, response: HostResponse): Promise<void> {

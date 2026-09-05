@@ -30,7 +30,11 @@ import {
   THREAD_USER_PREVIEW_MAX_CHARS,
   type Thread,
 } from "../../shared/contracts.ts";
-import type { DesktopExtensionDiagnostic, ResolvedExtensionSet } from "../../shared/desktop-extension-contracts.ts";
+import type {
+  DesktopExtensionDiagnostic,
+  DesktopWidgetViewport,
+  ResolvedExtensionSet,
+} from "../../shared/desktop-extension-contracts.ts";
 import type { SessionCheckpointDiffResult, SessionCheckpointRestoreResult } from "../../shared/pi-rewind-contracts.ts";
 import { FileCredentialStore } from "../models/credential-store.ts";
 import { DesktopBuiltinProviderRegistry } from "./desktop-builtin-provider.ts";
@@ -543,6 +547,10 @@ export class SessionRuntime {
     this.summaryState = { ...this.summaryState, title: title.trim() || "新会话" };
     this.publishControl();
     this.onSummaryChanged(this);
+  }
+
+  configureWidget(viewport: DesktopWidgetViewport): void {
+    this.extensionHost.configureWidget(viewport);
   }
 
   respond(response: Parameters<DesktopExtensionHost["respond"]>[0]): void {

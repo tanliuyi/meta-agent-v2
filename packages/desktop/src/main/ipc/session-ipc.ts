@@ -15,6 +15,7 @@ import type {
   SessionRemovePolicy,
   SessionResourceReloadInput,
 } from "../../shared/contracts.ts";
+import type { DesktopWidgetViewport } from "../../shared/desktop-extension-contracts.ts";
 import type {
   SessionCheckpointDiffInput,
   SessionCheckpointDiffResult,
@@ -62,6 +63,7 @@ export const SESSION_IPC_CHANNELS = [
   CHANNELS.sessionsRefreshModels,
   CHANNELS.sessionsSetModel,
   CHANNELS.sessionsSetThinking,
+  CHANNELS.sessionsConfigureWidget,
   CHANNELS.sessionsRespond,
   CHANNELS.sessionsReadImageResource,
 ] as const;
@@ -175,6 +177,11 @@ export function registerSessionIpc({ sessions, terminals }: SessionIpcDependenci
     CHANNELS.sessionsSetThinking,
     (_event, projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]) =>
       sessions.setThinking(projectId, threadId, level),
+  );
+  ipcMain.handle(
+    CHANNELS.sessionsConfigureWidget,
+    (event, projectId: string, threadId: string, viewport: DesktopWidgetViewport) =>
+      sessions.configureWidget(event.sender.id, projectId, threadId, viewport),
   );
   ipcMain.handle(CHANNELS.sessionsRespond, (_event, projectId: string, threadId: string, response: HostResponse) =>
     sessions.respond(projectId, threadId, response),

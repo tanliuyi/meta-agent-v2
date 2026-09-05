@@ -2834,7 +2834,12 @@ export function renderWidget(ctx: ExtensionContext, jobs: AsyncJobState[]): void
 		return;
 	}
 	if (!ctx.hasUI) return;
-	if ((ctx as { mode?: string }).mode === "rpc") {
+	const componentWidgets = "widgetCapabilities" in ctx.ui
+		&& typeof ctx.ui.widgetCapabilities === "object"
+		&& ctx.ui.widgetCapabilities !== null
+		&& "components" in ctx.ui.widgetCapabilities
+		&& ctx.ui.widgetCapabilities.components === true;
+	if ((ctx as { mode?: string }).mode === "rpc" && !componentWidgets) {
 		ctx.ui.setWidget(WIDGET_KEY, encodeAsyncStatusSnapshotWidget(jobs));
 		return;
 	}

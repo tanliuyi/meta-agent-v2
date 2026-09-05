@@ -89,6 +89,7 @@ import type {
   ApplySessionPluginSelectionInput,
   ApproveDevelopmentExtensionInput,
   DesktopExtensionSettingsSnapshot,
+  DesktopWidgetViewport,
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
   SessionPluginOptions,
@@ -312,6 +313,7 @@ export interface DesktopApi {
     refreshModels(projectId: string, threadId: string): Promise<void>;
     setModel(projectId: string, threadId: string, provider: string, modelId: string): Promise<void>;
     setThinking(projectId: string, threadId: string, level: SessionControlState["thinkingLevel"]): Promise<void>;
+    configureWidget(projectId: string, threadId: string, viewport: DesktopWidgetViewport): Promise<void>;
     respond(projectId: string, threadId: string, response: HostResponse): Promise<void>;
     /** 按 attachment 租约读取 timeline 引用的图像资源主体；主体仅经此通道返回，不进 timeline。 */
     readImageResource(attachmentId: string, resourceId: string): Promise<SessionImageResource | undefined>;

@@ -1202,6 +1202,18 @@
   font-size: var(--type-size-caption);
   line-height: 1.5;
 }
+.composer-terminal-widget,
+.composer-terminal-widget .xterm,
+.composer-terminal-widget .xterm-viewport,
+.composer-terminal-widget .xterm-screen,
+.composer-terminal-widget .xterm-rows,
+.composer-terminal-widget canvas {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+.composer-terminal-widget .xterm-viewport {
+  overflow: hidden !important;
+}
 .mode-control {
   display: flex;
   padding: 2px;

@@ -69,5 +69,12 @@ describe("Desktop sidecar build cleanup", () => {
     expect(readFileSync(join(subagentsRoot, "package.json"), "utf8")).toContain('"name": "pi-subagents"');
     expect(readFileSync(join(subagentsRoot, "install.mjs"), "utf8")).toContain("pi-subagents installer");
     expect(readFileSync(join(subagentsRoot, "docs", "workflows.md"), "utf8")).toContain("workflow");
+    expect(
+      readFileSync(
+        join(outputRoot, "main", "pi", "extensions", "pi-browser", "skills", "pi-browser", "SKILL.md"),
+        "utf8",
+      ),
+    ).toContain("name: pi-browser");
+    expect(existsSync(join(outputRoot, "main", "pi", "extensions", "pi-hermes-memory", "skills"))).toBe(false);
   });
 });

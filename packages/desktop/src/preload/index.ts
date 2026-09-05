@@ -366,6 +366,8 @@ const desktopApi: DesktopApi = {
       ipcRenderer.invoke(CHANNELS.sessionsSetModel, projectId, threadId, provider, modelId),
     setThinking: (projectId, threadId, level) =>
       ipcRenderer.invoke(CHANNELS.sessionsSetThinking, projectId, threadId, level),
+    configureWidget: (projectId, threadId, viewport) =>
+      ipcRenderer.invoke(CHANNELS.sessionsConfigureWidget, projectId, threadId, viewport),
     respond: (projectId, threadId, response) =>
       ipcRenderer.invoke(CHANNELS.sessionsRespond, projectId, threadId, response),
     readImageResource: (attachmentId, resourceId) =>

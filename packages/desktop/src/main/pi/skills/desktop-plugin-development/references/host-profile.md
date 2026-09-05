@@ -34,16 +34,27 @@ The following `ctx.ui` calls are intended for Desktop-compatible plugins:
 - `setStatus` for an extension status line.
 - `setTitle` for the session/window title when genuinely useful.
 - `setEditorText` and `pasteToEditor` for explicit composer workflows.
-- `setWidget` only with `string[]` content.
+- `setWidget` with `string[]` content or a read-only Pi component factory; use the `ui.widget.text` capability for both.
+- `ctx.ui.theme` and the widget factory's `theme` for semantic text colors.
 - `setWorkingMessage` and `setWorkingVisible` for work that needs a visible progress state.
 
 Keep UI calls optional. Extensions must continue to return useful plain text and structured `details` when no UI is available, such as RPC or child sessions.
+
+## Widget Rendering
+
+Desktop exposes `ctx.ui.widgetCapabilities = { components: true, input: false }` as an additional runtime capability. Check this property with `in` (it is not part of upstream Pi types) when selecting a component factory instead of an RPC-specific data payload. `ctx.mode` remains `"rpc"`; this does not enable terminal-only dialogs or editors.
+
+The host calls `Component.render(width)` with the measured Desktop character width, forwards ANSI text to a read-only terminal surface, and refreshes at most every 250 ms. It calls `invalidate()` after width/theme changes and `dispose()` when replacing, clearing, resetting or disposing a widget. Use the injected `tui.terminal.columns` and `theme`, not process stdout dimensions or global Pi theme state. `tui.requestRender()` is coalesced into the refresh loop. Desktop's ANSI palette follows its theme.
+
+Widgets are display-only: keyboard handlers, overlays, focus, direct terminal writes, and image protocols are not supported. Keep cleanup in `dispose()` for any timers or subscriptions owned by a factory. Host limits are 32 component widgets, 40 lines each, 300 columns, and 4096 source characters per line; oversized output is marked as truncated. Synchronous plugin render code is full-trust and cannot be preempted by these output limits.
+
+Plain strings remain text, including JSON. Desktop does not infer plugin-specific schemas. Plugins that send an RPC protocol string must select their component factory using the capability above to obtain readable presentation.
 
 ## Unsupported TUI and Session Surfaces
 
 Do not build a Desktop plugin around these Pi-only surfaces:
 
-- `ctx.ui.custom`, TUI component renderers, themes, headers, footers, custom editors, terminal input, or autocomplete providers.
+- `ctx.ui.custom`, theme switching/catalog APIs, headers, footers, custom editors, terminal input, or autocomplete providers. Read-only `setWidget` component factories and their injected theme are the exception.
 - `pi.registerShortcut()` and `pi.registerFlag()` as Desktop user entry points. Desktop has no Pi TUI keybinding or Pi CLI flag workflow.
 - `getEditorText`, working-indicator frames, hidden-thinking labels, or tools-expanded state.
 - Session replacement methods such as `newSession`, `fork`, `navigateTree`, or `switchSession`.

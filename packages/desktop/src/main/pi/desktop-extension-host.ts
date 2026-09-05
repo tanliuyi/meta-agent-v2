@@ -6,6 +6,8 @@ import type {
   ExtensionWidgetOptions,
 } from "@earendil-works/pi-coding-agent";
 import type { DesktopExtensionHostState, HostRequest, HostResponse } from "../../shared/contracts.ts";
+import type { DesktopWidgetViewport } from "../../shared/desktop-extension-contracts.ts";
+import { DesktopWidgetAdapter } from "./desktop-widget-adapter.ts";
 
 interface PendingRequest {
   request: HostRequest;
@@ -50,6 +52,7 @@ export class DesktopExtensionHost {
   private readonly pending = new Map<string, PendingRequest>();
   private state: DesktopExtensionHostState = EMPTY_HOST_STATE;
   private readonly hostId = randomUUID();
+  private readonly widgetAdapter: DesktopWidgetAdapter;
   private composerRevision = 0;
   private disposed = false;
   private readonly changed: () => void;
@@ -75,6 +78,14 @@ export class DesktopExtensionHost {
     this.activeToolIds = activeToolIds;
     this.publishNotification = publishNotification;
     this.warn = warn;
+    this.widgetAdapter = new DesktopWidgetAdapter(
+      this.hostId,
+      (widget) => {
+        const widgets = this.state.widgets.filter((current) => current.key !== widget.key);
+        this.patch("ui.widget.text", { widgets: [...widgets, widget] });
+      },
+      warn,
+    );
   }
 
   get requests(): HostRequest[] {
@@ -85,9 +96,10 @@ export class DesktopExtensionHost {
     return this.state;
   }
 
-  createContext(): ExtensionUIContext {
+  createContext(): ExtensionUIContext & { widgetCapabilities: { components: true; input: false } } {
     const host = this;
     return {
+      widgetCapabilities: { components: true, input: false },
       select: (title: string, options: string[], opts?: ExtensionUIDialogOptions) =>
         this.ask("select", title, { options }, opts, (response) => response.value),
       confirm: (title: string, message: string, opts?: ExtensionUIDialogOptions) =>
@@ -133,8 +145,7 @@ export class DesktopExtensionHost {
         return undefined;
       },
       get theme() {
-        host.degrade("ui.tui.theme");
-        return undefined as unknown as ExtensionUIContext["theme"];
+        return host.widgetAdapter.theme;
       },
       getAllThemes: () => {
         this.degrade("ui.tui.theme");
@@ -174,12 +185,14 @@ export class DesktopExtensionHost {
       item.reject(error);
     }
     this.pending.clear();
+    this.widgetAdapter.clear();
     this.state = EMPTY_HOST_STATE;
     this.changed();
   }
 
   dispose(): void {
     if (this.disposed) return;
+    this.widgetAdapter.clear();
     this.disposed = true;
     const error = new DesktopExtensionCompatibilityError("DESKTOP_EXTENSION_HOST_DISPOSED", "ui.dialog");
     for (const item of this.pending.values()) {
@@ -254,12 +267,26 @@ export class DesktopExtensionHost {
     });
   }
 
+  configureWidget(viewport: DesktopWidgetViewport): void {
+    this.assertActive("ui.widget.text");
+    this.widgetAdapter.configure(viewport);
+  }
+
   private setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
     this.assertActive("ui.widget.text");
-    if (content !== undefined && (!Array.isArray(content) || !content.every((line) => typeof line === "string"))) {
-      this.degrade("ui.tui.custom", "component widgets are not supported");
+    if (typeof content === "function") {
+      this.widgetAdapter.set(
+        key,
+        content as Exclude<Parameters<ExtensionUIContext["setWidget"]>[1], undefined>,
+        options,
+      );
       return;
     }
+    if (content !== undefined && (!Array.isArray(content) || !content.every((line) => typeof line === "string"))) {
+      this.degrade("ui.widget.text", "widget content must be lines or a component factory");
+      return;
+    }
+    this.widgetAdapter.remove(key);
     const widgets = this.state.widgets.filter((widget) => widget.key !== key);
     if (content) {
       widgets.push({

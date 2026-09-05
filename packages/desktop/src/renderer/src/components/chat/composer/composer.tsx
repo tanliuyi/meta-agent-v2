@@ -7,6 +7,7 @@ import {
 } from "@assistant-ui/react";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Readiness, SessionControlState } from "../../../../../shared/contracts.ts";
+import type { DesktopWidgetViewport } from "../../../../../shared/desktop-extension-contracts.ts";
 import {
   appendComposerQuote,
   type ComposerQuoteTarget,
@@ -71,6 +72,12 @@ export function Composer(props: ComposerProps) {
   );
   const suggestionProjectId = props.mode === "draft" ? props.project?.id : props.projectId;
   const commands = props.mode === "draft" ? (props.config?.commands ?? EMPTY_COMMANDS) : props.commands;
+
+  const configureWidget = useCallback(
+    (viewport: DesktopWidgetViewport) =>
+      window.desktop.sessions.configureWidget(record.identity.projectId, record.identity.threadId, viewport),
+    [record.identity.projectId, record.identity.threadId],
+  );
 
   const reportError = useCallback((value: unknown) => {
     setError(errorMessage(value));
@@ -300,6 +307,7 @@ export function Composer(props: ComposerProps) {
         />
       ) : null}
 
+      <ComposerWidgets widgets={aboveWidgets} onViewportChange={configureWidget} />
       <ComposerPrimitive.Unstable_TriggerPopoverRoot>
         <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
           <ComposerPrimitive.AttachmentDropzone asChild disabled={attachmentsDisabled}>
@@ -311,7 +319,6 @@ export function Composer(props: ComposerProps) {
                   <span className="min-w-0 truncate">{extensionWorking.message}</span>
                 </div>
               ) : null}
-              <ComposerWidgets widgets={aboveWidgets} />
               <ComposerAttachments disabled={attachmentsDisabled} />
               <ComposerInput
                 projectId={suggestionProjectId}
@@ -425,11 +432,11 @@ export function Composer(props: ComposerProps) {
                   />
                 </div>
               </div>
-              <ComposerWidgets widgets={belowWidgets} />
             </div>
           </ComposerPrimitive.AttachmentDropzone>
         </ComposerPrimitive.Root>
       </ComposerPrimitive.Unstable_TriggerPopoverRoot>
+      <ComposerWidgets widgets={belowWidgets} onViewportChange={configureWidget} />
       {draftOptionsInDrawer ? (
         <div className="draft-composer-drawer" role="group" aria-label="新会话设置">
           <div className="draft-composer-drawer-content">{draftSelectionControls}</div>

@@ -24,6 +24,7 @@ import type {
   SessionResourceReloadInput,
   Thread,
 } from "../../shared/contracts.ts";
+import type { DesktopWidgetViewport } from "../../shared/desktop-extension-contracts.ts";
 import type {
   SessionCheckpointDiffInput,
   SessionCheckpointDiffResult,
@@ -313,6 +314,16 @@ export class SessionSupervisor {
       }
       if (pending.size === 0) this.pendingAttachments.delete(ownerId);
     }
+  }
+
+  configureWidget(
+    ownerId: number,
+    projectId: string,
+    threadId: string,
+    viewport: DesktopWidgetViewport,
+  ): Promise<void> {
+    if (!this.findSubscription(ownerId, projectId, threadId)) throw new Error("Session attachment is not active");
+    return this.workers.configureWidget(projectId, threadId, viewport);
   }
 
   respond(projectId: string, threadId: string, response: HostResponse): Promise<void> {

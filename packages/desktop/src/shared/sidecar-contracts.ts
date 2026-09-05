@@ -18,7 +18,11 @@ import type {
   SessionResourceReloadInput,
   Thread,
 } from "./contracts.ts";
-import type { ResolvedExtensionEntry, ResolvedExtensionSet } from "./desktop-extension-contracts.ts";
+import type {
+  DesktopWidgetViewport,
+  ResolvedExtensionEntry,
+  ResolvedExtensionSet,
+} from "./desktop-extension-contracts.ts";
 import type { SessionCheckpointDiffResult, SessionCheckpointRestoreResult } from "./pi-rewind-contracts.ts";
 import type {
   SubagentHostRequest,
@@ -249,6 +253,7 @@ export type ThreadSidecarCommand =
   | { type: "setModel"; provider: string; modelId: string }
   | { type: "setThinking"; level: SessionControlState["thinkingLevel"] }
   | { type: "rename"; title: string }
+  | { type: "configureWidget"; viewport: DesktopWidgetViewport }
   | { type: "respondHostUi"; response: HostResponse }
   | { type: "getSummary"; archived: boolean }
   | { type: "branch"; input: SessionBranchInput }

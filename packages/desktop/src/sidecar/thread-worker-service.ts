@@ -160,6 +160,9 @@ export class ThreadWorkerService implements SidecarService {
         return this.runtime.readImageResource(command.resourceId);
       case "resolveRunCodeArtifact":
         return this.runtime.resolveRunCodeArtifact(command.toolCallId, command.artifactId);
+      case "configureWidget":
+        this.runtime.configureWidget(command.viewport);
+        return null;
       case "respondHostUi":
         this.runtime.respond(command.response);
         return null;

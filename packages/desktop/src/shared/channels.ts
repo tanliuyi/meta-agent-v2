@@ -46,6 +46,7 @@ export const CHANNELS = {
   sessionsRefreshModels: "desktop:sessions:refresh-models",
   sessionsSetModel: "desktop:sessions:set-model",
   sessionsSetThinking: "desktop:sessions:set-thinking",
+  sessionsConfigureWidget: "desktop:sessions:configure-widget",
   sessionsRespond: "desktop:sessions:respond",
   sessionsReadImageResource: "desktop:sessions:read-image-resource",
   sessionsOpenRunCodeArtifact: "desktop:sessions:open-run-code-artifact",

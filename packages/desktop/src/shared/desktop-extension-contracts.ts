@@ -135,6 +135,13 @@ export interface DraftExtensionContext {
   enabledPluginIds: string[] | null;
 }
 
+export interface DesktopWidgetViewport {
+  hostId: string;
+  key: string;
+  columns: number;
+  theme: "light" | "dark";
+}
+
 export interface DesktopExtensionHostState {
   statuses: Record<string, string>;
   windowTitle?: string;
@@ -144,7 +151,15 @@ export interface DesktopExtensionHostState {
     mode: "replace" | "append";
     text: string;
   };
-  widgets: Array<{ key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" }>;
+  widgets: Array<{
+    key: string;
+    lines: string[];
+    placement: "aboveEditor" | "belowEditor";
+    /** Present for host-rendered, read-only TUI component widgets. */
+    hostId?: string;
+    columns?: number;
+    truncated?: boolean;
+  }>;
   working?: {
     message?: string;
     visible?: boolean;
