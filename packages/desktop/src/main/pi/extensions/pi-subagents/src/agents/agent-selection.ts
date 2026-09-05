@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { AgentScope, AgentConfig } from "./agents.ts";
 
 export function mergeAgentsForScope(

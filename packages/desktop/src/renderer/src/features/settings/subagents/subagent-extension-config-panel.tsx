@@ -32,7 +32,7 @@ const AUTHORITY_ACTIONS = [
 
 // 上游对 0 非法（会拒绝或回退默认值）的字段：UI 下限为 1。
 // 与 pi-subagents 消费点校验一致：
-// turn-budget.ts maxTurns>=1 / tool-budget.ts hard>=1,soft>=1 /
+// tool-budget.ts hard>=1,soft>=1 /
 // usage-budget.ts hard>0,soft>0 / parallel normalize>=1 /
 // subagent-control.ts parsePositiveInt / completion-batcher.ts parsePositiveInt /
 // scheduled-runs.ts maxPending>=1 / checkSubagentDepth 0 会禁止全部子代理。
@@ -42,7 +42,6 @@ const POSITIVE_INTEGER_FIELDS = [
   "scheduledRunsMaxPending",
   "parallelMaxTasks",
   "parallelConcurrency",
-  "turnBudgetMaxTurns",
   "toolBudgetHard",
   "toolBudgetSoft",
   "usageBudgetTokensHard",
@@ -62,7 +61,6 @@ const FIELD_LABELS: Record<(typeof POSITIVE_INTEGER_FIELDS)[number], string> = {
   scheduledRunsMaxPending: "定时运行最大积压",
   parallelMaxTasks: "并行最大任务数",
   parallelConcurrency: "并行并发数",
-  turnBudgetMaxTurns: "回合预算上限",
   toolBudgetHard: "工具预算硬上限",
   toolBudgetSoft: "工具预算软上限",
   usageBudgetTokensHard: "Token 预算硬上限",
@@ -104,7 +102,6 @@ export function SubagentExtensionConfigPanel({ config, saving, onSave }: Subagen
     scheduledRunsEnabled: config.scheduledRuns?.enabled ?? true,
     scheduledRunsMaxPending: config.scheduledRuns?.maxPending ?? ("" as const),
     scheduledRunsStoreRoot: config.scheduledRuns?.storeRoot ?? "",
-    legacyChainControls: config.legacyChainControls ?? false,
     inlineToolDisplay: config.inlineToolDisplay ?? "rich",
     forceTopLevelAsync: config.forceTopLevelAsync ?? false,
     waitToolEnabled: config.waitTool?.enabled ?? true,
@@ -132,8 +129,6 @@ export function SubagentExtensionConfigPanel({ config, saving, onSave }: Subagen
     parallelMaxTasks: config.parallel?.maxTasks ?? ("" as const),
     parallelConcurrency: config.parallel?.concurrency ?? ("" as const),
     chainDynamicFanoutMaxItems: config.chain?.dynamicFanout?.maxItems ?? 0,
-    turnBudgetMaxTurns: config.turnBudget?.maxTurns ?? ("" as const),
-    turnBudgetGraceTurns: config.turnBudget?.graceTurns ?? 1,
     toolBudgetSoft: config.toolBudget?.soft ?? ("" as const),
     toolBudgetHard: config.toolBudget?.hard ?? ("" as const),
     controlEnabled: config.control?.enabled ?? false,
@@ -180,7 +175,6 @@ export function SubagentExtensionConfigPanel({ config, saving, onSave }: Subagen
         ...(num(draft.scheduledRunsMaxPending) > 0 ? { maxPending: num(draft.scheduledRunsMaxPending) } : {}),
         ...(draft.scheduledRunsStoreRoot ? { storeRoot: draft.scheduledRunsStoreRoot } : {}),
       },
-      legacyChainControls: draft.legacyChainControls,
       inlineToolDisplay: draft.inlineToolDisplay as SubagentExtensionConfig["inlineToolDisplay"],
       forceTopLevelAsync: draft.forceTopLevelAsync,
       waitTool: { enabled: draft.waitToolEnabled },
@@ -237,14 +231,6 @@ export function SubagentExtensionConfigPanel({ config, saving, onSave }: Subagen
               dynamicFanout: {
                 maxItems: num(draft.chainDynamicFanoutMaxItems),
               },
-            },
-          }
-        : {}),
-      ...(num(draft.turnBudgetMaxTurns) > 0
-        ? {
-            turnBudget: {
-              maxTurns: num(draft.turnBudgetMaxTurns),
-              ...(num(draft.turnBudgetGraceTurns) > 0 ? { graceTurns: num(draft.turnBudgetGraceTurns) } : {}),
             },
           }
         : {}),
@@ -488,7 +474,6 @@ export function SubagentExtensionConfigPanel({ config, saving, onSave }: Subagen
           {subgroup(
             "运行模式",
             <>
-              {switchRow("旧版链控件", "legacyChainControls")}
               <div className="settings-row subagent-config-row">
                 <span>内联工具展示</span>
                 <SelectRoot
@@ -556,13 +541,6 @@ export function SubagentExtensionConfigPanel({ config, saving, onSave }: Subagen
             </span>
             <ChevronDown aria-hidden="true" />
           </summary>
-          {subgroup(
-            "回合预算",
-            <>
-              {numberRow("上限", "turnBudgetMaxTurns", undefined, "留空 = 未设置")}
-              {numberRow("宽限", "turnBudgetGraceTurns", "默认 1；0 = 无宽限")}
-            </>,
-          )}
           {subgroup(
             "工具预算",
             <>

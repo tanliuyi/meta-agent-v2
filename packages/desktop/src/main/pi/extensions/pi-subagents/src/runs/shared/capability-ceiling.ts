@@ -1,9 +1,7 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import { Buffer } from "node:buffer";
 
 export const SUBAGENT_CAPABILITY_CEILING_VERSION = 1 as const;
 export const SUBAGENT_CAPABILITY_CEILING_REGISTRY_KEY = "pi-subagents.capability-ceiling.v1";
-export const SUBAGENT_CAPABILITY_CEILING_ENV = "PI_SUBAGENT_CAPABILITY_CEILING_V1";
 
 export type SubagentCapabilityCeiling =
 	| { allowedTools: readonly string[]; allowedAgents?: readonly string[]; denyExtensions?: boolean }
@@ -23,6 +21,7 @@ export interface SubagentCapabilityAudit {
 	requestedTools?: string[];
 	effectiveTools: string[];
 	removedTools: string[];
+	excludeTools?: string[];
 	internalTools: string[];
 	extensionsDenied: boolean;
 	removedExtensionCount: number;
@@ -167,7 +166,7 @@ export function resolveSubagentCapabilityCeiling(sessionId: string | undefined, 
 }
 
 export function resolveCurrentSubagentCapabilityCeiling(sessionId: string | undefined): ResolvedSubagentCapabilityCeiling | undefined {
-	return resolveSubagentCapabilityCeiling(sessionId, decodeSubagentCapabilityCeiling(process.env[SUBAGENT_CAPABILITY_CEILING_ENV]));
+	return resolveSubagentCapabilityCeiling(sessionId, undefined);
 }
 
 export function isAgentAllowedByCapabilityCeiling(agentName: string, ceiling: ResolvedSubagentCapabilityCeiling | undefined): boolean {

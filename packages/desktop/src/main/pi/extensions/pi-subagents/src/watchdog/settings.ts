@@ -1,42 +1,33 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { THINKING_LEVELS, type ThinkingLevel } from "../shared/model-info.ts";
 import { getAgentDir, getProjectConfigDir } from "../shared/utils.ts";
 import {
-	WATCHDOG_DELIVERY_MODES,
-	WATCHDOG_LATE_WARNING_POLICIES,
 	WATCHDOG_WARNING_SEVERITIES,
 	type ResolvedWatchdogConfig,
-	type WatchdogAsyncCompletionConfig,
-	type WatchdogAutoFollowConfig,
 	type WatchdogChildOverrideConfig,
 	type WatchdogChildrenConfig,
-	type WatchdogDeliveryMode,
 	type WatchdogEndpointConfig,
 	type WatchdogCadenceConfig,
 	type WatchdogGuidanceConfig,
-	type WatchdogLateWarningPolicy,
 	type WatchdogScopeConfig,
 	type WatchdogLspConfig,
+	type WatchdogRoleModelRule,
+	type WatchdogRulesConfig,
 	type WatchdogSettingsError,
 	type WatchdogSettingsResult,
 	type WatchdogSettingsSource,
 	type WatchdogSeverity,
-	type WatchdogSyncBacklog,
 } from "./types.ts";
 
-type WatchdogAutoFollowPatch = Partial<WatchdogAutoFollowConfig>;
 type WatchdogGuidancePatch = Partial<WatchdogGuidanceConfig>;
 type WatchdogScopePatch = Partial<WatchdogScopeConfig>;
 type WatchdogCadencePatch = Partial<WatchdogCadenceConfig>;
 type WatchdogEndpointPatch = Partial<WatchdogEndpointConfig>;
 type WatchdogChildOverridePatch = Partial<WatchdogChildOverrideConfig>;
-type WatchdogChildrenPatch = Partial<Omit<WatchdogChildrenConfig, "autoFollow" | "overrides">> & {
-	autoFollow?: WatchdogAutoFollowPatch;
+type WatchdogChildrenPatch = Partial<Omit<WatchdogChildrenConfig, "overrides">> & {
 	overrides?: Record<string, WatchdogChildOverridePatch>;
 };
-type WatchdogAsyncCompletionPatch = Partial<WatchdogAsyncCompletionConfig>;
 type WatchdogLspPatch = Partial<WatchdogLspConfig>;
 
 export type WatchdogSettingsWriteScope = "user" | "project";
@@ -44,38 +35,6 @@ export type WatchdogModelSettingsTarget =
 	| { kind: "main" }
 	| { kind: "children" }
 	| { kind: "child"; agent: string };
-
-export interface WatchdogSettingsOverride {
-	enabled?: boolean;
-	main: {
-		enabled?: boolean;
-		model?: string;
-		thinking?: ThinkingLevel | false;
-	};
-	children: {
-		enabled?: boolean;
-		model?: string;
-		thinking?: ThinkingLevel | false;
-	};
-}
-
-export interface WatchdogSettingsWrite {
-	scope: WatchdogSettingsWriteScope;
-	cwd?: string;
-	config: {
-		enabled?: boolean | null;
-		main?: {
-			enabled?: boolean | null;
-			model?: string | null;
-			thinking?: ThinkingLevel | false | null;
-		};
-		children?: {
-			enabled?: boolean | null;
-			model?: string | null;
-			thinking?: ThinkingLevel | false | null;
-		};
-	};
-}
 
 export interface WatchdogModelSettingsWrite {
 	scope: WatchdogSettingsWriteScope;
@@ -85,14 +44,13 @@ export interface WatchdogModelSettingsWrite {
 	thinking?: ThinkingLevel | false | null;
 }
 
-type WatchdogConfigPatch = Partial<Omit<ResolvedWatchdogConfig, "guidance" | "autoFollow" | "scope" | "cadence" | "main" | "children" | "asyncCompletion" | "lsp">> & {
+type WatchdogConfigPatch = Partial<Omit<ResolvedWatchdogConfig, "guidance" | "scope" | "cadence" | "main" | "children" | "lsp" | "rules">> & {
+	rules?: WatchdogRulesConfig;
 	guidance?: WatchdogGuidancePatch;
-	autoFollow?: WatchdogAutoFollowPatch;
 	scope?: WatchdogScopePatch;
 	cadence?: WatchdogCadencePatch;
 	main?: WatchdogEndpointPatch;
 	children?: WatchdogChildrenPatch;
-	asyncCompletion?: WatchdogAsyncCompletionPatch;
 	lsp?: WatchdogLspPatch;
 };
 
@@ -103,22 +61,13 @@ interface ParseMeta {
 
 export const DEFAULT_WATCHDOG_CONFIG: ResolvedWatchdogConfig = {
 	enabled: false,
-	delivery: "held",
-	showDuringRun: false,
-	syncBacklog: "off",
 	agentEndTimeoutMs: 30_000,
-	lateWarningPolicy: "show-stale-no-autofollow",
 	severityThreshold: "concern",
 	maxWarnings: null,
 	guidance: {
 		watchdogMd: true,
-		systemPromptPath: null,
 	},
-	autoFollow: {
-		blockers: true,
-		maxAttempts: 3,
-		stalemateRepeats: 3,
-	},
+	stalemateRepeats: 3,
 	scope: {
 		enabled: true,
 	},
@@ -131,16 +80,7 @@ export const DEFAULT_WATCHDOG_CONFIG: ResolvedWatchdogConfig = {
 	children: {
 		enabled: false,
 		watchdogTailTimeoutMs: 120_000,
-		autoFollow: {
-			blockers: true,
-			maxAttempts: 3,
-			stalemateRepeats: 3,
-		},
 		overrides: {},
-	},
-	asyncCompletion: {
-		enabled: false,
-		autoFollowBlockers: false,
 	},
 	lsp: {
 		enabled: true,
@@ -148,56 +88,43 @@ export const DEFAULT_WATCHDOG_CONFIG: ResolvedWatchdogConfig = {
 		maxFiles: 20,
 		maxDiagnostics: 50,
 	},
-	compactAtPercent: 80,
-	reviewRetryDelayMs: 1_000,
-	maxReviewFailures: 3,
 };
 
 const WATCHDOG_FIELDS = new Set([
 	"enabled",
-	"delivery",
-	"showDuringRun",
-	"syncBacklog",
 	"agentEndTimeoutMs",
-	"lateWarningPolicy",
 	"severityThreshold",
 	"maxWarnings",
 	"guidance",
-	"autoFollow",
+	"stalemateRepeats",
 	"scope",
 	"cadence",
 	"main",
 	"children",
-	"asyncCompletion",
 	"lsp",
-	"compactAtPercent",
-	"reviewRetryDelayMs",
-	"maxReviewFailures",
+	"rules",
 ]);
-const GUIDANCE_FIELDS = new Set(["watchdogMd", "systemPromptPath"]);
-const AUTO_FOLLOW_FIELDS = new Set(["blockers", "maxAttempts", "stalemateRepeats"]);
+const RULES_FIELDS = new Set(["action", "roleModels"]);
+const ROLE_MODEL_RULE_FIELDS = new Set(["allow", "deny", "note"]);
+const GUIDANCE_FIELDS = new Set(["watchdogMd"]);
 const SCOPE_FIELDS = new Set(["enabled"]);
 const CADENCE_FIELDS = new Set(["everyNTools"]);
 const ENDPOINT_FIELDS = new Set(["enabled", "model", "thinking"]);
-const CHILDREN_FIELDS = new Set(["enabled", "model", "thinking", "watchdogTailTimeoutMs", "autoFollow", "overrides"]);
-const CHILD_OVERRIDE_FIELDS = new Set(["enabled", "model", "thinking"]);
-const ASYNC_COMPLETION_FIELDS = new Set(["enabled", "autoFollowBlockers"]);
+const CHILDREN_FIELDS = new Set(["enabled", "model", "thinking", "watchdogTailTimeoutMs", "cadence", "overrides"]);
+const CHILD_OVERRIDE_FIELDS = new Set(["enabled", "model", "thinking", "cadence"]);
 const LSP_FIELDS = new Set(["enabled", "timeoutMs", "maxFiles", "maxDiagnostics"]);
 
 function cloneDefaultConfig(): ResolvedWatchdogConfig {
 	return {
 		...DEFAULT_WATCHDOG_CONFIG,
 		guidance: { ...DEFAULT_WATCHDOG_CONFIG.guidance },
-		autoFollow: { ...DEFAULT_WATCHDOG_CONFIG.autoFollow },
 		scope: { ...DEFAULT_WATCHDOG_CONFIG.scope },
 		cadence: { ...DEFAULT_WATCHDOG_CONFIG.cadence },
 		main: { ...DEFAULT_WATCHDOG_CONFIG.main },
 		children: {
 			...DEFAULT_WATCHDOG_CONFIG.children,
-			autoFollow: { ...DEFAULT_WATCHDOG_CONFIG.children.autoFollow },
 			overrides: {},
 		},
-		asyncCompletion: { ...DEFAULT_WATCHDOG_CONFIG.asyncCompletion },
 		lsp: { ...DEFAULT_WATCHDOG_CONFIG.lsp },
 	};
 }
@@ -260,35 +187,11 @@ function parseEnum<T extends string>(value: unknown, field: string, meta: ParseM
 	throw invalid(meta, field, values.map((item) => `'${item}'`).join(" or "));
 }
 
-function parseSyncBacklog(value: unknown, field: string, meta: ParseMeta): WatchdogSyncBacklog {
-	if (value === "off") return "off";
-	return parseInteger(value, field, meta, "'off' or a positive integer", (candidate) => candidate >= 1);
-}
-
 function parseGuidancePatch(value: unknown, field: string, meta: ParseMeta): WatchdogGuidancePatch {
 	const input = parseObject(value, field, meta);
 	assertKnownFields(input, GUIDANCE_FIELDS, field, meta);
 	const patch: WatchdogGuidancePatch = {};
 	if ("watchdogMd" in input) patch.watchdogMd = parseBoolean(input.watchdogMd, `${field}.watchdogMd`, meta);
-	if ("systemPromptPath" in input) {
-		patch.systemPromptPath = input.systemPromptPath === null
-			? null
-			: parseNonEmptyString(input.systemPromptPath, `${field}.systemPromptPath`, meta);
-	}
-	return patch;
-}
-
-function parseAutoFollowPatch(value: unknown, field: string, meta: ParseMeta): WatchdogAutoFollowPatch {
-	const input = parseObject(value, field, meta);
-	assertKnownFields(input, AUTO_FOLLOW_FIELDS, field, meta);
-	const patch: WatchdogAutoFollowPatch = {};
-	if ("blockers" in input) patch.blockers = parseBoolean(input.blockers, `${field}.blockers`, meta);
-	if ("maxAttempts" in input) {
-		patch.maxAttempts = parseNullableInteger(input.maxAttempts, `${field}.maxAttempts`, meta, "null or a positive integer", (candidate) => candidate >= 1);
-	}
-	if ("stalemateRepeats" in input) {
-		patch.stalemateRepeats = parseInteger(input.stalemateRepeats, `${field}.stalemateRepeats`, meta, "a positive integer", (candidate) => candidate >= 1);
-	}
 	return patch;
 }
 
@@ -329,6 +232,7 @@ function parseChildOverridePatch(value: unknown, field: string, meta: ParseMeta)
 	if ("enabled" in input) patch.enabled = parseBoolean(input.enabled, `${field}.enabled`, meta);
 	if ("model" in input) patch.model = parseNonEmptyString(input.model, `${field}.model`, meta);
 	if ("thinking" in input) patch.thinking = parseThinking(input.thinking, `${field}.thinking`, meta);
+	if ("cadence" in input) patch.cadence = parseCadencePatch(input.cadence, `${field}.cadence`, meta);
 	return patch;
 }
 
@@ -342,7 +246,7 @@ function parseChildrenPatch(value: unknown, field: string, meta: ParseMeta): Wat
 	if ("watchdogTailTimeoutMs" in input) {
 		patch.watchdogTailTimeoutMs = parseInteger(input.watchdogTailTimeoutMs, `${field}.watchdogTailTimeoutMs`, meta, "a positive integer", (candidate) => candidate >= 1);
 	}
-	if ("autoFollow" in input) patch.autoFollow = parseAutoFollowPatch(input.autoFollow, `${field}.autoFollow`, meta);
+	if ("cadence" in input) patch.cadence = parseCadencePatch(input.cadence, `${field}.cadence`, meta);
 	if ("overrides" in input) {
 		const overrides = parseObject(input.overrides, `${field}.overrides`, meta);
 		patch.overrides = {};
@@ -351,15 +255,6 @@ function parseChildrenPatch(value: unknown, field: string, meta: ParseMeta): Wat
 			patch.overrides[agent] = parseChildOverridePatch(override, `${field}.overrides.${agent}`, meta);
 		}
 	}
-	return patch;
-}
-
-function parseAsyncCompletionPatch(value: unknown, field: string, meta: ParseMeta): WatchdogAsyncCompletionPatch {
-	const input = parseObject(value, field, meta);
-	assertKnownFields(input, ASYNC_COMPLETION_FIELDS, field, meta);
-	const patch: WatchdogAsyncCompletionPatch = {};
-	if ("enabled" in input) patch.enabled = parseBoolean(input.enabled, `${field}.enabled`, meta);
-	if ("autoFollowBlockers" in input) patch.autoFollowBlockers = parseBoolean(input.autoFollowBlockers, `${field}.autoFollowBlockers`, meta);
 	return patch;
 }
 
@@ -374,19 +269,42 @@ function parseLspPatch(value: unknown, field: string, meta: ParseMeta): Watchdog
 	return patch;
 }
 
+function parseStringList(value: unknown, field: string, meta: ParseMeta): string[] {
+	if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !entry.trim())) throw invalid(meta, field, "an array of non-empty strings");
+	return value.map((entry: string) => entry.trim());
+}
+
+function parseRoleModelRule(value: unknown, field: string, meta: ParseMeta): WatchdogRoleModelRule {
+	const input = parseObject(value, field, meta);
+	assertKnownFields(input, ROLE_MODEL_RULE_FIELDS, field, meta);
+	const rule: WatchdogRoleModelRule = {};
+	if ("allow" in input) rule.allow = parseStringList(input.allow, `${field}.allow`, meta);
+	if ("deny" in input) rule.deny = parseStringList(input.deny, `${field}.deny`, meta);
+	if ("note" in input) rule.note = parseNonEmptyString(input.note, `${field}.note`, meta);
+	return rule;
+}
+
+function parseRules(value: unknown, field: string, meta: ParseMeta): WatchdogRulesConfig {
+	const input = parseObject(value, field, meta);
+	assertKnownFields(input, RULES_FIELDS, field, meta);
+	const rules: WatchdogRulesConfig = { action: "warn", roleModels: {} };
+	if ("action" in input) rules.action = parseEnum(input.action, `${field}.action`, meta, ["warn", "block"] as const);
+	if ("roleModels" in input) {
+		for (const [agent, rule] of Object.entries(parseObject(input.roleModels, `${field}.roleModels`, meta))) {
+			if (!agent.trim()) throw invalid(meta, `${field}.roleModels`, "agent names to be non-empty");
+			rules.roleModels[agent] = parseRoleModelRule(rule, `${field}.roleModels.${agent}`, meta);
+		}
+	}
+	return rules;
+}
+
 function parseWatchdogPatch(value: unknown, field: string, meta: ParseMeta): WatchdogConfigPatch {
 	const input = parseObject(value, field, meta);
 	assertKnownFields(input, WATCHDOG_FIELDS, field, meta);
 	const patch: WatchdogConfigPatch = {};
 	if ("enabled" in input) patch.enabled = parseBoolean(input.enabled, `${field}.enabled`, meta);
-	if ("delivery" in input) patch.delivery = parseEnum<WatchdogDeliveryMode>(input.delivery, `${field}.delivery`, meta, WATCHDOG_DELIVERY_MODES);
-	if ("showDuringRun" in input) patch.showDuringRun = parseBoolean(input.showDuringRun, `${field}.showDuringRun`, meta);
-	if ("syncBacklog" in input) patch.syncBacklog = parseSyncBacklog(input.syncBacklog, `${field}.syncBacklog`, meta);
 	if ("agentEndTimeoutMs" in input) {
 		patch.agentEndTimeoutMs = parseInteger(input.agentEndTimeoutMs, `${field}.agentEndTimeoutMs`, meta, "a positive integer", (candidate) => candidate >= 1);
-	}
-	if ("lateWarningPolicy" in input) {
-		patch.lateWarningPolicy = parseEnum<WatchdogLateWarningPolicy>(input.lateWarningPolicy, `${field}.lateWarningPolicy`, meta, WATCHDOG_LATE_WARNING_POLICIES);
 	}
 	if ("severityThreshold" in input) {
 		patch.severityThreshold = parseEnum<WatchdogSeverity>(input.severityThreshold, `${field}.severityThreshold`, meta, WATCHDOG_WARNING_SEVERITIES);
@@ -395,22 +313,15 @@ function parseWatchdogPatch(value: unknown, field: string, meta: ParseMeta): Wat
 		patch.maxWarnings = parseNullableInteger(input.maxWarnings, `${field}.maxWarnings`, meta, "null or a non-negative integer", (candidate) => candidate >= 0);
 	}
 	if ("guidance" in input) patch.guidance = parseGuidancePatch(input.guidance, `${field}.guidance`, meta);
-	if ("autoFollow" in input) patch.autoFollow = parseAutoFollowPatch(input.autoFollow, `${field}.autoFollow`, meta);
+	if ("stalemateRepeats" in input) {
+		patch.stalemateRepeats = parseInteger(input.stalemateRepeats, `${field}.stalemateRepeats`, meta, "a positive integer", (candidate) => candidate >= 1);
+	}
 	if ("scope" in input) patch.scope = parseScopePatch(input.scope, `${field}.scope`, meta);
 	if ("cadence" in input) patch.cadence = parseCadencePatch(input.cadence, `${field}.cadence`, meta);
 	if ("main" in input) patch.main = parseEndpointPatch(input.main, `${field}.main`, meta);
 	if ("children" in input) patch.children = parseChildrenPatch(input.children, `${field}.children`, meta);
-	if ("asyncCompletion" in input) patch.asyncCompletion = parseAsyncCompletionPatch(input.asyncCompletion, `${field}.asyncCompletion`, meta);
 	if ("lsp" in input) patch.lsp = parseLspPatch(input.lsp, `${field}.lsp`, meta);
-	if ("compactAtPercent" in input) {
-		patch.compactAtPercent = parseInteger(input.compactAtPercent, `${field}.compactAtPercent`, meta, "an integer from 50 through 95", (candidate) => candidate >= 50 && candidate <= 95);
-	}
-	if ("reviewRetryDelayMs" in input) {
-		patch.reviewRetryDelayMs = parseInteger(input.reviewRetryDelayMs, `${field}.reviewRetryDelayMs`, meta, "a positive integer", (candidate) => candidate >= 1);
-	}
-	if ("maxReviewFailures" in input) {
-		patch.maxReviewFailures = parseInteger(input.maxReviewFailures, `${field}.maxReviewFailures`, meta, "a positive integer", (candidate) => candidate >= 1);
-	}
+	if ("rules" in input) patch.rules = parseRules(input.rules, `${field}.rules`, meta);
 	return patch;
 }
 
@@ -514,12 +425,6 @@ export function resolveWatchdogConfigStrict(cwd: string, options: { session?: Re
 	return resolvePatch(patch);
 }
 
-export function resolveWatchdogInheritedConfig(
-	scope: WatchdogSettingsWriteScope,
-): ResolvedWatchdogConfig {
-	return scope === "user" ? resolvePatch({}) : resolvePatch(parseSourceFile(getUserSettingsPath(), "user"));
-}
-
 function ensureObjectField(parent: Record<string, unknown>, key: string, field: string, meta: ParseMeta): Record<string, unknown> {
 	if (!(key in parent)) parent[key] = {};
 	if (!isPlainObject(parent[key])) throw invalid(meta, field, "an object");
@@ -550,62 +455,14 @@ function writeSettingsFile(settingsPath: string, settings: Record<string, unknow
 	return settingsPath;
 }
 
-function assignOptionalSetting(
-	target: Record<string, unknown>,
-	key: string,
-	value: string | boolean | null | undefined,
-): void {
-	if (value === null) delete target[key];
-	else if (value !== undefined) target[key] = value;
-}
-
-export function readWatchdogSettingsOverride(
-	scope: WatchdogSettingsWriteScope,
-	cwd?: string,
-): WatchdogSettingsOverride {
-	const settingsPath = settingsPathForWrite(scope, cwd);
-	const patch = parseSourceFile(settingsPath, scope);
-	return {
-		...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-		main: {
-			...(patch.main?.enabled !== undefined ? { enabled: patch.main.enabled } : {}),
-			...(patch.main?.model !== undefined ? { model: patch.main.model } : {}),
-			...(patch.main?.thinking !== undefined ? { thinking: patch.main.thinking } : {}),
-		},
-		children: {
-			...(patch.children?.enabled !== undefined ? { enabled: patch.children.enabled } : {}),
-			...(patch.children?.model !== undefined ? { model: patch.children.model } : {}),
-			...(patch.children?.thinking !== undefined ? { thinking: patch.children.thinking } : {}),
-		},
-	};
-}
-
-export function writeWatchdogSettings(input: WatchdogSettingsWrite): string {
-	const settingsPath = settingsPathForWrite(input.scope, input.cwd);
-	const meta: ParseMeta = { scope: input.scope, path: settingsPath };
+export function writeUserWatchdogEnabled(enabled: boolean): string {
+	const settingsPath = getUserSettingsPath();
+	const meta: ParseMeta = { scope: "user", path: settingsPath };
 	const settings = readSettingsFileStrict(settingsPath);
 	const watchdog = ensureWatchdogSettings(settings, meta);
-	if (input.config.enabled !== undefined) {
-		assignOptionalSetting(watchdog, "enabled", input.config.enabled);
-	}
-	if (input.config.main) {
-		const main = targetSettingsObject(watchdog, { kind: "main" }, meta);
-		assignOptionalSetting(main, "enabled", input.config.main.enabled);
-		assignOptionalSetting(main, "model", input.config.main.model);
-		assignOptionalSetting(main, "thinking", input.config.main.thinking);
-	}
-	if (input.config.children) {
-		const children = targetSettingsObject(watchdog, { kind: "children" }, meta);
-		assignOptionalSetting(children, "enabled", input.config.children.enabled);
-		assignOptionalSetting(children, "model", input.config.children.model);
-		assignOptionalSetting(children, "thinking", input.config.children.thinking);
-	}
-	parseSettingsObject(settings, meta);
+	watchdog.enabled = enabled;
+	targetSettingsObject(watchdog, { kind: "main" }, meta).enabled = enabled;
 	return writeSettingsFile(settingsPath, settings);
-}
-
-export function writeUserWatchdogEnabled(enabled: boolean): string {
-	return writeWatchdogSettings({ scope: "user", config: { enabled, main: { enabled } } });
 }
 
 export function writeWatchdogModelSettings(input: WatchdogModelSettingsWrite): string {

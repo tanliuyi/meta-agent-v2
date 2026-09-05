@@ -51,8 +51,6 @@ interface AgentDraft {
   defaultContext: string;
   tools: string;
   skills: string;
-  maxTurns: string;
-  graceTurns: string;
   toolHard: string;
   toolSoft: string;
   toolBlock: string;
@@ -111,14 +109,6 @@ export function SubagentAgentDialog({
         : {
             async: current.defaultAsync,
             timeoutMs: positiveInteger(current.timeoutMs) ?? false,
-            turnBudget: positiveInteger(current.maxTurns)
-              ? {
-                  maxTurns: positiveInteger(current.maxTurns)!,
-                  ...(nonNegativeInteger(current.graceTurns) !== undefined
-                    ? { graceTurns: nonNegativeInteger(current.graceTurns) }
-                    : {}),
-                }
-              : false,
           }),
       toolBudget: positiveInteger(current.toolHard)
         ? {
@@ -359,48 +349,6 @@ export function SubagentAgentDialog({
             <TabsContent value="limits" className="subagent-editor-tab-content">
               {!builtin ? (
                 <div className="subagent-form-grid subagent-budget-grid">
-                  <SubagentFormField label="最大轮次">
-                    {({ controlId, labelId }) => (
-                      <SelectRoot
-                        defaultValue={draft.current.maxTurns}
-                        onValueChange={(value) => updateDraft({ maxTurns: value })}
-                      >
-                        <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
-                          <SelectValue placeholder="无限制" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">无限制</SelectItem>
-                          <SelectItem value="1">1</SelectItem>
-                          <SelectItem value="3">3</SelectItem>
-                          <SelectItem value="5">5</SelectItem>
-                          <SelectItem value="10">10</SelectItem>
-                          <SelectItem value="25">25</SelectItem>
-                          <SelectItem value="50">50</SelectItem>
-                          <SelectItem value="100">100</SelectItem>
-                        </SelectContent>
-                      </SelectRoot>
-                    )}
-                  </SubagentFormField>
-                  <SubagentFormField label="额外轮次">
-                    {({ controlId, labelId }) => (
-                      <SelectRoot
-                        defaultValue={draft.current.graceTurns}
-                        onValueChange={(value) => updateDraft({ graceTurns: value })}
-                      >
-                        <SelectTrigger id={controlId} aria-labelledby={labelId} className="w-full">
-                          <SelectValue placeholder="无限制" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">无限制</SelectItem>
-                          <SelectItem value="0">0</SelectItem>
-                          <SelectItem value="1">1</SelectItem>
-                          <SelectItem value="3">3</SelectItem>
-                          <SelectItem value="5">5</SelectItem>
-                          <SelectItem value="10">10</SelectItem>
-                        </SelectContent>
-                      </SelectRoot>
-                    )}
-                  </SubagentFormField>
                   <SubagentFormField label="超时时间">
                     {({ controlId, labelId }) => (
                       <SelectRoot
@@ -514,8 +462,6 @@ function createDraft(agent: AgentSummary | undefined, scope: SubagentSettingsSco
     defaultContext: agent?.defaultContext ?? "inherit",
     tools: [...(agent?.tools ?? []), ...(agent?.mcpDirectTools ?? []).map((tool) => `mcp:${tool}`)].join(", "),
     skills: agent?.skills?.join(", ") ?? "",
-    maxTurns: agent?.turnBudget?.maxTurns?.toString() ?? "",
-    graceTurns: agent?.turnBudget?.graceTurns?.toString() ?? "",
     toolHard: agent?.toolBudget?.hard?.toString() ?? "",
     toolSoft: agent?.toolBudget?.soft?.toString() ?? "",
     toolBlock:
@@ -547,9 +493,4 @@ function csv(value: string): string[] | false {
 function positiveInteger(value: string): number | undefined {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function nonNegativeInteger(value: string): number | undefined {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { AgentContract, EffectsProjection, ExecutionProjection, ReviewProjection, SingleResult } from "../../shared/types.ts";
 
 export function isAgentContractV1(contract: AgentContract | undefined): boolean {
@@ -13,7 +12,7 @@ export function buildExecutionProjection(result: Pick<SingleResult, "exitCode" |
 		return { status: "stopped", success: false, exitCode: result.exitCode, stopped: true, ...(result.error ? { error: result.error } : {}) };
 	}
 	if (result.interrupted) {
-		return { status: "paused", success: true, exitCode: result.exitCode, interrupted: true, ...(result.error ? { error: result.error } : {}) };
+		return { status: "paused", success: false, exitCode: result.exitCode, interrupted: true, ...(result.error ? { error: result.error } : {}) };
 	}
 	const success = result.exitCode === 0 && !result.error && !result.timedOut;
 	return {

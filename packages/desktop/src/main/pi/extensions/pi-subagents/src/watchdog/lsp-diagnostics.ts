@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
@@ -445,6 +444,7 @@ async function collectWithTypeScriptLanguageServer(input: {
 }): Promise<WatchdogLspResult> {
 	const started = Date.now();
 	const child = spawn(input.command.command, input.command.args, {
+		windowsHide: true,
 		cwd: input.root,
 		stdio: "pipe",
 		env: { ...process.env, NO_COLOR: "1" },

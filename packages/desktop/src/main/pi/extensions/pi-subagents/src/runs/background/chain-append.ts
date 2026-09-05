@@ -1,11 +1,11 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { appendJsonl } from "../../shared/artifacts.ts";
-import type { AsyncParallelGroupStatus, AsyncStatus, WorkflowGraphNode, WorkflowGraphSnapshot } from "../../shared/types.ts";
-import { readStatus } from "../../shared/utils.ts";
+import type { AsyncStatus, WorkflowGraphNode, WorkflowGraphSnapshot } from "../../shared/types.ts";
+import { PROMPT_REDACTED, readStatus } from "../../shared/utils.ts";
+import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 import type { DynamicRunnerGroup, ParallelStepGroup, RunnerStep, RunnerSubagentStep } from "../shared/parallel-utils.ts";
 import { isDynamicRunnerGroup, isParallelGroup } from "../shared/parallel-utils.ts";
 
@@ -20,6 +20,7 @@ export interface ChainAppendRequest {
 export interface ChainAppendResult {
 	request: ChainAppendRequest;
 	pendingCount: number;
+	bookkeepingError?: string;
 }
 
 type StatusStep = NonNullable<AsyncStatus["steps"]>[number];
@@ -68,17 +69,14 @@ export function enqueueChainAppendRequest(input: {
 	runId: string;
 	steps: RunnerStep[];
 	now?: number;
+	admit?: (persist: () => void) => void;
 }): ChainAppendResult {
 	const status = readStatus(input.asyncDir);
 	if (!status) throw new Error(`No async run status found for '${input.runId}'.`);
 	if (status.runId !== input.runId) throw new Error(`Async run id mismatch: expected '${input.runId}', found '${status.runId}'.`);
 	if (status.mode !== "chain") throw new Error(`Run '${input.runId}' is ${status.mode}; only active chain runs accept appended steps.`);
 	if (status.state !== "running") throw new Error(`Run '${input.runId}' is ${status.state}; only running chain runs accept appended steps.`);
-	if ((status as AsyncStatus & { acceptingAppends?: boolean }).acceptingAppends === false) {
-		throw new Error(`Run '${input.runId}' is closing and no longer accepts appended steps.`);
-	}
-	const pendingBefore = countPendingChainAppendRequests(input.asyncDir);
-	const stillInProgress = (status.steps ?? []).some((step) => step.status === "running" || step.status === "pending") || pendingBefore > 0;
+	const stillInProgress = (status.steps ?? []).some((step) => step.status === "running" || step.status === "pending") || (status.pendingAppends ?? 0) > 0;
 	if (!stillInProgress) throw new Error(`Run '${input.runId}' has no running or pending chain steps left; append-step must target an in-progress chain.`);
 	if (input.steps.length === 0) throw new Error("append-step requires one chain step.");
 
@@ -88,42 +86,45 @@ export function enqueueChainAppendRequest(input: {
 		steps: input.steps,
 	};
 	fs.mkdirSync(appendDir(input.asyncDir), { recursive: true });
-	const requestPath = appendRequestPath(input.asyncDir, request);
-	writeAtomicJson(requestPath, request);
-	const latestStatus = readStatus(input.asyncDir);
-	if (latestStatus && (
-		latestStatus.state !== "running"
-		|| (latestStatus as AsyncStatus & { acceptingAppends?: boolean }).acceptingAppends === false
-	)) {
-		let withdrawn = false;
-		try {
-			fs.unlinkSync(requestPath);
-			withdrawn = true;
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		}
-		if (withdrawn) throw new Error(`Run '${input.runId}' stopped accepting appended steps before the request was claimed.`);
+	const persist = () => writeAtomicJson(appendRequestPath(input.asyncDir, request), request);
+	if (input.admit) input.admit(persist);
+	else persist();
+	let pendingCount = 1;
+	const bookkeepingErrors: string[] = [];
+	try {
+		pendingCount = countPendingChainAppendRequests(input.asyncDir);
+	} catch (error) {
+		bookkeepingErrors.push(`pending append count failed: ${error instanceof Error ? error.message : String(error)}`);
 	}
-	const pendingCount = countPendingChainAppendRequests(input.asyncDir);
-	// The append producer does not rewrite status.json from its stale snapshot;
-	// the runner projects requests after claiming them.
-	appendJsonl(path.join(input.asyncDir, "events.jsonl"), JSON.stringify({
-		type: "subagent.chain.append.requested",
-		ts: request.createdAt,
-		runId: input.runId,
-		requestId: request.id,
-		stepCount: input.steps.length,
-		pendingAppends: pendingCount,
-	}));
-	return { request, pendingCount };
+	const statusPath = path.join(input.asyncDir, "status.json");
+	const updatedStatus = { ...status, pendingAppends: pendingCount, lastUpdate: request.createdAt };
+	try {
+		writeAtomicJson(statusPath, updatedStatus);
+	} catch (error) {
+		bookkeepingErrors.push(`status update failed: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	try {
+		appendJsonl(path.join(input.asyncDir, "events.jsonl"), JSON.stringify({
+			type: "subagent.chain.append.requested",
+			ts: request.createdAt,
+			runId: input.runId,
+			requestId: request.id,
+			stepCount: input.steps.length,
+			pendingAppends: pendingCount,
+		}));
+	} catch (error) {
+		bookkeepingErrors.push(`event append failed: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	return { request, pendingCount, ...(bookkeepingErrors.length > 0 ? { bookkeepingError: bookkeepingErrors.join("; ") } : {}) };
 }
 
 function readAppendRequest(filePath: string): ChainAppendRequest | undefined {
 	const raw = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<ChainAppendRequest>;
 	if (!raw.id || typeof raw.id !== "string") return undefined;
-	if (!Number.isFinite(raw.createdAt)) return undefined;
+	const createdAt = raw.createdAt;
+	if (typeof createdAt !== "number" || !Number.isFinite(createdAt)) return undefined;
 	if (!Array.isArray(raw.steps) || raw.steps.length === 0) return undefined;
-	return { id: raw.id, createdAt: raw.createdAt, steps: raw.steps as RunnerStep[] };
+	return { id: raw.id, createdAt, steps: raw.steps as RunnerStep[] };
 }
 
 export function readPendingChainAppendRequests(asyncDir: string): ChainAppendRequest[] {
@@ -147,9 +148,24 @@ export function consumeChainAppendRequests(asyncDir: string): ChainAppendRequest
 	return requests.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id));
 }
 
+const MAX_STATUS_STEP_DESCRIPTION_CHARS = 160;
+
+/** Bounded one-line per-step task description persisted into status.json for fleet display. */
+export function statusStepDescription(task: string | undefined): string | undefined {
+	if (!task?.trim()) return undefined;
+	const description = PROMPT_REDACTED;
+	return description.length > MAX_STATUS_STEP_DESCRIPTION_CHARS
+		? `${description.slice(0, MAX_STATUS_STEP_DESCRIPTION_CHARS - 1)}…`
+		: description;
+}
+
 function statusStepForTask(task: RunnerSubagentStep): StatusStep {
+	const description = statusStepDescription(task.task);
+	const sessionName = task.sessionName ?? deriveChildSessionName({ agent: task.agent, task: task.task, label: task.label });
 	return {
 		agent: task.agent,
+		...(sessionName ? { sessionName } : {}),
+		...(description ? { description } : {}),
 		...(task.context ? { context: task.context } : {}),
 		phase: task.phase,
 		label: task.label,
@@ -159,6 +175,7 @@ function statusStepForTask(task: RunnerSubagentStep): StatusStep {
 		...(task.sessionFile ? { sessionFile: task.sessionFile } : {}),
 		skills: task.skills,
 		model: task.model,
+		...(task.contextLimit !== undefined ? { contextLimit: task.contextLimit } : {}),
 		thinking: task.thinking,
 		attemptedModels: task.modelCandidates && task.modelCandidates.length > 0 ? task.modelCandidates : task.model ? [task.model] : undefined,
 		recentTools: [],
@@ -176,6 +193,7 @@ function statusStepsForRunnerStep(step: RunnerStep): StatusStep[] {
 			label: step.label ?? step.parallel.label ?? `Dynamic fanout (${step.collect.as})`,
 			outputName: step.collect.as,
 			structured: Boolean(step.collect.outputSchema),
+			...(step.parallel.contextLimit !== undefined ? { contextLimit: step.parallel.contextLimit } : {}),
 			status: "pending",
 			recentTools: [],
 			recentOutput: [],
@@ -300,15 +318,4 @@ export function appendRunnerStepsToStatus(input: {
 	input.status.pendingAppends = input.pendingAppends ?? 0;
 	input.status.lastUpdate = input.now ?? Date.now();
 	return { addedChainSteps, addedFlatSteps };
-}
-
-const MAX_STATUS_STEP_DESCRIPTION_CHARS = 160;
-
-/** Bounded one-line per-step task description persisted into status.json for fleet display. */
-export function statusStepDescription(task: string | undefined): string | undefined {
-	const description = task?.replace(/\s+/g, " ").trim();
-	if (!description) return undefined;
-	return description.length > MAX_STATUS_STEP_DESCRIPTION_CHARS
-		? `${description.slice(0, MAX_STATUS_STEP_DESCRIPTION_CHARS - 1)}…`
-		: description;
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import {
 	SUBAGENT_WATCHDOG_WARNING_TYPE,
 	type WatchdogWarning,
@@ -45,7 +44,6 @@ export function formatWatchdogWarningContent(warning: WatchdogWarning): string {
 		tag("run_id", details.runId),
 		tag("state", details.state),
 		tag("stale", details.stale),
-		tag("auto_follow_attempt", details.autoFollowAttempt),
 	];
 	return [
 		`<subagent_watchdog ${attrs.join(" ")}>`,

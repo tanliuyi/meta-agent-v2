@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 export {
 	DEFAULT_FORK_PREAMBLE,
 	wrapForkTask,
@@ -6,10 +5,14 @@ export {
 	type AcceptanceInput,
 	type AcceptanceLedger,
 	type AcceptanceLevel,
+	type AgentCapabilitiesSnapshot,
+	type AgentCapabilityRow,
 	type AsyncStartedEvent,
 	type ControlEvent,
 	type Details,
 	type ExecutionProjection,
+	type ExternalJobRunnerStatus,
+	type ExternalJobStatus,
 	type JsonSchemaObject,
 	type OutputMode,
 	type ReviewProjection,
@@ -17,4 +20,8 @@ export {
 	type SubagentResultStatus,
 	type SubagentRunMode,
 	type Usage,
+	type ManagedWorktreeProvider,
+	type WorktreeNaming,
+	type WorktreeProvider,
+	type WorkflowResourceProvenanceV1,
 } from "../shared/types.ts";

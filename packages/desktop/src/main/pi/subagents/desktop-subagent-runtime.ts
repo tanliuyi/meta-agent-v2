@@ -3,11 +3,7 @@ import type {
   SubagentRunEvent,
   SubagentRunRequest,
 } from "../../../shared/subagent-contracts.ts";
-import type {
-  SubagentRuntime,
-  SubagentRuntimeResumeRequest,
-  SubagentRuntimeRunRequest,
-} from "../extensions/pi-subagents/src/runtime/subagent-runtime.ts";
+import type { SubagentRuntime, SubagentRuntimeResumeRequest, SubagentRuntimeRunRequest } from "./subagent-runtime.ts";
 
 interface DesktopSubagentRuntimeOptions {
   projectId: string;

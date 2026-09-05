@@ -44,7 +44,6 @@ import {
   validatePluginSkills,
 } from "./desktop-extension-runtime-policy.ts";
 import { getDesktopCheckpointDiff, restoreDesktopCheckpoint } from "./extensions/pi-rewind/src/index.ts";
-import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
 import { PiCompatibilityAdapter } from "./pi-compatibility-adapter.ts";
 import { PiThreadProjector } from "./pi-thread-projector.ts";
 import { DesktopPluginRegistryBuilder } from "./run-code/plugin-method-registry.ts";
@@ -55,6 +54,7 @@ import {
   resolveSessionResumeSelection,
   sessionReadiness,
 } from "./session-configuration.ts";
+import type { SubagentRuntime } from "./subagents/subagent-runtime.ts";
 
 interface RuntimeOptions {
   projectId: string;

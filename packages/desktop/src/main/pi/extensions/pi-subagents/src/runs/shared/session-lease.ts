@@ -1,5 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
-import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -79,11 +77,6 @@ function getProcessStartIdentity(pid: number): string | undefined {
 		} catch {
 			return undefined;
 		}
-	}
-	if (process.platform === "darwin" || process.platform === "freebsd") {
-		const result = spawnSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf-8" });
-		const started = result.status === 0 ? result.stdout.trim() : "";
-		return started ? `${process.platform}:${started}` : undefined;
 	}
 	return undefined;
 }

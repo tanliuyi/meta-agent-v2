@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 declare module "@earendil-works/pi-agent-core" {
 	interface AgentToolResult<T> {
 		/** Runtime error flag emitted and rendered by pi tool execution. */

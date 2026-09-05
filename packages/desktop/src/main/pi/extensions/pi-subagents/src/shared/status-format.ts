@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { ActivityState, AsyncJobStep } from "./types.ts";
 
 type StepStatusLike = Pick<AsyncJobStep, "status">;

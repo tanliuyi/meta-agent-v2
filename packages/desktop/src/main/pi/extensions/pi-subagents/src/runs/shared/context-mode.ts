@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 export type ContextMode = "fresh" | "fork";
 export type ContextSummary = ContextMode | "mixed";
 

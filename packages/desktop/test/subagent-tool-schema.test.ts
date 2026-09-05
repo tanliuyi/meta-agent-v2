@@ -6,8 +6,26 @@ import {
   FULL_SUBAGENT_TOOL_DESCRIPTION,
 } from "../src/main/pi/extensions/pi-subagents/src/extension/tool-description.ts";
 import { validateAcceptanceInput } from "../src/main/pi/extensions/pi-subagents/src/runs/shared/acceptance.ts";
+import { parseSubagentDelegationRequest } from "../src/main/pi/extensions/pi-subagents/src/slash/delegation-request.ts";
 
 describe("subagent tool schema", () => {
+  it("does not expose or accept the removed turn budget", () => {
+    expect((SubagentParams as { properties?: Record<string, unknown> }).properties).not.toHaveProperty("turnBudget");
+    expect(
+      parseSubagentDelegationRequest({
+        requestId: "request-1",
+        ownerRunId: "owner-1",
+        nodeId: "node-1",
+        agent: "worker",
+        task: "Implement",
+        context: "fresh",
+        cwd: process.cwd(),
+        result: { kind: "text" },
+        turnBudget: { maxTurns: 5 },
+      }),
+    ).toMatchObject({ ok: false, error: "Unsupported delegation field: turnBudget." });
+  });
+
   it("accepts supported explicit acceptance forms", () => {
     expect(Value.Check(SubagentParams, { agent: "reviewer", task: "Review", acceptance: "auto" })).toBe(true);
     expect(Value.Check(SubagentParams, { agent: "reviewer", task: "Review", acceptance: false })).toBe(true);

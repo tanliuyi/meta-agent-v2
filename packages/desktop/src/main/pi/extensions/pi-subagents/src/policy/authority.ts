@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 export const AUTHORITY_ACTIONS = [
 	"discardWorktree",
 	"destructiveCleanup",

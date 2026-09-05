@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
 import { resolveSupervisorChannelDir } from "../src/main/pi/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts";
 import { runSync } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/execution.ts";
@@ -15,6 +15,11 @@ import {
   SUBAGENT_RUN_ID_ENV,
   SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV,
 } from "../src/main/pi/extensions/pi-subagents/src/runs/shared/env-constants.ts";
+import {
+  EXCLUSIONS_PATH_ENV,
+  reloadFromDisk as reloadModelExclusions,
+} from "../src/main/pi/extensions/pi-subagents/src/runs/shared/model-exclusions.ts";
+import { createDesktopChildSessionFactory } from "../src/main/pi/subagents/desktop-child-session-factory.ts";
 import { DesktopSubagentRuntime } from "../src/main/pi/subagents/desktop-subagent-runtime.ts";
 import type { SessionBootstrap } from "../src/shared/contracts.ts";
 import type { SidecarEventBody } from "../src/shared/sidecar-contracts.ts";
@@ -27,6 +32,21 @@ import {
 import { SubagentWorkerService } from "../src/sidecar/subagent-worker-service.ts";
 
 const cleanups: Array<() => void | Promise<void>> = [];
+const previousExclusionsPath = process.env[EXCLUSIONS_PATH_ENV];
+const testExclusionsPath = join(
+  tmpdir(),
+  `desktop-subagent-model-exclusions-${process.pid}-${Math.random().toString(36).slice(2)}.json`,
+);
+process.env[EXCLUSIONS_PATH_ENV] = testExclusionsPath;
+reloadModelExclusions();
+
+afterAll(() => {
+  rmSync(testExclusionsPath, { force: true });
+  if (previousExclusionsPath === undefined) delete process.env[EXCLUSIONS_PATH_ENV];
+  else process.env[EXCLUSIONS_PATH_ENV] = previousExclusionsPath;
+  reloadModelExclusions();
+});
+
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   delete process.env[SUBAGENT_ORCHESTRATOR_TARGET_ENV];
@@ -119,7 +139,9 @@ describe("SubagentWorkerService", () => {
 
     const run = created.service.command({ type: "subagentRun", request });
     await expect
-      .poll(() => events.some((event) => event.type === "subagent-event" && event.event.type === "completed"))
+      .poll(() => events.some((event) => event.type === "subagent-event" && event.event.type === "completed"), {
+        timeout: 10_000,
+      })
       .toBe(true);
     const liveBootstrap = (await created.service.command({ type: "subagentBootstrap" })) as SessionBootstrap;
     expect(liveBootstrap).toMatchObject({
@@ -445,7 +467,7 @@ describe("SubagentWorkerService", () => {
     };
 
     const result = await runSync(root, [agent], agent.name, "Read README.md", {
-      subagentRuntime: runtime,
+      childSessionFactory: createDesktopChildSessionFactory(runtime),
       runId: "boundary-run",
       acceptance: false,
       artifactsDir: join(root, "artifacts"),
@@ -566,7 +588,12 @@ describe("SubagentWorkerService", () => {
     const faux = registerFauxProvider({ models: [{ id: "nested-model", reasoning: false }] });
     faux.setResponses([
       fauxAssistantMessage(
-        fauxToolCall("subagent", { agent: "delegate", task: "complete nested work", acceptance: false }),
+        fauxToolCall("subagent", {
+          agent: "delegate",
+          task: "complete nested work",
+          acceptance: false,
+          async: false,
+        }),
         { stopReason: "toolUse" },
       ),
       fauxAssistantMessage("nested worker result"),

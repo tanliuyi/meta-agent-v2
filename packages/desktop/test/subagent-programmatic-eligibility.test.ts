@@ -11,6 +11,7 @@ import {
 import { runSync } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/execution.ts";
 import { requiresParentIntercomDetach } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/subagent-executor.ts";
 import { canUseProgrammaticSubagentRuntime } from "../src/main/pi/extensions/pi-subagents/src/runs/shared/programmatic-runtime-capabilities.ts";
+import { createDesktopChildSessionFactory } from "../src/main/pi/subagents/desktop-child-session-factory.ts";
 import { DesktopSubagentRuntime } from "../src/main/pi/subagents/desktop-subagent-runtime.ts";
 import type { SubagentRunRequest } from "../src/shared/subagent-contracts.ts";
 
@@ -53,7 +54,8 @@ describe("programmatic runtime eligibility (desktop environment)", () => {
       // The bridge marker lands in the agent system prompt and the coordination
       // tools land in the allowlist.
       expect(agent.systemPrompt, name).toContain("Intercom orchestration channel:");
-      expect(agent.tools, name).toEqual(expect.arrayContaining(["contact_supervisor", "intercom"]));
+      expect(agent.tools, name).toEqual(expect.arrayContaining(["contact_supervisor"]));
+      expect(agent.tools, name).not.toContain("intercom");
       // Workflow (background) and async children run with no parent-detach
       // requirement: intercom is served by the programmatic supervisor channel.
       expect(
@@ -142,7 +144,7 @@ describe("programmatic runtime eligibility (desktop environment)", () => {
     };
 
     const result = await runSync(root, [agent], agent.name, "Return the result", {
-      subagentRuntime: runtime,
+      childSessionFactory: createDesktopChildSessionFactory(runtime),
       runId: "run-1",
       parentSessionId: "parent-session",
       orchestratorIntercomTarget: "subagent-chat-parent",

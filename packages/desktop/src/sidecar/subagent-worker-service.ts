@@ -1,14 +1,4 @@
-import {
-  closeSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -18,9 +8,9 @@ import {
   type AgentSessionEvent,
   createAgentSessionFromServices,
   createAgentSessionServices,
-  type ExtensionAPI,
   type InlineExtension,
   ModelRuntime,
+  resolveCliModel,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -28,12 +18,13 @@ import { FileCredentialStore } from "../main/models/credential-store.ts";
 import { DesktopBuiltinProviderRegistry } from "../main/pi/desktop-builtin-provider.ts";
 import { DesktopExtensionHost } from "../main/pi/desktop-extension-host.ts";
 import { controlledResourceLoaderOptions } from "../main/pi/desktop-extension-runtime-policy.ts";
-import registerFanoutChildSubagentExtension from "../main/pi/extensions/pi-subagents/src/extension/fanout-child.ts";
 import {
   ensureSupervisorChannelDir,
-  registerNativeSupervisorClient,
   resolveSupervisorChannelDir,
 } from "../main/pi/extensions/pi-subagents/src/intercom/native-supervisor-channel.ts";
+import { createChildHooks } from "../main/pi/extensions/pi-subagents/src/runs/shared/child-hooks.ts";
+import type { ChildRuntimeConfig } from "../main/pi/extensions/pi-subagents/src/runs/shared/child-runtime-config.ts";
+import { setChildSessionFactory } from "../main/pi/extensions/pi-subagents/src/runs/shared/child-session.ts";
 import {
   SUBAGENT_CHILD_AGENT_ENV,
   SUBAGENT_CHILD_INDEX_ENV,
@@ -42,16 +33,8 @@ import {
   SUBAGENT_RUN_ID_ENV,
   SUBAGENT_SUPERVISOR_CHANNEL_DIR_ENV,
 } from "../main/pi/extensions/pi-subagents/src/runs/shared/env-constants.ts";
-import {
-  createStructuredOutputToolParameters,
-  validateStructuredOutputValue,
-} from "../main/pi/extensions/pi-subagents/src/runs/shared/structured-output.ts";
-import {
-  shouldBlockToolForBudget,
-  toolBudgetBlockedMessage,
-  toolBudgetSoftNudge,
-} from "../main/pi/extensions/pi-subagents/src/runs/shared/tool-budget.ts";
 import { PiThreadProjector } from "../main/pi/pi-thread-projector.ts";
+import { createDesktopChildSessionFactory } from "../main/pi/subagents/desktop-child-session-factory.ts";
 import { DesktopSubagentRuntime } from "../main/pi/subagents/desktop-subagent-runtime.ts";
 import { PROTOCOL_VERSION, type SessionBootstrap, type SessionControlState } from "../shared/contracts.ts";
 import type { SidecarBinding, SidecarCommand } from "../shared/sidecar-contracts.ts";
@@ -59,17 +42,12 @@ import { toJsonValue } from "../shared/sidecar-wire.ts";
 import {
   SUBAGENT_TIMEOUT_CODE,
   type SubagentChildExtension,
+  type SubagentRunEvent,
   type SubagentRunRequest,
   type SubagentWorkerBinding,
   type SubagentWorkerCommand,
 } from "../shared/subagent-contracts.ts";
 import type { SidecarService, SidecarServiceContext } from "./sidecar-host.ts";
-
-const CHILD_BOUNDARY_INSTRUCTIONS = [
-  "You are a child subagent, not the parent orchestrator.",
-  "Complete only the assigned role-specific task with the tools available to you.",
-  "Do not launch or propose additional subagents unless this worker explicitly grants fanout capability.",
-].join("\n");
 
 export interface SubagentWorkerServiceDependencies {
   extensionFactories?: InlineExtension[];
@@ -85,6 +63,7 @@ export class SubagentWorkerService implements SidecarService {
   private extensionHost?: DesktopExtensionHost;
   private projector?: PiThreadProjector;
   private controlState?: SessionControlState;
+  private nestedRuntime?: DesktopSubagentRuntime;
   private runStarted = false;
   private initialPromptObserved = false;
   private runSettled = false;
@@ -191,6 +170,8 @@ export class SubagentWorkerService implements SidecarService {
     this.projector?.dispose();
     this.projector = undefined;
     this.extensionHost?.dispose();
+    await this.nestedRuntime?.dispose();
+    this.nestedRuntime = undefined;
     this.session?.dispose();
     this.session = undefined;
   }
@@ -233,10 +214,20 @@ export class SubagentWorkerService implements SidecarService {
       delete process.env[SUBAGENT_CHILD_INDEX_ENV];
       delete process.env.PI_SUBAGENT_INTERCOM_SESSION_NAME;
     }
+    const childRuntime = createChildRuntimeConfig(request, this.context, supervisorChannel?.channelDir);
+    if (childRuntime.fanoutChild) {
+      this.nestedRuntime = new DesktopSubagentRuntime({
+        projectId: request.projectId,
+        parentThreadId: request.parentThreadId,
+        parentWorker: request,
+        childExtensions: request.childExtensions,
+        requestHost: (hostRequest, onEvent) => this.context.requestHost(hostRequest, onEvent),
+      });
+      setChildSessionFactory(createDesktopChildSessionFactory(this.nestedRuntime));
+    }
     const extensionFactories = [
       ...DesktopBuiltinProviderRegistry.getSubagentExtensionFactories(request.extensionProfile),
-      ...(request.extensionProfile.includes("runtime") ? [createRuntimeExtension(request)] : []),
-      ...(request.extensionProfile.includes("fanout") ? [createFanoutExtension(request, this.context)] : []),
+      ...createChildHooks(childRuntime),
       ...(this.dependencies.extensionFactories ?? []),
     ];
     const extensionSet = childExtensionSet(
@@ -269,10 +260,8 @@ export class SubagentWorkerService implements SidecarService {
         ...(request.systemPromptMode === "replace" && request.systemPrompt
           ? { systemPrompt: request.systemPrompt }
           : {}),
-        appendSystemPrompt: [
-          CHILD_BOUNDARY_INSTRUCTIONS,
-          ...(request.systemPromptMode !== "replace" && request.systemPrompt ? [request.systemPrompt] : []),
-        ],
+        appendSystemPrompt:
+          request.systemPromptMode !== "replace" && request.systemPrompt ? [request.systemPrompt] : [],
       },
     });
     if (this.disposed || this.cancelled)
@@ -285,19 +274,24 @@ export class SubagentWorkerService implements SidecarService {
       throw new Error(services.diagnostics.map(({ message }) => message).join("\n"));
     }
     const availableModels = await services.modelRuntime.getAvailable();
-    const model = resolveModel(request, availableModels);
-    if (request.model && !model) throw new Error(`Unknown model: ${request.model}`);
+    const resolvedModel = request.model ? resolveCliModel({ cliModel: request.model, modelRuntime }) : undefined;
+    if (resolvedModel?.error) throw new Error(resolvedModel.error);
     const sessionManager = createSessionManager(request);
     const created = await createAgentSessionFromServices({
       services,
       sessionManager,
-      ...(model ? { model } : {}),
-      ...(request.thinking ? { thinkingLevel: request.thinking as ThinkingLevel } : {}),
+      ...(resolvedModel?.model ? { model: resolvedModel.model } : {}),
+      ...(resolvedModel?.thinkingLevel
+        ? { thinkingLevel: resolvedModel.thinkingLevel }
+        : request.thinking
+          ? { thinkingLevel: request.thinking as ThinkingLevel }
+          : {}),
       ...(request.tools
         ? {
             tools: [...new Set([...request.tools, ...(request.structuredOutput ? ["structured_output"] : [])])],
           }
         : {}),
+      ...(request.excludeTools?.length ? { excludeTools: request.excludeTools } : {}),
       sessionStartEvent: {
         type: "session_start",
         reason: request.sessionFile && existsSync(request.sessionFile) ? "resume" : "new",
@@ -385,8 +379,6 @@ export class SubagentWorkerService implements SidecarService {
         updatedAt: this.controlState.updatedAt,
       },
     });
-    let assistantTurns = 0;
-    let turnBudgetExceeded = false;
     const unsubscribe = created.session.subscribe((event) => {
       this.projectSessionEvent(event);
       if (!announcedSessionFile) {
@@ -406,68 +398,10 @@ export class SubagentWorkerService implements SidecarService {
           });
         }
       }
-      if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-        this.context.emit({
-          type: "subagent-event",
-          event: {
-            type: "message_update",
-            message: toJsonValue(event.message),
-            assistantMessageEvent: toJsonValue(event.assistantMessageEvent),
-          },
-        });
-      } else if (event.type === "message_end") {
-        if (event.message.role === "assistant") {
-          assistantTurns += 1;
-          const hardTurnLimit = request.turnBudget
-            ? request.turnBudget.maxTurns + request.turnBudget.graceTurns
-            : undefined;
-          const hasToolCall =
-            Array.isArray(event.message.content) && event.message.content.some((part) => part.type === "toolCall");
-          if (hardTurnLimit !== undefined && assistantTurns >= hardTurnLimit && hasToolCall) {
-            turnBudgetExceeded = true;
-            void created.session.abort();
-          }
-        }
-        this.context.emit({
-          type: "subagent-event",
-          event: {
-            type: "message_end",
-            message: toJsonValue(event.message),
-            updatedAt: this.controlState?.updatedAt,
-          },
-        });
-      } else if (event.type === "tool_execution_start") {
-        this.context.emit({
-          type: "subagent-event",
-          event: {
-            type: "tool_execution_start",
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            args: toJsonValue(event.args),
-          },
-        });
-      } else if (event.type === "tool_execution_update") {
-        this.context.emit({
-          type: "subagent-event",
-          event: {
-            type: "tool_execution_update",
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            partialResult: toJsonValue(event.partialResult),
-          },
-        });
-      } else if (event.type === "tool_execution_end") {
-        this.context.emit({
-          type: "subagent-event",
-          event: {
-            type: "tool_execution_end",
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            result: toJsonValue(event.result),
-            isError: event.isError,
-          },
-        });
-      }
+      this.context.emit({
+        type: "subagent-event",
+        event: projectSessionEventForWire(event, this.controlState?.updatedAt),
+      });
     });
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -485,9 +419,6 @@ export class SubagentWorkerService implements SidecarService {
       await created.session.waitForIdle();
       if (timedOut) throw new Error(`Subagent timed out after ${request.timeoutMs}ms.`);
       if (this.cancelled) throw new Error("Subagent cancelled.");
-      if (turnBudgetExceeded) {
-        throw new Error(`Subagent exceeded its turn budget (${request.turnBudget?.maxTurns}).`);
-      }
       const sessionFile = created.session.sessionFile;
       const updatedAt = this.terminalUpdatedAt();
       this.context.emit({
@@ -684,92 +615,122 @@ function createSessionManager(request: SubagentRunRequest): SessionManager {
   return SessionManager.create(request.cwd, request.sessionDir);
 }
 
-function resolveModel(request: SubagentRunRequest, models: readonly Model<Api>[]) {
-  if (!request.model) return undefined;
-  const slash = request.model.indexOf("/");
-  if (slash > 0) {
-    const provider = request.model.slice(0, slash);
-    const id = request.model.slice(slash + 1);
-    return models.find((model) => model.provider === provider && model.id === id);
-  }
-  return (
-    models.find((model) => model.provider === request.preferredProvider && model.id === request.model) ??
-    models.find((model) => model.id === request.model)
-  );
-}
+type SerializableChildRuntimeConfig = Omit<
+  ChildRuntimeConfig,
+  "runtimeAcknowledgements" | "structuredOutput" | "toolDiagnostic" | "watchdogStatus"
+> & {
+  structuredOutput?: Omit<NonNullable<ChildRuntimeConfig["structuredOutput"]>, "capture">;
+};
 
-function createFanoutExtension(request: SubagentRunRequest, context: SidecarServiceContext): InlineExtension {
-  const runtime = new DesktopSubagentRuntime({
-    projectId: request.projectId,
-    parentThreadId: request.parentThreadId,
-    parentWorker: request,
-    childExtensions: request.childExtensions,
-    requestHost: (hostRequest, onEvent) => context.requestHost(hostRequest, onEvent),
-  });
+function createChildRuntimeConfig(
+  request: SubagentRunRequest,
+  context: SidecarServiceContext,
+  supervisorChannelDir?: string,
+): ChildRuntimeConfig {
+  const fallback: SerializableChildRuntimeConfig = {
+    runId: request.runId,
+    agent: request.agent,
+    childIndex: request.childIndex,
+    fanoutChild: request.extensionProfile.includes("fanout"),
+    ...(request.intercomSessionName ? { intercomSessionName: request.intercomSessionName } : {}),
+    ...(request.orchestratorTarget ? { orchestratorTarget: request.orchestratorTarget } : {}),
+    ...(request.parentSessionId
+      ? { orchestratorSessionId: request.parentSessionId, parentSessionId: request.parentSessionId }
+      : {}),
+    ...(supervisorChannelDir ? { supervisorChannelDir } : {}),
+    depth: request.depth,
+    maxDepth: request.maxDepth,
+    inheritProjectContext: request.inheritProjectContext,
+    inheritGlobalContext: request.inheritGlobalContext ?? request.inheritProjectContext,
+    inheritSkills: request.inheritSkills,
+    ...(request.toolBudget ? { toolBudget: request.toolBudget } : {}),
+    waitTool: { enabled: true },
+    ...(request.structuredOutput ? { structuredOutput: request.structuredOutput } : {}),
+    fast: false,
+  };
+  const serializable =
+    request.childRuntime && typeof request.childRuntime === "object" && !Array.isArray(request.childRuntime)
+      ? (request.childRuntime as unknown as SerializableChildRuntimeConfig)
+      : fallback;
+  const { structuredOutput, ...runtimeConfig } = serializable;
+  const emitCapture = (
+    capture: "structured_output" | "tool_diagnostic" | "runtime_acknowledgements",
+    value: unknown,
+    acceptanceReport?: unknown,
+  ): void => {
+    context.emit({
+      type: "subagent-event",
+      event: {
+        type: "runtime_capture",
+        capture,
+        value: toJsonValue(value),
+        ...(acceptanceReport !== undefined ? { acceptanceReport: toJsonValue(acceptanceReport) } : {}),
+      },
+    });
+  };
   return {
-    name: "desktop:subagent-fanout",
-    factory: (api) => {
-      registerFanoutChildSubagentExtension(api, { programmaticRuntime: runtime });
-      api.on("session_shutdown", () => runtime.dispose());
+    ...runtimeConfig,
+    ...(structuredOutput
+      ? {
+          structuredOutput: {
+            ...structuredOutput,
+            capture: (value, acceptanceReport) => {
+              if (request.structuredOutput?.outputPath) {
+                mkdirSync(dirname(request.structuredOutput.outputPath), { recursive: true });
+                writeFileSync(request.structuredOutput.outputPath, JSON.stringify(value), "utf8");
+              }
+              emitCapture("structured_output", value, acceptanceReport);
+            },
+          },
+        }
+      : {}),
+    watchdogStatus: (event) =>
+      context.emit({
+        type: "subagent-event",
+        event: { type: "child_event", event: toJsonValue(event) },
+      }),
+    toolDiagnostic: (diagnostic) => {
+      if (diagnostic) emitCapture("tool_diagnostic", diagnostic);
     },
+    runtimeAcknowledgements: (ids) => emitCapture("runtime_acknowledgements", ids),
   };
 }
 
-function createRuntimeExtension(request: SubagentRunRequest): InlineExtension {
-  return {
-    name: "desktop:subagent-runtime",
-    factory: (api) => {
-      registerToolBudget(api, request);
-      registerStructuredOutput(api, request);
-      // Child intercom coordination through the shared supervisor channel. No-op
-      // unless the launch carried supervisor metadata (env vars above).
-      registerNativeSupervisorClient(api);
-    },
-  };
-}
-
-function registerToolBudget(api: ExtensionAPI, request: SubagentRunRequest): void {
-  const budget = request.toolBudget;
-  if (!budget) return;
-  let toolCount = 0;
-  let softNudged = false;
-  api.on("tool_call", (event) => {
-    toolCount += 1;
-    if (budget.soft !== undefined && toolCount >= budget.soft && !softNudged) {
-      softNudged = true;
-      api.sendUserMessage(toolBudgetSoftNudge(budget, toolCount), { deliverAs: "steer" });
-    }
-    if (!shouldBlockToolForBudget(budget, event.toolName, toolCount)) return undefined;
-    return { block: true, reason: toolBudgetBlockedMessage(budget, event.toolName, toolCount) };
-  });
-}
-
-function registerStructuredOutput(api: ExtensionAPI, request: SubagentRunRequest): void {
-  const structured = request.structuredOutput;
-  if (!structured) return;
-  try {
-    rmSync(structured.outputPath, { force: true });
-  } catch {
-    // A stale output is ignored; the tool writes the authoritative value.
-  }
-  api.registerTool({
-    name: "structured_output",
-    label: "Structured Output",
-    description: "Submit the required final structured output for this subagent step.",
-    parameters: createStructuredOutputToolParameters(structured.schema) as never,
-    async execute(_id, params: { value: unknown }) {
-      const validation = await validateStructuredOutputValue(structured.schema, params.value);
-      if (validation.status === "invalid")
-        throw new Error(`Structured output validation failed: ${validation.message}`);
-      mkdirSync(dirname(structured.outputPath), { recursive: true });
-      writeFileSync(structured.outputPath, JSON.stringify(params.value), { mode: 0o600 });
+function projectSessionEventForWire(event: AgentSessionEvent, updatedAt: number | undefined): SubagentRunEvent {
+  switch (event.type) {
+    case "message_update":
       return {
-        content: [{ type: "text", text: "Structured output captured." }],
-        details: { path: structured.outputPath },
-        terminate: true,
+        type: "message_update",
+        message: toJsonValue(event.message),
+        assistantMessageEvent: toJsonValue(event.assistantMessageEvent),
       };
-    },
-  });
+    case "message_end":
+      return { type: "message_end", message: toJsonValue(event.message), ...(updatedAt ? { updatedAt } : {}) };
+    case "tool_execution_start":
+      return {
+        type: "tool_execution_start",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        args: toJsonValue(event.args),
+      };
+    case "tool_execution_update":
+      return {
+        type: "tool_execution_update",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        partialResult: toJsonValue(event.partialResult),
+      };
+    case "tool_execution_end":
+      return {
+        type: "tool_execution_end",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        result: toJsonValue(event.result),
+        isError: event.isError,
+      };
+    default:
+      return { type: "child_event", event: toJsonValue(event) };
+  }
 }
 
 function validateChildExtensions(extensions: readonly SubagentChildExtension[] | undefined): SubagentChildExtension[] {

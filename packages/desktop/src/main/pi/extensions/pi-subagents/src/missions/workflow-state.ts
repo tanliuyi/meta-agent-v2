@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -60,7 +59,7 @@ function psProcessStartKey(pid: number): string | undefined {
 
 function windowsProcessStartKey(pid: number): string | undefined {
 	try {
-		const raw = execFileSync("powershell.exe", ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId=${pid}\").CreationDate`], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000 }).trim();
+		const raw = execFileSync("powershell.exe", ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter \"ProcessId=${pid}\").CreationDate`], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 1000, windowsHide: true }).trim();
 		return raw ? `win:${raw}` : undefined;
 	} catch {
 		return undefined;
@@ -70,7 +69,7 @@ function windowsProcessStartKey(pid: number): string | undefined {
 function processStartKey(pid: number): string | undefined {
 	if (process.platform === "linux") return linuxProcessStartKey(pid) ?? psProcessStartKey(pid);
 	if (process.platform === "win32") return windowsProcessStartKey(pid);
-	return psProcessStartKey(pid);
+	return undefined;
 }
 
 const CURRENT_PROCESS_KEY = processStartKey(process.pid);
@@ -96,8 +95,12 @@ function stateLockIsStale(lockPath: string, now = Date.now()): boolean {
 	const owner = readStateLockOwner(lockPath);
 	if (owner) {
 		if (!isProcessAlive(owner.pid)) return true;
-		const currentProcessKey = processStartKey(owner.pid);
-		return Boolean(owner.processKey && currentProcessKey && owner.processKey !== currentProcessKey);
+		if (owner.processKey) {
+			const currentProcessKey = owner.pid === process.pid ? CURRENT_PROCESS_KEY : processStartKey(owner.pid);
+			if (currentProcessKey) return owner.processKey !== currentProcessKey;
+			if (owner.pid === process.pid) return true;
+		}
+		return false;
 	}
 	try {
 		return now - fs.statSync(lockPath).mtimeMs > STATE_LOCK_STALE_MS;

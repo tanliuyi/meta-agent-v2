@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { normalizeModelSegment, resolveModelCandidate } from "../runs/shared/model-fallback.ts";
 import {

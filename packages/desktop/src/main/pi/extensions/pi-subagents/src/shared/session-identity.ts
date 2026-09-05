@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 interface SessionIdentityManager {
 	getSessionFile(): string | null | undefined;
 	getSessionId(): string | null | undefined;

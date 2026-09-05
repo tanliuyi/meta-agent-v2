@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { CostSummary, UsageBudgetConfig, UsageBudgetLimitConfig, UsageBudgetState } from "../../shared/types.ts";
 
 function validateLimit(value: unknown, label: string): { limit?: UsageBudgetLimitConfig; error?: string } {

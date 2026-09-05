@@ -29,7 +29,8 @@ import piBrowserExtension, { runCodeCatalog as piBrowserCatalog } from "./extens
 import hermesMemoryExtension from "./extensions/pi-hermes-memory/index.ts";
 import piRewindExtension from "./extensions/pi-rewind/src/index.ts";
 import subagentsExtension from "./extensions/pi-subagents/index.ts";
-import type { SubagentRuntime } from "./extensions/pi-subagents/src/runtime/subagent-runtime.ts";
+import { createDesktopChildSessionFactory } from "./subagents/desktop-child-session-factory.ts";
+import type { SubagentRuntime } from "./subagents/subagent-runtime.ts";
 
 type DesktopInlineExtension = InlineExtension;
 
@@ -147,7 +148,8 @@ export const DesktopBuiltinProviderRegistry = {
           ? {
               ...factory,
               name: typeof factory === "function" ? `desktop:${definition.id}` : factory.name,
-              factory: (api: ExtensionAPI) => subagentsExtension(api, options.subagentRuntime),
+              factory: (api: ExtensionAPI) =>
+                subagentsExtension(api, createDesktopChildSessionFactory(options.subagentRuntime!)),
             }
           : factory,
       ),

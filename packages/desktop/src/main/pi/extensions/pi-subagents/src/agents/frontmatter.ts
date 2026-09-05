@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 /**
  * Escape regex special characters for use in a RegExp constructor.
  */

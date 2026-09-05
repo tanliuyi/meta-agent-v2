@@ -14,7 +14,7 @@
 pi install npm:pi-subagents
 ```
 
-That is the only required step.
+That is the only required step. Background children require pi installed as the npm package (`@earendil-works/pi-coding-agent`): the detached runner imports pi's packages from that package directory. A standalone single-file pi binary has no package directory and cannot run background children; foreground children (`async: false`) still work there.
 
 ## Try this first
 
@@ -42,7 +42,7 @@ That is enough to start. Pi decides whether to call the `subagent` tool, which a
 
 Pi is the parent session. A subagent is a focused child Pi session with its own job.
 
-When you ask for a subagent, Pi starts the child, gives it the task, and brings the result back. Foreground runs stream in the conversation. Background runs keep working and can be checked later.
+When you ask for a subagent, Pi starts the child, gives it the task, and brings the result back. Foreground children run as sessions inside the parent Pi process and stream in the conversation. Background children run as sessions inside a detached runner process that keeps working and can be checked later.
 
 Installing the extension does not start an automatic reviewer in the background. It gives Pi a delegation tool. If you want every implementation reviewed, say so in your prompt or project instructions:
 
@@ -67,12 +67,16 @@ Rule of thumb: `scout` before you understand the code, `researcher` before you t
 
 ## Common workflows
 
+The package includes `/council` and `council-mode`, plus documented model-based
+`council-*` profile examples that you add in your own agent directory.
+
 | Want | Ask naturally |
 |------|---------------|
 | Get a second opinion | "Ask oracle to review this plan and challenge assumptions." |
 | Solve a hard problem | "Use oracle to investigate this bug before we edit." |
 | Review a diff | "Use reviewer to review this diff." |
 | Run parallel reviewers | "Run reviewers for correctness, tests, and cleanup." |
+| Debate a material decision | "Use `/council` with model-based advisors to compare this decision." |
 | Implement then review | "Implement this, then review it." |
 | Review until clean | "Run a review loop on this change with a max of 3 rounds." |
 | Execute a plan carefully | "Have worker implement this approved plan, then run reviewers and apply the feedback." |
@@ -92,6 +96,8 @@ Foreground runs stream progress in the conversation. Background runs keep workin
 In the TUI, a persistent FleetView below the editor keeps active work visible. `/subagents-fleet` opens a live inspector where you can browse children, read transcripts, steer a running child, or stop a run. You can also just ask: "Show me the current async runs."
 
 Details, keybindings, and the machine-readable run artifacts are in [Observability](https://github.com/nicobailon/pi-subagents/blob/main/docs/observability.md).
+
+For bounded orchestration, `maxSubagentSpawnsPerRun` limits cumulative logical children in one run tree. It defaults to 64 and stays separate from active concurrency and the session-wide cumulative spawn budget. See [Configuration](https://github.com/nicobailon/pi-subagents/blob/main/docs/configuration.md#maxsubagentspawnsperrun).
 
 ## If something feels off
 

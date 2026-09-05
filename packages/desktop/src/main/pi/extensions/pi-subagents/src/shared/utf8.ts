@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 export function decodeUtf8Tail(bytes: Buffer): string {
 	let start = 0;
 	while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start += 1;

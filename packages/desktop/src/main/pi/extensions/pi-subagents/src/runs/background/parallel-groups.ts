@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { AsyncParallelGroupStatus } from "../../shared/types.ts";
 
 function isValidParallelGroup(group: unknown, stepCount: number, chainStepCount: number): group is AsyncParallelGroupStatus {

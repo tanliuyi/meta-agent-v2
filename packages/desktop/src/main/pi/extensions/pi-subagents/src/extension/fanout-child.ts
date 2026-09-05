@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -7,14 +6,14 @@ import { discoverAgents } from "../agents/agents.ts";
 import { getArtifactsDir } from "../shared/artifacts.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { resolveWaitToolConfig } from "../runs/background/wait-config.ts";
-import { SUBAGENT_CHILD_ENV, SUBAGENT_FANOUT_CHILD_ENV } from "../runs/shared/env-constants.ts";
-import { readNestedControlRequests, resolveNestedRouteFromEnv, writeNestedControlResult } from "../runs/shared/nested-events.ts";
+import type { ChildRuntimeConfig } from "../runs/shared/child-runtime-config.ts";
+import { readNestedControlRequests, resolveInheritedNestedRoute, type NestedRoute, writeNestedControlResult } from "../runs/shared/nested-events.ts";
 import { deliverSubagentIntercomMessageEvent } from "../intercom/result-intercom.ts";
 import { resolveSubagentIntercomTarget } from "../intercom/intercom-bridge.ts";
-import { SubagentParams } from "./schemas.ts";
-import { loadConfig } from "./config.ts";
+import { createSubagentParamsSchema } from "./schemas.ts";
+import { finalizeToolResult } from "./tool-result.ts";
+import { loadConfig, resolveAsyncByDefault } from "./config.ts";
 import { type Details, type SubagentState } from "../shared/types.ts";
-import type { SubagentRuntime } from "../runtime/subagent-runtime.ts";
 
 function getSubagentSessionRoot(parentSessionFile: string | null): string {
 	if (parentSessionFile) {
@@ -39,7 +38,6 @@ function createChildSafeState(): SubagentState {
 		foregroundRuns: new Map(),
 		foregroundControls: new Map(),
 		lastForegroundControlId: null,
-		pendingForegroundControlNotices: new Map(),
 		cleanupTimers: new Map(),
 		lastUiContext: null,
 		poller: null,
@@ -53,25 +51,38 @@ function createChildSafeState(): SubagentState {
 	};
 }
 
-function startNestedControlInboxListener(pi: ExtensionAPI, state: SubagentState): NodeJS.Timeout | undefined {
-	let route;
-	try {
-		route = resolveNestedRouteFromEnv();
-	} catch {
-		return undefined;
-	}
-	if (!route) return undefined;
-	const seen = new Set<string>();
-	const inFlight = new Set<string>();
-	const pendingResults = new Map<string, Parameters<typeof writeNestedControlResult>[1]>();
+function resolveNestedControlRoute(config: ChildRuntimeConfig): NestedRoute | undefined {
+	return config.nestedRoute ? resolveInheritedNestedRoute(config.nestedRoute) : undefined;
+}
+
+function nestedControlRouteKey(route: NestedRoute): string {
+	return route.controlInbox;
+}
+
+interface NestedControlInboxState {
+	seen: Set<string>;
+	inFlight: Set<string>;
+	pendingResults: Map<string, Parameters<typeof writeNestedControlResult>[1]>;
+}
+
+interface NestedControlListenerEntry {
+	cleanup: () => void;
+	state: NestedControlInboxState;
+}
+
+function createNestedControlInboxState(): NestedControlInboxState {
+	return { seen: new Set(), inFlight: new Set(), pendingResults: new Map() };
+}
+
+function startNestedControlInboxListener(pi: ExtensionAPI, state: SubagentState, route: NestedRoute, inboxState: NestedControlInboxState): () => void {
 	const timer = setInterval(() => {
 		try {
 			for (const request of readNestedControlRequests(route)) {
-				if (seen.has(request.requestId) || inFlight.has(request.requestId)) continue;
-				inFlight.add(request.requestId);
+				if (inboxState.seen.has(request.requestId) || inboxState.inFlight.has(request.requestId)) continue;
+				inboxState.inFlight.add(request.requestId);
 				void (async () => {
 					try {
-						let result = pendingResults.get(request.requestId);
+						let result = inboxState.pendingResults.get(request.requestId);
 						if (!result) {
 							let ok = false;
 							let message = "Control request failed.";
@@ -110,15 +121,15 @@ function startNestedControlInboxListener(pi: ExtensionAPI, state: SubagentState)
 						try {
 							writeNestedControlResult(route, result);
 						} catch (error) {
-							pendingResults.set(request.requestId, result);
+							inboxState.pendingResults.set(request.requestId, result);
 							console.error(`Failed to write nested control result for request '${request.requestId}' targeting '${request.targetRunId}' via inbox '${route.controlInbox}'; keeping request for retry:`, error);
 							return;
 						}
-						pendingResults.delete(request.requestId);
-						seen.add(request.requestId);
+						inboxState.pendingResults.delete(request.requestId);
+						inboxState.seen.add(request.requestId);
 						try { fs.unlinkSync(request.filePath); } catch {}
 					} finally {
-						inFlight.delete(request.requestId);
+						inboxState.inFlight.delete(request.requestId);
 					}
 				})();
 			}
@@ -127,19 +138,12 @@ function startNestedControlInboxListener(pi: ExtensionAPI, state: SubagentState)
 		}
 	}, 200);
 	timer.unref?.();
-	return timer;
+	return () => clearInterval(timer);
 }
 
-export interface FanoutChildExtensionOptions {
-	programmaticRuntime?: SubagentRuntime;
-}
-
-export default function registerFanoutChildSubagentExtension(
-	pi: ExtensionAPI,
-	options: FanoutChildExtensionOptions = {},
-): void {
-	const programmatic = options.programmaticRuntime !== undefined;
-	if (!programmatic && (process.env[SUBAGENT_CHILD_ENV] !== "1" || process.env[SUBAGENT_FANOUT_CHILD_ENV] !== "1")) return;
+/** Register the child-side `subagent` tool for fanout-authorized children. */
+export default function registerFanoutChildSubagentExtension(pi: ExtensionAPI, childConfig: ChildRuntimeConfig): void {
+	if (!childConfig.fanoutChild) return;
 
 	const globalStore = globalThis as Record<string, unknown>;
 	const registeredKey = "__piSubagentFanoutChildRegisteredApis";
@@ -150,48 +154,50 @@ export default function registerFanoutChildSubagentExtension(
 	if (registeredApis.has(pi)) return;
 	registeredApis.add(pi);
 
-	const loadedConfig = loadConfig();
-	const config = programmatic
-		? {
-			...loadedConfig,
-			asyncByDefault: false,
-			forceTopLevelAsync: false,
-			intercomBridge: { mode: "off" as const },
-		}
-		: loadedConfig;
+	const config = loadConfig();
+	const waitToolConfig = resolveWaitToolConfig(config.waitTool);
 	const state = createChildSafeState();
 	const executor = createSubagentExecutor({
 		pi,
 		state,
 		config,
-		asyncByDefault: config.asyncByDefault === true,
-		waitToolEnabled: resolveWaitToolConfig(config.waitTool).enabled,
+		asyncByDefault: resolveAsyncByDefault(config),
+		waitToolEnabled: waitToolConfig.enabled,
+		waitToolDefaultTimeoutMs: waitToolConfig.defaultTimeoutMs,
 		tempArtifactsDir: getArtifactsDir(null),
 		getSubagentSessionRoot,
 		expandTilde,
 		discoverAgents,
 		allowMutatingManagementActions: false,
-		subagentRuntime: options.programmaticRuntime,
+		childRuntime: childConfig,
 	});
 
-	const tool: ToolDefinition<typeof SubagentParams, Details> = {
+	const params = createSubagentParamsSchema();
+	const tool: ToolDefinition<typeof params, Details> = {
 		name: "subagent",
 		label: "Subagent",
 		description: [
 			"Delegate to subagents from child-safe fanout mode.",
-			"Allowed management/control actions: list, get, status, interrupt, resume, steer, append-step, doctor.",
-			"Mutating management actions (create, update, delete, eject, disable, enable, reset, grant-spawn-budget) are blocked in this mode.",
+			"Allowed management/control actions: list, get, status, lane.status, interrupt, resume, steer, doctor.",
+			"Mutating management actions (create, update, delete, eject, disable, enable, reset, grant-spawn-budget, lane.recordMerge, lane.recordSupersession) are blocked in this mode.",
 		].join("\n"),
-		parameters: SubagentParams,
-		execute(id, params, signal, onUpdate, ctx) {
-			const request = params as SubagentParamsLike;
-			if (programmatic && (request.async === true || request.schedule !== undefined)) {
-				return executor.executePublic(id, request, signal, onUpdate, ctx);
-			}
-			return executor.execute(id, request, signal, onUpdate, ctx);
+		parameters: params,
+		async execute(id, params, signal, onUpdate, ctx) {
+			return finalizeToolResult(await executor.executePublic(id, params as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx));
 		},
 	};
 
 	pi.registerTool(tool);
-	if (!programmatic) startNestedControlInboxListener(pi, state);
+	const route = resolveNestedControlRoute(childConfig);
+	if (!route) return;
+	const listenerCleanupKey = "__piSubagentFanoutChildNestedControlInboxCleanups";
+	const listenerCleanups = globalStore[listenerCleanupKey] instanceof Map
+		? globalStore[listenerCleanupKey] as Map<string, NestedControlListenerEntry>
+		: new Map<string, NestedControlListenerEntry>();
+	globalStore[listenerCleanupKey] = listenerCleanups;
+	const routeKey = nestedControlRouteKey(route);
+	const previous = listenerCleanups.get(routeKey);
+	previous?.cleanup();
+	const inboxState = previous?.state ?? createNestedControlInboxState();
+	listenerCleanups.set(routeKey, { state: inboxState, cleanup: startNestedControlInboxListener(pi, state, route, inboxState) });
 }

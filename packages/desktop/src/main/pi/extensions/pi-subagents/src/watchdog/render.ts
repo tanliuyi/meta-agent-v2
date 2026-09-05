@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import { Container, Spacer, Text, type Component } from "@earendil-works/pi-tui";
 import type { WatchdogWarningDetails } from "./types.ts";
 
@@ -14,10 +13,9 @@ function titleCase(value: string): string {
 function stateLabels(warning: WatchdogWarningDetails): string[] {
 	const labels: string[] = [];
 	if (warning.state === "displayed") labels.push("displayed");
-	if (warning.stale || warning.state === "stale") labels.push("stale · no auto-follow");
+	if (warning.stale || warning.state === "stale") labels.push("stale");
 	if (warning.state === "failed") labels.push("failed review");
-	if (warning.state === "stalemate") labels.push("stalemate · auto-follow stopped");
-	if (warning.autoFollowAttempt !== undefined) labels.push(`auto-follow attempt ${warning.autoFollowAttempt}`);
+	if (warning.state === "stalemate") labels.push("stalemate");
 	return labels;
 }
 
@@ -32,9 +30,9 @@ export function formatWatchdogWarningRenderText(warning: WatchdogWarningDetails)
 	];
 	if (warning.state === "failed" && warning.error) lines.push(`Failure: ${warning.error}`);
 	if (warning.state === "stalemate" && warning.stalemateRepeats !== undefined) {
-		lines.push(`Auto-follow stopped after ${warning.stalemateRepeats} repeated blocker warning${warning.stalemateRepeats === 1 ? "" : "s"}.`);
+		lines.push(`Same warning ${warning.stalemateRepeats} time${warning.stalemateRepeats === 1 ? "" : "s"} in a row; the watchdog stopped continuing the run.`);
 	}
-	if (warning.stale || warning.state === "stale") lines.push("This warning arrived after the watchdog catch-up timeout and must not auto-follow.");
+	if (warning.stale || warning.state === "stale") lines.push("This warning arrived after the watchdog catch-up timeout.");
 	return lines.join("\n");
 }
 

@@ -41,19 +41,25 @@ export interface SubagentRunRequest {
   preferredProvider?: string;
   thinking?: ThinkingLevel;
   tools?: string[];
+  excludeTools?: string[];
+  extensionPaths?: string[];
+  ambientExtensions?: boolean;
   systemPrompt?: string;
   systemPromptMode?: "append" | "replace";
   inheritProjectContext: boolean;
+  inheritGlobalContext?: boolean;
   inheritSkills: boolean;
   extensionProfile: SubagentExtensionProfile[];
   childExtensions?: SubagentChildExtension[];
   timeoutMs?: number;
-  turnBudget?: { maxTurns: number; graceTurns: number };
   toolBudget?: { hard: number; soft?: number; block: "*" | string[] };
   structuredOutput?: {
-    schema: Record<string, JsonValue>;
-    outputPath: string;
+    schema: Record<string, unknown>;
+    acceptanceReport?: "optional" | "required";
+    outputPath?: string;
   };
+  /** Serializable projection of pi-subagents' ChildRuntimeConfig. */
+  childRuntime?: JsonValue;
 }
 
 export interface SubagentResumeRequest extends SubagentRunRequest {
@@ -76,7 +82,14 @@ export type SubagentRunEvent =
   | { type: "tool_execution_update"; toolCallId: string; toolName: string; partialResult: JsonValue }
   | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: JsonValue; isError: boolean }
   | { type: "completed"; runId: string; sessionFile?: string; updatedAt?: number }
-  | { type: "failed"; runId: string; error: string; code?: string; sessionFile?: string; updatedAt?: number };
+  | { type: "failed"; runId: string; error: string; code?: string; sessionFile?: string; updatedAt?: number }
+  | { type: "child_event"; event: JsonValue }
+  | {
+      type: "runtime_capture";
+      capture: "structured_output" | "tool_diagnostic" | "runtime_acknowledgements";
+      value: JsonValue;
+      acceptanceReport?: JsonValue;
+    };
 
 export function subagentTextDelta(event: SubagentRunEvent): string | undefined {
   if (
@@ -129,12 +142,7 @@ export type SubagentHostResult = {
 };
 
 export type SubagentSettingsScope = "user" | "project";
-export type SubagentSource = "builtin" | "user" | "project" | "package";
-
-export interface SubagentTurnBudget {
-  maxTurns: number;
-  graceTurns?: number;
-}
+export type SubagentSource = "builtin" | "user" | "project" | "package" | "runtime";
 
 export interface SubagentToolBudget {
   hard: number;
@@ -156,7 +164,6 @@ export interface SubagentAgentConfigInput {
   defaultContext?: "fresh" | "fork" | false;
   tools?: string[] | false;
   skills?: string[] | false;
-  turnBudget?: SubagentTurnBudget | false;
   toolBudget?: SubagentToolBudget | false;
   acceptanceRole?: "read-only" | "writer" | false;
   completionGuard?: boolean;
@@ -186,7 +193,6 @@ export interface AgentSummary {
   tools?: string[];
   mcpDirectTools?: string[];
   skills?: string[];
-  turnBudget?: SubagentTurnBudget;
   toolBudget?: SubagentToolBudget;
   acceptanceRole?: "read-only" | "writer";
   completionGuard?: boolean;
@@ -251,7 +257,6 @@ export interface SubagentExtensionConfig {
   };
   // 以下字段与上游 pi-subagents ExtensionConfig 对齐（fleetView/fleetViewPlacement/
   // fleetKeybindings 为 TUI 专属，GUI 不暴露）。
-  legacyChainControls?: boolean;
   inlineToolDisplay?: "rich" | "summary";
   forceTopLevelAsync?: boolean;
   waitTool?: { enabled?: boolean };
@@ -275,7 +280,6 @@ export interface SubagentExtensionConfig {
   >;
   parallel?: { maxTasks?: number; concurrency?: number };
   chain?: { dynamicFanout?: { maxItems?: number } };
-  turnBudget?: { maxTurns: number; graceTurns?: number };
   toolBudget?: { soft?: number; hard: number };
   control?: {
     enabled?: boolean;

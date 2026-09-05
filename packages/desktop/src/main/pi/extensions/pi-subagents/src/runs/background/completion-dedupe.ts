@@ -1,9 +1,9 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 interface CompletionDataLike {
 	id?: unknown;
 	agent?: unknown;
 	timestamp?: unknown;
 	sessionId?: unknown;
+	state?: unknown;
 	taskIndex?: unknown;
 	totalTasks?: unknown;
 	success?: unknown;
@@ -23,7 +23,10 @@ function asFiniteNumber(value: unknown): number | undefined {
 export function buildCompletionKey(data: CompletionDataLike, fallback: string): string {
 	const sessionId = asNonEmptyString(data.sessionId) ?? "no-session";
 	const id = asNonEmptyString(data.id);
-	if (id) return `session:${sessionId}:id:${id}`;
+	const state = asNonEmptyString(data.state);
+	if (id) return state
+		? `session:${sessionId}:id:${id}:state:${state}`
+		: `session:${sessionId}:id:${id}`;
 	const agent = asNonEmptyString(data.agent) ?? "unknown";
 	const timestamp = asFiniteNumber(data.timestamp);
 	const taskIndex = asFiniteNumber(data.taskIndex);

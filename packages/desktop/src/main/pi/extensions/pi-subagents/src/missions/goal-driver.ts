@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RetainedChild } from "../runs/background/retained-children.ts";
@@ -100,7 +99,9 @@ function missionStateAction(location: MissionStoreLocation, record: MissionRecor
 function retainedResumeTarget(record: MissionRecord, retainedChildren: RetainedChild[]): RetainedChild | undefined {
 	const latestRun = record.runs.at(-1);
 	if (!latestRun) return undefined;
-	return retainedChildren.find((child) => child.runId === latestRun.runId || child.parentRunId === latestRun.runId);
+	return retainedChildren.find((child) =>
+		child.resumability.state === "resumable" && (child.runId === latestRun.runId || child.parentRunId === latestRun.runId)
+	);
 }
 
 function nextReadyAction(location: MissionStoreLocation, record: MissionRecord, retainedChildren: RetainedChild[]): string {

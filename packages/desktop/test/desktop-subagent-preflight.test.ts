@@ -23,8 +23,7 @@ describe("Desktop subagent preflight", () => {
         subagents: {
           agentOverrides: {
             delegate: {
-              tools: ["read", "mcp:test-server/search"],
-              mcpDirectTools: ["test-server/search"],
+              tools: ["read"],
               extensions: ["./test-extension.ts"],
             },
           },

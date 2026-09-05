@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { AgentConfig, ChainConfig, ChainStepConfig } from "./agents.ts";
 import type { ProactiveSkillSubagentsConfig } from "../shared/types.ts";
 

@@ -239,26 +239,22 @@ describe("SubagentSettingsConfigService", () => {
       }),
     );
 
-    result = await service.saveConfig({
-      requestId: "create-chain",
-      projectId: "project",
-      expectedSnapshotRevision: snapshot.revision,
-      mutation: {
-        type: "create-chain",
-        scope: "user",
-        config: {
-          name: "desktop-flow",
-          description: "Desktop workflow",
-          steps: [{ agent: "desktop-helper", task: "Inspect the current task", progress: true }],
+    await expect(
+      service.saveConfig({
+        requestId: "create-chain",
+        projectId: "project",
+        expectedSnapshotRevision: snapshot.revision,
+        mutation: {
+          type: "create-chain",
+          scope: "user",
+          config: {
+            name: "desktop-flow",
+            description: "Desktop workflow",
+            steps: [{ agent: "desktop-helper", task: "Inspect the current task", progress: true }],
+          },
         },
-      },
-    });
-    expect(result.status).toBe("saved");
-    if (result.status !== "saved") return;
-    snapshot = result.snapshot;
-    expect(snapshot.chains).toContainEqual(
-      expect.objectContaining({ name: "desktop-flow", source: "user", stepCount: 1, editable: true }),
-    );
+      }),
+    ).rejects.toThrow("Durable chain definitions were removed");
 
     result = await service.saveConfig({
       requestId: "update-agent",
@@ -280,15 +276,7 @@ describe("SubagentSettingsConfigService", () => {
       thinking: "high",
     });
 
-    result = await service.saveConfig({
-      requestId: "delete-chain",
-      projectId: "project",
-      expectedSnapshotRevision: snapshot.revision,
-      mutation: { type: "delete-chain", chain: "desktop-flow", scope: "user" },
-    });
-    expect(result.status).toBe("saved");
-    if (result.status !== "saved") return;
-    expect(result.snapshot.chains.some((chain) => chain.name === "desktop-flow")).toBe(false);
+    expect(snapshot.chains.some((chain) => chain.name === "desktop-flow")).toBe(false);
   });
 
   test("persists builtin overrides and extension config", async () => {
@@ -327,7 +315,6 @@ describe("SubagentSettingsConfigService", () => {
           maxSubagentDepth: 3,
           globalConcurrencyLimit: 8,
           scheduledRuns: { enabled: true, maxPending: 5 },
-          legacyChainControls: true,
           inlineToolDisplay: "summary",
           forceTopLevelAsync: true,
           waitTool: { enabled: false },
@@ -339,7 +326,6 @@ describe("SubagentSettingsConfigService", () => {
           authorityPolicy: { scheduleCreate: "confirm", stopRun: "forbid" },
           parallel: { maxTasks: 4, concurrency: 2 },
           chain: { dynamicFanout: { maxItems: 3 } },
-          turnBudget: { maxTurns: 5, graceTurns: 1 },
           toolBudget: { hard: 50, soft: 40 },
           control: { enabled: true, needsAttentionAfterMs: 120000 },
           completionBatch: { enabled: true, debounceMs: 500, maxWaitMs: 2000 },
@@ -355,7 +341,6 @@ describe("SubagentSettingsConfigService", () => {
       maxSubagentDepth: 3,
       globalConcurrencyLimit: 8,
       scheduledRuns: { enabled: true, maxPending: 5 },
-      legacyChainControls: true,
       inlineToolDisplay: "summary",
       forceTopLevelAsync: true,
       waitTool: { enabled: false },
@@ -367,7 +352,6 @@ describe("SubagentSettingsConfigService", () => {
       authorityPolicy: { scheduleCreate: "confirm", stopRun: "forbid" },
       parallel: { maxTasks: 4, concurrency: 2 },
       chain: { dynamicFanout: { maxItems: 3 } },
-      turnBudget: { maxTurns: 5, graceTurns: 1 },
       toolBudget: { hard: 50, soft: 40 },
       control: { enabled: true, needsAttentionAfterMs: 120000 },
       completionBatch: { enabled: true, debounceMs: 500, maxWaitMs: 2000 },
@@ -379,7 +363,6 @@ describe("SubagentSettingsConfigService", () => {
       maxSubagentDepth: 3,
       globalConcurrencyLimit: 8,
       scheduledRuns: { enabled: true, maxPending: 5 },
-      legacyChainControls: true,
       inlineToolDisplay: "summary",
       forceTopLevelAsync: true,
       waitTool: { enabled: false },
@@ -391,7 +374,6 @@ describe("SubagentSettingsConfigService", () => {
       authorityPolicy: { scheduleCreate: "confirm", stopRun: "forbid" },
       parallel: { maxTasks: 4, concurrency: 2 },
       chain: { dynamicFanout: { maxItems: 3 } },
-      turnBudget: { maxTurns: 5, graceTurns: 1 },
       toolBudget: { hard: 50, soft: 40 },
       control: { enabled: true, needsAttentionAfterMs: 120000 },
       completionBatch: { enabled: true, debounceMs: 500, maxWaitMs: 2000 },

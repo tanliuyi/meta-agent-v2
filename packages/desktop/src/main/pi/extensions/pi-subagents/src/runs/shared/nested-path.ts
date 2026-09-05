@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as path from "node:path";
 
 const MAX_NESTED_ID_LENGTH = 128;
@@ -36,18 +35,4 @@ export function sanitizeNestedPath(value: unknown): NestedPathEntry[] {
 			...(nonEmptyString(record.agent, 128) ? { agent: nonEmptyString(record.agent, 128) } : {}),
 		};
 	}).filter((part): part is NestedPathEntry => Boolean(part)).slice(0, MAX_NESTED_PATH_ENTRIES);
-}
-
-export function parseNestedPathEnv(value: string | undefined): NestedPathEntry[] {
-	if (!value) return [];
-	try {
-		return sanitizeNestedPath(JSON.parse(value) as unknown);
-	} catch {
-		return [];
-	}
-}
-
-export function encodeNestedPathEnv(value: NestedPathEntry[]): string {
-	const sanitized = sanitizeNestedPath(value);
-	return sanitized.length ? JSON.stringify(sanitized) : "";
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 /**
  * Public project-owned Herdr pane lifecycle API for other Pi extensions.
  *
@@ -11,6 +10,7 @@ export {
 	createProjectPaneManager,
 	openProjectPane,
 	getProjectPaneStatus,
+	focusProjectPane,
 	closeProjectPane,
 	readProjectPaneBinding,
 	projectPaneBindingPath,
@@ -22,6 +22,7 @@ export {
 	type CloseProjectPaneOptions,
 	type OpenProjectPaneData,
 	type ProjectPaneStatusData,
+	type FocusProjectPaneData,
 	type CloseProjectPaneData,
 	type ProjectPaneRuntime,
 	type ProjectPaneError,

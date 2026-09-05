@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { SteeringNotice, SubagentState } from "../shared/types.ts";
 

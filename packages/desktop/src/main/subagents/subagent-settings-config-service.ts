@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ModelRegistry, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "../../shared/contracts.ts";
 import type {
@@ -16,20 +16,21 @@ import type {
   SubagentModelOption,
   SubagentSettingsMutation,
   SubagentSettingsSnapshot,
+  SubagentWatchdogConfigInput,
+  SubagentWatchdogSettings,
 } from "../../shared/subagent-contracts.ts";
 import { DesktopBuiltinProviderRegistry } from "../pi/desktop-builtin-provider.ts";
 import { handleManagementAction } from "../pi/extensions/pi-subagents/src/agents/agent-management.ts";
 import {
   type AgentConfig,
   type ChainConfig,
-  configureBuiltinAgentsDir,
+  discoverAgentSnapshot,
   discoverAgentsAll,
   mergeBuiltinAgentOverride,
 } from "../pi/extensions/pi-subagents/src/agents/agents.ts";
 import { discoverAvailableSkills } from "../pi/extensions/pi-subagents/src/agents/skills.ts";
 import {
   getConfigPath,
-  loadConfigStrict,
   resolveAsyncByDefault,
   saveConfig,
 } from "../pi/extensions/pi-subagents/src/extension/config.ts";
@@ -49,10 +50,10 @@ const DEFAULT_AUTHORITY_POLICY: Record<AuthorityAction, "auto" | "confirm" | "fo
 import { getSupportedThinkingLevels, toModelInfo } from "../pi/extensions/pi-subagents/src/shared/model-info.ts";
 import { DEFAULT_SUBAGENT_MAX_DEPTH, type ExtensionConfig } from "../pi/extensions/pi-subagents/src/shared/types.ts";
 import {
-  readWatchdogSettingsOverride,
+  DEFAULT_WATCHDOG_CONFIG,
+  getWatchdogProjectSettingsPath,
+  getWatchdogUserSettingsPath,
   resolveWatchdogConfig,
-  resolveWatchdogInheritedConfig,
-  writeWatchdogSettings,
 } from "../pi/extensions/pi-subagents/src/watchdog/settings.ts";
 
 interface SubagentSettingsConfigServiceOptions {
@@ -87,7 +88,6 @@ export class SubagentSettingsConfigService {
         provider.models.map((model) => subagentModelOption({ ...model, provider: provider.id })),
       ]),
     );
-    configureBuiltinAgentsDir(options.builtinAgentsDir);
   }
 
   async getSnapshot(input: GetSubagentSettingsInput = {}): Promise<SubagentSettingsSnapshot> {
@@ -150,7 +150,7 @@ export class SubagentSettingsConfigService {
   }
 
   private async buildSnapshot(context: ResolvedContext): Promise<SubagentSettingsSnapshot> {
-    const discovered = discoverAgentsAll(context.cwd, context.discoveryScope);
+    const discovered = this.discover(context);
     await this.options.modelRuntime.refresh({ allowNetwork: false });
     const runtimeModels = (await this.options.modelRuntime.getAvailable()).map((model) =>
       subagentModelOption({
@@ -172,12 +172,8 @@ export class SubagentSettingsConfigService {
     ].sort((left, right) => left.id.localeCompare(right.id));
     const watchdogResult = resolveWatchdogConfig(context.cwd);
     const watchdogScope = context.settingsScope === "project" ? "project" : "user";
-    let inheritedWatchdog = watchdogResult.config;
-    try {
-      inheritedWatchdog = resolveWatchdogInheritedConfig(watchdogScope);
-    } catch {
-      // The source error is already represented in watchdogResult.errors.
-    }
+    const inheritedWatchdog =
+      watchdogScope === "project" ? resolveWatchdogConfig(tmpdir()).config : DEFAULT_WATCHDOG_CONFIG;
     const watchdogOverride =
       watchdogResult.ok && context.settingsScope !== "system"
         ? readWatchdogSettingsOverride(context.settingsScope, context.cwd)
@@ -202,7 +198,7 @@ export class SubagentSettingsConfigService {
     ];
     let extensionConfig: ExtensionConfig = {};
     try {
-      const loadedExtensionConfig = loadConfigStrict();
+      const loadedExtensionConfig = loadExtensionConfigStrict();
       validateExtensionConfig(loadedExtensionConfig);
       extensionConfig = loadedExtensionConfig;
     } catch (error) {
@@ -286,7 +282,7 @@ export class SubagentSettingsConfigService {
         });
         return;
       case "update-agent": {
-        const discovered = discoverAgentsAll(context.cwd, context.discoveryScope);
+        const discovered = this.discover(context);
         const custom = (mutation.scope === "user" ? discovered.user : discovered.project).some(
           (agent) => agent.name === mutation.agent,
         );
@@ -334,14 +330,10 @@ export class SubagentSettingsConfigService {
         this.runManagement(context.cwd, "delete", { chainName: mutation.chain, agentScope: mutation.scope });
         return;
       case "update-watchdog-config":
-        writeWatchdogSettings({
-          scope: mutation.scope,
-          cwd: context.cwd,
-          config: mutation.config,
-        });
+        writeWatchdogSettings(mutation.scope, context.cwd, mutation.config);
         return;
       case "update-extension-config": {
-        const current = loadConfigStrict();
+        const current = loadExtensionConfigStrict();
         const next: ExtensionConfig = {
           ...current,
           ...mutation.config,
@@ -353,6 +345,14 @@ export class SubagentSettingsConfigService {
         saveConfig(next);
       }
     }
+  }
+
+  private discover(context: ResolvedContext): ReturnType<typeof discoverAgentsAll> {
+    const scope = context.settingsScope === "system" ? "project" : context.discoveryScope;
+    const all = discoverAgentSnapshot(context.cwd, scope, undefined, {
+      builtinAgentsDir: this.options.builtinAgentsDir,
+    }).all;
+    return context.settingsScope === "system" ? { ...all, user: [], project: [] } : all;
   }
 
   private runManagement(
@@ -418,7 +418,6 @@ function agentSummary(agent: AgentConfig): AgentSummary {
     ...(agent.tools ? { tools: [...agent.tools] } : {}),
     ...(agent.mcpDirectTools ? { mcpDirectTools: [...agent.mcpDirectTools] } : {}),
     ...(agent.skills ? { skills: [...agent.skills] } : {}),
-    ...(agent.defaultTurnBudget ? { turnBudget: { ...agent.defaultTurnBudget } } : {}),
     ...(agent.toolBudget ? { toolBudget: { ...agent.toolBudget } } : {}),
     ...(agent.acceptanceRole ? { acceptanceRole: agent.acceptanceRole } : {}),
     ...(agent.completionGuard !== undefined ? { completionGuard: agent.completionGuard } : {}),
@@ -534,7 +533,6 @@ function selectExtensionConfig(config: ExtensionConfig): SubagentExtensionConfig
       ...config.scheduledRuns,
       enabled: config.scheduledRuns?.enabled ?? true,
     },
-    legacyChainControls: config.legacyChainControls ?? false,
     inlineToolDisplay: config.inlineToolDisplay ?? "rich",
     forceTopLevelAsync: config.forceTopLevelAsync ?? false,
     waitTool: { enabled: waitTool.enabled },
@@ -549,7 +547,6 @@ function selectExtensionConfig(config: ExtensionConfig): SubagentExtensionConfig
     authorityPolicy,
     parallel: config.parallel,
     chain: config.chain,
-    turnBudget: config.turnBudget,
     toolBudget: config.toolBudget,
     control: config.control,
     completionBatch: config.completionBatch,
@@ -592,10 +589,7 @@ function validateExtensionConfig(config: ExtensionConfig): void {
   if (config.artifactDir && !["project", "session", "temp"].includes(config.artifactDir)) {
     throw new Error("artifactDir is invalid");
   }
-  for (const [name, value] of [
-    ["legacyChainControls", config.legacyChainControls],
-    ["forceTopLevelAsync", config.forceTopLevelAsync],
-  ] as const) {
+  for (const [name, value] of [["forceTopLevelAsync", config.forceTopLevelAsync]] as const) {
     if (value !== undefined && typeof value !== "boolean") {
       throw new Error(`${name} must be a boolean`);
     }
@@ -616,8 +610,6 @@ function validateExtensionConfig(config: ExtensionConfig): void {
     throw new Error("worktreeSetupHookTimeoutMs must be > 0 when worktreeSetupHook is set");
   }
   for (const [name, value] of [
-    ["turnBudget.maxTurns", config.turnBudget?.maxTurns],
-    ["turnBudget.graceTurns", config.turnBudget?.graceTurns],
     ["toolBudget.soft", config.toolBudget?.soft],
     ["toolBudget.hard", config.toolBudget?.hard],
     ["control.needsAttentionAfterMs", config.control?.needsAttentionAfterMs],
@@ -720,6 +712,90 @@ function hashPath(hash: ReturnType<typeof createHash>, path: string): void {
     return;
   }
   hash.update("other");
+}
+
+function readWatchdogSettingsOverride(scope: "user" | "project", cwd: string): SubagentWatchdogSettings["override"] {
+  const settingsPath = scope === "user" ? getWatchdogUserSettingsPath() : getWatchdogProjectSettingsPath(cwd);
+  if (!existsSync(settingsPath)) return { main: {}, children: {} };
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8")) as unknown;
+  if (!isRecord(settings)) return { main: {}, children: {} };
+  const subagents = isRecord(settings.subagents) ? settings.subagents : undefined;
+  const watchdog = subagents && isRecord(subagents.watchdog) ? subagents.watchdog : undefined;
+  if (!watchdog) return { main: {}, children: {} };
+  return {
+    ...(typeof watchdog.enabled === "boolean" ? { enabled: watchdog.enabled } : {}),
+    main: watchdogEndpointOverride(watchdog.main),
+    children: watchdogEndpointOverride(watchdog.children),
+  };
+}
+
+function loadExtensionConfigStrict(): ExtensionConfig {
+  const configPath = getConfigPath();
+  if (!existsSync(configPath)) return {};
+  const parsed = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
+  if (!isRecord(parsed)) throw new Error(`Subagent config at '${configPath}' must be a JSON object`);
+  validateExtensionConfig(parsed as ExtensionConfig);
+  return parsed as ExtensionConfig;
+}
+
+function watchdogEndpointOverride(value: unknown): SubagentWatchdogSettings["override"]["main"] {
+  if (!isRecord(value)) return {};
+  return {
+    ...(typeof value.enabled === "boolean" ? { enabled: value.enabled } : {}),
+    ...(typeof value.model === "string" ? { model: value.model } : {}),
+    ...(value.thinking === false || typeof value.thinking === "string"
+      ? { thinking: value.thinking as ThinkingLevel | false }
+      : {}),
+  };
+}
+
+function writeWatchdogSettings(scope: "user" | "project", cwd: string, config: SubagentWatchdogConfigInput): void {
+  const settingsPath = scope === "user" ? getWatchdogUserSettingsPath() : getWatchdogProjectSettingsPath(cwd);
+  const settings = existsSync(settingsPath) ? (JSON.parse(readFileSync(settingsPath, "utf8")) as unknown) : {};
+  if (!isRecord(settings)) throw new Error(`Settings file '${settingsPath}' must contain a JSON object.`);
+  const subagents = ensureRecordField(settings, "subagents", settingsPath);
+  const watchdog = ensureRecordField(subagents, "watchdog", settingsPath);
+  applyNullableField(watchdog, "enabled", config.enabled);
+  applyWatchdogEndpoint(watchdog, "main", config.main, settingsPath);
+  applyWatchdogEndpoint(watchdog, "children", config.children, settingsPath);
+  mkdirSync(dirname(settingsPath), { recursive: true });
+  writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+}
+
+function applyWatchdogEndpoint(
+  watchdog: Record<string, unknown>,
+  key: "main" | "children",
+  input: SubagentWatchdogConfigInput["main"],
+  settingsPath: string,
+): void {
+  if (!input) return;
+  const endpoint = ensureRecordField(watchdog, key, settingsPath);
+  applyNullableField(endpoint, "enabled", input.enabled);
+  applyNullableField(endpoint, "model", input.model);
+  applyNullableField(endpoint, "thinking", input.thinking);
+}
+
+function applyNullableField(
+  target: Record<string, unknown>,
+  key: string,
+  value: string | boolean | null | undefined,
+): void {
+  if (value === null) delete target[key];
+  else if (value !== undefined) target[key] = value;
+}
+
+function ensureRecordField(
+  parent: Record<string, unknown>,
+  key: string,
+  settingsPath: string,
+): Record<string, unknown> {
+  if (parent[key] === undefined) parent[key] = {};
+  if (!isRecord(parent[key])) throw new Error(`Settings file '${settingsPath}' has invalid '${key}'.`);
+  return parent[key];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function assertSaveInput(input: SaveSubagentSettingsInput): void {

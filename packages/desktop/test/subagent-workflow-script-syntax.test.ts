@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  SubagentParams,
-  SubagentParamsWithoutLegacyChainControls,
-} from "../src/main/pi/extensions/pi-subagents/src/extension/schemas.ts";
+import { SubagentParams } from "../src/main/pi/extensions/pi-subagents/src/extension/schemas.ts";
 import {
   COMPACT_SUBAGENT_TOOL_DESCRIPTION,
   FULL_SUBAGENT_TOOL_DESCRIPTION,
@@ -78,7 +75,7 @@ describe("workflowScript syntax diagnostics", () => {
 
 describe("workflowScript single-line quoting guidance", () => {
   it("keeps the rule in the tool schema workflowScript descriptions", () => {
-    for (const schema of [SubagentParams, SubagentParamsWithoutLegacyChainControls]) {
+    for (const schema of [SubagentParams]) {
       const description = schema.properties.workflowScript.description;
       expect(description).toContain("Keep every quoted string on one line");
       expect(description).toContain("raw newline inside quotes is a syntax error");

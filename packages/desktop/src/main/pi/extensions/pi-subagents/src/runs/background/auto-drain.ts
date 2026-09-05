@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { snapshotBackgroundWork } from "../../api/background-work.ts";
 import { DIRS, type Details, type SubagentState } from "../../shared/types.ts";
@@ -59,10 +58,11 @@ export async function drainOutstandingWork(deps: AutoDrainDeps): Promise<void> {
 				now,
 				stopOnAttention: false,
 				failOnFailedRuns: true,
+				failOnAttention: true,
 			},
 		);
 		if (waitResult.isError) {
-			throw new Error(`Auto-drain failed for session '${sessionId}': ${resultText(waitResult) || "subagent_wait returned an error without details"}.`);
+			throw new Error(`Auto-drain failed for session '${sessionId}': ${resultText(waitResult) || "bg_wait returned an error without details"}.`);
 		}
 	}
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import type { ChainConfig, ChainStepConfig } from "./agents.ts";
 import { buildRuntimeName, frontmatterNameForConfig, parsePackageName } from "./identity.ts";
 import { parseFrontmatter } from "./frontmatter.ts";

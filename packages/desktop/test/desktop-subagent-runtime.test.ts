@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/main/pi/extensions/pi-subagents/src/agents/agents.ts";
 import { runSync } from "../src/main/pi/extensions/pi-subagents/src/runs/foreground/execution.ts";
-import type {
-  SubagentRuntime,
-  SubagentRuntimeRunRequest,
-} from "../src/main/pi/extensions/pi-subagents/src/runtime/subagent-runtime.ts";
+import { createDesktopChildSessionFactory } from "../src/main/pi/subagents/desktop-child-session-factory.ts";
 import { DesktopSubagentRuntime } from "../src/main/pi/subagents/desktop-subagent-runtime.ts";
+import type { SubagentRuntime, SubagentRuntimeRunRequest } from "../src/main/pi/subagents/subagent-runtime.ts";
 import type {
   SubagentExtensionProfile,
   SubagentHostRequest,
@@ -129,7 +127,7 @@ describe("DesktopSubagentRuntime", () => {
     };
 
     const result = await runSync(process.cwd(), [agent], "worker", "Summarize the project", {
-      subagentRuntime: fakeRuntime,
+      childSessionFactory: createDesktopChildSessionFactory(fakeRuntime),
       runId: "run-programmatic",
       sessionFile: "child.jsonl",
       acceptance: false,
@@ -140,9 +138,10 @@ describe("DesktopSubagentRuntime", () => {
         runId: "run-programmatic",
         rootRunId: "run-programmatic",
         depth: 1,
+        maxDepth: 2,
         lineage: [],
         agent: "worker",
-        task: "Summarize the project",
+        task: "Task: Summarize the project",
         extensionProfile: ["provider", "memory", "runtime"],
       }),
     );
@@ -152,9 +151,9 @@ describe("DesktopSubagentRuntime", () => {
       sessionFile: "child.jsonl",
       usage: { input: 4, output: 2, turns: 1 },
     });
-  });
+  }, 30_000);
 
-  it("falls back to the upstream CLI adapter for configured extension paths", async () => {
+  it("passes configured extension paths to the Desktop worker runtime", async () => {
     const runtime: SubagentRuntime = {
       async *run() {
         yield { type: "failed", runId: "unexpected", error: "runtime should not start" };
@@ -175,16 +174,17 @@ describe("DesktopSubagentRuntime", () => {
       systemPrompt: "Work",
       source: "project",
       filePath: "custom.md",
+      completionGuard: false,
       extensions: ["C:\\extensions\\custom.ts"],
     };
     const result = await runSync(process.cwd(), [agent], "custom", "Inspect", {
-      subagentRuntime: runtime,
+      childSessionFactory: createDesktopChildSessionFactory(runtime),
       runId: "no-cli-fallback",
       acceptance: false,
     });
     expect(result.exitCode).toBe(1);
-    expect(result.error).toContain("Failed to load extension");
-  });
+    expect(result.error).toContain("runtime should not start");
+  }, 30_000);
 
   it("authorizes nested requests from the bound parent worker lineage", async () => {
     let captured: SubagentHostRequest | undefined;

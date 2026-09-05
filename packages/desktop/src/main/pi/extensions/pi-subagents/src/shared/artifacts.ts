@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CHAIN_RUNS_DIR, TEMP_ARTIFACTS_DIR, type ArtifactPaths, type ArtifactDirPreference } from "./types.ts";
@@ -64,10 +63,6 @@ function patternMatchesArtifactPath(pattern: string, artifactPath: string): bool
 		|| normalized === "*"
 		|| artifactPath.startsWith(`${normalized}/`)
 		|| globMatchesPath(normalized, artifactPath);
-}
-
-function patternMatchesProjectArtifacts(pattern: string): boolean {
-	return PROJECT_ARTIFACT_PATHS.some((artifactPath) => patternMatchesArtifactPath(pattern, artifactPath));
 }
 
 function ignoreFileExcludesProjectArtifacts(filePath: string): boolean {
@@ -145,7 +140,7 @@ export function getProjectChainRunsDir(cwd: string): string {
 
 export function getChainRunsDir(
 	projectCwd: string,
-	dirPreference: ArtifactDirPreference = "project",
+	dirPreference: ArtifactDirPreference = "session",
 ): string {
 	switch (dirPreference) {
 		case "project":
@@ -161,7 +156,7 @@ export function getChainRunsDir(
 export function getArtifactsDir(
 	sessionFile: string | null,
 	projectCwd?: string,
-	dirPreference: ArtifactDirPreference = "project",
+	dirPreference: ArtifactDirPreference = "session",
 ): string {
 	switch (dirPreference) {
 		case "session":
@@ -229,7 +224,7 @@ export function appendJsonl(filePath: string, line: string): void {
 }
 
 export function cleanupOldArtifacts(dir: string, maxAgeDays: number): void {
-	if (!fs.existsSync(dir)) return;
+	if (maxAgeDays <= 0 || !fs.existsSync(dir)) return;
 
 	const markerPath = path.join(dir, CLEANUP_MARKER_FILE);
 	const now = Date.now();

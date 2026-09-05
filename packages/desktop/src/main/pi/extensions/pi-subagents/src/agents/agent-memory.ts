@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 /**
  * Per-agent persistent memory scopes with read-only fallback.
  *

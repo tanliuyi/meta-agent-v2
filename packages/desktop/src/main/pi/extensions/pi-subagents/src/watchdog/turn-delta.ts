@@ -1,4 +1,3 @@
-// @ts-nocheck -- Vendored upstream module; Desktop boundary behavior is covered by focused tests.
 import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "./types.ts";
 
 type MessageLike = {
@@ -48,7 +47,7 @@ function formatValue(value: unknown, indent = ""): string {
 	if (value === undefined) return "undefined";
 	if (value === null || typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
 	if (Array.isArray(value)) {
-		return value.map((item, index) => `${indent}- ${formatValue(item, `${indent}  `)}`).join("\n");
+		return value.map((item) => `${indent}- ${formatValue(item, `${indent}  `)}`).join("\n");
 	}
 	if (typeof value === "object") {
 		const lines: string[] = [];
