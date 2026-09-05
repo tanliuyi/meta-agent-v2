@@ -7,6 +7,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { DesktopExtensionHostState, HostRequest, HostResponse } from "../../shared/contracts.ts";
 import type { DesktopWidgetViewport } from "../../shared/desktop-extension-contracts.ts";
+import {
+  type QuestionnaireUI,
+  readQuestionnaireResult,
+  validateQuestionnaireInput,
+} from "../../shared/questionnaire-contracts.ts";
 import { DesktopWidgetAdapter } from "./desktop-widget-adapter.ts";
 
 interface PendingRequest {
@@ -14,12 +19,10 @@ interface PendingRequest {
   resolve(response: HostResponse): void;
   reject(error: Error): void;
   timer?: ReturnType<typeof setTimeout>;
+  removeAbortListener?: () => void;
 }
 
-const EMPTY_HOST_STATE: DesktopExtensionHostState = {
-  statuses: {},
-  widgets: [],
-};
+const EMPTY_HOST_STATE: DesktopExtensionHostState = { statuses: {}, widgets: [] };
 
 export class DesktopExtensionCompatibilityError extends Error {
   readonly code: "DESKTOP_EXTENSION_CAPABILITY_UNAVAILABLE" | "DESKTOP_EXTENSION_HOST_DISPOSED";
@@ -96,10 +99,20 @@ export class DesktopExtensionHost {
     return this.state;
   }
 
-  createContext(): ExtensionUIContext & { widgetCapabilities: { components: true; input: false } } {
+  createContext(): ExtensionUIContext & QuestionnaireUI & { widgetCapabilities: { components: true; input: false } } {
     const host = this;
     return {
       widgetCapabilities: { components: true, input: false },
+      questionnaire: (input, opts) => {
+        validateQuestionnaireInput(input);
+        return this.ask(
+          "questionnaire",
+          "Questionnaire",
+          { questionnaire: structuredClone(input) },
+          opts,
+          (response) => response.questionnaire ?? { answers: [], cancelled: true },
+        );
+      },
       select: (title: string, options: string[], opts?: ExtensionUIDialogOptions) =>
         this.ask("select", title, { options }, opts, (response) => response.value),
       confirm: (title: string, message: string, opts?: ExtensionUIDialogOptions) =>
@@ -171,8 +184,18 @@ export class DesktopExtensionHost {
     this.assertActive("ui.dialog");
     const item = this.pending.get(response.requestId);
     if (!item) throw new Error(`Extension UI request does not exist: ${response.requestId}`);
+    if (item.request.questionnaire) {
+      response = {
+        ...response,
+        questionnaire: readQuestionnaireResult(
+          item.request.questionnaire,
+          response.dismissed ? { answers: [], cancelled: true } : response.questionnaire,
+        ),
+      };
+    }
     this.pending.delete(response.requestId);
     if (item.timer) clearTimeout(item.timer);
+    item.removeAbortListener?.();
     item.resolve(response);
     this.changed();
   }
@@ -182,6 +205,7 @@ export class DesktopExtensionHost {
     const error = new Error("Desktop extension host request became stale after reload");
     for (const item of this.pending.values()) {
       if (item.timer) clearTimeout(item.timer);
+      item.removeAbortListener?.();
       item.reject(error);
     }
     this.pending.clear();
@@ -197,6 +221,7 @@ export class DesktopExtensionHost {
     const error = new DesktopExtensionCompatibilityError("DESKTOP_EXTENSION_HOST_DISPOSED", "ui.dialog");
     for (const item of this.pending.values()) {
       if (item.timer) clearTimeout(item.timer);
+      item.removeAbortListener?.();
       item.reject(error);
     }
     this.pending.clear();
@@ -222,16 +247,17 @@ export class DesktopExtensionHost {
     };
     return new Promise<T>((resolve, reject) => {
       const item: PendingRequest = { request, resolve: (response) => resolve(read(response)), reject };
-      if (opts?.timeout) {
-        item.timer = setTimeout(() => this.cancel(id), opts.timeout);
-      }
       if (opts?.signal) {
         if (opts.signal.aborted) {
           reject(new DOMException("Extension UI request aborted", "AbortError"));
           return;
         }
-        opts.signal.addEventListener("abort", () => this.cancel(id), { once: true });
+        const signal = opts.signal;
+        const abort = () => this.cancel(id);
+        signal.addEventListener("abort", abort, { once: true });
+        item.removeAbortListener = () => signal.removeEventListener("abort", abort);
       }
+      if (opts?.timeout) item.timer = setTimeout(() => this.cancel(id), opts.timeout);
       this.pending.set(id, item);
       this.changed();
     });
@@ -248,6 +274,7 @@ export class DesktopExtensionHost {
     if (!item) return;
     this.pending.delete(id);
     if (item.timer) clearTimeout(item.timer);
+    item.removeAbortListener?.();
     item.resolve({ requestId: id, dismissed: true });
     this.changed();
   }

@@ -5,6 +5,8 @@ import type {
   StaleDraftExtensionSetErrorDetails,
 } from "./desktop-extension-contracts.ts";
 
+import type { QuestionnaireInput, QuestionnaireResult } from "./questionnaire-contracts.ts";
+
 export type { DesktopExtensionHostState } from "./desktop-extension-contracts.ts";
 
 /** Desktop 与 renderer 之间使用的协议版本。 */
@@ -168,11 +170,12 @@ export interface Readiness {
 /** 扩展向 Desktop 请求的交互。 */
 export interface HostRequest {
   id: string;
-  type: "confirm" | "select" | "input" | "editor";
+  type: "confirm" | "select" | "input" | "editor" | "questionnaire";
   title: string;
   message?: string;
   placeholder?: string;
   options?: string[];
+  questionnaire?: QuestionnaireInput;
   toolCallId?: string;
   workerInstanceId?: string;
   createdAt: number;
@@ -185,6 +188,7 @@ export interface HostResponse {
   dismissed?: boolean;
   confirmed?: boolean;
   value?: string;
+  questionnaire?: QuestionnaireResult;
 }
 
 export type PiThreadPhase = "idle" | "running" | "retrying" | "compacting" | "tree-navigation";

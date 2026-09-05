@@ -17,6 +17,102 @@ describe("DesktopExtensionHost", () => {
     expect(changed).toHaveBeenCalledTimes(2);
   });
 
+  it("validates questionnaire responses and supports empty multi-select answers", async () => {
+    const host = new DesktopExtensionHost(
+      () => undefined,
+      () => ["tool-1"],
+    );
+    const pending = host.createContext().questionnaire({
+      questions: [
+        {
+          question: "Select any",
+          header: "Options",
+          multiSelect: true,
+          options: [
+            { label: "A", description: "First" },
+            { label: "B", description: "Second" },
+          ],
+        },
+      ],
+    });
+    const request = host.requests[0];
+
+    expect(request).toMatchObject({ type: "questionnaire", toolCallId: "tool-1" });
+    host.respond({
+      requestId: request?.id ?? "",
+      questionnaire: {
+        cancelled: false,
+        answers: [{ questionIndex: 0, question: "ignored", kind: "multi", answer: null, selected: [] }],
+      },
+    });
+
+    await expect(pending).resolves.toEqual({
+      cancelled: false,
+      answers: [{ questionIndex: 0, question: "Select any", kind: "multi", answer: null, selected: [] }],
+    });
+  });
+
+  it("rejects invalid questionnaire responses without consuming the pending request", async () => {
+    const host = new DesktopExtensionHost(
+      () => undefined,
+      () => [],
+    );
+    const pending = host.createContext().questionnaire({
+      questions: [
+        {
+          question: "Choose",
+          header: "Choice",
+          options: [
+            { label: "A", description: "First" },
+            { label: "B", description: "Second" },
+          ],
+        },
+      ],
+    });
+    const requestId = host.requests[0]?.id ?? "";
+
+    expect(() =>
+      host.respond({
+        requestId,
+        questionnaire: {
+          cancelled: false,
+          answers: [{ questionIndex: 0, question: "Choose", kind: "option", answer: "C" }],
+        },
+      }),
+    ).toThrow("Questionnaire answer does not match offered options");
+    expect(host.requests).toHaveLength(1);
+    host.respond({ requestId, dismissed: true });
+    await expect(pending).resolves.toEqual({ answers: [], cancelled: true });
+  });
+
+  it("cancels questionnaire requests on abort", async () => {
+    const host = new DesktopExtensionHost(
+      () => undefined,
+      () => [],
+    );
+    const controller = new AbortController();
+    const pending = host.createContext().questionnaire(
+      {
+        questions: [
+          {
+            question: "Choose",
+            header: "Choice",
+            options: [
+              { label: "A", description: "First" },
+              { label: "B", description: "Second" },
+            ],
+          },
+        ],
+      },
+      { signal: controller.signal },
+    );
+
+    controller.abort();
+
+    await expect(pending).resolves.toEqual({ answers: [], cancelled: true });
+    expect(host.requests).toEqual([]);
+  });
+
   it("supports declarative status, title, text widgets, and one-way composer commands", () => {
     const host = new DesktopExtensionHost(
       () => undefined,

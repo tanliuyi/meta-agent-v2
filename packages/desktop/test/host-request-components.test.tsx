@@ -44,6 +44,37 @@ const selectRequest: HostRequest = {
 };
 
 describe("Host request components", () => {
+  it("questionnaire shows only one Type something input without note fields", () => {
+    const markup = renderToStaticMarkup(
+      <HostRequestDialog
+        request={{
+          id: "questionnaire",
+          type: "questionnaire",
+          title: "需求",
+          createdAt: 1,
+          questionnaire: {
+            questions: [
+              {
+                header: "需求",
+                question: "请选择需求",
+                options: [
+                  { label: "技术任务", description: "实现功能" },
+                  { label: "界面需求", description: "调整界面" },
+                ],
+              },
+            ],
+          },
+        }}
+        projectId="project"
+        threadId="thread"
+      />,
+    );
+
+    expect(markup.match(/<input\b/g)).toHaveLength(1);
+    expect(markup).toContain('placeholder="Type something."');
+    expect(markup).not.toContain("<textarea");
+    expect(markup).not.toContain("备注");
+  });
   it("select 请求使用带方向键契约和受控选中态的垂直 RadioGroup", () => {
     const markup = renderToStaticMarkup(
       <HostRequestField request={selectRequest} value="prod" onChange={() => undefined} />,
@@ -57,13 +88,14 @@ describe("Host request components", () => {
     expect(markup.match(/data-radix-collection-item=""/g)).toHaveLength(2);
   });
 
-  it("阻塞式 Dialog 通过共享 prop 隐藏关闭按钮", () => {
+  it("阻塞请求作为 Composer surface 内联渲染", () => {
     const markup = renderToStaticMarkup(
       <HostRequestDialog request={selectRequest} projectId="project" threadId="thread" />,
     );
 
-    expect(markup).toContain('data-close-button-class-name="hidden"');
-    expect(markup).toContain('data-class-name="gap-3 sm:max-w-lg"');
+    expect(markup).toContain('aria-label="扩展询问"');
+    expect(markup).toContain("composer-surface");
+    expect(markup).not.toContain("data-close-button-class-name");
   });
 
   it("长工具调用 ID 在标题行内截断并保留完整值供悬停查看", () => {
@@ -76,7 +108,7 @@ describe("Host request components", () => {
       />,
     );
 
-    expect(markup).toContain('class="flex min-w-0 items-baseline gap-1 text-xs font-medium text-muted-foreground"');
+    expect(markup).toContain('class="flex min-w-0 items-baseline gap-1 text-[11px] font-medium text-muted-foreground"');
     expect(markup).toContain('class="min-w-0 truncate font-mono"');
     expect(markup).toContain(`title="${toolCallId}"`);
   });

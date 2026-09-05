@@ -21,10 +21,10 @@ function errorMessage(reason: unknown): string {
 }
 
 /** 会话级插件选择：读取可选插件与当前子集，变更时经 main 替换 worker 加载集。 */
-export function useSessionPlugins(projectId: string, threadId: string): SessionPluginsController {
+export function useSessionPlugins(projectId: string, threadId: string, enabled = true): SessionPluginsController {
   const [plugins, setPlugins] = useState<readonly DraftSelectablePlugin[] | null>(null);
   const [enabledPluginIds, setEnabledPluginIds] = useState<string[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string>();
   const [pendingAbortSelection, setPendingAbortSelection] =
@@ -36,6 +36,10 @@ export function useSessionPlugins(projectId: string, threadId: string): SessionP
   const currentScopeKey = useRef(scopeKey);
 
   const reload = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     const generation = ++requestGeneration.current;
     setLoading(true);
     setError(undefined);
@@ -54,7 +58,7 @@ export function useSessionPlugins(projectId: string, threadId: string): SessionP
         setLoading(false);
       }
     }
-  }, [projectId, scopeKey, threadId]);
+  }, [enabled, projectId, scopeKey, threadId]);
   const reloadRef = useRef(reload);
 
   useLayoutEffect(() => {
@@ -70,8 +74,13 @@ export function useSessionPlugins(projectId: string, threadId: string): SessionP
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      requestGeneration.current++;
+      setLoading(false);
+      return;
+    }
     void reload();
-  }, [reload]);
+  }, [enabled, reload]);
 
   const apply = useCallback(
     async (selection: string[] | null) => {

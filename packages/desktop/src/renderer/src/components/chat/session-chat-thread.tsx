@@ -3,7 +3,6 @@ import { useRef } from "react";
 import { Messages } from "./messages.tsx";
 import { SelectionToolbar } from "./selection-toolbar.tsx";
 import { SessionComposer } from "./session-composer.tsx";
-import { SessionHostRequests } from "./session-host-requests.tsx";
 
 /**
  * Holds the assistant-ui thread viewport and the session message tree.
@@ -28,7 +27,6 @@ export function SessionChatThread() {
         </div>
         <SelectionToolbar rootRef={threadRootRef} />
       </ThreadPrimitive.Root>
-      <SessionHostRequests />
     </>
   );
 }

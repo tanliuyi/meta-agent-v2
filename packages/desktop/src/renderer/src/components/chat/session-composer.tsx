@@ -4,6 +4,7 @@ import { ConfirmDialog } from "../../shared/ui/confirm-dialog.tsx";
 import { useDesktopActions } from "../../state/desktop-context.tsx";
 import { useSessionControlSelector, useSessionScope, useSessionTimelineSelector } from "../session-context.tsx";
 import { Composer } from "./composer/composer.tsx";
+import { HostRequestDialog } from "./host-request-dialog.tsx";
 import { ReadOnlySessionStatus } from "./session-read-only-status.tsx";
 import { useSessionPlugins } from "./use-session-plugins.ts";
 
@@ -12,11 +13,11 @@ export function SessionComposer() {
   const { record, clearQueue, commandsReady, modelsRefreshing, refreshModels, setModel, setThinking } =
     useSessionScope();
   const actions = useDesktopActions();
-  const plugins = useSessionPlugins(record.identity.projectId, record.identity.threadId);
   const [pendingStop, setPendingStop] = useState(false);
   const [stopping, setStopping] = useState(false);
   const hasControl = useSessionControlSelector((control) => control !== null);
   const interaction = useSessionControlSelector((control) => control?.interaction);
+  const plugins = useSessionPlugins(record.identity.projectId, record.identity.threadId, interaction !== "read-only");
   const model = useSessionControlSelector((control) => control?.model);
   const models = useSessionControlSelector((control) => control?.models ?? EMPTY_MODELS);
   const commands = useSessionControlSelector((control) => control?.commands ?? EMPTY_COMMANDS);
@@ -27,6 +28,7 @@ export function SessionComposer() {
   const widgets = useSessionControlSelector((control) => control?.extensionHost.widgets ?? EMPTY_WIDGETS);
   const composerCommand = useSessionControlSelector((control) => control?.extensionHost.composerCommand);
   const working = useSessionControlSelector((control) => control?.extensionHost.working);
+  const hostRequest = useSessionControlSelector((control) => control?.hostRequests[0]);
   const phase = useSessionTimelineSelector((timeline) => timeline.phase);
   const queue = useSessionTimelineSelector((timeline) => timeline.queue);
   const confirmStop = useCallback(() => {
@@ -38,7 +40,7 @@ export function SessionComposer() {
       .finally(() => setStopping(false));
   }, [actions, record.identity.projectId, record.identity.threadId]);
   if (!hasControl || !readiness) return null;
-  if (interaction === "read-only") {
+  if (interaction === "read-only" && !hostRequest) {
     return (
       <>
         <ReadOnlySessionStatus
@@ -59,8 +61,9 @@ export function SessionComposer() {
       </>
     );
   }
-  return (
-    <>
+
+  const composer =
+    interaction === "read-only" ? null : (
       <Composer
         mode="session"
         projectId={record.identity.projectId}
@@ -92,16 +95,39 @@ export function SessionComposer() {
           void plugins.apply(enabledPluginIds);
         }}
       />
-      <ConfirmDialog
-        open={plugins.pendingAbortSelection !== null}
-        title="切换会话插件"
-        description="当前会话正在运行，更改插件会中止运行中的任务。已经生成的内容会保留。"
-        confirmLabel="中止并切换"
-        onOpenChange={(open) => {
-          if (!open) plugins.clearPendingAbort();
-        }}
-        onConfirm={() => void plugins.applyConfirmedAbort()}
-      />
+    );
+
+  return (
+    <>
+      {composer ? (
+        <div
+          data-composer-container
+          hidden={Boolean(hostRequest)}
+          inert={hostRequest ? true : undefined}
+          aria-hidden={hostRequest ? true : undefined}
+        >
+          {composer}
+        </div>
+      ) : null}
+      {hostRequest ? (
+        <HostRequestDialog
+          key={hostRequest.id}
+          request={hostRequest}
+          projectId={record.identity.projectId}
+          threadId={record.identity.threadId}
+        />
+      ) : composer ? (
+        <ConfirmDialog
+          open={plugins.pendingAbortSelection !== null}
+          title="切换会话插件"
+          description="当前会话正在运行，更改插件会中止运行中的任务。已经生成的内容会保留。"
+          confirmLabel="中止并切换"
+          onOpenChange={(open) => {
+            if (!open) plugins.clearPendingAbort();
+          }}
+          onConfirm={() => void plugins.applyConfirmedAbort()}
+        />
+      ) : null}
     </>
   );
 }
