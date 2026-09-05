@@ -1,0 +1,204 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "收起侧边栏" [expanded] [ref=e6]:
+        - generic [ref=e7]: 收起侧边栏 · Ctrl+B
+      - navigation "已打开的会话" [ref=e8]:
+        - tablist "会话" [ref=e9]:
+          - generic [ref=e10]:
+            - tab "调用subagent执行workflowScript" [ref=e636]
+            - button "关闭 调用subagent执行workflowScript" [ref=e13]:
+              - generic [ref=e14]: 关闭
+          - button "新建任务" [ref=e15]
+    - generic "窗口控制" [ref=e17]:
+      - button "最小化" [ref=e18]
+      - button "最大化" [ref=e20]
+      - button "关闭" [ref=e23]
+  - generic [ref=e27]:
+    - complementary [ref=e28]:
+      - separator "调整侧边栏宽度" [ref=e29]
+      - generic [ref=e30]:
+        - navigation "主要操作" [ref=e31]:
+          - button "新建任务" [ref=e32] [cursor=pointer]
+        - generic [ref=e34]:
+          - navigation "辅助操作" [ref=e35]:
+            - link "插件中心" [ref=e36] [cursor=pointer]:
+              - /url: /#/plugins?draftProjectId=__general__
+          - generic [ref=e39]:
+            - button "项目" [expanded] [ref=e41] [cursor=pointer]
+            - region "项目列表" [ref=e43]:
+              - list [ref=e45]:
+                - listitem [ref=e46]:
+                  - generic [ref=e48]:
+                    - button "tenyo-1" [ref=e49]
+                    - button "在 tenyo-1 中新建任务" [ref=e54]:
+                      - generic [ref=e55]: 新建任务
+                - listitem [ref=e56]:
+                  - generic [ref=e58]:
+                    - button "meta-agent-v2" [ref=e59]
+                    - button "在 meta-agent-v2 中新建任务" [ref=e64]:
+                      - generic [ref=e65]: 新建任务
+                - listitem [ref=e66]:
+                  - generic [ref=e68]:
+                    - button "七彩选岛小程序" [ref=e69]
+                    - button "在 七彩选岛小程序 中新建任务" [ref=e74]:
+                      - generic [ref=e75]: 新建任务
+                - listitem [ref=e76]:
+                  - generic [ref=e78]:
+                    - button "七彩选岛服务端" [ref=e79]
+                    - button "在 七彩选岛服务端 中新建任务" [ref=e84]:
+                      - generic [ref=e85]: 新建任务
+                - listitem [ref=e86]:
+                  - generic [ref=e88]:
+                    - button "页岩气" [ref=e89]
+                    - button "在 页岩气 中新建任务" [ref=e94]:
+                      - generic [ref=e95]: 新建任务
+                - listitem [ref=e96]:
+                  - generic [ref=e98]:
+                    - button "stockskill" [ref=e99]
+                    - button "在 stockskill 中新建任务" [ref=e104]:
+                      - generic [ref=e105]: 新建任务
+                - listitem [ref=e106]:
+                  - generic [ref=e108]:
+                    - button "ybsjxcx" [ref=e109]
+                    - button "在 ybsjxcx 中新建任务" [ref=e114]:
+                      - generic [ref=e115]: 新建任务
+                - listitem [ref=e116]:
+                  - generic [ref=e118]:
+                    - button "ssapp" [ref=e119]
+                    - button "在 ssapp 中新建任务" [ref=e124]:
+                      - generic [ref=e125]: 新建任务
+                - listitem [ref=e126]:
+                  - generic [ref=e128]:
+                    - button "dsh-plugin" [ref=e129]
+                    - button "在 dsh-plugin 中新建任务" [ref=e134]:
+                      - generic [ref=e135]: 新建任务
+                - listitem [ref=e136]:
+                  - generic [ref=e138]:
+                    - button "cd-history" [ref=e139]
+                    - button "在 cd-history 中新建任务" [ref=e144]:
+                      - generic [ref=e145]: 新建任务
+                - listitem [ref=e146]:
+                  - generic [ref=e148]:
+                    - button "deepseek-harness" [ref=e149]
+                    - button "在 deepseek-harness 中新建任务" [ref=e154]:
+                      - generic [ref=e155]: 新建任务
+                - listitem [ref=e156]:
+                  - generic [ref=e158]:
+                    - button "页岩气v2" [ref=e159]
+                    - button "在 页岩气v2 中新建任务" [ref=e164]:
+                      - generic [ref=e165]: 新建任务
+                - listitem [ref=e166]:
+                  - generic [ref=e168]:
+                    - button "v39" [ref=e169]
+                    - button "在 v39 中新建任务" [ref=e174]:
+                      - generic [ref=e175]: 新建任务
+                - listitem [ref=e176]:
+                  - generic [ref=e178]:
+                    - button "NewProject_1" [ref=e179]
+                    - button "在 NewProject_1 中新建任务" [ref=e184]:
+                      - generic [ref=e185]: 新建任务
+                - listitem [ref=e186]:
+                  - generic [ref=e188]:
+                    - button "game" [ref=e189]
+                    - button "在 game 中新建任务" [ref=e194]:
+                      - generic [ref=e195]: 新建任务
+                - listitem [ref=e196]:
+                  - generic [ref=e198]:
+                    - button "cdhsjyk" [ref=e199]
+                    - button "在 cdhsjyk 中新建任务" [ref=e204]:
+                      - generic [ref=e205]: 新建任务
+                - listitem [ref=e206]:
+                  - generic [ref=e208]:
+                    - button "Desktop" [ref=e209]
+                    - button "在 Desktop 中新建任务" [ref=e214]:
+                      - generic [ref=e215]: 新建任务
+                - listitem [ref=e216]:
+                  - generic [ref=e218]:
+                    - button "njs" [ref=e219]
+                    - button "在 njs 中新建任务" [ref=e224]:
+                      - generic [ref=e225]: 新建任务
+                - listitem [ref=e226]:
+                  - generic [ref=e228]:
+                    - button "meta-agent-v039" [ref=e229]
+                    - button "在 meta-agent-v039 中新建任务" [ref=e234]:
+                      - generic [ref=e235]: 新建任务
+          - generic [ref=e237]:
+            - button "对话" [expanded] [ref=e239] [cursor=pointer]
+            - region "对话会话列表" [ref=e241]:
+              - tree "对话 会话" [ref=e243]:
+                - generic [ref=e244]:
+                  - button "展开子会话" [ref=e245]
+                  - treeitem "调用subagent执行workflowScript" [level=1] [ref=e637]
+                  - generic [aria-hidden]:
+                    - generic: 调用subagent执行workflowScript
+                    - generic: 在侧边栏打开
+                - generic [ref=e250]:
+                  - button "展开子会话" [ref=e251]
+                  - treeitem "调用subagent工具" [level=1] [ref=e254]
+                  - generic [aria-hidden]:
+                    - generic: 调用subagent工具
+                    - generic: 在侧边栏打开
+                - generic [ref=e256]:
+                  - treeitem "Subagent with contact_supervisor and CDP markers" [level=1] [ref=e257]
+                  - generic [aria-hidden]:
+                    - generic: Subagent with contact_supervisor and CDP markers
+                    - generic: 在侧边栏打开
+                - generic [ref=e259]:
+                  - button "展开子会话" [ref=e260]
+                  - treeitem "Calling subagents with workflow script" [level=1] [ref=e263]
+                  - generic [aria-hidden]:
+                    - generic: Calling subagents with workflow script
+                    - generic: 在侧边栏打开
+                - generic [ref=e265]:
+                  - button "展开子会话" [ref=e266]
+                  - treeitem "Async subagent execution and result reporting" [level=1] [ref=e269]
+                  - generic [aria-hidden]:
+                    - generic: Async subagent execution and result reporting
+                    - generic: 在侧边栏打开
+                - button "展开更多" [ref=e272]
+        - link "设置" [ref=e274] [cursor=pointer]:
+          - /url: /#/settings/personalization?draftProjectId=__general__
+    - generic [ref=e704]:
+      - generic [ref=e705]:
+        - strong [ref=e707]: 新会话
+        - generic [ref=e708]:
+          - button "显示底部终端" [ref=e709]:
+            - generic [ref=e710]: 显示/隐藏终端
+          - button "显示右侧 Panel" [ref=e711]:
+            - generic [ref=e712]: 显示/隐藏侧边栏
+      - main [ref=e714]:
+        - generic [ref=e715]:
+          - heading "在 对话 做什么？" [level=1] [ref=e716]:
+            - text: 在
+            - generic [ref=e717]: 对话
+            - text: 做什么？
+          - generic [ref=e719]:
+            - generic [ref=e720]:
+              - generic [ref=e722]:
+                - generic [ref=e724]:
+                  - combobox "消息输入" [active] [ref=e725]:
+                    - paragraph [ref=e726]
+                  - generic: 发送消息，@ 引用文件
+                - generic [ref=e727]:
+                  - button "Add Attachment" [ref=e729]:
+                    - generic [ref=e730]: 添加附件
+                  - generic [ref=e731]:
+                    - combobox "选择模型" [ref=e732]:
+                      - generic [ref=e733]: GPT 5.6 Sol
+                    - combobox [ref=e737]:
+                      - generic [ref=e738]: medium
+                    - combobox [aria-hidden] [ref=e739]
+                    - button "发送消息" [disabled]
+              - group "新会话设置" [ref=e740]:
+                - generic [ref=e741]:
+                  - combobox [ref=e742]:
+                    - generic [ref=e743]: 对话
+                  - combobox "插件" [ref=e746]:
+                    - generic [aria-hidden] [ref=e749]: B
+            - status [ref=e751]:
+              - paragraph [ref=e755]: 本地插件“Figma Design”已覆盖市场插件“Figma Design”，当前使用本地版本。
+              - link "查看" [ref=e757] [cursor=pointer]:
+                - /url: /plugins
+  - region "通知 (F8)":
+    - list

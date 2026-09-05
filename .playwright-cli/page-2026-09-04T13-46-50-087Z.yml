@@ -1,0 +1,321 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - button "收起侧边栏" [expanded] [ref=e6]:
+        - generic [ref=e7]: 收起侧边栏 · Ctrl+B
+      - navigation "已打开的会话" [ref=e8]:
+        - tablist "会话" [ref=e9]:
+          - generic [ref=e321]:
+            - tab "运行中 调用subagent工具并返回指定输出" [selected] [ref=e1056]:
+              - generic "运行中" [ref=e1057]
+              - generic [ref=e324]: 调用subagent工具并返回指定输出
+            - button "关闭 调用subagent工具并返回指定输出" [ref=e666]:
+              - generic [ref=e326]: 关闭
+          - button "新建任务" [ref=e10]
+    - generic "窗口控制" [ref=e12]:
+      - button "最小化" [ref=e13]
+      - button "最大化" [ref=e15]
+      - button "关闭" [ref=e18]
+  - generic [ref=e22]:
+    - complementary [ref=e23]:
+      - separator "调整侧边栏宽度" [ref=e24]
+      - generic [ref=e25]:
+        - navigation "主要操作" [ref=e26]:
+          - button "新建任务" [ref=e27] [cursor=pointer]
+        - generic [ref=e29]:
+          - navigation "辅助操作" [ref=e30]:
+            - link "插件中心" [ref=e31] [cursor=pointer]:
+              - /url: /#/plugins?returnProjectId=__general__&returnThreadId=1a2f0bdf-2727-428d-b9dc-84e02bf8905e
+          - generic [ref=e34]:
+            - button "项目" [expanded] [ref=e36] [cursor=pointer]
+            - region "项目列表" [ref=e38]:
+              - list [ref=e40]:
+                - listitem [ref=e41]:
+                  - generic [ref=e43]:
+                    - button "tenyo-1" [ref=e44]
+                    - button "在 tenyo-1 中新建任务" [ref=e49]:
+                      - generic [ref=e50]: 新建任务
+                - listitem [ref=e51]:
+                  - generic [ref=e53]:
+                    - button "meta-agent-v2" [ref=e54]
+                    - button "在 meta-agent-v2 中新建任务" [ref=e59]:
+                      - generic [ref=e60]: 新建任务
+                - listitem [ref=e61]:
+                  - generic [ref=e63]:
+                    - button "七彩选岛小程序" [ref=e64]
+                    - button "在 七彩选岛小程序 中新建任务" [ref=e69]:
+                      - generic [ref=e70]: 新建任务
+                - listitem [ref=e71]:
+                  - generic [ref=e73]:
+                    - button "七彩选岛服务端" [ref=e74]
+                    - button "在 七彩选岛服务端 中新建任务" [ref=e79]:
+                      - generic [ref=e80]: 新建任务
+                - listitem [ref=e81]:
+                  - generic [ref=e83]:
+                    - button "页岩气" [ref=e84]
+                    - button "在 页岩气 中新建任务" [ref=e89]:
+                      - generic [ref=e90]: 新建任务
+                - listitem [ref=e91]:
+                  - generic [ref=e93]:
+                    - button "stockskill" [ref=e94]
+                    - button "在 stockskill 中新建任务" [ref=e99]:
+                      - generic [ref=e100]: 新建任务
+                - listitem [ref=e101]:
+                  - generic [ref=e103]:
+                    - button "ybsjxcx" [ref=e104]
+                    - button "在 ybsjxcx 中新建任务" [ref=e109]:
+                      - generic [ref=e110]: 新建任务
+                - listitem [ref=e111]:
+                  - generic [ref=e113]:
+                    - button "ssapp" [ref=e114]
+                    - button "在 ssapp 中新建任务" [ref=e119]:
+                      - generic [ref=e120]: 新建任务
+                - listitem [ref=e121]:
+                  - generic [ref=e123]:
+                    - button "dsh-plugin" [ref=e124]
+                    - button "在 dsh-plugin 中新建任务" [ref=e129]:
+                      - generic [ref=e130]: 新建任务
+                - listitem [ref=e131]:
+                  - generic [ref=e133]:
+                    - button "cd-history" [ref=e134]
+                    - button "在 cd-history 中新建任务" [ref=e139]:
+                      - generic [ref=e140]: 新建任务
+                - listitem [ref=e141]:
+                  - generic [ref=e143]:
+                    - button "deepseek-harness" [ref=e144]
+                    - button "在 deepseek-harness 中新建任务" [ref=e149]:
+                      - generic [ref=e150]: 新建任务
+                - listitem [ref=e151]:
+                  - generic [ref=e153]:
+                    - button "页岩气v2" [ref=e154]
+                    - button "在 页岩气v2 中新建任务" [ref=e159]:
+                      - generic [ref=e160]: 新建任务
+                - listitem [ref=e161]:
+                  - generic [ref=e163]:
+                    - button "v39" [ref=e164]
+                    - button "在 v39 中新建任务" [ref=e169]:
+                      - generic [ref=e170]: 新建任务
+                - listitem [ref=e171]:
+                  - generic [ref=e173]:
+                    - button "NewProject_1" [ref=e174]
+                    - button "在 NewProject_1 中新建任务" [ref=e179]:
+                      - generic [ref=e180]: 新建任务
+                - listitem [ref=e181]:
+                  - generic [ref=e183]:
+                    - button "game" [ref=e184]
+                    - button "在 game 中新建任务" [ref=e189]:
+                      - generic [ref=e190]: 新建任务
+                - listitem [ref=e191]:
+                  - generic [ref=e193]:
+                    - button "cdhsjyk" [ref=e194]
+                    - button "在 cdhsjyk 中新建任务" [ref=e199]:
+                      - generic [ref=e200]: 新建任务
+                - listitem [ref=e201]:
+                  - generic [ref=e203]:
+                    - button "Desktop" [ref=e204]
+                    - button "在 Desktop 中新建任务" [ref=e209]:
+                      - generic [ref=e210]: 新建任务
+                - listitem [ref=e211]:
+                  - generic [ref=e213]:
+                    - button "njs" [ref=e214]
+                    - button "在 njs 中新建任务" [ref=e219]:
+                      - generic [ref=e220]: 新建任务
+                - listitem [ref=e221]:
+                  - generic [ref=e223]:
+                    - button "meta-agent-v039" [ref=e224]
+                    - button "在 meta-agent-v039 中新建任务" [ref=e229]:
+                      - generic [ref=e230]: 新建任务
+          - generic [ref=e232]:
+            - button "对话" [expanded] [ref=e234] [cursor=pointer]
+            - region "对话会话列表" [ref=e236]:
+              - tree "对话 会话" [ref=e238]:
+                - generic [ref=e327]:
+                  - button "展开子会话" [ref=e328]
+                  - treeitem "调用subagent工具并返回指定输出 运行中" [level=1] [selected] [ref=e1058]:
+                    - generic [ref=e332]: 调用subagent工具并返回指定输出
+                    - generic "运行中" [ref=e1059]
+                  - generic [aria-hidden]:
+                    - generic: 调用subagent工具并返回指定输出
+                    - generic: 在侧边栏打开
+                - generic [ref=e239]:
+                  - treeitem "子智能体会话 Return exactly WORKFLOW_SCOUT_CDP_OK" [level=1] [ref=e240]:
+                    - img "子智能体会话" [ref=e241]
+                    - generic [ref=e244]: Return exactly WORKFLOW_SCOUT_CDP_OK
+                  - generic [aria-hidden]:
+                    - generic: Return exactly WORKFLOW_SCOUT_CDP_OK
+                    - generic: 在侧边栏打开
+                - generic [ref=e245]:
+                  - treeitem "子智能体会话 Return exactly WORKFLOW_REVIEWER_CDP_OK" [level=1] [ref=e246]:
+                    - img "子智能体会话" [ref=e247]
+                    - generic [ref=e250]: Return exactly WORKFLOW_REVIEWER_CDP_OK
+                  - generic [aria-hidden]:
+                    - generic: Return exactly WORKFLOW_REVIEWER_CDP_OK
+                    - generic: 在侧边栏打开
+                - generic [ref=e251]:
+                  - treeitem "子智能体会话 subagent-oracle-8404b4f3-1" [level=1] [ref=e252]:
+                    - img "子智能体会话" [ref=e253]
+                    - generic [ref=e256]: subagent-oracle-8404b4f3-1
+                  - generic [aria-hidden]:
+                    - generic: subagent-oracle-8404b4f3-1
+                    - generic: 在侧边栏打开
+                - generic [ref=e257]:
+                  - treeitem "子智能体会话 subagent-reviewer-f5ab4ee5-1" [level=1] [ref=e258]:
+                    - img "子智能体会话" [ref=e259]
+                    - generic [ref=e262]: subagent-reviewer-f5ab4ee5-1
+                  - generic [aria-hidden]:
+                    - generic: subagent-reviewer-f5ab4ee5-1
+                    - generic: 在侧边栏打开
+                - button "展开更多" [ref=e270]
+        - link "设置" [ref=e272] [cursor=pointer]:
+          - /url: /#/settings/personalization?returnProjectId=__general__&returnThreadId=1a2f0bdf-2727-428d-b9dc-84e02bf8905e
+    - generic [ref=e334]:
+      - generic [ref=e335]:
+        - strong [ref=e337]: 调用subagent工具并返回指定输出
+        - button "隐藏会话信息" [expanded] [pressed] [ref=e338]:
+          - generic [ref=e339]: 显示/隐藏会话信息
+        - generic [ref=e340]:
+          - button "显示底部终端" [ref=e341]:
+            - generic [ref=e342]: 显示/隐藏终端
+          - button "显示右侧 Panel" [ref=e343]:
+            - generic [ref=e344]: 显示/隐藏侧边栏
+      - main [ref=e346]:
+        - generic [ref=e347]:
+          - generic [ref=e348]:
+            - navigation "消息导航":
+              - generic [ref=e527]:
+                - button [ref=e528]
+                - button [ref=e529]
+                - button [ref=e615]
+                - button [ref=e702]
+                - button [ref=e788]
+                - button [ref=e928]
+                - button [ref=e1060]
+            - generic [ref=e351]:
+              - generic [ref=e352]:
+                - generic [ref=e353]:
+                  - generic [ref=e354]:
+                    - generic [aria-hidden] [ref=e355]: 用
+                    - generic [ref=e356]: 用户
+                  - generic [ref=e357]: 请立即调用 subagent 工具，参数 agent 为 delegate，task 为：Return exactly DELEGATE_ALL_SUBAGENTS_CDP_OK。调用完成后只回复子代理输出。
+                - generic [ref=e362]:
+                  - generic [ref=e365]:
+                    - generic [ref=e366]: gpt-5.6-sol
+                    - generic [ref=e367]: 思考：medium
+                  - generic [ref=e369]:
+                    - button "已处理 29s" [ref=e503]
+                    - paragraph [ref=e509]: DELEGATE_ALL_SUBAGENTS_CDP_OK
+              - generic [ref=e530]:
+                - generic [ref=e531]:
+                  - generic [ref=e532]:
+                    - generic [aria-hidden] [ref=e533]: 用
+                    - generic [ref=e534]: 用户
+                  - generic [ref=e535]: 请立即调用 subagent 工具，参数 agent 为 scout，task 为：Return exactly SCOUT_ALL_SUBAGENTS_CDP_OK。调用完成后只回复子代理输出。
+                - generic [ref=e581]:
+                  - generic [ref=e584]:
+                    - generic [ref=e585]: gpt-5.6-sol
+                    - generic [ref=e586]: 思考：medium
+                  - generic [ref=e588]:
+                    - button "已处理 34s" [ref=e590]
+                    - paragraph [ref=e597]: SCOUT_ALL_SUBAGENTS_CDP_OK。
+              - generic [ref=e616]:
+                - generic [ref=e617]:
+                  - generic [ref=e618]:
+                    - generic [aria-hidden] [ref=e619]: 用
+                    - generic [ref=e620]: 用户
+                  - generic [ref=e621]: 请立即调用 subagent 工具，参数 agent 为 reviewer，task 为：Return exactly REVIEWER_ALL_SUBAGENTS_CDP_OK。调用完成后只回复子代理输出。
+                - generic [ref=e668]:
+                  - generic [ref=e671]:
+                    - generic [ref=e672]: gpt-5.6-sol
+                    - generic [ref=e673]: 思考：medium
+                  - generic [ref=e675]:
+                    - button "已处理 30s" [ref=e677]
+                    - paragraph [ref=e684]: REVIEWER_ALL_SUBAGENTS_CDP_OK。
+              - generic [ref=e703]:
+                - generic [ref=e704]:
+                  - generic [ref=e705]:
+                    - generic [aria-hidden] [ref=e706]: 用
+                    - generic [ref=e707]: 用户
+                  - generic [ref=e708]: 请立即调用 subagent 工具，参数 agent 为 oracle，task 为：Return exactly ORACLE_ALL_SUBAGENTS_CDP_OK。调用完成后只回复子代理输出。
+                - generic [ref=e754]:
+                  - generic [ref=e757]:
+                    - generic [ref=e758]: gpt-5.6-sol
+                    - generic [ref=e759]: 思考：medium
+                  - generic [ref=e761]:
+                    - button "已处理 35s" [ref=e763]
+                    - paragraph [ref=e770]: ORACLE_ALL_SUBAGENTS_CDP_OK。
+              - generic [ref=e789]:
+                - generic [ref=e790]:
+                  - generic [ref=e791]:
+                    - generic [aria-hidden] [ref=e792]: 用
+                    - generic [ref=e793]: 用户
+                  - generic [ref=e794]: 请立即调用 subagent 工具，参数 agent 为 worker，task 为：Return exactly WORKER_ALL_SUBAGENTS_CDP_OK。调用完成后只回复子代理输出。
+                - generic [ref=e838]:
+                  - generic [ref=e841]:
+                    - generic [ref=e842]: gpt-5.6-sol
+                    - generic [ref=e843]: 思考：medium
+                  - generic [ref=e845]:
+                    - button "已处理 36s" [ref=e902]
+                    - paragraph [ref=e908]: WORKER_ALL_SUBAGENTS_CDP_OK。
+                    - status [ref=e909]:
+                      - generic [ref=e910]: 💾 记忆已自动审查并更新
+              - generic [ref=e929]:
+                - generic [ref=e930]:
+                  - generic [ref=e931]:
+                    - generic [aria-hidden] [ref=e932]: 用
+                    - generic [ref=e933]: 用户
+                  - generic [ref=e934]: 请立即调用 subagent 工具，参数 agent 为 researcher，task 为：Return exactly RESEARCHER_ALL_SUBAGENTS_CDP_OK。调用完成后只回复子代理输出。
+                - generic [ref=e978]:
+                  - generic [ref=e981]:
+                    - generic [ref=e982]: gpt-5.6-sol
+                    - generic [ref=e983]: 思考：medium
+                  - generic [ref=e985]:
+                    - generic [ref=e986]:
+                      - button "已处理 42s" [ref=e1033]
+                      - status [ref=e1037]:
+                        - generic [ref=e1038]: 💾 记忆已自动审查并更新
+                    - paragraph [ref=e1042]: RESEARCHER_ALL_SUBAGENTS_CDP_OK
+              - generic [ref=e1062]:
+                - generic [ref=e1063]:
+                  - generic [aria-hidden] [ref=e1064]: 用
+                  - generic [ref=e1065]: 用户
+                - generic [ref=e1066]: 请调用 subagent 工具：agent=worker，task=Return exactly ASYNC_ALL_SUBAGENTS_CDP_OK，async=true。然后使用 bg_wait 等待该异步运行完成，最后只回复子代理输出。
+              - generic [ref=e1074]:
+                - status [aria-hidden] [ref=e1075]:
+                  - generic [ref=e1076]: loading
+                - generic [ref=e1103]: 运行中
+          - generic [ref=e467]:
+            - generic [ref=e469]:
+              - combobox "消息输入" [active] [ref=e470]:
+                - paragraph [ref=e1104]
+              - generic: 运行中，可发送后续消息
+            - generic [ref=e472]:
+              - generic [ref=e473]:
+                - button "Add Attachment" [ref=e474]:
+                  - generic [ref=e475]: 添加附件
+                - group "运行中消息模式" [ref=e1105]:
+                  - button "引导" [pressed] [ref=e1106]
+                  - button "排队" [ref=e1107]
+              - generic [ref=e479]:
+                - combobox "选择模型" [ref=e480]:
+                  - generic [ref=e481]: gpt-5.6-sol
+                - combobox [ref=e485]:
+                  - generic [ref=e486]: medium
+                - combobox [aria-hidden] [ref=e487]
+                - generic [ref=e488]:
+                  - tooltip "上下文使用量 10% 已用 29k / 272k":
+                    - generic:
+                      - paragraph: 上下文使用量
+                      - paragraph: 10%
+                    - generic:
+                      - generic: 已用
+                      - generic: 29k / 272k
+                  - button "上下文使用量" [ref=e489]
+                - button "停止运行" [ref=e1108]
+        - complementary "会话信息" [ref=e495]:
+          - generic [ref=e497]:
+            - term [ref=e498]: 会话 ID
+            - definition [ref=e499]:
+              - generic "1a2f0bdf-2727-428d-b9dc-84e02bf8905e" [ref=e500]
+              - button "复制会话 ID"
+  - region "通知 (F8)":
+    - list

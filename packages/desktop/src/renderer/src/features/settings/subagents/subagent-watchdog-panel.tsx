@@ -223,7 +223,7 @@ export function SubagentWatchdogPanel({ settings, models, scopeLabel, saving, on
         </div>
         <div className="subagent-config-actions">
           <Button type="submit" disabled={saving}>
-            保存设置
+            保存自动审查
           </Button>
         </div>
       </form>

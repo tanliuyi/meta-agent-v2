@@ -86,6 +86,8 @@ describe("OpenWorkbenchPanel presence", () => {
     expect(markup).not.toContain("data-collapsed");
     expect(markup).toContain("调整右侧 Panel 宽度");
     expect(markup).toContain("panel-tabs");
+    expect(markup).toContain("panel-add size-6 text-muted-foreground");
+    expect(markup.indexOf("panel-add")).toBeGreaterThan(markup.indexOf("panel-tab-list"));
     expect(markup).toContain('id="workbench-panel-content"');
   });
 

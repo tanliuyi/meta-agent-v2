@@ -22,6 +22,8 @@ const captured = vi.hoisted(() => ({
   inputOnSubmit: undefined as (() => void) | undefined,
   commandOnSelect: undefined as ((command: SlashCommand) => void) | undefined,
   formOnSubmit: undefined as ((event: { preventDefault: () => void }) => void) | undefined,
+  modelSelectDisabled: undefined as boolean | undefined,
+  thinkingSelectDisabled: undefined as boolean | undefined,
 }));
 
 vi.mock("@assistant-ui/react", () => ({
@@ -106,10 +108,20 @@ vi.mock("../src/renderer/src/components/assistant-ui/attachment/composer-add-att
 vi.mock("../src/renderer/src/components/assistant-ui/attachment/composer-attachments.tsx", () => ({
   ComposerAttachments: () => null,
 }));
-vi.mock("../src/renderer/src/components/chat/model-select.tsx", () => ({ ModelSelect: () => null }));
+vi.mock("../src/renderer/src/components/chat/model-select.tsx", () => ({
+  ModelSelect: ({ disabled }: { disabled?: boolean }) => {
+    captured.modelSelectDisabled = disabled;
+    return null;
+  },
+}));
 vi.mock("../src/renderer/src/components/chat/plugin-select.tsx", () => ({ PluginSelect: () => null }));
 vi.mock("../src/renderer/src/components/chat/project-select.tsx", () => ({ ProjectSelect: () => null }));
-vi.mock("../src/renderer/src/components/chat/thinking-select.tsx", () => ({ ThinkingSelect: () => null }));
+vi.mock("../src/renderer/src/components/chat/thinking-select.tsx", () => ({
+  ThinkingSelect: ({ disabled }: { disabled?: boolean }) => {
+    captured.thinkingSelectDisabled = disabled;
+    return null;
+  },
+}));
 
 import { Composer } from "../src/renderer/src/components/chat/composer/composer.tsx";
 
@@ -372,6 +384,16 @@ describe("Composer running 阶段提交", () => {
     captured.composerState.attachments = [];
     captured.composerState.send.mockClear();
     captured.formOnSubmit = undefined;
+    captured.modelSelectDisabled = undefined;
+    captured.thinkingSelectDisabled = undefined;
+  });
+
+  it("running 时允许切换模型和思考等级", () => {
+    captured.running = true;
+    renderToStaticMarkup(<Composer {...sessionProps({ phase: "running" })} />);
+
+    expect(captured.modelSelectDisabled).toBe(false);
+    expect(captured.thinkingSelectDisabled).toBe(false);
   });
 
   it("空文本但带附件时允许提交", () => {

@@ -68,6 +68,21 @@ describe("plugin icons", () => {
     expect(popoverContent.className).toContain("z-(--stack-menu)");
   });
 
+  it("renders the plugin placeholder when no plugins are selected", () => {
+    const markup = renderToStaticMarkup(
+      <TooltipProvider>
+        <PluginSelect
+          plugins={[{ id: "dev.meta-agent.market", displayName: "Market", source: "marketplace", available: true }]}
+          value={[]}
+          onValueChange={() => undefined}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(markup).toContain(">插件</span>");
+    expect(markup).not.toContain(`src="${marketplacePluginIconUrl("dev.meta-agent.market")}"`);
+  });
+
   it("renders an installed marketplace icon in the composer selector", () => {
     const markup = renderToStaticMarkup(
       <TooltipProvider>
