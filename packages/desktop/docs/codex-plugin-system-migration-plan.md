@@ -4,7 +4,7 @@
 > Owner: Desktop
 > Scope: `packages/desktop`
 > Authority: `C:\Users\Administrator\.codex\skills\.system\plugin-creator\SKILL.md`
-> Last updated: 2026-07-26
+> Last updated: 2026-09-07
 
 ## 1. Objective
 
@@ -89,14 +89,14 @@ Exit criteria: the old protocol has an explicit dependency map and no unknown pr
 
 ### Phase 1: Codex contract layer
 
-Status: not started
+Status: done
 
-- [ ] Add typed Codex `plugin.json` model and strict parser.
-- [ ] Validate normalized plugin name, supported manifest fields, relative paths, and companion existence.
-- [ ] Reject path traversal, absolute paths, unsupported fields, TODO placeholders, and malformed JSON.
-- [ ] Add Codex Marketplace JSON model and parser.
-- [ ] Resolve default personal Marketplace using the user profile path.
-- [ ] Add tests using fixtures copied from valid Codex plugin layouts.
+- [x] Add typed Codex `plugin.json` model and strict parser.
+- [x] Validate normalized plugin name, supported manifest fields, relative paths, and companion existence.
+- [x] Reject path traversal, absolute paths, unsupported fields, TODO placeholders, and malformed JSON. (Deviation: unknown top-level fields are tolerated per the observed host contract, e.g. `hooks`, `bundledContentVariant`.)
+- [x] Add Codex Marketplace JSON model and parser.
+- [x] Resolve default personal Marketplace using the user profile path.
+- [x] Add tests using fixtures copied from valid Codex plugin layouts.
 
 Exit criteria: Desktop can validate a real Codex plugin and Marketplace file without importing old Desktop manifest code.
 
@@ -202,6 +202,17 @@ Required final coverage:
 - preservation of user-modified unrelated files.
 
 ## 7. Live implementation log
+
+### 2026-09-07
+
+- Implemented Phase 1 contract layer on branch `codex/plugin-system-migration`.
+- Added `src/main/plugins/codex/codex-plugin-identifiers.ts` (plugin and Marketplace name patterns).
+- Added `src/main/plugins/codex/codex-plugin-manifest.ts` (typed manifest model, strict parser, on-disk companion and asset validation).
+- Added `src/main/plugins/codex/codex-marketplace.ts` (typed Marketplace model, parser, personal Marketplace path resolution).
+- Added fixtures copied from the installed Codex host (`test/fixtures/codex/plugins/dart-flutter`, `browser`, `marketplaces/openai-curated.json`, `openai-api-curated.json`).
+- Added `test/codex-plugin-manifest.test.ts` and `test/codex-marketplace.test.ts`; 43 tests pass, `npm run check` clean.
+- Parser follows the observed host contract, not the stricter bundled validator: `hooks` and other unknown top-level fields are tolerated, `interface` is optional, and Marketplace entries keep their declared source path verbatim after safety validation.
+- Next implementation step: Phase 2, source discovery and registry.
 
 ### 2026-07-26
 
