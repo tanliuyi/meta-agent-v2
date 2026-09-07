@@ -883,6 +883,57 @@ describe("DesktopExtensionSourcePolicy codex sources", () => {
     ]);
   });
 
+  it("verifies the installed copy instead of the source when present", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    // 源根被删除，但受管副本仍然完好 → 插件保持可用
+    const sourceRoot = join(root, "source");
+    const copyRoot = await writeCodexPluginRoot(root, "dart-flutter", "1.0.0");
+    await rm(sourceRoot, { recursive: true, force: true });
+    const record = codexRecord("dart-flutter", sourceRoot, "1.0.0");
+    const installed = { ...record, installedRootPath: copyRoot, installedHash: "a".repeat(64) };
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: "rev-1",
+        plugins: [installed],
+      }),
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    expect(resolved.entries.map(({ id }) => id)).toEqual(["curated", "builtin"]);
+    expect(resolved.diagnostics).toEqual([]);
+    // 指纹仍然稳定
+    const second = await harness.policy.resolve("project");
+    expect(second.generation).toBe(resolved.generation);
+  });
+
+  it("reports a broken Codex plugin when the installed copy is damaged", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    const sourceRoot = await writeCodexPluginRoot(root, "dart-flutter", "1.0.0");
+    const copyRoot = join(root, "damaged-copy");
+    await mkdir(join(copyRoot, "skills"), { recursive: true });
+    const record = codexRecord("dart-flutter", sourceRoot, "1.0.0");
+    const installed = { ...record, installedRootPath: copyRoot, installedHash: "a".repeat(64) };
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: "rev-1",
+        plugins: [installed],
+      }),
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    expect(resolved.diagnostics).toEqual([
+      expect.objectContaining({
+        extensionId: "dart-flutter",
+        source: "codex",
+        code: "CODEX_EXTENSION_ENTRY_UNAVAILABLE",
+      }),
+    ]);
+  });
+
   it("skips Codex entries whose id conflicts with an existing extension", async () => {
     const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     directories.push(root);

@@ -177,4 +177,156 @@ describe("CodexPluginRegistry", () => {
       expect(info.mode & 0o600).toBe(0o600);
     }
   });
+
+  it("commits installed state with the derived version", async () => {
+    const { registry } = await createHarness();
+    const snapshot = await registry.reconcile([sourceRecord()]);
+
+    const committed = await registry.commitInstalled(
+      snapshot.revision,
+      "dart-flutter",
+      "C:\\copies\\dart-flutter",
+      "c".repeat(64),
+      "1.0.0+codex.20260907120000",
+    );
+
+    expect(committed.status).toBe("saved");
+    if (committed.status !== "saved") return;
+    expect(committed.snapshot.plugins[0]).toMatchObject({
+      id: "dart-flutter",
+      version: "1.0.0+codex.20260907120000",
+      installedRootPath: "C:\\copies\\dart-flutter",
+      installedHash: "c".repeat(64),
+    });
+    expect(committed.snapshot.revision).not.toBe(snapshot.revision);
+  });
+
+  it("leaves other plugin records untouched when committing", async () => {
+    const { registry } = await createHarness();
+    const snapshot = await registry.reconcile([sourceRecord(), sourceRecord({ name: "alpha" })]);
+
+    const committed = await registry.commitInstalled(
+      snapshot.revision,
+      "dart-flutter",
+      "C:\\copies\\dart-flutter",
+      "c".repeat(64),
+      "1.0.0",
+    );
+
+    expect(committed.status).toBe("saved");
+    if (committed.status !== "saved") return;
+    const alpha = committed.snapshot.plugins.find((plugin) => plugin.id === "alpha");
+    expect(alpha?.installedHash).toBeUndefined();
+    expect(alpha?.version).toBe("1.0.0");
+  });
+
+  it("returns conflict when committing against a stale revision", async () => {
+    const { registry } = await createHarness();
+    await registry.reconcile([sourceRecord()]);
+
+    const committed = await registry.commitInstalled(
+      "stale-revision",
+      "dart-flutter",
+      "C:\\copies\\dart-flutter",
+      "c".repeat(64),
+      "1.0.0",
+    );
+
+    expect(committed.status).toBe("conflict");
+  });
+
+  it("returns not-installed when committing unknown plugins", async () => {
+    const { registry } = await createHarness();
+    const snapshot = await registry.reconcile([sourceRecord()]);
+
+    const committed = await registry.commitInstalled(
+      snapshot.revision,
+      "unknown",
+      "C:\\copies\\unknown",
+      "c".repeat(64),
+      "1.0.0",
+    );
+
+    expect(committed.status).toBe("not-installed");
+  });
+
+  it("clears installed state on commitUninstalled and keeps the discovery record", async () => {
+    const { registry } = await createHarness();
+    const discovered = await registry.reconcile([sourceRecord()]);
+    const installed = await registry.commitInstalled(
+      discovered.revision,
+      "dart-flutter",
+      "C:\\copies\\dart-flutter",
+      "c".repeat(64),
+      "1.0.0",
+    );
+    if (installed.status !== "saved") return;
+
+    const uninstalled = await registry.commitUninstalled(installed.snapshot.revision, "dart-flutter");
+
+    expect(uninstalled.status).toBe("saved");
+    if (uninstalled.status !== "saved") return;
+    expect(uninstalled.snapshot.plugins[0]).toMatchObject({
+      id: "dart-flutter",
+      version: "1.0.0",
+      rootPath: "C:\\home\\plugins\\dart-flutter",
+    });
+    expect(uninstalled.snapshot.plugins[0]?.installedHash).toBeUndefined();
+    expect(uninstalled.snapshot.plugins[0]?.installedRootPath).toBeUndefined();
+  });
+
+  it("returns not-installed when uninstalling a plugin without installed state", async () => {
+    const { registry } = await createHarness();
+    const snapshot = await registry.reconcile([sourceRecord()]);
+
+    const uninstalled = await registry.commitUninstalled(snapshot.revision, "dart-flutter");
+
+    expect(uninstalled.status).toBe("not-installed");
+  });
+
+  it("keeps installed state across discovery passes when the source is unchanged", async () => {
+    const { registry } = await createHarness();
+    const discovered = await registry.reconcile([sourceRecord()]);
+    await registry.commitInstalled(
+      discovered.revision,
+      "dart-flutter",
+      "C:\\copies\\dart-flutter",
+      "c".repeat(64),
+      "1.0.0",
+    );
+
+    const snapshot = await registry.reconcile([sourceRecord()]);
+
+    expect(snapshot.plugins[0]?.installedHash).toBe("c".repeat(64));
+    expect(snapshot.plugins[0]?.installedRootPath).toBe("C:\\copies\\dart-flutter");
+  });
+
+  it("drops installed state when the source changed", async () => {
+    const { registry } = await createHarness();
+    const discovered = await registry.reconcile([sourceRecord()]);
+    await registry.commitInstalled(
+      discovered.revision,
+      "dart-flutter",
+      "C:\\copies\\dart-flutter",
+      "c".repeat(64),
+      "1.0.0",
+    );
+
+    const snapshot = await registry.reconcile([sourceRecord({ version: "1.1.0" })]);
+
+    expect(snapshot.plugins[0]?.installedHash).toBeUndefined();
+    expect(snapshot.plugins[0]?.installedRootPath).toBeUndefined();
+    expect(snapshot.plugins[0]?.version).toBe("1.1.0");
+  });
+
+  it("rejects an invalid installedHash in the registry file", async () => {
+    const { root, registry } = await createHarness();
+    await registry.reconcile([sourceRecord()]);
+    const registryPath = join(root, "plugins", "codex-plugins.json");
+    const data = JSON.parse(await readFile(registryPath, "utf8")) as { plugins: Array<Record<string, unknown>> };
+    data.plugins[0] = { ...data.plugins[0], installedHash: "not-a-hash" };
+    await writeFile(registryPath, `${JSON.stringify({ version: 1, plugins: data.plugins }, null, 2)}\n`, "utf8");
+
+    await expect(registry.getSnapshot()).rejects.toThrow("codex-plugins.json plugin entry is invalid");
+  });
 });

@@ -179,7 +179,8 @@ export class DesktopExtensionSourcePolicy {
           continue;
         }
         try {
-          const loaded = await loadCodexPluginManifest(record.rootPath);
+          const manifestRoot = record.installedRootPath ?? record.rootPath;
+          const loaded = await loadCodexPluginManifest(manifestRoot);
           if (loaded.manifest === undefined) {
             const detail = loaded.issues[0] ? `: ${loaded.issues[0].path}: ${loaded.issues[0].message}` : "";
             throw new Error(`Codex plugin manifest is invalid${detail}`);

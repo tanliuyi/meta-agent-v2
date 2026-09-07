@@ -116,16 +116,18 @@ Exit criteria check: a Codex plugin declared by the personal Marketplace is disc
 
 ### Phase 3: Installation, update, and removal
 
-Status: not started
+Status: done
 
-- [ ] Replace artifact-specific installer inputs with Codex Marketplace source resolution.
-- [ ] Preserve staging, locking, CAS/revision, crash recovery, and garbage collection where useful.
-- [ ] Remove required Desktop artifact metadata and runtime-target selection from the Codex plugin path.
-- [ ] Implement Codex cachebuster update flow for local Marketplace development.
-- [ ] Ensure Desktop never writes to Codex `plugin.json` or manually edits Marketplace JSON during updates.
-- [ ] Keep explicit full-trust confirmation for ordinary Node plugin code as a Desktop UX policy, not a manifest requirement.
+- [x] Replace artifact-specific installer inputs with Codex Marketplace source resolution (the installer resolves the discovered record and copies the local plugin source; no artifact API, runtime-target selection, or Desktop manifest involvement).
+- [x] Preserve staging, locking, CAS/revision, crash recovery, and garbage collection where useful (per-plugin locks, `.meta-agent-codex-staging`, content-addressed `.versions` payloads under `plugins/codex-extensions`, registry revision CAS, startup reconciler).
+- [x] Remove required Desktop artifact metadata and runtime-target selection from the Codex plugin path (records carry only `installedRootPath`/`installedHash`; no `artifactHash`/capabilities/entry path).
+- [x] Implement Codex cachebuster update flow for local Marketplace development (updates derive `base+codex.<UTC timestamp>` versions, mirroring `update_plugin_cachebuster`; version bumps keep the source version verbatim).
+- [x] Ensure Desktop never writes to Codex `plugin.json` or manually edits Marketplace JSON during updates (the installer only reads the source and manages its own copy under `plugins/codex-extensions`).
+- [x] Keep explicit full-trust confirmation for ordinary Node plugin code as a Desktop UX policy, not a manifest requirement (`confirmFullTrust`/`confirmRemoval` stay caller-side requirements).
 
 Exit criteria: install/update/uninstall works for a Codex Marketplace entry and does not create a Desktop-only plugin format.
+
+Exit criteria check: installing copies the verified local source into a content-addressed `.versions` payload under `plugins/codex-extensions/<name>/` (Desktop-owned files excluded, symlinks followed so the copy is self-contained) and commits `installedRootPath`/`installedHash` plus the record version through `CodexPluginRegistry.commitInstalled`. Updates re-verify the source, derive a cachebuster version (`0.1.0+codex.<UTC timestamp>` when the manifest base is unchanged, the source version verbatim on a manifest bump), land a new payload, remove the previous one, and return `reloadRequired: true` so the worker generation rebuilds (`fingerprint` includes the record version). Uninstalls clear the installed state and remove the managed copy. Crash windows (payload landed but not committed, installed payload gone, registry committed but copy removal interrupted) are repaired by `CodexPluginReconciler`. The installer never writes the plugin source, `plugin.json`, or Marketplace JSON; no Desktop artifact manifest is produced. Install state is discovery-bound: when a Marketplace entry disappears at startup, the discovery record is dropped and the reconciler removes the managed copy; the managed copy is authoritative within a run, not a persistent install that survives source removal.
 
 ### Phase 4: Companion loading
 
@@ -226,6 +228,14 @@ Required final coverage:
 - Added `test/codex-plugin-sources.test.ts`, `test/codex-plugin-registry.test.ts`, and six Codex cases in `test/desktop-extension-source-policy.test.ts`; 99 tests across the five extension test files pass, `npm run check` clean.
 - Marketplace root resolves three directories above the marketplace file (e.g. `~/.agents/plugins/marketplace.json` maps `./plugins/<name>` to `~/plugins/<name>`), per the Codex layout; only the implicit personal Marketplace is scanned in this phase.
 - Next implementation step: Phase 3, installation, update, and removal.
+
+### 2026-09-07 (Phase 3)
+
+- Implemented Phase 3, installation, update, and removal. Resolution now verifies `record.installedRootPath` when present, so the managed copy is authoritative over the live source.
+- Added `src/main/plugins/codex/codex-plugin-installer.ts`: install/update/uninstall copy verified sources into content-addressed `.versions` payloads under `plugins/codex-extensions`, commit installed state (`installedRootPath`/`installedHash` plus the record version) through the registry with revision CAS and per-plugin locks, derive cachebuster versions (`0.1.0+codex.<UTC timestamp>`) on content-only updates, and never write plugin, Marketplace, or source files. Full-trust/removal confirmation stays a caller-side UX requirement.
+- Added `src/main/plugins/codex/codex-plugin-reconciler.ts` repairing the crash windows around the registry commit point (orphan staging, uncommitted payloads, missing installed payloads, interrupted copy removal); `plugin-services.ts` wires both.
+- Added `test/codex-plugin-installer.test.ts`, `test/codex-plugin-reconciler.test.ts`, nine registry mutation cases, and two installed-copy cases in the policy test; 137 tests across the seven extension test files pass, `npm run check` clean.
+- Next implementation step: Phase 4, companion loading (`skills/`, `scripts/`, `.mcp.json`, `.app.json`).
 
 ### 2026-07-26
 

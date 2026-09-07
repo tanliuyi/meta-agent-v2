@@ -4,6 +4,9 @@ import { safeStorage } from "electron";
 import { DesktopControlledExtensionRegistry } from "../extensions/desktop-extension-registry.ts";
 import { DesktopExtensionSettingsService } from "../extensions/desktop-extension-settings-service.ts";
 import { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
+import { resolveCodexExtensionRoot } from "../plugins/codex/codex-extension-root.ts";
+import { CodexPluginInstaller } from "../plugins/codex/codex-plugin-installer.ts";
+import { CodexPluginReconciler } from "../plugins/codex/codex-plugin-reconciler.ts";
 import { CodexPluginRegistry } from "../plugins/codex/codex-plugin-registry.ts";
 import { discoverCodexPluginSources } from "../plugins/codex/codex-plugin-sources.ts";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "../plugins/default-plugin-marketplace.ts";
@@ -29,6 +32,7 @@ export interface PluginServices {
   readonly marketplaceEndpoints: MarketplaceEndpointSettingsService;
   readonly marketplaceRegistry: MarketplacePluginRegistry;
   readonly codexRegistry: CodexPluginRegistry;
+  readonly codexInstaller: CodexPluginInstaller;
   readonly marketplaceCatalog: MarketplaceCatalogService;
   readonly marketplaceInstaller: MarketplacePluginInstaller;
   readonly marketplaceGarbageCollector: MarketplacePluginGarbageCollector;
@@ -85,6 +89,12 @@ export async function createPluginServices(
   await marketplaceReconciler.reconcile();
   handleMarketplacePluginIconRequests(marketplaceRegistry);
   await codexRegistry.reconcile((await discoverCodexPluginSources(options.codexHomeDir ?? homedir())).plugins);
+  const codexRoot = resolveCodexExtensionRoot(context.userDataDir);
+  const codexReconciler = new CodexPluginReconciler(codexRegistry, codexRoot, marketplaceLockDirectory, {
+    log: (text) => context.sidecarLog.write("codex", text),
+  });
+  const codexInstaller = new CodexPluginInstaller(codexRegistry, marketplaceLockDirectory, codexRoot);
+  await codexReconciler.reconcile();
 
   const extensionSourcePolicy = new DesktopExtensionSourcePolicy({
     settings: extensionSettings,
@@ -124,6 +134,7 @@ export async function createPluginServices(
     marketplaceEndpoints,
     marketplaceRegistry,
     codexRegistry,
+    codexInstaller,
     marketplaceCatalog,
     marketplaceInstaller,
     marketplaceGarbageCollector,
