@@ -47,6 +47,13 @@ import type {
   SaveBrowserSettingsResult,
 } from "./browser-settings-contracts.ts";
 import type {
+  CodexPluginMutationInput,
+  CodexPluginMutationResult,
+  CodexPluginsSnapshot,
+  SetCodexPluginEnabledInput,
+  SetCodexPluginEnabledResult,
+} from "./codex-plugin-contracts.ts";
+import type {
   ClearedQueue,
   DraftSessionConfig,
   FileChangeSet,
@@ -110,32 +117,6 @@ import type {
   SessionCheckpointRestoreInput,
   SessionCheckpointRestoreResult,
 } from "./pi-rewind-contracts.ts";
-import type {
-  PluginConfigurationSnapshot,
-  SavePluginConfigurationInput,
-  SavePluginConfigurationResult,
-} from "./plugin-configuration-contracts.ts";
-import type {
-  InstalledMarketplacePluginsSnapshot,
-  InstallMarketplacePluginInput,
-  InstallMarketplacePluginResult,
-  ListMarketplacePluginsInput,
-  MarketplaceEndpointSettingsSnapshot,
-  MarketplacePluginPage,
-  MarketplacePluginSummary,
-  SaveMarketplaceEndpointInput,
-  SaveMarketplaceEndpointResult,
-  SetMarketplacePluginEnabledInput,
-  SetMarketplacePluginEnabledResult,
-  SetMarketplacePluginScopeInput,
-  SetMarketplacePluginScopeResult,
-  TestMarketplaceEndpointInput,
-  TestMarketplaceEndpointResult,
-  UninstallMarketplacePluginInput,
-  UninstallMarketplacePluginResult,
-  UpdateMarketplacePluginInput,
-  UpdateMarketplacePluginResult,
-} from "./plugin-marketplace-contracts.ts";
 import type { PreferencesSnapshot, SavePreferencesInput, SavePreferencesResult } from "./preferences-contracts.ts";
 import type { ProvidersSnapshot, SaveProvidersInput, SaveProvidersResult } from "./providers-config-contracts.ts";
 import type { ScmChangedEvent, ScmDiff, ScmSnapshot } from "./scm-contracts.ts";
@@ -243,24 +224,13 @@ export interface DesktopApi {
     apply(input: ApplyDesktopExtensionSetInput): Promise<ApplyDesktopExtensionSetResult>;
     getSessionPlugins(projectId: string, threadId: string): Promise<SessionPluginOptions>;
     applySessionPlugins(input: ApplySessionPluginSelectionInput): Promise<ApplyDesktopExtensionSetResult>;
-    getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
-    savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
   };
-  marketplace: {
-    getEndpointSettings(): Promise<MarketplaceEndpointSettingsSnapshot>;
-    testEndpoint(input: TestMarketplaceEndpointInput): Promise<TestMarketplaceEndpointResult>;
-    saveEndpoint(input: SaveMarketplaceEndpointInput): Promise<SaveMarketplaceEndpointResult>;
-    listPlugins(input?: ListMarketplacePluginsInput): Promise<MarketplacePluginPage>;
-    /** 按 pluginId 直达详情；市场目录中不存在时返回 null。 */
-    getPlugin(pluginId: string): Promise<MarketplacePluginSummary | null>;
-    getInstalled(): Promise<InstalledMarketplacePluginsSnapshot>;
-    getPluginConfiguration(pluginId: string): Promise<PluginConfigurationSnapshot>;
-    savePluginConfiguration(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult>;
-    installPlugin(input: InstallMarketplacePluginInput): Promise<InstallMarketplacePluginResult>;
-    updatePlugin(input: UpdateMarketplacePluginInput): Promise<UpdateMarketplacePluginResult>;
-    uninstallPlugin(input: UninstallMarketplacePluginInput): Promise<UninstallMarketplacePluginResult>;
-    setPluginEnabled(input: SetMarketplacePluginEnabledInput): Promise<SetMarketplacePluginEnabledResult>;
-    setPluginScope(input: SetMarketplacePluginScopeInput): Promise<SetMarketplacePluginScopeResult>;
+  codexPlugins: {
+    list(): Promise<CodexPluginsSnapshot>;
+    install(input: CodexPluginMutationInput): Promise<CodexPluginMutationResult>;
+    update(input: CodexPluginMutationInput): Promise<CodexPluginMutationResult>;
+    uninstall(input: CodexPluginMutationInput): Promise<CodexPluginMutationResult>;
+    setEnabled(input: SetCodexPluginEnabledInput): Promise<SetCodexPluginEnabledResult>;
   };
   subagents: {
     getSnapshot(input?: GetSubagentSettingsInput): Promise<SubagentSettingsSnapshot>;

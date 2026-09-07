@@ -136,7 +136,7 @@ describe("SessionRuntime Pi-native commands", () => {
     expect(mocks.createAgentSessionFromServices).not.toHaveBeenCalled();
   });
 
-  it("does not fail startup when a marketplace plugin is superseded by local development", async () => {
+  it("does not fail startup for an unsupported Codex companion", async () => {
     const session = createSession();
     mocks.createAgentSessionFromServices.mockResolvedValue({ session });
 
@@ -144,16 +144,16 @@ describe("SessionRuntime Pi-native commands", () => {
       projectId: "project",
       cwd: "/workspace",
       extensionSet: {
-        generation: "local-priority",
+        generation: "unsupported-companion",
         projectId: "project",
         entries: [],
         diagnostics: [
           {
-            extensionId: "pi.web-access",
-            source: "marketplace",
+            extensionId: "review-plugin",
+            source: "codex",
             phase: "resolve",
-            code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
-            message: "本地插件优先",
+            code: "CODEX_COMPANION_UNSUPPORTED",
+            message: "review-plugin: hooks are unsupported",
           },
         ],
         resolvedAt: 0,
@@ -164,7 +164,7 @@ describe("SessionRuntime Pi-native commands", () => {
 
     expect(runtime.bootstrap().control.lastError).toBeUndefined();
     expect(runtime.bootstrap().control.extensionSet.diagnostics).toEqual([
-      expect.objectContaining({ code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT" }),
+      expect.objectContaining({ code: "CODEX_COMPANION_UNSUPPORTED" }),
     ]);
     await runtime.dispose();
   });
@@ -678,7 +678,7 @@ describe("SessionRuntime Pi-native commands", () => {
   it("reloadResources 调用 Pi reload 并发布刷新后的 commands", async () => {
     const session = createSession();
     const push = vi.fn();
-    const skills: ReturnType<AgentSession["resourceLoader"]["getSkills"]>["skills"] = [];
+    const skills: ReturnType<AgentSession["resourceLoader"]["getSkills"]>["skills"] = createBuiltinSkills();
     session.resourceLoader.getSkills = () => ({ skills, diagnostics: [] });
     session.reload.mockImplementationOnce(async () => {
       skills.push({
@@ -792,7 +792,7 @@ describe("SessionRuntime Pi-native commands", () => {
   it("reloadResources 将 skill diagnostics 返回为失败结果", async () => {
     const session = createSession();
     session.resourceLoader.getSkills = () => ({
-      skills: [],
+      skills: createBuiltinSkills(),
       diagnostics: [{ type: "error", message: "invalid frontmatter", path: "/skills/broken/SKILL.md" }],
     });
     mocks.createAgentSessionFromServices.mockResolvedValue({ session });
@@ -880,7 +880,26 @@ describe("SessionRuntime Pi-native commands", () => {
 });
 
 function createServices() {
-  const builtinSkills: Skill[] = [
+  const builtinSkills = createBuiltinSkills();
+  return {
+    cwd: "/workspace",
+    modelRuntime: {
+      refresh: vi.fn(async () => undefined),
+      getError: () => undefined,
+      getAvailableSnapshot: () => [],
+      getModels: () => [],
+      getModel: () => undefined,
+    },
+    resourceLoader: {
+      getExtensions: () => ({ extensions: [], errors: [] }),
+      getSkills: () => ({ skills: builtinSkills, diagnostics: [] }),
+    },
+    diagnostics: [],
+  };
+}
+
+function createBuiltinSkills(): Skill[] {
+  return [
     ["pi-hermes-memory", "Hermes Memory"],
     ["pi-subagents", "Subagents"],
     ["pi-browser", "内置浏览器"],
@@ -897,21 +916,6 @@ function createServices() {
       disableModelInvocation: false,
     };
   });
-  return {
-    cwd: "/workspace",
-    modelRuntime: {
-      refresh: vi.fn(async () => undefined),
-      getError: () => undefined,
-      getAvailableSnapshot: () => [],
-      getModels: () => [],
-      getModel: () => undefined,
-    },
-    resourceLoader: {
-      getExtensions: () => ({ extensions: [], errors: [] }),
-      getSkills: () => ({ skills: builtinSkills, diagnostics: [] }),
-    },
-    diagnostics: [],
-  };
 }
 
 function createSession(streaming = false): AgentSession & {

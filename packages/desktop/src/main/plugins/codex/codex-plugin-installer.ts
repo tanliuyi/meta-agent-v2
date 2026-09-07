@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { cp, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { valid } from "semver";
-import { withMarketplacePluginLock } from "../marketplace-plugin-lock.ts";
+import { withCodexPluginLock } from "./codex-plugin-lock.ts";
 import { type CodexPluginManifest, loadCodexPluginManifest } from "./codex-plugin-manifest.ts";
 import type {
   CodexPluginRegistry,
@@ -21,7 +21,7 @@ import type {
  * development iterations that keep the manifest version derive a new worker
  * generation without touching the source manifest.
  *
- * Crash recovery mirrors the Desktop marketplace pipeline: the registry is the
+ * Crash recovery uses the registry as the
  * single commit point, payloads land by atomic rename, and a startup
  * reconciler removes payloads that never committed.
  */
@@ -124,15 +124,15 @@ export class CodexPluginInstaller {
   }
 
   install(input: CodexPluginMutationInput): Promise<CodexPluginInstallResult> {
-    return withMarketplacePluginLock(this.lockDirectory, input.pluginId, () => this.installSerialized(input));
+    return withCodexPluginLock(this.lockDirectory, input.pluginId, () => this.installSerialized(input));
   }
 
   update(input: CodexPluginMutationInput): Promise<CodexPluginUpdateResult> {
-    return withMarketplacePluginLock(this.lockDirectory, input.pluginId, () => this.updateSerialized(input));
+    return withCodexPluginLock(this.lockDirectory, input.pluginId, () => this.updateSerialized(input));
   }
 
   uninstall(input: CodexPluginMutationInput): Promise<CodexPluginUninstallResult> {
-    return withMarketplacePluginLock(this.lockDirectory, input.pluginId, () => this.uninstallSerialized(input));
+    return withCodexPluginLock(this.lockDirectory, input.pluginId, () => this.uninstallSerialized(input));
   }
 
   clearCompletedMutation(requestId: string): void {
@@ -175,8 +175,7 @@ export class CodexPluginInstaller {
       await syncDirectory(dirname(stagingPath));
       rootCreated = await prepareInstallRoot(rootPath);
       await mkdir(dirname(versionPath), { recursive: true, mode: 0o700 });
-      await rename(stagingPath, versionPath);
-      versionCreated = true;
+      versionCreated = await landPayload(stagingPath, versionPath, hashValue);
       await syncDirectory(dirname(versionPath));
       await syncDirectory(rootPath);
       if (rootCreated) await syncDirectory(dirname(rootPath));
@@ -270,8 +269,7 @@ export class CodexPluginInstaller {
       }
       await syncDirectory(dirname(stagingPath));
       await mkdir(dirname(versionPath), { recursive: true, mode: 0o700 });
-      await rename(stagingPath, versionPath);
-      versionCreated = true;
+      versionCreated = await landPayload(stagingPath, versionPath, hashValue);
       await syncDirectory(dirname(versionPath));
       await syncDirectory(rootPath);
       await this.beforeRegistryCommit?.(rootPath, versionPath);
@@ -287,19 +285,12 @@ export class CodexPluginInstaller {
         return { status: "conflict", current: saved.status === "conflict" ? saved.snapshot : initial };
       }
       registryCommitted = true;
-      const oldVersionPath = join(rootPath, VERSION_DIRECTORY, before.installedHash);
-      let recoveryPending = false;
-      try {
-        await rm(oldVersionPath, { recursive: true, force: true });
-        await syncDirectory(join(rootPath, VERSION_DIRECTORY));
-      } catch {
-        recoveryPending = true;
-      }
+      // Old workers and replacement rollback still use the previous payload.
+      // Only startup reconciliation, before any workers exist, may collect it.
       const result: CodexPluginUpdateResult = {
         status: "updated",
         snapshot: saved.snapshot,
         reloadRequired: true,
-        ...(recoveryPending ? { recoveryPending: true } : {}),
       };
       this.completedUpdates.set(input.requestId, result);
       return result;
@@ -346,7 +337,7 @@ export class CodexPluginInstaller {
       this.completedUninstalls.set(input.requestId, result);
       return result;
     }
-    const managedRoot = this.requireManagedRoot(input.pluginId, record.installedRootPath);
+    this.requireManagedRoot(input.pluginId, record.installedRootPath);
     const saved = await this.registry.commitUninstalled(input.expectedRevision, input.pluginId);
     if (saved.status !== "saved") {
       if (saved.status === "conflict") return { status: "conflict", current: saved.snapshot };
@@ -357,19 +348,12 @@ export class CodexPluginInstaller {
       this.completedUninstalls.set(input.requestId, result);
       return result;
     }
-    let recoveryPending = false;
-    try {
-      await rm(managedRoot, { recursive: true, force: true });
-      await rmdir(this.codexRoot).catch(() => undefined);
-      await rmdir(join(managedRoot, VERSION_DIRECTORY)).catch(() => undefined);
-    } catch {
-      recoveryPending = true;
-    }
+    // Uninstall immediately excludes new resolutions. Existing generations keep
+    // their files until startup reconciliation, including rollback snapshots.
     const result: CodexPluginUninstallResult = {
       status: "uninstalled",
       snapshot: saved.snapshot,
       reloadRequired: true,
-      ...(recoveryPending ? { recoveryPending: true } : {}),
     };
     this.completedUninstalls.set(input.requestId, result);
     return result;
@@ -416,17 +400,34 @@ export function defaultCachebusterToken(now: number): string {
 }
 
 async function copyPluginSource(sourceRoot: string, targetRoot: string): Promise<void> {
-  await cp(sourceRoot, targetRoot, {
-    recursive: true,
-    force: false,
-    errorOnExist: true,
-    verbatimSymlinks: false,
-    filter: (source) => {
-      const name = source.split(/[\\/]/).pop() ?? "";
-      if (name.startsWith(".meta-agent") || name === ".versions") return false;
-      return true;
-    },
-  });
+  // The private staging directory is already reserved. Copy its children without
+  // weakening errorOnExist, which must still reject unexpected destination files.
+  for (const entry of await readdir(sourceRoot)) {
+    await cp(join(sourceRoot, entry), join(targetRoot, entry), {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+      dereference: true,
+      filter: (source) => {
+        const name = source.split(/[\\/]/).pop() ?? "";
+        if (name.startsWith(".meta-agent") || name === ".versions") return false;
+        return true;
+      },
+    });
+  }
+}
+
+async function landPayload(stagingPath: string, versionPath: string, expectedHash: string): Promise<boolean> {
+  if (await pathExists(versionPath)) {
+    const info = await lstat(versionPath);
+    if (!info.isDirectory() || info.isSymbolicLink() || (await hashCodexPluginRoot(versionPath)) !== expectedHash) {
+      throw new Error("Retained Codex payload does not match its content hash");
+    }
+    await rm(stagingPath, { recursive: true, force: true });
+    return false;
+  }
+  await rename(stagingPath, versionPath);
+  return true;
 }
 
 async function prepareInstallRoot(root: string): Promise<boolean> {

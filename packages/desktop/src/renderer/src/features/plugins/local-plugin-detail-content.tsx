@@ -1,9 +1,5 @@
 import { Button } from "@renderer/shared/ui/button";
 import { Switch } from "@renderer/shared/ui/switch";
-import { Tabs } from "@renderer/shared/ui/tabs";
-import { TabsContent } from "@renderer/shared/ui/tabs-content";
-import { TabsList } from "@renderer/shared/ui/tabs-list";
-import { TabsTrigger } from "@renderer/shared/ui/tabs-trigger";
 import Blocks from "lucide-react/dist/esm/icons/blocks.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { useState } from "react";
@@ -11,7 +7,6 @@ import type {
   DesktopExtensionDiagnostic,
   DesktopExtensionListEntry,
 } from "../../../../shared/desktop-extension-contracts.ts";
-import { PluginConfigurationForm } from "./plugin-configuration-form.tsx";
 
 interface LocalPluginDetailContentProps {
   plugin: DesktopExtensionListEntry;
@@ -89,88 +84,50 @@ export function LocalPluginDetailContent({
           </div>
         </div>
         <span className="plugin-marketplace-detail-muted">{plugin.displayPath ?? "本地扩展入口"}</span>
-        {plugin.pluginId ? (
-          <div className="plugin-marketplace-notice" data-tone="info" role="status">
-            此插件声明了与市场插件 <strong>{plugin.pluginId}</strong> 相同的 ID，市场版本将被禁用，本地版本优先加载。
-            移除或停用本插件后市场版本恢复可用。
-          </div>
+      </div>
+      <div className="plugin-marketplace-detail-body">
+        <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-metadata">
+          <h3 id="plugin-local-detail-metadata">来源</h3>
+          <dl className="plugin-marketplace-detail-metadata">
+            <div>
+              <dt>插件 ID</dt>
+              <dd>{plugin.id}</dd>
+            </div>
+            <div>
+              <dt>入口路径</dt>
+              <dd>{plugin.displayPath ?? "本地扩展入口"}</dd>
+            </div>
+            <div>
+              <dt>来源</dt>
+              <dd>Developer Mode 本地插件</dd>
+            </div>
+            <div>
+              <dt>已启用</dt>
+              <dd>{plugin.configuredEnabled ? "是" : "否"}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-risks">
+          <h3 id="plugin-local-detail-risks">运行权限</h3>
+          <p>本地插件以当前账户权限运行，可读写文件、访问网络、读取环境变量并执行子进程，是受信任代码而非沙箱。</p>
+          <span className="plugin-marketplace-detail-muted">未提供能力声明（本地插件不声明 Marketplace 能力）</span>
+        </section>
+
+        {diagnostics.length ? (
+          <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-diagnostics">
+            <h3 id="plugin-local-detail-diagnostics">诊断</h3>
+            <ul className="plugin-local-detail-diagnostics">
+              {diagnostics.map((diagnostic) => (
+                <li key={`${diagnostic.phase}:${diagnostic.code}`} data-tone="error">
+                  <strong>{diagnostic.phase}</strong>
+                  <span>{diagnostic.message}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
       </div>
-      <Tabs defaultValue="overview" className="plugin-marketplace-detail-tabs">
-        <TabsList className="plugin-marketplace-detail-tab-list" aria-label="插件详情">
-          <TabsTrigger value="overview">基本信息</TabsTrigger>
-          <TabsTrigger value="configuration">配置</TabsTrigger>
-        </TabsList>
-        <TabsContent value="overview" className="plugin-marketplace-detail-tab-content">
-          <div className="plugin-marketplace-detail-body">
-            <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-metadata">
-              <h3 id="plugin-local-detail-metadata">来源</h3>
-              <dl className="plugin-marketplace-detail-metadata">
-                <div>
-                  <dt>插件 ID</dt>
-                  <dd>{plugin.id}</dd>
-                </div>
-                {plugin.pluginId ? (
-                  <div>
-                    <dt>市场插件身份</dt>
-                    <dd>{plugin.pluginId}</dd>
-                  </div>
-                ) : null}
-                <div>
-                  <dt>入口路径</dt>
-                  <dd>{plugin.displayPath ?? "本地扩展入口"}</dd>
-                </div>
-                <div>
-                  <dt>来源</dt>
-                  <dd>Developer Mode 本地插件</dd>
-                </div>
-                <div>
-                  <dt>已启用</dt>
-                  <dd>{plugin.configuredEnabled ? "是" : "否"}</dd>
-                </div>
-              </dl>
-            </section>
-
-            <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-risks">
-              <h3 id="plugin-local-detail-risks">能力与风险</h3>
-              <p>本地插件以当前账户权限运行，可读写文件、访问网络、读取环境变量并执行子进程，是受信任代码而非沙箱。</p>
-              <span className="plugin-marketplace-detail-muted">未提供能力声明（本地插件不声明 Marketplace 能力）</span>
-            </section>
-
-            {diagnostics.length ? (
-              <section className="plugin-marketplace-detail-section" aria-labelledby="plugin-local-detail-diagnostics">
-                <h3 id="plugin-local-detail-diagnostics">诊断</h3>
-                <ul className="plugin-local-detail-diagnostics">
-                  {diagnostics.map((diagnostic) => (
-                    <li key={`${diagnostic.phase}:${diagnostic.code}`} data-tone="error">
-                      <strong>{diagnostic.phase}</strong>
-                      <span>{diagnostic.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="configuration" className="plugin-marketplace-detail-tab-content">
-          <div className="plugin-marketplace-detail-body">
-            {plugin.configurationSchema ? (
-              <PluginConfigurationForm pluginId={plugin.id} source="development" />
-            ) : (
-              <section
-                className="plugin-marketplace-detail-section"
-                aria-labelledby="plugin-local-detail-configuration-empty"
-              >
-                <h3 id="plugin-local-detail-configuration-empty">配置</h3>
-                <span className="plugin-marketplace-detail-muted">
-                  本地插件没有声明配置 Schema；需要密钥或选项时通过环境变量或插件代码配置。
-                </span>
-              </section>
-            )}
-          </div>
-        </TabsContent>
-      </Tabs>
     </>
   );
 }

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { FileChangeSet, TerminalEvent } from "../../shared/contracts.ts";
+import type { PluginConfigurationSchema } from "../../shared/plugin-configuration-contracts.ts";
 import { ProjectFileWatcher } from "../files/file-watcher.ts";
 import { OfficeDocumentPreviewService } from "../files/office-document-preview-service.ts";
 import { ScmService } from "../scm/scm-service.ts";
@@ -10,6 +11,15 @@ import type { CoreServices } from "./core-services.ts";
 import type { PluginServices } from "./plugin-services.ts";
 import type { DesktopRuntimeContext } from "./runtime-context.ts";
 import type { SessionServices } from "./session-services.ts";
+
+const OFFICE_DOCUMENT_CONFIGURATION: PluginConfigurationSchema = {
+  version: 1,
+  fields: [
+    { key: "binaryPath", label: "OfficeCLI 二进制路径", type: "path" },
+    { key: "version", label: "下载版本", type: "text", defaultValue: "v1.0.143" },
+    { key: "autoDownload", label: "自动下载二进制", type: "boolean", defaultValue: true },
+  ],
+};
 
 /** 工作区文件、SCM、终端和 Office 预览服务集合。 */
 export interface WorkspaceServices {
@@ -53,7 +63,10 @@ export function createWorkspaceServices(options: WorkspaceServicesOptions): Work
       cacheDir: join(context.userDataDir, "cache", "office-document-preview"),
       getConfiguration: async () => {
         try {
-          const { values } = await plugins.pluginConfigurations.getRuntimeConfiguration("pi.officecli");
+          const { values } = await plugins.pluginConfigurations.getRuntimeConfiguration(
+            "pi.officecli",
+            OFFICE_DOCUMENT_CONFIGURATION,
+          );
           return {
             installed: true,
             binaryPath: typeof values.binaryPath === "string" ? values.binaryPath : undefined,

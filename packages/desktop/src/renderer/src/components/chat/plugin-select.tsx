@@ -1,7 +1,6 @@
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import { useId, useState } from "react";
 import type { DraftSelectablePlugin } from "../../../../shared/desktop-extension-contracts.ts";
-import { marketplacePluginIconUrl } from "../../../../shared/plugin-icon-contracts.ts";
 import { cn } from "../../shared/lib/cn.ts";
 import { Checkbox } from "../../shared/ui/checkbox.tsx";
 import { Popover } from "../../shared/ui/popover.tsx";
@@ -48,10 +47,6 @@ function equalIds(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   const set = new Set(right);
   return left.every((id) => set.has(id));
-}
-
-function pluginIconUrl(plugin: DraftSelectablePlugin): string | undefined {
-  return plugin.source === "marketplace" ? marketplacePluginIconUrl(plugin.id) : undefined;
 }
 
 /** 新会话的 direct-tool 插件激活选择；run_code 插件由插件中心全局控制，不在此处显示。 */
@@ -108,7 +103,7 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
                       index === 0 ? "z-10" : index === 1 ? "z-20" : "z-30",
                     )}
                   >
-                    <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} className="size-5" />
+                    <PluginIcon name={plugin.displayName} className="size-5" />
                   </span>
                 ))}
                 {enabledCount > 3 ? (
@@ -174,7 +169,7 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
                     }
                   />
                   <span className="flex size-[20px] aspect-square shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted/95 shadow-sm">
-                    <PluginIcon name={plugin.displayName} iconUrl={pluginIconUrl(plugin)} className="size-[18px]" />
+                    <PluginIcon name={plugin.displayName} className="size-[18px]" />
                   </span>
                   <label
                     htmlFor={checkboxId}
@@ -195,7 +190,7 @@ export function PluginSelect({ plugins, value, disabled = false, loading = false
                       )}
                       title={!plugin.available ? "该项目未开放此插件，启用后仅本会话加载" : undefined}
                     >
-                      {!plugin.available ? "未开放" : plugin.source === "marketplace" ? "市场" : "本地"}
+                      {!plugin.available ? "未开放" : plugin.source === "codex" ? "Codex" : "本地"}
                     </span>
                   </label>
                 </div>

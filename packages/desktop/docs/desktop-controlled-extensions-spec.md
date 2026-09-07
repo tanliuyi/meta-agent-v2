@@ -6,7 +6,7 @@
 >
 > 目标版本：Desktop Extension Host Profile v1
 >
-> 部分废止说明：[`plugin-marketplace-product-spec.md`](./plugin-marketplace-product-spec.md) 已接受并取代本文中“不建设在线 packages center”、不提供下载/签名/更新/撤销、source 仅限 `builtin/curated/development`、marketplace provider 不受支持，以及不复制预构建依赖/native artifact 的相关条款。Pi runner、受控 entry set、Host Profile、immutable worker generation、single-writer replacement 和 Developer Mode 边界继续有效。当前实现也不再为 path-backed entry 计算或校验内容 hash；generation 由设置 revision、marketplace artifact key、入口路径和配置 revision 决定。
+> 部分废止说明：[`codex-plugin-system-migration-plan.md`](./codex-plugin-system-migration-plan.md) 取代本文所有第三方插件协议。Host Profile、capabilities、可执行 entry 和 `plugin-methods.provide` 仅适用于 Desktop built-in、curated 和 Developer Mode Pi adapters。Codex 插件使用 `.codex-plugin/plugin.json` 和 companion adapters，不实现本规范的 Host Profile。
 
 ## 1. 摘要
 
@@ -413,7 +413,7 @@ Developer Mode extension 同样使用该 Host Profile。其 UI API 不因“开�
 
 ### 8.4 声明式插件配置
 
-Marketplace artifact 可以在 `market-manifest.json` 中声明版本化的 `configuration` schema。Desktop 只接受受限字段联合，不接受任意 renderer 组件或可执行 JSON Schema 扩展。v1 支持 `text`、`textarea`、`path`、`number`、`boolean`、`select` 和 `secret` 字段，并限制字段数、文本长度、选项数、默认值及数值范围。
+Desktop 内部 adapter 可以由 host 代码传入版本化的 `configuration` schema。该 schema 不从 Codex manifest 或 Marketplace JSON 读取。Desktop 只接受受限字段联合，不接受任意 renderer 组件或可执行 JSON Schema 扩展。v1 支持 `text`、`textarea`、`path`、`number`、`boolean`、`select` 和 `secret` 字段，并限制字段数、文本长度、选项数、默认值及数值范围。
 
 配置由 Desktop main 进程验证并按插件 ID 独立持久化。普通值写入 owner-only 文件；`secret` 值使用 Electron `safeStorage` 加密，renderer snapshot 只包含是否已配置，不包含明文。保存使用 request ID、revision/CAS、文件锁和原子替换。
 

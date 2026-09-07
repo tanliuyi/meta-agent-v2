@@ -1,0 +1,31 @@
+import type { DesktopExtensionCapability } from "../../shared/desktop-extension-contracts.ts";
+
+/** Internal capability vocabulary retained for legacy built-in adapters. */
+export const DESKTOP_EXTENSION_CAPABILITIES = new Set<DesktopExtensionCapability>([
+  "events.subscribe",
+  "configuration.read",
+  "tools.register",
+  "commands.register",
+  "providers.register",
+  "messages.enqueue",
+  "messages.custom",
+  "session.read",
+  "session.abort",
+  "session.compact",
+  "session.reload",
+  "session.replace",
+  "ui.notify",
+  "ui.dialog",
+  "ui.status",
+  "ui.widget.text",
+  "ui.title",
+  "ui.composer.write",
+  "ui.composer.read",
+  "ui.working",
+  "ui.tui.custom",
+  "ui.tui.theme",
+  "ui.tui.chrome",
+  "ui.tui.editor",
+  "ui.terminal.input",
+  "plugin-methods.provide",
+]);

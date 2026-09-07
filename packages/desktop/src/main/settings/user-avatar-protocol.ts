@@ -3,7 +3,6 @@ import { extname, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { net, protocol } from "electron";
 import { MARKDOWN_IMAGE_SCHEME } from "../../shared/markdown-image-contracts.ts";
-import { MARKETPLACE_PLUGIN_ICON_SCHEME } from "../../shared/plugin-icon-contracts.ts";
 import { USER_AVATAR_SCHEME } from "../../shared/settings-config-contracts.ts";
 
 const AVATAR_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
@@ -18,10 +17,6 @@ export function registerLocalImageSchemes(): void {
     {
       scheme: MARKDOWN_IMAGE_SCHEME,
       privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
-    },
-    {
-      scheme: MARKETPLACE_PLUGIN_ICON_SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true },
     },
   ]);
 }

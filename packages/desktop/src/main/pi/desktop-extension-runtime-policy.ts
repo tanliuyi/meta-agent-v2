@@ -1,5 +1,5 @@
 import { lstat, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as bundledPiAgentCore from "@earendil-works/pi-agent-core";
 import * as bundledPiAi from "@earendil-works/pi-ai";
@@ -26,10 +26,19 @@ import {
   type DesktopExtensionDiagnostic,
   type ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
+import { loadCodexPluginCompanions } from "../plugins/codex/codex-plugin-companions.ts";
+import { loadCodexPluginManifest } from "../plugins/codex/codex-plugin-manifest.ts";
+import { createCodexCompanionExtension } from "./codex-companion-extension.ts";
 import type { DesktopPluginRegistryBuilder } from "./run-code/plugin-method-registry.ts";
 import { createRunCodeExtension, type RunCodeRegistryHolder } from "./run-code/run-code-tool.ts";
 
-const NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES = new Set(["DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT"]);
+const NON_BLOCKING_EXTENSION_DIAGNOSTIC_CODES = new Set([
+  "CODEX_COMPANION_INVALID",
+  "CODEX_COMPANION_UNSUPPORTED",
+  "CODEX_EXTENSION_ENTRY_UNAVAILABLE",
+  "CODEX_EXTENSION_ID_CONFLICT",
+  "CODEX_SKILL_INVALID",
+]);
 
 type DesktopExtensionConfiguration = Readonly<Record<string, string | number | boolean>>;
 type DesktopInlineExtension = {
@@ -103,6 +112,22 @@ export async function validateResolvedExtensionSet(
       if (entry.entryPath) throw new Error(`Built-in extension ${entry.id} must use an inline factory`);
       continue;
     }
+    if (entry.source === "codex") {
+      const companions = entry.codexCompanions;
+      if (entry.entryPath || !companions || !isAbsolute(companions.rootPath) || entry.capabilities.length > 0) {
+        throw new Error(`Invalid Codex companion entry: ${entry.id}`);
+      }
+      const loaded = await loadCodexPluginManifest(companions.rootPath);
+      if (!loaded.manifest || loaded.manifest.name !== entry.id) throw new Error(`Invalid Codex manifest: ${entry.id}`);
+      const verified = await loadCodexPluginCompanions(companions.rootPath, loaded.manifest);
+      if (
+        JSON.stringify(verified.resources) !== JSON.stringify(companions) ||
+        JSON.stringify(entry.skillPaths) !== JSON.stringify(companions.skillPaths)
+      ) {
+        throw new Error(`Codex companions changed since resolution: ${entry.id}`);
+      }
+      continue;
+    }
     if (!entry.entryPath || !isAbsolute(entry.entryPath)) {
       throw new Error(`Extension ${entry.id} requires an absolute approved entry path`);
     }
@@ -126,6 +151,7 @@ export async function validateResolvedExtensionSet(
       ...entry,
       ...(entry.entryPath ? { entryPath: resolve(entry.entryPath) } : {}),
       capabilities: [...entry.capabilities],
+      ...(entry.codexCompanions ? { codexCompanions: structuredClone(entry.codexCompanions) } : {}),
       ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
     })),
     diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
@@ -247,6 +273,27 @@ export function controlledResourceLoaderOptions(
         .filter((path): path is string => typeof path === "string" && path.length > 0),
     ],
     skillsOverride: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
+      // Load each plugin separately so global name de-duplication cannot drop
+      // another plugin's skill. Paths and relative resource bases stay intact.
+      const skills = [...base.skills];
+      const diagnostics = [...base.diagnostics];
+      for (const entry of set.entries.filter((candidate) => candidate.source === "codex")) {
+        const loaded = loadSkills({
+          cwd: options.cwd ?? process.cwd(),
+          agentDir: options.agentDir ?? process.cwd(),
+          skillPaths: entry.skillPaths ?? [],
+          includeDefaults: false,
+        });
+        diagnostics.push(...loaded.diagnostics);
+        for (const skill of loaded.skills) {
+          const name = `${entry.id}:${skill.name}`;
+          if (skills.some((existing) => existing.name === name)) {
+            diagnostics.push({ type: "collision", message: `Skill name collision: ${name}`, path: skill.filePath });
+          } else {
+            skills.push({ ...skill, name });
+          }
+        }
+      }
       const builtinSkills = set.entries
         .filter((entry) => entry.source === "builtin" && entry.runCodeSkill)
         .flatMap((entry) => entry.skillPaths ?? [])
@@ -260,11 +307,11 @@ export function controlledResourceLoaderOptions(
               includeDefaults: false,
             }).skills,
         );
-      if (builtinSkills.length === 0) return base;
+      if (builtinSkills.length === 0) return { skills, diagnostics };
       const builtinNames = new Set(builtinSkills.map((skill) => skill.name));
       return {
-        skills: [...base.skills.filter((skill) => !builtinNames.has(skill.name)), ...builtinSkills],
-        diagnostics: base.diagnostics.filter(
+        skills: [...skills.filter((skill) => !builtinNames.has(skill.name)), ...builtinSkills],
+        diagnostics: diagnostics.filter(
           (diagnostic) =>
             !(diagnostic.type === "collision" && diagnostic.collision && builtinNames.has(diagnostic.collision.name)),
         ),
@@ -278,6 +325,7 @@ export function controlledResourceLoaderOptions(
         ? [createRunCodeExtension(options.pluginRegistry, options.cwd ?? process.cwd())]
         : []),
       ...pathBackedFactories,
+      ...set.entries.filter((entry) => entry.source === "codex").map(createCodexCompanionExtension),
     ],
     packageManagerOnMissing: async () => "error" as const,
   };
@@ -289,6 +337,28 @@ export function validatePluginSkills(
 ): DesktopExtensionDiagnostic[] {
   const diagnostics: DesktopExtensionDiagnostic[] = [];
   for (const entry of set.entries) {
+    if (entry.source === "codex") {
+      for (const diagnostic of loaded.diagnostics) {
+        if (
+          !diagnostic.path ||
+          !(entry.skillPaths ?? []).some((root) => {
+            const within = relative(resolve(root), resolve(diagnostic.path!));
+            return within === "" || (!isAbsolute(within) && within !== ".." && !within.startsWith(`..${sep}`));
+          })
+        )
+          continue;
+        diagnostics.push({
+          extensionId: entry.id,
+          source: entry.source,
+          extensionSetGeneration: set.generation,
+          projectId: set.projectId,
+          phase: "load",
+          code: "CODEX_SKILL_INVALID",
+          message: `${entry.displayName}: ${diagnostic.message}`,
+        });
+      }
+      continue;
+    }
     if (!entry.capabilities.includes("plugin-methods.provide")) continue;
     const primaryName = entry.runCodeSkill;
     const approvedPaths = new Set(

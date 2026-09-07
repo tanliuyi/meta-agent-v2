@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
+import type { CodexMarketplaceAuthenticationPolicy, CodexMarketplaceInstallationPolicy } from "./codex-marketplace.ts";
 import type { CodexPluginSourceRecord } from "./codex-plugin-sources.ts";
 
 export const MISSING_CODEX_REGISTRY_REVISION = "missing:codex-plugins-v1";
@@ -23,6 +24,10 @@ export interface CodexPluginRegistryRecord {
   marketplacePath: string;
   /** Declared local source path, relative to the marketplace root. */
   sourcePath: string;
+  marketplaceCategory?: string;
+  installationPolicy?: CodexMarketplaceInstallationPolicy;
+  authenticationPolicy?: CodexMarketplaceAuthenticationPolicy;
+  products?: string[];
   enabled: boolean;
   discoveredAt: number;
   /** Desktop-managed copy root; present when the plugin was installed. */
@@ -42,6 +47,11 @@ export interface CodexPluginRegistrySnapshot {
 }
 
 export type CodexPluginRegistryCommit =
+  | { status: "saved"; snapshot: CodexPluginRegistrySnapshot }
+  | { status: "conflict"; snapshot: CodexPluginRegistrySnapshot }
+  | { status: "not-installed"; snapshot: CodexPluginRegistrySnapshot };
+
+export type CodexPluginEnabledCommit =
   | { status: "saved"; snapshot: CodexPluginRegistrySnapshot }
   | { status: "conflict"; snapshot: CodexPluginRegistrySnapshot }
   | { status: "not-installed"; snapshot: CodexPluginRegistrySnapshot };
@@ -107,6 +117,15 @@ export class CodexPluginRegistry {
     return operation;
   }
 
+  commitEnabled(expectedRevision: string, pluginId: string, enabled: boolean): Promise<CodexPluginEnabledCommit> {
+    const operation = this.saveTail.then(() => this.commitEnabledLocked(expectedRevision, pluginId, enabled));
+    this.saveTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
   private async reconcileLocked(discovered: CodexPluginSourceRecord[]): Promise<CodexPluginRegistrySnapshot> {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const release = await lockfile.lock(this.path, {
@@ -139,6 +158,10 @@ export class CodexPluginRegistry {
           rootPath: plugin.rootPath,
           marketplacePath: plugin.marketplacePath,
           sourcePath: plugin.sourcePath,
+          ...(plugin.marketplaceCategory ? { marketplaceCategory: plugin.marketplaceCategory } : {}),
+          ...(plugin.installationPolicy ? { installationPolicy: plugin.installationPolicy } : {}),
+          ...(plugin.authenticationPolicy ? { authenticationPolicy: plugin.authenticationPolicy } : {}),
+          ...(plugin.products ? { products: [...plugin.products] } : {}),
           enabled: sameSource ? previous.enabled : true,
           discoveredAt: previous?.discoveredAt ?? Date.now(),
           // 源未变化时保留安装状态；源一旦变化安装副本即失效，需要重新安装。
@@ -218,6 +241,34 @@ export class CodexPluginRegistry {
     }
   }
 
+  private async commitEnabledLocked(
+    expectedRevision: string,
+    pluginId: string,
+    enabled: boolean,
+  ): Promise<CodexPluginEnabledCommit> {
+    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
+    const release = await lockfile.lock(this.path, {
+      realpath: false,
+      stale: 30_000,
+      retries: { retries: 6, factor: 1.6, minTimeout: 50, maxTimeout: 500, randomize: true },
+    });
+    try {
+      const current = await this.readCurrent();
+      if (current.revision !== expectedRevision) return { status: "conflict", snapshot: snapshot(current) };
+      const plugins = current.data.plugins;
+      if (!plugins?.some((plugin) => plugin.id === pluginId && plugin.installedHash)) {
+        return { status: "not-installed", snapshot: snapshot(current) };
+      }
+      await this.atomicWrite({
+        version: 1,
+        plugins: plugins.map((plugin) => (plugin.id === pluginId ? { ...plugin, enabled } : plugin)),
+      });
+      return { status: "saved", snapshot: await this.getSnapshot() };
+    } finally {
+      await release();
+    }
+  }
+
   private async readCurrent(): Promise<CurrentRegistry> {
     try {
       const info = await lstat(this.path);
@@ -290,6 +341,10 @@ function recordsEqual(
     left.rootPath === right.rootPath &&
     left.marketplacePath === right.marketplacePath &&
     left.sourcePath === right.sourcePath &&
+    left.marketplaceCategory === right.marketplaceCategory &&
+    left.installationPolicy === right.installationPolicy &&
+    left.authenticationPolicy === right.authenticationPolicy &&
+    JSON.stringify(left.products ?? []) === JSON.stringify(right.products ?? []) &&
     left.enabled === right.enabled &&
     left.installedRootPath === right.installedRootPath &&
     left.installedHash === right.installedHash
@@ -314,6 +369,16 @@ function assertRegistryFile(value: unknown): asserts value is RegistryFileData {
       typeof plugin.rootPath !== "string" ||
       typeof plugin.marketplacePath !== "string" ||
       typeof plugin.sourcePath !== "string" ||
+      (plugin.marketplaceCategory !== undefined && typeof plugin.marketplaceCategory !== "string") ||
+      (plugin.installationPolicy !== undefined &&
+        plugin.installationPolicy !== "NOT_AVAILABLE" &&
+        plugin.installationPolicy !== "AVAILABLE" &&
+        plugin.installationPolicy !== "INSTALLED_BY_DEFAULT") ||
+      (plugin.authenticationPolicy !== undefined &&
+        plugin.authenticationPolicy !== "ON_INSTALL" &&
+        plugin.authenticationPolicy !== "ON_USE") ||
+      (plugin.products !== undefined &&
+        (!Array.isArray(plugin.products) || !plugin.products.every((product) => typeof product === "string"))) ||
       typeof plugin.enabled !== "boolean" ||
       !Number.isSafeInteger(plugin.discoveredAt) ||
       (plugin.discoveredAt as number) < 0 ||

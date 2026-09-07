@@ -1,5 +1,6 @@
+import type { CodexPluginCompanions } from "./codex-plugin-companions.ts";
 import type { JsonValue } from "./contracts.ts";
-import type { PluginConfigurationSchema, PluginConfigurationValue } from "./plugin-configuration-contracts.ts";
+import type { PluginConfigurationValue } from "./plugin-configuration-contracts.ts";
 
 export const DESKTOP_EXTENSION_HOST_PROFILE_VERSION = 1 as const;
 
@@ -63,7 +64,7 @@ export type DesktopExtensionCapability =
   | "ui.terminal.input"
   | "plugin-methods.provide";
 
-export type DesktopExtensionSource = "builtin" | "curated" | "marketplace" | "development" | "codex";
+export type DesktopExtensionSource = "builtin" | "curated" | "development" | "codex";
 
 export interface DesktopExtensionDiagnostic {
   extensionId: string;
@@ -99,9 +100,8 @@ export interface ResolvedExtensionEntry {
   hostProfileVersion: typeof DESKTOP_EXTENSION_HOST_PROFILE_VERSION;
   capabilities: DesktopExtensionCapability[];
   configuration?: Record<string, PluginConfigurationValue>;
-  /** development 插件声明的插件身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
-  pluginId?: string;
   skillPaths?: string[];
+  codexCompanions?: CodexPluginCompanions;
   runCodeSkill?: string;
   runCodeCatalogPath?: string;
   runCodeCatalogSha256?: string;
@@ -121,7 +121,7 @@ export interface ResolvedExtensionSet {
 export interface DraftSelectablePlugin {
   id: string;
   displayName: string;
-  source: "marketplace" | "development";
+  source: "development" | "codex";
   /** 启用状态由插件中心全局决定；此字段表示当前项目/扩展集是否可用。 */
   available: boolean;
 }
@@ -174,12 +174,9 @@ export interface DesktopExtensionListEntry {
   configuredEnabled: boolean;
   capabilities: DesktopExtensionCapability[];
   displayPath?: string;
-  configurationSchema?: PluginConfigurationSchema;
   /** 生效范围：global 对所有项目生效；project 仅对 projectIds 指定的项目生效。 */
   scope: ExtensionScope;
   projectIds?: string[];
-  /** development 插件声明的插件身份（market-manifest.json plugin.id），用于识别与市场插件的覆盖关系。 */
-  pluginId?: string;
 }
 
 export interface DesktopExtensionSettingsSnapshot {

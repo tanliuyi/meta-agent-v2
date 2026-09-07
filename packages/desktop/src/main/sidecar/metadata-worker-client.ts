@@ -13,7 +13,7 @@ import type {
   CreationReservationRecovery,
   MetadataSidecarCommand,
 } from "../../shared/sidecar-contracts.ts";
-import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
+import type { PluginGenerationReferenceTracker } from "../plugins/plugin-generation-reference-tracker.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 import { SidecarWorkerClient } from "./worker-client.ts";
 
@@ -22,7 +22,7 @@ export class MetadataWorkerClient {
   private readonly agentDir: string;
   private readonly userDataDir: string;
   private readonly log?: (scope: string, text: string) => void;
-  private readonly generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
+  private readonly generationReferences?: Pick<PluginGenerationReferenceTracker, "retain" | "release">;
   private client?: SidecarWorkerClient;
   private operationTail: Promise<void> = Promise.resolve();
   private draftExtensionGeneration?: string;
@@ -35,7 +35,7 @@ export class MetadataWorkerClient {
     agentDir: string,
     userDataDir: string,
     log?: (scope: string, text: string) => void,
-    generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">,
+    generationReferences?: Pick<PluginGenerationReferenceTracker, "retain" | "release">,
   ) {
     this.manifest = manifest;
     this.agentDir = agentDir;
@@ -60,22 +60,26 @@ export class MetadataWorkerClient {
     projectId: string,
     cwd: string,
     extensionSet: ResolvedExtensionSet,
-    allEntries: ResolvedExtensionEntry[],
+    allEntries: ResolvedExtensionEntry[] = extensionSet.entries,
   ): Promise<DraftSessionConfig> {
+    // Capture before enqueueing: callers may mutate their next draft while the
+    // metadata worker is still finishing a request for the previous generation.
+    const snapshot = structuredClone(extensionSet);
+    const selectableEntries = structuredClone(allEntries);
     return this.enqueue(async () => {
-      if (this.draftExtensionGeneration !== undefined && this.draftExtensionGeneration !== extensionSet.generation) {
+      if (this.draftExtensionGeneration !== undefined && this.draftExtensionGeneration !== snapshot.generation) {
         const previous = this.client;
         this.client = undefined;
         await previous?.shutdown();
       }
-      this.draftExtensionGeneration = extensionSet.generation;
-      this.generationReferences?.retain("metadata:draft", extensionSet);
+      this.draftExtensionGeneration = snapshot.generation;
+      this.generationReferences?.retain("metadata:draft", snapshot);
       return this.safeRequest<DraftSessionConfig>({
         type: "getDraftConfig",
         projectId,
         cwd,
-        extensionSet,
-        allEntries,
+        extensionSet: snapshot,
+        allEntries: selectableEntries,
       });
     });
   }

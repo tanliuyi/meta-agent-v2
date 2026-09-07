@@ -54,7 +54,7 @@ import { collectThreadDescendantIds } from "../../shared/thread-tree.ts";
 import { readSessionFileHeader } from "../../sidecar/session-file-header.ts";
 import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
 import { samePath } from "../path-identity.ts";
-import type { MarketplaceGenerationReferenceTracker } from "../plugins/marketplace-generation-reference-tracker.ts";
+import type { PluginGenerationReferenceTracker } from "../plugins/plugin-generation-reference-tracker.ts";
 import type { MetadataWorkerClient } from "./metadata-worker-client.ts";
 import type { SidecarRuntimeManifest } from "./sidecar-runtime-manifest.ts";
 import { SidecarRequestError, SidecarWorkerClient, type WorkerClientOptions } from "./worker-client.ts";
@@ -113,7 +113,7 @@ export interface ThreadWorkerRegistryOptions {
   agentDir: string;
   shellPath?: string;
   extensionSourcePolicy: DesktopExtensionSourcePolicy;
-  generationReferences?: Pick<MarketplaceGenerationReferenceTracker, "retain" | "release">;
+  generationReferences?: Pick<PluginGenerationReferenceTracker, "retain" | "release">;
   getCwd(projectId: string): string;
   resolveSessionCwd(projectId: string, cwd: string): Promise<string>;
   getWorkspaceKey(projectId: string): Promise<string>;
@@ -305,7 +305,7 @@ export class ThreadWorkerRegistry {
         .map((entry) => ({
           id: entry.id,
           displayName: entry.displayName,
-          source: entry.source === "development" ? ("development" as const) : ("marketplace" as const),
+          source: entry.source === "codex" ? ("codex" as const) : ("development" as const),
           available: set.entries.some((active) => active.id === entry.id),
         })),
       enabledPluginIds:
@@ -359,6 +359,7 @@ export class ThreadWorkerRegistry {
         await this.awaitRecordShutdown(current);
         if (this.records.get(key) === current) this.records.delete(key);
         let replacement: WorkerRecord | undefined;
+        let latestDesired = desired;
         try {
           replacement = await this.spawn({
             mode: "open",
@@ -371,42 +372,48 @@ export class ThreadWorkerRegistry {
             ...(normalized ? { enabledPluginIds: normalized } : {}),
             extensionSet: buildSessionExtensionSet(desired, allEntries, normalized),
           });
+          latestDesired = await this.options.extensionSourcePolicy.resolve(projectId);
+          if (latestDesired.generation !== desired.generation) {
+            throw new StaleExtensionSetApplyError(desired.generation, latestDesired.generation);
+          }
         } catch (error) {
           try {
-            if (replacement && !replacement.retired) {
-              replacement.retired = true;
-              await this.awaitRecordShutdown(replacement);
-              if (this.records.get(key) === replacement) this.records.delete(key);
-            }
-          } finally {
-            const rollback = await this.spawn({
-              mode: "open",
-              projectId,
-              cwd: this.options.getCwd(projectId),
-              agentDir: this.options.agentDir,
-              ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
-              threadId,
-              sessionFile,
-              ...(previousEnabled ? { enabledPluginIds: previousEnabled } : {}),
-              extensionSet: previousSet,
-            });
-            activateAppliedRecord(rollback, attachments);
-            rollback.desiredExtensionGeneration = desired.generation;
-            rollback.desiredExtensionDiagnostics = [
-              ...desired.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-              ...desired.entries.map((entry) => ({
-                extensionId: entry.id,
-                source: entry.source,
-                extensionSetGeneration: desired.generation,
-                projectId,
-                threadId,
-                phase: "start" as const,
-                code: "DESKTOP_EXTENSION_STARTUP_FAILED",
-                message: error instanceof Error ? error.message : String(error),
-              })),
-            ];
-            this.options.resync(projectId, threadId, "extension-set-rollback");
+            latestDesired = await this.options.extensionSourcePolicy.resolve(projectId);
+          } catch {
+            // The immutable previous snapshot remains usable if resolution fails.
           }
+          if (replacement && !replacement.retired) {
+            replacement.retired = true;
+            await this.awaitRecordShutdown(replacement);
+            if (this.records.get(key) === replacement) this.records.delete(key);
+          }
+          const rollback = await this.spawn({
+            mode: "open",
+            projectId,
+            cwd: this.options.getCwd(projectId),
+            agentDir: this.options.agentDir,
+            ...(this.options.shellPath ? { shellPath: this.options.shellPath } : {}),
+            threadId,
+            sessionFile,
+            ...(previousEnabled ? { enabledPluginIds: previousEnabled } : {}),
+            extensionSet: previousSet,
+          });
+          activateAppliedRecord(rollback, attachments);
+          rollback.desiredExtensionGeneration = latestDesired.generation;
+          rollback.desiredExtensionDiagnostics = [
+            ...latestDesired.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+            ...(latestDesired.generation === desired.generation ? desired.entries : []).map((entry) => ({
+              extensionId: entry.id,
+              source: entry.source,
+              extensionSetGeneration: desired.generation,
+              projectId,
+              threadId,
+              phase: "start" as const,
+              code: "DESKTOP_EXTENSION_STARTUP_FAILED",
+              message: error instanceof Error ? error.message : String(error),
+            })),
+          ];
+          this.options.resync(projectId, threadId, "extension-set-rollback");
           return {
             status: "rolled-back" as const,
             generation: previousSet.generation,
@@ -906,6 +913,7 @@ export class ThreadWorkerRegistry {
             threadId,
             sessionFile,
             extensionSet: previousSet,
+            ...(current.enabledPluginIds ? { enabledPluginIds: [...current.enabledPluginIds] } : {}),
           });
           activateAppliedRecord(rollback, attachments);
           rollback.desiredExtensionGeneration = latestDesired.generation;
@@ -1986,15 +1994,7 @@ async function waitForIdleSummary(record: WorkerRecord): Promise<void> {
 }
 
 function cloneExtensionSet(set: ResolvedExtensionSet): ResolvedExtensionSet {
-  return {
-    ...set,
-    entries: set.entries.map((entry) => ({
-      ...entry,
-      capabilities: [...entry.capabilities],
-      ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
-    })),
-    diagnostics: set.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-  };
+  return structuredClone(set);
 }
 
 /** 索引持久化时把会话级插件子集合入 summary，避免后续 summary 推送覆盖丢失。 */
@@ -2023,7 +2023,7 @@ function buildSessionExtensionSet(
   );
   const entries = [
     ...set.entries.filter((entry) => {
-      if (entry.source === "marketplace" || entry.source === "development") {
+      if (entry.source === "development" || entry.source === "codex") {
         if (entry.capabilities.includes("plugin-methods.provide")) return true;
         return selected.has(entry.id);
       }
@@ -2033,7 +2033,7 @@ function buildSessionExtensionSet(
   ];
   return {
     ...set,
-    entries: entries.map((entry) => ({ ...entry, capabilities: [...entry.capabilities] })),
+    entries: structuredClone(entries),
   };
 }
 

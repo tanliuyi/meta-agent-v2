@@ -8,15 +8,12 @@ import { useToast } from "@renderer/shared/ui/use-toast";
 import { useNavigate } from "@tanstack/react-router";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
-import Settings2 from "lucide-react/dist/esm/icons/settings-2.mjs";
 import { useEffect, useState } from "react";
 import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
+import { CodexPluginsView } from "./codex-plugins-view.tsx";
 import { LocalPluginsView } from "./local-plugins-view.tsx";
-import { MarketplaceSettingsDialog } from "./marketplace-settings-dialog.tsx";
-import { MarketplacePluginCard } from "./plugin-marketplace-card.tsx";
-import { localPluginIdOverrides } from "./plugin-marketplace-utils.ts";
+import { useCodexPlugins } from "./use-codex-plugins.ts";
 import { useLocalPlugins } from "./use-local-plugins.ts";
-import { usePluginMarketplace } from "./use-plugin-marketplace.ts";
 
 export function PluginMarketplacePage({
   returnSession,
@@ -29,11 +26,11 @@ export function PluginMarketplacePage({
 }) {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState<"marketplace" | "local">(initialView);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     setActiveView(initialView);
   }, [initialView]);
-  const controller = usePluginMarketplace(activeView === "marketplace", initialQuery);
+  const [query, setQuery] = useState(initialQuery);
+  const controller = useCodexPlugins(query);
   const localController = useLocalPlugins(returnSession?.projectId, returnSession?.threadId);
   const toast = useToast();
   useEffect(() => {
@@ -48,25 +45,10 @@ export function PluginMarketplacePage({
         title: "插件操作失败",
         message: controller.error,
         tone: "error",
-        action:
-          controller.error.includes("not configured") || controller.error.includes("未配置")
-            ? { label: "打开设置", altText: "打开插件中心设置", onClick: () => setSettingsOpen(true) }
-            : undefined,
       });
       controller.clearError();
     }
   }, [controller.error, controller.clearError, toast]);
-  const localOverrides = localPluginIdOverrides(
-    (localController.snapshot?.entries ?? []).filter((entry) => entry.source === "development"),
-  );
-  const orphanedInstalled = controller.installed?.plugins.filter(
-    (installed) => !controller.page?.plugins.some((plugin) => plugin.id === installed.id),
-  );
-  const mutationPending =
-    controller.installingId !== undefined ||
-    controller.updatingId !== undefined ||
-    controller.uninstallingId !== undefined ||
-    controller.settingEnabledId !== undefined;
 
   return (
     <>
@@ -86,16 +68,6 @@ export function PluginMarketplacePage({
             onClick={() => void (activeView === "marketplace" ? controller.refresh() : localController.reload())}
           >
             <RefreshCw />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6"
-            aria-label="插件中心设置"
-            title="设置"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings2 />
           </Button>
         </div>
       </header>
@@ -123,20 +95,20 @@ export function PluginMarketplacePage({
             <TabsContent value="marketplace" className="plugin-center-tab-content">
               <header className="plugin-marketplace-page-heading">
                 <h2>插件</h2>
-                <span>安装、更新和管理标准插件。</span>
+                <span>安装、更新和管理个人 Marketplace 中的 Codex 插件。</span>
               </header>
               <div className="plugin-marketplace-toolbar" data-has-options={returnSession ? "true" : undefined}>
                 <div className="plugin-marketplace-search-field">
                   <Search aria-hidden="true" />
                   <Input
                     type="search"
-                    value={controller.query}
+                    value={query}
                     aria-label="搜索插件"
                     placeholder="搜索插件"
                     style={{ paddingLeft: "2.25rem" }}
                     onChange={(event) => {
                       const query = event.currentTarget.value;
-                      controller.setQuery(query);
+                      setQuery(query);
                       void navigate({
                         to: "/plugins",
                         search: (previous) => ({
@@ -149,86 +121,19 @@ export function PluginMarketplacePage({
                   />
                 </div>
               </div>
-              {controller.page?.stale ? (
-                <div className="plugin-marketplace-notice" data-tone="warning" role="status">
-                  当前显示离线缓存
+              <CodexPluginsView
+                plugins={controller.plugins}
+                pendingId={controller.pendingId}
+                onMutate={(plugin, action) => void controller.mutate(plugin, action)}
+              />
+              {!controller.loading && !controller.error && controller.plugins.length === 0 ? (
+                <div className="plugin-marketplace-empty">没有匹配的插件</div>
+              ) : null}
+              {controller.loading && !controller.snapshot ? (
+                <div className="plugin-marketplace-empty" role="status">
+                  正在载入插件目录
                 </div>
               ) : null}
-
-              {orphanedInstalled && orphanedInstalled.length > 0 ? (
-                <section className="plugin-marketplace-section" aria-labelledby="installed-plugin-heading">
-                  <div className="plugin-marketplace-section-heading">
-                    <h3 id="installed-plugin-heading">已安装</h3>
-                    <span>当前市场目录中不可用的已安装插件</span>
-                  </div>
-                  <div className="plugin-marketplace-grid">
-                    {orphanedInstalled.map((installed) => (
-                      <MarketplacePluginCard
-                        key={installed.id}
-                        installed={installed}
-                        supersededByLocalPlugin={localOverrides.get(installed.id)}
-                        mutationPending={mutationPending}
-                        onToggleEnabled={(enabled) => void controller.setEnabled(installed.id, enabled)}
-                        onOpen={() =>
-                          void navigate({
-                            to: "/plugins/$pluginId",
-                            params: { pluginId: installed.id },
-                            search: (previous) => ({
-                              ...previous,
-                              query: controller.query || undefined,
-                              view: "marketplace",
-                            }),
-                          })
-                        }
-                      />
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-
-              <section
-                className="plugin-marketplace-section"
-                aria-labelledby="plugin-catalog-heading"
-                aria-busy={controller.loading}
-              >
-                <div className="plugin-marketplace-section-heading">
-                  <h3 id="plugin-catalog-heading">插件目录</h3>
-                  {controller.page ? <span>{controller.page.plugins.length} 个插件</span> : null}
-                </div>
-                {controller.page?.plugins.length ? (
-                  <div className="plugin-marketplace-grid">
-                    {controller.page.plugins.map((plugin) => (
-                      <MarketplacePluginCard
-                        key={plugin.id}
-                        plugin={plugin}
-                        installed={controller.installed?.plugins.find((installed) => installed.id === plugin.id)}
-                        supersededByLocalPlugin={localOverrides.get(plugin.id)}
-                        mutationPending={mutationPending}
-                        onToggleEnabled={(enabled) => void controller.setEnabled(plugin.id, enabled)}
-                        onOpen={() =>
-                          void navigate({
-                            to: "/plugins/$pluginId",
-                            params: { pluginId: plugin.id },
-                            search: (previous) => ({
-                              ...previous,
-                              query: controller.query || undefined,
-                              view: "marketplace",
-                            }),
-                          })
-                        }
-                      />
-                    ))}
-                  </div>
-                ) : null}
-                {!controller.loading && !controller.error && controller.page?.plugins.length === 0 ? (
-                  <div className="plugin-marketplace-empty">没有匹配的插件</div>
-                ) : null}
-                {controller.loading && !controller.page ? (
-                  <div className="plugin-marketplace-empty" role="status">
-                    正在载入插件目录
-                  </div>
-                ) : null}
-              </section>
             </TabsContent>
             <TabsContent value="local" className="plugin-center-tab-content">
               <LocalPluginsView
@@ -245,11 +150,6 @@ export function PluginMarketplacePage({
           </Tabs>
         </main>
       </div>
-      <MarketplaceSettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        onSaved={() => void controller.refresh()}
-      />
     </>
   );
 }

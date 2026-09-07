@@ -19,12 +19,8 @@ describe("registerApplicationIpc", () => {
     };
     const plugins = {
       extensionSettings: {},
-      marketplaceEndpoints: {},
-      marketplaceCatalog: {},
-      marketplaceRegistry: {},
-      marketplaceInstaller: {},
+      codexCatalog: {},
       pluginConfigurations: {},
-      marketplaceGarbageCollector: {},
     };
     const sessions = {
       sessions: {},
@@ -53,7 +49,7 @@ describe("registerApplicationIpc", () => {
       scm: workspace.scm,
       terminals: workspace.terminals,
       extensions: plugins.extensionSettings,
-      marketplaceRegistry: plugins.marketplaceRegistry,
+      codexCatalog: plugins.codexCatalog,
       browser: browser.manager,
       updater,
       dirtyGuard,

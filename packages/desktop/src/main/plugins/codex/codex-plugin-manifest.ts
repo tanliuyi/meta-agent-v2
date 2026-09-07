@@ -227,7 +227,7 @@ function validateInterface(rawValue: unknown, issues: CodexPluginValidationIssue
     "composerIcon",
     "logo",
     "logoDark",
-  ]) {
+  ] as const) {
     const value = optionalString(rawValue[field]);
     if (value !== undefined) result[field] = value;
   }

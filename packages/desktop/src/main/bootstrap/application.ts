@@ -51,7 +51,6 @@ export interface DesktopApplicationFactories {
   readonly registerIpc: typeof registerApplicationIpc;
   readonly createUpdater: (app: typeof electronApp) => AutoUpdateService;
   readonly scheduleUpdates: typeof scheduleAutoUpdateChecks;
-  readonly scheduleMarketplaceGc: typeof scheduleMarketplaceGarbageCollection;
 }
 
 /** DesktopApplication 的 Electron、窗口和 bootstrap 配置。 */
@@ -78,7 +77,6 @@ const DEFAULT_FACTORIES: DesktopApplicationFactories = {
   registerIpc: registerApplicationIpc,
   createUpdater: (app) => new AutoUpdateService({ app }),
   scheduleUpdates: scheduleAutoUpdateChecks,
-  scheduleMarketplaceGc: scheduleMarketplaceGarbageCollection,
 };
 
 /** Desktop 主进程组合根：负责服务图、窗口启动和分阶段资源释放。 */
@@ -192,7 +190,7 @@ export class DesktopApplication {
       this.resources.add("sidecar log", "logging", context.sidecarLog);
       const [core, plugins] = await Promise.all([
         this.factories.createCoreServices(context),
-        this.factories.createPluginServices(context, { desktopVersion: this.options.app.getVersion() }),
+        this.factories.createPluginServices(context, {}),
         this.options.installDevTools(),
       ]);
       if (this.isStopping()) throw new Error("Desktop application initialization was stopped");
@@ -258,11 +256,6 @@ export class DesktopApplication {
       this.resources.add("auto update checks", "background", {
         dispose: this.factories.scheduleUpdates(this.graph.updater),
       });
-      this.resources.add("marketplace garbage collection", "background", {
-        dispose: this.factories.scheduleMarketplaceGc(this.graph.plugins.marketplaceGarbageCollector, (text) =>
-          this.graph?.context.sidecarLog.write("marketplace", text),
-        ),
-      });
       this.resources.add("tray", "background", this.trayController);
       this.state = "running";
     } catch (error) {
@@ -284,28 +277,6 @@ export class DesktopApplication {
   private isStopping(): boolean {
     return this.state === "stopping";
   }
-}
-
-function scheduleMarketplaceGarbageCollection(
-  collector: PluginServices["marketplaceGarbageCollector"],
-  log: (text: string) => void,
-): () => void {
-  const collect = async (): Promise<void> => {
-    try {
-      const result = await collector.run();
-      if (result.removedVersions.length > 0 || result.removedRoots.length > 0) {
-        log(`Plugin GC removed ${result.removedVersions.length} version(s) and ${result.removedRoots.length} root(s)`);
-      }
-    } catch (error) {
-      log(`Plugin GC failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-  const initial = setTimeout(() => void collect(), 30_000);
-  const interval = setInterval(() => void collect(), 60 * 60_000);
-  return () => {
-    clearTimeout(initial);
-    clearInterval(interval);
-  };
 }
 
 function broadcastScmChanged(projectId: string): void {

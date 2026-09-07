@@ -13,7 +13,6 @@ import {
   type SavePluginConfigurationResult,
   validatePluginConfigurationValue,
 } from "../../shared/plugin-configuration-contracts.ts";
-import type { MarketplacePluginRegistry } from "./marketplace-plugin-registry.ts";
 
 export interface PluginConfigurationSecretStorage {
   isAvailable(): boolean;
@@ -37,8 +36,7 @@ interface PluginConfigurationServiceOptions {
   createId?(): string;
 }
 
-const PLUGIN_ID = /^[a-z0-9]+(?:[._-][a-z0-9]+)+$/;
-const DEVELOPMENT_PLUGIN_ID = /^development:[a-z0-9][a-z0-9._-]*$/;
+const PLUGIN_ID = /^[a-z0-9][a-z0-9._:-]*$/;
 const REQUEST_ID = /^[a-zA-Z0-9._-]{1,128}$/;
 const MAX_REQUEST_RESULTS = 256;
 
@@ -49,7 +47,6 @@ interface ConfigurablePlugin {
 
 export class PluginConfigurationService {
   private readonly root: string;
-  private readonly registry: MarketplacePluginRegistry;
   private readonly secretStorage: PluginConfigurationSecretStorage;
   private readonly createId: () => string;
   private saveTail: Promise<void> = Promise.resolve();
@@ -57,41 +54,24 @@ export class PluginConfigurationService {
 
   constructor(
     userDataDir: string,
-    registry: MarketplacePluginRegistry,
     secretStorage: PluginConfigurationSecretStorage,
     options: PluginConfigurationServiceOptions = {},
   ) {
     this.root = join(userDataDir, "plugins", "configuration");
-    this.registry = registry;
     this.secretStorage = secretStorage;
     this.createId = options.createId ?? randomUUID;
   }
 
-  async getConfig(pluginId: string): Promise<PluginConfigurationSnapshot> {
-    const plugin = await this.getConfigurablePlugin(pluginId);
-    return this.getConfigFor(plugin, pluginId);
-  }
-
-  async getDevelopmentConfig(
-    pluginId: string,
-    schema: PluginConfigurationSchema,
-  ): Promise<PluginConfigurationSnapshot> {
-    assertDevelopmentPluginId(pluginId);
+  async getConfig(pluginId: string, schema: PluginConfigurationSchema): Promise<PluginConfigurationSnapshot> {
+    assertPluginId(pluginId);
     return this.getConfigFor({ id: pluginId, configurationSchema: schema }, pluginId);
   }
 
   async getRuntimeConfiguration(
     pluginId: string,
-  ): Promise<{ revision: string; values: Record<string, PluginConfigurationValue> }> {
-    const plugin = await this.getConfigurablePlugin(pluginId);
-    return this.getRuntimeConfigurationFor(plugin, pluginId);
-  }
-
-  async getDevelopmentRuntimeConfiguration(
-    pluginId: string,
     schema: PluginConfigurationSchema,
   ): Promise<{ revision: string; values: Record<string, PluginConfigurationValue> }> {
-    assertDevelopmentPluginId(pluginId);
+    assertPluginId(pluginId);
     return this.getRuntimeConfigurationFor({ id: pluginId, configurationSchema: schema }, pluginId);
   }
 
@@ -126,34 +106,18 @@ export class PluginConfigurationService {
     return { revision: current.revision, values };
   }
 
-  saveConfig(input: SavePluginConfigurationInput): Promise<SavePluginConfigurationResult> {
-    assertSaveInput(input);
-    const cacheKey = `${input.pluginId}\0${input.requestId}`;
-    const cached = this.requestResults.get(cacheKey);
-    if (cached) return Promise.resolve(cached);
-    const operation = this.saveTail.then(async () => {
-      const plugin = await this.getConfigurablePlugin(input.pluginId);
-      return this.saveConfigLocked(input, cacheKey, plugin);
-    });
-    this.saveTail = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    return operation;
-  }
-
-  saveDevelopmentConfig(
+  saveConfig(
     input: SavePluginConfigurationInput,
     schema: PluginConfigurationSchema,
   ): Promise<SavePluginConfigurationResult> {
     assertSaveInput(input);
-    assertDevelopmentPluginId(input.pluginId);
+    assertPluginId(input.pluginId);
     const cacheKey = `${input.pluginId}\0${input.requestId}`;
     const cached = this.requestResults.get(cacheKey);
     if (cached) return Promise.resolve(cached);
-    const operation = this.saveTail.then(() =>
-      this.saveConfigLocked(input, cacheKey, { id: input.pluginId, configurationSchema: schema }),
-    );
+    const operation = this.saveTail.then(async () => {
+      return this.saveConfigLocked(input, cacheKey, { id: input.pluginId, configurationSchema: schema });
+    });
     this.saveTail = operation.then(
       () => undefined,
       () => undefined,
@@ -278,14 +242,6 @@ export class PluginConfigurationService {
     };
   }
 
-  private async getConfigurablePlugin(pluginId: string): Promise<ConfigurablePlugin> {
-    if (!PLUGIN_ID.test(pluginId) || pluginId.length > 200) throw new Error("Plugin configuration ID is invalid");
-    const plugin = (await this.registry.getInternalSnapshot()).plugins.find((candidate) => candidate.id === pluginId);
-    if (!plugin || plugin.state !== "installed") throw new Error(`Marketplace plugin is not installed: ${pluginId}`);
-    if (!plugin.configurationSchema) throw new Error(`Marketplace plugin is not configurable: ${pluginId}`);
-    return { id: plugin.id, configurationSchema: plugin.configurationSchema };
-  }
-
   private pathFor(pluginId: string): string {
     const fileId = pluginId.startsWith("development:") ? encodeURIComponent(pluginId) : pluginId;
     return join(this.root, `${fileId}.json`);
@@ -390,10 +346,8 @@ function sameConfiguration(current: PluginConfigurationFile, next: PluginConfigu
   );
 }
 
-function assertDevelopmentPluginId(pluginId: string): void {
-  if (!DEVELOPMENT_PLUGIN_ID.test(pluginId) || pluginId.length > 200) {
-    throw new Error("Development plugin configuration ID is invalid");
-  }
+function assertPluginId(pluginId: string): void {
+  if (!PLUGIN_ID.test(pluginId) || pluginId.length > 200) throw new Error("Plugin configuration ID is invalid");
 }
 
 function assertSaveInput(input: SavePluginConfigurationInput): void {

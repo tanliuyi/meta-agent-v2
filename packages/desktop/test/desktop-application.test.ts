@@ -39,7 +39,7 @@ function createHarness() {
   };
   const context = { sidecarLog: { dispose: vi.fn(() => calls.push("log")) } };
   const core = { projects: {} };
-  const plugins = { marketplaceGarbageCollector: {} };
+  const plugins = {};
   const sessions = { dispose: vi.fn(async () => calls.push("session")), sessions: {} };
   const workspace = { dispose: vi.fn(() => calls.push("workspace")) };
   const browser = { dispose: vi.fn(async () => calls.push("browser")) };
@@ -56,7 +56,6 @@ function createHarness() {
     registerIpc: vi.fn(() => registration),
     createUpdater: vi.fn(() => ({})),
     scheduleUpdates: vi.fn(() => () => calls.push("updates")),
-    scheduleMarketplaceGc: vi.fn(() => () => calls.push("gc")),
   };
   const application = new DesktopApplication({
     app: app as never,
@@ -203,6 +202,6 @@ describe("DesktopApplication", () => {
 
     await Promise.all([application.dispose(), application.dispose()]);
 
-    expect(calls).toEqual(["ipc", "window", "updates", "gc", "browser", "workspace", "session", "log"]);
+    expect(calls).toEqual(["ipc", "window", "updates", "browser", "workspace", "session", "log"]);
   });
 });

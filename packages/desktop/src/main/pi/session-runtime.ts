@@ -122,15 +122,7 @@ export class SessionRuntime {
     this.subagentRuntime = subagentRuntime;
     this.runCodeRegistry = runCodeRegistry;
     this.runCodeRegistryBuilder = runCodeRegistryBuilder;
-    this.extensionSet = {
-      ...extensionSet,
-      entries: extensionSet.entries.map((entry) => ({
-        ...entry,
-        capabilities: [...entry.capabilities],
-        ...(entry.configuration ? { configuration: { ...entry.configuration } } : {}),
-      })),
-      diagnostics: extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-    };
+    this.extensionSet = structuredClone(extensionSet);
     this.extensionDiagnostics = extensionSet.diagnostics.map((diagnostic) => ({ ...diagnostic }));
     this.projector = new PiThreadProjector({
       projectId,
@@ -488,6 +480,10 @@ export class SessionRuntime {
         ...extensionLoadDiagnostics(this.extensionSet, this.session.resourceLoader.getExtensions()).map(
           (diagnostic) => ({ ...diagnostic, threadId: this.id }),
         ),
+        ...validatePluginSkills(this.extensionSet, this.session.resourceLoader.getSkills()).map((diagnostic) => ({
+          ...diagnostic,
+          threadId: this.id,
+        })),
         ...lifecycleDiagnostics,
       ];
       this.lastError = joinRuntimeDiagnostics(

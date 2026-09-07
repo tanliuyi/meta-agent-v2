@@ -269,7 +269,7 @@ export interface PiPluginSubCallRecord {
   callId: string;
   pluginId: string;
   method: string;
-  source: "builtin" | "curated" | "marketplace" | "development";
+  source: "builtin" | "curated" | "codex" | "development";
   state: "queued" | "running" | "complete" | "error" | "aborted";
   startedAt?: number;
   completedAt?: number;

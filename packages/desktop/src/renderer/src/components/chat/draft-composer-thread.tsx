@@ -3,7 +3,7 @@ import { cn } from "@renderer/shared/lib/cn";
 import type { DraftSessionConfig, GitWorktree, Project, ThinkingLevel } from "../../../../shared/contracts.ts";
 import type { DesktopExtensionDiagnostic } from "../../../../shared/desktop-extension-contracts.ts";
 import { Composer } from "./composer/composer.tsx";
-import { ComposerFeedback, type ComposerFeedbackTone } from "./composer/composer-feedback.tsx";
+import { ComposerFeedback } from "./composer/composer-feedback.tsx";
 
 interface DraftComposerThreadProps {
   projects: readonly Project[];
@@ -48,40 +48,17 @@ export function DraftComposerThread({ compact = false, error, diagnostics = [], 
           {error || diagnostics.length > 0 ? (
             <div className="composer-feedback-stack draft-composer-feedback">
               {error ? <ComposerFeedback tone="error" message={error} /> : null}
-              {diagnostics.map((diagnostic) => {
-                const feedback = extensionDiagnosticFeedback(diagnostic);
-                return (
-                  <ComposerFeedback
-                    key={`${diagnostic.extensionId}:${diagnostic.phase}:${diagnostic.code}`}
-                    tone={feedback.tone}
-                    message={diagnostic.message}
-                    action={feedback.showPluginCenter ? <a href="/plugins">查看</a> : undefined}
-                  />
-                );
-              })}
+              {diagnostics.map((diagnostic) => (
+                <ComposerFeedback
+                  key={`${diagnostic.extensionId}:${diagnostic.phase}:${diagnostic.code}`}
+                  tone="error"
+                  message={diagnostic.message}
+                />
+              ))}
             </div>
           ) : null}
         </div>
       </div>
     </ThreadPrimitive.Root>
   );
-}
-
-function extensionDiagnosticFeedback(diagnostic: DesktopExtensionDiagnostic): {
-  tone: ComposerFeedbackTone;
-  showPluginCenter?: boolean;
-} {
-  if (diagnostic.code === "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT") {
-    return { tone: "info", showPluginCenter: true };
-  }
-  if (diagnostic.code === "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE") {
-    return { tone: "error" };
-  }
-  if (diagnostic.code === "DESKTOP_EXTENSION_LOAD_FAILED") {
-    return { tone: "error" };
-  }
-  if (diagnostic.code === "DESKTOP_EXTENSION_REGISTRATION_FAILED") {
-    return { tone: "error" };
-  }
-  return { tone: "error" };
 }

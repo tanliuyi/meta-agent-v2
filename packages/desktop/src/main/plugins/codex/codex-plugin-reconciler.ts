@@ -1,7 +1,7 @@
 import type { Dirent } from "node:fs";
 import { lstat, readdir, rm, rmdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { withMarketplacePluginLock } from "../marketplace-plugin-lock.ts";
+import { withCodexPluginLock } from "./codex-plugin-lock.ts";
 import type { CodexPluginRegistry } from "./codex-plugin-registry.ts";
 
 interface CodexPluginReconcilerOptions {
@@ -15,7 +15,7 @@ const CODEX_PLUGIN_ID = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
 /**
  * Startup reconciliation for Desktop-managed Codex plugin copies.
  *
- * Same crash model as the Desktop marketplace pipeline (registry is the
+ * The registry is the
  * single commit point): payloads that landed but never committed are removed,
  * and managed roots whose installed state is gone are torn down. Records that
  * claim an installed payload that no longer exists lose their installed state;
@@ -42,7 +42,7 @@ export class CodexPluginReconciler {
   async reconcile(): Promise<void> {
     await this.cleanupOrphanStaging();
     for (const entry of await this.managedRoots()) {
-      await withMarketplacePluginLock(this.lockDirectory, entry.name, async () => {
+      await withCodexPluginLock(this.lockDirectory, entry.name, async () => {
         await this.reconcileRoot(entry.name);
       });
     }

@@ -1,6 +1,8 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
+  type CodexMarketplaceAuthenticationPolicy,
+  type CodexMarketplaceInstallationPolicy,
   normalizeCodexLocalPluginPath,
   parseCodexMarketplace,
   resolveCodexMarketplaceRoot,
@@ -13,7 +15,7 @@ import { loadCodexPluginManifest } from "./codex-plugin-manifest.ts";
  * validates every local `source.path` plugin root. This is the Codex-side
  * "the same local plugin root is discovered by Codex and Desktop" contract:
  * Desktop reads exactly the files the Codex host resolves, without accepting
- * legacy Pi layouts (`market-manifest.json`) or remote-only entries.
+ * remote-only entries.
  *
  * Repo/team Marketplace files are not implicitly discovered by Codex either;
  * they can be scanned through `discoverCodexPluginSourcesFromMarketplace`
@@ -34,6 +36,10 @@ export interface CodexPluginSourceRecord {
   marketplacePath: string;
   /** Declared local source path, relative to the marketplace root. */
   sourcePath: string;
+  marketplaceCategory?: string;
+  installationPolicy?: CodexMarketplaceInstallationPolicy;
+  authenticationPolicy?: CodexMarketplaceAuthenticationPolicy;
+  products?: string[];
 }
 
 export type CodexPluginSourceIssueCode =
@@ -148,15 +154,6 @@ export async function discoverCodexPluginSourcesFromMarketplace(
       });
       continue;
     }
-    if (await hasLegacyDesktopManifest(rootPath)) {
-      issues.push({
-        code: "plugin.legacy-layout",
-        marketplacePath,
-        pluginName: entry.name,
-        message: `Plugin root uses the legacy Desktop \`market-manifest.json\` layout and is not loaded as a Codex plugin: ${rootPath}`,
-      });
-      continue;
-    }
     const loaded = await loadCodexPluginManifest(rootPath);
     if (loaded.manifest === undefined) {
       const detail = loaded.issues[0] ? `: ${loaded.issues[0].path}: ${loaded.issues[0].message}` : "";
@@ -198,19 +195,13 @@ export async function discoverCodexPluginSourcesFromMarketplace(
       rootPath: canonicalRoot,
       marketplacePath,
       sourcePath,
+      ...(entry.category ? { marketplaceCategory: entry.category } : {}),
+      ...(entry.policy?.installation ? { installationPolicy: entry.policy.installation } : {}),
+      ...(entry.policy?.authentication ? { authenticationPolicy: entry.policy.authentication } : {}),
+      ...(entry.policy?.products ? { products: [...entry.policy.products] } : {}),
     });
   }
   return { plugins, issues };
-}
-
-async function hasLegacyDesktopManifest(rootPath: string): Promise<boolean> {
-  try {
-    const info = await lstat(join(rootPath, "market-manifest.json"));
-    return info.isFile() && !info.isSymbolicLink();
-  } catch (error) {
-    if (isNodeError(error, "ENOENT")) return false;
-    throw error;
-  }
 }
 
 function errorMessage(error: unknown): string {

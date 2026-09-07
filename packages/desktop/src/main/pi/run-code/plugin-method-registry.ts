@@ -182,7 +182,7 @@ export class DesktopPluginRegistryBuilder {
     pluginId: string;
     catalog: PluginApiCatalogV1;
   } {
-    const pluginId = entry.pluginId ?? entry.id;
+    const pluginId = entry.id;
     if (
       !pluginId ||
       !PLUGIN_ID_PATTERN.test(pluginId) ||

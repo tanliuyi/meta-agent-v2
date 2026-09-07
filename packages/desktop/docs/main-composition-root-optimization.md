@@ -1,5 +1,7 @@
 # Desktop Main Composition Root 优化方案
 
+> Plugin migration note (2026-09-08): 本文的组合根重构目标仍有效，但旧 `Marketplace*` 服务图已由 `CodexPluginRegistry`、`CodexPluginCatalog`、`CodexPluginInstaller`、`CodexPluginReconciler` 和 `PluginGenerationReferenceTracker` 替代。第三方协议以 [`codex-plugin-system-migration-plan.md`](./codex-plugin-system-migration-plan.md) 为准；下文中的旧 Marketplace 类名仅是历史基线。
+
 ## 1. 文档目的
 
 本文分析 `packages/desktop/src/main/index.ts` 的主进程编排职责，并制定在不改变现有 IPC contract、sidecar protocol、session 持久化格式和用户功能的前提下，降低启动入口复杂度的重构方案。

@@ -16,6 +16,7 @@ import {
   controlledResourceLoaderOptions,
   extensionLoadDiagnostics,
   extensionServiceDiagnostics,
+  validatePluginSkills,
 } from "./desktop-extension-runtime-policy.ts";
 import { resolveThinkingConfiguration, selectInitialModel } from "./model-selection-adapter.ts";
 import { DesktopPluginRegistryBuilder } from "./run-code/plugin-method-registry.ts";
@@ -52,7 +53,7 @@ export async function loadDraftSessionConfig(
       resourceLoaderOptions: controlledResourceLoaderOptions(
         extensionSet,
         DesktopBuiltinProviderRegistry.getExtensionFactories(),
-        { pluginRegistryBuilder, agentDir },
+        { pluginRegistryBuilder, agentDir, cwd },
       ),
     });
     models = runtimeServices.modelRuntime;
@@ -63,6 +64,7 @@ export async function loadDraftSessionConfig(
   const extensionDiagnostics = [
     ...(resources ? extensionLoadDiagnostics(extensionSet, resources.getExtensions()) : extensionSet.diagnostics),
     ...extensionServiceDiagnostics(extensionSet, serviceDiagnostics),
+    ...(resources ? validatePluginSkills(extensionSet, resources.getSkills()) : []),
   ];
   if (pluginRegistryBuilder) {
     try {
@@ -106,7 +108,7 @@ export async function loadDraftSessionConfig(
       extensionSetGeneration: extensionSet.generation,
       diagnostics: extensionDiagnostics,
       plugins: (allEntries ?? extensionSet.entries).flatMap((entry) =>
-        entry.source === "marketplace" || entry.source === "development"
+        entry.source === "development" || entry.source === "codex"
           ? entry.capabilities.includes("plugin-methods.provide")
             ? []
             : [

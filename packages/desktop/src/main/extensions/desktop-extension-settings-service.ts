@@ -3,20 +3,13 @@ import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promise
 import { basename, dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import type {
-  DesktopExtensionCapability,
   DesktopExtensionDefinition,
   DesktopExtensionDiagnostic,
   DesktopExtensionSettingsSnapshot,
   ExtensionScope,
-  PluginApiCatalogV1,
   SaveDesktopExtensionSettingsInput,
   SaveDesktopExtensionSettingsResult,
 } from "../../shared/desktop-extension-contracts.ts";
-import type { PluginConfigurationSchema } from "../../shared/plugin-configuration-contracts.ts";
-import {
-  clonePluginConfigurationSchema,
-  parsePluginConfigurationSchema,
-} from "../../shared/plugin-configuration-contracts.ts";
 import type { ResolvedDevelopmentEntry } from "./desktop-extension-directory.ts";
 import { resolveDevelopmentEntry } from "./desktop-extension-directory.ts";
 
@@ -28,17 +21,8 @@ export interface StoredDevelopmentExtension {
   entryPath: string;
   enabled: boolean;
   displayPath?: string;
-  capabilities: DesktopExtensionCapability[];
-  configurationSchema?: PluginConfigurationSchema;
   scope?: ExtensionScope;
   projectIds?: string[];
-  /** 插件声明的身份（market-manifest.json plugin.id）；与市场插件同 id 时本地优先。 */
-  pluginId?: string;
-  skillPaths?: string[];
-  runCodeSkill?: string;
-  runCodeCatalogPath?: string;
-  runCodeCatalogSha256?: string;
-  runCodeCatalog?: PluginApiCatalogV1;
 }
 
 export interface InternalDesktopExtensionSettings {
@@ -52,9 +36,7 @@ interface ExtensionSettingsFileData {
   version?: number;
   developerMode?: boolean;
   curatedEnabled?: Record<string, boolean>;
-  developmentEntries?: Array<
-    Omit<StoredDevelopmentExtension, "capabilities"> & { capabilities?: DesktopExtensionCapability[] }
-  >;
+  developmentEntries?: StoredDevelopmentExtension[];
   [key: string]: unknown;
 }
 
@@ -95,13 +77,6 @@ export class DesktopExtensionSettingsService {
   async getInternalConfig(): Promise<InternalDesktopExtensionSettings> {
     const current = await this.readCurrent();
     return internalFromCurrent(current);
-  }
-
-  async getDevelopmentConfigurationSchema(pluginId: string): Promise<PluginConfigurationSchema | undefined> {
-    if (!pluginId || !pluginId.startsWith("development:")) return undefined;
-    const internal = await this.getInternalConfig();
-    const entry = internal.developmentEntries.find((candidate) => candidate.id === pluginId);
-    return entry?.configurationSchema;
   }
 
   saveConfig(input: SaveDesktopExtensionSettingsInput): Promise<SaveDesktopExtensionSettingsResult> {
@@ -195,16 +170,6 @@ export class DesktopExtensionSettingsService {
                   displayName: resolved.displayName,
                   displayPath: resolved.displayPath,
                   enabled: true,
-                  capabilities: [...resolved.capabilities],
-                  ...(resolved.pluginId ? { pluginId: resolved.pluginId } : { pluginId: undefined }),
-                  ...(resolved.configurationSchema
-                    ? { configurationSchema: resolved.configurationSchema }
-                    : { configurationSchema: undefined }),
-                  skillPaths: resolved.skillPaths,
-                  runCodeSkill: resolved.runCodeSkill,
-                  runCodeCatalogPath: resolved.runCodeCatalogPath,
-                  runCodeCatalogSha256: resolved.runCodeCatalogSha256,
-                  runCodeCatalog: resolved.runCodeCatalog,
                 }
               : entry,
           )
@@ -215,15 +180,7 @@ export class DesktopExtensionSettingsService {
               displayName: resolved.displayName,
               entryPath: resolved.entryPath,
               enabled: true,
-              capabilities: [...resolved.capabilities],
               ...(resolved.displayPath ? { displayPath: resolved.displayPath } : {}),
-              ...(resolved.pluginId ? { pluginId: resolved.pluginId } : {}),
-              ...(resolved.configurationSchema ? { configurationSchema: resolved.configurationSchema } : {}),
-              ...(resolved.skillPaths ? { skillPaths: [...resolved.skillPaths] } : {}),
-              ...(resolved.runCodeSkill ? { runCodeSkill: resolved.runCodeSkill } : {}),
-              ...(resolved.runCodeCatalogPath ? { runCodeCatalogPath: resolved.runCodeCatalogPath } : {}),
-              ...(resolved.runCodeCatalogSha256 ? { runCodeCatalogSha256: resolved.runCodeCatalogSha256 } : {}),
-              ...(resolved.runCodeCatalog ? { runCodeCatalog: resolved.runCodeCatalog } : {}),
             },
           ];
       await this.atomicWrite({
@@ -333,15 +290,10 @@ export class DesktopExtensionSettingsService {
         source: "development" as const,
         enabled: internal.developerMode && entry.enabled,
         configuredEnabled: entry.enabled,
-        capabilities: [...entry.capabilities],
+        capabilities: [],
         displayPath: entry.displayPath ?? basename(entry.entryPath),
         scope,
         ...(scope === "project" ? { projectIds: dedupeProjectIds(entry.projectIds ?? []) } : {}),
-        ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
-        ...(entry.configurationSchema
-          ? { configurationSchema: clonePluginConfigurationSchema(entry.configurationSchema) }
-          : {}),
-        ...(entry.skillPaths ? { skillPaths: [...entry.skillPaths] } : {}),
       };
     });
     return {
@@ -387,13 +339,7 @@ function developmentApprovalMatches(existing: StoredDevelopmentExtension, resolv
     existing.enabled &&
     existing.displayName === resolved.displayName &&
     existing.displayPath === resolved.displayPath &&
-    existing.pluginId === resolved.pluginId &&
-    existing.capabilities.length === resolved.capabilities.length &&
-    existing.capabilities.every((capability, index) => capability === resolved.capabilities[index]) &&
-    JSON.stringify(existing.configurationSchema) === JSON.stringify(resolved.configurationSchema) &&
-    JSON.stringify(existing.skillPaths) === JSON.stringify(resolved.skillPaths) &&
-    existing.runCodeSkill === resolved.runCodeSkill &&
-    existing.runCodeCatalogSha256 === resolved.runCodeCatalogSha256
+    existing.entryPath === resolved.entryPath
   );
 }
 
@@ -484,8 +430,13 @@ function internalFromCurrent(current: CurrentExtensionSettingsSource): InternalD
     developerMode: current.data.developerMode ?? false,
     curatedEnabled: { ...(current.data.curatedEnabled ?? {}) },
     developmentEntries: (current.data.developmentEntries ?? []).map((entry) => ({
-      ...entry,
-      capabilities: [...(entry.capabilities ?? [])],
+      id: entry.id,
+      displayName: entry.displayName,
+      entryPath: entry.entryPath,
+      enabled: entry.enabled,
+      ...(entry.displayPath ? { displayPath: entry.displayPath } : {}),
+      ...(entry.scope ? { scope: entry.scope } : {}),
+      ...(entry.projectIds ? { projectIds: [...entry.projectIds] } : {}),
     })),
   };
 }
@@ -527,12 +478,7 @@ function assertSettingsFile(value: unknown): asserts value is ExtensionSettingsF
         typeof entry.entryPath !== "string" ||
         typeof entry.enabled !== "boolean" ||
         (entry.displayPath !== undefined && typeof entry.displayPath !== "string") ||
-        (entry.capabilities !== undefined &&
-          (!Array.isArray(entry.capabilities) ||
-            !entry.capabilities.every((capability) => typeof capability === "string"))) ||
         (entry.scope !== undefined && entry.scope !== "global" && entry.scope !== "project") ||
-        (entry.pluginId !== undefined &&
-          (typeof entry.pluginId !== "string" || !entry.pluginId.trim() || entry.pluginId.length > 200)) ||
         (entry.scope === "project" &&
           (!Array.isArray(entry.projectIds) ||
             entry.projectIds.length === 0 ||
@@ -543,9 +489,6 @@ function assertSettingsFile(value: unknown): asserts value is ExtensionSettingsF
           (!Array.isArray(entry.projectIds) || !entry.projectIds.every((projectId) => typeof projectId === "string")))
       ) {
         throw new Error("extensions.json development entry is invalid");
-      }
-      if (entry.configurationSchema !== undefined) {
-        parsePluginConfigurationSchema(entry.configurationSchema);
       }
     }
   }

@@ -1016,7 +1016,7 @@ describe("PiThreadProjector", () => {
               callId: "sub-1",
               pluginId: "com.example.plugin",
               method: "run",
-              source: "marketplace",
+              source: "development",
               state: "complete",
             },
           ],

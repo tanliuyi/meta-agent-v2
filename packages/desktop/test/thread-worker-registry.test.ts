@@ -702,7 +702,7 @@ describe("ThreadWorkerRegistry", () => {
     const RunCodeEntry = {
       id: "marketplace:run-code",
       displayName: "Plugin Call",
-      source: "marketplace" as const,
+      source: "development" as const,
       entryPath: "/tmp/run-code.ts",
       hostProfileVersion: 1 as const,
       capabilities: ["plugin-methods.provide" as const],
@@ -744,7 +744,7 @@ describe("ThreadWorkerRegistry", () => {
         {
           id: "marketplace:out-of-scope",
           displayName: "Out of Scope",
-          source: "marketplace",
+          source: "development",
           entryPath: "/tmp/m3.ts",
           hostProfileVersion: 1,
           capabilities: [],
@@ -967,7 +967,7 @@ describe("ThreadWorkerRegistry", () => {
         {
           id: "marketplace:out-of-scope",
           displayName: "Out of Scope",
-          source: "marketplace",
+          source: "development",
           entryPath: "/tmp/m3.ts",
           hostProfileVersion: 1,
           capabilities: [],
@@ -1927,7 +1927,7 @@ function fullExtensionSet(): ResolvedExtensionSet {
       {
         id: "marketplace:first",
         displayName: "Market First",
-        source: "marketplace",
+        source: "development",
         entryPath: "/tmp/m1.ts",
         hostProfileVersion: 1,
         capabilities: [],
@@ -1935,7 +1935,7 @@ function fullExtensionSet(): ResolvedExtensionSet {
       {
         id: "marketplace:second",
         displayName: "Market Second",
-        source: "marketplace",
+        source: "development",
         entryPath: "/tmp/m2.ts",
         hostProfileVersion: 1,
         capabilities: [],

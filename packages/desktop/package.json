@@ -35,6 +35,7 @@
     "@earendil-works/pi-ai": "0.84.4",
     "@earendil-works/pi-coding-agent": "0.84.4",
     "@floating-ui/react": "0.27.20",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@rc-component/image": "1.10.0",
     "@tanstack/react-virtual": "3.14.9",
     "@xterm/addon-image": "0.9.0",

@@ -1233,7 +1233,7 @@ function isPluginSubCallRecord(value: unknown): value is PiPluginSubCallRecord {
     typeof value.callId === "string" &&
     typeof value.pluginId === "string" &&
     typeof value.method === "string" &&
-    ["builtin", "curated", "marketplace", "development"].includes(String(value.source)) &&
+    ["builtin", "curated", "codex", "development"].includes(String(value.source)) &&
     ["queued", "running", "complete", "error", "aborted"].includes(String(value.state))
   );
 }

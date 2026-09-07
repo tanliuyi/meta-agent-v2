@@ -29,7 +29,7 @@ export function LocalPluginsView({ controller, onOpen }: LocalPluginsViewProps) 
             <div
               key={`${diagnostic.phase}:${diagnostic.code}`}
               className="plugin-marketplace-notice"
-              data-tone={diagnostic.code === "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT" ? "info" : "warning"}
+              data-tone="warning"
             >
               {diagnostic.message}
             </div>
@@ -73,7 +73,7 @@ export function LocalPluginsView({ controller, onOpen }: LocalPluginsViewProps) 
           <Button
             variant="outline"
             disabled={!snapshot?.developerMode || controller.mutating}
-            title="选择扩展入口文件或包含 market-manifest.json 的插件目录"
+            title="选择扩展入口文件或包含 index.ts、index.js、index.mjs 或 index.cjs 的目录"
             onClick={() => void controller.chooseDevelopmentEntry()}
           >
             <FolderPlus />
@@ -97,14 +97,6 @@ export function LocalPluginsView({ controller, onOpen }: LocalPluginsViewProps) 
                     <span>Development</span>
                   </div>
                   <span>{plugin.displayPath ?? "本地扩展入口"}</span>
-                  {plugin.pluginId ? (
-                    <span
-                      className="plugin-marketplace-scope-badge"
-                      title="本地插件已声明相同插件 ID，市场同名插件将被禁用"
-                    >
-                      覆盖市场同名插件
-                    </span>
-                  ) : null}
                 </button>
                 <div className="plugin-local-row-actions">
                   <Switch

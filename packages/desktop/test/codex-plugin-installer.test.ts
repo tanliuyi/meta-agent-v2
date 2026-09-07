@@ -8,6 +8,7 @@ import {
   deriveUpdateVersion,
   hashCodexPluginRoot,
 } from "../src/main/plugins/codex/codex-plugin-installer.ts";
+import { CodexPluginReconciler } from "../src/main/plugins/codex/codex-plugin-reconciler.ts";
 import type { CodexPluginRegistryRecord } from "../src/main/plugins/codex/codex-plugin-registry.ts";
 import { CodexPluginRegistry } from "../src/main/plugins/codex/codex-plugin-registry.ts";
 import { discoverCodexPluginSources } from "../src/main/plugins/codex/codex-plugin-sources.ts";
@@ -315,7 +316,7 @@ describe("codex-plugin-installer", () => {
     const after = updated.snapshot.plugins.find((p) => p.id === "my-tool");
     expect(after?.version).toBe("0.1.0+codex.20260907120000");
     expect(after?.installedHash).not.toBe(before?.installedHash);
-    // 旧 payload 已删除，新 payload 在位
+    // Old generations remain usable until startup reconciliation.
     const newVersion = after?.installedHash;
     if (newVersion) {
       const files = await readdir(join(harness.codexRoot, "my-tool", ".versions", newVersion), { recursive: true });
@@ -323,7 +324,16 @@ describe("codex-plugin-installer", () => {
     }
     const oldVersion = before?.installedHash;
     if (oldVersion) {
-      await expect(readdir(join(harness.codexRoot, "my-tool", ".versions", oldVersion))).rejects.toThrow();
+      expect(await readdir(join(harness.codexRoot, "my-tool", ".versions", oldVersion))).toContain("buffer.js");
+      await harness.mutatePlugin("my-tool", "buffer.js", "export function ping() {}\n");
+      const reverted = await harness.installer.update({
+        pluginId: "my-tool",
+        requestId: "revert-content",
+        expectedRevision: updated.snapshot.revision,
+        confirmFullTrust: true,
+      });
+      expect(reverted.status).toBe("updated");
+      expect((await harness.record("my-tool"))?.installedHash).toBe(oldVersion);
     }
   });
 
@@ -387,7 +397,7 @@ describe("codex-plugin-installer", () => {
     expect(updated.status).toBe("not-installed");
   });
 
-  it("uninstalls by clearing the installed state and removing the managed copy", async () => {
+  it("uninstalls immediately from the registry and collects retained payloads on restart", async () => {
     const harness = await createHarness();
     await harness.addPlugin();
     const first = await harness.installer.install({
@@ -411,6 +421,26 @@ describe("codex-plugin-installer", () => {
     expect(after?.installedRootPath).toBeUndefined();
     // 发现记录仍然保留（rootPath 是发现时的 realpath 结果，macOS TMPDIR 是 /var → /private/var 链接）
     expect(after?.rootPath).toBe(await realpath(join(harness.homeDir, "plugins", "my-tool")));
+    expect(await readdir(join(harness.codexRoot, "my-tool"))).toEqual([".versions"]);
+    const reinstalled = await harness.installer.install({
+      pluginId: "my-tool",
+      requestId: "reinstall-retained",
+      expectedRevision: uninstalled.snapshot.revision,
+      confirmFullTrust: true,
+    });
+    expect(reinstalled.status).toBe("installed");
+    if (reinstalled.status !== "installed") throw new Error("Reinstall failed");
+    await harness.installer.uninstall({
+      pluginId: "my-tool",
+      requestId: "remove-again",
+      expectedRevision: reinstalled.snapshot.revision,
+      confirmRemoval: true,
+    });
+    await new CodexPluginReconciler(
+      harness.registry,
+      harness.codexRoot,
+      join(harness.userDataDir, "plugins", "locks"),
+    ).reconcile();
     await expect(readdir(join(harness.codexRoot, "my-tool"))).rejects.toThrow();
   });
 

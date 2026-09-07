@@ -30,11 +30,6 @@ describe("extensions IPC", () => {
     getConfig: vi.fn(),
     saveConfig: vi.fn(),
     approveDevelopmentEntry: vi.fn(),
-    getDevelopmentConfigurationSchema: vi.fn(),
-  };
-  const pluginConfigurations = {
-    getDevelopmentConfig: vi.fn(),
-    saveDevelopmentConfig: vi.fn(),
   };
 
   beforeEach(() => {
@@ -47,7 +42,6 @@ describe("extensions IPC", () => {
         sessions: sessions as never,
         dirtyGuard: { requestClose: vi.fn(), setDirty: vi.fn(), remove: vi.fn() } as never,
         extensions: extensions as never,
-        pluginConfigurations: pluginConfigurations as never,
       }),
     );
   });
@@ -146,46 +140,20 @@ describe("extensions IPC", () => {
     expect(sessions.applyExtensionSet).toHaveBeenCalledWith("project", "thread", "next", true);
   });
 
-  it("serves development plugin configuration through the extensions channel only", async () => {
-    const schema = { version: 1, fields: [{ key: "endpoint", label: "Endpoint", type: "text" }] };
-    const snapshot = {
-      pluginId: "development:entry-id",
-      revision: "config-one",
-      schema,
-      values: {},
-      secrets: {},
-      secretStorageAvailable: true,
-    };
-    const input = {
-      requestId: "dev-config-save",
-      pluginId: "development:entry-id",
-      expectedRevision: "config-one",
-      values: { endpoint: "https://example.test" },
-    };
-    extensions.getDevelopmentConfigurationSchema.mockResolvedValue(schema);
-    pluginConfigurations.getDevelopmentConfig.mockResolvedValue(snapshot);
-    pluginConfigurations.saveDevelopmentConfig.mockResolvedValue({ status: "saved", snapshot });
-
+  it("rejects malformed extension apply input before reaching the supervisor", async () => {
     await expect(
-      electron.handles.get(CHANNELS.extensionsGetPluginConfiguration)?.({}, "development:entry-id"),
-    ).resolves.toBe(snapshot);
-    await expect(electron.handles.get(CHANNELS.extensionsSavePluginConfiguration)?.({}, input)).resolves.toEqual({
-      status: "saved",
-      snapshot,
-    });
-
-    expect(extensions.getDevelopmentConfigurationSchema).toHaveBeenCalledTimes(2);
-    expect(pluginConfigurations.getDevelopmentConfig).toHaveBeenCalledWith("development:entry-id", schema);
-    expect(pluginConfigurations.saveDevelopmentConfig).toHaveBeenCalledWith(input, schema);
-    expect(sessions.extensionSettingsChanged).toHaveBeenCalledOnce();
-  });
-
-  it("rejects development configuration for entries without a declared schema", async () => {
-    extensions.getDevelopmentConfigurationSchema.mockResolvedValue(undefined);
-
-    await expect(
-      electron.handles.get(CHANNELS.extensionsGetPluginConfiguration)?.({}, "development:plain"),
-    ).rejects.toThrow("Development plugin is not configurable");
-    expect(pluginConfigurations.getDevelopmentConfig).not.toHaveBeenCalled();
+      Promise.resolve().then(() =>
+        electron.handles.get(CHANNELS.extensionsApply)?.(
+          {},
+          {
+            projectId: "project",
+            threadId: "thread",
+            expectedDesiredGeneration: "next",
+            abortRunning: "yes",
+          },
+        ),
+      ),
+    ).rejects.toThrow("Invalid extension apply input");
+    expect(sessions.applyExtensionSet).not.toHaveBeenCalled();
   });
 });

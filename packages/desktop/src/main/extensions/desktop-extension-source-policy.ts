@@ -1,20 +1,16 @@
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { lstat, realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
-  DesktopExtensionCapability,
   DesktopExtensionDefinition,
   DesktopExtensionDiagnostic,
   ResolvedExtensionEntry,
   ResolvedExtensionSet,
 } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
-import { parsePluginApiCatalog } from "../pi/run-code/plugin-method-registry.ts";
+import { loadCodexPluginCompanions } from "../plugins/codex/codex-plugin-companions.ts";
 import { loadCodexPluginManifest } from "../plugins/codex/codex-plugin-manifest.ts";
 import type { CodexPluginRegistryRecord } from "../plugins/codex/codex-plugin-registry.ts";
-import { validateInstalledMarketplacePlugin } from "../plugins/marketplace-installed-plugin.ts";
-import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
-import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
 import type {
   DesktopExtensionSettingsService,
   StoredDevelopmentExtension,
@@ -24,13 +20,7 @@ interface DesktopExtensionSourcePolicyOptions {
   settings: DesktopExtensionSettingsService;
   getBuiltinDefinitions(): DesktopExtensionDefinition[];
   getCuratedDefinitions(): DesktopExtensionDefinition[];
-  getMarketplaceExtensions?(): Promise<{ revision: string; plugins: InstalledMarketplacePluginRecord[] }>;
   getCodexExtensions?(): Promise<{ revision: string; plugins: CodexPluginRegistryRecord[] }>;
-  pluginConfigurations?: Pick<
-    PluginConfigurationService,
-    "getRuntimeConfiguration" | "getDevelopmentRuntimeConfiguration"
-  >;
-  marketplaceRoot?: string;
   curatedRoot?: string;
   createGeneration?(): string;
 }
@@ -82,76 +72,10 @@ export class DesktopExtensionSourcePolicy {
       fingerprintParts.push(`${definition.id}:${entryPath}`);
       pathEntries.push({ ...definition, entryPath, capabilities: [...definition.capabilities] });
     }
-    if (this.options.getMarketplaceExtensions) {
-      const marketplace = await this.options.getMarketplaceExtensions();
-      fingerprintParts.push(marketplace.revision);
-      const localPluginIds = collectLocalPluginIds(settings.developmentEntries);
-      for (const plugin of marketplace.plugins) {
-        if (!plugin.enabled || plugin.state !== "installed") continue;
-        // 插件中心状态是全局状态；插件不再按项目作用域筛选。
-        const inScope = true;
-        const localPlugin = localPluginIds.get(plugin.id);
-        if (localPlugin) {
-          fingerprintParts.push(`${plugin.id}:superseded-by-local`);
-          if (inScope) {
-            diagnostics.push({
-              extensionId: plugin.id,
-              source: "marketplace",
-              phase: "resolve",
-              code: "DESKTOP_EXTENSION_SUPERSEDED_BY_DEVELOPMENT",
-              message: `本地插件“${localPlugin}”已覆盖市场插件“${plugin.displayName}”，当前使用本地版本。`,
-            });
-          }
-          continue;
-        }
-        try {
-          if (!this.options.marketplaceRoot) throw new Error(`Marketplace extension root is unavailable: ${plugin.id}`);
-          const entryPath = await validateInstalledMarketplacePlugin(plugin, this.options.marketplaceRoot);
-          const configuration =
-            plugin.configurationSchema && plugin.capabilities.includes("configuration.read")
-              ? await this.options.pluginConfigurations?.getRuntimeConfiguration(plugin.id)
-              : undefined;
-          fingerprintParts.push(`${plugin.id}:${plugin.artifactHash}:${configuration?.revision ?? "unconfigured"}`);
-          const pluginMetadata = await validatePluginMetadata(plugin);
-          fingerprintParts.push(await pluginMetadataFingerprint(pluginMetadata));
-          const entry: ResolvedExtensionEntry = {
-            id: plugin.id,
-            displayName: plugin.displayName,
-            source: "marketplace",
-            entryPath,
-            hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-            capabilities: [...plugin.capabilities],
-            ...(pluginMetadata.skillPaths ? { skillPaths: pluginMetadata.skillPaths } : {}),
-            ...(pluginMetadata.runCodeSkill ? { runCodeSkill: pluginMetadata.runCodeSkill } : {}),
-            ...(pluginMetadata.runCodeCatalogPath ? { runCodeCatalogPath: pluginMetadata.runCodeCatalogPath } : {}),
-            ...(pluginMetadata.runCodeCatalogSha256
-              ? { runCodeCatalogSha256: pluginMetadata.runCodeCatalogSha256 }
-              : {}),
-            ...(pluginMetadata.runCodeCatalog ? { runCodeCatalog: pluginMetadata.runCodeCatalog } : {}),
-            ...(configuration ? { configuration: { ...configuration.values } } : {}),
-          };
-          allEntries.push(entry);
-          if (inScope) pathEntries.push(entry);
-        } catch {
-          fingerprintParts.push(`${plugin.id}:broken`);
-          if (inScope) {
-            diagnostics.push({
-              extensionId: plugin.id,
-              source: "marketplace",
-              phase: "resolve",
-              code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
-              message: `市场插件“${plugin.displayName}”暂不可用，本次会话不会加载该插件。`,
-            });
-          }
-        }
-      }
-    }
     if (this.options.getCodexExtensions) {
       const codex = await this.options.getCodexExtensions();
       fingerprintParts.push(codex.revision);
-      // Codex 插件在 Phase 4（companion 加载）之前没有任何可加载内容，且 worker 侧
-      // validateResolvedExtensionSet 要求非 builtin 条目具备绝对 entryPath。发现的插件
-      // 保持为注册表 + 诊断 + 世代指纹的一部分，不进 loadable 扩展集。
+      // Discovery is not installation approval. Only managed installed copies load resources.
       const reservedIds = new Set([
         ...pathEntries.map((entry) => entry.id),
         ...curatedDefinitions.map((definition) => definition.id),
@@ -179,13 +103,40 @@ export class DesktopExtensionSourcePolicy {
           continue;
         }
         try {
-          const manifestRoot = record.installedRootPath ?? record.rootPath;
+          const manifestRoot =
+            record.installedRootPath && record.installedHash
+              ? join(record.installedRootPath, ".versions", record.installedHash)
+              : record.rootPath;
           const loaded = await loadCodexPluginManifest(manifestRoot);
           if (loaded.manifest === undefined) {
             const detail = loaded.issues[0] ? `: ${loaded.issues[0].path}: ${loaded.issues[0].message}` : "";
             throw new Error(`Codex plugin manifest is invalid${detail}`);
           }
+          if (loaded.manifest.name !== record.id) throw new Error("Codex plugin identity mismatch");
           fingerprintParts.push(`${record.id}:${record.version}:${record.rootPath}:enabled`);
+          if (!record.installedRootPath || !record.installedHash) continue;
+          const companions = await loadCodexPluginCompanions(manifestRoot, loaded.manifest);
+          fingerprintParts.push(companions.resources.fingerprint);
+          diagnostics.push(
+            ...companions.diagnostics.map((diagnostic) => ({
+              ...diagnostic,
+              extensionId: record.id,
+              source: "codex" as const,
+              phase: "resolve" as const,
+            })),
+          );
+          const entry: ResolvedExtensionEntry = {
+            id: record.id,
+            displayName: record.displayName,
+            source: "codex",
+            hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
+            capabilities: [],
+            skillPaths: companions.resources.skillPaths,
+            codexCompanions: companions.resources,
+          };
+          pathEntries.push(entry);
+          allEntries.push(entry);
+          reservedIds.add(record.id);
         } catch {
           fingerprintParts.push(`${record.id}:${record.version}:${record.rootPath}:broken`);
           if (inScope) {
@@ -209,34 +160,14 @@ export class DesktopExtensionSourcePolicy {
           const info = await lstat(entry.entryPath);
           if (!info.isFile() || info.isSymbolicLink()) throw new Error("entry is not a regular non-symlink file");
           const entryPath = await realpath(entry.entryPath);
-          const configuration =
-            entry.configurationSchema && entry.capabilities.includes("configuration.read")
-              ? await this.options.pluginConfigurations?.getDevelopmentRuntimeConfiguration(
-                  entry.id,
-                  entry.configurationSchema,
-                )
-              : undefined;
-          fingerprintParts.push(
-            `${entry.id}:${entry.pluginId ?? ""}:${entryPath}:${configuration?.revision ?? "unconfigured"}`,
-          );
-          const pluginMetadata = await validatePluginMetadata({ ...entry, source: "development" });
-          fingerprintParts.push(await pluginMetadataFingerprint(pluginMetadata));
+          fingerprintParts.push(`${entry.id}:${entryPath}`);
           const resolved: ResolvedExtensionEntry = {
             id: entry.id,
             displayName: entry.displayName,
             source: "development",
             entryPath,
             hostProfileVersion: DESKTOP_EXTENSION_HOST_PROFILE_VERSION,
-            capabilities: [...entry.capabilities],
-            ...(entry.pluginId ? { pluginId: entry.pluginId } : {}),
-            ...(pluginMetadata.skillPaths ? { skillPaths: pluginMetadata.skillPaths } : {}),
-            ...(pluginMetadata.runCodeSkill ? { runCodeSkill: pluginMetadata.runCodeSkill } : {}),
-            ...(pluginMetadata.runCodeCatalogPath ? { runCodeCatalogPath: pluginMetadata.runCodeCatalogPath } : {}),
-            ...(pluginMetadata.runCodeCatalogSha256
-              ? { runCodeCatalogSha256: pluginMetadata.runCodeCatalogSha256 }
-              : {}),
-            ...(pluginMetadata.runCodeCatalog ? { runCodeCatalog: pluginMetadata.runCodeCatalog } : {}),
-            ...(configuration ? { configuration: { ...configuration.values } } : {}),
+            capabilities: [],
           };
           allEntries.push(resolved);
           if (inScope) pathEntries.push(resolved);
@@ -291,66 +222,6 @@ export class DesktopExtensionSourcePolicy {
   }
 }
 
-async function validatePluginMetadata(entry: {
-  id: string;
-  pluginId?: string;
-  source?: string;
-  rootPath?: string;
-  artifactHash?: string;
-  capabilities: DesktopExtensionCapability[];
-  skillPaths?: string[];
-  runCodeSkill?: string;
-  runCodeCatalogPath?: string;
-  runCodeCatalogSha256?: string;
-}): Promise<
-  Pick<
-    ResolvedExtensionEntry,
-    "skillPaths" | "runCodeSkill" | "runCodeCatalogPath" | "runCodeCatalogSha256" | "runCodeCatalog"
-  >
-> {
-  const skillPaths = entry.skillPaths ? await Promise.all(entry.skillPaths.map((path) => realpath(path))) : undefined;
-  for (const path of skillPaths ?? []) {
-    const info = await lstat(path);
-    if (!info.isFile() || info.isSymbolicLink()) throw new Error("Plugin skill is not a regular non-symlink file");
-  }
-  if (!entry.capabilities.includes("plugin-methods.provide")) return skillPaths ? { skillPaths } : {};
-  if (!skillPaths?.length || !entry.runCodeSkill || !entry.runCodeCatalogPath || !entry.runCodeCatalogSha256) {
-    throw new Error("Plugin method metadata is incomplete");
-  }
-  const runCodeCatalogPath = await realpath(entry.runCodeCatalogPath);
-  const catalogInfo = await lstat(runCodeCatalogPath);
-  if (!catalogInfo.isFile() || catalogInfo.isSymbolicLink()) throw new Error("Plugin catalog is not a regular file");
-  if (entry.rootPath && entry.artifactHash) {
-    const versionRoot = await realpath(resolve(entry.rootPath, ".versions", entry.artifactHash));
-    for (const path of [...skillPaths, runCodeCatalogPath]) {
-      const withinRoot = relative(versionRoot, path);
-      if (!withinRoot || withinRoot.startsWith("..") || isAbsolute(withinRoot)) {
-        throw new Error("Plugin metadata escapes its immutable version root");
-      }
-    }
-  }
-  const bytes = await readFile(runCodeCatalogPath);
-  if (bytes.byteLength > 256 * 1024) throw new Error("Plugin catalog exceeds 256 KiB");
-  if (createHash("sha256").update(bytes).digest("hex") !== entry.runCodeCatalogSha256) {
-    throw new Error("Plugin catalog digest mismatch");
-  }
-  const runCodeCatalog = parsePluginApiCatalog(
-    JSON.parse(bytes.toString("utf8")),
-  ) as unknown as ResolvedExtensionEntry["runCodeCatalog"];
-  if (!runCodeCatalog) throw new Error("Plugin catalog is missing");
-  const canonicalPluginId = entry.source === "development" ? entry.pluginId : entry.id;
-  if (!canonicalPluginId || runCodeCatalog.pluginId !== canonicalPluginId) {
-    throw new Error("Plugin catalog identity mismatch");
-  }
-  return {
-    skillPaths,
-    runCodeSkill: entry.runCodeSkill,
-    runCodeCatalogPath,
-    runCodeCatalogSha256: entry.runCodeCatalogSha256,
-    runCodeCatalog,
-  };
-}
-
 function extensionSettingsFingerprint(settings: {
   developerMode: boolean;
   curatedEnabled: Record<string, boolean>;
@@ -367,28 +238,6 @@ function extensionSettingsFingerprint(settings: {
     curatedEnabled: settings.curatedEnabled,
     developmentEntries,
   });
-}
-
-async function pluginMetadataFingerprint(
-  metadata: Pick<ResolvedExtensionEntry, "skillPaths" | "runCodeCatalogSha256">,
-): Promise<string> {
-  const skillHashes = await Promise.all(
-    (metadata.skillPaths ?? []).map(async (path) =>
-      createHash("sha256")
-        .update(await readFile(path))
-        .digest("hex"),
-    ),
-  );
-  return `plugin-metadata:${metadata.runCodeCatalogSha256 ?? "none"}:${skillHashes.join(",")}`;
-}
-
-function collectLocalPluginIds(developmentEntries: StoredDevelopmentExtension[]): Map<string, string> {
-  const pluginIds = new Map<string, string>();
-  for (const entry of developmentEntries) {
-    if (!entry.pluginId) continue;
-    pluginIds.set(entry.pluginId, entry.displayName);
-  }
-  return pluginIds;
 }
 
 function assertDefinition(definition: DesktopExtensionDefinition, expectedSource: "builtin" | "curated"): void {
@@ -429,6 +278,7 @@ function cloneEntries(entries: ResolvedExtensionEntry[]): ResolvedExtensionEntry
     ...entry,
     capabilities: [...entry.capabilities],
     ...(entry.skillPaths ? { skillPaths: [...entry.skillPaths] } : {}),
+    ...(entry.codexCompanions ? { codexCompanions: structuredClone(entry.codexCompanions) } : {}),
     ...(entry.runCodeCatalog
       ? {
           runCodeCatalog: JSON.parse(JSON.stringify(entry.runCodeCatalog)) as NonNullable<

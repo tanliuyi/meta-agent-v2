@@ -102,20 +102,14 @@ describe("discoverCodexPluginSources", () => {
     expect(result.issues).toEqual([]);
   });
 
-  it("reports unsafe, missing, and legacy-layout local roots with stable diagnostics", async () => {
+  it("reports unsafe and missing local roots with stable diagnostics", async () => {
     // 绝对路径与 .. 遍历在 Marketplace 解析层被拒（marketplace.invalid）且条目不携带
     // source.path；发现层因此同时给出 source.unsafe。
-    const legacyRoot = join(tmpdir(), `codex-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    directories.push(legacyRoot);
-    await mkdir(legacyRoot, { recursive: true });
-    await writeFile(join(legacyRoot, "market-manifest.json"), "{}", "utf8");
     const { homeDir } = await createHome([
       entry("escape", "../../escape"),
       entry("absolute", "C:\\absolute\\plugin"),
       entry("missing-root", "./plugins/missing-root"),
-      entry("legacy", "./plugins/legacy"),
     ]);
-    await cp(legacyRoot, join(homeDir, "plugins", "legacy"), { recursive: true });
 
     const result = await discoverCodexPluginSources(homeDir);
 
@@ -123,12 +117,7 @@ describe("discoverCodexPluginSources", () => {
     for (const issue of result.issues) {
       byCode.set(issue.code, [...(byCode.get(issue.code) ?? []), issue]);
     }
-    expect([...byCode.keys()].sort()).toEqual([
-      "marketplace.invalid",
-      "plugin.legacy-layout",
-      "source.missing",
-      "source.unsafe",
-    ]);
+    expect([...byCode.keys()].sort()).toEqual(["marketplace.invalid", "source.missing", "source.unsafe"]);
     expect(byCode.get("marketplace.invalid")?.map((issue) => issue.pluginName)).toEqual([undefined, undefined]);
     expect(byCode.get("marketplace.invalid")?.[0]?.message).toContain("must be a non-empty relative path");
     expect(
@@ -140,7 +129,6 @@ describe("discoverCodexPluginSources", () => {
     expect(byCode.get("source.unsafe")?.[0]?.message).toContain("absolute or escapes");
     expect(byCode.get("source.missing")?.map((issue) => issue.pluginName)).toEqual(["missing-root"]);
     expect(byCode.get("source.missing")?.[0]?.message).toContain("does not exist");
-    expect(byCode.get("plugin.legacy-layout")?.[0]?.message).toContain("market-manifest.json");
     expect(result.plugins).toEqual([]);
   });
 
