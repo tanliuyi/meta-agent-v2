@@ -102,15 +102,17 @@ Exit criteria: Desktop can validate a real Codex plugin and Marketplace file wit
 
 ### Phase 2: Source discovery and registry
 
-Status: not started
+Status: done
 
-- [ ] Replace `DesktopExtensionSourcePolicy` input with Codex plugin sources.
-- [ ] Support local plugin roots and Marketplace `source.path`.
-- [ ] Add Codex plugin registry records without `hostProfileVersion`, `artifactHash`, or Desktop capability requirements.
-- [ ] Preserve immutable worker generations internally, but derive them from Codex plugin identity/version/source state.
-- [ ] Keep built-in Desktop providers on a separate internal path.
+- [x] Replace `DesktopExtensionSourcePolicy` input with Codex plugin sources (`getCodexExtensions` snapshot from the Codex registry).
+- [x] Support local plugin roots and Marketplace `source.path` (marketplace root resolves three directories above the marketplace file, per the Codex layout; only the implicit personal Marketplace is scanned in this phase).
+- [x] Add Codex plugin registry records without `hostProfileVersion`, `artifactHash`, or Desktop capability requirements (`codex-plugins.json`, reconciled at startup; records keep only identity/version/source state plus an `enabled` flag).
+- [x] Preserve immutable worker generations internally, but derive them from Codex plugin identity/version/source state (registry revision plus `id:version:rootPath:enabled` enter the resolution fingerprint).
+- [x] Keep built-in Desktop providers on a separate internal path (builtin resolution is untouched).
 
 Exit criteria: the same local plugin root is discovered by Codex and Desktop, and unapproved legacy Pi directories remain excluded.
+
+Exit criteria check: a Codex plugin declared by the personal Marketplace is discovered, validated, and enters the registry and the resolution fingerprint; it stays out of the loadable extension set until Phase 4 provides companion content (the worker-side `validateResolvedExtensionSet` requires an absolute entry path for non-builtin entries, and Codex plugins have no loadable content yet), with discovery state visible through diagnostics and worker generations. Plugin roots containing `market-manifest.json` are excluded with the `plugin.legacy-layout` diagnostic. `source.unsafe` remains as defense-in-depth for entries stripped of their path at parse time.
 
 ### Phase 3: Installation, update, and removal
 
@@ -213,6 +215,17 @@ Required final coverage:
 - Added `test/codex-plugin-manifest.test.ts` and `test/codex-marketplace.test.ts`; 43 tests pass, `npm run check` clean.
 - Parser follows the observed host contract, not the stricter bundled validator: `hooks` and other unknown top-level fields are tolerated, `interface` is optional, and Marketplace entries keep their declared source path verbatim after safety validation.
 - Next implementation step: Phase 2, source discovery and registry.
+
+### 2026-09-07 (Phase 2)
+
+- Implemented Phase 2, source discovery and registry, on branch `codex/plugin-system-migration` (commit `2ca251f47` covered Phase 1).
+- Added `src/main/plugins/codex/codex-plugin-sources.ts` (personal Marketplace discovery, `source.path` resolution, legacy-layout exclusion, manifest re-validation).
+- Added `src/main/plugins/codex/codex-plugin-registry.ts` (persisted `codex-plugins.json` records without `hostProfileVersion`/`artifactHash`/capabilities; reconciled at startup and on demand).
+- `DesktopExtensionSourcePolicy` gained a `getCodexExtensions` input; discovered Codex plugins contribute `id:version:rootPath:enabled` fingerprints plus the registry revision to the generation, report id-conflict and unavailability diagnostics, and do not enter the loadable extension set (no entry path until Phase 4).
+- `DesktopExtensionSource` gained the `codex` value; `plugin-services.ts` wires discovery and the registry; builtin resolution path unchanged.
+- Added `test/codex-plugin-sources.test.ts`, `test/codex-plugin-registry.test.ts`, and six Codex cases in `test/desktop-extension-source-policy.test.ts`; 99 tests across the five extension test files pass, `npm run check` clean.
+- Marketplace root resolves three directories above the marketplace file (e.g. `~/.agents/plugins/marketplace.json` maps `./plugins/<name>` to `~/plugins/<name>`), per the Codex layout; only the implicit personal Marketplace is scanned in this phase.
+- Next implementation step: Phase 3, installation, update, and removal.
 
 ### 2026-07-26
 

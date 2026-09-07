@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { isCodexMarketplaceName, isCodexPluginName } from "./codex-plugin-identifiers.ts";
 
 /**
@@ -125,9 +125,16 @@ function validatePlugins(rawValue: unknown, issues: CodexMarketplaceValidationIs
     return [];
   }
   const plugins: CodexMarketplacePluginEntry[] = [];
+  const names = new Set<string>();
   for (const [index, rawEntry] of rawValue.entries()) {
     const entry = validateEntry(rawEntry, `$.plugins[${index}]`, issues);
-    if (entry !== undefined) plugins.push(entry);
+    if (entry === undefined) continue;
+    if (names.has(entry.name)) {
+      issues.push({ path: `$.plugins[${index}].name`, message: "duplicate plugin name" });
+      continue;
+    }
+    names.add(entry.name);
+    plugins.push(entry);
   }
   return plugins;
 }
@@ -248,6 +255,31 @@ function validatePolicy(
     result.products = [...products];
   }
   return result;
+}
+
+/**
+ * Resolves the marketplace root for a marketplace file. The Codex layout
+ * places the file at `<root>/.agents/plugins/marketplace.json`, so the root is
+ * three directories up: `~/.agents/plugins/marketplace.json` maps to `~` and
+ * a repo marketplace to the repository root.
+ */
+export function resolveCodexMarketplaceRoot(marketplaceFilePath: string): string {
+  return dirname(dirname(dirname(marketplaceFilePath)));
+}
+
+/**
+ * Normalizes a local plugin source path (as declared in marketplace.json) to a
+ * relative POSIX path, or undefined when it is absolute, empty, or traverses
+ * outside the marketplace root. The declared text is not rewritten elsewhere;
+ * this is the only place a safe path is converted for filesystem use.
+ */
+export function normalizeCodexLocalPluginPath(raw: string): string | undefined {
+  if (!isSafeLocalSourcePath(raw)) return undefined;
+  return raw
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((part) => part !== "" && part !== ".")
+    .join("/");
 }
 
 /** Checks a local source path for traversal or absolute escapes; the declared text is kept verbatim. */

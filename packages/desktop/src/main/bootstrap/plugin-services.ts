@@ -1,8 +1,11 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { safeStorage } from "electron";
 import { DesktopControlledExtensionRegistry } from "../extensions/desktop-extension-registry.ts";
 import { DesktopExtensionSettingsService } from "../extensions/desktop-extension-settings-service.ts";
 import { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
+import { CodexPluginRegistry } from "../plugins/codex/codex-plugin-registry.ts";
+import { discoverCodexPluginSources } from "../plugins/codex/codex-plugin-sources.ts";
 import { DEFAULT_PLUGIN_MARKETPLACE } from "../plugins/default-plugin-marketplace.ts";
 import { MarketplaceCatalogService } from "../plugins/marketplace-catalog-service.ts";
 import { MarketplaceEndpointSettingsService } from "../plugins/marketplace-endpoint-settings-service.ts";
@@ -25,6 +28,7 @@ export interface PluginServices {
   readonly extensionSourcePolicy: DesktopExtensionSourcePolicy;
   readonly marketplaceEndpoints: MarketplaceEndpointSettingsService;
   readonly marketplaceRegistry: MarketplacePluginRegistry;
+  readonly codexRegistry: CodexPluginRegistry;
   readonly marketplaceCatalog: MarketplaceCatalogService;
   readonly marketplaceInstaller: MarketplacePluginInstaller;
   readonly marketplaceGarbageCollector: MarketplacePluginGarbageCollector;
@@ -34,6 +38,8 @@ export interface PluginServices {
 /** 插件服务构造所需的桌面版本信息。 */
 export interface PluginServicesOptions {
   readonly desktopVersion: string;
+  /** Codex home directory containing `.agents/plugins/marketplace.json`; defaults to the OS home. */
+  readonly codexHomeDir?: string;
 }
 
 /** 构造并完成 marketplace reconcile，返回可供 session worker 使用的插件服务图。 */
@@ -52,6 +58,7 @@ export async function createPluginServices(
     defaultEndpoint: DEFAULT_PLUGIN_MARKETPLACE,
   });
   const marketplaceRegistry = new MarketplacePluginRegistry(context.userDataDir);
+  const codexRegistry = new CodexPluginRegistry(context.userDataDir);
   const marketplaceRoot = resolveMarketplaceExtensionRoot(context.userDataDir);
   const marketplaceLockDirectory = join(context.userDataDir, "plugins", "locks");
   const pluginConfigurations = new PluginConfigurationService(context.userDataDir, marketplaceRegistry, {
@@ -77,12 +84,14 @@ export async function createPluginServices(
   );
   await marketplaceReconciler.reconcile();
   handleMarketplacePluginIconRequests(marketplaceRegistry);
+  await codexRegistry.reconcile((await discoverCodexPluginSources(options.codexHomeDir ?? homedir())).plugins);
 
   const extensionSourcePolicy = new DesktopExtensionSourcePolicy({
     settings: extensionSettings,
     getBuiltinDefinitions: () => builtinExtensions,
     getCuratedDefinitions: () => curatedExtensions,
     getMarketplaceExtensions: () => marketplaceRegistry.getInternalSnapshot(),
+    getCodexExtensions: () => codexRegistry.getSnapshot(),
     pluginConfigurations,
     marketplaceRoot,
     curatedRoot: context.isPackaged ? join(context.resourcesPath, "extensions") : join(context.appDir, "../extensions"),
@@ -114,6 +123,7 @@ export async function createPluginServices(
     extensionSourcePolicy,
     marketplaceEndpoints,
     marketplaceRegistry,
+    codexRegistry,
     marketplaceCatalog,
     marketplaceInstaller,
     marketplaceGarbageCollector,

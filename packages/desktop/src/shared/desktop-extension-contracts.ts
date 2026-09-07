@@ -63,7 +63,7 @@ export type DesktopExtensionCapability =
   | "ui.terminal.input"
   | "plugin-methods.provide";
 
-export type DesktopExtensionSource = "builtin" | "curated" | "marketplace" | "development";
+export type DesktopExtensionSource = "builtin" | "curated" | "marketplace" | "development" | "codex";
 
 export interface DesktopExtensionDiagnostic {
   extensionId: string;

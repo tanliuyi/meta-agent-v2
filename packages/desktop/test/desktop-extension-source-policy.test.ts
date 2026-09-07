@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DesktopExtensionSettingsService } from "../src/main/extensions/desktop-extension-settings-service.ts";
 import { DesktopExtensionSourcePolicy } from "../src/main/extensions/desktop-extension-source-policy.ts";
+import type { CodexPluginRegistryRecord } from "../src/main/plugins/codex/codex-plugin-registry.ts";
 import { writeMarketplaceProjection } from "../src/main/plugins/marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord } from "../src/main/plugins/marketplace-plugin-registry.ts";
 import {
@@ -763,7 +764,37 @@ async function createMarketplacePlugins(
   );
 }
 
-async function createHarness(options: { builtinId?: string } = {}) {
+function codexRecord(id: string, rootPath: string, version = "1.0.0", enabled = true): CodexPluginRegistryRecord {
+  return {
+    id,
+    displayName: id,
+    version,
+    rootPath,
+    marketplacePath: join(dirname(rootPath), "marketplace.json"),
+    sourcePath: `plugins/${id}`,
+    enabled,
+    discoveredAt: 1,
+  };
+}
+
+async function writeCodexPluginRoot(root: string, name: string, version: string): Promise<string> {
+  const pluginRoot = join(root, name);
+  await mkdir(join(pluginRoot, ".codex-plugin"), { recursive: true });
+  await mkdir(join(pluginRoot, "skills"), { recursive: true });
+  await writeFile(
+    join(pluginRoot, ".codex-plugin", "plugin.json"),
+    `${JSON.stringify({ name, version, description: "test plugin", author: { name: "test" } }, null, 2)}\n`,
+    "utf8",
+  );
+  return pluginRoot;
+}
+
+async function createHarness(
+  options: {
+    builtinId?: string;
+    getCodexExtensions?: () => Promise<{ revision: string; plugins: CodexPluginRegistryRecord[] }>;
+  } = {},
+) {
   const root = join(tmpdir(), `desktop-extension-policy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   directories.push(root);
   const curatedRoot = join(root, "curated");
@@ -799,8 +830,135 @@ async function createHarness(options: { builtinId?: string } = {}) {
     settings,
     getBuiltinDefinitions: () => builtin,
     getCuratedDefinitions: () => curated,
+    ...(options.getCodexExtensions ? { getCodexExtensions: options.getCodexExtensions } : {}),
     curatedRoot,
     createGeneration: () => `generation-${++generation}`,
   });
   return { root, curatedRoot, curatedPath, curated, builtin, settings, policy };
 }
+
+describe("DesktopExtensionSourcePolicy codex sources", () => {
+  it("keeps verified Codex plugins out of the loadable set while driving the generation", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    const pluginRoot = await writeCodexPluginRoot(root, "dart-flutter", "1.0.0");
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: "rev-1",
+        plugins: [codexRecord("dart-flutter", pluginRoot, "1.0.0")],
+      }),
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    // Codex 插件在 companion 加载（Phase 4）之前没有可加载内容；发现状态只经诊断与世代指纹可见。
+    expect(resolved.entries.map(({ id }) => id)).toEqual(["curated", "builtin"]);
+    expect(resolved.diagnostics).toEqual([]);
+    const second = await harness.policy.resolve("project");
+    expect(second.generation).toBe(resolved.generation);
+  });
+
+  it("reports a broken Codex plugin with a stable diagnostic", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    const pluginRoot = join(root, "broken");
+    await mkdir(join(pluginRoot, "skills"), { recursive: true });
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: "rev-1",
+        plugins: [codexRecord("broken", pluginRoot, "1.0.0")],
+      }),
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    expect(resolved.entries.some(({ id }) => id === "broken")).toBe(false);
+    expect(resolved.diagnostics).toEqual([
+      expect.objectContaining({
+        extensionId: "broken",
+        source: "codex",
+        code: "CODEX_EXTENSION_ENTRY_UNAVAILABLE",
+        message: "Codex 插件\u201cbroken\u201d暂不可用，本次会话不会加载该插件。",
+      }),
+    ]);
+  });
+
+  it("skips Codex entries whose id conflicts with an existing extension", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    const pluginRoot = await writeCodexPluginRoot(root, "builtin", "1.0.0");
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: "rev-1",
+        plugins: [codexRecord("builtin", pluginRoot, "1.0.0")],
+      }),
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    expect(resolved.entries.map(({ id }) => id)).toEqual(["curated", "builtin"]);
+    expect(resolved.diagnostics).toEqual([
+      expect.objectContaining({
+        extensionId: "builtin",
+        source: "codex",
+        code: "CODEX_EXTENSION_ID_CONFLICT",
+        message: expect.stringContaining("ID 冲突"),
+      }),
+    ]);
+  });
+
+  it("skips disabled Codex records without disk access", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    const pluginRoot = join(root, "missing-on-disk"); // 未校验：disabled 记录不触碰磁盘
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: "rev-1",
+        plugins: [codexRecord("missing-on-disk", pluginRoot, "1.0.0", false)],
+      }),
+    });
+
+    const resolved = await harness.policy.resolve("project");
+
+    expect(resolved.entries.some(({ id }) => id === "missing-on-disk")).toBe(false);
+    expect(resolved.diagnostics).toEqual([]);
+  });
+
+  it("derives a new generation when the Codex version changes", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    const pluginRoot = await writeCodexPluginRoot(root, "dart-flutter", "1.0.0");
+    let version = "1.0.0";
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: `rev-${version}`,
+        plugins: [codexRecord("dart-flutter", pluginRoot, version)],
+      }),
+    });
+    const first = await harness.policy.resolve("project");
+    version = "1.1.0";
+
+    const second = await harness.policy.resolve("project");
+
+    expect(second.generation).not.toBe(first.generation);
+  });
+
+  it("derives a new generation when a Codex record is disabled", async () => {
+    const root = join(tmpdir(), `desktop-extension-policy-codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(root);
+    const pluginRoot = await writeCodexPluginRoot(root, "dart-flutter", "1.0.0");
+    let enabled = true;
+    const harness = await createHarness({
+      getCodexExtensions: async () => ({
+        revision: "rev-1",
+        plugins: [codexRecord("dart-flutter", pluginRoot, "1.0.0", enabled)],
+      }),
+    });
+    const first = await harness.policy.resolve("project");
+    enabled = false;
+
+    const second = await harness.policy.resolve("project");
+
+    expect(second.generation).not.toBe(first.generation);
+  });
+});

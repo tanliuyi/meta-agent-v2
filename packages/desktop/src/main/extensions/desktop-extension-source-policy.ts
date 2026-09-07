@@ -10,6 +10,8 @@ import type {
 } from "../../shared/desktop-extension-contracts.ts";
 import { DESKTOP_EXTENSION_HOST_PROFILE_VERSION } from "../../shared/desktop-extension-contracts.ts";
 import { parsePluginApiCatalog } from "../pi/run-code/plugin-method-registry.ts";
+import { loadCodexPluginManifest } from "../plugins/codex/codex-plugin-manifest.ts";
+import type { CodexPluginRegistryRecord } from "../plugins/codex/codex-plugin-registry.ts";
 import { validateInstalledMarketplacePlugin } from "../plugins/marketplace-installed-plugin.ts";
 import type { InstalledMarketplacePluginRecord } from "../plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
@@ -23,6 +25,7 @@ interface DesktopExtensionSourcePolicyOptions {
   getBuiltinDefinitions(): DesktopExtensionDefinition[];
   getCuratedDefinitions(): DesktopExtensionDefinition[];
   getMarketplaceExtensions?(): Promise<{ revision: string; plugins: InstalledMarketplacePluginRecord[] }>;
+  getCodexExtensions?(): Promise<{ revision: string; plugins: CodexPluginRegistryRecord[] }>;
   pluginConfigurations?: Pick<
     PluginConfigurationService,
     "getRuntimeConfiguration" | "getDevelopmentRuntimeConfiguration"
@@ -138,6 +141,59 @@ export class DesktopExtensionSourcePolicy {
               phase: "resolve",
               code: "DESKTOP_EXTENSION_ENTRY_UNAVAILABLE",
               message: `市场插件“${plugin.displayName}”暂不可用，本次会话不会加载该插件。`,
+            });
+          }
+        }
+      }
+    }
+    if (this.options.getCodexExtensions) {
+      const codex = await this.options.getCodexExtensions();
+      fingerprintParts.push(codex.revision);
+      // Codex 插件在 Phase 4（companion 加载）之前没有任何可加载内容，且 worker 侧
+      // validateResolvedExtensionSet 要求非 builtin 条目具备绝对 entryPath。发现的插件
+      // 保持为注册表 + 诊断 + 世代指纹的一部分，不进 loadable 扩展集。
+      const reservedIds = new Set([
+        ...pathEntries.map((entry) => entry.id),
+        ...curatedDefinitions.map((definition) => definition.id),
+        ...this.options.getBuiltinDefinitions().map((definition) => definition.id),
+        ...(settings.developerMode ? settings.developmentEntries.map((entry) => entry.id) : []),
+      ]);
+      for (const record of codex.plugins) {
+        // 插件中心状态是全局状态；Codex 插件同样不按项目作用域筛选。
+        const inScope = true;
+        if (!record.enabled) {
+          fingerprintParts.push(`${record.id}:${record.version}:${record.rootPath}:disabled`);
+          continue;
+        }
+        if (reservedIds.has(record.id)) {
+          fingerprintParts.push(`${record.id}:${record.version}:${record.rootPath}:conflict`);
+          if (inScope) {
+            diagnostics.push({
+              extensionId: record.id,
+              source: "codex",
+              phase: "resolve",
+              code: "CODEX_EXTENSION_ID_CONFLICT",
+              message: `Codex 插件“${record.displayName}”与现有扩展 ID 冲突，本次会话不会加载该插件。`,
+            });
+          }
+          continue;
+        }
+        try {
+          const loaded = await loadCodexPluginManifest(record.rootPath);
+          if (loaded.manifest === undefined) {
+            const detail = loaded.issues[0] ? `: ${loaded.issues[0].path}: ${loaded.issues[0].message}` : "";
+            throw new Error(`Codex plugin manifest is invalid${detail}`);
+          }
+          fingerprintParts.push(`${record.id}:${record.version}:${record.rootPath}:enabled`);
+        } catch {
+          fingerprintParts.push(`${record.id}:${record.version}:${record.rootPath}:broken`);
+          if (inScope) {
+            diagnostics.push({
+              extensionId: record.id,
+              source: "codex",
+              phase: "resolve",
+              code: "CODEX_EXTENSION_ENTRY_UNAVAILABLE",
+              message: `Codex 插件“${record.displayName}”暂不可用，本次会话不会加载该插件。`,
             });
           }
         }
