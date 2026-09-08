@@ -36,7 +36,7 @@ export interface CodexPluginInterface {
   logo?: string;
   logoDark?: string;
   screenshots?: string[];
-  defaultPrompt?: string[];
+  defaultPrompt?: string | string[];
 }
 
 export interface CodexPluginManifest {
@@ -200,7 +200,7 @@ function validateInterface(rawValue: unknown, issues: CodexPluginValidationIssue
     validateOptionalString(rawValue, field, `$.interface.${field}`, issues);
   }
   validateStringArray(rawValue, "capabilities", "$.interface.capabilities", issues);
-  validateStringArray(rawValue, "defaultPrompt", "$.interface.defaultPrompt", issues);
+  validateDefaultPrompt(rawValue.defaultPrompt, issues);
   for (const field of ["websiteURL", "privacyPolicyURL", "termsOfServiceURL"]) {
     validateOptionalHttpsUrl(rawValue, field, `$.interface.${field}`, issues);
   }
@@ -235,7 +235,7 @@ function validateInterface(rawValue: unknown, issues: CodexPluginValidationIssue
   if (capabilities !== undefined) result.capabilities = capabilities;
   const screenshots = optionalStringArray(rawValue.screenshots);
   if (screenshots !== undefined) result.screenshots = screenshots;
-  const defaultPrompt = optionalStringArray(rawValue.defaultPrompt);
+  const defaultPrompt = optionalDefaultPrompt(rawValue.defaultPrompt);
   if (defaultPrompt !== undefined) result.defaultPrompt = defaultPrompt;
   return result;
 }
@@ -518,6 +518,13 @@ function validateStringArray(
   }
 }
 
+function validateDefaultPrompt(value: unknown, issues: CodexPluginValidationIssue[]): void {
+  if (value === undefined) return;
+  if (typeof value === "string" && value.trim() !== "") return;
+  if (Array.isArray(value) && value.every((item) => typeof item === "string" && item.trim() !== "")) return;
+  issues.push({ path: "$.interface.defaultPrompt", message: "must be a non-empty string or an array of strings" });
+}
+
 function rejectTodoMarkers(value: unknown, path: string, issues: CodexPluginValidationIssue[]): void {
   if (typeof value === "string") {
     if (value.includes(TODO_MARKER)) {
@@ -567,6 +574,11 @@ function optionalStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string" && item.trim() !== "")
     ? [...value]
     : undefined;
+}
+
+function optionalDefaultPrompt(value: unknown): string | string[] | undefined {
+  if (typeof value === "string" && value.trim() !== "") return value;
+  return optionalStringArray(value);
 }
 
 function copyOptionalStrings(raw: Record<string, unknown>, fields: string[]): Record<string, string> {

@@ -1,5 +1,6 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { isPathWithin } from "../../path-identity.ts";
 import {
   type CodexMarketplaceAuthenticationPolicy,
   type CodexMarketplaceInstallationPolicy,
@@ -110,6 +111,13 @@ export async function discoverCodexPluginSourcesFromMarketplace(
     });
   }
   if (marketplace === undefined) return { plugins, issues };
+  let canonicalMarketplaceRoot: string;
+  try {
+    canonicalMarketplaceRoot = await realpath(resolveCodexMarketplaceRoot(marketplacePath));
+  } catch {
+    issues.push({ code: "marketplace.read-failed", marketplacePath, message: "Marketplace root is not accessible" });
+    return { plugins, issues };
+  }
   const marketplaceRoot = resolveCodexMarketplaceRoot(marketplacePath);
   for (const entry of marketplace.plugins) {
     if (entry.source.source !== "local") continue; // remote sources need installation (Phase 3)
@@ -154,7 +162,37 @@ export async function discoverCodexPluginSourcesFromMarketplace(
       });
       continue;
     }
-    const loaded = await loadCodexPluginManifest(rootPath);
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = await realpath(rootPath);
+    } catch {
+      issues.push({
+        code: "source.missing",
+        marketplacePath,
+        pluginName: entry.name,
+        message: `Plugin root is not accessible: ${rootPath}`,
+      });
+      continue;
+    }
+    if (!isPathWithin(canonicalMarketplaceRoot, canonicalRoot)) {
+      issues.push({
+        code: "source.unsafe",
+        marketplacePath,
+        pluginName: entry.name,
+        message: "Plugin root escapes the Marketplace root",
+      });
+      continue;
+    }
+    if (basename(canonicalRoot) !== entry.name) {
+      issues.push({
+        code: "plugin.invalid",
+        marketplacePath,
+        pluginName: entry.name,
+        message: "Plugin directory name does not match the Marketplace entry name",
+      });
+      continue;
+    }
+    const loaded = await loadCodexPluginManifest(canonicalRoot);
     if (loaded.manifest === undefined) {
       const detail = loaded.issues[0] ? `: ${loaded.issues[0].path}: ${loaded.issues[0].message}` : "";
       issues.push({
@@ -174,15 +212,12 @@ export async function discoverCodexPluginSourcesFromMarketplace(
       });
       continue;
     }
-    let canonicalRoot: string;
-    try {
-      canonicalRoot = await realpath(rootPath);
-    } catch {
+    if (await fileExists(join(canonicalRoot, "market-manifest.json"))) {
       issues.push({
-        code: "source.missing",
+        code: "plugin.legacy-layout",
         marketplacePath,
         pluginName: entry.name,
-        message: `Plugin root is not accessible: ${rootPath}`,
+        message: "Legacy market-manifest.json layout is not a Codex plugin",
       });
       continue;
     }
@@ -206,6 +241,16 @@ export async function discoverCodexPluginSourcesFromMarketplace(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) return false;
+    throw error;
+  }
 }
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {

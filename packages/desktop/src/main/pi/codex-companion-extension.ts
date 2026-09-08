@@ -28,7 +28,7 @@ export function createCodexCompanionExtension(entry: ResolvedExtensionEntry): In
         pi.registerTool({
           name: `${prefix}_script`,
           label: `${entry.displayName} script`,
-          description: `Explicitly execute a ${entry.displayName} script in the plugin directory. JavaScript uses Node, Python uses python3. Allowed scripts: ${JSON.stringify(companions.scripts)}. No shell expansion.`,
+          description: `Explicitly execute a ${entry.displayName} script in the plugin directory. JavaScript uses Node; Python uses the platform Python command. Allowed scripts: ${JSON.stringify(companions.scripts)}. No shell expansion.`,
           parameters: Type.Object(
             { script: Type.String(), args: Type.Optional(Type.Array(Type.String())) },
             { additionalProperties: false },
@@ -37,7 +37,8 @@ export function createCodexCompanionExtension(entry: ResolvedExtensionEntry): In
             if (!companions.scripts.includes(script)) throw new Error("CODEX_SCRIPT_NOT_APPROVED");
             const path = await resolveCodexCompanionPath(companions.rootPath, script);
             signal?.throwIfAborted();
-            const executable = extname(script) === ".py" ? "python3" : process.execPath;
+            const executable =
+              extname(script) === ".py" ? (process.platform === "win32" ? "python" : "python3") : process.execPath;
             const result = await executeCodexScript(executable, [path, ...(args ?? [])], {
               cwd: companions.rootPath,
               signal: AbortSignal.any([shutdown.signal, ...(signal ? [signal] : [])]),

@@ -7,6 +7,10 @@ export function useCodexPlugins(query = "") {
   const [pendingId, setPendingId] = useState<string>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    plugin: CodexPluginSummary;
+    action: "install" | "update" | "uninstall";
+  }>();
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -27,9 +31,9 @@ export function useCodexPlugins(query = "") {
   }, []);
   useEffect(() => void refresh(), [refresh]);
 
-  const mutate = useCallback(
+  const executeMutation = useCallback(
     async (plugin: CodexPluginSummary, action: "install" | "update" | "uninstall" | "toggle") => {
-      if (!snapshot || pendingId) return;
+      if (!snapshot || pendingId) return false;
       setPendingId(plugin.id);
       setError(undefined);
       setNotice(undefined);
@@ -43,18 +47,34 @@ export function useCodexPlugins(query = "") {
               : action === "uninstall"
                 ? await window.desktop.codexPlugins.uninstall({ ...base, confirmRemoval: true })
                 : await window.desktop.codexPlugins.setEnabled({ ...base, enabled: !plugin.enabled });
-        if (!mounted.current) return;
+        if (!mounted.current) return false;
         setSnapshot(result.status === "conflict" ? result.current : result.snapshot);
         setNotice(result.status === "conflict" ? undefined : actionNotice(action, plugin.enabled));
         if (result.status === "conflict") setError("插件状态已在其他窗口更新，请重试");
+        return true;
       } catch (reason) {
         if (mounted.current) setError(message(reason));
+        return false;
       } finally {
         if (mounted.current) setPendingId(undefined);
       }
     },
     [pendingId, snapshot],
   );
+  const mutate = useCallback(
+    async (plugin: CodexPluginSummary, action: "install" | "update" | "uninstall" | "toggle") => {
+      if (action === "toggle") return executeMutation(plugin, action);
+      setPendingConfirmation({ plugin, action });
+    },
+    [executeMutation],
+  );
+  const confirmMutation = useCallback(async () => {
+    const pending = pendingConfirmation;
+    if (!pending) return;
+    const succeeded = await executeMutation(pending.plugin, pending.action);
+    if (!succeeded) throw new Error("Codex plugin mutation failed");
+    if (mounted.current) setPendingConfirmation(undefined);
+  }, [executeMutation, pendingConfirmation]);
 
   const normalized = query.trim().toLocaleLowerCase();
   const plugins = useMemo(
@@ -69,7 +89,21 @@ export function useCodexPlugins(query = "") {
   );
   const clearError = useCallback(() => setError(undefined), []);
   const clearNotice = useCallback(() => setNotice(undefined), []);
-  return { snapshot, plugins, loading, pendingId, error, notice, refresh, mutate, clearError, clearNotice };
+  return {
+    snapshot,
+    plugins,
+    loading,
+    pendingId,
+    pendingConfirmation,
+    error,
+    notice,
+    refresh,
+    mutate,
+    confirmMutation,
+    cancelMutation: () => setPendingConfirmation(undefined),
+    clearError,
+    clearNotice,
+  };
 }
 
 function actionNotice(action: "install" | "update" | "uninstall" | "toggle", enabled: boolean): string {

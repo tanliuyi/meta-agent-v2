@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cp, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir } from "node:fs/promises";
+import { cp, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { valid } from "semver";
+import { isPathWithin, samePath } from "../../path-identity.ts";
+import { assertCodexManagedChild, ensureCodexManagedDirectory } from "./codex-managed-paths.ts";
 import { withCodexPluginLock } from "./codex-plugin-lock.ts";
 import { type CodexPluginManifest, loadCodexPluginManifest } from "./codex-plugin-manifest.ts";
 import type {
@@ -67,34 +69,55 @@ interface CodexPluginInstallerOptions {
   beforeRegistryCommit?(rootPath: string, versionPath: string): Promise<void>;
 }
 
-/** Content hash of a plugin root: sorted relative paths plus file bytes. */
+/** Content hash of a plugin root using length-framed sorted paths and file bytes. */
 export async function hashCodexPluginRoot(rootPath: string): Promise<string> {
   const hash = createHash("sha256");
-  await collectCodexPluginFiles(rootPath, rootPath, "", hash);
+  const canonicalRoot = await realpath(rootPath);
+  await collectCodexPluginFiles(canonicalRoot, rootPath, "", hash, new Set());
   return hash.digest("hex");
 }
 
 async function collectCodexPluginFiles(
-  root: string,
+  canonicalRoot: string,
   directory: string,
   relativePrefix: string,
   hash: ReturnType<typeof createHash>,
-) {
-  const entries = await readdir(directory, { withFileTypes: true });
+  seenDirectories: Set<string>,
+): Promise<void> {
+  const canonicalDirectory = await realpath(directory);
+  assertSourceContained(canonicalRoot, canonicalDirectory);
+  if (seenDirectories.has(canonicalDirectory)) throw new Error("Codex plugin source contains a directory cycle");
+  seenDirectories.add(canonicalDirectory);
+  const entries = await readdir(canonicalDirectory, { withFileTypes: true });
   entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
   for (const entry of entries) {
     if (entry.name === VERSION_DIRECTORY || entry.name.startsWith(".meta-agent")) continue;
-    const full = join(directory, entry.name);
-    const relative = relativePrefix ? `${relativePrefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      await collectCodexPluginFiles(root, full, relative, hash);
+    const full = join(canonicalDirectory, entry.name);
+    const relativeName = relativePrefix ? `${relativePrefix}/${entry.name}` : entry.name;
+    const canonical = await realpath(full);
+    assertSourceContained(canonicalRoot, canonical);
+    const info = await stat(canonical);
+    if (info.isDirectory()) {
+      await collectCodexPluginFiles(canonicalRoot, canonical, relativeName, hash, seenDirectories);
       continue;
     }
-    const content = await readFile(full).catch(() => {
-      throw new Error(`Codex plugin source is unreadable at ${full}`);
-    });
-    hash.update(relative);
-    hash.update(content);
+    if (!info.isFile()) throw new Error(`Codex plugin source contains an unsupported entry at ${full}`);
+    updateHashFrame(hash, "file", Buffer.from(relativeName), await readFile(canonical));
+  }
+  seenDirectories.delete(canonicalDirectory);
+}
+
+function updateHashFrame(hash: ReturnType<typeof createHash>, type: string, path: Buffer, content: Buffer): void {
+  const header = Buffer.allocUnsafe(12);
+  header.writeUInt32BE(type.length, 0);
+  header.writeUInt32BE(path.length, 4);
+  header.writeUInt32BE(content.length, 8);
+  hash.update(header).update(type).update(path).update(content);
+}
+
+function assertSourceContained(canonicalRoot: string, candidate: string): void {
+  if (!isPathWithin(canonicalRoot, candidate)) {
+    throw new Error("Codex plugin source contains a path outside the plugin root");
   }
 }
 
@@ -145,13 +168,21 @@ export class CodexPluginInstaller {
     const cached = this.completedInstalls.get(input.requestId);
     if (cached) return cached;
     validateMutationInput(input, "install");
+    const canonicalManagedRoot = await ensureCodexManagedDirectory(this.codexRoot, dirname(dirname(this.codexRoot)));
     const initial = await this.registry.getSnapshot();
     if (initial.revision !== input.expectedRevision) return { status: "conflict", current: initial };
     const record = initial.plugins.find((plugin) => plugin.id === input.pluginId);
     if (!record) throw new Error(`Codex plugin is not discovered: ${input.pluginId}`);
+    assertInstallationAllowed(record);
     if (record.installedHash && record.installedRootPath) {
+      this.requireManagedRoot(input.pluginId, record.installedRootPath, canonicalManagedRoot);
       // payload 中途缺失时不能短路：按正常流程重新复制修复
-      if (await pathExists(join(record.installedRootPath, VERSION_DIRECTORY, record.installedHash))) {
+      if (
+        await payloadMatches(
+          join(record.installedRootPath, VERSION_DIRECTORY, record.installedHash),
+          record.installedHash,
+        )
+      ) {
         const result: CodexPluginInstallResult = { status: "already-installed", snapshot: initial };
         this.completedInstalls.set(input.requestId, result);
         return result;
@@ -159,7 +190,8 @@ export class CodexPluginInstaller {
     }
     const verified = await this.verifySource(record);
     const hashValue = await hashCodexPluginRoot(record.rootPath);
-    const rootPath = join(this.codexRoot, input.pluginId);
+    const rootPath = join(canonicalManagedRoot, input.pluginId);
+    assertCodexManagedChild(canonicalManagedRoot, rootPath);
     const versionPath = join(rootPath, VERSION_DIRECTORY, hashValue);
     const stagingPath = createStagingPath(this.codexRoot, input.pluginId, this.createId());
     await prepareStagingPath(stagingPath);
@@ -168,13 +200,14 @@ export class CodexPluginInstaller {
     let registryCommitted = false;
     try {
       await copyPluginSource(record.rootPath, stagingPath);
+      await verifyCopiedPayload(stagingPath, record.id, verified.version);
       // 哈希后再复制的窗口内源可能被改动：payload 目录名必须与内容一致
       if ((await hashCodexPluginRoot(stagingPath)) !== hashValue) {
         throw new Error("Codex plugin source changed while it was being copied");
       }
       await syncDirectory(dirname(stagingPath));
       rootCreated = await prepareInstallRoot(rootPath);
-      await mkdir(dirname(versionPath), { recursive: true, mode: 0o700 });
+      await ensureCodexManagedDirectory(dirname(versionPath), canonicalManagedRoot);
       versionCreated = await landPayload(stagingPath, versionPath, hashValue);
       await syncDirectory(dirname(versionPath));
       await syncDirectory(rootPath);
@@ -224,6 +257,7 @@ export class CodexPluginInstaller {
     const cached = this.completedUpdates.get(input.requestId);
     if (cached) return cached;
     validateMutationInput(input, "update");
+    const canonicalManagedRoot = await ensureCodexManagedDirectory(this.codexRoot, dirname(dirname(this.codexRoot)));
     const initial = await this.registry.getSnapshot();
     if (initial.revision !== input.expectedRevision) {
       return { status: "conflict", current: await this.registry.getSnapshot() };
@@ -234,16 +268,21 @@ export class CodexPluginInstaller {
       this.completedUpdates.set(input.requestId, result);
       return result;
     }
+    assertInstallationAllowed(before);
     if (!before.installedHash || !before.installedRootPath) {
       const result: CodexPluginUpdateResult = { status: "not-installed", snapshot: await this.registry.getSnapshot() };
       this.completedUpdates.set(input.requestId, result);
       return result;
     }
+    const rootPath = this.requireManagedRoot(input.pluginId, before.installedRootPath, canonicalManagedRoot);
     const verified = await this.verifySource(before);
     const hashValue = await hashCodexPluginRoot(before.rootPath);
     if (
       hashValue === before.installedHash &&
-      (await pathExists(join(before.installedRootPath!, VERSION_DIRECTORY, before.installedHash)))
+      (await payloadMatches(
+        join(before.installedRootPath, VERSION_DIRECTORY, before.installedHash),
+        before.installedHash,
+      ))
     ) {
       const result: CodexPluginUpdateResult = {
         status: "same-version",
@@ -254,8 +293,6 @@ export class CodexPluginInstaller {
       return result;
     }
     const nextVersion = deriveUpdateVersion(before, verified.version, this.now());
-    // 删除路径只接受受管根内的副本：篡改的 codex-plugins.json 不得让卸载/更新 rm -rf 任意目录
-    const rootPath = this.requireManagedRoot(input.pluginId, before.installedRootPath);
     const versionPath = join(rootPath, VERSION_DIRECTORY, hashValue);
     const stagingPath = createStagingPath(this.codexRoot, input.pluginId, this.createId());
     await prepareStagingPath(stagingPath);
@@ -263,12 +300,13 @@ export class CodexPluginInstaller {
     let registryCommitted = false;
     try {
       await copyPluginSource(before.rootPath, stagingPath);
+      await verifyCopiedPayload(stagingPath, before.id, verified.version);
       // 哈希后再复制的窗口内源可能被改动：payload 目录名必须与内容一致
       if ((await hashCodexPluginRoot(stagingPath)) !== hashValue) {
         throw new Error("Codex plugin source changed while it was being copied");
       }
       await syncDirectory(dirname(stagingPath));
-      await mkdir(dirname(versionPath), { recursive: true, mode: 0o700 });
+      await ensureCodexManagedDirectory(dirname(versionPath), canonicalManagedRoot);
       versionCreated = await landPayload(stagingPath, versionPath, hashValue);
       await syncDirectory(dirname(versionPath));
       await syncDirectory(rootPath);
@@ -324,6 +362,7 @@ export class CodexPluginInstaller {
     const cached = this.completedUninstalls.get(input.requestId);
     if (cached) return cached;
     validateMutationInput(input, "uninstall");
+    const canonicalManagedRoot = await ensureCodexManagedDirectory(this.codexRoot, dirname(dirname(this.codexRoot)));
     const initial = await this.registry.getSnapshot();
     if (initial.revision !== input.expectedRevision) {
       return { status: "conflict", current: await this.registry.getSnapshot() };
@@ -337,7 +376,7 @@ export class CodexPluginInstaller {
       this.completedUninstalls.set(input.requestId, result);
       return result;
     }
-    this.requireManagedRoot(input.pluginId, record.installedRootPath);
+    this.requireManagedRoot(input.pluginId, record.installedRootPath, canonicalManagedRoot);
     const saved = await this.registry.commitUninstalled(input.expectedRevision, input.pluginId);
     if (saved.status !== "saved") {
       if (saved.status === "conflict") return { status: "conflict", current: saved.snapshot };
@@ -359,9 +398,14 @@ export class CodexPluginInstaller {
     return result;
   }
 
-  private requireManagedRoot(pluginId: string, installedRootPath: string | undefined): string {
-    const expected = resolve(join(this.codexRoot, pluginId));
-    if (!installedRootPath || resolve(installedRootPath) !== expected) {
+  private requireManagedRoot(
+    pluginId: string,
+    installedRootPath: string | undefined,
+    canonicalManagedRoot: string,
+  ): string {
+    const expected = resolve(join(canonicalManagedRoot, pluginId));
+    assertCodexManagedChild(canonicalManagedRoot, expected);
+    if (!installedRootPath || !samePath(installedRootPath, expected)) {
       throw new Error(`Codex plugin managed copy is outside the Desktop root: ${pluginId}`);
     }
     return expected;
@@ -433,14 +477,13 @@ async function landPayload(stagingPath: string, versionPath: string, expectedHas
 async function prepareInstallRoot(root: string): Promise<boolean> {
   try {
     const info = await lstat(root);
-    if (!info.isDirectory() || info.isSymbolicLink()) {
-      throw new Error("Codex plugin destination is already occupied");
-    }
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Codex plugin destination is already occupied");
+    return false;
   } catch (error) {
-    if (isNodeError(error, "ENOENT")) return true;
-    throw error;
+    if (!isNodeError(error, "ENOENT")) throw error;
+    await mkdir(root, { mode: 0o700 });
+    return true;
   }
-  return false;
 }
 
 async function cleanupUncommittedInstall(
@@ -465,6 +508,28 @@ async function prepareStagingPath(path: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await rm(path, { recursive: true, force: true });
   await mkdir(path, { mode: 0o700 });
+}
+
+async function verifyCopiedPayload(rootPath: string, expectedName: string, expectedVersion: string): Promise<void> {
+  const copied = await loadCodexPluginManifest(rootPath);
+  if (!copied.manifest || copied.manifest.name !== expectedName || copied.manifest.version !== expectedVersion) {
+    throw new Error("Codex plugin source changed while it was being copied");
+  }
+}
+
+async function payloadMatches(path: string, expectedHash: string): Promise<boolean> {
+  try {
+    const info = await lstat(path);
+    return info.isDirectory() && !info.isSymbolicLink() && (await hashCodexPluginRoot(path)) === expectedHash;
+  } catch {
+    return false;
+  }
+}
+
+function assertInstallationAllowed(record: CodexPluginRegistryRecord): void {
+  if (record.installationPolicy === "NOT_AVAILABLE") {
+    throw new Error(`Codex plugin is not available for installation: ${record.id}`);
+  }
 }
 
 async function pathExists(path: string): Promise<boolean> {

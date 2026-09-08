@@ -181,7 +181,7 @@ describe("Codex companion discovery and sidecar loading", () => {
     const loaded = await load(f);
     expect(
       (await loaded.invoke("_script", { script: join("scripts", "echo.py"), args: ["python-ok"] })).content,
-    ).toEqual([{ type: "text", text: "python-ok\n" }]);
+    ).toEqual([{ type: "text", text: process.platform === "win32" ? "python-ok\r\n" : "python-ok\n" }]);
     await expect(
       loaded.invoke("_script", { script: join("scripts", "wait.mjs") }, AbortSignal.timeout(100)),
     ).rejects.toThrow();

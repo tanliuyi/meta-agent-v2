@@ -10,6 +10,7 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Search from "lucide-react/dist/esm/icons/search.mjs";
 import { useEffect, useState } from "react";
 import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
+import { CodexPluginMutationConfirmation } from "./codex-plugin-mutation-confirmation.tsx";
 import { CodexPluginsView } from "./codex-plugins-view.tsx";
 import { LocalPluginsView } from "./local-plugins-view.tsx";
 import { useCodexPlugins } from "./use-codex-plugins.ts";
@@ -121,6 +122,15 @@ export function PluginMarketplacePage({
                   />
                 </div>
               </div>
+              {controller.snapshot?.diagnostics.map((diagnostic, index) => (
+                <div
+                  className="plugin-marketplace-empty"
+                  role="alert"
+                  key={`${diagnostic.code}:${diagnostic.pluginId ?? index}`}
+                >
+                  {diagnostic.message}
+                </div>
+              ))}
               <CodexPluginsView
                 plugins={controller.plugins}
                 pendingId={controller.pendingId}
@@ -150,6 +160,11 @@ export function PluginMarketplacePage({
           </Tabs>
         </main>
       </div>
+      <CodexPluginMutationConfirmation
+        pending={controller.pendingConfirmation}
+        onCancel={controller.cancelMutation}
+        onConfirm={controller.confirmMutation}
+      />
     </>
   );
 }

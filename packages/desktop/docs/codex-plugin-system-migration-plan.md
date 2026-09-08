@@ -1,6 +1,6 @@
 # Desktop Codex Plugin System Migration Plan
 
-> Status: Done
+> Status: Blocked — do not merge into v39
 > Owner: Desktop
 > Scope: `packages/desktop`
 > Authority: `C:\Users\Administrator\.codex\skills\.system\plugin-creator\SKILL.md`
@@ -23,6 +23,26 @@ The target protocol is:
 ```
 
 The Codex manifest and Marketplace JSON are the only third-party plugin contracts. Desktop-specific runtime details remain internal implementation details and must not be required in a plugin package.
+
+### Release blocker: package compatibility is not runtime compatibility
+
+This branch must not be merged into v39. The current implementation validates, installs, and maps only a portable subset of the Codex plugin package contract. It does not provide the complete Codex plugin host runtime.
+
+A concrete counterexample is the bundled plugin at `%USERPROFILE%\\.codex\\plugins\\cache\\openai-bundled\\computer-use\\26.901.51231`. Its package has a valid `.codex-plugin/plugin.json` and skill, but its behavior depends on Codex-hosted facilities that Desktop does not currently provide:
+
+- manifest hooks, including `Stop` hooks with `type: "mcp_tool"`;
+- the host-provided `node_repl` MCP server and its lifecycle;
+- the bundled `@oai/sky` runtime and associated native Computer Use host components;
+- Codex plugin appserver registration, tool routing, confirmation semantics, and hook dispatch.
+
+Desktop currently accepts the package metadata and can expose its skill text, but cannot execute the plugin's core Computer Use behavior. Reporting such a plugin as installed and usable would therefore be misleading.
+
+The architecture must choose and complete one of these paths before merge:
+
+1. **Codex runtime bridge (preferred):** delegate installed/cache plugin activation, hooks, host tools, and bundled runtime dependencies to the authoritative Codex plugin appserver; Desktop remains responsible for UI, approval, session selection, and lifecycle coordination.
+2. **Explicit portable subset:** define a Desktop capability-compatibility contract, reject or mark unavailable every plugin requiring unsupported hooks or host tools, and ensure the UI distinguishes package installation from runtime availability.
+
+The current `skills`/scripts/narrow-MCP adapters may remain useful, but they do not satisfy the broad claim that a valid Codex plugin can be used directly. Phase and exit-criteria labels below describe completed subset work only and do not override this release blocker.
 
 ## 2. Non-negotiable outcomes
 
@@ -127,7 +147,7 @@ Status: done
 
 Exit criteria: install/update/uninstall works for a Codex Marketplace entry and does not create a Desktop-only plugin format.
 
-Exit criteria check: installing copies the verified local source into a content-addressed `.versions` payload under `plugins/codex-extensions/<name>/` (Desktop-owned files excluded, symlinks followed so the copy is self-contained) and commits `installedRootPath`/`installedHash` plus the record version through `CodexPluginRegistry.commitInstalled`. Updates re-verify the source, derive a cachebuster version (`0.1.0+codex.<UTC timestamp>` when the manifest base is unchanged, the source version verbatim on a manifest bump), land a new payload, retain the previous one while live workers can reference it, and return `reloadRequired: true` so the worker generation rebuilds (`fingerprint` includes the record version). Uninstalls clear the installed state immediately; retained managed payloads are collected by startup reconciliation after workers are gone. Crash windows (payload landed but not committed, installed payload gone, registry committed but copy removal interrupted) are repaired by `CodexPluginReconciler`. The installer never writes the plugin source, `plugin.json`, or Marketplace JSON; no Desktop artifact manifest is produced. Install state is discovery-bound: when a Marketplace entry disappears at startup, the discovery record is dropped and the reconciler removes the managed copy; the managed copy is authoritative within a run, not a persistent install that survives source removal.
+Exit criteria check: installing copies the verified local source into a content-addressed `.versions` payload under `plugins/codex-extensions/<name>/` (Desktop-owned files excluded; symlinks are dereferenced only when their canonical targets remain inside the source root) and commits `installedRootPath`/`installedHash` plus the record version through `CodexPluginRegistry.commitInstalled`. Updates re-verify the source, derive a cachebuster version (`0.1.0+codex.<UTC timestamp>` when the manifest base is unchanged, the source version verbatim on a manifest bump), land a new payload, retain the previous one while live workers can reference it, and return `reloadRequired: true` so the worker generation rebuilds (`fingerprint` includes the record version). Uninstalls clear the installed state immediately; retained managed payloads are collected by startup reconciliation after workers are gone. Crash windows (payload landed but not committed, installed payload gone, registry committed but copy removal interrupted) are repaired by `CodexPluginReconciler`. The installer never writes the plugin source, `plugin.json`, or Marketplace JSON; no Desktop artifact manifest is produced. Install state is discovery-bound: when a Marketplace entry disappears at startup, the discovery record is dropped and the reconciler removes the managed copy; the managed copy is authoritative within a run, not a persistent install that survives source removal.
 
 ### Phase 4: Companion loading
 
@@ -147,7 +167,7 @@ Implemented support boundary:
 | Companion | Behavior |
 | --- | --- |
 | `skills/**/SKILL.md` | Default discovery even without `manifest.skills`; approved files enter the existing Pi skill loader without `pi.entry` or `plugin-methods.provide`. |
-| `scripts/` | Explicit sidecar tool calls only. `.js`, `.mjs`, `.cjs` use the sidecar Node executable; `.py` uses `python3` from PATH. Arguments are passed without shell expansion, cwd is the plugin root, timeout is 30 seconds, output limit is 1 MiB, cancellation and shutdown terminate the complete process group. Other interpreter entry types (`.sh`, `.ps1`, `.bat`, `.cmd`, `.ts`) report unsupported and may still be used explicitly from skill instructions through existing host tools. |
+| `scripts/` | Explicit sidecar tool calls only. `.js`, `.mjs`, `.cjs` use the sidecar Node executable; `.py` uses `python3` from PATH on POSIX and `python` on Windows. Arguments are passed without shell expansion, cwd is the plugin root, timeout is 30 seconds, output limit is 1 MiB, cancellation and shutdown terminate the complete process group. Other interpreter entry types (`.sh`, `.ps1`, `.bat`, `.cmd`, `.ts`) report unsupported and may still be used explicitly from skill instructions through existing host tools. |
 | `.mcp.json` and inline `mcpServers` | `mcpServers` file envelope plus inline entries, rejecting duplicate names. Supports stdio (`command`, `args`, `env`, `cwd`) and Streamable HTTP (`type: "http"`, `url`, `headers`). The narrow tool bridge exposes `tools/list` (including pagination) and `tools/call`, with JSON results. SDK `1.30.0` handles protocol negotiation and transports. |
 | MCP lifecycle | No startup connections. Each invocation opens and closes its own connection, including error/cancellation paths; timeout is 30 seconds. This does not preserve server-side state between calls. OAuth, legacy SSE, host-specific filtering/configuration, MCP resources/prompts and background sessions are not implemented. Unknown configuration fields are rejected rather than ignored. Only the literal `${CODEX_PLUGIN_ROOT}` placeholder is expanded. |
 | `.app.json` | Parsed as data; valid declarations report `CODEX_COMPANION_UNSUPPORTED` because Desktop has no Codex connector authorization API. |
@@ -224,6 +244,14 @@ Required final coverage:
 
 ## 7. Live implementation log
 
+### 2026-09-08 (Runtime compatibility audit and merge hold)
+
+- Re-audited the implementation against a real OpenAI bundled plugin, `computer-use` version `26.901.51231`.
+- Confirmed that package discovery and manifest compatibility do not provide the Codex runtime facilities required by that plugin: hooks, `node_repl`, `@oai/sky`, native host components, and plugin appserver routing.
+- Marked the migration blocked and explicitly held this branch out of v39 until either an authoritative Codex runtime bridge is implemented or unsupported runtime requirements are detected and surfaced as unavailable before installation.
+- Fixed the independently identified installer and registry defects: managed-root containment, source symlink escape, hash framing and payload revalidation, Marketplace policy enforcement, source/installed version separation, diagnostics projection, installed-copy metadata, full-trust/removal confirmations, Windows paths, and Python invocation.
+- Verification: 158 focused Codex tests pass and root `npm run check` passes. Electron GUI smoke and packaged build were not run. These checks validate the supported subset, not full bundled-plugin runtime compatibility.
+
 ### 2026-09-07 (Phase 4)
 
 - Added data-only companion discovery, internal resource snapshots, generation fingerprints and sidecar snapshot validation.
@@ -297,5 +325,8 @@ Required final coverage:
 
 ## 8. Open decisions
 
-- Hook execution and Apps authorization remain unsupported until their host runtime contracts are available; MCP support is limited to the explicit Phase 4 subset above.
+- **Release decision:** this branch is not eligible for v39 while the runtime compatibility blocker in section 1 remains unresolved.
+- Decide whether Desktop delegates to the authoritative Codex plugin appserver or intentionally supports a smaller portable subset with capability-based availability checks.
+- Hook execution, host-provided tools such as `node_repl`, bundled runtimes such as `@oai/sky`, and Apps authorization remain unsupported; MCP support is limited to the explicit Phase 4 subset above.
+- If the portable-subset option is selected, extend the shared contracts and renderer to expose `runtimeAvailable`, required host capabilities, and stable incompatibility diagnostics before allowing installation.
 - Whether existing Pi-based built-ins are retained permanently as internal Desktop features or rewritten as Codex companions is a separate migration decision.

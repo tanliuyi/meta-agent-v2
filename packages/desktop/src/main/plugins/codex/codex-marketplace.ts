@@ -127,8 +127,9 @@ function validatePlugins(rawValue: unknown, issues: CodexMarketplaceValidationIs
   const plugins: CodexMarketplacePluginEntry[] = [];
   const names = new Set<string>();
   for (const [index, rawEntry] of rawValue.entries()) {
+    const issueCount = issues.length;
     const entry = validateEntry(rawEntry, `$.plugins[${index}]`, issues);
-    if (entry === undefined) continue;
+    if (entry === undefined || issues.length !== issueCount) continue;
     if (names.has(entry.name)) {
       issues.push({ path: `$.plugins[${index}].name`, message: "duplicate plugin name" });
       continue;

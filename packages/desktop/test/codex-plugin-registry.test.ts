@@ -73,6 +73,7 @@ describe("CodexPluginRegistry", () => {
       id: "dart-flutter",
       displayName: "Dart Flutter",
       version: "1.0.0",
+      sourceVersion: "1.0.0",
       rootPath: "C:\\home\\plugins\\dart-flutter",
       marketplacePath: "C:\\home\\.agents\\plugins\\marketplace.json",
       sourcePath: "plugins/dart-flutter",
@@ -301,7 +302,7 @@ describe("CodexPluginRegistry", () => {
     expect(snapshot.plugins[0]?.installedRootPath).toBe("C:\\copies\\dart-flutter");
   });
 
-  it("drops installed state when the source changed", async () => {
+  it("preserves installed state and records an available source update", async () => {
     const { registry } = await createHarness();
     const discovered = await registry.reconcile([sourceRecord()]);
     await registry.commitInstalled(
@@ -314,9 +315,30 @@ describe("CodexPluginRegistry", () => {
 
     const snapshot = await registry.reconcile([sourceRecord({ version: "1.1.0" })]);
 
-    expect(snapshot.plugins[0]?.installedHash).toBeUndefined();
-    expect(snapshot.plugins[0]?.installedRootPath).toBeUndefined();
-    expect(snapshot.plugins[0]?.version).toBe("1.1.0");
+    expect(snapshot.plugins[0]?.installedHash).toBe("c".repeat(64));
+    expect(snapshot.plugins[0]?.installedRootPath).toBe("C:\\copies\\dart-flutter");
+    expect(snapshot.plugins[0]?.version).toBe("1.0.0");
+    expect(snapshot.plugins[0]?.sourceVersion).toBe("1.1.0");
+  });
+
+  it("restores the discovered source version when uninstalling after a source bump", async () => {
+    const { registry } = await createHarness();
+    const discovered = await registry.reconcile([sourceRecord()]);
+    const installed = await registry.commitInstalled(
+      discovered.revision,
+      "dart-flutter",
+      "C:\\copies\\dart-flutter",
+      "c".repeat(64),
+      "1.0.0",
+    );
+    if (installed.status !== "saved") return;
+    const updatedSource = await registry.reconcile([sourceRecord({ version: "1.1.0" })]);
+
+    const uninstalled = await registry.commitUninstalled(updatedSource.revision, "dart-flutter");
+
+    expect(uninstalled.status).toBe("saved");
+    expect(uninstalled.snapshot.plugins[0]?.version).toBe("1.1.0");
+    expect(uninstalled.snapshot.plugins[0]?.sourceVersion).toBe("1.1.0");
   });
 
   it("rejects an invalid installedHash in the registry file", async () => {

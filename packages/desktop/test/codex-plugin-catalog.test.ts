@@ -1,13 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodexPluginCatalog } from "../src/main/plugins/codex/codex-plugin-catalog.ts";
 
-const fixtureRoot = new URL("fixtures/codex/plugins/dart-flutter", import.meta.url).pathname;
+const fixtureRoot = fileURLToPath(new URL("fixtures/codex/plugins/dart-flutter", import.meta.url));
+const temporaryRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 function record(marketplacePath: string) {
   return {
     id: "dart-flutter",
     displayName: "Dart Flutter",
     version: "1.0.0",
+    sourceVersion: "1.0.0",
     rootPath: fixtureRoot,
     marketplacePath,
     sourcePath: "plugins/dart-flutter",
@@ -48,6 +58,49 @@ describe("CodexPluginCatalog", () => {
     });
     expect(snapshot.plugins[0]).not.toHaveProperty("rootPath");
     expect(snapshot.plugins[0]).not.toHaveProperty("marketplacePath");
+  });
+
+  it("prefers metadata from the immutable installed payload", async () => {
+    const root = join(tmpdir(), `codex-catalog-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    temporaryRoots.push(root);
+    const hash = "a".repeat(64);
+    const payload = join(root, ".versions", hash);
+    await mkdir(payload, { recursive: true });
+    await cp(fixtureRoot, payload, { recursive: true });
+    const manifestPath = join(payload, ".codex-plugin", "plugin.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.interface = { ...(manifest.interface as object), displayName: "Installed Metadata" };
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    const installedRecord = {
+      ...record("/home/test/.agents/plugins/marketplace.json"),
+      installedRootPath: root,
+      installedHash: hash,
+    };
+    const registry = { getSnapshot: vi.fn().mockResolvedValue({ revision: "one", plugins: [installedRecord] }) };
+
+    const snapshot = await new CodexPluginCatalog(registry as never, {} as never).list();
+
+    expect(snapshot.plugins[0]?.displayName).toBe("Installed Metadata");
+    expect(snapshot.diagnostics).toEqual([]);
+  });
+
+  it("projects discovery issues without exposing local paths", async () => {
+    const registry = { getSnapshot: vi.fn().mockResolvedValue({ revision: "one", plugins: [] }) };
+    const catalog = new CodexPluginCatalog(registry as never, {} as never, [
+      {
+        code: "plugin.invalid",
+        pluginName: "broken-tool",
+        marketplacePath: "C:\\secret\\marketplace.json",
+        message: "C:\\secret\\plugins\\broken-tool is invalid",
+      },
+    ]);
+
+    const snapshot = await catalog.list();
+
+    expect(snapshot.diagnostics).toEqual([
+      { code: "plugin.invalid", pluginId: "broken-tool", message: "插件“broken-tool” manifest 无效。" },
+    ]);
+    expect(JSON.stringify(snapshot)).not.toContain("C:\\\\secret");
   });
 
   it("marks non-personal marketplace files as custom", async () => {

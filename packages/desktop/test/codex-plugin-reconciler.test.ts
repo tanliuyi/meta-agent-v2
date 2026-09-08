@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -105,6 +105,74 @@ describe("codex-plugin-reconciler", () => {
     expect(after?.installedHash).toBeUndefined();
     expect(after?.installedRootPath).toBeUndefined();
     expect(await readdir(join(harness.codexRoot, "my-tool")).catch(() => [])).toEqual([]);
+  });
+
+  it("clears installed state when the installed payload hash no longer matches", async () => {
+    const harness = await createHarness();
+    const installed = await installPlugin(harness);
+    if (!installed) return;
+    const record = installed.snapshot.plugins.find((plugin) => plugin.id === "my-tool");
+    if (!record?.installedHash) return;
+    await writeFile(
+      join(harness.codexRoot, "my-tool", ".versions", record.installedHash, "skills", "demo", "SKILL.md"),
+      "tampered\n",
+      "utf8",
+    );
+    await harness.reconciler.reconcile();
+    const after = (await harness.registry.getSnapshot()).plugins.find((plugin) => plugin.id === "my-tool");
+    expect(after?.installedHash).toBeUndefined();
+    expect(await readdir(join(harness.codexRoot, "my-tool")).catch(() => [])).toEqual([]);
+  });
+
+  it("quarantines an installed payload with an escaping symlink without touching the target", async () => {
+    const harness = await createHarness();
+    const installed = await installPlugin(harness);
+    if (!installed) return;
+    const record = installed.snapshot.plugins.find((plugin) => plugin.id === "my-tool");
+    if (!record?.installedHash) return;
+    const outside = join(harness.root, "outside-payload.txt");
+    await writeFile(outside, "keep", "utf8");
+    const skillPath = join(
+      harness.codexRoot,
+      "my-tool",
+      ".versions",
+      record.installedHash,
+      "skills",
+      "demo",
+      "SKILL.md",
+    );
+    await rm(skillPath);
+    let linkedCreated = false;
+    try {
+      await symlink(outside, skillPath, "file");
+      linkedCreated = true;
+    } catch {
+      // Windows without symlink privileges cannot exercise this boundary.
+    }
+    if (!linkedCreated) return;
+
+    await harness.reconciler.reconcile();
+
+    const after = (await harness.registry.getSnapshot()).plugins.find((plugin) => plugin.id === "my-tool");
+    expect(after?.installedHash).toBeUndefined();
+    expect(await readFile(outside, "utf8")).toBe("keep");
+  });
+
+  it("refuses to reconcile through a symlinked managed root", async () => {
+    const harness = await createHarness();
+    const outside = join(harness.root, "outside-reconcile-root");
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "keep.txt"), "keep", "utf8");
+    let linkedCreated = false;
+    try {
+      await symlink(outside, harness.codexRoot, "dir");
+      linkedCreated = true;
+    } catch {
+      // Windows without symlink privileges cannot exercise this boundary.
+    }
+    if (!linkedCreated) return;
+    await expect(harness.reconciler.reconcile()).rejects.toThrow(/managed path/);
+    expect(await readFile(join(outside, "keep.txt"), "utf8")).toBe("keep");
   });
 
   it("leaves a healthy installed copy alone", async () => {

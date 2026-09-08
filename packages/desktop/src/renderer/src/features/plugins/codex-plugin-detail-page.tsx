@@ -6,6 +6,7 @@ import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
 import { PluginIcon } from "../../components/chat/plugin-icon.tsx";
 import { SidebarToggle } from "../../components/layout/sidebar-toggle.tsx";
+import { CodexPluginMutationConfirmation } from "./codex-plugin-mutation-confirmation.tsx";
 import { PluginDetailBackLink } from "./plugin-detail-back-link.tsx";
 import { PluginMarketplaceBreadcrumb } from "./plugin-marketplace-breadcrumb.tsx";
 import { useCodexPlugins } from "./use-codex-plugins.ts";
@@ -13,6 +14,7 @@ import { useCodexPlugins } from "./use-codex-plugins.ts";
 export function CodexPluginDetailPage({ pluginId }: { pluginId: string }) {
   const controller = useCodexPlugins();
   const plugin = controller.snapshot?.plugins.find((entry) => entry.id === pluginId);
+  const installable = plugin?.installationPolicy !== "NOT_AVAILABLE";
   return (
     <>
       <header className="topbar plugin-marketplace-topbar plugin-marketplace-detail-topbar">
@@ -79,7 +81,7 @@ export function CodexPluginDetailPage({ pluginId }: { pluginId: string }) {
                           卸载
                         </Button>
                         <Button
-                          disabled={controller.pendingId !== undefined}
+                          disabled={controller.pendingId !== undefined || !installable}
                           onClick={() => void controller.mutate(plugin, "update")}
                         >
                           <RefreshCw />
@@ -88,7 +90,7 @@ export function CodexPluginDetailPage({ pluginId }: { pluginId: string }) {
                       </>
                     ) : (
                       <Button
-                        disabled={controller.pendingId !== undefined}
+                        disabled={controller.pendingId !== undefined || !installable}
                         onClick={() => void controller.mutate(plugin, "install")}
                       >
                         <Download />
@@ -111,6 +113,12 @@ export function CodexPluginDetailPage({ pluginId }: { pluginId: string }) {
                       <dt>版本</dt>
                       <dd>{plugin.version}</dd>
                     </div>
+                    {plugin.updateAvailable ? (
+                      <div>
+                        <dt>可更新版本</dt>
+                        <dd>{plugin.sourceVersion}</dd>
+                      </div>
+                    ) : null}
                     <div>
                       <dt>Marketplace</dt>
                       <dd>{plugin.marketplace === "personal" ? "个人 Marketplace" : "自定义 Marketplace"}</dd>
@@ -190,6 +198,11 @@ export function CodexPluginDetailPage({ pluginId }: { pluginId: string }) {
           )}
         </main>
       </div>
+      <CodexPluginMutationConfirmation
+        pending={controller.pendingConfirmation}
+        onCancel={controller.cancelMutation}
+        onConfirm={controller.confirmMutation}
+      />
     </>
   );
 }

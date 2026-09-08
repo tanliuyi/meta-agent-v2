@@ -259,10 +259,16 @@ describe("parseCodexPluginManifest", () => {
     expect(badCapabilities.issues).toEqual([
       { path: "$.interface.capabilities", message: "must be an array of strings" },
     ]);
-    const badPrompt = parseCodexPluginManifest(
-      JSON.stringify({ ...base, interface: { displayName: "d", defaultPrompt: "not-an-array" } }),
+    const scaffoldPrompt = parseCodexPluginManifest(
+      JSON.stringify({ ...base, interface: { displayName: "d", defaultPrompt: "scaffold prompt" } }),
     );
-    expect(badPrompt.issues).toEqual([{ path: "$.interface.defaultPrompt", message: "must be an array of strings" }]);
+    expect(scaffoldPrompt.manifest?.interface?.defaultPrompt).toBe("scaffold prompt");
+    const badPrompt = parseCodexPluginManifest(
+      JSON.stringify({ ...base, interface: { displayName: "d", defaultPrompt: 1 } }),
+    );
+    expect(badPrompt.issues).toEqual([
+      { path: "$.interface.defaultPrompt", message: "must be a non-empty string or an array of strings" },
+    ]);
   });
 
   it("rejects empty asset paths at parse time", () => {

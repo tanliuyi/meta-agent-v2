@@ -17,7 +17,10 @@ export interface CodexPluginRegistryRecord {
   /** Codex plugin name; unique within the registry. */
   id: string;
   displayName: string;
+  /** Installed version when installed, otherwise the currently discovered source version. */
   version: string;
+  /** Current version declared by the discovered source manifest. */
+  sourceVersion: string;
   /** Absolute plugin root path (realpath-resolved during discovery). */
   rootPath: string;
   /** Marketplace file the entry was declared in. */
@@ -142,19 +145,16 @@ export class CodexPluginRegistry {
         if (seen.has(plugin.name)) continue; // defensive: never persist duplicate IDs
         seen.add(plugin.name);
         const previous = existing.get(plugin.name);
-        const sameSource =
+        const sameLocation =
           previous !== undefined &&
-          // cachebuster 后缀属于 Desktop 侧派生（installer 写入），发现层只比较 semver base：
-          // 否则一次内容更新后记录版本带 +codex.<ts>，下一轮发现会误判源已变化而撤销安装。
-          previous.version.split("+")[0] === plugin.version.split("+")[0] &&
           previous.rootPath === plugin.rootPath &&
           previous.sourcePath === plugin.sourcePath &&
           previous.marketplacePath === plugin.marketplacePath;
         plugins.push({
           id: plugin.name,
           displayName: plugin.displayName,
-          // 源未变化时保留记录版本（可能带 cachebuster），源 bump 时采用源版本原样
-          version: sameSource ? previous.version : plugin.version,
+          version: sameLocation && previous.installedHash ? previous.version : plugin.version,
+          sourceVersion: plugin.version,
           rootPath: plugin.rootPath,
           marketplacePath: plugin.marketplacePath,
           sourcePath: plugin.sourcePath,
@@ -162,10 +162,10 @@ export class CodexPluginRegistry {
           ...(plugin.installationPolicy ? { installationPolicy: plugin.installationPolicy } : {}),
           ...(plugin.authenticationPolicy ? { authenticationPolicy: plugin.authenticationPolicy } : {}),
           ...(plugin.products ? { products: [...plugin.products] } : {}),
-          enabled: sameSource ? previous.enabled : true,
+          enabled: sameLocation ? previous.enabled : true,
           discoveredAt: previous?.discoveredAt ?? Date.now(),
-          // 源未变化时保留安装状态；源一旦变化安装副本即失效，需要重新安装。
-          ...(sameSource && previous?.installedHash && previous.installedRootPath
+          // Source version changes mark an update as available but do not silently uninstall the managed copy.
+          ...(sameLocation && previous?.installedHash && previous.installedRootPath
             ? { installedRootPath: previous.installedRootPath, installedHash: previous.installedHash }
             : {}),
         });
@@ -232,7 +232,9 @@ export class CodexPluginRegistry {
         return { status: "not-installed", snapshot: snapshot(current) };
       }
       const plugins = current.data.plugins.map((plugin) =>
-        plugin.id === pluginId ? { ...plugin, installedRootPath: undefined, installedHash: undefined } : plugin,
+        plugin.id === pluginId
+          ? { ...plugin, version: plugin.sourceVersion, installedRootPath: undefined, installedHash: undefined }
+          : plugin,
       );
       await this.atomicWrite({ version: 1, plugins });
       return { status: "saved", snapshot: await this.getSnapshot() };
@@ -338,6 +340,7 @@ function recordsEqual(
     left.id === right.id &&
     left.displayName === right.displayName &&
     left.version === right.version &&
+    left.sourceVersion === right.sourceVersion &&
     left.rootPath === right.rootPath &&
     left.marketplacePath === right.marketplacePath &&
     left.sourcePath === right.sourcePath &&
@@ -366,6 +369,8 @@ function assertRegistryFile(value: unknown): asserts value is RegistryFileData {
       plugin.displayName.length === 0 ||
       typeof plugin.version !== "string" ||
       plugin.version.length === 0 ||
+      (plugin.sourceVersion !== undefined &&
+        (typeof plugin.sourceVersion !== "string" || plugin.sourceVersion.length === 0)) ||
       typeof plugin.rootPath !== "string" ||
       typeof plugin.marketplacePath !== "string" ||
       typeof plugin.sourcePath !== "string" ||
@@ -389,6 +394,7 @@ function assertRegistryFile(value: unknown): asserts value is RegistryFileData {
     ) {
       throw new Error("codex-plugins.json plugin entry is invalid");
     }
+    plugin.sourceVersion ??= plugin.version;
     if (ids.has(plugin.id)) throw new Error(`codex-plugins.json duplicate plugin ID: ${plugin.id}`);
     ids.add(plugin.id);
   }

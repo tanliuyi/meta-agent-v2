@@ -162,6 +162,92 @@ describe("codex-plugin-installer", () => {
     expect(await hashCodexPluginRoot(join(harness.homeDir, "plugins", "my-tool"))).toBe(hash);
   });
 
+  it("frames file paths and contents when hashing", async () => {
+    const harness = await createHarness();
+    const left = join(harness.root, "hash-left");
+    const right = join(harness.root, "hash-right");
+    await mkdir(left, { recursive: true });
+    await mkdir(right, { recursive: true });
+    await writeFile(join(left, "x"), "yz", "utf8");
+    await writeFile(join(right, "xy"), "z", "utf8");
+    expect(await hashCodexPluginRoot(left)).not.toBe(await hashCodexPluginRoot(right));
+  });
+
+  it("rejects a symlinked managed root before writing outside userData", async () => {
+    const harness = await createHarness();
+    await harness.addPlugin();
+    const outside = join(harness.root, "outside-managed-root");
+    await mkdir(outside, { recursive: true });
+    let linkedCreated = false;
+    try {
+      await symlink(outside, harness.codexRoot, "dir");
+      linkedCreated = true;
+    } catch {
+      // Windows without symlink privileges cannot exercise this boundary.
+    }
+    if (!linkedCreated) return;
+    await expect(
+      harness.installer.install({
+        pluginId: "my-tool",
+        requestId: "symlinked-root",
+        expectedRevision: harness.revision,
+        confirmFullTrust: true,
+      }),
+    ).rejects.toThrow(/managed path/);
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it("accepts case-only differences in Windows managed-root registry paths", async () => {
+    if (process.platform !== "win32") return;
+    const harness = await createHarness();
+    await harness.addPlugin();
+    const installed = await harness.installer.install({
+      pluginId: "my-tool",
+      requestId: "case-install",
+      expectedRevision: harness.revision,
+      confirmFullTrust: true,
+    });
+    if (installed.status !== "installed") return;
+    const record = installed.snapshot.plugins.find((plugin) => plugin.id === "my-tool");
+    if (!record?.installedHash || !record.installedRootPath) return;
+    const rewritten = await harness.registry.commitInstalled(
+      installed.snapshot.revision,
+      "my-tool",
+      record.installedRootPath.toUpperCase(),
+      record.installedHash,
+      record.version,
+    );
+    if (rewritten.status !== "saved") return;
+
+    await expect(
+      harness.installer.uninstall({
+        pluginId: "my-tool",
+        requestId: "case-uninstall",
+        expectedRevision: rewritten.snapshot.revision,
+        confirmRemoval: true,
+      }),
+    ).resolves.toMatchObject({ status: "uninstalled" });
+  });
+
+  it("rejects plugins whose Marketplace installation policy is NOT_AVAILABLE", async () => {
+    const harness = await createHarness();
+    await harness.addPlugin();
+    await writeFile(
+      join(harness.homeDir, ".agents", "plugins", "marketplace.json"),
+      `${JSON.stringify({ name: "personal", plugins: [{ name: "my-tool", source: { source: "local", path: "./plugins/my-tool" }, policy: { installation: "NOT_AVAILABLE" } }] }, null, 2)}\n`,
+      "utf8",
+    );
+    await harness.refreshDiscovery();
+    await expect(
+      harness.installer.install({
+        pluginId: "my-tool",
+        requestId: "not-available",
+        expectedRevision: harness.revision,
+        confirmFullTrust: true,
+      }),
+    ).rejects.toThrow("not available for installation");
+  });
+
   it("never copies Desktop-owned files into the managed copy", async () => {
     const harness = await createHarness();
     await harness.addPlugin();
@@ -182,7 +268,7 @@ describe("codex-plugin-installer", () => {
     expect(files).not.toContain(".versions/x");
   });
 
-  it("follows source symlinks when copying so the copy is self-contained", async () => {
+  it("rejects source symlinks that escape the plugin root", async () => {
     const harness = await createHarness();
     const pluginRoot = join(harness.homeDir, "plugins", "my-tool");
     await writeCodexPluginSource(pluginRoot, "0.1.0");
@@ -195,22 +281,16 @@ describe("codex-plugin-installer", () => {
     } catch {
       // Windows without developer mode may fail to create symlinks; the assertion is skipped then.
     }
+    if (!linkedCreated) return;
     await harness.refreshDiscovery();
-    const result = await harness.installer.install({
-      pluginId: "my-tool",
-      requestId: "install-3",
-      expectedRevision: harness.revision,
-      confirmFullTrust: true,
-    });
-    expect(result.status).toBe("installed");
-    const installed = await harness.record("my-tool");
-    if (!installed?.installedHash || !linkedCreated) return;
-    expect(
-      await readFile(
-        join(harness.codexRoot, "my-tool", ".versions", installed.installedHash, "skills", "linked.md"),
-        "utf8",
-      ),
-    ).toBe("linked content\n");
+    await expect(
+      harness.installer.install({
+        pluginId: "my-tool",
+        requestId: "install-3",
+        expectedRevision: harness.revision,
+        confirmFullTrust: true,
+      }),
+    ).rejects.toThrow("outside the plugin root");
   });
 
   it("replays a completed install for the same request id", async () => {

@@ -199,7 +199,7 @@ describe("parseCodexMarketplace", () => {
     expect(result.marketplace?.plugins[0]?.name).toBe("p");
   });
 
-  it("reports structured issues and keeps invalid-name entries", () => {
+  it("reports structured issues and drops invalid entries", () => {
     const result = parseCodexMarketplace(
       JSON.stringify(manifest({ plugins: [entry("good"), entry("bad name"), 7, entry("also-good")] })),
     );
@@ -207,7 +207,7 @@ describe("parseCodexMarketplace", () => {
       { path: "$.plugins[1].name", message: "must match `[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*`" },
       { path: "$.plugins[2]", message: "must be an object" },
     ]);
-    expect(result.marketplace?.plugins.map((plugin) => plugin.name)).toEqual(["good", "bad name", "also-good"]);
+    expect(result.marketplace?.plugins.map((plugin) => plugin.name)).toEqual(["good", "also-good"]);
   });
 });
 

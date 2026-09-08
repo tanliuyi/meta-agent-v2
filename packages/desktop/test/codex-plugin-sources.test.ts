@@ -34,6 +34,15 @@ async function createHome(entries: unknown[]): Promise<HomeLayout> {
   return { homeDir, marketplacePath };
 }
 
+async function writeCodexPluginSource(rootPath: string, name: string): Promise<void> {
+  await mkdir(join(rootPath, ".codex-plugin"), { recursive: true });
+  await writeFile(
+    join(rootPath, ".codex-plugin", "plugin.json"),
+    `${JSON.stringify({ name, version: "1.0.0", description: "test", author: { name: "test" } }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 async function installDartFlutterPlugin(homeDir: string): Promise<string> {
   const rootPath = join(homeDir, "plugins", "dart-flutter");
   await mkdir(join(homeDir, "plugins"), { recursive: true });
@@ -103,8 +112,7 @@ describe("discoverCodexPluginSources", () => {
   });
 
   it("reports unsafe and missing local roots with stable diagnostics", async () => {
-    // 绝对路径与 .. 遍历在 Marketplace 解析层被拒（marketplace.invalid）且条目不携带
-    // source.path；发现层因此同时给出 source.unsafe。
+    // 绝对路径与 .. 遍历在 Marketplace 解析层被拒并 fail closed；无效条目不会进入发现层。
     const { homeDir } = await createHome([
       entry("escape", "../../escape"),
       entry("absolute", "C:\\absolute\\plugin"),
@@ -117,16 +125,9 @@ describe("discoverCodexPluginSources", () => {
     for (const issue of result.issues) {
       byCode.set(issue.code, [...(byCode.get(issue.code) ?? []), issue]);
     }
-    expect([...byCode.keys()].sort()).toEqual(["marketplace.invalid", "source.missing", "source.unsafe"]);
+    expect([...byCode.keys()].sort()).toEqual(["marketplace.invalid", "source.missing"]);
     expect(byCode.get("marketplace.invalid")?.map((issue) => issue.pluginName)).toEqual([undefined, undefined]);
     expect(byCode.get("marketplace.invalid")?.[0]?.message).toContain("must be a non-empty relative path");
-    expect(
-      byCode
-        .get("source.unsafe")
-        ?.map((issue) => issue.pluginName)
-        .sort(),
-    ).toEqual(["absolute", "escape"]);
-    expect(byCode.get("source.unsafe")?.[0]?.message).toContain("absolute or escapes");
     expect(byCode.get("source.missing")?.map((issue) => issue.pluginName)).toEqual(["missing-root"]);
     expect(byCode.get("source.missing")?.[0]?.message).toContain("does not exist");
     expect(result.plugins).toEqual([]);
@@ -232,6 +233,36 @@ describe("discoverCodexPluginSources", () => {
 
     expect(result.plugins).toEqual([]);
     expect(result.issues).toEqual([expect.objectContaining({ code: "marketplace.read-failed" })]);
+  });
+
+  it("rejects plugin directories whose basename does not match the declared identity", async () => {
+    const { homeDir } = await createHome([entry("declared-name", "./plugins/actual-directory")]);
+    await writeCodexPluginSource(join(homeDir, "plugins", "actual-directory"), "declared-name");
+
+    const result = await discoverCodexPluginSources(homeDir);
+
+    expect(result.plugins).toEqual([]);
+    expect(result.issues).toEqual([expect.objectContaining({ code: "plugin.invalid", pluginName: "declared-name" })]);
+  });
+
+  it("rejects a local root that escapes through an intermediate symlink", async () => {
+    const { homeDir } = await createHome([entry("escape-tool", "./linked/escape-tool")]);
+    const outside = join(tmpdir(), `outside-marketplace-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    directories.push(outside);
+    await writeCodexPluginSource(join(outside, "escape-tool"), "escape-tool");
+    let linkedCreated = false;
+    try {
+      await symlink(outside, join(homeDir, "linked"), "dir");
+      linkedCreated = true;
+    } catch {
+      // Windows without symlink privileges cannot exercise this boundary.
+    }
+    if (!linkedCreated) return;
+
+    const result = await discoverCodexPluginSources(homeDir);
+
+    expect(result.plugins).toEqual([]);
+    expect(result.issues).toEqual([expect.objectContaining({ code: "source.unsafe", pluginName: "escape-tool" })]);
   });
 
   it("supports explicit marketplace file discovery with a repo-style root", async () => {

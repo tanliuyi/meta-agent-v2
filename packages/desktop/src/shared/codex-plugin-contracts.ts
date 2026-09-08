@@ -3,6 +3,8 @@ export interface CodexPluginDisplayMetadata {
   description: string;
   developerName: string;
   version: string;
+  sourceVersion: string;
+  updateAvailable: boolean;
   category?: string;
   capabilities: string[];
   keywords: string[];
@@ -23,9 +25,16 @@ export interface CodexPluginSummary extends CodexPluginDisplayMetadata {
   enabled: boolean;
 }
 
+export interface CodexPluginDiagnostic {
+  code: string;
+  pluginId?: string;
+  message: string;
+}
+
 export interface CodexPluginsSnapshot {
   revision: string;
   plugins: CodexPluginSummary[];
+  diagnostics: CodexPluginDiagnostic[];
 }
 
 export interface CodexPluginMutationInput {

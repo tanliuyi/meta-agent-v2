@@ -52,13 +52,14 @@ export async function createPluginServices(
     decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
   });
   const generationReferences = new PluginGenerationReferenceTracker();
-  await codexRegistry.reconcile((await discoverCodexPluginSources(options.codexHomeDir ?? homedir())).plugins);
+  const codexDiscovery = await discoverCodexPluginSources(options.codexHomeDir ?? homedir());
+  await codexRegistry.reconcile(codexDiscovery.plugins);
   const codexRoot = resolveCodexExtensionRoot(context.userDataDir);
   const codexReconciler = new CodexPluginReconciler(codexRegistry, codexRoot, marketplaceLockDirectory, {
     log: (text) => context.sidecarLog.write("codex", text),
   });
   const codexInstaller = new CodexPluginInstaller(codexRegistry, marketplaceLockDirectory, codexRoot);
-  const codexCatalog = new CodexPluginCatalog(codexRegistry, codexInstaller);
+  const codexCatalog = new CodexPluginCatalog(codexRegistry, codexInstaller, codexDiscovery.issues);
   await codexReconciler.reconcile();
 
   const extensionSourcePolicy = new DesktopExtensionSourcePolicy({

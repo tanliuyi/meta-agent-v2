@@ -1,6 +1,9 @@
 import type { Dirent } from "node:fs";
 import { lstat, readdir, rm, rmdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { samePath } from "../../path-identity.ts";
+import { assertCodexManagedChild, ensureCodexManagedDirectory } from "./codex-managed-paths.ts";
+import { hashCodexPluginRoot } from "./codex-plugin-installer.ts";
 import { withCodexPluginLock } from "./codex-plugin-lock.ts";
 import type { CodexPluginRegistry } from "./codex-plugin-registry.ts";
 
@@ -40,16 +43,22 @@ export class CodexPluginReconciler {
   }
 
   async reconcile(): Promise<void> {
-    await this.cleanupOrphanStaging();
-    for (const entry of await this.managedRoots()) {
-      await withCodexPluginLock(this.lockDirectory, entry.name, async () => {
-        await this.reconcileRoot(entry.name);
+    const canonicalRoot = await ensureCodexManagedDirectory(this.codexRoot, dirname(dirname(this.codexRoot)));
+    await this.cleanupOrphanStaging(canonicalRoot);
+    const pluginIds = new Set((await this.managedRoots(canonicalRoot)).map((entry) => entry.name));
+    for (const record of (await this.registry.getSnapshot()).plugins) {
+      if (record.installedHash && record.installedRootPath) pluginIds.add(record.id);
+    }
+    for (const pluginId of pluginIds) {
+      await withCodexPluginLock(this.lockDirectory, pluginId, async () => {
+        await this.reconcileRoot(canonicalRoot, pluginId);
       });
     }
   }
 
-  private async reconcileRoot(pluginId: string): Promise<void> {
-    const rootPath = resolve(this.codexRoot, pluginId);
+  private async reconcileRoot(canonicalRoot: string, pluginId: string): Promise<void> {
+    const rootPath = resolve(canonicalRoot, pluginId);
+    assertCodexManagedChild(canonicalRoot, rootPath);
     const registered = (await this.registry.getSnapshot()).plugins.find((plugin) => plugin.id === pluginId);
     const installedHash = registered?.installedHash;
     const installedRootPath = registered?.installedRootPath;
@@ -57,14 +66,20 @@ export class CodexPluginReconciler {
       await this.removeRoot(rootPath, pluginId);
       return;
     }
-    if (resolve(installedRootPath) !== rootPath) return;
-    const payloadPath = join(rootPath, VERSION_DIRECTORY, installedHash);
+    if (!samePath(installedRootPath, rootPath)) return;
+    const versionsRoot = join(rootPath, VERSION_DIRECTORY);
+    const payloadPath = join(versionsRoot, installedHash);
     let exists = false;
     try {
+      const versionsInfo = await lstat(versionsRoot);
+      if (!versionsInfo.isDirectory() || versionsInfo.isSymbolicLink()) {
+        throw new Error("Codex .versions path is not a regular directory");
+      }
       const info = await lstat(payloadPath);
-      exists = info.isDirectory() && !info.isSymbolicLink();
-    } catch (error) {
-      if (!isNodeError(error, "ENOENT")) throw error;
+      exists =
+        info.isDirectory() && !info.isSymbolicLink() && (await hashCodexPluginRoot(payloadPath)) === installedHash;
+    } catch {
+      exists = false;
     }
     if (!exists) {
       await this.registry
@@ -82,7 +97,11 @@ export class CodexPluginReconciler {
   private async removeOrphanVersions(rootPath: string, installedHash: string, pluginId: string): Promise<void> {
     let versions: Dirent[];
     try {
-      versions = await readdir(join(rootPath, VERSION_DIRECTORY), { withFileTypes: true });
+      const versionsRoot = join(rootPath, VERSION_DIRECTORY);
+      const info = await lstat(versionsRoot);
+      if (!info.isDirectory() || info.isSymbolicLink())
+        throw new Error("Codex .versions path is not a regular directory");
+      versions = await readdir(versionsRoot, { withFileTypes: true });
     } catch {
       return;
     }
@@ -108,7 +127,13 @@ export class CodexPluginReconciler {
     } catch {
       return;
     }
-    if (entries.length !== 1 || entries[0]?.name !== VERSION_DIRECTORY || !entries[0].isDirectory()) return;
+    if (
+      entries.length !== 1 ||
+      entries[0]?.name !== VERSION_DIRECTORY ||
+      !entries[0].isDirectory() ||
+      entries[0].isSymbolicLink()
+    )
+      return;
     let versions: Dirent[];
     try {
       versions = await readdir(join(rootPath, VERSION_DIRECTORY), { withFileTypes: true });
@@ -126,8 +151,9 @@ export class CodexPluginReconciler {
     this.log(`Removed uncommitted Codex plugin payload for ${pluginId}`);
   }
 
-  private async cleanupOrphanStaging(): Promise<void> {
-    const stagingRoot = join(this.codexRoot, ".meta-agent-codex-staging");
+  private async cleanupOrphanStaging(canonicalRoot: string): Promise<void> {
+    const stagingRoot = join(canonicalRoot, ".meta-agent-codex-staging");
+    assertCodexManagedChild(canonicalRoot, stagingRoot);
     let entries: Dirent[];
     try {
       entries = await readdir(stagingRoot, { withFileTypes: true });
@@ -142,9 +168,9 @@ export class CodexPluginReconciler {
     await rmdir(stagingRoot).catch(() => undefined);
   }
 
-  private async managedRoots(): Promise<Dirent[]> {
+  private async managedRoots(canonicalRoot: string): Promise<Dirent[]> {
     try {
-      const entries = await readdir(this.codexRoot, { withFileTypes: true });
+      const entries = await readdir(canonicalRoot, { withFileTypes: true });
       return entries.filter(
         (entry) => entry.isDirectory() && !entry.isSymbolicLink() && CODEX_PLUGIN_ID.test(entry.name),
       );
