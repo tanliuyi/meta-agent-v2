@@ -26,7 +26,7 @@ export interface WorkspaceServicesOptions {
   readonly context: DesktopRuntimeContext;
   readonly core: Pick<CoreServices, "projects">;
   readonly plugins: Pick<PluginServices, "pluginConfigurations">;
-  readonly sessions: Pick<SessionServices, "workers">;
+  readonly sessions: Pick<SessionServices, "sessions">;
   readonly workspaceMutation: WorkspaceMutationPort;
   readonly publishScmChanged: (projectId: string) => void;
   readonly publishFileChanged: (change: FileChangeSet) => void;
@@ -46,7 +46,7 @@ export function createWorkspaceServices(options: WorkspaceServicesOptions): Work
       core.projects,
       options.publishTerminalEvent,
       createTerminalShellResolver(context.agentDir, context.shellPath),
-      (projectId, threadId) => sessions.workers.getSessionCwd(projectId, threadId),
+      (projectId, threadId) => sessions.sessions.getSessionCwd(projectId, threadId),
     );
     workspaceMutation.bind(terminals);
     const officeDocuments = new OfficeDocumentPreviewService(core.projects, {

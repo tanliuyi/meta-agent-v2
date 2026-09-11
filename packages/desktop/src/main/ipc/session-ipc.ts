@@ -24,7 +24,7 @@ import type {
   SessionCheckpointRestoreInput,
   SessionCheckpointRestoreResult,
 } from "../../shared/pi-rewind-contracts.ts";
-import type { SessionSupervisor } from "../pi/session-supervisor.ts";
+import type { SessionService } from "../session/session-service.ts";
 import type { TerminalSupervisor } from "../terminal/terminal-supervisor.ts";
 import { openPath } from "./ipc-shared.ts";
 
@@ -32,7 +32,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 /** session IPC 所需的 supervisor 和 terminal 清理依赖。 */
 export interface SessionIpcDependencies {
-  readonly sessions: SessionSupervisor;
+  readonly sessions: SessionService;
   readonly terminals: TerminalSupervisor;
 }
 

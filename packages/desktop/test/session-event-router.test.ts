@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SessionSupervisor } from "../src/main/pi/session-supervisor.ts";
-import { SessionEventRouter } from "../src/main/session/session-event-router.ts";
+import { type SessionEventReceiver, SessionEventRouter } from "../src/main/session/session-event-router.ts";
 import type { SessionPushPayload } from "../src/shared/contracts.ts";
 
 const payload = { type: "session", event: {} } as unknown as SessionPushPayload;
@@ -27,7 +26,7 @@ describe("SessionEventRouter", () => {
       receive: vi.fn(),
       workerFailed: vi.fn(),
       resyncRequired: vi.fn(),
-    } as unknown as SessionSupervisor;
+    } satisfies SessionEventReceiver;
     const router = new SessionEventRouter({
       publishCatalogChanged: vi.fn(),
     });
@@ -48,7 +47,7 @@ describe("SessionEventRouter", () => {
     const router = new SessionEventRouter({
       publishCatalogChanged: vi.fn(),
     });
-    const supervisor = {} as SessionSupervisor;
+    const supervisor = {} as SessionEventReceiver;
 
     router.bindSupervisor(supervisor);
 

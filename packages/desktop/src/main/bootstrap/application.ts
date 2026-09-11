@@ -263,7 +263,11 @@ export class DesktopApplication {
         this.graph.core.settings,
         this.dirtyGuard,
         this.options.app.getVersion(),
-        new DesktopDevelopmentService(this.graph.core.mainAgents, this.graph.plugins, this.graph.sessions.workers),
+        new DesktopDevelopmentService(
+          this.graph.core.mainAgents,
+          this.graph.plugins,
+          this.graph.sessions.developmentRuntime,
+        ),
       );
       this.desktopRuntime.addWindow(window);
       this.resources.add("desktop runtime", "background", this.desktopRuntime);

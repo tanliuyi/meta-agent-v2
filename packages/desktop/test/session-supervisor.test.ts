@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionSupervisor } from "../src/main/pi/session-supervisor.ts";
+import { SessionSupervisor } from "../src/main/session/session-supervisor.ts";
 import type { ThreadWorkerRegistry } from "../src/main/sidecar/thread-worker-registry.ts";
 import type { ProjectStore } from "../src/main/store/project-store.ts";
 import type { SessionAttachInput, SessionBootstrap, SessionPush } from "../src/shared/contracts.ts";

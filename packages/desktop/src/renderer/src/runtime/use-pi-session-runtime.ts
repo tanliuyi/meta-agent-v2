@@ -12,6 +12,7 @@ import type { PiQueueItem, SessionControlState } from "../../../shared/contracts
 import { useExternalStoreSelector } from "../shared/hooks/use-external-store-selector.ts";
 import { useToast } from "../shared/ui/use-toast.ts";
 import { attachmentAdapter, restoreComposerAttachments } from "./attachments.ts";
+import { createDesktopSessionCommandGateway } from "./desktop-session-gateway.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "./pi-command-coordinator.ts";
 import { PiMessageRepositoryConverter } from "./pi-message-repository.ts";
 import type { CachedSessionRecord } from "./pi-session-store.ts";
@@ -50,11 +51,13 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
   const converter = useMemo(() => new PiMessageRepositoryConverter(), []);
+  const commands = useMemo(() => createDesktopSessionCommandGateway(), []);
   const repository = useMemo(() => converter.build(snapshot), [converter, snapshot]);
 
   const coordinator = useMemo(
     () =>
       new PiCommandCoordinator({
+        commands,
         getTarget: () => {
           if (!activeRef.current || stores.connection.getSnapshot() !== "ready" || !transport.hasCommittedLease(record))
             return null;
@@ -71,7 +74,7 @@ export function usePiSessionRuntime({ record, active, transport }: PiSessionRunt
         updateNotification: update,
         report: (error) => console.error("Pi command failed", error),
       }),
-    [notify, record, stores.connection, transport, update],
+    [commands, notify, record, stores.connection, transport, update],
   );
 
   useEffect(() => coordinator.observeQueue(snapshot.queue), [coordinator, snapshot.queue]);

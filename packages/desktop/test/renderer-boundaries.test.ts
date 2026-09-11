@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -97,6 +97,19 @@ function cssSystemFiles(overrides: Readonly<Record<string, string>> = {}): Reado
 }
 
 describe("Desktop renderer boundary verifier", () => {
+  it("keeps session application logic behind renderer gateways", async () => {
+    const runtimeRoot = resolve(import.meta.dirname, "../src/renderer/src/runtime");
+    const [commands, transport] = await Promise.all([
+      readFile(join(runtimeRoot, "pi-command-coordinator.ts"), "utf8"),
+      readFile(join(runtimeRoot, "session-transport-manager.ts"), "utf8"),
+    ]);
+
+    expect(commands).not.toContain("window.desktop");
+    expect(commands).toContain("this.commands");
+    expect(transport).not.toContain("window.desktop");
+    expect(transport).toContain("this.gateway");
+  });
+
   it("accepts one component per file and forward-only feature imports", async () => {
     const root = await fixture({
       "features/settings/settings-page.tsx": [

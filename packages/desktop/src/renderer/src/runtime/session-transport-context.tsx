@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useRef } from "react";
+import { createDesktopSessionTransportGateway } from "./desktop-session-gateway.ts";
 import { SessionTransportManager } from "./session-transport-manager.ts";
 
 const TransportContext = createContext<SessionTransportManager | null>(null);
@@ -10,7 +11,7 @@ const TransportContext = createContext<SessionTransportManager | null>(null);
 export function TransportProvider({ children }: { children: ReactNode }) {
   const managerRef = useRef<SessionTransportManager | null>(null);
   if (!managerRef.current) {
-    managerRef.current = new SessionTransportManager();
+    managerRef.current = new SessionTransportManager(createDesktopSessionTransportGateway());
   }
   return <TransportContext.Provider value={managerRef.current}>{children}</TransportContext.Provider>;
 }

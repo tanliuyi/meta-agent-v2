@@ -1,9 +1,11 @@
 import { dirname, join } from "node:path";
 import type { Thread } from "../../shared/contracts.ts";
 import { deleteSessionCheckpoints } from "../pi/extensions/pi-rewind/src/core.ts";
-import { SessionSupervisor } from "../pi/session-supervisor.ts";
+import type { DesktopDevelopmentRuntimePort } from "../runtime/desktop-development-service.ts";
 import type { BrowserCapabilityPort } from "../session/browser-capability-port.ts";
 import { SessionEventRouter } from "../session/session-event-router.ts";
+import type { SessionService } from "../session/session-service.ts";
+import { SessionSupervisor } from "../session/session-supervisor.ts";
 import type { WorkspaceMutationPort } from "../session/workspace-mutation-port.ts";
 import { MetadataWorkerClient } from "../sidecar/metadata-worker-client.ts";
 import { SubagentWorkerRegistry } from "../sidecar/subagent-worker-registry.ts";
@@ -18,8 +20,8 @@ import type { DesktopRuntimeContext } from "./runtime-context.ts";
 export interface SessionServices {
   readonly metadata: MetadataWorkerClient;
   readonly subagents: SubagentWorkerRegistry;
-  readonly workers: ThreadWorkerRegistry;
-  readonly sessions: SessionSupervisor;
+  readonly developmentRuntime: DesktopDevelopmentRuntimePort;
+  readonly sessions: SessionService;
   readonly subagentSettings: SubagentSettingsConfigService;
   refreshActiveModelRuntimes(): Promise<void>;
   refreshMemoryConfiguration(): Promise<void>;
@@ -147,7 +149,7 @@ export function createSessionServices(options: SessionServicesOptions): SessionS
   return {
     metadata,
     subagents,
-    workers,
+    developmentRuntime: workers,
     sessions,
     subagentSettings,
     async refreshActiveModelRuntimes(): Promise<void> {
@@ -172,7 +174,7 @@ export function createSessionServices(options: SessionServicesOptions): SessionS
 }
 
 async function disposeSessionServices(
-  sessions: SessionSupervisor,
+  sessions: SessionService,
   subagents: SubagentWorkerRegistry,
   metadata: MetadataWorkerClient,
 ): Promise<void> {

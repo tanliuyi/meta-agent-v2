@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createDesktopSessionTransportGateway } from "../src/renderer/src/runtime/desktop-session-gateway.ts";
 import { createSessionRecord } from "../src/renderer/src/runtime/pi-session-store.ts";
 import { SessionTransportManager } from "../src/renderer/src/runtime/session-transport-manager.ts";
 import type { SessionAttachment, SessionControlState } from "../src/shared/contracts.ts";
@@ -79,7 +80,7 @@ describe("SessionTransportManager attach settling", () => {
       .mockReturnValueOnce(first)
       .mockResolvedValueOnce(attachmentFor(createSessionRecord({ projectId: "p", threadId: "t" }), "attachment-2"));
     const desktop = stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     const record = createSessionRecord({ projectId: "p", threadId: "t" });
 
     const firstEnsure = manager.ensure(record);
@@ -108,7 +109,7 @@ describe("SessionTransportManager attach settling", () => {
     const record = createSessionRecord({ projectId: "p", threadId: "t" });
     const attach = vi.fn().mockResolvedValue(attachmentFor(record, "attachment-2"));
     stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     const attached = await manager.ensure(record);
     expect(attached.attachmentId).toBe("attachment-2");
     vi.unstubAllGlobals();
@@ -121,7 +122,7 @@ describe("SessionTransportManager attach settling", () => {
       .mockResolvedValueOnce(attachmentFor(record, "attachment-1"))
       .mockResolvedValueOnce(attachmentFor(record, "attachment-2"));
     const desktop = stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     await manager.ensure(record);
     const restore = await manager.quiesce(record);
@@ -146,7 +147,7 @@ describe("SessionTransportManager attach settling", () => {
     });
     const attach = vi.fn().mockReturnValueOnce(first);
     const desktop = stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     const record = createSessionRecord({ projectId: "p", threadId: "t" });
 
     const firstEnsure = manager.ensure(record);
@@ -178,7 +179,7 @@ describe("SessionTransportManager attach settling", () => {
     });
     const attach = vi.fn().mockReturnValueOnce(first);
     const desktop = stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     const record = createSessionRecord({ projectId: "p", threadId: "t" });
 
     const firstEnsure = manager.ensure(record);
@@ -203,7 +204,7 @@ describe("SessionTransportManager attach settling", () => {
       .mockResolvedValueOnce(attachmentFor(record, "attachment-1"))
       .mockResolvedValueOnce(attachmentFor(record, "attachment-2"));
     stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     const attached = await manager.recover(record);
     expect(attached.attachmentId).toBe("attachment-1");
@@ -223,7 +224,7 @@ describe("SessionTransportManager attach settling", () => {
     });
     const attach = vi.fn().mockReturnValueOnce(first);
     const desktop = stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     const record = createSessionRecord({ projectId: "p", threadId: "t" });
 
     const firstEnsure = manager.ensure(record);
@@ -257,7 +258,7 @@ describe("SessionTransportManager attach settling", () => {
       .mockResolvedValueOnce(attachmentFor(first, "attachment-1"))
       .mockResolvedValueOnce(attachmentFor(second, "attachment-2"));
     const desktop = stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     await manager.ensure(first);
     await manager.ensure(second);

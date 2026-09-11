@@ -46,7 +46,7 @@ vi.mock("../src/main/sidecar/thread-worker-registry.ts", () => ({
     return mocks.workers;
   }),
 }));
-vi.mock("../src/main/pi/session-supervisor.ts", () => ({
+vi.mock("../src/main/session/session-supervisor.ts", () => ({
   SessionSupervisor: vi.fn(function SessionSupervisor() {
     return mocks.sessions;
   }),
@@ -99,7 +99,7 @@ describe("createSessionServices", () => {
     expect(services).toMatchObject({
       metadata: mocks.metadata,
       subagents: mocks.subagents,
-      workers: mocks.workers,
+      developmentRuntime: mocks.workers,
       sessions: mocks.sessions,
     });
     expect(mocks.subagentOptions).not.toHaveProperty("shellPath");

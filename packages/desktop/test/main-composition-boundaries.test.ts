@@ -6,13 +6,40 @@ const sourceRoot = resolve(import.meta.dirname, "../src");
 const mainRoot = resolve(sourceRoot, "main");
 const rendererRoot = resolve(sourceRoot, "renderer");
 const sidecarRoot = resolve(mainRoot, "sidecar");
+const sessionRoot = resolve(mainRoot, "session");
+const bootstrapRoot = resolve(mainRoot, "bootstrap");
+const sessionSupervisor = resolve(sessionRoot, "session-supervisor.ts");
+const threadWorkerRegistry = resolve(sidecarRoot, "thread-worker-registry.ts");
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 describe("Desktop main composition boundaries", () => {
   it("keeps bootstrap imports out of domain services", async () => {
     const violations = await findViolations(mainRoot, (file, specifier) => {
-      if (isWithin(file, resolve(mainRoot, "bootstrap")) || file === resolve(mainRoot, "index.ts")) return false;
-      return resolvesWithin(file, specifier, resolve(mainRoot, "bootstrap"));
+      if (isWithin(file, bootstrapRoot) || file === resolve(mainRoot, "index.ts")) return false;
+      return resolvesWithin(file, specifier, bootstrapRoot);
+    });
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps session application services independent from Pi, Electron, and sidecar implementations", async () => {
+    const violations = await findViolations(
+      sessionRoot,
+      (file, specifier) =>
+        specifier === "electron" ||
+        specifier.startsWith("electron/") ||
+        specifier.startsWith("@earendil-works/pi") ||
+        resolvesWithin(file, specifier, resolve(mainRoot, "pi")) ||
+        resolvesWithin(file, specifier, sidecarRoot),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps concrete session and worker implementations confined to the composition root", async () => {
+    const violations = await findViolations(mainRoot, (file, specifier) => {
+      const target = resolveImport(file, specifier);
+      if (target === sessionSupervisor) return !isWithin(file, bootstrapRoot);
+      if (target === threadWorkerRegistry) return file !== resolve(bootstrapRoot, "session-services.ts");
+      return false;
     });
     expect(violations).toEqual([]);
   });

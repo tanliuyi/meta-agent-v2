@@ -11,6 +11,7 @@ import type {
 } from "../../../shared/contracts.ts";
 import { toComposerAttachmentInput, toPiPromptAttachments } from "./attachments.ts";
 import { getComposerQuotes, getMessageQuotes, parseQuoteValue, toComposerQuote } from "./composer-quotes.ts";
+import type { SessionCommandGateway } from "./desktop-session-gateway.ts";
 
 interface SessionTarget {
   projectId: string;
@@ -33,6 +34,7 @@ interface CommandNotification {
 }
 
 interface CoordinatorOptions {
+  commands: SessionCommandGateway;
   getTarget(): SessionTarget | null;
   getComposer(): ComposerTarget | null;
   getPhase(): PiThreadPhase;
@@ -49,6 +51,7 @@ interface PendingInput {
 
 /** 将 assistant-ui callbacks 收敛为 typed Pi commands。 */
 export class PiCommandCoordinator {
+  private readonly commands: SessionCommandGateway;
   private readonly getTarget: CoordinatorOptions["getTarget"];
   private readonly getComposer: CoordinatorOptions["getComposer"];
   private readonly getPhase: CoordinatorOptions["getPhase"];
@@ -59,6 +62,7 @@ export class PiCommandCoordinator {
   private readonly pendingInputs = new Map<string, PendingInput>();
 
   constructor(options: CoordinatorOptions) {
+    this.commands = options.commands;
     this.getTarget = options.getTarget;
     this.getComposer = options.getComposer;
     this.getPhase = options.getPhase;
@@ -105,7 +109,7 @@ export class PiCommandCoordinator {
     const target = this.requireTarget();
     if (!message.sourceId) throw new Error("assistant-ui edit 缺少 sourceId");
     const { input, imageResources } = await promptInput(message, target, undefined);
-    const result = await window.desktop.sessions.edit({
+    const result = await this.commands.edit({
       ...input,
       sourceId: message.sourceId,
       ...(imageResources.length > 0 ? { imageResources } : {}),
@@ -119,7 +123,7 @@ export class PiCommandCoordinator {
     const target = this.requireTarget();
     const userEntryId = this.resolveReloadTarget(parentId);
     if (!userEntryId) throw new Error("Pi reload 无法解析前置 user entry");
-    const result = await window.desktop.sessions.reload({
+    const result = await this.commands.reload({
       requestId: crypto.randomUUID(),
       projectId: target.projectId,
       threadId: target.threadId,
@@ -132,14 +136,14 @@ export class PiCommandCoordinator {
   cancel = async (items: readonly PiQueueItem[]): Promise<void> => {
     const target = this.requireTarget();
     const pendingInputs = new Map(this.pendingInputs);
-    const cleared = await window.desktop.sessions.cancel(target.projectId, target.threadId);
+    const cleared = await this.commands.cancel(target.projectId, target.threadId);
     await this.restoreClearedQueue(target, items, cleared, pendingInputs);
   };
 
   clearQueue = async (items: readonly PiQueueItem[]): Promise<void> => {
     const target = this.requireTarget();
     const pendingInputs = new Map(this.pendingInputs);
-    const cleared = await window.desktop.sessions.clearQueue(target.projectId, target.threadId);
+    const cleared = await this.commands.clearQueue(target.projectId, target.threadId);
     await this.restoreClearedQueue(target, items, cleared, pendingInputs);
   };
 
@@ -180,12 +184,12 @@ export class PiCommandCoordinator {
       : undefined;
     try {
       const result = isResourceReload
-        ? await window.desktop.sessions.reloadResources({
+        ? await this.commands.reloadResources({
             requestId: input.requestId,
             projectId: input.projectId,
             threadId: input.threadId,
           })
-        : await window.desktop.sessions.prompt(input);
+        : await this.commands.prompt(input);
       assertAccepted(result);
       if (progressNotificationId) {
         this.updateNotification(

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createDesktopSessionTransportGateway } from "../src/renderer/src/runtime/desktop-session-gateway.ts";
 import { createSessionRecord } from "../src/renderer/src/runtime/pi-session-store.ts";
 import { createRecoveryLoop } from "../src/renderer/src/runtime/session-recovery.ts";
 import { SessionTransportManager } from "../src/renderer/src/runtime/session-transport-manager.ts";
@@ -208,7 +209,7 @@ describe("session recovery after post-ready resync failure", () => {
       .mockRejectedValueOnce(new Error("runtime unavailable"))
       .mockResolvedValueOnce(attachmentFor(record, "attachment-2"));
     stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     // 初始 attach 成功：ready。
     const attached = await manager.ensure(record);
@@ -260,7 +261,7 @@ describe("session recovery after post-ready resync failure", () => {
       .mockRejectedValueOnce(new Error("runtime still down"))
       .mockResolvedValueOnce(attachmentFor(record, "attachment-2"));
     stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     await manager.ensure(record);
     expect(record.stores.connection.getSnapshot()).toBe("ready");
 
@@ -306,7 +307,7 @@ describe("single recovery owner per mounted active session", () => {
       .mockResolvedValueOnce(attachmentFor(record, "attachment-2"))
       .mockResolvedValueOnce(attachmentFor(record, "attachment-3"));
     stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     // SessionContent 挂载语义：cache.ensure 发起初始 attach。
     const attached = await manager.ensure(record);
@@ -351,7 +352,7 @@ describe("single recovery owner per mounted active session", () => {
       .mockResolvedValueOnce(attachmentFor(record, "attachment-2"))
       .mockResolvedValueOnce(attachmentFor(record, "attachment-3"));
     stubWindow(attach);
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     await manager.ensure(record);
     expect(record.stores.connection.getSnapshot()).toBe("ready");
 

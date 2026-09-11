@@ -1,24 +1,47 @@
 import { isAbsolute } from "node:path";
 import { BrowserWindow, dialog } from "electron";
 import type { BrowserSessionIdentity } from "../../shared/browser-contracts.ts";
-import { mainAgentConfigurationSchema } from "../../shared/desktop-development-contracts.ts";
+import { type DesktopReloadStatus, mainAgentConfigurationSchema } from "../../shared/desktop-development-contracts.ts";
 import type { MainAgentMutationInput, MainAgentProfile } from "../../shared/main-agent-contracts.ts";
 import type { PluginConfigurationValue } from "../../shared/plugin-configuration-contracts.ts";
-import type { PluginServices } from "../bootstrap/plugin-services.ts";
+import type { DesktopExtensionSettingsService } from "../extensions/desktop-extension-settings-service.ts";
+import type { DesktopExtensionSourcePolicy } from "../extensions/desktop-extension-source-policy.ts";
+import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
 import type { MainAgentConfigService } from "../settings/main-agent-config-service.ts";
-import type { ThreadWorkerRegistry } from "../sidecar/thread-worker-registry.ts";
+
+export interface DesktopDevelopmentRuntimePort {
+  getExtensionState(projectId: string, threadId: string): Promise<unknown>;
+  getPluginRuntime(projectId: string, threadId: string, pluginId?: string): Promise<unknown>;
+  schedulePluginReload(
+    projectId: string,
+    threadId: string,
+    requestId: string,
+    continuation?: string,
+  ): DesktopReloadStatus;
+  getPluginReloadStatus(projectId: string, threadId: string, requestId: string): DesktopReloadStatus;
+  extensionSettingsChanged(): Promise<void>;
+}
+
+export interface DesktopDevelopmentPluginPort {
+  extensionSettings: Pick<
+    DesktopExtensionSettingsService,
+    "getConfig" | "saveConfig" | "approveDevelopmentEntry" | "getDevelopmentConfigurationSchema"
+  >;
+  pluginConfigurations: Pick<
+    PluginConfigurationService,
+    "getDevelopmentConfig" | "getConfig" | "saveDevelopmentConfig" | "saveConfig"
+  >;
+  extensionSourcePolicy: Pick<DesktopExtensionSourcePolicy, "invalidate">;
+}
 
 export class DesktopDevelopmentService {
   private readonly mainAgents: MainAgentConfigService;
-  private readonly plugins: Pick<
-    PluginServices,
-    "extensionSettings" | "pluginConfigurations" | "extensionSourcePolicy"
-  >;
-  private readonly workers: ThreadWorkerRegistry;
+  private readonly plugins: DesktopDevelopmentPluginPort;
+  private readonly workers: DesktopDevelopmentRuntimePort;
   constructor(
     mainAgents: MainAgentConfigService,
-    plugins: Pick<PluginServices, "extensionSettings" | "pluginConfigurations" | "extensionSourcePolicy">,
-    workers: ThreadWorkerRegistry,
+    plugins: DesktopDevelopmentPluginPort,
+    workers: DesktopDevelopmentRuntimePort,
   ) {
     this.mainAgents = mainAgents;
     this.plugins = plugins;

@@ -1,5 +1,6 @@
 import type { AppendMessage } from "@assistant-ui/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDesktopSessionCommandGateway } from "../src/renderer/src/runtime/desktop-session-gateway.ts";
 import { PiCommandCoordinator, resolveReloadUserEntry } from "../src/renderer/src/runtime/pi-command-coordinator.ts";
 import type { PiThreadSnapshot, SessionPromptInput } from "../src/shared/contracts.ts";
 import { PROTOCOL_VERSION } from "../src/shared/contracts.ts";
@@ -405,6 +406,7 @@ describe("PiCommandCoordinator", () => {
 
   function createCoordinator(): PiCommandCoordinator {
     return new PiCommandCoordinator({
+      commands: createDesktopSessionCommandGateway(),
       getTarget: () => target,
       getComposer: () => ({ getState, setText, setQuote, addAttachment }),
       getPhase: () => phase,

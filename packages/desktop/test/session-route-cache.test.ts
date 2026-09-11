@@ -1,6 +1,7 @@
 import type { Attachment, CreateAttachment } from "@assistant-ui/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { restoreComposerAttachments, toComposerAttachmentInput } from "../src/renderer/src/runtime/attachments.ts";
+import { createDesktopSessionTransportGateway } from "../src/renderer/src/runtime/desktop-session-gateway.ts";
 import {
   createSessionRecord,
   parseSessionRecordKey,
@@ -245,7 +246,12 @@ describe("SessionTransportManager", () => {
   });
 
   it("getConnectionState 对未知 key 返回 null", () => {
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager({
+      attach: vi.fn(),
+      flush: vi.fn(),
+      detach: vi.fn(),
+      getWorkbench: vi.fn(),
+    });
     expect(manager.getConnectionState("unknown")).toBeNull();
   });
 
@@ -286,7 +292,7 @@ describe("SessionTransportManager", () => {
         },
       },
     });
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     const connectionStates: string[] = [];
     const unsubscribe = record.stores.connection.subscribe(() => {
       connectionStates.push(record.stores.connection.getSnapshot());
@@ -314,7 +320,7 @@ describe("SessionTransportManager", () => {
         workbench: { get: vi.fn(async () => workbenchState()) },
       },
     });
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     await expect(manager.ensure(record)).rejects.toThrow("worker unavailable");
 
@@ -337,7 +343,7 @@ describe("SessionTransportManager", () => {
         workbench: { get: vi.fn(async () => workbenchState()) },
       },
     });
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     await expect(manager.ensure(record)).rejects.toMatchObject({ name: "AbortError" });
 
@@ -358,7 +364,7 @@ describe("SessionTransportManager", () => {
         workbench: { get: vi.fn(async () => workbenchState()) },
       },
     });
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     const attaching = manager.ensure(record);
     const rejected = expect(attaching).rejects.toMatchObject({ name: "AbortError" });
@@ -386,7 +392,7 @@ describe("SessionTransportManager", () => {
         workbench: { get: vi.fn(async () => workbenchState()) },
       },
     });
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     await manager.ensure(record);
     await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(2));
@@ -411,7 +417,7 @@ describe("SessionTransportManager", () => {
         workbench: { get: vi.fn(async () => workbenchState()) },
       },
     });
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
     const cachedAttachment = completeAttachment("preserved-image");
     record.stores.composerDraft.setSnapshot({ text: "preserved draft", attachments: [cachedAttachment] });
 
@@ -453,7 +459,7 @@ describe("SessionTransportManager", () => {
         workbench: { get: getWorkbench },
       },
     });
-    const manager = new SessionTransportManager();
+    const manager = new SessionTransportManager(createDesktopSessionTransportGateway());
 
     await manager.ensure(record);
     await expect(manager.resync(record)).rejects.toThrow("workbench read failed");

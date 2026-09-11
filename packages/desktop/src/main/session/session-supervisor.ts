@@ -33,8 +33,7 @@ import type {
   SessionCheckpointRestoreInput,
   SessionCheckpointRestoreResult,
 } from "../../shared/pi-rewind-contracts.ts";
-import type { ThreadWorkerRegistry } from "../sidecar/thread-worker-registry.ts";
-import type { ProjectStore } from "../store/project-store.ts";
+import type { SessionProjectPort, SessionRuntimePort, SessionService } from "./session-service.ts";
 
 interface RendererSubscription {
   attachmentId: string;
@@ -67,17 +66,17 @@ const MAX_ATTACHMENT_PENDING_EVENTS = 128;
 const MAX_ATTACHMENT_PENDING_BYTES = 16 * 1024 * 1024;
 const DELIVERY_ACK_TIMEOUT_MS = 5_000;
 
-/** Electron-only facade for attachment leases, ProjectStore overlays, and sidecar routing. */
-export class SessionSupervisor {
+/** Main-process application service for attachment leases, project overlays, and runtime routing. */
+export class SessionSupervisor implements SessionService {
   private readonly subscriptions = new Map<number, Map<string, RendererSubscription>>();
   private readonly pendingAttachments = new Map<number, Map<string, PendingRendererAttachment>>();
   private readonly pendingDeliveryAcks = new Map<string, PendingDeliveryAck>();
   private runtimeStatusSequence = 0;
-  private readonly projects: ProjectStore;
-  private readonly workers: ThreadWorkerRegistry;
+  private readonly projects: SessionProjectPort;
+  private readonly workers: SessionRuntimePort;
   private readonly log?: SessionSupervisorOptions["log"];
 
-  constructor(projects: ProjectStore, workers: ThreadWorkerRegistry, options: SessionSupervisorOptions = {}) {
+  constructor(projects: SessionProjectPort, workers: SessionRuntimePort, options: SessionSupervisorOptions = {}) {
     this.projects = projects;
     this.workers = workers;
     this.log = options.log;
@@ -104,7 +103,13 @@ export class SessionSupervisor {
     const cwd = worktreePath
       ? await this.projects.resolveSessionCwd(projectId, worktreePath)
       : this.projects.getCwd(projectId);
-    return this.workers.getDraftConfig(projectId, cwd, mainAgent);
+    return mainAgent
+      ? this.workers.getDraftConfig(projectId, cwd, mainAgent)
+      : this.workers.getDraftConfig(projectId, cwd);
+  }
+
+  getSessionCwd(projectId: string, threadId: string): string | undefined {
+    return this.workers.getSessionCwd(projectId, threadId);
   }
 
   getExtensionState(projectId: string, threadId: string) {

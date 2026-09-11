@@ -24,16 +24,16 @@ import type {
   UpdateMarketplacePluginInput,
 } from "../../shared/plugin-marketplace-contracts.ts";
 import type { DesktopExtensionSettingsService } from "../extensions/desktop-extension-settings-service.ts";
-import type { SessionSupervisor } from "../pi/session-supervisor.ts";
 import type { MarketplaceCatalogService } from "../plugins/marketplace-catalog-service.ts";
 import type { MarketplaceEndpointSettingsService } from "../plugins/marketplace-endpoint-settings-service.ts";
 import type { MarketplacePluginInstaller } from "../plugins/marketplace-plugin-installer.ts";
 import type { MarketplacePluginRegistry } from "../plugins/marketplace-plugin-registry.ts";
 import type { PluginConfigurationService } from "../plugins/plugin-configuration-service.ts";
+import type { SessionService } from "../session/session-service.ts";
 
 /** 插件和 marketplace IPC 所需的最小服务集合。 */
 export interface PluginIpcDependencies {
-  readonly sessions: SessionSupervisor;
+  readonly sessions: SessionService;
   readonly extensions?: DesktopExtensionSettingsService;
   readonly marketplaceEndpoints?: MarketplaceEndpointSettingsService;
   readonly marketplaceCatalog?: MarketplaceCatalogService;
@@ -248,7 +248,7 @@ export function registerPluginIpc(dependencies: PluginIpcDependencies): readonly
 }
 
 async function applyMarketplaceMutation(
-  sessions: SessionSupervisor,
+  sessions: SessionService,
   target: { projectId: string; threadId: string; abortRunning?: boolean } | undefined,
   recoveryPending: boolean | undefined,
 ): Promise<{ application?: ApplyDesktopExtensionSetResult; applicationError?: string }> {

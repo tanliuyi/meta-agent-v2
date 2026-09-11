@@ -16,8 +16,14 @@ describe("session route running state", () => {
     record.stores.control.replace(control(true));
     record.stores.connection.setState("ready");
     let runtime: AssistantRuntime | undefined;
-    const transport = new SessionTransportManager();
+    const transport = new SessionTransportManager({
+      attach: vi.fn(),
+      flush: vi.fn(),
+      detach: vi.fn(),
+      getWorkbench: vi.fn(),
+    });
     vi.spyOn(transport, "hasCommittedLease").mockReturnValue(true);
+    vi.stubGlobal("window", { desktop: { sessions: {} } });
 
     function RuntimeProbe() {
       runtime = usePiSessionRuntime({
@@ -32,6 +38,7 @@ describe("session route running state", () => {
 
     expect(runtime?.thread.getState().isRunning).toBe(true);
     expect(runtime?.thread.getState().capabilities.edit).toBe(true);
+    vi.unstubAllGlobals();
   });
 
   it("cached control 通过窄 summary action 更新 catalog running", () => {

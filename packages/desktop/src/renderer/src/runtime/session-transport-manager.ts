@@ -1,4 +1,5 @@
 import type { SessionAttachment, SessionBootstrap, SessionPushPayload } from "../../../shared/contracts.ts";
+import type { SessionTransportGateway } from "./desktop-session-gateway.ts";
 import {
   type CachedSessionRecord,
   type SessionConnectionState,
@@ -50,6 +51,11 @@ export class SessionTransportManager {
   private readonly keyStates = new Map<string, KeyState>();
   private readonly settling = new Map<string, SettlingEntry>();
   private readonly quiesced = new Map<string, CachedSessionRecord>();
+  private readonly gateway: SessionTransportGateway;
+
+  constructor(gateway: SessionTransportGateway) {
+    this.gateway = gateway;
+  }
 
   async ensure(record: CachedSessionRecord): Promise<SessionAttachment> {
     const key = record.key;
@@ -155,7 +161,7 @@ export class SessionTransportManager {
     const attachmentId = state.committed?.attachmentId;
     state.committed = null;
     this.keyStates.delete(key);
-    if (attachmentId) window.desktop.sessions.detach(attachmentId);
+    if (attachmentId) this.gateway.detach(attachmentId);
     this.recordSettling(key, state.pending, state.record, false);
     await state.pending?.catch(() => undefined);
   }
@@ -172,7 +178,7 @@ export class SessionTransportManager {
       const attachmentId = state.committed?.attachmentId;
       state.committed = null;
       this.keyStates.delete(key);
-      if (attachmentId) window.desktop.sessions.detach(attachmentId);
+      if (attachmentId) this.gateway.detach(attachmentId);
       this.recordSettling(key, state.pending, state.record, true);
       await state.pending?.catch(() => undefined);
       return;
@@ -244,7 +250,7 @@ export class SessionTransportManager {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           const requestId = crypto.randomUUID();
           try {
-            attachment = await window.desktop.sessions.attach(
+            attachment = await this.gateway.attach(
               {
                 projectId: record.identity.projectId,
                 threadId: record.identity.threadId,
@@ -290,7 +296,7 @@ export class SessionTransportManager {
           throw new DOMException("Session attach superseded", "AbortError");
         }
 
-        const workbench = await window.desktop.workbench.get(record.identity.projectId, record.identity.threadId);
+        const workbench = await this.gateway.getWorkbench(record.identity.projectId, record.identity.threadId);
         if (
           state.tombstoned ||
           this.keyStates.get(record.key) !== state ||
@@ -304,7 +310,7 @@ export class SessionTransportManager {
         state.committed = { attachmentId: attachment.attachmentId, generation };
         record.stores.connection.setState("ready");
         record.stores.summary.set({ connectionState: "ready" });
-        const flush = window.desktop.sessions.flush(attachment.attachmentId);
+        const flush = this.gateway.flush(attachment.attachmentId);
         if (flush.state === "recovering") {
           record.stores.connection.setState("recovering");
           record.stores.summary.set({ connectionState: "recovering" });
@@ -313,7 +319,7 @@ export class SessionTransportManager {
         return attachment;
       } catch (error) {
         if (attachmentId) {
-          window.desktop.sessions.detach(attachmentId);
+          this.gateway.detach(attachmentId);
           if (state.committed?.attachmentId === attachmentId || state.committed?.attachmentId === replaceAttachmentId) {
             state.committed = null;
           }
@@ -353,7 +359,7 @@ export class SessionTransportManager {
   private commitBootstrap(
     record: CachedSessionRecord,
     bootstrap: SessionBootstrap,
-    workbench: Awaited<ReturnType<typeof window.desktop.workbench.get>>,
+    workbench: Awaited<ReturnType<SessionTransportGateway["getWorkbench"]>>,
   ): void {
     if (bootstrap.projectId !== record.identity.projectId || bootstrap.threadId !== record.identity.threadId) {
       throw new Error("Session bootstrap identity does not match cache record");
