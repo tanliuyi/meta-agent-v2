@@ -276,6 +276,11 @@ export interface PiAssistantUsage {
   };
 }
 
+export interface PiPluginSource {
+  url: string;
+  title?: string;
+}
+
 export interface PiPluginSubCallRecord {
   sequence: number;
   callId: string;
@@ -288,6 +293,7 @@ export interface PiPluginSubCallRecord {
   durationMs?: number;
   errorCode?: string;
   progress?: JsonValue;
+  sources?: PiPluginSource[];
 }
 
 export interface PiRunCodeArtifact {

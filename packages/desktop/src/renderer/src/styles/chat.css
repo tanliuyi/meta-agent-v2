@@ -207,6 +207,34 @@
 .tool-trigger[data-running="true"] .tool-target {
   flex: 0 1 auto;
 }
+.tool-view[data-tool-kind="skill"] {
+  width: fit-content;
+  max-width: 100%;
+  background: var(--tool-pending-background);
+}
+.tool-view[data-tool-kind="skill"][data-tool-status="complete"] {
+  background: var(--tool-success-background);
+}
+.tool-view[data-tool-kind="skill"][data-tool-status="error"] {
+  background: var(--tool-error-background);
+}
+.tool-view[data-tool-kind="skill"] .tool-trigger-row {
+  padding-inline: 12px;
+}
+.tool-view[data-tool-kind="skill"] .tool-trigger {
+  flex: 1 1 auto;
+}
+.tool-view[data-tool-kind="skill"] .tool-name,
+.tool-suffix {
+  font-family: var(--font-family-sans);
+}
+.tool-view[data-tool-kind="skill"] .tool-target {
+  flex: 0 1 auto;
+}
+.tool-suffix {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .tool-file-target {
   flex: 0 1 auto;
   padding: 0;

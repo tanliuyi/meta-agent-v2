@@ -10,6 +10,7 @@ import type {
   PiAssistantNotificationPart,
   PiAssistantPart,
   PiNoticeMessage,
+  PiPluginSource,
   PiThreadSnapshot,
   PiTimelineNode,
 } from "../../../shared/contracts.ts";
@@ -22,6 +23,12 @@ type PiNoticePart = {
   type: "data";
   name: "pi-notice";
   data: Extract<PiTimelineNode, { kind: "notice" }>;
+};
+
+type PiSourcesPart = {
+  type: "data";
+  name: "pi-sources";
+  data: { sources: PiPluginSource[] };
 };
 
 interface ProjectionEntry {
@@ -203,15 +210,20 @@ export class PiMessageRepositoryConverter {
     last: PiAssistantMessage,
     projectedId: string,
   ): ThreadMessage {
+    const content = parts.flatMap<ThreadAssistantMessagePart | PiNoticePart>((part) => {
+      if (part.type === "data") return [part];
+      const converted = this.assistantPart(part);
+      return converted ? [converted] : [];
+    });
+    const sources = collectPluginSources(parts);
+    if (last.status.type !== "running" && sources.length > 0) {
+      content.push({ type: "data", name: "pi-sources", data: { sources } } satisfies PiSourcesPart);
+    }
     return {
       id: projectedId,
       role: "assistant",
       createdAt: new Date(first.createdAt),
-      content: parts.flatMap((part) => {
-        if (part.type === "data") return [part];
-        const converted = this.assistantPart(part);
-        return converted ? [converted] : [];
-      }),
+      content,
       status: last.status,
       metadata: {
         unstable_state: null,
@@ -233,6 +245,23 @@ export class PiMessageRepositoryConverter {
       },
     };
   }
+}
+
+function collectPluginSources(parts: readonly (PiAssistantPart | PiNoticePart)[]): PiPluginSource[] {
+  const sources: PiPluginSource[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    if (part.type !== "tool-call") continue;
+    for (const call of part.runCode?.calls ?? []) {
+      if (call.pluginId !== "pi.web-access" || call.state !== "complete") continue;
+      for (const source of call.sources ?? []) {
+        if (seen.has(source.url)) continue;
+        seen.add(source.url);
+        sources.push(source);
+      }
+    }
+  }
+  return sources;
 }
 
 function projectionDirtyFrom(previous: ProjectionCache | undefined, nodes: readonly PiTimelineNode[]): number {

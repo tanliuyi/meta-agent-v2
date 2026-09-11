@@ -46,7 +46,9 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
 interface ToolHeader {
   label: string;
   target?: ToolTarget;
+  suffix?: string;
   context?: string;
+  kind?: "skill";
 }
 
 /** 按 pi-coding-agent TUI 的标题、状态底色与折叠预览渲染工具。 */
@@ -80,6 +82,7 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
     <Collapsible
       className="tool-view"
       data-tool-name={toolName}
+      data-tool-kind={header.kind}
       data-tool-status={toolState}
       open={expanded}
       onOpenChange={setExpanded}
@@ -94,10 +97,11 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
           >
             <span className="tool-name">{header.label}</span>
             {header.target?.type === "text" ? <span className="tool-target">{header.target.value}</span> : null}
+            {header.suffix ? <span className="tool-suffix">{header.suffix}</span> : null}
             {header.target?.type !== "file" && header.context ? (
               <span className="tool-context">{header.context}</span>
             ) : null}
-            {cursorFollowsArgs && header.target?.type !== "file" ? (
+            {cursorFollowsArgs && header.kind !== "skill" && header.target?.type !== "file" ? (
               <span className="tool-running-cursor" aria-hidden="true" />
             ) : null}
           </button>
@@ -117,12 +121,14 @@ export function ToolView({ toolName, args, result, status, artifact, isError }: 
         <span className="sr-only" aria-live="polite">
           {stateLabel}
         </span>
-        <CollapsibleTrigger
-          className="tool-expand-trigger"
-          aria-label={`${expanded ? "收起" : "展开"}${header.label}详情`}
-        >
-          <ChevronRight size={15} className="tool-chevron" aria-hidden="true" />
-        </CollapsibleTrigger>
+        {header.kind !== "skill" ? (
+          <CollapsibleTrigger
+            className="tool-expand-trigger"
+            aria-label={`${expanded ? "收起" : "展开"}${header.label}详情`}
+          >
+            <ChevronRight size={15} className="tool-chevron" aria-hidden="true" />
+          </CollapsibleTrigger>
+        ) : null}
       </div>
       <CollapsibleContent animation="persistent">
         <div className="tool-scroll-area" ref={viewportRef}>
@@ -163,7 +169,9 @@ function toolHeader(
   }
   if (name === "read") {
     const skillName = readSkillName(path);
-    if (skillName) return { label: "加载", target: textTarget(`${skillName} 技能`) };
+    if (skillName) {
+      return { label: "加载", target: textTarget(skillName), suffix: "技能", kind: "skill" };
+    }
     return { label: toolLabel(name), target: fileTarget(path), context: readLineRange(args) };
   }
   if (name === "write" || name === "edit") {

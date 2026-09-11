@@ -199,11 +199,11 @@ describe("run_code runtime", () => {
       entryPath: "/tmp/captured.ts",
       hostProfileVersion: 1 as const,
       capabilities: ["plugin-methods.provide" as const],
-      pluginId: "com.example.captured",
+      pluginId: "pi.web-access",
       runCodeSkill: "plugin-captured",
       runCodeCatalog: {
         schemaVersion: 1 as const,
-        pluginId: "com.example.captured",
+        pluginId: "pi.web-access",
         methods: [
           {
             name: "run",
@@ -236,7 +236,14 @@ describe("run_code runtime", () => {
             { type: "text", text: `value:${params.value}` },
             { type: "image", data: "aW1hZ2U=", mimeType: "image/png" },
           ],
-          details: { private: true },
+          details: {
+            private: true,
+            sources: [
+              { title: "Assistant UI Sources", url: "https://www.assistant-ui.com/elements/sources" },
+              { title: "Duplicate", url: "https://www.assistant-ui.com/elements/sources" },
+              { title: "Invalid", url: "javascript:alert(1)" },
+            ],
+          },
         };
       },
     });
@@ -244,7 +251,7 @@ describe("run_code runtime", () => {
     const details = { calls: [], logs: [], attachments: [], toolContext: extensionContext };
     await expect(
       executePluginProgram(
-        'return plugin["com.example.captured"].run({ raw: 21 });',
+        'return plugin["pi.web-access"].run({ raw: 21 });',
         new PluginMethodDispatcher(builder.finalize(), process.cwd()),
         "tool-captured",
         undefined,
@@ -253,7 +260,11 @@ describe("run_code runtime", () => {
         details,
       ),
     ).resolves.toEqual({ text: "value:42\n[image attachment]" });
-    expect(details.calls[0]).toMatchObject({ state: "complete", progress: { text: "working" } });
+    expect(details.calls[0]).toMatchObject({
+      state: "complete",
+      progress: { text: "working" },
+      sources: [{ title: "Assistant UI Sources", url: "https://www.assistant-ui.com/elements/sources" }],
+    });
     expect(details.attachments).toMatchObject([{ type: "image", mimeType: "image/png" }]);
   });
 

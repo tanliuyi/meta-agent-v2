@@ -482,6 +482,84 @@ describe("PiMessageRepositoryConverter", () => {
     ]);
   });
 
+  it("将 run_code 查询来源去重并追加在最终回复之后", () => {
+    const webTool = {
+      ...toolPart("a:tool:0", "run-code", "run_code"),
+      runCode: {
+        kind: "run-code" as const,
+        description: "Search the web",
+        generation: "generation",
+        calls: [
+          {
+            sequence: 1,
+            callId: "call-1",
+            pluginId: "pi.web-access",
+            method: "web_search",
+            source: "curated" as const,
+            state: "complete" as const,
+            sources: [
+              { title: "Assistant UI Sources", url: "https://www.assistant-ui.com/elements/sources" },
+              { title: "Duplicate", url: "https://www.assistant-ui.com/elements/sources" },
+            ],
+          },
+          {
+            sequence: 2,
+            callId: "call-2",
+            pluginId: "pi.web-access",
+            method: "fetch_content",
+            source: "curated" as const,
+            state: "complete" as const,
+            sources: [{ title: "Docs", url: "https://www.assistant-ui.com/docs" }],
+          },
+          {
+            sequence: 3,
+            callId: "call-3",
+            pluginId: "com.example.other",
+            method: "lookup",
+            source: "curated" as const,
+            state: "complete" as const,
+            sources: [{ title: "Ignored", url: "https://example.com/ignored" }],
+          },
+        ],
+        logs: [],
+        attachments: [],
+      },
+    };
+    const assistant = {
+      ...assistantNode("a", null),
+      content: [webTool, { id: "a:text:1", type: "text" as const, text: "最终回复" }],
+    } satisfies PiAssistantMessage;
+
+    const repository = new PiMessageRepositoryConverter().build(snapshot([assistant], "a"));
+    const converted = repository.messages[0]?.message;
+    expect(converted?.role).toBe("assistant");
+    if (converted?.role !== "assistant") throw new Error("assistant message missing");
+    expect(converted.content).toMatchObject([
+      { type: "tool-call" },
+      { type: "text", text: "最终回复" },
+      {
+        type: "data",
+        name: "pi-sources",
+        data: {
+          sources: [
+            { title: "Assistant UI Sources", url: "https://www.assistant-ui.com/elements/sources" },
+            { title: "Docs", url: "https://www.assistant-ui.com/docs" },
+          ],
+        },
+      },
+    ]);
+
+    const running = {
+      ...assistant,
+      status: { type: "running" as const },
+    } satisfies PiAssistantMessage;
+    const runningRepository = new PiMessageRepositoryConverter().build(snapshot([running], "a"));
+    const runningMessage = runningRepository.messages[0]?.message;
+    expect(runningMessage?.role).toBe("assistant");
+    if (runningMessage?.role !== "assistant") throw new Error("running assistant message missing");
+    expect(runningMessage.content.some((part) => part.type === "data" && part.name === "pi-sources")).toBe(false);
+  });
+
   it("将 active assistant 的 notification part 原位转换为 pi-notice data", () => {
     const assistant = {
       ...assistantNode("a", null),

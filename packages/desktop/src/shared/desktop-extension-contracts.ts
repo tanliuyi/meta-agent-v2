@@ -17,6 +17,11 @@ export interface PluginApiCatalogV1 {
   }>;
 }
 
+export interface PluginMethodSource {
+  readonly url: string;
+  readonly title?: string;
+}
+
 export interface PluginMethodExecutionContext {
   readonly pluginId: string;
   readonly methodName: string;
@@ -27,6 +32,7 @@ export interface PluginMethodExecutionContext {
   readonly toolContext?: unknown;
   attach(attachment: PluginMethodAttachment): void;
   reportProgress(progress: JsonValue): void;
+  reportSources(sources: readonly PluginMethodSource[]): void;
 }
 
 export type PluginMethodAttachment =

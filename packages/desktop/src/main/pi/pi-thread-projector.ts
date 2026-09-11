@@ -1234,7 +1234,15 @@ function isPluginSubCallRecord(value: unknown): value is PiPluginSubCallRecord {
     typeof value.pluginId === "string" &&
     typeof value.method === "string" &&
     ["builtin", "curated", "marketplace", "development"].includes(String(value.source)) &&
-    ["queued", "running", "complete", "error", "aborted"].includes(String(value.state))
+    ["queued", "running", "complete", "error", "aborted"].includes(String(value.state)) &&
+    (value.sources === undefined ||
+      (Array.isArray(value.sources) &&
+        value.sources.every(
+          (source) =>
+            isPlainRecord(source) &&
+            typeof source.url === "string" &&
+            (source.title === undefined || typeof source.title === "string"),
+        )))
   );
 }
 

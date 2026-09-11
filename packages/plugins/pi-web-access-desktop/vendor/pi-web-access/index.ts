@@ -1223,6 +1223,7 @@ export default function (pi: ExtensionAPI) {
 				fetchId,
 				fetchUrls: isBackgroundFetch ? opts.urls : undefined,
 				searchId,
+				sources: opts.results.flatMap(result => result.results.map(source => ({ title: source.title, url: source.url }))),
 				...(opts.curated ? {
 					curated: true,
 					curatedFrom: opts.curatedFrom,
@@ -2203,7 +2204,13 @@ export default function (pi: ExtensionAPI) {
 			});
 			return {
 				content: [{ type: "text", text: formatSourceCheckResult(artifact, toolNames.getSearchContent) }],
-				details: { responseId: artifact.id, artifact, sourceCount: artifact.sources.length, passageCount: artifact.passages.length },
+				details: {
+					responseId: artifact.id,
+					artifact,
+					sourceCount: artifact.sources.length,
+					passageCount: artifact.passages.length,
+					sources: artifact.sources.map(source => ({ title: source.title, url: source.url })),
+				},
 			};
 		},
 	});
@@ -2357,6 +2364,7 @@ export default function (pi: ExtensionAPI) {
 						successful: 1,
 						totalChars: fullLength,
 						title: result.title,
+						sources: [{ title: result.title, url: result.url }],
 						responseId,
 						truncated,
 						hasImage: imageCount > 0,
@@ -2389,7 +2397,16 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [{ type: "text", text: output }],
-				details: { urls: urlList, urlCount: urlList.length, successful, totalChars, responseId },
+				details: {
+					urls: urlList,
+					urlCount: urlList.length,
+					successful,
+					totalChars,
+					responseId,
+					sources: presentedResults.flatMap(result =>
+						result.error ? [] : [{ title: result.title, url: result.url }],
+					),
+				},
 			};
 		},
 

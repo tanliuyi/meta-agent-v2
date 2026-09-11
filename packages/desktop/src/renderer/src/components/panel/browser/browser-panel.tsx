@@ -1370,10 +1370,15 @@ export function BrowserPanel() {
               </div>
             );
           })}
+          <TooltipIconButton
+            tooltip="新建标签页"
+            aria-label="新建标签页"
+            className="self-center shrink-0"
+            onClick={handleAddView}
+          >
+            <Plus size={15} aria-hidden="true" />
+          </TooltipIconButton>
         </div>
-        <TooltipIconButton tooltip="新建标签页" aria-label="新建标签页" className="self-center" onClick={handleAddView}>
-          <Plus size={15} aria-hidden="true" />
-        </TooltipIconButton>
       </div>
       <div className="browser-viewport-shell">
         {deviceToolbarOpen ? (

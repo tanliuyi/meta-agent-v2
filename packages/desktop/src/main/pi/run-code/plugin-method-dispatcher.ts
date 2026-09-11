@@ -6,6 +6,7 @@ import type { JsonValue } from "../../../shared/contracts.ts";
 import type {
   PluginMethodAttachment,
   PluginMethodExecutionContext,
+  PluginMethodSource,
 } from "../../../shared/desktop-extension-contracts.ts";
 import type { PluginMethodRegistry } from "./plugin-method-registry.ts";
 import { normalizePluginError, RunCodeError } from "./run-code-errors.ts";
@@ -29,6 +30,7 @@ export interface PluginSubCallRecord {
   durationMs?: number;
   errorCode?: string;
   progress?: JsonValue;
+  sources?: PluginMethodSource[];
 }
 
 export type RunCodeAttachment =
@@ -345,6 +347,7 @@ export class PluginMethodDispatcher {
       value: JsonValue;
       responseBytes: number;
       attachments: StagedAttachment[];
+      sources: PluginMethodSource[];
     }> => {
       if (signal.aborted || isInactive(details)) {
         throw new RunCodeError("PLUGIN_CALL_ABORTED", undefined, pluginId, methodName);
@@ -353,6 +356,7 @@ export class PluginMethodDispatcher {
       record.startedAt = Date.now();
       publish(details, onUpdate);
       const stagedAttachments: StagedAttachment[] = [];
+      const stagedSources: PluginMethodSource[] = [];
       const context: PluginMethodExecutionContext = {
         pluginId,
         methodName,
@@ -394,6 +398,10 @@ export class PluginMethodDispatcher {
           record.progress = value;
           publish(details, onUpdate);
         },
+        reportSources: (sources) => {
+          if (isInactive(details) || controller.signal.aborted) return;
+          stagedSources.push(...snapshotSources(sources));
+        },
       };
       let checkedArgs: JsonValue;
       try {
@@ -432,6 +440,7 @@ export class PluginMethodDispatcher {
         value,
         responseBytes: Buffer.byteLength(JSON.stringify(value), "utf8"),
         attachments: stagedAttachments,
+        sources: stagedSources,
       };
     };
 
@@ -482,6 +491,7 @@ export class PluginMethodDispatcher {
         details.imageBytes = nextImageBytes;
         details.fileBytes = nextFileBytes;
         details.attachments?.push(...committedAttachments);
+        if (outcome.prepared.sources.length > 0) record.sources = outcome.prepared.sources;
         record.state = "complete";
         return outcome.prepared.value;
       });
@@ -518,6 +528,30 @@ function publish(details: RunCodeExecution, onUpdate: (() => void) | undefined):
 
 function isInactive(details: RunCodeExecution): boolean {
   return details.active === false;
+}
+
+function snapshotSources(sources: readonly PluginMethodSource[]): PluginMethodSource[] {
+  if (!Array.isArray(sources) || sources.length > 100) throw new RunCodeError("PLUGIN_INVALID_JSON");
+  const result: PluginMethodSource[] = [];
+  const seen = new Set<string>();
+  for (const source of sources) {
+    if (!source || typeof source !== "object" || typeof source.url !== "string" || source.url.length > 2_048) {
+      throw new RunCodeError("PLUGIN_INVALID_JSON");
+    }
+    let url: URL;
+    try {
+      url = new URL(source.url);
+    } catch {
+      throw new RunCodeError("PLUGIN_INVALID_JSON");
+    }
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || seen.has(url.href)) continue;
+    if (source.title !== undefined && (typeof source.title !== "string" || source.title.length > 512)) {
+      throw new RunCodeError("PLUGIN_INVALID_JSON");
+    }
+    seen.add(url.href);
+    result.push({ url: url.href, ...(source.title?.trim() ? { title: source.title.trim() } : {}) });
+  }
+  return result;
 }
 
 function snapshotAttachment(attachment: PluginMethodAttachment, cwd: string, limits: RunCodeLimits): StagedAttachment {

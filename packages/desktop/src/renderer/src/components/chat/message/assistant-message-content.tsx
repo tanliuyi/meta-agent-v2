@@ -13,6 +13,7 @@ import { PiNoticeView } from "../pi-notice-view.tsx";
 import { ToolView } from "../tool-view.tsx";
 import { ChainOfThoughtGroup } from "./chain-of-thought-group.tsx";
 import { RunActivityGroup } from "./run-activity-group.tsx";
+import { SourcesBlock } from "./sources-block.tsx";
 
 export function AssistantMessageContent({
   isRunActivityRunning,
@@ -32,6 +33,13 @@ export function AssistantMessageContent({
   const groupMessagePart = useMemo(() => createRunGroupPart(messageParts), [messageParts]);
   const supersededInfoNotificationData = useMemo(
     () => findSupersededInfoNotificationData(messageParts),
+    [messageParts],
+  );
+  const sources = useMemo(
+    () =>
+      messageParts.flatMap((part) =>
+        part.type === "data" && part.name === "pi-sources" && isSourcesData(part.data) ? part.data.sources : [],
+      ),
     [messageParts],
   );
   const defaultOpenCompletedActivity = !runHasFinalResponse && (showAvatars || !hasNewUserPrompt);
@@ -119,6 +127,7 @@ export function AssistantMessageContent({
             case "tool-call":
               return part.toolUI ?? <ToolView {...part} />;
             case "data":
+              if (part.name === "pi-sources") return null;
               if (part.name !== "pi-notice") return part.dataRendererUI;
               return supersededInfoNotificationData.has(part.data) ? null : <PiNoticeView data={part.data} />;
             default:
@@ -126,6 +135,7 @@ export function AssistantMessageContent({
           }
         }}
       </MessagePrimitive.GroupedParts>
+      <SourcesBlock sources={sources} />
       <MessagePrimitive.Error>
         <ErrorPrimitive.Root className="mt-1 flex flex-row items-start gap-1.5 py-1 text-md leading-relaxed text-muted-foreground">
           <AlertCircle className="mt-[5px] size-3.5 shrink-0 text-destructive/70" aria-hidden="true" />
@@ -133,6 +143,20 @@ export function AssistantMessageContent({
         </ErrorPrimitive.Root>
       </MessagePrimitive.Error>
     </div>
+  );
+}
+
+function isSourcesData(value: unknown): value is {
+  readonly sources: Array<{ readonly url: string; readonly title?: string }>;
+} {
+  if (!value || typeof value !== "object" || !("sources" in value) || !Array.isArray(value.sources)) return false;
+  return value.sources.every(
+    (source) =>
+      !!source &&
+      typeof source === "object" &&
+      "url" in source &&
+      typeof source.url === "string" &&
+      (!("title" in source) || source.title === undefined || typeof source.title === "string"),
   );
 }
 

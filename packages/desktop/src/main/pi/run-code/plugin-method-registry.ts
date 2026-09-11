@@ -164,6 +164,10 @@ export class DesktopPluginRegistryBuilder {
         (update: AgentToolResult<unknown>) => context.reportProgress({ text: toolResultText(update) }),
         extensionContext,
       );
+      if (pluginId === "pi.web-access") {
+        const sources = toolResultSources(toolResult.details);
+        if (sources.length > 0) context.reportSources(sources);
+      }
       const textParts: string[] = [];
       for (const part of toolResult.content) {
         if (part.type === "text") textParts.push(part.text);
@@ -232,6 +236,27 @@ function validateCapturedTool(value: unknown): CapturedPluginTool {
     throw new Error("PLUGIN_DECLARATION_INVALID");
   }
   return tool as CapturedPluginTool;
+}
+
+function toolResultSources(details: unknown): Array<{ url: string; title?: string }> {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return [];
+  const sources = Reflect.get(details, "sources");
+  if (!Array.isArray(sources)) return [];
+  return sources.slice(0, 100).flatMap((source) => {
+    if (!source || typeof source !== "object" || Array.isArray(source)) return [];
+    const rawUrl = Reflect.get(source, "url");
+    const rawTitle = Reflect.get(source, "title");
+    if (typeof rawUrl !== "string" || rawUrl.length > 2_048) return [];
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      return [];
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return [];
+    const title = typeof rawTitle === "string" && rawTitle.length <= 512 ? rawTitle.trim() : "";
+    return [{ url: url.href, ...(title ? { title } : {}) }];
+  });
 }
 
 function toolResultText(result: AgentToolResult<unknown>): string {

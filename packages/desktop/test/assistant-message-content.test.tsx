@@ -380,6 +380,24 @@ describe("AssistantMessageContent thinking visibility", () => {
     expect(markup.match(/data-testid="pi-notice"/g)).toHaveLength(2);
   });
 
+  it("在最终回复之后渲染 Sources", () => {
+    viewState.parts = [
+      {
+        type: "data",
+        name: "pi-sources",
+        data: { sources: [{ title: "Assistant UI Sources", url: "https://www.assistant-ui.com/elements/sources" }] },
+      },
+      { type: "text", text: "最终回复" },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <AssistantMessageContent isRunActivityRunning={false} isMessageRunning={false} />,
+    );
+
+    expect(markup).toContain("Assistant UI Sources");
+    expect(markup.indexOf('data-testid="thinking-text"')).toBeLessThan(markup.indexOf("Assistant UI Sources"));
+  });
+
   it("standalone tool 不压制独立 running indicator", () => {
     viewState.parts = [{ type: "tool-call", toolName: "ask_user" }];
     viewState.toolUIs = { ask_user: [{ standalone: true }] };

@@ -30,6 +30,7 @@ import {
 } from "../src/renderer/src/components/chat/tools/tool-format.ts";
 
 const chatCss = readFileSync(new URL("../src/renderer/src/styles/chat.css", import.meta.url), "utf8");
+const themeCss = readFileSync(new URL("../src/renderer/src/styles/tokens.css", import.meta.url), "utf8");
 
 describe("ToolView TUI parity", () => {
   it("用 TUI 标题与 pending 底色展示流式 write 参数", () => {
@@ -263,12 +264,29 @@ describe("ToolView TUI parity", () => {
     "读取技能定义时展示技能语义标题: %s",
     (path) => {
       const markup = renderToolView(toolCall({ toolName: "read", args: { path, offset: 1, limit: 400 } }));
+      const runningMarkup = renderToolView(toolCall({ toolName: "read", args: { path }, status: { type: "running" } }));
 
-      expect(markup).toContain(">加载</span>");
-      expect(markup).toContain(">simplify 技能</span>");
+      expect(markup).toContain('data-tool-kind="skill"');
+      expect(markup).toContain('<span class="tool-name">加载</span>');
+      expect(markup).toContain('<span class="tool-target">simplify</span>');
+      expect(markup).toContain('<span class="tool-suffix">技能</span>');
+      expect(markup).not.toContain("simplify 技能</span>");
       expect(markup).not.toContain("tool-file-target");
+      expect(markup).not.toContain("tool-expand-trigger");
+      expect(runningMarkup).not.toContain("tool-running-cursor");
+      expect(markup.match(/aria-expanded=/g)).toHaveLength(1);
       expect(markup).not.toContain(":1-400");
       expect(markup).not.toContain("SKILL.md");
+      expect(chatCss).toMatch(/\.tool-view\[data-tool-kind="skill"\]\s*\{[^}]*width:\s*fit-content;/s);
+      expect(chatCss).toContain("background: var(--tool-pending-background)");
+      expect(chatCss).toContain("background: var(--tool-success-background)");
+      expect(chatCss).toContain("background: var(--tool-error-background)");
+      expect(themeCss).toContain("--tool-pending-background: #e8e8f0");
+      expect(themeCss).toContain("--tool-success-background: #e8f0e8");
+      expect(themeCss).toContain("--tool-error-background: #f0e8e8");
+      expect(themeCss).toContain("--tool-pending-background: #282832");
+      expect(themeCss).toContain("--tool-success-background: #283228");
+      expect(themeCss).toContain("--tool-error-background: #3c2828");
     },
   );
 

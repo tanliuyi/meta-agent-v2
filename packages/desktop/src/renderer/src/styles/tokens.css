@@ -201,6 +201,9 @@
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
     --success: 145 70% 31%;
+    --tool-pending-background: #e8e8f0;
+    --tool-success-background: #e8f0e8;
+    --tool-error-background: #f0e8e8;
     --warning: 38 92% 40%;
     --warning-foreground: 36 100% 12%;
     --info: 210 80% 45%;
@@ -280,6 +283,9 @@
     --destructive: 0 63% 52%;
     --destructive-foreground: 0 0% 98%;
     --success: 145 55% 48%;
+    --tool-pending-background: #282832;
+    --tool-success-background: #283228;
+    --tool-error-background: #3c2828;
     --warning: 43 96% 56%;
     --warning-foreground: 36 100% 10%;
     --info: 210 85% 65%;

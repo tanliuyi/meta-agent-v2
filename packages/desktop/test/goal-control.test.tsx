@@ -12,7 +12,9 @@ describe("GoalToolbar", () => {
     expect(markup).toContain('role="toolbar"');
     expect(markup).toContain("执行中");
     expect(markup).toContain("完成 Desktop Goal 集成");
+    expect(markup).toContain('aria-label="编辑目标"');
     expect(markup).toContain('aria-label="暂停 Goal"');
+    expect(markup).toContain('aria-label="关闭目标"');
     expect(markup).toContain("3 轮");
     expect(markup).not.toContain("创建 Goal");
     expect(markup).not.toContain('aria-haspopup="dialog"');
