@@ -49,6 +49,40 @@ describe("ToolView TUI parity", () => {
     expect(markup).toContain('data-state="closed"');
   });
 
+  it("所有工具标题统一使用中文动作", () => {
+    const cases: Array<{ toolName: string; args: Record<string, unknown>; label: string }> = [
+      { toolName: "bash", args: { command: "pwd" }, label: "执行" },
+      { toolName: "powershell", args: { command: "Get-Location" }, label: "执行" },
+      { toolName: "read", args: { path: "notes.txt" }, label: "读取" },
+      { toolName: "write", args: { path: "notes.txt" }, label: "写入" },
+      { toolName: "edit", args: { path: "notes.txt" }, label: "编辑" },
+      { toolName: "grep", args: { pattern: "text" }, label: "搜索" },
+      { toolName: "find", args: { pattern: "*.ts" }, label: "查找" },
+      { toolName: "ls", args: { path: "." }, label: "列出" },
+      { toolName: "run_code", args: { description: "检查应用" }, label: "调用插件" },
+      { toolName: "memory", args: { action: "add", content: "偏好" }, label: "记忆" },
+      { toolName: "memory_search", args: { query: "偏好" }, label: "搜索记忆" },
+      { toolName: "session_search", args: { query: "历史" }, label: "搜索会话" },
+      { toolName: "skill_manage", args: { action: "view", name: "demo" }, label: "管理技能" },
+      { toolName: "browser_click", args: { elementIndex: 1 }, label: "浏览器" },
+      { toolName: "subagent", args: { agent: "reviewer", task: "检查" }, label: "子智能体" },
+      { toolName: "bg_wait", args: {}, label: "等待任务" },
+      { toolName: "compress", args: {}, label: "压缩上下文" },
+      { toolName: "decompress", args: {}, label: "恢复上下文" },
+      { toolName: "search_context", args: { query: "工具" }, label: "搜索上下文" },
+      { toolName: "acp_status", args: {}, label: "查看上下文" },
+    ];
+
+    for (const testCase of cases) {
+      const markup = renderToolView(toolCall({ toolName: testCase.toolName, args: testCase.args }));
+      expect(markup, testCase.toolName).toContain(`<span class="tool-name">${testCase.label}</span>`);
+    }
+
+    const unknownMarkup = renderToolView(toolCall({ toolName: "custom_tool", args: { query: "目标" } }));
+    expect(unknownMarkup).toContain('<span class="tool-name">工具</span>');
+    expect(unknownMarkup).toContain(">custom_tool</span>");
+  });
+
   it("bash content 默认完全折叠，标题展示 command", () => {
     const partialResult = toolResult(Array.from({ length: 7 }, (_, index) => `line-${index + 1}`).join("\n"));
     const markup = renderToolView(
@@ -225,6 +259,19 @@ describe("ToolView TUI parity", () => {
     expect(markup).toContain(">src/read.ts</button>");
   });
 
+  it.each([".agents/skills/simplify/SKILL.md", "C:\\Users\\test\\skills\\simplify\\skill.md"])(
+    "读取技能定义时展示技能语义标题: %s",
+    (path) => {
+      const markup = renderToolView(toolCall({ toolName: "read", args: { path, offset: 1, limit: 400 } }));
+
+      expect(markup).toContain(">加载</span>");
+      expect(markup).toContain(">simplify 技能</span>");
+      expect(markup).not.toContain("tool-file-target");
+      expect(markup).not.toContain(":1-400");
+      expect(markup).not.toContain("SKILL.md");
+    },
+  );
+
   it.each(["read", "write", "edit"])("%s 标题展示项目相对路径", (toolName) => {
     const absolutePath = "/Users/test/project/packages/desktop/src/renderer/src/components/chat/tool-view.tsx";
     const markup = renderToolView(toolCall({ toolName, args: { path: absolutePath } }));
@@ -252,8 +299,8 @@ describe("ToolView TUI parity", () => {
     );
 
     expect(lsMarkup).toContain(">packages/desktop</span>");
-    expect(findMarkup).toContain("in packages/desktop");
-    expect(grepMarkup).toContain("in packages/desktop");
+    expect(findMarkup).toContain("在 packages/desktop");
+    expect(grepMarkup).toContain("在 packages/desktop");
     expect(`${lsMarkup}${findMarkup}${grepMarkup}`).not.toContain("/Users/test/project");
   });
 
@@ -267,7 +314,7 @@ describe("ToolView TUI parity", () => {
 
     expect(readMarkup).toContain(":120-139");
     expect(grepMarkup).toContain("/ToolView/");
-    expect(grepMarkup).toContain("in src (*.tsx)");
+    expect(grepMarkup).toContain("在 src (*.tsx)");
   });
 });
 
@@ -357,7 +404,7 @@ describe("subagent 工具详情", () => {
       }),
     );
 
-    expect(markup).toContain("parallel ×3");
+    expect(markup).toContain("并行 ×3");
     expect(markup).toContain("researcher, writer");
   });
 
@@ -374,7 +421,7 @@ describe("subagent 工具详情", () => {
       }),
     );
 
-    expect(markup).toContain("chain ×2");
+    expect(markup).toContain("串行 ×2");
     expect(markup).toContain("scout → planner");
   });
 
@@ -738,7 +785,7 @@ describe("subagent 工具详情", () => {
       }),
     );
 
-    expect(markup).toContain("chain 2/3");
+    expect(markup).toContain("串行 2/3");
     expect(markup).toContain("planner");
   });
 

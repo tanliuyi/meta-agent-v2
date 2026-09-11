@@ -33,6 +33,7 @@ export const WORKSPACE_IPC_CHANNELS = [
   CHANNELS.projectsChoose,
   CHANNELS.projectsOpen,
   CHANNELS.projectsRename,
+  CHANNELS.projectsReorder,
   CHANNELS.projectsOpenExternally,
   CHANNELS.projectsRemove,
   CHANNELS.projectsWorktrees,
@@ -87,6 +88,7 @@ export function registerWorkspaceIpc(dependencies: WorkspaceIpcDependencies): re
   ipcMain.handle(CHANNELS.projectsRename, (_event, projectId: string, name: string) =>
     projects.rename(projectId, name),
   );
+  ipcMain.handle(CHANNELS.projectsReorder, (_event, projectIds: string[]) => projects.reorder(projectIds));
   ipcMain.handle(CHANNELS.projectsOpenExternally, async (_event, projectId: string) =>
     openPath(projects.getCwd(projectId)),
   );

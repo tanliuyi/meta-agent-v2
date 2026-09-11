@@ -25,6 +25,7 @@ export type DesktopAction =
   | { type: "projects-loaded"; projects: Project[]; activeProjectId: string | null }
   | { type: "project-upserted"; project: Project }
   | { type: "project-renamed"; project: Project }
+  | { type: "projects-reordered"; projects: Project[] }
   | { type: "project-activated"; projectId: string }
   | { type: "project-threads-loaded"; projectId: string; threads: Thread[] }
   | { type: "thread-catalog-added"; bootstrap: SessionBootstrap }
@@ -75,6 +76,8 @@ export function desktopReducer(state: DesktopState, action: DesktopAction): Desk
         ...state,
         projects: state.projects.map((project) => (project.id === action.project.id ? action.project : project)),
       };
+    case "projects-reordered":
+      return { ...state, projects: action.projects };
     case "project-activated":
       return state.activeProjectId === action.projectId ? state : { ...state, activeProjectId: action.projectId };
     case "project-threads-loaded":

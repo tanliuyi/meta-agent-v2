@@ -12,13 +12,15 @@ import { DialogContent } from "@renderer/shared/ui/dialog-content";
 import { DialogDescription } from "@renderer/shared/ui/dialog-description";
 import { DialogTitle } from "@renderer/shared/ui/dialog-title";
 import { Input } from "@renderer/shared/ui/input";
+import ArrowDown from "lucide-react/dist/esm/icons/arrow-down.mjs";
+import ArrowUp from "lucide-react/dist/esm/icons/arrow-up.mjs";
 import Folder from "lucide-react/dist/esm/icons/folder.mjs";
 import FolderOpen from "lucide-react/dist/esm/icons/folder-open.mjs";
 import LoaderCircle from "lucide-react/dist/esm/icons/loader-circle.mjs";
 import Pencil from "lucide-react/dist/esm/icons/pencil.mjs";
 import Plus from "lucide-react/dist/esm/icons/plus.mjs";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2.mjs";
-import { type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
+import { type DragEvent, type FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { Project } from "../../../../shared/contracts.ts";
 import { useDesktopActions, useDesktopSelector } from "../../state/desktop-context.tsx";
 import { selectProjectThreads } from "../../state/desktop-selectors.ts";
@@ -28,11 +30,22 @@ import { pinnedThreadKey } from "../../state/thread-pinning-preference.ts";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.tsx";
 import { DesktopThreadList } from "./desktop-thread-list.tsx";
 
+export type ProjectDropPosition = "before" | "after";
+
 interface ProjectItemProps {
   project: Project;
   active: boolean;
   newTaskDisabled: boolean;
+  dragging?: boolean;
+  dropPosition?: ProjectDropPosition | null;
+  reordering?: boolean;
   onNewTask(projectId: string): void;
+  onMoveUp?(): void;
+  onMoveDown?(): void;
+  onDragStart?(event: DragEvent<HTMLDivElement>, projectId: string): void;
+  onDragOver?(event: DragEvent<HTMLDivElement>, projectId: string): void;
+  onDrop?(event: DragEvent<HTMLDivElement>, projectId: string): void;
+  onDragEnd?(): void;
 }
 
 /** 渲染单个 Project disclosure，并只订阅该 Project 的 thread catalog。 */
@@ -40,7 +53,16 @@ export const ProjectItem = memo(function ProjectItem({
   project,
   active,
   newTaskDisabled,
+  dragging = false,
+  dropPosition = null,
+  reordering = false,
   onNewTask,
+  onMoveUp,
+  onMoveDown,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: ProjectItemProps) {
   const actions = useDesktopActions();
   const threads = useDesktopSelector((state) => selectProjectThreads(state, project.id));
@@ -110,14 +132,26 @@ export const ProjectItem = memo(function ProjectItem({
   const confirmDelete = () => runProjectAction(() => actions.removeProject(project.id));
 
   return (
-    <li className="project-group mb-1" data-project-id={project.id}>
+    <li className="project-group relative mb-1" data-project-id={project.id} data-dragging={dragging || undefined}>
+      {dropPosition ? (
+        <span
+          className={`bg-primary pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full ${dropPosition === "before" ? "top-0" : "bottom-0"}`}
+          aria-hidden="true"
+        />
+      ) : null}
       <Collapsible open={expanded} onOpenChange={handleOpenChange}>
         <ContextMenu.Root>
           <ContextMenu.Trigger asChild>
             <div
-              className="project-row group hover:bg-foreground/[0.055] active:bg-foreground/[0.09] data-[state=open]:bg-foreground/[0.055] grid h-8 grid-cols-[minmax(0,1fr)_auto] items-center rounded-xl pe-1.5 transition-colors"
+              className="project-row group hover:bg-foreground/[0.055] active:bg-foreground/[0.09] data-[state=open]:bg-foreground/[0.055] grid h-8 cursor-grab grid-cols-[minmax(0,1fr)_auto] items-center rounded-xl pe-1.5 transition-[color,background-color,opacity] active:cursor-grabbing data-[dragging=true]:opacity-40"
               data-active={active || undefined}
               data-pending={pendingAction || undefined}
+              data-dragging={dragging || undefined}
+              draggable={!reordering && onDragStart !== undefined}
+              onDragStart={onDragStart ? (event) => onDragStart(event, project.id) : undefined}
+              onDragOver={onDragOver ? (event) => onDragOver(event, project.id) : undefined}
+              onDrop={onDrop ? (event) => onDrop(event, project.id) : undefined}
+              onDragEnd={onDragEnd}
             >
               <CollapsibleTrigger asChild>
                 <button
@@ -167,6 +201,12 @@ export const ProjectItem = memo(function ProjectItem({
             </div>
           </ContextMenu.Trigger>
           <ContextMenuContent className="min-w-44">
+            <ContextMenuItem disabled={pendingAction || reordering || !onMoveUp} onSelect={onMoveUp}>
+              <ArrowUp /> 上移
+            </ContextMenuItem>
+            <ContextMenuItem disabled={pendingAction || reordering || !onMoveDown} onSelect={onMoveDown}>
+              <ArrowDown /> 下移
+            </ContextMenuItem>
             <ContextMenuItem disabled={pendingAction} onSelect={() => setRenameName(project.name)}>
               <Pencil /> 重命名
             </ContextMenuItem>

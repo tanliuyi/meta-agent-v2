@@ -45,6 +45,21 @@ describe("desktop catalog reducer", () => {
     expect(state.activeProjectId).toBe(second.id);
   });
 
+  it("应用持久化返回的 Project 拖拽顺序", () => {
+    const first = { ...project, id: "first" };
+    const second = { ...project, id: "second" };
+    const loaded = desktopReducer(INITIAL_STATE, {
+      type: "projects-loaded",
+      projects: [first, second],
+      activeProjectId: first.id,
+    });
+
+    const reordered = desktopReducer(loaded, { type: "projects-reordered", projects: [second, first] });
+
+    expect(reordered.projects.map(({ id }) => id)).toEqual([second.id, first.id]);
+    expect(reordered.activeProjectId).toBe(first.id);
+  });
+
   it("新添加 Project 才改变列表结构", () => {
     const existing = { ...project, id: "existing" };
     const added = { ...project, id: "added" };

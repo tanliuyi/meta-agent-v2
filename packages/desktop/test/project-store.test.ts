@@ -101,6 +101,46 @@ describe("ProjectStore", () => {
     expect((await stat(project.cwd)).isDirectory()).toBe(true);
   });
 
+  it("新增项目的界面顺序与重载后的持久化顺序一致", async () => {
+    const root = await mkdtemp(join(tmpdir(), "meta-agent-project-add-order-"));
+    roots.push(root);
+    const file = join(root, "state", "desktop-state.json");
+    const firstDirectory = join(root, "first");
+    const secondDirectory = join(root, "second");
+    await Promise.all([mkdir(firstDirectory), mkdir(secondDirectory)]);
+    const store = new ProjectStore(file);
+    await store.load();
+    const first = await store.add(firstDirectory);
+    const second = await store.add(secondDirectory);
+
+    expect((await store.list()).map(({ id }) => id)).toEqual([second.id, first.id]);
+
+    const restored = new ProjectStore(file);
+    await restored.load();
+    expect((await restored.list()).map(({ id }) => id)).toEqual([second.id, first.id]);
+  });
+
+  it("拖拽排序后保存并恢复项目顺序", async () => {
+    const root = await mkdtemp(join(tmpdir(), "meta-agent-project-order-"));
+    roots.push(root);
+    const file = join(root, "state", "desktop-state.json");
+    const projectDirectories = ["first", "second", "third"].map((name) => join(root, name));
+    await Promise.all(projectDirectories.map((directory) => mkdir(directory)));
+    const store = new ProjectStore(file);
+    await store.load();
+    const projects = [];
+    for (const directory of projectDirectories) projects.push(await store.add(directory));
+
+    await store.reorder([projects[2]!.id, projects[0]!.id, projects[1]!.id]);
+
+    const restored = new ProjectStore(file);
+    await restored.load();
+    expect((await restored.list()).map(({ id }) => id)).toEqual([projects[2]!.id, projects[0]!.id, projects[1]!.id]);
+    await expect(store.reorder([projects[0]!.id, projects[1]!.id])).rejects.toThrow(
+      "Project 排序必须包含全部且不重复的项目 ID",
+    );
+  });
+
   it("迁移旧 desktop-state 中嵌套的项目记录", async () => {
     const root = await mkdtemp(join(tmpdir(), "meta-agent-project-migration-"));
     roots.push(root);

@@ -88,6 +88,7 @@ function desktopActions(): DesktopActions {
     refreshProjectThreads: vi.fn(async () => undefined),
     activateProject: vi.fn(),
     renameProject: vi.fn(),
+    reorderProjects: vi.fn(),
     openProjectExternally: vi.fn(),
     removeProject: vi.fn(),
     prewarmThread: vi.fn(),

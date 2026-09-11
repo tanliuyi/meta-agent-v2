@@ -16,6 +16,7 @@ export const CHANNELS = {
   projectsChoose: "desktop:projects:choose",
   projectsOpen: "desktop:projects:open",
   projectsRename: "desktop:projects:rename",
+  projectsReorder: "desktop:projects:reorder",
   projectsOpenExternally: "desktop:projects:open-externally",
   projectsRemove: "desktop:projects:remove",
   projectsActive: "desktop:projects:active",

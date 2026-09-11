@@ -15,6 +15,34 @@ import { parseToolResult, projectDisplayToolPath, readToolStringArgument } from 
 type ToolState = "running" | "complete" | "error";
 type ToolTarget = { type: "file"; value: string } | { type: "text"; value: string };
 
+const TOOL_LABELS: Readonly<Record<string, string>> = {
+  bash: "执行",
+  powershell: "执行",
+  read: "读取",
+  write: "写入",
+  edit: "编辑",
+  grep: "搜索",
+  find: "查找",
+  ls: "列出",
+  run_code: "调用插件",
+  memory: "记忆",
+  memory_search: "搜索记忆",
+  session_search: "搜索会话",
+  skill_manage: "管理技能",
+  browser: "浏览器",
+  subagent: "子智能体",
+  subagent_wait: "子智能体",
+  bg_wait: "等待任务",
+  subagent_supervisor: "协调子智能体",
+  compress: "压缩上下文",
+  decompress: "恢复上下文",
+  search_context: "搜索上下文",
+  acp_status: "查看上下文",
+  goal_complete: "完成目标",
+  goal_blocked: "目标受阻",
+  goal_wait: "等待目标",
+};
+
 interface ToolHeader {
   label: string;
   target?: ToolTarget;
@@ -130,41 +158,44 @@ function toolHeader(
 ): ToolHeader {
   const rawPath = readToolStringArgument(args, "path", "file_path");
   const path = projectCwd ? projectDisplayToolPath(rawPath, projectCwd) : rawPath;
-  if (name === "bash") {
-    return { label: "$", target: textTarget(readToolStringArgument(args, "command") || "…") };
+  if (name === "bash" || name === "powershell") {
+    return { label: toolLabel(name), target: textTarget(readToolStringArgument(args, "command") || "…") };
   }
   if (name === "read") {
-    return { label: "read", target: fileTarget(path), context: readLineRange(args) };
+    const skillName = readSkillName(path);
+    if (skillName) return { label: "加载", target: textTarget(`${skillName} 技能`) };
+    return { label: toolLabel(name), target: fileTarget(path), context: readLineRange(args) };
   }
   if (name === "write" || name === "edit") {
-    return { label: name, target: fileTarget(path) };
+    return { label: toolLabel(name), target: fileTarget(path) };
   }
   if (name === "grep") {
     const pattern = readToolStringArgument(args, "pattern");
     const glob = readToolStringArgument(args, "glob");
     return {
-      label: "grep",
+      label: toolLabel(name),
       target: textTarget(`/${pattern}/`),
-      context: `in ${path || "."}${glob ? ` (${glob})` : ""}${numberSuffix(args.limit, "limit")}`,
+      context: `在 ${path || "."}${glob ? ` (${glob})` : ""}${numberSuffix(args.limit, "上限")}`,
     };
   }
   if (name === "find") {
     return {
-      label: "find",
+      label: toolLabel(name),
       target: textTarget(readToolStringArgument(args, "pattern") || "…"),
-      context: `in ${path || "."}${numberSuffix(args.limit, "limit", true)}`,
+      context: `在 ${path || "."}${numberSuffix(args.limit, "上限", true)}`,
     };
   }
   if (name === "ls") {
     return {
-      label: "ls",
+      label: toolLabel(name),
       target: textTarget(path || "."),
-      context: numberSuffix(args.limit, "limit", true).trimStart(),
+      context: numberSuffix(args.limit, "上限", true).trimStart(),
     };
   }
+  if (name === "subagent" || name === "subagent_wait") return subagentToolHeader(name, args, result);
   if (name === "run_code") {
     return {
-      label: "plugin",
+      label: toolLabel(name),
       target: textTarget(readToolStringArgument(args, "description") || "…"),
       context: result ? RunCodeContext(result) : undefined,
     };
@@ -174,21 +205,21 @@ function toolHeader(
     const actionLabel = MEMORY_ACTION_LABELS[readToolStringArgument(args, "action")];
     const scopeLabel = MEMORY_SCOPE_LABELS[readToolStringArgument(args, "target")];
     return {
-      label: "memory",
+      label: toolLabel(name),
       target: textTarget(firstLineSummary(readToolStringArgument(args, "content", "old_text")) || "…"),
       context: [actionLabel, scopeLabel].filter(Boolean).join(" · "),
     };
   }
   if (name === "memory_search") {
-    return { label: "memory", target: textTarget(readToolStringArgument(args, "query") || "…"), context: "搜索记忆" };
+    return { label: toolLabel(name), target: textTarget(readToolStringArgument(args, "query") || "…") };
   }
   if (name === "session_search") {
     const query = readToolStringArgument(args, "query") || firstLineSummary(readToolStringArgument(args, "markdown"));
-    return { label: "recall", target: textTarget(query || "…"), context: "搜索历史会话" };
+    return { label: toolLabel(name), target: textTarget(query || "…") };
   }
   if (name === "skill_manage") {
     return {
-      label: "skill",
+      label: toolLabel(name),
       target: textTarget(readToolStringArgument(args, "name", "skill_id") || "…"),
       context: SKILL_ACTION_LABELS[readToolStringArgument(args, "action")] ?? "",
     };
@@ -196,7 +227,11 @@ function toolHeader(
   if (name === "browser" || name.startsWith("browser_")) {
     return browserToolHeader(name, args);
   }
-  return { label: name, target: textTarget(toolFallbackTarget(args)) };
+  return {
+    label: toolLabel(name),
+    target: textTarget(TOOL_LABELS[name] ? toolFallbackTarget(args) : name),
+    context: TOOL_LABELS[name] ? undefined : toolFallbackTarget(args),
+  };
 }
 
 const BROWSER_ACTION_LABELS: Readonly<Record<string, string>> = {
@@ -218,9 +253,9 @@ function browserToolHeader(name: string, args: Readonly<Record<string, unknown>>
   const url = readToolStringArgument(args, "url");
   const tabId = typeof args.tabId === "number" ? String(args.tabId) : "";
   const elementIndex = typeof args.elementIndex === "number" ? `[${args.elementIndex}]` : "";
-  const target = url || (tabId ? `tab ${tabId}` : elementIndex) || "…";
+  const target = url || (tabId ? `标签页 ${tabId}` : elementIndex) || "…";
   const context = BROWSER_ACTION_LABELS[action] ?? "";
-  return { label: "browser", target: textTarget(target), context: context || undefined };
+  return { label: toolLabel("browser"), target: textTarget(target), context: context || undefined };
 }
 
 const MEMORY_ACTION_LABELS: Readonly<Record<string, string>> = {
@@ -252,56 +287,61 @@ function subagentToolHeader(name: string, args: Readonly<Record<string, unknown>
   const asyncSuffix = call.async ? " · 后台" : "";
   if (call.mode === "wait") {
     return {
-      label: "subagent",
-      target: textTarget("wait"),
+      label: toolLabel(name),
+      target: textTarget("等待"),
       context: call.waitId ? `等待 ${call.waitId}` : call.waitAll ? "等待全部后台任务" : "等待后台任务",
     };
   }
   if (call.mode === "management") {
-    return { label: "subagent", target: textTarget(call.action ?? "…"), context: call.actionTarget ?? "" };
+    return { label: toolLabel(name), target: textTarget(call.action ?? "…"), context: call.actionTarget ?? "" };
   }
   // 运行中：标题跟随当前活动 agent / 步骤，实时反馈进度。
   if (call.mode === "chain" && liveStep) {
     return {
-      label: "subagent",
-      target: textTarget(`chain ${liveStep.stepIndex}/${details?.totalSteps ?? call.taskCount}`),
+      label: toolLabel(name),
+      target: textTarget(`串行 ${liveStep.stepIndex}/${details?.totalSteps ?? call.taskCount}`),
       context: `${liveStep.agents.join(" + ")}${asyncSuffix}`,
     };
   }
   if (liveRow && (call.mode === "parallel" || call.mode === "chain")) {
     return {
-      label: "subagent",
-      target: textTarget(`${call.mode} ×${call.taskCount}`),
+      label: toolLabel(name),
+      target: textTarget(`${call.mode === "parallel" ? "并行" : "串行"} ×${call.taskCount}`),
       context: `${liveRow.agent}${liveRow.detail ? ` · ${liveRow.detail}` : ""}`,
     };
   }
   if (liveRow) {
     return {
-      label: "subagent",
+      label: toolLabel(name),
       target: textTarget(liveRow.agent),
       context: liveRow.detail ?? `${firstLineSummary(call.specs[0]?.task ?? "")}${asyncSuffix}`,
     };
   }
   if (call.mode === "chain") {
     return {
-      label: "subagent",
-      target: textTarget(`chain ×${call.taskCount}`),
+      label: toolLabel(name),
+      target: textTarget(`串行 ×${call.taskCount}`),
       context: `${summarizeAgents(call.specs, " → ")}${asyncSuffix}`,
     };
   }
   if (call.mode === "parallel") {
     return {
-      label: "subagent",
-      target: textTarget(`parallel ×${call.taskCount}`),
+      label: toolLabel(name),
+      target: textTarget(`并行 ×${call.taskCount}`),
       context: `${summarizeAgents(call.specs, ", ")}${asyncSuffix}`,
     };
   }
   const spec = call.specs[0];
   return {
-    label: "subagent",
+    label: toolLabel(name),
     target: textTarget(spec?.agent ?? "…"),
     context: `${firstLineSummary(spec?.task ?? "")}${asyncSuffix}`,
   };
+}
+
+function toolLabel(name: string): string {
+  if (name.startsWith("browser_")) return TOOL_LABELS.browser;
+  return TOOL_LABELS[name] ?? "工具";
 }
 
 function fileTarget(value: string): ToolTarget | undefined {
@@ -310,6 +350,11 @@ function fileTarget(value: string): ToolTarget | undefined {
 
 function textTarget(value: string): ToolTarget {
   return { type: "text", value };
+}
+
+function readSkillName(path: string): string | undefined {
+  const segments = path.replaceAll("\\", "/").split("/").filter(Boolean);
+  return segments.at(-1)?.toLowerCase() === "skill.md" ? segments.at(-2) : undefined;
 }
 
 function readLineRange(args: Readonly<Record<string, unknown>>): string {

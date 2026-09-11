@@ -141,6 +141,15 @@ export function DesktopCatalogProvider({ children }: DesktopCatalogProviderProps
           throw error;
         }
       },
+      async reorderProjects(projectIds) {
+        try {
+          const projects = await window.desktop.projects.reorder(projectIds);
+          dispatchDesktop(store, { type: "projects-reordered", projects });
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
       async openProjectExternally(projectId) {
         try {
           await window.desktop.projects.openExternally(projectId);

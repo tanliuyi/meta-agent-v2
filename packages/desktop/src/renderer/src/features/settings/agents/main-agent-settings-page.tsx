@@ -396,7 +396,6 @@ export function MainAgentSettingsPage() {
                         ))}
                       </div>
                     ) : null}
-                    <p className="settings-row-description">会话回退（rewind）作为基础行为保留，不在此处关闭。</p>
                   </div>
                 </section>
 

@@ -151,7 +151,7 @@ export class ProjectStore {
         updatedAt: now,
         lastOpenedAt: now,
       };
-      this.projectMetadata.projects.push(project);
+      this.projectMetadata.projects.unshift(project);
     } else {
       project.lastOpenedAt = new Date().toISOString();
       project.updatedAt = project.lastOpenedAt;
@@ -190,6 +190,20 @@ export class ProjectStore {
     project.updatedAt = new Date().toISOString();
     await this.saveProjects();
     return this.toProject(project);
+  }
+
+  async reorder(projectIds: string[]): Promise<Project[]> {
+    const storedById = new Map(this.projectMetadata.projects.map((project) => [project.projectId, project]));
+    if (
+      projectIds.length !== storedById.size ||
+      new Set(projectIds).size !== projectIds.length ||
+      projectIds.some((projectId) => !storedById.has(projectId))
+    ) {
+      throw new Error("Project 排序必须包含全部且不重复的项目 ID");
+    }
+    this.projectMetadata.projects = projectIds.map((projectId) => storedById.get(projectId)!);
+    await this.saveProjects();
+    return this.list();
   }
 
   async remove(projectId: string): Promise<void> {
